@@ -1,5 +1,7 @@
 # Đ (Edh) - The next-big-things ought to happen with Haskell not C/C++
 
+[![Gitter](https://badges.gitter.im/e-wrks/community.svg)](https://gitter.im/e-wrks/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
+
 ## Quick Start
 
 - Take [A Tour of Đ (Edh)](./Tour/)
@@ -24,19 +26,6 @@ brought into an _Object_ layer, giving you lock-free (a.k.a optimistic locking)
 transactions, with intuitive as well as pragmatic constructs to
 program data consistency under heavy concurrency.
 
-- [Quick Start](#quick-start)
-- [What is Đ (Edh)](#what-is-%c4%90-edh)
-- [The name](#the-name)
-- [Philosophy](#philosophy)
-  - [About Everything](#about-everything)
-  - [Object? - Yes, Oriented? - No](#object---yes-oriented---no)
-  - [Functional? - Try not to abuse this concept](#functional---try-not-to-abuse-this-concept)
-  - [Performance Goals](#performance-goals)
-- [Zen of Edh](#zen-of-edh)
-- [Licensing](#licensing)
-- [Academic relationship](#academic-relationship)
-- [A joke](#a-joke)
-
 **Edh** competes with [Python](https://python.org) to help **Haskell**
 instead of **C**/**C++** to be the breeding ground for next phenomenal
 pieces of software, after [TensorFlow](https://tensorflow.org),
@@ -51,6 +40,19 @@ for the **next-big-things**, but has a learning curve not too less
 steep than **Haskell**, **Edh** is faithful to get people with just
 **Python**/**JavaScript**/**Go** knowledge and skills started with
 a [world](./Tour/#world) in **Haskell**.
+
+- [Quick Start](#quick-start)
+- [What is Đ (Edh)](#what-is-%c4%90-edh)
+- [The name](#the-name)
+- [Philosophy](#philosophy)
+  - [About Everything](#about-everything)
+  - [Object? - Yes, Oriented? - No](#object---yes-oriented---no)
+  - [Functional? - Try not to abuse this concept](#functional---try-not-to-abuse-this-concept)
+  - [Performance Goals](#performance-goals)
+- [Zen of Edh](#zen-of-edh)
+- [Licensing](#licensing)
+- [Academic relationship](#academic-relationship)
+- [A joke](#a-joke)
 
 ## The name
 
