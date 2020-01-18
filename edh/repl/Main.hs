@@ -31,7 +31,7 @@ main = do
     outputStrLn ">> Bare Đ (Edh) Interpreter <<"
     outputStrLn
       "* Blank Screen Syndrome ? Take the Tour as your companion, checkout:"
-    outputStrLn "  https://github.com/e-wrks/edh/Tour/"
+    outputStrLn "  https://github.com/e-wrks/edh/tree/master/Tour"
 
     world <- createEdhWorld logger
     installEdhBatteries world
