@@ -128,7 +128,7 @@ $ export EDH_LOG_LEVEL=DEBUG
 $ edhi
 >> Bare Đ (Edh) Interpreter <<
 * Blank Screen Syndrome ? Take the Tour as your companion, checkout:
-  https://github.com/e-wrks/edh/Tour/
+  https://github.com/e-wrks/edh/tree/master/Tour
 Đ:
 ```
 
@@ -141,7 +141,7 @@ curly braces start & end multi-line input mode:
 $ edhi
 >> Bare Đ (Edh) Interpreter <<
 * Blank Screen Syndrome ? Take the Tour as your companion, checkout:
-  https://github.com/e-wrks/edh/Tour/
+  https://github.com/e-wrks/edh/tree/master/Tour
 Đ: a=3
 3
 Đ: {
@@ -679,7 +679,7 @@ $ export EDH_LOG_LEVEL=WARN
 $ edhi
 >> Bare Đ (Edh) Interpreter <<
 * Blank Screen Syndrome ? Take the Tour as your companion, checkout:
-  https://github.com/e-wrks/edh/Tour/
+  https://github.com/e-wrks/edh/tree/master/Tour
 Đ: runtime.debug
 10
 Đ: runtime.info
@@ -698,7 +698,7 @@ $ export EDH_LOG_LEVEL=DEBUG
 $ edhi
 >> Bare Đ (Edh) Interpreter <<
 * Blank Screen Syndrome ? Take the Tour as your companion, checkout:
-  https://github.com/e-wrks/edh/Tour/
+  https://github.com/e-wrks/edh/tree/master/Tour
 Đ: runtime.info <| "Source location is informative most of the time, right?"
 Đ: ℹ️ <interactive>:1:1
 Source location is informative most of the time, right?
