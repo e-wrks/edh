@@ -119,7 +119,7 @@ at it since inception.
 > (i.e. be a _Haskeller_). For someone who you must work with but
 > hasn't feel comfortable with **Haskell** code, ask him/her to use
 > **Edh**, and write
-> [host procedures](https://github.com/e-wrks/edh/Tour/#host-procedures)
+> [host procedures](./Tour#host-procedures)
 > wrapping idiomatic models in **Haskell** to help get his/her job done
 >
 > Under certain circumstances, there are sweet spots balanced between
