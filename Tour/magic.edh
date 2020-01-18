@@ -1,0 +1,98 @@
+
+import * 'batteries/magic'
+
+{
+
+  class Tensor (name) {
+
+    method (+) (other) case type(other) of {
+      # add to a constant
+      DecimalType -> Tensor(name= '('++ this.name ++ '+' ++ other ++')')
+
+      case other of {{ Tensor:_ }} -> {
+        # add to another Tensor
+        return Tensor(name= '('++ this.name ++ '+' ++ other.name ++')')
+      }
+
+      continue # as NotImplemented in Python
+    }
+
+    method (*) (other) case type(other) of {
+      # mul to a constant
+      DecimalType -> Tensor(name= '('++ this.name ++ '*' ++ other ++')')
+
+      case other of {{ Tensor:_ }} -> {
+        # mul to another Tensor
+        return Tensor(name= '('++ this.name ++ '*' ++ other.name ++')')
+      }
+
+      continue # as NotImplemented in Python
+    }
+
+    method (-) (other) case type(other) of {
+      # sub a constant
+      DecimalType -> Tensor(name= '('++ this.name ++ '-' ++ other ++')')
+
+      case other of {{ Tensor:_ }} -> {
+        # sub another Tensor
+        return Tensor(name= '('++ this.name ++ '-' ++ other.name ++')')
+      }
+
+      continue # as NotImplemented in Python
+    }
+
+    method (-@) (other) case type(other) of {
+      # sub from a constant
+      DecimalType -> Tensor(name= '('++ other ++ '-' ++ this.name ++')')
+
+      case other of {{ Tensor:_ }} -> {
+        error('not resolved to magic (-) of ' ++ lhv ++ ' ?!')
+      }
+
+      continue # as NotImplemented in Python
+    }
+
+    method (/) (other) case type(other) of {
+      # div by a constant
+      DecimalType -> Tensor(name= '('++ this.name ++ '/' ++ other ++')')
+
+      case other of {{ Tensor:_ }} -> {
+        # div by another Tensor
+        return Tensor(name= '('++ this.name ++ '/' ++ other.name ++')')
+      }
+
+      continue # as NotImplemented in Python
+    }
+
+    method (/@) (other) case type(other) of {
+      # div to a constant
+      DecimalType -> Tensor(name= '('++ other ++ '/' ++ this.name ++')')
+
+      case other of {{ Tensor:_ }} -> {
+        error('not resolved to magic (/) of ' ++ lhv ++ ' ?!')
+      }
+
+      continue # as NotImplemented in Python
+    }
+
+  }
+
+}
+
+let (x, y) = (Tensor('x'), Tensor('y'))
+
+result = x + y; result?name
+result = x + 5; result?name
+result = 5 + x; result?name
+result = x - 5; result?name
+result = 5 - x; result?name
+result = x * y; result?name
+result = x / y; result?name
+result = x * 3; result?name
+result = 3 * x; result?name
+result = x / 3; result?name
+result = 3 / x; result?name
+
+result = 3 + x / 7 * (y - 5); result?name
+
+x + 'z'

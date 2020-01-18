@@ -1,0 +1,102 @@
+cabal-version: 2.4
+name: edh
+version: 0.1.0.0
+license: BSD-3-Clause
+copyright: 2019 Compl Yue
+maintainer: compl.yue@icloud.com
+author: Compl Yue
+stability: experimental
+homepage: https://github.com/e-wrks/edh
+bug-reports: https://github.com/e-wrks/edh/issues
+synopsis: a modern Object layer spliced with Haskell
+description:
+    Please see the README on Github at <https://github.com/e-wrks/edh>
+category: Object,Event,Interpreted,Programming,Language
+build-type: Simple
+extra-source-files:
+    README.md
+    CHANGELOG.md
+
+source-repository head
+    type: git
+    location: https://github.com/e-wrks/edh
+    subdir: edh
+
+library
+    exposed-modules:
+        Language.Edh.EHI
+    hs-source-dirs: pub
+    default-language: Haskell2010
+    default-extensions: NoImplicitPrelude OverloadedStrings LambdaCase
+                        BlockArguments BangPatterns TupleSections ScopedTypeVariables
+    build-depends:
+        base >=4.12 && <5,
+        stm >=2.5,
+        megaparsec >7.0,
+        lossless-decimal -any,
+        edh-internal -any,
+        text -any,
+        mtl -any,
+        transformers -any
+
+library edh-internal
+    exposed-modules:
+        Language.Edh.Control
+        Language.Edh.Interpreter
+        Language.Edh.Batteries
+        Language.Edh.Batteries.Data
+        Language.Edh.Batteries.Math
+        Language.Edh.Batteries.Assign
+        Language.Edh.Batteries.Reflect
+        Language.Edh.Batteries.Ctrl
+        Language.Edh.Batteries.Runtime
+        Language.Edh.Runtime
+        Language.Edh.Event
+        Language.Edh.AST
+        Language.Edh.Parser
+        Language.Edh.Details.RtTypes
+        Language.Edh.Details.CoreLang
+        Language.Edh.Details.Evaluate
+        Language.Edh.Details.Tx
+        Language.Edh.Details.PkgMan
+        Language.Edh.Details.Utils
+        Paths_edh
+    hs-source-dirs: src
+    autogen-modules:
+        Paths_edh
+    default-language: Haskell2010
+    default-extensions: NoImplicitPrelude OverloadedStrings LambdaCase
+                        BlockArguments BangPatterns TupleSections ScopedTypeVariables
+    ghc-options: -Wall
+    build-depends:
+        ghc >=8.6.5,
+        base >=4.12 && <5,
+        stm >=2.5,
+        megaparsec >7.0,
+        lossless-decimal -any,
+        scientific -any,
+        filepath -any,
+        directory -any,
+        bytestring -any,
+        text -any,
+        clock -any,
+        time -any,
+        vector -any,
+        containers -any,
+        mtl -any,
+        transformers -any
+
+executable edhi
+    main-is: Main.hs
+    hs-source-dirs: repl
+    other-modules:
+        Repl
+    default-language: Haskell2010
+    default-extensions: NoImplicitPrelude OverloadedStrings LambdaCase
+                        BlockArguments BangPatterns TupleSections ScopedTypeVariables
+    build-depends:
+        edh-internal -any,
+        base >=4.12 && <5,
+        megaparsec >7.0,
+        text -any,
+        haskeline -any

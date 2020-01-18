@@ -1,0 +1,35 @@
+
+{
+  method countdown(n) case type(n) of {
+
+    DecimalType -> {
+      
+      n < 1 -> runtime.info <| '  🎉 instantly !!'
+
+      n > 5 -> {
+        runtime.warn <| "  😓 that's too many to count, doing my most ..."
+        n = 5
+        fallthrough # similar to `fallthrough` in Go
+      }
+
+      # (:-) will be parsed as another operator, sep (1 space used below) needed here
+      for i from range(n : 0 : -1) do runtime.info <| '  ⏲️  ' ++ i
+      runtime.info <| '  🎉 !!'
+
+    }
+
+    _ -> # the underscore condition always matches, similar to underscore in Haskell
+      runtime.error <| "I don't know what you want from a " ++ type(n) ++ ': ' ++ n
+
+    runtime.fatal <| "don't worry, this will never happen."
+  }
+}
+
+countdown(3)
+
+countdown(50)
+
+countdown(-1)
+
+countdown('the hell')
+

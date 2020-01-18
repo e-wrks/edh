@@ -1,0 +1,18 @@
+
+{
+
+  evs = sink
+
+  n = 0
+  go for ev from evs do runtime.info
+        <| '  📆 event#' ++ (n+=1) ++ ' 🎉  ' ++ ev
+
+  go for nanos from runtime.everySeconds(1) do
+        evs <- 'time now (in nanos) is ' ++ nanos
+
+  # all descendant threads (goroutines) will be terminated when
+  # main thread terminates, need wait here to see any event above
+  # being processed.
+  for _ from runtime.everySeconds(5) do { break }
+
+}

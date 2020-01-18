@@ -1,0 +1,8 @@
+resolver: lts-14.15
+
+packages:
+  - edh
+  - lossless-decimal
+
+extra-deps:
+  - megaparsec-8.0.0

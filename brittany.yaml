@@ -1,0 +1,9 @@
+conf_forward:
+  options_ghc:
+    - -XNoImplicitPrelude
+    - -XOverloadedStrings
+    - -XLambdaCase
+    - -XBlockArguments
+    - -XBangPatterns
+    - -XTupleSections
+    - -XScopedTypeVariables

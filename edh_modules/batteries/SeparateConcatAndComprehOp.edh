@@ -1,0 +1,21 @@
+
+# The (=<) operator does comprehension as well as concat by default,
+# import this module then (=<) can not be used to comprehend into 
+# list/dict/tuple with existing data anymore, only (<=<) can
+# be used for concat.
+
+# re-declare (=<) as the concat operator (<=<)
+operator <=< 1 () (=<)
+
+# Override operator (=<) to comprehend into empty ones only
+operator =< (callerScope, lhe, rhe) {
+  lhv = callerScope.eval(lhe)
+  if not null(lhv) then
+    error("You don't comprehend into non-empty ones!")
+  # left-hand value is empty, can do it
+  callerScope.eval( makeOp(lhe, "<=<", rhe) )
+
+  # the overridden original (=<) operator is in scope of this proc,
+  # but don't do `lhv =< callerScope.eval(rhe)` here, as it won't
+  # work as expected when `rhe` is a for-from-do loop
+}

@@ -1,0 +1,43 @@
+
+# Some fancy chars can be used in operators
+#
+# 🔀🔁🔂⏩⏪🔼⏫🔽⏬⏹️
+# 🌀📢📣🔔🔕🎵⭕
+# 🆔🆘🆚
+
+{
+  operator 📣 5 (lhv, rhv) {
+    runtime.info <| rhv ++ ' is telling ' ++ lhv
+  }
+
+  operator 🆚 1 (lhv, rhv) {
+    runtime.info <| "🌀 What's the difference?\n     "
+      ++ lhv ++ '\n  🆚\n     ' ++ rhv
+  }
+}
+
+'a tale' 📣 'the goat'
+
+let (a, b) = ( 'Orange', 'Apple', )
+a 🆚 b
+
+
+{
+  method localOverrides * {
+    # overide the (++) operator within this procedure only, avoid
+    # polluting the module scope
+
+    before = 'You' ++ ' and ' ++ 'me'
+    operator ++ (lhv, rhv) {
+      # inside the overriding operator definition, the overridden,
+      # original operator is available as was before the overide
+      lhv ++ ' ⭕ ' ++ rhv
+    }
+    after = 'You' ++ ' and ' ++ 'me'
+
+    before 🆚 after
+  }
+}
+
+localOverrides()
+

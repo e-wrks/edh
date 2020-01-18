@@ -1,0 +1,10 @@
+*~
+*.swp
+tarballs/
+.stack-work/
+stack.yaml.lock
+/dist/
+/dist-newstyle/
+result
+.ghc.environment*
+cabal.project.local

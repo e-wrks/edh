@@ -1,0 +1,24 @@
+
+{
+
+  class C (a) {
+    b = 5
+    method f (n) n*a/b
+    method g (n) { v = (n+3)/a; return v*b}
+
+    method setA(a as this.a) pass
+    method setB(b as this.b) pass
+  }
+
+  c = C(17); # this semicolon is necessary,
+  # or the following tuple will parse as a call
+  # against the assignment result, which is the
+  # newly constructed C object.
+
+  ( c.f(7) , c.g(7) )
+
+}
+
+c.setA(11); c.setB(23)
+
+( c.f(7) , c.g(7) )

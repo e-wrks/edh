@@ -1,0 +1,5 @@
+{#
+ redirect operations to magic methods on objects in Python spirit
+#}
+
+import * './arith'

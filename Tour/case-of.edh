@@ -1,0 +1,41 @@
+
+{
+  method essay (v) case type(v) of {
+    BoolType -> "to be or not to be, that's a problem"
+  
+    DecimalType -> {
+        v<2 -> "consume less, produce more";
+        v<10 -> "no more than " ++ v ++ " cups of coffee a day";
+        _ -> "every one get his/her lucky number"
+    }
+
+    StringType -> {quiz=v fallthrough}
+
+    SymbolType -> {quiz='mistery attracts most people' fallthrough}
+
+    ObjectType -> {
+      quiz = 'I live in ' ++ v?__name__ |> 'no where';
+      fallthrough
+    }
+
+    "do you known, that " ++ quiz ++ " ?"
+  }
+}
+
+essay(true)
+
+essay(1)
+
+essay(5)
+
+essay(25)
+
+essay('magic happens')
+
+essay(Symbol('hidden-secrete'))
+
+essay(this)
+
+class C * pass
+essay(C())
+

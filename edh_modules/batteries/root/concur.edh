@@ -1,0 +1,87 @@
+
+{#
+ schedule a number of tasks to run concurrently, but with
+ concurrency limit specified by 'c'
+
+ each task must be a nullary procedure (i.e. a niladic 
+ computation)
+
+ pass 'runtime.debug' or even 'runtime.info' as 'dbgLogger'
+ to see verbose log of the finishing up
+#}
+method concur(*tasks, c=6, dbgLogger=0) {
+  null(tasks) -> return nil
+  c < 1 -> error("Invalid concurrency: " ++ c)
+
+  # event sink for decreased number of running tasks, this will
+  # read zero after all done. will only start to fire after all
+  # tasks have been put at running, and the running count drops
+  # below 'c', i.e. started overall finishing up
+  doneSig = sink
+
+  # use a class to manage 'tasks' and 'cntRunning' as instance
+  # attributes, an attribute belonging to the local scope of a
+  # method procedure (`concur()` in this case) is not possible
+  # to be assigned from another procedure (the later
+  # `scheduleMore()` method in this case)
+  class Scheduler(
+    # arguments to a class (constructor) procedure automatically
+    tasks # become instance attributes
+  ){
+
+    # this somewhat emulates a WaitGroup in Go
+    cntRunning = 0 # 'this.' at ctor proc scope is optional
+
+    method scheduleMore() {
+
+      # snoc this.tasks within an *atoiso* tx block
+      ai case this.tasks of {
+
+        {()} -> task2do = nil # no more tasks in backlog
+
+        { task2do => rest } -> # one task taken out of backlog
+          this.tasks = rest # update this.task within tx
+
+      }
+
+      if nil == task2do then {
+        doneSig <- this.cntRunning # notify about overall finishing up
+        return nil # skip all following code
+      }
+
+      go { # start a new thread (goroutine) to run 'task2do'
+
+        # use `defer` to always run upon thread termination,
+        # this is necessary as code after `task2do()` may not
+        # get actually executed in case this thread is broken by
+        # an event reactor registered during `task2do()`
+        defer {
+          this.cntRunning -= 1 # this is atomic in Edh
+
+          if this.cntRunning < c then # seen run slot available
+            # to bring another pending task from backlog at running,
+            # or to post notification to 'doneSig' upon overall
+            # finishing up detected (i.e. backlog drained)
+            this.scheduleMore()
+        }
+
+        task2do() # do the real work
+
+      }
+      # similar to WaitGroup.Add() in Go
+      this.cntRunning += 1 # this is atomic in Edh
+
+    }
+  }
+
+  schd = Scheduler(tasks)
+  while not null(schd.tasks) && schd.cntRunning < c
+    schd.scheduleMore()
+
+  for nTasksRunning from doneSig do if nTasksRunning < 1 then {
+    dbgLogger <| '  🎉  all concur tasks done.'
+    return nil # don't forget to break out the 'doneSig' event loop
+  } else
+    dbgLogger <| '  ⏲️  finishing up concur tasks, ' ++ nTasksRunning
+      ++ ' still running.'
+}

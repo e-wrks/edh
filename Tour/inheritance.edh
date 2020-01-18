@@ -1,0 +1,46 @@
+
+{
+
+  class B (name) {
+      method greeting(guest) {
+          runtime.info <| ("Hello "++guest++", I am "++name++', your guide.')
+      }
+  }
+
+  class C () {
+      extends B('Nobleman')
+  }
+
+  class D () {
+      extends B('Farmer')
+
+      method hello() {
+          runtime.info <| (`Hello there!`)
+      }
+  }
+
+  class E () {
+      extends C()
+      extends D()
+      # an E object will contain 2 copies of B object,
+      # the order above matters in resolving the `greeting` method.
+  }
+
+}
+
+e = E()
+
+supers(e)
+
+e.hello()
+
+e.greeting('New Comer')
+
+embededD = case e of {{ D:d }} -> d
+embededD.hello()
+
+d = D()
+case d of {{ C:c }} -> c
+
+embededC = case e of {{ C:c }} -> c
+embededC.hello()

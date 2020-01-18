@@ -1,0 +1,40 @@
+
+  operator != (lhv, rhv) not (lhv == rhv)
+
+  operator &> (callerScope, lhe, rhe) {
+    lhv = callerScope.eval(lhe)
+    if lhv != false && lhv != nil && lhv != ''
+      then callerScope.eval(rhe)
+      else nil
+  }
+
+  operator |> (callerScope, lhe, rhe) {
+    lhv = callerScope.eval(lhe)
+    if null(lhv)
+      then callerScope.eval(rhe)
+      else lhv
+  }
+
+  operator += (callerScope, lhe, rhe) {
+    callerScope.eval(makeOp(
+      lhe, "=", makeOp(lhe, "+", rhe)
+    ))
+  }
+
+  operator -= (callerScope, lhe, rhe) {
+    callerScope.eval(makeOp(
+      lhe, "=", makeOp(lhe, "-", rhe)
+    ))
+  }
+
+  operator *= (callerScope, lhe, rhe) {
+    callerScope.eval(makeOp(
+      lhe, "=", makeOp(lhe, "*", rhe)
+    ))
+  }
+
+  operator /= (callerScope, lhe, rhe) {
+    callerScope.eval(makeOp(
+      lhe, "=", makeOp(lhe, "/", rhe)
+    ))
+  }

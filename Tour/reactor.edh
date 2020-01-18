@@ -1,0 +1,46 @@
+{
+  evs = sink
+  stopSig = sink 
+
+  go {
+
+    defer {
+      runtime.info <| "I'm really done."
+    }
+
+    reactor stopSig ev {
+      runtime.info <| '  🎬  stopping because: ' ++ ev
+      break  # break from a reactor terminates the thread
+    }
+
+    for ev from evs do {
+      runtime.info <| '  🎐  sth happening: ' ++ ev
+    }
+
+  }
+
+  # wait a second
+  for _ from runtime.everySeconds(1) do { break }
+
+  evs <- '  🛎️  ding.ding..'
+
+  # wait a second
+  for _ from runtime.everySeconds(1) do { break }
+
+  # stopSig <- "don't do that!"
+
+  evs <- '  🍃  chill..chill...'
+
+  # wait a second
+  for _ from runtime.everySeconds(1) do { break }
+
+  stopSig <- "that's enough!"
+
+  evs <- '  ☎️  ling.ling..ling...'
+
+  # all descendant threads (go routines) will be terminated when
+  # main thread terminates, need wait here to see any event above
+  # being processed.
+  for _ from runtime.everySeconds(1) do { break }
+  # runtime.info <| 'main program terminating ...'
+}

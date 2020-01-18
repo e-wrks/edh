@@ -1,0 +1,17 @@
+
+{
+  method f(n) {
+    method g(m) {
+      scope()
+    }
+    return (scope(), g(5))
+  }
+}
+let (s1, s2) = (*f(3))
+s2.traceback()
+s1.attrs()
+s2.attrs()
+s2.eval(makeExpr(m/n))
+s2.eval(makeExpr( (t=n/m) ))
+s2.attrs()
+s2.t
