@@ -106,7 +106,12 @@ _human_ aspect from the _human:machine_ pair, offer wider tolerance,
 therefore better leverage, over diversified skill sets/levels among
 all crew members onboard.
 
-Raw machine performance squeezing is offloaded to
+This is in the spirit of [Ruby](https://www.ruby-lang.org/en/about).
+Though [Ruby](https://www.ruby-lang.org) took the road even more
+_Object Oriented_, while **Edh** picked an alternative one, they are
+both **Human Oriented**.
+
+And raw machine performance squeezing is offloaded to
 [GHC](https://wiki.haskell.org/GHC) who has been undescribable good
 at it since inception.
 
