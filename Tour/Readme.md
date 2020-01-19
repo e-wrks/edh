@@ -209,8 +209,12 @@ the goat is telling a tale
 
 ## Package / Module Structures
 
+Checkout how [npm](https://www.npmjs.com/) manages
+[NodeJS](https://nodejs.org/en/) packages to see the idea for better
+dependency management that **Edh** follows.
+
 Checkout the directory/file structure of the mere **Edh** parts of default
-batteries [in this repository](../edh_modules/)
+batteries [in the edh repository](../edh_modules/)
 
 It's very similar to the deeply-nested
 [`node_modules` folder structures](https://nodejs.org/api/modules.html#modules_loading_from_node_modules_folders)
@@ -1803,6 +1807,10 @@ for an example.
 
 ### Package
 
+Checkout how [npm](https://www.npmjs.com/) manages
+[NodeJS](https://nodejs.org/en/) packages to see the idea for better
+dependency management that **Edh** follows.
+
 Just a folder tree containing various `*.edh` file, resides directly or nested
 some levels within the **Edh** interpreter's
 [cwd](https://en.wikipedia.org/wiki/Working_directory)
@@ -1817,8 +1825,12 @@ as well as to auto download & install packages from some shared repositories.
 
 ### Module
 
+Checkout how [npm](https://www.npmjs.com/) manages
+[NodeJS](https://nodejs.org/en/) packages to see the idea for better
+dependency management that **Edh** follows.
+
 A **module** in **Edh** is a single `*.edh` file, imported by some **Edh**
-code or **Haskell** code via the **EHI**.
+code or **Haskell** code via the [EHI](#ehi-edh-host-interface).
 
 See [Package / Module Structures](#package--module-structures)
 
