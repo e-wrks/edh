@@ -705,6 +705,9 @@ Source location is informative most of the time, right?
 Đ: runtime.debug <| "Especially when trouble shooting some unexpected results."
 Đ: 🐞 <interactive>:1:1
 Especially when trouble shooting some unexpected results.
+Đ: 50<|'use a number works the same way!'
+Đ: 🔥 <interactive>:1:1
+use a number works the same way!
 Đ:
 ```
 
@@ -719,9 +722,6 @@ DecimalType
 ( HostProcType, HostOperType, TypeType, )
 Đ: type(pkargs(1,2,k1='a'), type'of'dict={,}, type'of'tuple=(,), type'of'list=[], type'of'nil=nil)
 pkargs( ArgsPackType, type'of'dict=DictType, type'of'list=ListType, type'of'nil=nil, type'of'tuple=TupleType, )
-Đ: 50<|'use a number works the same way!'
-Đ: 🔥 <interactive>:1:1
-use a number works the same way!
 Đ:
 ```
 
