@@ -1038,7 +1038,78 @@ I am good
 
 ### Generator Procedures
 
-Values can be exchanged between the generator and the `do` expr
+Checkout how the `range()` clone from **Python** is
+[implemented in **Edh**](../edh_modules/batteries/root/iter.edh) :
+
+```js
+  # resembles `range` in Python
+  generator range(start, stop=nil, step=nil) {
+
+    if nil == stop && nil == step then case start of {
+      # enable the hidden *Edhic* version of `range` using pair
+      {(start:stop:step)} -> {fallthrough}
+      {(start:stop)} -> {fallthrough}
+    }
+
+    if nil == stop then let (stop, start) = (start, 0)
+    start == stop -> return nil
+    n = start
+
+    start < stop -> {
+      if nil == step
+        then step = 1
+        else if step <= 0 then {
+          runtime.warn <| 'step of ' ++ step ++ ' for range [' ++
+                          start ++ ', ' ++ stop ++ ") won't converge"
+          return nil
+        }
+      while n < stop {
+        yield n
+        n += step
+      }
+    }
+
+    start > stop -> {
+      if nil == step
+        then step = -1
+        else if step >= 0 then {
+          runtime.warn <| 'step of ' ++ step ++ ' for range [' ++
+                          start ++ ', ' ++ stop ++ ") won't converge"
+          return nil
+        }
+      while n > stop {
+        yield n
+        n += step
+      }
+    }
+  }
+```
+
+This is pasteable to the REPL:
+
+```python
+{
+  # Python style `range` (range is a generator procedure in Edh)
+  for n from range(5) do runtime.info <| ' ** iter # ' ++ n
+  for n from range(3, 7) do runtime.info <| ' ** iter # ' ++ n
+  for n from range(7, 3) do runtime.info <| ' ** iter # ' ++ n
+  for n from range(5, 10, 2) do runtime.info <| ' ** iter # ' ++ n
+  for n from range(10, 5, -2) do runtime.info <| ' ** iter # ' ++ n
+
+  # non-converging ranges won't loop
+  for n from range(5, 10, -2) do runtime.info <| ' ** iter # ' ++ n
+  for n from range(10, 5, 2) do runtime.info <| ' ** iter # ' ++ n
+
+  # using pairs
+  for n from range(5:10:2) do runtime.info <| ' ** iter # ' ++ n
+  for n from range(7:3) do runtime.info <| ' ** iter # ' ++ n
+
+  # Python style `enumerate`
+  for (i, n) from enumerate(range, 5) do runtime.info <| ' # ' ++ i ++ ' >> ' ++ n
+}
+```
+
+Also values can be exchanged between the generator and the `do` expr
 
 ```bash
 Đ: generator ss n while true n = yield n*n
@@ -1262,10 +1333,10 @@ and [./concur.edh using that](./concur.edh)
 
 ```bash
 Đ: {
-Đ|  1: 
+Đ|  1:
 Đ|  2:   # fake some time costing works to do
 Đ|  3:   generator allWorksToDo(nJobs=10, leastSeconds=3) {
-Đ|  4: 
+Đ|  4:
 Đ|  5:     # use this proc to capture a local copy of the arguments for the task
 Đ|  6:     method longthyWork(job'num, seconds2take) {
 Đ|  7:       # this anonymous nullary proc defines the task in form of niladic computation
@@ -1282,36 +1353,36 @@ and [./concur.edh using that](./concur.edh)
 Đ| 18:           }
 Đ| 19:       }
 Đ| 20:     }
-Đ| 21: 
+Đ| 21:
 Đ| 22:     for n from range(nJobs) do yield longthyWork(n, leastSeconds + n)
 Đ| 23:   }
-Đ| 24: 
+Đ| 24:
 Đ| 25: }
 <generator: allWorksToDo>
-Đ: 
+Đ:
 Đ: {
-Đ|  1: 
+Đ|  1:
 Đ|  2: {#
 Đ|  3:   # `concur()` is the sorta primitive for concurrency scheduling,
 Đ|  4:   # it's a plain Edh method procedure defined in `batteries/root`
 Đ|  5:   # module so automically available in a Edh runtime, its signature
 Đ|  6:   # looks like following:
-Đ|  7: 
+Đ|  7:
 Đ|  8:   method concur(*tasks, c=6, dbgLogger=0) {
 Đ|  9:     ...
 Đ| 10:   }
 Đ| 11: #}
-Đ| 12: 
+Đ| 12:
 Đ| 13:   concur(
-Đ| 14: 
+Đ| 14:
 Đ| 15:     * (,) =< for work from allWorksToDo(10, 3) do work,
 Đ| 16: #   ^--^--^------positional arguments unpacking
 Đ| 17: #      |--+------tuple comprehension target/tag
 Đ| 18: #         |------comprehension operator in Edh
-Đ| 19: 
+Đ| 19:
 Đ| 20:     c=5, dbgLogger=runtime.info,
 Đ| 21: #    ^------------^---------------keyword arguments
-Đ| 22: 
+Đ| 22:
 Đ| 23:   )
 Đ| 24: }
 ℹ️ <interactive>:9:9
