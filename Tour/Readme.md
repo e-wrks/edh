@@ -1284,6 +1284,7 @@ any assumption about the record it points to. Well further ideas to leverage
 the inheritance constructs so far may include:
 
 - Use symbols to augment `that` descendant record from ancestor methods
+
   If two modules each defines their own `name = Symbol('name')` symbol,
   assign and use `that.@name = xxx`, there's no clash at all, the
   augmented symbolic attributes are neither visible to irrelevant
