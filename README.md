@@ -2,13 +2,12 @@
 
 [![Gitter](https://badges.gitter.im/e-wrks/community.svg)](https://gitter.im/e-wrks/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 
-## Quick Start
+**Quick Start**
 
-- Take [A Tour of Đ (Edh)](./Tour/)
-- Clone or derive the scaffold:
-  [EdhIm - Đ (Edh) doing Instant Messaging](https://github.com/e-wrks/edhim)
+1. Take [A Tour of Đ (Edh)](./Tour/)
+1. Clone or derive the scaffold, run it to get some feel:
+   [EdhIm - Đ (Edh) doing Instant Messaging](https://github.com/e-wrks/edhim)
 
-- [Quick Start](#quick-start)
 - [What is Đ (Edh)](#what-is-%c4%90-edh)
   - [Program Concurrency and Data Consistency as a whole](#program-concurrency-and-data-consistency-as-a-whole)
   - [The Mission](#the-mission)
