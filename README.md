@@ -8,6 +8,21 @@
 - Clone or derive the scaffold:
   [EdhIm - Đ (Edh) doing Instant Messaging](https://github.com/e-wrks/edhim)
 
+- [Quick Start](#quick-start)
+- [What is Đ (Edh)](#what-is-%c4%90-edh)
+  - [Program Concurrency and Data Consistency as a whole](#program-concurrency-and-data-consistency-as-a-whole)
+  - [The Mission](#the-mission)
+- [The name](#the-name)
+- [Philosophy](#philosophy)
+  - [About Everything](#about-everything)
+  - [Object? - Yes, Oriented? - No](#object---yes-oriented---no)
+  - [Functional? - Try not to abuse this concept](#functional---try-not-to-abuse-this-concept)
+  - [Performance Goals](#performance-goals)
+- [Zen of Edh](#zen-of-edh)
+- [Licensing](#licensing)
+- [Academic relationship](#academic-relationship)
+- [A joke](#a-joke)
+
 ## What is Đ (Edh)
 
 **Edh** as a programming language is born just recently,
@@ -24,8 +39,9 @@ of
 [Software transactional memory](https://en.wikipedia.org/wiki/Software_transactional_memory)
 brought into an _Object_ layer, together with the
 [Go routine](./Tour/Readme.md#go-routine) brought from [Go](https://golang.org),
-you can
-[Program Concurrency and Data Consistency as a whole](./Tour/Readme.md#programming-concurrency-and-data-consistency-as-a-whole)
+you can:
+
+### [Program Concurrency and Data Consistency as a whole](./Tour/Readme.md#programming-concurrency-and-data-consistency-as-a-whole)
 
 > When coding within an **Edh** world, you can forget about all kinds of
 > [synchronization primitives](http://www.cs.columbia.edu/~hgs/os/sync.html)
@@ -47,6 +63,8 @@ and [concur.edh in the Tour using that](./Tour/concur.edh).
 
 `concur()` is just an example, it's straight forward for you to write
 application logics in similar ways.
+
+### The Mission
 
 **Edh** competes with [Python](https://python.org) to help **Haskell**
 instead of **C**/**C++** to be the breeding ground for next phenomenal
@@ -74,19 +92,6 @@ straight, and before that -
 **Edh** is faithful to get people with just **Python**/**JavaScript**/**Go**
 knowledge and skills started with a [world](./Tour/Readme.md#world) in
 **Haskell** (and in **Julia** too I sincerely hope for chances).
-
-- [Quick Start](#quick-start)
-- [What is Đ (Edh)](#what-is-%c4%90-edh)
-- [The name](#the-name)
-- [Philosophy](#philosophy)
-  - [About Everything](#about-everything)
-  - [Object? - Yes, Oriented? - No](#object---yes-oriented---no)
-  - [Functional? - Try not to abuse this concept](#functional---try-not-to-abuse-this-concept)
-  - [Performance Goals](#performance-goals)
-- [Zen of Edh](#zen-of-edh)
-- [Licensing](#licensing)
-- [Academic relationship](#academic-relationship)
-- [A joke](#a-joke)
 
 ## The name
 
