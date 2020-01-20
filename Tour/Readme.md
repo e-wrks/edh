@@ -1643,7 +1643,11 @@ and
 [arith.edh](../edh_modules/batteries/magic/arith.edh)
 
 This is meant to attract people to port **Theano** and **TensorFlow** as well as
-**Pandas** and **Numpy** to **Haskell** with the aid of **Edh**.
+**Pandas** and **Numpy** to **Haskell** with the aid of **Edh**, while
+[AccelerateHS](http://hackage.haskell.org/package/accelerate) and
+[Repa](http://hackage.haskell.org/package/repa)
+have demonstrated how great **Haskell** can be at heavy lifting wrt number
+crunchings.
 
 ```bash
 Đ: import * 'batteries/magic'
