@@ -1459,6 +1459,9 @@ logics in similar ways.
 
 ## Event Sink / Reactor / Defer
 
+See [The reactor Procedure](#the-reactor-procedure) in the
+[Terminology](#terminology) section for the mechanism how it works.
+
 Checkout [reactor.edh](./reactor.edh)
 
 ```bash
@@ -2400,7 +2403,7 @@ and an **arguments receiver** to receive the event value into the procedure
 body's **scope** before running.
 
 Draining of events from each's respective **sink** by **reactor**s attached
-to a thread, are run interleaved with normal transactions on the thread, i.e.
+to a thread, are run **interleaved** with normal transactions on the thread, i.e.
 between each 2 normal tx processed, all **reactors** are tried to process one
 event from each's associated **sink**.
 
