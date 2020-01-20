@@ -2489,11 +2489,11 @@ edhValueNull _ = return False
 A **class** in **Edh** is defined by a `class` statement in **Edh**
 code in form of a **class** procedure.
 
-A **class** procedure constructs objects when called, on each invocation,
-it implicitly creates an object taking the **class** and _many_ (reads
-zero-to-multiple) **supers** (declared by _many_ `extends` statements
-within the **class** procedure) mounted on the **scope** **entity** of
-the **class** procedure call.
+A **class** procedure constructs **object**s when called, on each
+invocation, it implicitly creates an **object** taking the **class**
+and _many_ (reads zero-to-multiple) **supers** (declared by _many_
+`extends` statements within the **class** procedure) mounted on the
+**scope** **entity** of the **class** procedure call.
 
 > A **class** procedure can explicitly return another **object**, another
 > **value** or even `nil`, but again, this is the black magic you want to

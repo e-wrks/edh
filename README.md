@@ -91,8 +91,11 @@ I suppose years still needed for our education system to get that situation
 straight, and before that -
 
 **Edh** is faithful to get people with just **Python**/**JavaScript**/**Go**
-knowledge and skills started with a [world](./Tour/Readme.md#world) in
-**Haskell** (and in **Julia** too I sincerely hope for chances).
+knowledge and skills started with a
+[procedural](https://en.wikipedia.org/wiki/Procedural_programming)
+[world](./Tour/Readme.md#world)
+with [object](./Tour/Readme.md#object--class)s
+in **Haskell** (and in **Julia** too I sincerely hope for chances).
 
 ## The name
 
