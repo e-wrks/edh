@@ -38,7 +38,8 @@ of
 [Software transactional memory](https://en.wikipedia.org/wiki/Software_transactional_memory)
 brought into an _Object_ layer, together with the
 [Go routine](./Tour/Readme.md#go-routine) brought from [Go](https://golang.org),
-and the [Reactor mechanism with Event Sinks](#event-sink--reactor--defer),
+and the
+[Reactor mechanism with Event Sinks](./Tour/Readme.md#event-sink--reactor--defer),
 you can:
 
 ### [Program Concurrency and Data Consistency as a whole](./Tour/Readme.md#programming-concurrency-and-data-consistency-as-a-whole)
