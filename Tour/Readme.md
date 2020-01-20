@@ -49,7 +49,7 @@ See [Edh Im](https://github.com/e-wrks/edhim) for an example.
   - [Class Procedures](#class-procedures)
   - [Inheritance Hierarchy](#inheritance-hierarchy)
 - [Go Routines](#go-routines)
-- [Programming the Concurrency](#programming-the-concurrency)
+- [Programming Concurrency and Data Consistency as a whole](#programming-concurrency-and-data-consistency-as-a-whole)
 - [Event Sink / Reactor / Defer](#event-sink--reactor--defer)
 - [Indexing](#indexing)
 - [Defining More Magic Methods](#defining-more-magic-methods)
@@ -1330,11 +1330,28 @@ Checkout [goroutine.edh](./goroutine.edh)
 Đ:
 ```
 
-## Programming the Concurrency
+## Programming Concurrency and Data Consistency as a whole
+
+> When coding within an **Edh** world, you can forget about all kinds of
+> [synchronization primitives](http://www.cs.columbia.edu/~hgs/os/sync.html)
+> scattered
+> [here](https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/pthread.h.html),
+> [here](https://golang.org/pkg/sync),
+> and many _otherwheres_ , with every methods you attempt to program concurrency
+> otherwise.
+>
+> Despite of many **async** frameworks trying to mitigate that disputable
+> complexity, e.g.
+> [async in JavaScript](https://caolan.github.io/async),
+> [asyncio in Python](https://docs.python.org/3/library/asyncio.html),
+> and [async in Haskell](http://hackage.haskell.org/package/async).
 
 Checkout the implementation of
 [concur](../edh_modules/batteries/root/concur.edh)
-and [./concur.edh using that](./concur.edh)
+and [concur.edh in the Tour using that](./concur.edh).
+
+`concur()` is just an example, it's straight forward for you to write application
+logics in similar ways.
 
 ```bash
 Đ: {
@@ -1967,16 +1984,28 @@ that improperly or plainly wrong, you will be punished with excessive **stm**
 retries or even dropped into infinite vain loops without progress.
 
 Above said may sound pretty dreadful, but it should make you feel better if I
-tell you that, when coding an **Edh** world, you can forget about all kinds of
-[synchronization primitives](http://www.cs.columbia.edu/~hgs/os/sync.html)
-scattered [here](https://docs.python.org/3/library/asyncio-sync.html),
-[there](https://golang.org/pkg/sync) and many _otherwheres_
-(despite of many **async** frameworks trying to mitigate that disputable
-complexity), with every methods you attempt to program concurrency otherwise.
+tell you that:
 
-Checkout a way to control concurrency with **Edh**
-[here](../edh_modules/batteries/root/concur.edh)
-and [a working example to use that](./concur.edh) .
+> When coding within an **Edh** world, you can forget about all kinds of
+> [synchronization primitives](http://www.cs.columbia.edu/~hgs/os/sync.html)
+> scattered
+> [here](https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/pthread.h.html),
+> [here](https://golang.org/pkg/sync),
+> and many _otherwheres_ , with every methods you attempt to program concurrency
+> otherwise.
+>
+> Despite of many **async** frameworks trying to mitigate that disputable
+> complexity, e.g.
+> [async in JavaScript](https://caolan.github.io/async),
+> [asyncio in Python](https://docs.python.org/3/library/asyncio.html),
+> and [async in Haskell](http://hackage.haskell.org/package/async).
+
+Checkout the implementation of
+[concur](../edh_modules/batteries/root/concur.edh)
+and [concur.edh in the Tour using that](./concur.edh).
+
+`concur()` is just an example, it's straight forward for you to write application
+logics in similar ways.
 
 ### Transaction (STM)
 

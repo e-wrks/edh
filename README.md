@@ -22,9 +22,31 @@ The killer feature may be the very
 [Haskell implementation](http://hackage.haskell.org/package/stm)
 of
 [Software transactional memory](https://en.wikipedia.org/wiki/Software_transactional_memory)
-brought into an _Object_ layer, giving you lock-free (a.k.a optimistic locking)
-transactions, with intuitive as well as pragmatic constructs to
-program data consistency under heavy concurrency.
+brought into an _Object_ layer, together with the
+[Go routine](./Tour/Readme.md#go-routine) brought from [Go](https://golang.org),
+you can
+[Program Concurrency and Data Consistency as a whole](./Tour/Readme.md#programming-concurrency-and-data-consistency-as-a-whole)
+
+> When coding within an **Edh** world, you can forget about all kinds of
+> [synchronization primitives](http://www.cs.columbia.edu/~hgs/os/sync.html)
+> scattered
+> [here](https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/pthread.h.html),
+> [here](https://golang.org/pkg/sync),
+> and many _otherwheres_ , with every methods you attempt to program concurrency
+> otherwise.
+>
+> Despite of many **async** frameworks trying to mitigate that disputable
+> complexity, e.g.
+> [async in JavaScript](https://caolan.github.io/async),
+> [asyncio in Python](https://docs.python.org/3/library/asyncio.html),
+> and [async in Haskell](http://hackage.haskell.org/package/async).
+
+Checkout the implementation of
+[concur](../edh_modules/batteries/root/concur.edh)
+and [concur.edh in the Tour using that](./concur.edh).
+
+`concur()` is just an example, it's straight forward for you to write application
+logics in similar ways.
 
 **Edh** competes with [Python](https://python.org) to help **Haskell**
 instead of **C**/**C++** to be the breeding ground for next phenomenal
