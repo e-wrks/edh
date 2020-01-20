@@ -58,10 +58,22 @@ in **Python**.
 Take the [Tour](./Tour/) to see what **Edh** has to offer.
 
 [**Julia**](https://julialang.org) is an alternative all-in-one solution
-for the **next-big-things**, but has a learning curve not too less
-steep than **Haskell**, **Edh** is faithful to get people with just
-**Python**/**JavaScript**/**Go** knowledge and skills started with
-a [world](./Tour/#world) in **Haskell**.
+for the **next-big-things**, but as well as **Haskell**, **Julia** carries
+high impedance to average people without highly developed
+[Mathematical Mindsets](https://www.aft.org/ae/winter2018-2019/boaler)
+
+> But in the early years of school, we live in a system whereby students
+> are required, from an early age, to learn many formal mathematical methods,
+> such as those used to add, subtract, divide, and multiply numbers.
+> This is the time when students stray from mathematical mindsets and develop
+> fixed, procedural mindsets.
+
+I suppose years still needed for our education system to get that situation
+straight, and before that -
+
+**Edh** is faithful to get people with just **Python**/**JavaScript**/**Go**
+knowledge and skills started with a [world](./Tour/Readme.md#world) in
+**Haskell** (and in **Julia** too I sincerely hope for chances).
 
 - [Quick Start](#quick-start)
 - [What is Đ (Edh)](#what-is-%c4%90-edh)
