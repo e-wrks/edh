@@ -42,11 +42,11 @@ you can
 > and [async in Haskell](http://hackage.haskell.org/package/async).
 
 Checkout the implementation of
-[concur](../edh_modules/batteries/root/concur.edh)
-and [concur.edh in the Tour using that](./concur.edh).
+[concur](./edh_modules/batteries/root/concur.edh)
+and [concur.edh in the Tour using that](./Tour/concur.edh).
 
-`concur()` is just an example, it's straight forward for you to write application
-logics in similar ways.
+`concur()` is just an example, it's straight forward for you to write
+application logics in similar ways.
 
 **Edh** competes with [Python](https://python.org) to help **Haskell**
 instead of **C**/**C++** to be the breeding ground for next phenomenal
