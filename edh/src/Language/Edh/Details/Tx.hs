@@ -208,16 +208,17 @@ driveEdhProgram !progCtx !prog = do
       atomically ((Just <$> stmJob) `orElse` return Nothing) >>= \case
         Nothing -> -- ^ stm failed, do a tracked retry
           doSTM (rtc' + 1)
+        Just [] ->
+          -- no reactor has fired, the tx job has already been executed
+          return False
         Just !gotevl -> driveReactors gotevl >>= \case
           True -> -- a reactor is terminating this thread
             return True
-          False -> if null gotevl
-            then -- no reactor has fired, the tx job has already been executed
-                 return False
-            else -- there've been one or more reactors fired, the tx job have
-                 -- been skipped, as no reactor is terminating the thread,
-                 -- continue with this tx job
-                 doSTM rtc'
+          False ->
+            -- there've been one or more reactors fired, the tx job have
+            -- been skipped, as no reactor is terminating the thread,
+            -- continue with this tx job
+            doSTM rtc'
 
     stmJob :: STM [(EdhValue, ReactorRecord)]
     stmJob =

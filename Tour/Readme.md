@@ -2406,10 +2406,17 @@ the **sink** to be associated with, a procedure body consists of **Edh** code,
 and an **arguments receiver** to receive the event value into the procedure
 body's **scope** before running.
 
-Draining of events from each's respective **sink** by **reactor**s attached
-to a thread, are run **interleaved** with normal transactions on the thread, i.e.
-between each 2 normal tx processed, all **reactors** are tried to process one
-event from each's associated **sink**.
+Draining of events from each's respective event **sink** by **reactor**s
+attached to a thread, have higher priority than normal tx jobs on the thread,
+in common cases, event streams won't appear like a tight-loop, so **reactors**
+will appear to run **interleaved** with normal transactions on the thread.
+
+But the next normal tx job won't get executed unless all **reactor**s stay
+un-fired, meaning their respective event **sink**s are all in silence for
+that instant in time.
+
+Fairness in processing of tight-loop-like event streams needs to be further
+explored sooner than later.
 
 #### Break the thread from reactor
 
