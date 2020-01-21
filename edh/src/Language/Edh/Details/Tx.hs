@@ -175,18 +175,11 @@ driveEdhProgram !progCtx !prog = do
         driveEdhThread defers taskSource
 
   goSTM :: Int -> EdhTxTask -> IO Bool
-  goSTM !rtc txTask@(EdhTxTask !pgsThread !wait !input !task) = if wait
+  goSTM !rtc (EdhTxTask !pgsThread !wait !input !task) = if wait
     then -- let stm do the retry, for blocking read of a 'TChan' etc.
          waitSTM
-    else do -- blocking wait not expected, track stm retries explicitly
-
-      when -- todo increase the threshold of reporting?
-           (rtc > 0) $ do
-        -- trace out the retries so the end users can be aware of them
-        tid <- myThreadId
-        trace (" 🌀 " <> show tid <> " stm retry #" <> show rtc) $ return ()
-
-      doSTM
+    else -- blocking wait not expected, track stm retries explicitly
+         doSTM rtc
 
    where
 
@@ -203,20 +196,28 @@ driveEdhProgram !progCtx !prog = do
           -- continue with this tx job
           waitSTM
 
-    doSTM :: IO Bool
-    doSTM = atomically ((Just <$> stmJob) `orElse` return Nothing) >>= \case
-      Nothing -> -- ^ stm failed, do a tracked retry
-        goSTM (rtc + 1) txTask
-      Just !gotevl -> driveReactors gotevl >>= \case
-        True -> -- a reactor is terminating this thread
-          return True
-        False -> if null gotevl
-          then -- no reactor has fired, the tx job has already been executed
-               return False
-          else -- there've been one or more reactors fired, the tx job have
-               -- been skipped, as no reactor is terminating the thread,
-               -- continue with this tx job
-               doSTM
+    doSTM :: Int -> IO Bool
+    doSTM !rtc' = do
+
+      when -- todo increase the threshold of reporting?
+           (rtc' > 0) $ do
+        -- trace out the retries so the end users can be aware of them
+        tid <- myThreadId
+        trace (" 🌀 " <> show tid <> " stm retry #" <> show rtc') $ return ()
+
+      atomically ((Just <$> stmJob) `orElse` return Nothing) >>= \case
+        Nothing -> -- ^ stm failed, do a tracked retry
+          doSTM (rtc' + 1)
+        Just !gotevl -> driveReactors gotevl >>= \case
+          True -> -- a reactor is terminating this thread
+            return True
+          False -> if null gotevl
+            then -- no reactor has fired, the tx job has already been executed
+                 return False
+            else -- there've been one or more reactors fired, the tx job have
+                 -- been skipped, as no reactor is terminating the thread,
+                 -- continue with this tx job
+                 doSTM rtc'
 
     stmJob :: STM [(EdhValue, ReactorRecord)]
     stmJob =
