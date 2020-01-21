@@ -177,7 +177,7 @@ driveEdhProgram !progCtx !prog = do
   goSTM :: Int -> EdhTxTask -> IO Bool
   goSTM !rtc txTask@(EdhTxTask !pgsThread !wait !input !task) = if wait
     then -- let stm do the retry, for blocking read of a 'TChan' etc.
-         atomically stmJob >>= driveReactors
+         waitSTM
     else do -- blocking wait not expected, track stm retries explicitly
 
       when -- todo increase the threshold of reporting?
@@ -189,6 +189,19 @@ driveEdhProgram !progCtx !prog = do
       doSTM
 
    where
+
+    waitSTM :: IO Bool
+    waitSTM = atomically stmJob >>= \case
+      [] -> -- no reactor fires, the tx job has been executed
+        return False
+      gotevl -> driveReactors gotevl >>= \case
+        True -> -- a reactor is terminating this thread
+          return True
+        False ->
+          -- there've been one or more reactors fired, the tx job have
+          -- been skipped, as no reactor is terminating the thread,
+          -- continue with this tx job
+          waitSTM
 
     doSTM :: IO Bool
     doSTM = atomically ((Just <$> stmJob) `orElse` return Nothing) >>= \case
