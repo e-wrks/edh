@@ -186,19 +186,34 @@ driveEdhProgram !progCtx !prog = do
         tid <- myThreadId
         trace (" 🌀 " <> show tid <> " stm retry #" <> show rtc) $ return ()
 
-      atomically ((Just <$> stmJob) `orElse` return Nothing) >>= \case
-        Nothing -> -- ^ stm failed, do a tracked retry
-          goSTM (rtc + 1) txTask
-        Just gotevl -> driveReactors gotevl
+      doSTM
 
    where
+
+    doSTM :: IO Bool
+    doSTM = atomically ((Just <$> stmJob) `orElse` return Nothing) >>= \case
+      Nothing -> -- ^ stm failed, do a tracked retry
+        goSTM (rtc + 1) txTask
+      Just !gotevl -> driveReactors gotevl >>= \case
+        True -> -- a reactor is terminating this thread
+          return True
+        False -> if null gotevl
+          then -- no reactor has fired, the tx job has already been executed
+               return False
+          else -- there've been one or more reactors fired, the tx job have
+               -- been skipped, as no reactor is terminating the thread,
+               -- continue with this tx job
+               doSTM
 
     stmJob :: STM [(EdhValue, ReactorRecord)]
     stmJob =
       (readTVar (edh'reactors pgsThread) >>= reactorChk []) >>= \gotevl ->
         if null gotevl
-          then join (runReaderT (task input) pgsThread) >> return []
-          else return gotevl
+          then -- no reactor fires, execute the tx job
+               join (runReaderT (task input) pgsThread) >> return []
+          else -- skip the tx job if at least one reactor fires
+               return gotevl
+
     reactorChk
       :: [(EdhValue, ReactorRecord)]
       -> [ReactorRecord]
