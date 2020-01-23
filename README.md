@@ -11,7 +11,7 @@
 > **Đ (Edh)** code should be especially more _readable_/_modifiable_
 > to average people without a
 > [functional](#functional---try-not-to-abuse-this-concept)
-> mindset, thus development of a software project in **Haskell** + **Edh**
+> mindset (yet), thus development of a software project in **Haskell** + **Edh**
 > can be more viable and maintainable by teams with diversified crew members.
 >
 > One possible division of labour on from the scaffold as a baseline, e.g.
@@ -96,7 +96,7 @@ application logics in similar ways.
 
 ### The Mission
 
-**Edh** competes with [Python](https://python.org) to help **Haskell**
+**Edh** competes with [Python](https://python.org) in aid of **Haskell**
 instead of **C**/**C++** to be the breeding ground for next phenomenal
 pieces of software, after [TensorFlow](https://tensorflow.org),
 [Pandas](https://pandas.pydata.org/), [Numpy](https://numpy.org/) etc.
