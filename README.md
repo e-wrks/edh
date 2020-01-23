@@ -16,7 +16,7 @@
 >
 > One possible division of labour on from the scaffold as a baseline, e.g.
 >
-> - Junior people and new comers (the Dev):
+> - Junior people and New Comers (the Dev), End Users (bugfixers):
 >
 >   Extend [Đ (Edh) code](https://github.com/e-wrks/edhim/Readme.md#full-%c4%90-edh-code-95-loc) with new modules,
 >   3rd party packages for application / business logics, with fast
