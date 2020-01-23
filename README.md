@@ -5,8 +5,37 @@
 ## Quick Start
 
 - Take [A Tour of Đ (Edh)](./Tour/)
-- Clone or derive the scaffold:
+- Checkout the demo & scaffold project:
   [EdhIm - Đ (Edh) doing Instant Messaging](https://github.com/e-wrks/edhim)
+
+> **Đ (Edh)** code should be especially more _readable_/_modifiable_
+> to average people without a
+> [functional](#functional---try-not-to-abuse-this-concept)
+> mindset, thus development of a software project in **Haskell** + **Edh**
+> can be more viable and maintainable by teams with diversified crew members.
+>
+> One possible division of labour on from the scaffold as a baseline, e.g.
+>
+> - Junior people and new comers (the Dev):
+>
+>   Extend [Đ (Edh) code](https://github.com/e-wrks/edhim/Readme.md#full-%c4%90-edh-code-95-loc) with new modules,
+>   3rd party packages for application / business logics, with fast
+>   iterations
+>
+> - Thinkist people:
+>
+>   Establish the
+>   [world modeling code](https://github.com/e-wrks/edhim/Readme.md#world-modeling-code-in-haskell-190-loc),
+>   then progressively (but may better conservatively) improve the models,
+>   for mistakes harder to be made, idiomatics easier to be followed
+>
+> - Architect / Senior Engineering people, Security Experts, the Ops:
+>
+>   Establish and maintain
+>   [world reifying code](https://github.com/e-wrks/edhim/Readme.md#world-reifying-code-in-haskell-193-loc),
+>   ensure the systems run continuously & securely on a foundation of
+>   contemporary technology stack, deal with dependency EOLs, patch CVEs in
+>   time, perform regularly the house keeping of backing storage
 
 ## What is Đ (Edh)
 
