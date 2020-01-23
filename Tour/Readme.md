@@ -49,7 +49,7 @@ See [Edh Im](https://github.com/e-wrks/edhim) for an example.
   - [Class Procedures](#class-procedures)
   - [Inheritance Hierarchy](#inheritance-hierarchy)
 - [Go Routines](#go-routines)
-- [Programming the Concurrency](#programming-the-concurrency)
+- [Programming Concurrency and Data Consistency as a whole](#programming-concurrency-and-data-consistency-as-a-whole)
 - [Event Sink / Reactor / Defer](#event-sink--reactor--defer)
 - [Indexing](#indexing)
 - [Defining More Magic Methods](#defining-more-magic-methods)
@@ -1330,11 +1330,28 @@ Checkout [goroutine.edh](./goroutine.edh)
 Đ:
 ```
 
-## Programming the Concurrency
+## Programming Concurrency and Data Consistency as a whole
+
+> When coding within an **Edh** world, you can forget about all kinds of
+> [synchronization primitives](http://www.cs.columbia.edu/~hgs/os/sync.html)
+> scattered
+> [here](https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/pthread.h.html),
+> [here](https://golang.org/pkg/sync),
+> and many _otherwheres_ , with every methods you attempt to program concurrency
+> otherwise.
+>
+> Despite of many **async** frameworks trying to mitigate that disputable
+> complexity, e.g.
+> [async in JavaScript](https://caolan.github.io/async),
+> [asyncio in Python](https://docs.python.org/3/library/asyncio.html),
+> and [async in Haskell](http://hackage.haskell.org/package/async).
 
 Checkout the implementation of
 [concur](../edh_modules/batteries/root/concur.edh)
-and [./concur.edh using that](./concur.edh)
+and [concur.edh in the Tour using that](./concur.edh).
+
+`concur()` is just an example, it's straight forward for you to write application
+logics in similar ways.
 
 ```bash
 Đ: {
@@ -1441,6 +1458,9 @@ and [./concur.edh using that](./concur.edh)
 ```
 
 ## Event Sink / Reactor / Defer
+
+See [The reactor Procedure](#the-reactor-procedure) in the
+[Terminology](#terminology) section for the mechanism how it works.
 
 Checkout [reactor.edh](./reactor.edh)
 
@@ -1623,7 +1643,11 @@ and
 [arith.edh](../edh_modules/batteries/magic/arith.edh)
 
 This is meant to attract people to port **Theano** and **TensorFlow** as well as
-**Pandas** and **Numpy** to **Haskell** with the aid of **Edh**.
+**Pandas** and **Numpy** to **Haskell** with the aid of **Edh**, while
+[AccelerateHS](http://hackage.haskell.org/package/accelerate) and
+[Repa](http://hackage.haskell.org/package/repa)
+have demonstrated how great **Haskell** can be at heavy lifting wrt number
+crunchings.
 
 ```bash
 Đ: import * 'batteries/magic'
@@ -1967,16 +1991,28 @@ that improperly or plainly wrong, you will be punished with excessive **stm**
 retries or even dropped into infinite vain loops without progress.
 
 Above said may sound pretty dreadful, but it should make you feel better if I
-tell you that, when coding an **Edh** world, you can forget about all kinds of
-[synchronization primitives](http://www.cs.columbia.edu/~hgs/os/sync.html)
-scattered [here](https://docs.python.org/3/library/asyncio-sync.html),
-[there](https://golang.org/pkg/sync) and many _otherwheres_
-(despite of many **async** frameworks trying to mitigate that disputable
-complexity), with every methods you attempt to program concurrency otherwise.
+tell you that:
 
-Checkout a way to control concurrency with **Edh**
-[here](../edh_modules/batteries/root/concur.edh)
-and [a working example to use that](./concur.edh) .
+> When coding within an **Edh** world, you can forget about all kinds of
+> [synchronization primitives](http://www.cs.columbia.edu/~hgs/os/sync.html)
+> scattered
+> [here](https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/pthread.h.html),
+> [here](https://golang.org/pkg/sync),
+> and many _otherwheres_ , with every methods you attempt to program concurrency
+> otherwise.
+>
+> Despite of many **async** frameworks trying to mitigate that disputable
+> complexity, e.g.
+> [async in JavaScript](https://caolan.github.io/async),
+> [asyncio in Python](https://docs.python.org/3/library/asyncio.html),
+> and [async in Haskell](http://hackage.haskell.org/package/async).
+
+Checkout the implementation of
+[concur](../edh_modules/batteries/root/concur.edh)
+and [concur.edh in the Tour using that](./concur.edh).
+
+`concur()` is just an example, it's straight forward for you to write application
+logics in similar ways.
 
 ### Transaction (STM)
 
@@ -2370,10 +2406,17 @@ the **sink** to be associated with, a procedure body consists of **Edh** code,
 and an **arguments receiver** to receive the event value into the procedure
 body's **scope** before running.
 
-Draining of events from each's respective **sink** by **reactor**s attached
-to a thread, are run interleaved with normal transactions on the thread, i.e.
-between each 2 normal tx processed, all **reactors** are tried to process one
-event from each's associated **sink**.
+Draining of events from each's respective event **sink** by **reactor**s
+attached to a thread, have higher priority than normal tx jobs on the thread,
+in common cases, event streams won't appear like a tight-loop, so **reactors**
+will appear to run **interleaved** with normal transactions on the thread.
+
+But the next normal tx job won't get executed unless all **reactor**s stay
+un-fired, meaning their respective event **sink**s are all in silence for
+that instant in time.
+
+Fairness in processing of tight-loop-like event streams needs to be further
+explored sooner than later.
 
 #### Break the thread from reactor
 
@@ -2460,11 +2503,11 @@ edhValueNull _ = return False
 A **class** in **Edh** is defined by a `class` statement in **Edh**
 code in form of a **class** procedure.
 
-A **class** procedure constructs objects when called, on each invocation,
-it implicitly creates an object taking the **class** and _many_ (reads
-zero-to-multiple) **supers** (declared by _many_ `extends` statements
-within the **class** procedure) mounted on the **scope** **entity** of
-the **class** procedure call.
+A **class** procedure constructs **object**s when called, on each
+invocation, it implicitly creates an **object** taking the **class**
+and _many_ (reads zero-to-multiple) **supers** (declared by _many_
+`extends` statements within the **class** procedure) mounted on the
+**scope** **entity** of the **class** procedure call.
 
 > A **class** procedure can explicitly return another **object**, another
 > **value** or even `nil`, but again, this is the black magic you want to

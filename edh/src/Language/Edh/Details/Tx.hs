@@ -175,30 +175,60 @@ driveEdhProgram !progCtx !prog = do
         driveEdhThread defers taskSource
 
   goSTM :: Int -> EdhTxTask -> IO Bool
-  goSTM !rtc txTask@(EdhTxTask !pgsThread !wait !input !task) = if wait
+  goSTM !rtc (EdhTxTask !pgsThread !wait !input !task) = if wait
     then -- let stm do the retry, for blocking read of a 'TChan' etc.
-         atomically stmJob >>= driveReactors
-    else do -- blocking wait not expected, track stm retries explicitly
+         waitSTM
+    else -- blocking wait not expected, track stm retries explicitly
+         doSTM rtc
+
+   where
+
+    waitSTM :: IO Bool
+    waitSTM = atomically stmJob >>= \case
+      [] -> -- no reactor fires, the tx job has been executed
+        return False
+      gotevl -> driveReactors gotevl >>= \case
+        True -> -- a reactor is terminating this thread
+          return True
+        False ->
+          -- there've been one or more reactors fired, the tx job have
+          -- been skipped, as no reactor is terminating the thread,
+          -- continue with this tx job
+          waitSTM
+
+    doSTM :: Int -> IO Bool
+    doSTM !rtc' = do
 
       when -- todo increase the threshold of reporting?
-           (rtc > 0) $ do
+           (rtc' > 0) $ do
         -- trace out the retries so the end users can be aware of them
         tid <- myThreadId
-        trace (" 🌀 " <> show tid <> " stm retry #" <> show rtc) $ return ()
+        trace (" 🌀 " <> show tid <> " stm retry #" <> show rtc') $ return ()
 
       atomically ((Just <$> stmJob) `orElse` return Nothing) >>= \case
         Nothing -> -- ^ stm failed, do a tracked retry
-          goSTM (rtc + 1) txTask
-        Just gotevl -> driveReactors gotevl
-
-   where
+          doSTM (rtc' + 1)
+        Just [] ->
+          -- no reactor has fired, the tx job has already been executed
+          return False
+        Just !gotevl -> driveReactors gotevl >>= \case
+          True -> -- a reactor is terminating this thread
+            return True
+          False ->
+            -- there've been one or more reactors fired, the tx job have
+            -- been skipped, as no reactor is terminating the thread,
+            -- continue with this tx job
+            doSTM rtc'
 
     stmJob :: STM [(EdhValue, ReactorRecord)]
     stmJob =
       (readTVar (edh'reactors pgsThread) >>= reactorChk []) >>= \gotevl ->
         if null gotevl
-          then join (runReaderT (task input) pgsThread) >> return []
-          else return gotevl
+          then -- no reactor fires, execute the tx job
+               join (runReaderT (task input) pgsThread) >> return []
+          else -- skip the tx job if at least one reactor fires
+               return gotevl
+
     reactorChk
       :: [(EdhValue, ReactorRecord)]
       -> [ReactorRecord]

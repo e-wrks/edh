@@ -393,7 +393,7 @@ exitEdhSTM' !pgs !exit !result = if edh'in'tx pgs
   else writeTQueue (edh'task'queue pgs) $ EdhTxTask pgs False result exit
 {-# INLINE exitEdhSTM' #-}
 
--- | An atomic task, an Edh program is composed form many this kind of tasks.
+-- | An atomic task, an Edh program is composed of many this kind of tasks.
 data EdhTxTask = EdhTxTask {
     edh'task'pgs :: !EdhProgState
     , edh'task'wait :: !Bool
@@ -757,5 +757,3 @@ edhTypeOf (EdhYield  _)      = EdhType YieldType
 edhTypeOf (EdhReturn _)      = EdhType ReturnType
 edhTypeOf (EdhSink   _)      = EdhType SinkType
 edhTypeOf (EdhExpr   _)      = EdhType ExprType
-
-

@@ -2,7 +2,7 @@
 
 [![Gitter](https://badges.gitter.im/e-wrks/community.svg)](https://gitter.im/e-wrks/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 
-## Quick Start
+**Quick Start**
 
 - Take [A Tour of Đ (Edh)](./Tour/)
 - Checkout the demo & scaffold project:
@@ -37,6 +37,20 @@
 >   contemporary technology stack, deal with dependency EOLs, patch CVEs in
 >   time, perform regularly the house keeping of backing storage
 
+- [What is Đ (Edh)](#what-is-%c4%90-edh)
+  - [Program Concurrency and Data Consistency as a whole](#program-concurrency-and-data-consistency-as-a-whole)
+  - [The Mission](#the-mission)
+- [The name](#the-name)
+- [Philosophy](#philosophy)
+  - [About Everything](#about-everything)
+  - [Object? - Yes, Oriented? - No](#object---yes-oriented---no)
+  - [Functional? - Try not to abuse this concept](#functional---try-not-to-abuse-this-concept)
+  - [Performance Goals](#performance-goals)
+- [Zen of Edh](#zen-of-edh)
+- [Licensing](#licensing)
+- [Academic relationship](#academic-relationship)
+- [A joke](#a-joke)
+
 ## What is Đ (Edh)
 
 **Edh** as a programming language is born just recently,
@@ -51,9 +65,36 @@ The killer feature may be the very
 [Haskell implementation](http://hackage.haskell.org/package/stm)
 of
 [Software transactional memory](https://en.wikipedia.org/wiki/Software_transactional_memory)
-brought into an _Object_ layer, giving you lock-free (a.k.a optimistic locking)
-transactions, with intuitive as well as pragmatic constructs to
-program data consistency under heavy concurrency.
+brought into an _Object_ layer, together with the
+[Go routine](./Tour/Readme.md#go-routine) brought from [Go](https://golang.org),
+and the
+[Reactor mechanism with Event Sinks](./Tour/Readme.md#event-sink--reactor--defer),
+you can:
+
+### [Program Concurrency and Data Consistency as a whole](./Tour/Readme.md#programming-concurrency-and-data-consistency-as-a-whole)
+
+> When coding within an **Edh** world, you can forget about all kinds of
+> [synchronization primitives](http://www.cs.columbia.edu/~hgs/os/sync.html)
+> scattered
+> [here](https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/pthread.h.html),
+> [here](https://golang.org/pkg/sync),
+> and many _otherwheres_ , with every methods you attempt to program concurrency
+> otherwise.
+>
+> Despite of many **async** frameworks trying to mitigate that disputable
+> complexity, e.g.
+> [async in JavaScript](https://caolan.github.io/async),
+> [asyncio in Python](https://docs.python.org/3/library/asyncio.html),
+> and [async in Haskell](http://hackage.haskell.org/package/async).
+
+Checkout the implementation of
+[concur](./edh_modules/batteries/root/concur.edh)
+and [concur.edh in the Tour using that](./Tour/concur.edh).
+
+`concur()` is just an example, it's straight forward for you to write
+application logics in similar ways.
+
+### The Mission
 
 **Edh** competes with [Python](https://python.org) to help **Haskell**
 instead of **C**/**C++** to be the breeding ground for next phenomenal
@@ -65,23 +106,25 @@ in **Python**.
 Take the [Tour](./Tour/) to see what **Edh** has to offer.
 
 [**Julia**](https://julialang.org) is an alternative all-in-one solution
-for the **next-big-things**, but has a learning curve not too less
-steep than **Haskell**, **Edh** is faithful to get people with just
-**Python**/**JavaScript**/**Go** knowledge and skills started with
-a [world](./Tour/#world) in **Haskell**.
+for the **next-big-things**, but as well as **Haskell**, **Julia** carries
+high impedance to average people without highly developed
+[Mathematical Mindsets](https://www.aft.org/ae/winter2018-2019/boaler)
 
-- [Quick Start](#quick-start)
-- [What is Đ (Edh)](#what-is-%c4%90-edh)
-- [The name](#the-name)
-- [Philosophy](#philosophy)
-  - [About Everything](#about-everything)
-  - [Object? - Yes, Oriented? - No](#object---yes-oriented---no)
-  - [Functional? - Try not to abuse this concept](#functional---try-not-to-abuse-this-concept)
-  - [Performance Goals](#performance-goals)
-- [Zen of Edh](#zen-of-edh)
-- [Licensing](#licensing)
-- [Academic relationship](#academic-relationship)
-- [A joke](#a-joke)
+> But in the early years of school, we live in a system whereby students
+> are required, from an early age, to learn many formal mathematical methods,
+> such as those used to add, subtract, divide, and multiply numbers.
+> This is the time when students stray from mathematical mindsets and develop
+> fixed, procedural mindsets.
+
+I suppose years still needed for our education system to get that situation
+straight, and before that -
+
+**Edh** is faithful to get people with just **Python**/**JavaScript**/**Go**
+knowledge and skills started with a
+[procedural](https://en.wikipedia.org/wiki/Procedural_programming)
+[world](./Tour/Readme.md#world)
+with [object](./Tour/Readme.md#object--class)s
+in **Haskell** (and in **Julia** too I sincerely hope for chances).
 
 ## The name
 
