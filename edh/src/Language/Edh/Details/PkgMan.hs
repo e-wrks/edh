@@ -21,7 +21,7 @@ import           Language.Edh.Details.RtTypes
 
 edhPkgPathFrom :: FilePath -> FilePath
 edhPkgPathFrom !fromPath = if "<" `isPrefixOf` fromPath
-  then "" -- intrinsic module path
+  then "." -- intrinsic module path
   else case splitExtension fromPath of
     (filePath, ".edh") -> takeDirectory filePath
     _                  -> fromPath
