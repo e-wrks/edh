@@ -5,7 +5,6 @@ import           Prelude
 
 import           Data.Char
 import           Data.Ratio
-import           GHC.Show                       ( Show(..) )
 
 
 data Decimal = Decimal {
