@@ -12,8 +12,6 @@ language (i.e. **Haskell**) installed, in addition to the default ones.
 See [Edh Im](https://github.com/e-wrks/edhim) for an example.
 
 - [Running the REPL (a bare interpreter)](#running-the-repl-a-bare-interpreter)
-  - [Favouring Cabal](#favouring-cabal)
-  - [Favouring Stack](#favouring-stack)
   - [Run with verbose (or lean) log level](#run-with-verbose-or-lean-log-level)
   - [Multi / Single line input modes](#multi--single-line-input-modes)
   - [Paste code snippets from this Tour](#paste-code-snippets-from-this-tour)
@@ -104,16 +102,8 @@ git clone https://github.com/e-wrks/edh
 cd edh
 ```
 
-### Favouring [Cabal](https://www.haskell.org/cabal)
-
 ```shell
 cabal v2-install edhi --overwrite-policy=always
-```
-
-### Favouring [Stack](https://haskellstack.org)
-
-```shell
-stack install
 ```
 
 ### Run with verbose (or lean) log level

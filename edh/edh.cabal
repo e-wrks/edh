@@ -60,10 +60,7 @@ library edh-internal
         Language.Edh.Details.Tx
         Language.Edh.Details.PkgMan
         Language.Edh.Details.Utils
-        Paths_edh
     hs-source-dirs: src
-    autogen-modules:
-        Paths_edh
     default-language: Haskell2010
     default-extensions: NoImplicitPrelude OverloadedStrings LambdaCase
                         BangPatterns TupleSections ScopedTypeVariables
