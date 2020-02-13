@@ -41,12 +41,12 @@ installEdhBatteries world = liftIO $ do
         "<batteries>"
         [ -- format: (symbol, precedence)
 
-        -- | the cons operator, creates pairs in Edh
+        -- the cons operator, creates pairs in Edh
           ( ":"
           , 2
-          ) -- ^ why brittany insists on formatting it like this ?.?
+          ) -- why brittany insists on formatting it like this ?.?
 
-        -- | attribute tempter, 
+        -- attribute tempter, 
         -- address an attribute off an object if possible, nil otherwise
         , ( "?"
           , 9
@@ -55,13 +55,13 @@ installEdhBatteries world = liftIO $ do
         -- assignments
         , ( "="
           , 1
-          ) -- ^ make it lower than (++), so don't need to quote `a = b ++ c`
+          ) -- make it lower than (++), so don't need to quote `a = b ++ c`
         , ("+=", 2)
         , ("-=", 2)
         , ("/=", 2)
         , ( "*="
           , 2
-          ) -- ^ why brittany insists on formatting it like this ?.?
+          ) -- why brittany insists on formatting it like this ?.?
 
         -- arithmetic
         , ("+", 6)
@@ -74,13 +74,13 @@ installEdhBatteries world = liftIO $ do
         -- comparations
         , ( "~="
           , 4
-          ) -- ^ deep-value-wise equality test
+          ) -- deep-value-wise equality test
         , ( "=="
           , 4
-          ) -- ^ identity-wise equality test
+          ) -- identity-wise equality test
         , ( "!="
           , 4
-          ) -- ^ inversed identity-wise equality test
+          ) -- inversed identity-wise equality test
             -- C style here, as (/=) is used for inplace division
         , (">" , 4)
         , (">=", 4)
@@ -92,7 +92,7 @@ installEdhBatteries world = liftIO $ do
         , ("&&", 3)
         , ( "||"
           , 3
-          ) -- ^ why brittany insists on formatting it like this ?.?
+          ) -- why brittany insists on formatting it like this ?.?
 
           -- emulate the ternary operator in C:
           --       onCnd ? oneThing : theOther
@@ -103,9 +103,9 @@ installEdhBatteries world = liftIO $ do
         , ("&>", 3)
         , ( "|>"
           , 3
-          ) -- ^ why brittany insists on formatting it like this ?.?
+          ) -- why brittany insists on formatting it like this ?.?
 
-          -- | comprehension
+          -- comprehension
           --  * list comprehension:
           --     [] =< for x from range(100) do x*x
           --  * dict comprehension:
@@ -114,31 +114,31 @@ installEdhBatteries world = liftIO $ do
           --     (,) =< for x from range(100) do x*x
         , ( "=<"
           , 1
-          ) -- ^ why brittany insists on formatting it like this ?.?
-          -- | prepand to list
+          ) -- why brittany insists on formatting it like this ?.?
+          -- prepand to list
           --     l = [3,7,5]
           --     [2,9] => l
         , ( "=>"
           , 1
           )
 
-          -- | publish to sink
+          -- publish to sink
           --     evsPub <- outEvent
         , ( "<-"
           , 1
           )
 
-          -- | branch
+          -- branch
         , ( "->"
           , 0
           )
 
-          -- | string coercing concatenation
+          -- string coercing concatenation
         , ( "++"
           , 2
           )
 
-          -- | logging
+          -- logging
         , ("<|", 1)
         ]
 

@@ -552,39 +552,39 @@ instance Show EventSink where
 data EdhValue =
   -- | type itself is a kind of (immutable) value
       EdhType !EdhTypeValue
-  -- * end values (immutable)
+  -- | end values (immutable)
     | EdhNil
     | EdhDecimal !Decimal
     | EdhBool !Bool
     | EdhString !Text
     | EdhSymbol !Symbol
 
-  -- * direct pointer (to entities) values
+  -- | direct pointer (to entities) values
     | EdhObject !Object
 
-  -- * mutable containers
+  -- | mutable containers
     | EdhDict !Dict
     | EdhList !List
 
-  -- * immutable containers
+  -- | immutable containers
   --   the elements may still pointer to mutable data
     | EdhPair !EdhValue !EdhValue
     | EdhTuple ![EdhValue]
     | EdhArgsPack ArgsPack
 
-  -- * host procedures callable from Edh world
+  -- | host procedures callable from Edh world
     | EdhHostProc !HostProcedure
     | EdhHostOper !Precedence !HostProcedure
     | EdhHostGenr !HostProcedure
 
-  -- * precedures defined by Edh code
+  -- | precedures defined by Edh code
     | EdhClass !Class
     | EdhMethod !Method
     | EdhOperator !Operator
     | EdhGenrDef !GenrDef
     | EdhInterpreter !Interpreter
 
-  -- * flow control
+  -- | flow control
     | EdhBreak
     | EdhContinue
     | EdhCaseClose !EdhValue
@@ -592,10 +592,10 @@ data EdhValue =
     | EdhYield !EdhValue
     | EdhReturn !EdhValue
 
-  -- * event sink
+  -- | event sink
     | EdhSink !EventSink
 
-  -- * reflection
+  -- | reflection
     | EdhExpr !Expr
 
 edhValueStr :: EdhValue -> Text

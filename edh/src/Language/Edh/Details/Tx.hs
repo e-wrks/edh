@@ -206,7 +206,7 @@ driveEdhProgram !progCtx !prog = do
         trace (" 🌀 " <> show tid <> " stm retry #" <> show rtc') $ return ()
 
       atomically ((Just <$> stmJob) `orElse` return Nothing) >>= \case
-        Nothing -> -- ^ stm failed, do a tracked retry
+        Nothing -> -- stm failed, do a tracked retry
           doSTM (rtc' + 1)
         Just [] ->
           -- no reactor has fired, the tx job has already been executed

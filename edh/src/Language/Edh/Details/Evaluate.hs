@@ -216,13 +216,13 @@ evalStmt' !stmt !exit = do
           case cndVal of
             (EdhBool True) ->
               evalBlock stmts $ \(OriginalValue !blkVal _ _) -> case blkVal of
-              -- | early stop of procedure
+                -- early stop of procedure
                 EdhReturn rtnVal   -> exitEdhProc exit rtnVal
-                -- | break while loop
+                -- break while loop
                 EdhBreak           -> exitEdhProc exit nil
-                -- | treat as break here, TODO judge this decision
+                -- treat as break here, TODO judge this decision
                 EdhFallthrough     -> exitEdhProc exit nil
-                -- | treat as continue here, TODO judge this decision
+                -- treat as continue here, TODO judge this decision
                 EdhCaseClose ccVal -> exitEdhProc exit ccVal
                 -- continue while loop
                 _                  -> doWhile

@@ -481,7 +481,8 @@ parseLitExpr = choice
   , TypeLiteral TypeType <$ litKw "TypeType"
   ]
   where
--- | there're just too many of them, annoying if all listed in err rpt
+        -- | there're just too many of them,
+        -- annoying if all listed in err rpt
         litKw = hidden . keyword
 
 parseAttrName :: Parser Text

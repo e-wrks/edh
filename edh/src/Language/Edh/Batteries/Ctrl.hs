@@ -66,7 +66,7 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                 )
 
   case lhExpr of
-    -- | recognize `_` as similar to the wildcard pattern match in Haskell,
+    -- recognize `_` as similar to the wildcard pattern match in Haskell,
     -- it always matches
     AttrExpr (DirectRef (NamedAttr "_")) ->
       evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> exitEdhProc
@@ -76,18 +76,18 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
           _              -> EdhCaseClose rhVal
         )
 
-    -- | { x:y:z:... } -- pair pattern matching
+    -- { x:y:z:... } -- pair pattern matching
     DictExpr [pairPattern] -> handlePairPattern pairPattern
-    -- | this is to establish the intuition that `{ ... }` always invokes
+    -- this is to establish the intuition that `{ ... }` always invokes
     -- pattern matching. if a literal dict value really meant to be matched,
     -- the parenthesized form `( {k1: v1, k2: v2, ...} )` should be used.
     DictExpr !malPairs ->
       throwEdh EvalError $ "Invalid match pattern: " <> T.pack (show malPairs)
 
-    -- | other patterns matching
+    -- other patterns matching
     BlockExpr patternExpr -> case patternExpr of
 
-      -- | {( x:y:z:... )} -- parenthesised pair pattern
+      -- {( x:y:z:... )} -- parenthesised pair pattern
       [StmtSrc (_, ExprStmt (ParenExpr pairPattern))] ->
         handlePairPattern pairPattern
 
@@ -147,7 +147,7 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                    _          -> exitEdhSTM pgs exit EdhFallthrough
                  _ -> exitEdhSTM pgs exit EdhFallthrough
 
-      -- | {( x,y,z,... )} -- tuple pattern
+      -- {( x,y,z,... )} -- tuple pattern
       [StmtSrc (_, ExprStmt (TupleExpr vExprs))] -> contEdhSTM $ if null vExprs
         then -- an empty tuple pattern matches any empty sequence
           let doMatched =
@@ -234,7 +234,7 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       _ -> throwEdh EvalError $ "Invalid match pattern: " <> T.pack
         (show patternExpr)
 
-    -- | guarded condition, ignore match target in context, just check if the
+    -- guarded condition, ignore match target in context, just check if the
     -- condition itself is true
     PrefixExpr Guard guardedExpr ->
       evalExpr guardedExpr $ \(OriginalValue !predValue _ _) ->
@@ -247,7 +247,7 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
               _              -> EdhCaseClose rhVal
             )
 
-    -- | value-wise matching against the target in context
+    -- value-wise matching against the target in context
     _ -> evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> if lhVal /= ctxMatch
       then exitEdhProc exit EdhFallthrough
       else evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> exitEdhProc
