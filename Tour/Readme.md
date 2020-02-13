@@ -48,6 +48,7 @@ See [Edh Im](https://github.com/e-wrks/edhim) for an example.
   - [Interpreter Procedures](#interpreter-procedures)
   - [Class Procedures](#class-procedures)
   - [Inheritance Hierarchy](#inheritance-hierarchy)
+  - [Reactor Procedure](#reactor-procedure)
 - [Go Routines](#go-routines)
 - [Programming Concurrency and Data Consistency as a whole](#programming-concurrency-and-data-consistency-as-a-whole)
 - [Event Sink / Reactor / Defer](#event-sink--reactor--defer)
@@ -1303,6 +1304,17 @@ the inheritance constructs so far may include:
   decendant classes to follow. Personally I don't like this idea, but it
   is trivially doable.
 
+### Reactor Procedure
+
+A **reactor procedure** is a [Method Procedure](#method-procedure) per se,
+what makes it special is that it is not bound to a **scope** (as an
+attribute of the **scope** **entity**), instead, it is associated with an
+[Event Sink](#event-sink) and attached to a running **Edh** **thread**
+(**go** routine).
+
+See [Event Sink / Reactor / Defer](#event-sink--reactor--defer) for its
+usage in action.
+
 ## Go Routines
 
 Checkout [goroutine.edh](./goroutine.edh)
@@ -2393,13 +2405,6 @@ unique reader only (i.e. load balancing semantics), while a **sink** gives
 the same **event** to all readers (i.e. broadcasting semantics).
 
 #### The reactor Procedure
-
-There is actually a special type of **procedure** in **Edh** not listed in
-section [Procedure](#procedure) , a **reactor procedure** is a
-[Method Procedure](#method-procedure) per se, but what makes it special
-is that it is not bound to a **scope** (as an attribute of the **scope**
-**entity**), instead, it is associated with an **event sink** and attached
-to a running **Edh** **thread** (**go** routine).
 
 A **reactor** is defined by a `reactor` statement in **Edh** code, specifying
 the **sink** to be associated with, a procedure body consists of **Edh** code,
