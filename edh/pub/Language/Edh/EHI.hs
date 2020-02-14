@@ -18,7 +18,13 @@ module Language.Edh.EHI
   , UsageError(..)
   , edhKnownError
 
-    -- * STM/IO API for Edh/RT to be used as a spliced interpreter
+    -- * Event processing
+  , EventSink(..)
+  , newEventSink
+  , subscribeEvents
+  , publishEvent
+
+    -- * STM/IO API for spliced interpreter
 
     -- ** Logging interface
   , EdhLogger
@@ -119,13 +125,7 @@ module Language.Edh.EHI
   , mkHostProc
   , mkHostOper
 
-    -- * Event processing
-  , EventSink(..)
-  , newEventSink
-  , subscribeEvents
-  , publishEvent
-
-    -- * Monadic API for Edh/RT to be used as a textual interpreter
+    -- * Monadic API for textual interpreter
   , runEdh
   , runEdhWithoutBatteries
   , runEdhShell
