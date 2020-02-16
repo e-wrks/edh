@@ -1,6 +1,6 @@
 { overlays ? [ ], ... }@args:
 import (<nixpkgs>) (args // {
-  overlays = (args.overlays or [ ]) ++ [
+  overlays = [
     (self: super:
       let
         pkgsWithEdh = super.haskellPackages.override {
@@ -20,5 +20,5 @@ import (<nixpkgs>) (args // {
           packages = super.haskell.packages // { ghcWithEdh = pkgsWithEdh; };
         };
       })
-  ];
+  ] ++ overlays;
 })
