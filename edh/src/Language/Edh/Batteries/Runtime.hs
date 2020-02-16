@@ -20,7 +20,6 @@ import           Text.Megaparsec
 import           Data.Lossless.Decimal          ( Decimal(..) )
 
 import           Language.Edh.Control
-import           Language.Edh.AST
 import           Language.Edh.Runtime
 
 

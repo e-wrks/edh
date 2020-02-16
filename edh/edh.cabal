@@ -52,7 +52,6 @@ library edh-internal
         Language.Edh.Batteries.Runtime
         Language.Edh.Runtime
         Language.Edh.Event
-        Language.Edh.AST
         Language.Edh.Parser
         Language.Edh.Details.RtTypes
         Language.Edh.Details.CoreLang

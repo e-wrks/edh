@@ -12,7 +12,6 @@ import qualified Data.Text                     as T
 import qualified Data.Map.Strict               as Map
 
 import           Language.Edh.Control
-import           Language.Edh.AST
 import           Language.Edh.Runtime
 
 

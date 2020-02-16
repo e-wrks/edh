@@ -40,7 +40,6 @@ import qualified Data.Map.Strict               as Map
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 
 import           Language.Edh.Control
-import           Language.Edh.AST
 import           Language.Edh.Details.CoreLang as CL
 import           Language.Edh.Details.RtTypes  as RT
 import           Language.Edh.Details.Tx       as TX

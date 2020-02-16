@@ -31,7 +31,7 @@ module Language.Edh.EHI
   , LogLevel
   , defaultEdhLogger
 
-    -- ** Bootstrapping
+    -- ** Booting up
   , EdhWorld(..)
   , EdhRuntime(..)
   , createEdhWorld
@@ -80,8 +80,18 @@ module Language.Edh.EHI
   , exitEdhProc'
   , waitEdhSTM
   , edhNop
-    -- ** AST manipulation
-  , module AST
+    -- ** Reflective manipulation
+  , StmtSrc(..)
+  , Stmt(..)
+  , Expr(..)
+  , Prefix(..)
+  , Literal(..)
+  , AttrAddr(..)
+  , ArgsReceiver(..)
+  , ArgReceiver(..)
+  , ArgsSender
+  , ArgSender(..)
+  , ProcDecl(..)
   , SourcePos(..)
   , sourcePosPretty
   , deParen
@@ -100,6 +110,7 @@ module Language.Edh.EHI
   , edhValueStr
   , edhValueNull
   , EdhValue(..)
+  , EdhTypeValue(..)
   , nil
   , true
   , false
@@ -151,7 +162,6 @@ import           Language.Edh.Interpreter
 import           Language.Edh.Batteries
 import           Language.Edh.Runtime
 import           Language.Edh.Event
-import           Language.Edh.AST              as AST
 
 
 evalEdh

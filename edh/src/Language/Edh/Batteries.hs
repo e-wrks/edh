@@ -14,7 +14,6 @@ import qualified Data.Map.Strict               as Map
 
 import           Data.Lossless.Decimal         as D
 
-import           Language.Edh.AST
 import           Language.Edh.Runtime
 
 import           Language.Edh.Batteries.Data

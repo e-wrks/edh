@@ -28,7 +28,6 @@ import qualified Data.List.NonEmpty            as NE
 import           Text.Megaparsec
 
 import           Language.Edh.Control
-import           Language.Edh.AST
 import           Language.Edh.Parser
 import           Language.Edh.Event
 import           Language.Edh.Details.RtTypes

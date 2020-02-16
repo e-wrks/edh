@@ -23,7 +23,7 @@ import qualified Text.Megaparsec.Char.Lexer    as L
 import           Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
-import           Language.Edh.AST
+import           Language.Edh.Details.RtTypes
 
 
 sc :: Parser ()

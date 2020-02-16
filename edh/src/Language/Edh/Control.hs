@@ -15,8 +15,9 @@ import qualified Data.Map.Strict               as Map
 
 import           Text.Megaparsec         hiding ( State )
 
-import           Language.Edh.AST
 
+type OpSymbol = Text
+type Precedence = Int
 
 -- use such a dict as the parsing state, to implement
 -- object-language-declarable operator precendence

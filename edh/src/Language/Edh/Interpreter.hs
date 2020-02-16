@@ -17,7 +17,6 @@ import qualified Data.Map.Strict               as Map
 import           Text.Megaparsec
 
 import           Language.Edh.Control
-import           Language.Edh.AST
 import           Language.Edh.Parser
 import           Language.Edh.Runtime
 
