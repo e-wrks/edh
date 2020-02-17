@@ -7,6 +7,7 @@ import           Prelude
 import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
+import           Data.Maybe
 import qualified Data.Text                     as T
 import qualified Data.Map.Strict               as Map
 
@@ -36,22 +37,42 @@ consProc !argsSender _ =
 attrTemptProc :: EdhProcedure
 attrTemptProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
   !pgs <- ask
-  case rhExpr of
-    AttrExpr (DirectRef (NamedAttr attrName)) ->
-      evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
-        EdhObject obj -> contEdhSTM $ do
-          em <- readTVar $ objEntity obj
-          exitEdhSTM
-            pgs
-            exit
-            (case Map.lookup (AttrByName attrName) em of
-              Nothing  -> nil
-              Just val -> val
-            )
-        _ -> exitEdhProc exit nil
-    _ -> throwEdh EvalError $ "Invalid attribute expression: " <> T.pack
-      (show rhExpr)
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
+    EdhObject obj -> case rhExpr of
+      AttrExpr (DirectRef (NamedAttr attrName)) -> contEdhSTM $ do
+        em <- readTVar $ objEntity obj
+        exitEdhSTM pgs exit $ fromMaybe nil $ Map.lookup (AttrByName attrName)
+                                                         em
+      _ -> throwEdh EvalError $ "Invalid attribute expression: " <> T.pack
+        (show rhExpr)
+    _ -> exitEdhProc exit nil
 attrTemptProc !argsSender _ =
+  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
+
+-- | operator (?$) - attribute dereferencing tempter, 
+-- address an attribute off an object if possible, nil otherwise
+attrDerefTemptProc :: EdhProcedure
+attrDerefTemptProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+  !pgs <- ask
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
+    EdhObject obj -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+      case rhVal of
+        EdhString !attrName -> contEdhSTM $ do
+          em <- readTVar $ objEntity obj
+          exitEdhSTM pgs exit $ fromMaybe nil $ Map.lookup
+            (AttrByName attrName)
+            em
+        EdhSymbol !sym -> contEdhSTM $ do
+          em <- readTVar $ objEntity obj
+          exitEdhSTM pgs exit $ fromMaybe nil $ Map.lookup (AttrBySym sym) em
+        _ ->
+          throwEdh EvalError
+            $  "Invalid attribute reference - "
+            <> edhValueStr (edhTypeOf rhVal)
+            <> ": "
+            <> edhValueStr rhVal
+    _ -> exitEdhProc exit nil
+attrDerefTemptProc !argsSender _ =
   throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 

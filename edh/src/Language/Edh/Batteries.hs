@@ -47,7 +47,8 @@ installEdhBatteries world = liftIO $ do
 
         -- attribute tempter, 
         -- address an attribute off an object if possible, nil otherwise
-        , ( "?"
+        , ("?", 9)
+        , ( "?$"
           , 9
           )
 
@@ -146,6 +147,7 @@ installEdhBatteries world = liftIO $ do
         (\(sym, hp) -> (AttrByName sym, ) <$> mkHostOper world sym hp)
         [ (":" , consProc)
         , ("?" , attrTemptProc)
+        , ("?$", attrDerefTemptProc)
         , ("++", concatProc)
         , ("=<", cprhProc)
         , ("=>", prpdProc)
