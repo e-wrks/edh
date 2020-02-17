@@ -136,7 +136,11 @@ createEdhWorld !logger = liftIO $ do
     !scopeClass = Class { classLexiStack = worldScope :| []
                         , classProcedure = scopeClassProc
                         }
-  opPD    <- newTMVarIO Map.empty
+  opPD <- newTMVarIO $ Map.fromList
+    [ ( "$" -- dereferencing attribute addressor
+      , (10, "<Intrinsic>")
+      )
+    ]
   modus   <- newTMVarIO Map.empty
   runtime <- newTMVarIO EdhRuntime { runtimeLogger   = logger
                                    , runtimeLogLevel = 20
