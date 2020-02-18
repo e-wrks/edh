@@ -181,6 +181,7 @@ parseAttrAddr = do
   leadingPart = choice
     [ AttrExpr ThisRef <$ keyword "this"
     , AttrExpr ThatRef <$ keyword "that"
+    , AttrExpr SuperRef <$ keyword "super"
     , AttrExpr . DirectRef . SymbolicAttr <$> parseAttrSym
     , AttrExpr . DirectRef . NamedAttr <$> parseAttrName
     ]

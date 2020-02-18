@@ -145,7 +145,8 @@ installEdhBatteries world = liftIO $ do
 
       !rootOperators <- mapM
         (\(sym, hp) -> (AttrByName sym, ) <$> mkHostOper world sym hp)
-        [ (":" , consProc)
+        [ ("$" , attrDerefAddrProc)
+        , (":" , consProc)
         , ("?" , attrTemptProc)
         , ("?$", attrDerefTemptProc)
         , ("++", concatProc)

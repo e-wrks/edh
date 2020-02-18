@@ -54,6 +54,12 @@ lookupEdhObjAttr this addr = resolveEdhObjAttr this addr >>= \case
   Just (OriginalValue !val _ _) -> return $ Just val
 {-# INLINE lookupEdhObjAttr #-}
 
+lookupEdhSuperAttr :: Object -> AttrKey -> STM (Maybe EdhValue)
+lookupEdhSuperAttr this addr = resolveEdhSuperAttr this addr >>= \case
+  Nothing                       -> return Nothing
+  Just (OriginalValue !val _ _) -> return $ Just val
+{-# INLINE lookupEdhSuperAttr #-}
+
 
 resolveEdhCtxAttr :: Scope -> AttrKey -> STM (Maybe OriginalValue)
 resolveEdhCtxAttr scope@(Scope !ent _ _ lexi'stack _) !addr =
@@ -73,7 +79,7 @@ resolveLexicalAttr (scope@(Scope !ent !this !_that _ _) : outerScopes) addr =
       -- some objects too, in addition to the `import` mechanism
       (if ent == objEntity this
           -- go directly to supers as entity has just got negative result
-          then readTVar (objSupers this) >>= resolveEdhSuperAttr this addr
+          then readTVar (objSupers this) >>= resolveEdhSuperAttr' this addr
           -- context scope is different entity from this context object,
           -- start next from this object
           else resolveEdhObjAttr' this this addr
@@ -87,6 +93,11 @@ resolveLexicalAttr (scope@(Scope !ent !this !_that _ _) : outerScopes) addr =
 resolveEdhObjAttr :: Object -> AttrKey -> STM (Maybe OriginalValue)
 resolveEdhObjAttr !this !addr = resolveEdhObjAttr' this this addr
 {-# INLINE resolveEdhObjAttr #-}
+
+resolveEdhSuperAttr :: Object -> AttrKey -> STM (Maybe OriginalValue)
+resolveEdhSuperAttr !this !addr =
+  readTVar (objSupers this) >>= resolveEdhSuperAttr' this addr
+{-# INLINE resolveEdhSuperAttr #-}
 
 resolveEdhObjAttr' :: Object -> Object -> AttrKey -> STM (Maybe OriginalValue)
 resolveEdhObjAttr' !that !this !addr = readTVar thisEnt >>= \em ->
@@ -104,20 +115,20 @@ resolveEdhObjAttr' !that !this !addr = readTVar thisEnt >>= \em ->
             )
             that
           )
-    Nothing -> readTVar (objSupers this) >>= resolveEdhSuperAttr that addr
+    Nothing -> readTVar (objSupers this) >>= resolveEdhSuperAttr' that addr
  where
   !thisEnt = objEntity this
   clsProc  = classProcedure (objClass this)
 {-# INLINE resolveEdhObjAttr' #-}
 
-resolveEdhSuperAttr
+resolveEdhSuperAttr'
   :: Object -> AttrKey -> [Object] -> STM (Maybe OriginalValue)
-resolveEdhSuperAttr _ _ [] = return Nothing
-resolveEdhSuperAttr !that !addr (super : restSupers) =
+resolveEdhSuperAttr' _ _ [] = return Nothing
+resolveEdhSuperAttr' !that !addr (super : restSupers) =
   resolveEdhObjAttr' that super addr >>= \case
     Just scope -> return $ Just scope
-    Nothing    -> resolveEdhSuperAttr that addr restSupers
-{-# INLINE resolveEdhSuperAttr #-}
+    Nothing    -> resolveEdhSuperAttr' that addr restSupers
+{-# INLINE resolveEdhSuperAttr' #-}
 
 
 resolveEdhInstance' :: Class -> [Object] -> STM (Maybe Object)

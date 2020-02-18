@@ -1,0 +1,100 @@
+
+{
+
+  class MetaSuper1 * {
+
+    # handles magic method resolution on a magic child (referred to by `that`),
+    # for:
+    #    *) `this.xxx` (@<-)
+    #    *) `this.xxx = yyy` (@<-*)
+    #    *) `obj.xxx` (@<-*)
+    #    *) `obj.xxx = yyy` (*<-@)
+    # where `this` and `obj` is a grand business child
+    method (!<-) (magicSpell) {
+      30 <| 'casting spell (' ++ magicSpell ++ ')'
+
+      # treat explicit nil/false still as not present
+      that?$magicSpell |> continue
+    }
+
+    # handles super attribute resolution, on a magic child (referred to by `that`),
+    # for `super.xxx` from a grand business child
+    method (@<-^) (attrKey) {
+      20 <| 'getting super.' ++ attrKey ++ ' from the super'
+
+      case that?$attrKey of {
+        nil -> continue  # to consult next super
+        { n } -> n / 2  # can do some transformation here
+      }
+    }
+
+  }
+
+  class Super1 * {
+
+    # handles `this.xxx` from a business child (referred to by `that`)
+    method (@<-) (attrKey) {
+      20 <| 'getting this.' ++ attrKey
+      continue  # try next super, or fail as normally if no such attr
+    }
+
+    # handles `obj.xxx` from a business child (referred to by `that`)
+    method (@<-*) (attrKey) {
+      20 <| 'getting ' ++ attrKey ++ ' from the obj'
+      that?$attrKey  # giving out nil if no such attr
+    }
+
+    # a default attribute value
+    n = 23
+
+    # handles `this.xxx = yyy` from a business child (referred to by `that`)
+    method (<-@) (attrKey, attrVal) {
+      20 <| 'setting this.' ++ attrKey ++ ' to ' ++ attrVal
+      that$attrKey = attrVal
+    }
+
+    # handles `obj.xxx = yyy` for `obj` being a business child (referred to by `that`)
+    method (*<-@) (attrKey, attrVal) {
+      20 <| 'setting ' ++ attrKey ++ ' to ' ++ attrVal ++ ' for the obj'
+      that$attrKey = attrVal
+    }
+
+    extends MetaSuper1()
+
+  }
+
+  class BusObj1 * {
+
+    method n () {
+      30 <| 'super provided n - ' ++ super?n
+      this.n1
+    }
+
+    this.n1 = 7
+
+    this.n2 = 3
+
+    extends Super1()
+
+  }
+
+}
+
+bo1 = BusObj1()
+
+{
+
+  10<| 'bo1.n() is ' ++ bo1.n() 
+
+  10<| 'bo1.n1 is ' ++ bo1.n1
+
+  10<| 'bo1.n2 is ' ++ bo1.n2
+
+  10<| 'bo1.n3 is ' ++ bo1.n3
+
+}
+
+{
+  bo1.n1 = 5
+  10<| 'bo1.n1 set to ' ++ bo1.n1
+}

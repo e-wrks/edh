@@ -802,7 +802,8 @@ data Stmt =
     | ExprStmt !Expr
   deriving (Eq, Show)
 
-data AttrAddr = ThisRef | ThatRef
+-- Attribute addressor
+data AttrAddr = ThisRef | ThatRef | SuperRef
     | DirectRef !AttrAddressor
     | IndirectRef !Expr !AttrAddressor
   deriving (Eq, Show)
@@ -902,6 +903,8 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
     | CallExpr !Expr !ArgsSender
 
     | InfixExpr !OpSymbol !Expr !Expr
+
+    | GodSendExpr EdhValue
   deriving (Eq, Show)
 
 
