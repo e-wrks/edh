@@ -6,12 +6,13 @@
     # handles magic method resolution on a magic child (referred to by `that`),
     # for:
     #    *) `this.xxx` (@<-)
-    #    *) `this.xxx = yyy` (@<-*)
+    #    *) `this.xxx = yyy` (<-@)
     #    *) `obj.xxx` (@<-*)
     #    *) `obj.xxx = yyy` (*<-@)
-    # where `this` and `obj` is a grand business child
+    #    *) `extends xxx` (<-^)
+    # where `this`, `obj` and procedure context this is a grand business child
     method (!<-) (magicSpell) {
-      30 <| 'casting spell (' ++ magicSpell ++ ')'
+      30<| 'casting spell (' ++ magicSpell ++ ')'
 
       # treat explicit nil/false still as not present
       that?$magicSpell |> continue
@@ -20,7 +21,7 @@
     # handles super attribute resolution, on a magic child (referred to by `that`),
     # for `super.xxx` from a grand business child
     method (@<-^) (attrKey) {
-      20 <| 'getting super.' ++ attrKey ++ ' from the super'
+      20<| 'getting super.' ++ attrKey ++ ' from the super'
 
       case that?$attrKey of {
         nil -> continue  # to consult next super
@@ -32,15 +33,22 @@
 
   class Super1 * {
 
+    # handles `extends` from a business child (referred to by `that`),
+    # `this` is the new super object being added to `that`, if this 
+    # method err out, the inheritance relationship won't be established
+    method (<-^) () {
+      20<| 'connecting child: ' ++ that
+    }
+
     # handles `this.xxx` from a business child (referred to by `that`)
     method (@<-) (attrKey) {
-      20 <| 'getting this.' ++ attrKey
+      20<| 'getting this.' ++ attrKey
       continue  # try next super, or fail as normally if no such attr
     }
 
     # handles `obj.xxx` from a business child (referred to by `that`)
     method (@<-*) (attrKey) {
-      20 <| 'getting ' ++ attrKey ++ ' from the obj'
+      20<| 'getting ' ++ attrKey ++ ' from the obj'
       that?$attrKey  # giving out nil if no such attr
     }
 
@@ -49,13 +57,13 @@
 
     # handles `this.xxx = yyy` from a business child (referred to by `that`)
     method (<-@) (attrKey, attrVal) {
-      20 <| 'setting this.' ++ attrKey ++ ' to ' ++ attrVal
+      20<| 'setting this.' ++ attrKey ++ ' to ' ++ attrVal
       that$attrKey = attrVal
     }
 
     # handles `obj.xxx = yyy` for `obj` being a business child (referred to by `that`)
     method (*<-@) (attrKey, attrVal) {
-      20 <| 'setting ' ++ attrKey ++ ' to ' ++ attrVal ++ ' for the obj'
+      20<| 'setting ' ++ attrKey ++ ' to ' ++ attrVal ++ ' for the obj'
       that$attrKey = attrVal
     }
 
@@ -66,7 +74,7 @@
   class BusObj1 * {
 
     method n () {
-      30 <| 'super provided n - ' ++ super?n
+      30<| 'super provided n - ' ++ super?n
       this.n1
     }
 
@@ -84,17 +92,17 @@ bo1 = BusObj1()
 
 {
 
-  10<| 'bo1.n() is ' ++ bo1.n() 
+  20<| 'bo1.n() is ' ++ bo1.n() 
 
-  10<| 'bo1.n1 is ' ++ bo1.n1
+  20<| 'bo1.n1 is ' ++ bo1.n1
 
-  10<| 'bo1.n2 is ' ++ bo1.n2
+  20<| 'bo1.n2 is ' ++ bo1.n2
 
-  10<| 'bo1.n3 is ' ++ bo1.n3
+  20<| 'bo1.n3 is ' ++ bo1.n3
 
 }
 
 {
   bo1.n1 = 5
-  10<| 'bo1.n1 set to ' ++ bo1.n1
+  20<| 'bo1.n1 set to ' ++ bo1.n1
 }

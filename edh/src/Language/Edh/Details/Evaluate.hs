@@ -241,9 +241,26 @@ evalStmt' !stmt !exit = do
 
     ExtendsStmt superExpr ->
       evalExpr superExpr $ \(OriginalValue !superVal _ _) -> case superVal of
-        (EdhObject superObj) -> contEdhSTM $ do
-          modifyTVar' (objSupers $ thisObject scope) (superObj :)
-          exitEdhSTM pgs exit nil
+        (EdhObject superObj) ->
+          let
+            !this = thisObject scope
+            !key  = AttrByName "<-^"
+            doExtend :: STM ()
+            doExtend = do
+              modifyTVar' (objSupers this) (superObj :)
+              exitEdhSTM pgs exit nil
+            noMagic :: EdhProg (STM ())
+            noMagic = contEdhSTM $ resolveEdhObjAttr superObj key >>= \case
+              Nothing                            -> doExtend
+              Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
+            withMagicMethod :: EdhValue -> STM ()
+            withMagicMethod magicMth =
+              edhMakeCall pgs magicMth this [] $ \mkCall ->
+                runEdhProg pgs $ mkCall $ const $ contEdhSTM doExtend
+          in
+            getEdhAttrWithMagic (AttrByName "!<-") superObj key noMagic
+              $ \(OriginalValue !magicMth _ _) ->
+                  contEdhSTM $ withMagicMethod magicMth
         _ ->
           throwEdh EvalError
             $  "Can only extends an object, not "
@@ -1018,11 +1035,9 @@ getEdhAttrWithMagic !magicKey !obj !key !exitNoMagic !exit = do
             contEdhSTM $ withMagicMethod magicMth
      where
       noMetamagic :: EdhProg (STM ())
-      noMetamagic = contEdhSTM $ do
-        em <- readTVar (objEntity super)
-        case Map.lookup magicKey em of
-          Nothing        -> runEdhProg pgs $ getViaSupers restSupers
-          Just !magicMth -> withMagicMethod magicMth
+      noMetamagic = contEdhSTM $ resolveEdhObjAttr super magicKey >>= \case
+        Nothing -> runEdhProg pgs $ getViaSupers restSupers
+        Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
       withMagicMethod :: EdhValue -> STM ()
       withMagicMethod !magicMth =
         edhMakeCall pgs
