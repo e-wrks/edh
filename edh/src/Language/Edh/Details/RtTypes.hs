@@ -205,6 +205,7 @@ instance Show Scope where
   show (Scope _ _ _ _ (ProcDecl pName argsRcvr (StmtSrc (!srcPos, _)))) =
     "<"
       ++ T.unpack pName
+      ++ " "
       ++ show argsRcvr
       ++ " @ "
       ++ sourcePosPretty srcPos
@@ -825,7 +826,7 @@ data ArgsReceiver = PackReceiver ![ArgReceiver]
 instance Show ArgsReceiver where
   show (PackReceiver   rs) = "( " ++ unwords ((++ ", ") . show <$> rs) ++ ")"
   show (SingleReceiver r ) = "(" ++ show r ++ ")"
-  show WildReceiver        = " * "
+  show WildReceiver        = "*"
 
 data ArgReceiver = RecvRestPosArgs !AttrName
     | RecvRestKwArgs !AttrName
