@@ -8,7 +8,7 @@
   }
 }
 let (s1, s2) = (*f(3))
-s2.traceback()
+s2.lexiLoc()
 s1.attrs()
 s2.attrs()
 s2.eval(makeExpr(m/n))

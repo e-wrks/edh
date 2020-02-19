@@ -31,13 +31,19 @@
 
   }
 
+}
+
+{
+
   class Super1 * {
 
     # handles `extends` from a business child (referred to by `that`),
     # `this` is the new super object being added to `that`, if this 
-    # method err out, the inheritance relationship won't be established
-    method (<-^) () {
-      20<| 'connecting child: ' ++ that
+    # method err out, the inheritance relationship won't be established.
+    # `boScope` is a scope object reflecting `that` object's entity
+    method (<-^) (boScope) {
+      20<| 'connecting child of ' ++ constructor(that)
+        ++ ' which is defined at: ' ++ boScope.lexiLoc()
     }
 
     # handles `this.xxx` from a business child (referred to by `that`)
@@ -72,6 +78,8 @@
   }
 
   class BusObj1 * {
+
+    boEntity = scope()  # for debug purpose
 
     method n () {
       30<| 'super provided n - ' ++ super?n

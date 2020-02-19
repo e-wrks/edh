@@ -1791,10 +1791,10 @@ there ought to be comprehensive API to do more useful things.
 Đ|  7: }
 <method: f>
 Đ: let (s1, s2) = (*f(3))
-Đ: s2.traceback()
-<<interactive> *  @ <adhoc>:1:1>
-<f( n, ) @ <interactive>:1:15>
-<scope *  @ <hostcode>:1:1>
+Đ: s2.lexiLoc()
+<<interactive> * @ <adhoc>:1:1>
+<f ( n, ) @ <interactive>:1:15>
+<g ( m, ) @ <interactive>:2:17>
 
 Đ: s1.attrs()
 { "g":<method: g>, "n":3, }

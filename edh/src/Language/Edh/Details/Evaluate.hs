@@ -111,14 +111,16 @@ evalStmt' !stmt !exit = do
     LetStmt argsRcvr argsSndr ->
       -- ensure args sending and receiving happens within a same tx
       -- for atomicity of the let statement
-      local (const pgs { edh'in'tx = True }) $ packEdhArgs argsSndr $ \pk ->
-        recvEdhArgs ctx argsRcvr pk $ \rcvd'ent -> contEdhSTM $ do
-          -- overwrite current scope entity with attributes from
-          -- the received entity
-          um <- readTVar rcvd'ent
-          modifyTVar' (scopeEntity scope) $ \em -> Map.union um em
-          -- let statement evaluates to nil always
-          exitEdhSTM pgs exit nil
+      local (const pgs { edh'in'tx = True })
+        $ packEdhArgs pgs argsSndr
+        $ \pk -> recvEdhArgs ctx argsRcvr pk $ \rcvd'ent -> contEdhSTM $ do
+          -- overwrite current scope entity with attributes from the
+          -- received entity
+            um <- readTVar rcvd'ent
+            modifyTVar' (scopeEntity scope) $ \em -> Map.union um em
+            -- let statement evaluates to nil always, with previous tx
+            -- state restored
+            exitEdhSTM pgs exit nil
 
     BreakStmt       -> exitEdhProc exit EdhBreak
     ContinueStmt    -> exitEdhProc exit EdhContinue
@@ -254,9 +256,16 @@ evalStmt' !stmt !exit = do
               Nothing                            -> doExtend
               Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
             withMagicMethod :: EdhValue -> STM ()
-            withMagicMethod magicMth =
-              edhMakeCall pgs magicMth this [] $ \mkCall ->
-                runEdhProg pgs $ mkCall $ const $ contEdhSTM doExtend
+            withMagicMethod magicMth = do
+              scopeObj <- mkScopeWrapper
+                (contextWorld ctx)
+                scope { scopeEntity = objEntity this }
+              edhMakeCall pgs
+                          magicMth
+                          this
+                          [SendPosArg (GodSendExpr $ EdhObject scopeObj)]
+                $ \mkCall ->
+                    runEdhProg pgs $ mkCall $ const $ contEdhSTM doExtend
           in
             getEdhAttrWithMagic (AttrByName "!<-") superObj key noMagic
               $ \(OriginalValue !magicMth _ _) ->
@@ -1182,14 +1191,14 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
     (EdhClass cls) ->
       -- ensure atomicity of args sending
       runEdhProg pgsCaller { edh'in'tx = True }
-        $ packEdhArgs argsSndr
+        $ packEdhArgs pgsCaller argsSndr
         $ \apk -> contEdhSTM $ callMaker $ constructEdhObject apk cls
 
     -- calling a method procedure
     (EdhMethod (Method !mth'lexi'stack !mth'proc)) ->
       -- ensure atomicity of args sending
       runEdhProg pgsCaller { edh'in'tx = True }
-        $ packEdhArgs argsSndr
+        $ packEdhArgs pgsCaller argsSndr
         $ \apk -> contEdhSTM $ callMaker $ callEdhMethod apk
                                                          callee'that
                                                          mth'lexi'stack
@@ -1414,7 +1423,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                 (EdhGenrDef (GenrDef !gnr'lexi'stack !gnr'proc)) ->
                   -- ensure atomicity of args sending
                   local (const pgsLooper { edh'in'tx = True })
-                    $ packEdhArgs argsSndr
+                    $ packEdhArgs pgsLooper argsSndr
                     $ \apk -> contEdhSTM $ forLooper $ \exit -> do
                         pgs <- ask
                         callEdhMethod apk
@@ -1537,6 +1546,9 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
 
 
 -- | Make a reflective object wrapping the specified scope
+--
+-- todo currently only lexical context is recorded, the call frames may
+--      be needed in the future
 mkScopeWrapper :: EdhWorld -> Scope -> STM Object
 mkScopeWrapper world scope = do
   -- use an object to wrap the scope entity
@@ -1775,6 +1787,22 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
         <> " positional argument(s) to wild receiver"
 
 
+packHostProcArgs
+  :: ArgsSender -> (ArgsPack -> EdhProg (STM ())) -> EdhProg (STM ())
+packHostProcArgs !argsSender !exit = do
+  !pgs <- ask
+  -- a host procedure has its own call frame, underneath is the caller's stack
+  let !pgsCaller = pgs { edh'context = callerCtx }
+      !callerCtx = calleeCtx
+        { callStack = case callerStack of
+                        (top : rest) -> top :| rest
+                        _ -> error "bug: host proc called from nowhere"
+        }
+      !callerStack = NE.tail $ callStack calleeCtx
+      !calleeCtx   = edh'context pgs
+  packEdhArgs pgsCaller argsSender exit
+
+
 packEdhExprs
   :: [ArgSender] -> (ArgsPack -> EdhProg (STM ())) -> EdhProg (STM ())
 packEdhExprs []       !exit = exit (ArgsPack [] Map.empty)
@@ -1788,10 +1816,17 @@ packEdhExprs (x : xs) !exit = case x of
     exit (ArgsPack posArgs $ Map.insert kw (EdhExpr argExpr) kwArgs)
 
 
-packEdhArgs :: ArgsSender -> (ArgsPack -> EdhProg (STM ())) -> EdhProg (STM ())
--- make sure values in a pack are evaluated in same tx
-packEdhArgs !argsSender !exit =
-  local (\s -> s { edh'in'tx = True }) $ packEdhArgs' argsSender exit
+packEdhArgs
+  :: EdhProgState
+  -> ArgsSender
+  -> (ArgsPack -> EdhProg (STM ()))
+  -> EdhProg (STM ())
+packEdhArgs !pgsFrom !argsSender !exit = do
+  !pgsAfter <- ask
+  -- make sure values in a pack are evaluated in same tx
+  local (const pgsFrom { edh'in'tx = True })
+    $ packEdhArgs' argsSender
+    $ \apk -> local (const pgsAfter) $ exit apk
 
 packEdhArgs'
   :: [ArgSender] -> (ArgsPack -> EdhProg (STM ())) -> EdhProg (STM ())
