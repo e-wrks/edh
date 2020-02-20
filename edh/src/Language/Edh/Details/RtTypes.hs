@@ -531,9 +531,11 @@ data EventSink = EventSink {
     , evs'mrv :: !(TVar EdhValue)
     -- | the broadcast channel
     , evs'chan :: !(TChan EdhValue)
+    -- | subscriber counter
+    , evs'subc :: !(TVar Int)
   } deriving Eq
 instance Show EventSink where
-  show (EventSink _ _ _) = "<sink>"
+  show EventSink{} = "<sink>"
 
 
 -- Atop Haskell, most types in Edh the surface language, are for
