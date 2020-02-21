@@ -187,15 +187,14 @@ dictProc !argsSender !exit = do
 
 
 val2DictEntry :: EdhProgState -> EdhValue -> STM (ItemKey, EdhValue)
-val2DictEntry _ (EdhPair (EdhType    t) v) = return (ItemByType t, v)
 val2DictEntry _ (EdhPair (EdhString  s) v) = return (ItemByStr s, v)
 val2DictEntry _ (EdhPair (EdhSymbol  s) v) = return (ItemBySym s, v)
 val2DictEntry _ (EdhPair (EdhDecimal n) v) = return (ItemByNum n, v)
 val2DictEntry _ (EdhPair (EdhBool    b) v) = return (ItemByBool b, v)
+val2DictEntry _ (EdhPair (EdhType    t) v) = return (ItemByType t, v)
+val2DictEntry _ (EdhPair (EdhClass   c) v) = return (ItemByClass c, v)
 val2DictEntry pgs (EdhPair k _v) =
   throwEdhSTM pgs EvalError $ "Invalid key for dict: " <> T.pack (show k)
-val2DictEntry _ (EdhArgsPack (ArgsPack [EdhType t, v] !kwargs))
-  | Map.null kwargs = return (ItemByType t, v)
 val2DictEntry _ (EdhArgsPack (ArgsPack [EdhString s, v] !kwargs))
   | Map.null kwargs = return (ItemByStr s, v)
 val2DictEntry _ (EdhArgsPack (ArgsPack [EdhSymbol s, v] !kwargs))
@@ -206,11 +205,16 @@ val2DictEntry _ (EdhArgsPack (ArgsPack [EdhBool b, v] !kwargs))
   | Map.null kwargs = return (ItemByBool b, v)
 val2DictEntry pgs (EdhArgsPack (ArgsPack [k, _v] !kwargs)) | Map.null kwargs =
   throwEdhSTM pgs EvalError $ "Invalid key for dict: " <> T.pack (show k)
-val2DictEntry _ (EdhTuple [EdhType    t, v]) = return (ItemByType t, v)
+val2DictEntry _ (EdhArgsPack (ArgsPack [EdhType t, v] !kwargs))
+  | Map.null kwargs = return (ItemByType t, v)
+val2DictEntry _ (EdhArgsPack (ArgsPack [EdhClass c, v] !kwargs))
+  | Map.null kwargs = return (ItemByClass c, v)
 val2DictEntry _ (EdhTuple [EdhString  s, v]) = return (ItemByStr s, v)
 val2DictEntry _ (EdhTuple [EdhSymbol  s, v]) = return (ItemBySym s, v)
 val2DictEntry _ (EdhTuple [EdhDecimal n, v]) = return (ItemByNum n, v)
 val2DictEntry _ (EdhTuple [EdhBool    b, v]) = return (ItemByBool b, v)
+val2DictEntry _ (EdhTuple [EdhType    t, v]) = return (ItemByType t, v)
+val2DictEntry _ (EdhTuple [EdhClass   c, v]) = return (ItemByClass c, v)
 val2DictEntry pgs (EdhTuple [k, _v]) =
   throwEdhSTM pgs EvalError $ "Invalid key for dict: " <> T.pack (show k)
 val2DictEntry pgs val =

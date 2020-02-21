@@ -30,11 +30,12 @@ assignProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
        -- indexing assign to a dict
             EdhDict (Dict d) -> contEdhSTM $ do
               ixKey <- case ixVal of
-                EdhType    t -> return $ ItemByType t
                 EdhString  s -> return $ ItemByStr s
                 EdhSymbol  s -> return $ ItemBySym s
                 EdhDecimal n -> return $ ItemByNum n
                 EdhBool    b -> return $ ItemByBool b
+                EdhType    t -> return $ ItemByType t
+                EdhClass   c -> return $ ItemByClass c
                 _ ->
                   throwEdhSTM pgs EvalError
                     $  "Invalid dict key: "

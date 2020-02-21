@@ -658,11 +658,12 @@ evalExpr expr exit = do
             EdhTuple l -> contEdhSTM $ do
               dpl <- forM l $ \case
                 EdhPair kVal vVal -> (, vVal) <$> case kVal of
-                  EdhType    k -> return $ ItemByType k
                   EdhString  k -> return $ ItemByStr k
                   EdhSymbol  k -> return $ ItemBySym k
                   EdhDecimal k -> return $ ItemByNum k
                   EdhBool    k -> return $ ItemByBool k
+                  EdhType    k -> return $ ItemByType k
+                  EdhClass   k -> return $ ItemByClass k
                   k ->
                     throwEdhSTM pgs EvalError
                       $  "Invalid dict key "
@@ -765,11 +766,12 @@ evalExpr expr exit = do
         -- indexing a dict
           (EdhDict (Dict d)) -> contEdhSTM $ do
             ixKey <- case ixVal of
-              EdhType    t -> return $ ItemByType t
               EdhString  s -> return $ ItemByStr s
               EdhSymbol  s -> return $ ItemBySym s
               EdhDecimal n -> return $ ItemByNum n
               EdhBool    b -> return $ ItemByBool b
+              EdhType    t -> return $ ItemByType t
+              EdhClass   c -> return $ ItemByClass c
               _ ->
                 throwEdhSTM pgs EvalError
                   $  "Invalid dict key: "

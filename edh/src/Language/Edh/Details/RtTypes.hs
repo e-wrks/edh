@@ -61,12 +61,12 @@ showEdhDict ds = if Map.null ds
     ++ "}"
 
 itemKeyValue :: ItemKey -> EdhValue
-itemKeyValue (ItemByType  tyv) = EdhType tyv
-itemKeyValue (ItemByStr   s  ) = EdhString s
-itemKeyValue (ItemBySym   s  ) = EdhSymbol s
-itemKeyValue (ItemByNum   d  ) = EdhDecimal d
-itemKeyValue (ItemByBool  b  ) = EdhBool b
-itemKeyValue (ItemByClass c  ) = EdhClass c
+itemKeyValue (ItemByStr   s) = EdhString s
+itemKeyValue (ItemBySym   s) = EdhSymbol s
+itemKeyValue (ItemByNum   d) = EdhDecimal d
+itemKeyValue (ItemByBool  b) = EdhBool b
+itemKeyValue (ItemByType  t) = EdhType t
+itemKeyValue (ItemByClass c) = EdhClass c
 
 toPairList :: DictStore -> [EdhValue]
 toPairList d = (<$> Map.toList d) $ \(k, v) -> EdhPair (itemKeyValue k) v
