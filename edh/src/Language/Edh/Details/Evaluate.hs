@@ -1115,7 +1115,7 @@ setEdhAttr !pgsAfter !tgtExpr !key !val !exit = do
     AttrExpr ThisRef ->
       let noMagic :: EdhProg (STM ())
           noMagic = contEdhSTM $ do
-            modifyTVar' (objEntity this) $ Map.insert key val
+            modifyTVar' (objEntity this) $ setEntityAttr key val
             runEdhProg pgsAfter $ exitEdhProc exit val
       in  setEdhAttrWithMagic pgsAfter
                               (AttrByName "<-@")
@@ -1126,7 +1126,7 @@ setEdhAttr !pgsAfter !tgtExpr !key !val !exit = do
                               exit
     -- no magic layer laid over assignment via `that` ref
     AttrExpr ThatRef -> contEdhSTM $ do
-      modifyTVar' (objEntity that) $ Map.insert key val
+      modifyTVar' (objEntity that) $ setEntityAttr key val
       runEdhProg pgsAfter $ exitEdhProc exit val
     -- not allowing assignment via super
     AttrExpr SuperRef -> throwEdh EvalError "Can not assign via super"
@@ -1136,7 +1136,7 @@ setEdhAttr !pgsAfter !tgtExpr !key !val !exit = do
       EdhObject !tgtObj ->
         let noMagic :: EdhProg (STM ())
             noMagic = contEdhSTM $ do
-              modifyTVar' (objEntity tgtObj) $ Map.insert key val
+              modifyTVar' (objEntity tgtObj) $ setEntityAttr key val
               runEdhProg pgsAfter $ exitEdhProc exit val
         in  setEdhAttrWithMagic pgsAfter
                                 (AttrByName "*<-@")
@@ -1598,7 +1598,7 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
       -- no magic imposed to direct assignment in a (possibly class) proc
       DirectRef !addr' -> contEdhSTM $ resolveAddr pgs addr' >>= \key -> do
         modifyTVar' (scopeEntity $ contextScope $ edh'context pgs)
-          $ Map.insert key rhVal
+          $ setEntityAttr key rhVal
         runEdhProg pgsAfter $ exitEdhProc exit rhVal
       -- assign to an addressed attribute
       IndirectRef !tgtExpr !addr' -> contEdhSTM $ do

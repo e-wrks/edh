@@ -232,7 +232,7 @@ prpdProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
         exitEdhSTM pgs exit rhVal
       EdhDict (Dict d) -> contEdhSTM $ do
         (k, v) <- val2DictEntry pgs lhVal
-        modifyTVar' d (Map.insert k v)
+        modifyTVar' d (setDictItem k v)
         exitEdhSTM pgs exit rhVal
       _ ->
         throwEdh EvalError
@@ -264,7 +264,7 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       insertToDict :: EdhValue -> TVar DictStore -> STM ()
       insertToDict p d = do
         (k, v) <- val2DictEntry pgs p
-        modifyTVar' d $ Map.insert k v
+        modifyTVar' d $ setDictItem k v
   case rhExpr of
     ForExpr argsRcvr iterExpr doExpr ->
       evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of

@@ -60,6 +60,11 @@ showEdhDict ds = if Map.null ds
     ++ concat [ show k ++ ":" ++ show v ++ ", " | (k, v) <- Map.toList ds ]
     ++ "}"
 
+-- | setting to `nil` value means deleting the item by the specified key
+setDictItem :: ItemKey -> EdhValue -> DictStore -> DictStore
+setDictItem !k v !ds =
+  if v == EdhNil then Map.delete k ds else Map.insert k v ds
+
 itemKeyValue :: ItemKey -> EdhValue
 itemKeyValue (ItemByStr   s) = EdhString s
 itemKeyValue (ItemBySym   s) = EdhSymbol s
@@ -89,6 +94,11 @@ type Entity = TVar EntityStore
 type EntityStore = Map.Map AttrKey EdhValue
 data AttrKey = AttrByName !AttrName | AttrBySym !Symbol
     deriving (Eq, Ord, Show)
+
+-- | setting to `nil` value means deleting the attribute by the specified key
+setEntityAttr :: AttrKey -> EdhValue -> EntityStore -> EntityStore
+setEntityAttr !k v !es =
+  if v == EdhNil then Map.delete k es else Map.insert k v es
 
 type AttrName = Text
 

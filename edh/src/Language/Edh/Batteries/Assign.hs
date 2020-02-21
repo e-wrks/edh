@@ -23,11 +23,11 @@ assignProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
   case lhExpr of
     IndexExpr ixExpr tgtExpr ->
       evalExpr ixExpr $ \(OriginalValue !ixVal _ _) ->
-      -- indexing assignment
+        -- indexing assignment
         evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
           evalExpr tgtExpr $ \(OriginalValue !tgtVal _ _) -> case tgtVal of
 
-       -- indexing assign to a dict
+            -- indexing assign to a dict
             EdhDict (Dict d) -> contEdhSTM $ do
               ixKey <- case ixVal of
                 EdhString  s -> return $ ItemByStr s
@@ -42,7 +42,7 @@ assignProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                     <> T.pack (show $ edhTypeOf ixVal)
                     <> ": "
                     <> T.pack (show ixVal)
-              modifyTVar' d $ Map.insert ixKey rhVal
+              modifyTVar' d $ setDictItem ixKey rhVal
               exitEdhSTM pgs exit rhVal
 
             -- indexing assign to an object, by calling its ([=]) method with ixVal and rhVal
