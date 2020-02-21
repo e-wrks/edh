@@ -743,15 +743,15 @@ the wildcard always matches!
 
 `<fallthrough>` is the result value from evaluating a non-matched branch,
 it signals the _try-next-case_ semantic. And without an enclosing `case-of`
-construct, the _left-hand-value_ to (**->**) operator is matched against
-the value `true`. And since **Edh** is strongly typed (though dynamically
-typed), there is no _trueish_ semantics for another type of value to be
-matched with `true`.
+construct, the _left-hand-value_ to the branch (**->**) operator is matched
+against the value `true`. And since **Edh** is strongly typed (though
+dynamically typed), there is no _trueish_ semantics for another type of
+value to be matched with `true`.
 
 > You'll soon see [Pattern Matching](#pattern-matching), the **branch**
 > does [Value Matching](#value-matching) unless **Pattern Matching** is
-> invoked by _curly-brace-quoting_ at _left-hand-side_ of the (**->**)
-> operator.
+> invoked by _curly-brace-quoting_ at _left-hand-side_ of the branch
+> (**->**) operator.
 
 #### Case-Of
 
@@ -826,7 +826,7 @@ do you known, that I live in no where ?
 Check out [patterns.edh](./patterns.edh)
 
 **Pattern Matching** is invoked by _curly-brace-quoting_ at _left-hand-side_
-of the (**->**) operator.
+of the branch (**->**) operator.
 
 Patterns available by now:
 
@@ -864,6 +864,9 @@ tuple pattern matches the length
 Đ: case c of {{ B:b }} -> 'instance resolving pattern obtains the right super instance: ' ++ b
 instance resolving pattern obtains the right super instance: <object: B>
 Đ:
+Đ: case 'b' of {[ 'a', 'b', 'c' ]} -> 'any-of pattern feels like list element-of test'
+any-of pattern feels like list element-of test
+Đ:
 ```
 
 More patterns can be added in the future.
@@ -876,9 +879,9 @@ Once a **branch** has its _left-hand-side_ value or pattern matched, its
 _right-hand-side_ expression is evaluated, then its immediate enclosing
 block is considered to have been evaluated to the result value, without
 consulting any following statements in this block; unless the
-_right-hand-side_ of (**->**) is evaluated to a result of `<fallthrough>`,
-in which case the rest statements in the block continue to be evaluated
-sequentially.
+_right-hand-side_ of the branch (**->**) operator is evaluated to a result
+of `<fallthrough>`, in which case the rest statements in the block continue
+to be evaluated sequentially.
 
 ```bash
 Đ: {

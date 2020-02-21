@@ -22,3 +22,4 @@ c = C()
 
 case c of {{ B:b }} -> 'instance resolving pattern obtains the right super instance: ' ++ b
 
+case 'b' of {[ 'a', 'b', 'c' ]} -> 'any-of pattern feels like list element-of test'

@@ -228,6 +228,27 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                     Nothing -> exitEdhSTM pgs exit EdhFallthrough
           _ -> exitEdhProc exit EdhFallthrough
 
+      -- {[ x,y,z,... ]} -- any-of pattern
+      [StmtSrc (_, ExprStmt valsExpr@(ListExpr vExprs))] -> if null vExprs
+        then exitEdhProc exit EdhFallthrough
+        else evalExpr valsExpr $ \(OriginalValue matchVals _ _) ->
+          case matchVals of
+            EdhList (List l') -> contEdhSTM $ do
+              l <- readTVar l'
+              if ctxMatch `elem` l
+                then
+                  runEdhProg pgs
+                  $ evalExpr rhExpr
+                  $ \(OriginalValue !rhVal _ _) -> exitEdhProc
+                      exit
+                      (case rhVal of
+                        EdhFallthrough -> EdhFallthrough
+                        _              -> EdhCaseClose rhVal
+                      )
+                else exitEdhSTM pgs exit EdhFallthrough
+            _ -> error "bug: list expr evals to non-list"
+
+
       -- TODO more kinds of match patterns to support ?
       --      e.g. list pattern, with rest-items repacking etc.
       _ -> throwEdh EvalError $ "Invalid match pattern: " <> T.pack
