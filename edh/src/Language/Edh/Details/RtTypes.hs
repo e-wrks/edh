@@ -39,16 +39,18 @@ newtype Dict = Dict (TVar DictStore)
 type DictStore = Map.Map ItemKey EdhValue
 instance Show Dict where
   show (Dict d) = showEdhDict ds where ds = unsafePerformIO $ readTVarIO d
-data ItemKey = ItemByType !EdhTypeValue
-    | ItemByStr !Text | ItemBySym !Symbol
+data ItemKey = ItemByStr !Text | ItemBySym !Symbol
     | ItemByNum !Decimal | ItemByBool !Bool
+    | ItemByType !EdhTypeValue
+    | ItemByClass !Class
   deriving (Eq, Ord)
 instance Show ItemKey where
-  show (ItemByType k) = show k
-  show (ItemByStr  k) = show k
-  show (ItemBySym  k) = show k
-  show (ItemByNum  k) = showDecimal k
-  show (ItemByBool k) = show $ EdhBool k
+  show (ItemByStr   k) = show k
+  show (ItemBySym   k) = show k
+  show (ItemByNum   k) = showDecimal k
+  show (ItemByBool  k) = show $ EdhBool k
+  show (ItemByType  k) = show k
+  show (ItemByClass k) = show k
 
 showEdhDict :: DictStore -> String
 showEdhDict ds = if Map.null ds
@@ -59,11 +61,12 @@ showEdhDict ds = if Map.null ds
     ++ "}"
 
 itemKeyValue :: ItemKey -> EdhValue
-itemKeyValue (ItemByType tyv) = EdhType tyv
-itemKeyValue (ItemByStr  s  ) = EdhString s
-itemKeyValue (ItemBySym  s  ) = EdhSymbol s
-itemKeyValue (ItemByNum  d  ) = EdhDecimal d
-itemKeyValue (ItemByBool b  ) = EdhBool b
+itemKeyValue (ItemByType  tyv) = EdhType tyv
+itemKeyValue (ItemByStr   s  ) = EdhString s
+itemKeyValue (ItemBySym   s  ) = EdhSymbol s
+itemKeyValue (ItemByNum   d  ) = EdhDecimal d
+itemKeyValue (ItemByBool  b  ) = EdhBool b
+itemKeyValue (ItemByClass c  ) = EdhClass c
 
 toPairList :: DictStore -> [EdhValue]
 toPairList d = (<$> Map.toList d) $ \(k, v) -> EdhPair (itemKeyValue k) v
@@ -246,6 +249,9 @@ instance Eq Class where
   Class x's x'pd == Class y's y'pd = x's == y's && x'pd == y'pd
 instance Show Class where
   show (Class _ (ProcDecl cn _ _)) = "<class: " ++ T.unpack cn ++ ">"
+instance Ord Class where
+  compare (Class _ (ProcDecl x'cn _ _)) (Class _ (ProcDecl y'cn _ _)) =
+    compare x'cn y'cn
 
 data Method = Method {
     methodLexiStack :: !(NonEmpty Scope)
