@@ -229,24 +229,17 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
           _ -> exitEdhProc exit EdhFallthrough
 
       -- {[ x,y,z,... ]} -- any-of pattern
-      [StmtSrc (_, ExprStmt valsExpr@(ListExpr vExprs))] -> if null vExprs
+      [StmtSrc (_, ExprStmt (ListExpr vExprs))] -> if null vExprs
         then exitEdhProc exit EdhFallthrough
-        else evalExpr valsExpr $ \(OriginalValue matchVals _ _) ->
+        else evalExprs vExprs $ \(OriginalValue matchVals _ _) ->
           case matchVals of
-            EdhList (List l') -> contEdhSTM $ do
-              l <- readTVar l'
-              if ctxMatch `elem` l
-                then
-                  runEdhProg pgs
-                  $ evalExpr rhExpr
-                  $ \(OriginalValue !rhVal _ _) -> exitEdhProc
-                      exit
-                      (case rhVal of
-                        EdhFallthrough -> EdhFallthrough
-                        _              -> EdhCaseClose rhVal
-                      )
-                else exitEdhSTM pgs exit EdhFallthrough
-            _ -> error "bug: list expr evals to non-list"
+            EdhTuple l -> if ctxMatch `elem` l
+              then evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+                exitEdhProc exit $ case rhVal of
+                  EdhFallthrough -> EdhFallthrough
+                  _              -> EdhCaseClose rhVal
+              else exitEdhProc exit EdhFallthrough
+            _ -> error "bug: evalExprs returned non-tuple"
 
 
       -- TODO more kinds of match patterns to support ?
