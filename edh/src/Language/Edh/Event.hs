@@ -106,8 +106,9 @@ setoffEvents' !pgs (EventSink _ _ _ !subc) !minConsumers !consumerSetup !produce
                      "You don't setoff events from within a transaction"
     else do
       when (minConsumers < 1) $ error
-        "if no need to wait subscriber before producing events, "
-        "you'd just go `publishEvent`"
+        (  "if no need to wait subscriber before producing events, "
+        ++ "you'd just go `publishEvent`"
+        )
       subcBefore <- readTVar subc
       consumerSetup
       writeTQueue
