@@ -121,6 +121,10 @@ installEdhBatteries world = liftIO $ do
         , ( "=>"
           , 1
           )
+          -- element-of test
+        , ( "?<="
+          , 3
+          )
 
           -- publish to sink
           --     evsPub <- outEvent
@@ -145,30 +149,31 @@ installEdhBatteries world = liftIO $ do
 
       !rootOperators <- mapM
         (\(sym, hp) -> (AttrByName sym, ) <$> mkHostOper world sym hp)
-        [ ("$" , attrDerefAddrProc)
-        , (":" , consProc)
-        , ("?" , attrTemptProc)
-        , ("?$", attrDerefTemptProc)
-        , ("++", concatProc)
-        , ("=<", cprhProc)
-        , ("=>", prpdProc)
-        , ("<-", evtPubProc)
-        , ("+" , addProc)
-        , ("-" , subsProc)
-        , ("*" , mulProc)
-        , ("/" , divProc)
-        , ("**", powProc)
-        , ("&&", logicalAndProc)
-        , ("||", logicalOrProc)
-        , ("~=", valEqProc)
-        , ("==", idEqProc)
-        , (">" , isGtProc)
-        , (">=", isGeProc)
-        , ("<" , isLtProc)
-        , ("<=", isLeProc)
-        , ("=" , assignProc)
-        , ("->", branchProc)
-        , ("<|", loggingProc)
+        [ ("$"  , attrDerefAddrProc)
+        , (":"  , consProc)
+        , ("?"  , attrTemptProc)
+        , ("?$" , attrDerefTemptProc)
+        , ("++" , concatProc)
+        , ("=<" , cprhProc)
+        , ("?<=", elemProc)
+        , ("=>" , prpdProc)
+        , ("<-" , evtPubProc)
+        , ("+"  , addProc)
+        , ("-"  , subsProc)
+        , ("*"  , mulProc)
+        , ("/"  , divProc)
+        , ("**" , powProc)
+        , ("&&" , logicalAndProc)
+        , ("||" , logicalOrProc)
+        , ("~=" , valEqProc)
+        , ("==" , idEqProc)
+        , (">"  , isGtProc)
+        , (">=" , isGeProc)
+        , ("<"  , isLtProc)
+        , ("<=" , isLeProc)
+        , ("="  , assignProc)
+        , ("->" , branchProc)
+        , ("<|" , loggingProc)
         ]
 
       !rootProcedures <- mapM
