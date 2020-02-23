@@ -5,7 +5,7 @@ import           Prelude
 
 import           Data.Char
 import           Data.Ratio
-
+import           Data.Hashable
 
 data Decimal = Decimal {
     denominator'10 :: !Integer
@@ -72,6 +72,10 @@ instance Eq Decimal where
     | -- either is nan
       (x'd == 0 && x'n == 0) || (y'd == 0 && y'n == 0) = False
     | otherwise = EQ == compareNonNanDecimal x y
+
+instance Hashable Decimal where
+  hashWithSalt s (Decimal d e n) =
+    s `hashWithSalt` d `hashWithSalt` e `hashWithSalt` n
 
 instance Num Decimal where
   fromInteger = uncurry (Decimal 1) . (decodeRadix'10 0 . fromIntegral)
