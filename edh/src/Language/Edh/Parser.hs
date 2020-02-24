@@ -523,16 +523,16 @@ parseBlock =
       [ symbol "}"
         $> (case t of
              [] | mustBlock' -> BlockExpr []
-          -- let {} parse as empty dict instead of empty block
+            -- let {} parse as empty dict instead of empty block
              []              -> DictExpr []
-          -- single k:v pair without comma will reach here
-             [StmtSrc (_, ExprStmt pairExpr@(InfixExpr ":" _ _))] ->
-               DictExpr [pairExpr]
+            -- single k:v pair without comma will reach here
+             [StmtSrc (_, ExprStmt pairExpr@(InfixExpr ":" _ _))]
+               | not mustBlock' -> DictExpr [pairExpr]
              _ -> BlockExpr (reverse t)
            )
       , do
         ss <- parseStmt
-        notFollowedBy (symbol ":")
+        unless mustBlock' $ notFollowedBy (symbol ":")
         parseBlockRest mustBlock' $ ss : t
       ]
 
