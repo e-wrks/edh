@@ -8,7 +8,7 @@ import           Prelude
 import           Control.Concurrent.STM
 
 import qualified Data.Text                     as T
-import qualified Data.Map.Strict               as Map
+import qualified Data.HashMap.Strict           as Map
 import qualified Data.List.NonEmpty            as NE
 
 import           Language.Edh.Control

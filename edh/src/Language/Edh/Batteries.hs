@@ -10,7 +10,8 @@ import           Control.Exception
 import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
-import qualified Data.Map.Strict               as Map
+import           Data.Unique
+import qualified Data.HashMap.Strict           as Map
 
 import           Data.Lossless.Decimal         as D
 
@@ -28,6 +29,7 @@ installEdhBatteries :: MonadIO m => EdhWorld -> m ()
 installEdhBatteries world = liftIO $ do
   envLogLevel <- lookupEnv "EDH_LOG_LEVEL"
   rootCtx     <- atomically $ moduleContext world $ worldRoot world
+  rtu         <- newUnique
   runEdhProgram' rootCtx $ do
     pgs <- ask
     contEdhSTM $ do
@@ -207,7 +209,8 @@ installEdhBatteries world = liftIO $ do
         , (AttrByName "everySeconds", rtEverySeconds)
         ]
       !rtSupers <- newTVar []
-      let !runtime = Object { objEntity = rtEntity
+      let !runtime = Object { objIdent  = rtu
+                            , objEntity = rtEntity
                             , objClass  = moduleClass world
                             , objSupers = rtSupers
                             }

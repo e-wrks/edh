@@ -10,9 +10,10 @@ import           Control.Monad.IO.Class
 import           Control.Monad.State.Strict
 import           Control.Concurrent.STM
 
+import           Data.Unique
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
-import qualified Data.Map.Strict               as Map
+import qualified Data.HashMap.Strict           as Map
 
 import           Text.Megaparsec
 
@@ -29,7 +30,9 @@ createEdhModule world moduId = liftIO $ do
     , (AttrByName "__file__", EdhString "<adhoc>")
     ]
   !moduSupers <- newTVarIO []
-  return Object { objEntity = moduEntity
+  u           <- liftIO newUnique
+  return Object { objIdent  = u
+                , objEntity = moduEntity
                 , objClass  = moduleClass world
                 , objSupers = moduSupers
                 }

@@ -8,7 +8,7 @@ import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
 import qualified Data.Text                     as T
-import qualified Data.Map.Strict               as Map
+import qualified Data.HashMap.Strict           as Map
 
 import           Language.Edh.Control
 import           Language.Edh.Runtime
@@ -171,17 +171,17 @@ valEqProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
     cmp2Val lhVal rhVal = if lhVal == rhVal
       then return True
       else case lhVal of
-        EdhList (List lhll) -> case rhVal of
-          EdhList (List rhll) -> do
+        EdhList (List _ lhll) -> case rhVal of
+          EdhList (List _ rhll) -> do
             lhl <- readTVar lhll
             rhl <- readTVar rhll
             cmp2List lhl rhl
           _ -> return False
-        EdhDict (Dict lhd) -> case rhVal of
-          EdhDict (Dict rhd) -> do
+        EdhDict (Dict _ lhd) -> case rhVal of
+          EdhDict (Dict _ rhd) -> do
             lhm <- readTVar lhd
             rhm <- readTVar rhd
-            cmp2Map (Map.toAscList lhm) (Map.toAscList rhm)
+            cmp2Map (Map.toList lhm) (Map.toList rhm)
           _ -> return False
         _ -> return False
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->

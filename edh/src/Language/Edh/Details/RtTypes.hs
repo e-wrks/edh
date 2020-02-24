@@ -12,15 +12,14 @@ import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
 import           Data.Foldable
+import           Data.Unique
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
-import qualified Data.Map.Strict               as Map
+import           Data.Hashable
+import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
 
-import           Foreign.C.String
-import           Foreign.Marshal.Alloc
-import           System.Mem.Weak
 import           System.IO.Unsafe
 
 import           Text.Megaparsec
@@ -31,26 +30,18 @@ import           Language.Edh.Control
 
 
 -- | A dict in Edh is neither an object nor an entity, but just a
--- mutable associative map.
---
--- A dict has items associated by 'ItemKey'.
-newtype Dict = Dict (TVar DictStore)
-  deriving (Eq)
-type DictStore = Map.Map ItemKey EdhValue
+-- mutable associative array.
+data Dict = Dict !Unique !(TVar DictStore)
+instance Eq Dict where
+  Dict x'u _ == Dict y'u _ = x'u == y'u
+instance Ord Dict where
+  compare (Dict x'u _) (Dict y'u _) = compare x'u y'u
+instance Hashable Dict where
+  hashWithSalt s (Dict u _) = hashWithSalt s u
 instance Show Dict where
-  show (Dict d) = showEdhDict ds where ds = unsafePerformIO $ readTVarIO d
-data ItemKey = ItemByStr !Text | ItemBySym !Symbol
-    | ItemByNum !Decimal | ItemByBool !Bool
-    | ItemByType !EdhTypeValue
-    | ItemByClass !Class
-  deriving (Eq, Ord)
-instance Show ItemKey where
-  show (ItemByStr   k) = show k
-  show (ItemBySym   k) = show k
-  show (ItemByNum   k) = showDecimal k
-  show (ItemByBool  k) = show $ EdhBool k
-  show (ItemByType  k) = show k
-  show (ItemByClass k) = show k
+  show (Dict _ d) = showEdhDict ds where ds = unsafePerformIO $ readTVarIO d
+type ItemKey = EdhValue
+type DictStore = Map.HashMap EdhValue EdhValue
 
 showEdhDict :: DictStore -> String
 showEdhDict ds = if Map.null ds
@@ -65,35 +56,29 @@ setDictItem :: ItemKey -> EdhValue -> DictStore -> DictStore
 setDictItem !k v !ds =
   if v == EdhNil then Map.delete k ds else Map.insert k v ds
 
-itemKeyValue :: ItemKey -> EdhValue
-itemKeyValue (ItemByStr   s) = EdhString s
-itemKeyValue (ItemBySym   s) = EdhSymbol s
-itemKeyValue (ItemByNum   d) = EdhDecimal d
-itemKeyValue (ItemByBool  b) = EdhBool b
-itemKeyValue (ItemByType  t) = EdhType t
-itemKeyValue (ItemByClass c) = EdhClass c
-
 toPairList :: DictStore -> [EdhValue]
-toPairList d = (<$> Map.toList d) $ \(k, v) -> EdhPair (itemKeyValue k) v
+toPairList d = (<$> Map.toList d) $ \(k, v) -> EdhPair k v
 
 edhDictFromEntity :: Entity -> STM Dict
 edhDictFromEntity ent = do
+  u  <- unsafeIOToSTM newUnique
   em <- readTVar ent
-  (Dict <$>) $ newTVar $ Map.fromAscList
-    [ (keyAttr2Item k, v) | (k, v) <- Map.toAscList em ]
- where
-  keyAttr2Item :: AttrKey -> ItemKey
-  keyAttr2Item (AttrByName nm ) = ItemByStr nm
-  keyAttr2Item (AttrBySym  sym) = ItemBySym sym
+  (Dict u <$>) $ newTVar $ Map.fromList
+    [ (attrKeyValue k, v) | (k, v) <- Map.toList em ]
 
 -- | An entity in Edh is the backing storage for a scope, with possibly 
 -- an object mounted to it with one class and many supers
 --
 -- An entity has attributes associated by 'AttrKey'.
 type Entity = TVar EntityStore
-type EntityStore = Map.Map AttrKey EdhValue
+type EntityStore = Map.HashMap AttrKey EdhValue
 data AttrKey = AttrByName !AttrName | AttrBySym !Symbol
     deriving (Eq, Ord, Show)
+instance Hashable AttrKey where
+  hashWithSalt s (AttrByName name) =
+    s `hashWithSalt` (0 :: Int) `hashWithSalt` name
+  hashWithSalt s (AttrBySym sym) =
+    s `hashWithSalt` (1 :: Int) `hashWithSalt` sym
 
 -- | setting to `nil` value means deleting the attribute by the specified key
 setEntityAttr :: AttrKey -> EdhValue -> EntityStore -> EntityStore
@@ -106,6 +91,7 @@ attrKeyValue :: AttrKey -> EdhValue
 attrKeyValue (AttrByName nm ) = EdhString nm
 attrKeyValue (AttrBySym  sym) = EdhSymbol sym
 
+
 -- | A symbol can stand in place of an alphanumeric name, used to
 -- address an attribute from an object entity, but symbols are 
 -- private to its owning scope, can not be imported from out side
@@ -117,30 +103,31 @@ attrKeyValue (AttrBySym  sym) = EdhSymbol sym
 -- available to all procedures defined in the module, and a symbol
 -- bound within a class procedure is available to all its methods
 -- as well as nested classes.
---
--- Note: we rely on the 'Ord' instance of 'CString' field (which is
---       essentially a ptr), for trivial implementation of 'Symbol'
---       's 'Ord' instance, so it can be used as attribute key on an
---       entity (the underlying 'Map.Map' storage per se).
-newtype Symbol = Symbol {
-    symbol'description :: CString
-  } deriving (Eq, Ord)
+data Symbol = Symbol !Unique !Text
+instance Eq Symbol where
+  Symbol x'u _ == Symbol y'u _ = x'u == y'u
+instance Ord Symbol where
+  compare (Symbol x'u _) (Symbol y'u _) = compare x'u y'u
+instance Hashable Symbol where
+  hashWithSalt s (Symbol u _) = hashWithSalt s u
 instance Show Symbol where
-  show (Symbol dp) = "<@" <> sd <> ">"
-    where sd = unsafePerformIO $ peekCString dp
+  show (Symbol _ sym) = "<@" <> T.unpack sym <> ">"
 mkSymbol :: String -> STM Symbol
 mkSymbol !d = unsafeIOToSTM $ do
-  !s <- newCString d
-  let !sym = Symbol s
-  addFinalizer sym $ free s
-  return sym
+  !u <- newUnique
+  return $ Symbol u $ T.pack d
 
 
 -- | A list in Edh is a multable, singly-linked, prepend list.
-newtype List = List (TVar [EdhValue])
-  deriving (Eq)
+data List = List !Unique !(TVar [EdhValue])
+instance Eq List where
+  List x'u _ == List y'u _ = x'u == y'u
+instance Ord List where
+  compare (List x'u _) (List y'u _) = compare x'u y'u
+instance Hashable List where
+  hashWithSalt s (List u _) = hashWithSalt s u
 instance Show List where
-  show (List l) = if null ll
+  show (List _ !l) = if null ll
     then "[]"
     else "[ " ++ concat [ show i ++ ", " | i <- ll ] ++ "]"
     where ll = unsafePerformIO $ readTVarIO l
@@ -215,7 +202,7 @@ data Scope = Scope {
 instance Eq Scope where
   Scope x'e _ _ _ _ == Scope y'e _ _ _ _ = x'e == y'e
 instance Show Scope where
-  show (Scope _ _ _ _ (ProcDecl pName argsRcvr (StmtSrc (!srcPos, _)))) =
+  show (Scope _ _ _ _ (ProcDecl _ pName argsRcvr (StmtSrc (!srcPos, _)))) =
     "<"
       ++ T.unpack pName
       ++ " "
@@ -228,27 +215,34 @@ instance Show Scope where
 -- | An object views an entity, with inheritance relationship 
 -- to any number of super objects.
 data Object = Object {
+    objIdent :: !Unique
     -- | the entity stores attribute set of the object
-    objEntity :: !Entity
+    , objEntity :: !Entity
     -- | the class (a.k.a constructor) procedure of the object
     , objClass :: !Class
     -- | up-links for object inheritance hierarchy
     , objSupers :: !(TVar [Object])
   }
 instance Eq Object where
-  -- equality by pointer to entity
-  Object x'e _ _ == Object y'e _ _ = x'e == y'e
+  -- equality by identity
+  Object x'u _ _ _ == Object y'u _ _ _ = x'u == y'u
+instance Ord Object where
+  compare (Object x'u _ _ _) (Object y'u _ _ _) = compare x'u y'u
+instance Hashable Object where
+  hashWithSalt s (Object u _ _ _) = hashWithSalt s u
 instance Show Object where
   -- it's not right to call 'atomically' here to read 'objSupers' for
   -- the show, as 'show' may be called from an stm transaction, stm
   -- will fail hard on encountering of nested 'atomically' calls.
-  show (Object _ (Class _ (ProcDecl cn _ _)) _) =
+  show (Object _ _ (Class _ (ProcDecl _ cn _ _)) _) =
     "<object: " ++ T.unpack cn ++ ">"
 
 -- | View an entity as object of specified class with specified ancestors
 -- this is the black magic you want to avoid
 viewAsEdhObject :: Entity -> Class -> [Object] -> STM Object
-viewAsEdhObject ent cls supers = Object ent cls <$> newTVar supers
+viewAsEdhObject ent cls supers = do
+  oid <- unsafeIOToSTM newUnique
+  Object oid ent cls <$> newTVar supers
 
 data Class = Class {
     -- | the lexical context where this class procedure is defined
@@ -256,33 +250,52 @@ data Class = Class {
     , classProcedure :: !ProcDecl
   }
 instance Eq Class where
-  Class x's x'pd == Class y's y'pd = x's == y's && x'pd == y'pd
-instance Show Class where
-  show (Class _ (ProcDecl cn _ _)) = "<class: " ++ T.unpack cn ++ ">"
+  Class _ x'p == Class _ y'p = x'p == y'p
 instance Ord Class where
-  compare (Class _ (ProcDecl x'cn _ _)) (Class _ (ProcDecl y'cn _ _)) =
-    compare x'cn y'cn
+  compare (Class _ x'p) (Class _ y'p) = compare x'p y'p
+instance Hashable Class where
+  hashWithSalt s (Class _ p) = hashWithSalt s p
+instance Show Class where
+  show (Class _ (ProcDecl _ cn _ _)) = "<class: " ++ T.unpack cn ++ ">"
 
 data Method = Method {
     methodLexiStack :: !(NonEmpty Scope)
     , methodProcedure :: !ProcDecl
-  } deriving (Eq)
+  }
+instance Eq Method where
+  Method _ x'p == Method _ y'p = x'p == y'p
+instance Ord Method where
+  compare (Method _ x'p) (Method _ y'p) = compare x'p y'p
+instance Hashable Method where
+  hashWithSalt s (Method _ p) = hashWithSalt s p
 instance Show Method where
-  show (Method _ (ProcDecl mn _ _)) = "<method: " ++ T.unpack mn ++ ">"
+  show (Method _ (ProcDecl _ mn _ _)) = "<method: " ++ T.unpack mn ++ ">"
 
 data GenrDef = GenrDef {
     generatorLexiStack :: !(NonEmpty Scope)
     , generatorProcedure :: !ProcDecl
-  } deriving (Eq)
+  }
+instance Eq GenrDef where
+  GenrDef _ x'p == GenrDef _ y'p = x'p == y'p
+instance Ord GenrDef where
+  compare (GenrDef _ x'p) (GenrDef _ y'p) = compare x'p y'p
+instance Hashable GenrDef where
+  hashWithSalt s (GenrDef _ p) = hashWithSalt s p
 instance Show GenrDef where
-  show (GenrDef _ (ProcDecl mn _ _)) = "<generator: " ++ T.unpack mn ++ ">"
+  show (GenrDef _ (ProcDecl _ mn _ _)) = "<generator: " ++ T.unpack mn ++ ">"
 
 data Interpreter = Interpreter {
     interpreterLexiStack :: !(NonEmpty Scope)
     , interpreterProcedure :: !ProcDecl
-  } deriving (Eq)
+  }
+instance Eq Interpreter where
+  Interpreter _ x'p == Interpreter _ y'p = x'p == y'p
+instance Ord Interpreter where
+  compare (Interpreter _ x'p) (Interpreter _ y'p) = compare x'p y'p
+instance Hashable Interpreter where
+  hashWithSalt s (Interpreter _ p) = hashWithSalt s p
 instance Show Interpreter where
-  show (Interpreter _ (ProcDecl mn _ _)) =
+  show (Interpreter _ (ProcDecl _ mn _ _)) =
     "<interpreter: " ++ T.unpack mn ++ ">"
 
 data Operator = Operator {
@@ -295,9 +308,15 @@ data Operator = Operator {
     -- safely from a pure 'show' function. can remove this field once we
     -- switched to a better introspection tool for operators at runtime.
     , operatorPrecedence :: !Precedence
-  } deriving (Eq)
+  }
+instance Eq Operator where
+  Operator _ x'p _ _ == Operator _ y'p _ _ = x'p == y'p
+instance Ord Operator where
+  compare (Operator _ x'p _ _) (Operator _ y'p _ _) = compare x'p y'p
+instance Hashable Operator where
+  hashWithSalt s (Operator _ p _ _) = hashWithSalt s p
 instance Show Operator where
-  show (Operator _ (ProcDecl opSym _ _) _ prec) =
+  show (Operator _ (ProcDecl _ opSym _ _) _ prec) =
     "<operator: (" ++ T.unpack opSym ++ ") " ++ show prec ++ ">"
 
 
@@ -321,7 +340,7 @@ data EdhWorld = EdhWorld {
     -- entry, will be a transient entry containing an error value if
     -- failed loading, or a permanent entry containing the module object
     -- if successfully loaded
-    , worldModules :: !(TMVar (Map.Map ModuleId (TMVar EdhValue)))
+    , worldModules :: !(TMVar (Map.HashMap ModuleId (TMVar EdhValue)))
     -- | interface to the embedding host runtime
     , worldRuntime :: !(TMVar EdhRuntime)
   }
@@ -463,7 +482,7 @@ getEdhErrorContext !pgs !msg =
   let !ctx               = edh'context pgs
       (StmtSrc (!sp, _)) = contextStmt ctx
       !frames            = foldl'
-        (\sfs (Scope _ _ _ _ (ProcDecl procName _ (StmtSrc (spos, _)))) ->
+        (\sfs (Scope _ _ _ _ (ProcDecl _ procName _ (StmtSrc (spos, _)))) ->
           (procName, T.pack (sourcePosPretty spos)) : sfs
         )
         []
@@ -489,8 +508,13 @@ throwEdhSTM pgs !excCtor !msg = throwSTM (excCtor $ getEdhErrorContext pgs msg)
 -- normally obtained by invoking `packEdhArgs ctx argsSender`.
 data ArgsPack = ArgsPack {
     positional'args :: ![EdhValue]
-    , keyword'args :: !(Map.Map AttrName EdhValue)
+    , keyword'args :: !(Map.HashMap AttrName EdhValue)
   } deriving (Eq)
+instance Hashable ArgsPack where
+  hashWithSalt s (ArgsPack args kwargs) =
+    foldl' (\s' (k, v) -> s' `hashWithSalt` k `hashWithSalt` v)
+           (foldl' hashWithSalt s args)
+      $ Map.toList kwargs
 instance Show ArgsPack where
   show (ArgsPack posArgs kwArgs) = if null posArgs && Map.null kwArgs
     then "()"
@@ -505,24 +529,26 @@ instance Show ArgsPack where
 
 
 -- | Type of procedures implemented in the host language (Haskell).
---
--- Note: we rely on the 'CString' field (which is essentially a ptr),
---       for equality testing of host procedures.
 data HostProcedure = HostProcedure {
-    hostProc'name :: !CString
+    hostProc'uniq :: !Unique
+    , hostProc'name :: !Text
     , hostProc'proc :: !EdhProcedure
   }
 instance Eq HostProcedure where
-  HostProcedure x'n _ == HostProcedure y'n _ = x'n == y'n
+  HostProcedure x'u _ _ == HostProcedure y'u _ _ = x'u == y'u
+instance Ord HostProcedure where
+  compare (HostProcedure x'u _ _) (HostProcedure y'u _ _) = compare x'u y'u
+instance Hashable HostProcedure where
+  hashWithSalt s (HostProcedure u _ _) = hashWithSalt s u
 instance Show HostProcedure where
-  show (HostProcedure pn _) = "<hostproc: " ++ nm ++ ">"
-    where nm = unsafePerformIO $ peekCString pn
+  show (HostProcedure _ pn _) = "<hostproc: " <> T.unpack pn <> ">"
 
-hostProcDecl :: CString -> STM ProcDecl
-hostProcDecl !pn = do
-  nm <- unsafeIOToSTM $ peekCString pn
+hostProcDecl :: HostProcedure -> STM ProcDecl
+hostProcDecl !hp = do
+  u <- unsafeIOToSTM newUnique
   return ProcDecl
-    { procedure'name = T.pack nm
+    { procedure'uniq = u
+    , procedure'name = hostProc'name hp
     , procedure'args = WildReceiver
     , procedure'body = StmtSrc
                          ( SourcePos { sourceName   = "<hostcode>"
@@ -537,19 +563,26 @@ hostProcDecl !pn = do
 -- | An event sink is similar to a Go channel, but is broadcast
 -- in nature, in contrast to the unicast nature of channels in Go.
 data EventSink = EventSink {
+    evs'uniq :: !Unique
     -- | sequence number, increased on every new event posting.
     -- must read zero when no event has ever been posted to this sink,
     -- non-zero otherwise. monotonicly increasing most of the time,
     -- but allowed to wrap back to 1 when exceeded 'maxBound::Int'
     -- negative values can be used to indicate abnormal conditions.
-    evs'seqn :: !(TVar Int)
+    , evs'seqn :: !(TVar Int)
     -- | most recent value, not valid until evs'seqn turns non-zero
     , evs'mrv :: !(TVar EdhValue)
     -- | the broadcast channel
     , evs'chan :: !(TChan EdhValue)
     -- | subscriber counter
     , evs'subc :: !(TVar Int)
-  } deriving Eq
+  }
+instance Eq EventSink where
+  EventSink x'u _ _ _ _ == EventSink y'u _ _ _ _ = x'u == y'u
+instance Ord EventSink where
+  compare (EventSink x'u _ _ _ _) (EventSink y'u _ _ _ _) = compare x'u y'u
+instance Hashable EventSink where
+  hashWithSalt s (EventSink s'u _ _ _ _) = hashWithSalt s s'u
 instance Show EventSink where
   show EventSink{} = "<sink>"
 
@@ -618,20 +651,20 @@ data EdhValue =
     | EdhSink !EventSink
 
   -- | reflection
-    | EdhExpr !Expr
+    | EdhExpr !Unique !Expr
 
 edhValueStr :: EdhValue -> Text
 edhValueStr (EdhString s) = s
 edhValueStr v             = T.pack $ show v
 
 edhValueNull :: EdhValue -> STM Bool
-edhValueNull EdhNil                = return True
-edhValueNull (EdhDecimal d       ) = return $ D.decimalIsNaN d || d == 0
-edhValueNull (EdhBool    b       ) = return $ b == False
-edhValueNull (EdhString  s       ) = return $ T.null s
-edhValueNull (EdhDict    (Dict d)) = Map.null <$> readTVar d
-edhValueNull (EdhList    (List l)) = null <$> readTVar l
-edhValueNull (EdhTuple   l       ) = return $ null l
+edhValueNull EdhNil                  = return True
+edhValueNull (EdhDecimal d         ) = return $ D.decimalIsNaN d || d == 0
+edhValueNull (EdhBool    b         ) = return $ b == False
+edhValueNull (EdhString  s         ) = return $ T.null s
+edhValueNull (EdhDict    (Dict _ d)) = Map.null <$> readTVar d
+edhValueNull (EdhList    (List _ l)) = null <$> readTVar l
+edhValueNull (EdhTuple   l         ) = return $ null l
 edhValueNull (EdhArgsPack (ArgsPack args kwargs)) =
   return $ null args && Map.null kwargs
 edhValueNull _ = return False
@@ -657,12 +690,10 @@ instance Show EdhValue where
   show (EdhArgsPack v) = "pkargs" ++ show v
 
   show (EdhHostProc v) = show v
-  show (EdhHostOper prec (HostProcedure pn _)) =
-    "<hostop: (" ++ nm ++ ") " ++ show prec ++ ">"
-    where nm = unsafePerformIO $ peekCString pn
-  show (EdhHostGenr (HostProcedure pn _)) = "<hostgen: " ++ nm ++ ">"
-    where nm = unsafePerformIO $ peekCString pn
-
+  show (EdhHostOper prec (HostProcedure _ pn _)) =
+    "<hostop: (" <> T.unpack pn <> ") " <> show prec <> ">"
+  show (EdhHostGenr (HostProcedure _ pn _)) =
+    "<hostgen: " <> T.unpack pn <> ">"
 
   show (EdhClass       v) = show v
   show (EdhMethod      v) = show v
@@ -679,7 +710,7 @@ instance Show EdhValue where
 
   show (EdhSink   v)      = show v
 
-  show (EdhExpr   v)      = "<expr: " ++ show v ++ ">"
+  show (EdhExpr _ v)      = "<expr: " ++ show v ++ ">"
 
 -- Note:
 --
@@ -725,12 +756,49 @@ instance Eq EdhValue where
 
   EdhSink   x          == EdhSink   y          = x == y
 
-  EdhExpr   x'v        == EdhExpr   y'v        = x'v == y'v
+  EdhExpr x'u _        == EdhExpr y'u _        = x'u == y'u
 
 -- todo: support coercing equality ?
 --       * without this, we are a strongly typed dynamic language
 --       * with this, we'll be a weakly typed dynamic language
   _                    == _                    = False
+
+instance Hashable EdhValue where
+  hashWithSalt s (EdhType x)        = hashWithSalt s $ 1 + fromEnum x
+  hashWithSalt s EdhNil             = hashWithSalt s (0 :: Int)
+  hashWithSalt s (EdhDecimal x    ) = hashWithSalt s x
+  hashWithSalt s (EdhBool    x    ) = hashWithSalt s x
+  hashWithSalt s (EdhString  x    ) = hashWithSalt s x
+  hashWithSalt s (EdhSymbol  x    ) = hashWithSalt s x
+  hashWithSalt s (EdhObject  x    ) = hashWithSalt s x
+
+  hashWithSalt s (EdhDict    x    ) = hashWithSalt s x
+  hashWithSalt s (EdhList    x    ) = hashWithSalt s x
+  hashWithSalt s (EdhPair k v     ) = s `hashWithSalt` k `hashWithSalt` v
+  hashWithSalt s (EdhTuple    x   ) = foldl' hashWithSalt s x
+  hashWithSalt s (EdhArgsPack x   ) = hashWithSalt s x
+
+  hashWithSalt s (EdhHostProc x   ) = hashWithSalt s x
+  hashWithSalt s (EdhHostOper _ x ) = hashWithSalt s x
+  hashWithSalt s (EdhHostGenr    x) = hashWithSalt s x
+
+  hashWithSalt s (EdhClass       x) = hashWithSalt s x
+  hashWithSalt s (EdhMethod      x) = hashWithSalt s x
+  hashWithSalt s (EdhOperator    x) = hashWithSalt s x
+  hashWithSalt s (EdhGenrDef     x) = hashWithSalt s x
+  hashWithSalt s (EdhInterpreter x) = hashWithSalt s x
+
+  hashWithSalt s EdhBreak           = hashWithSalt s (-1 :: Int)
+  hashWithSalt s EdhContinue        = hashWithSalt s (-2 :: Int)
+  hashWithSalt s (EdhCaseClose v) =
+    s `hashWithSalt` (-3 :: Int) `hashWithSalt` v
+  hashWithSalt s EdhFallthrough = hashWithSalt s (-4 :: Int)
+  hashWithSalt s (EdhYield  v)  = s `hashWithSalt` (-5 :: Int) `hashWithSalt` v
+  hashWithSalt s (EdhReturn v)  = s `hashWithSalt` (-6 :: Int) `hashWithSalt` v
+
+  hashWithSalt s (EdhSink   x)  = hashWithSalt s x
+
+  hashWithSalt s (EdhExpr u _)  = hashWithSalt s u
 
 
 nil :: EdhValue
@@ -865,14 +933,19 @@ data ArgSender = UnpackPosArgs !Expr
     | SendKwArg !AttrName !Expr
   deriving (Eq, Show)
 
-data ProcDecl = ProcDecl { procedure'name :: AttrName
-                        ,  procedure'args :: !ArgsReceiver
-                        ,  procedure'body :: !StmtSrc
-                        }
-  deriving (Show)
+data ProcDecl = ProcDecl { procedure'uniq :: !Unique
+    , procedure'name :: !AttrName
+    , procedure'args :: !ArgsReceiver
+    , procedure'body :: !StmtSrc
+  }
 instance Eq ProcDecl where
-  ProcDecl x'name _ x'body == ProcDecl y'name _ y'body =
-    x'name == y'name && x'body == y'body
+  ProcDecl x'u _ _ _ == ProcDecl y'u _ _ _ = x'u == y'u
+instance Ord ProcDecl where
+  compare (ProcDecl x'u _ _ _) (ProcDecl y'u _ _ _) = compare x'u y'u
+instance Hashable ProcDecl where
+  hashWithSalt s (ProcDecl u _ _ _) = hashWithSalt s u
+instance Show ProcDecl where
+  show (ProcDecl _ name _ _) = "<proc " <> T.unpack name <> ">"
 
 
 data Prefix = PrefixPlus | PrefixMinus | Not
@@ -966,35 +1039,37 @@ data EdhTypeValue = TypeType
     | ReturnType
     | SinkType
     | ExprType
-  deriving (Eq, Ord, Show)
+  deriving (Enum, Eq, Ord, Show)
+instance Hashable EdhTypeValue where
+  hashWithSalt s t = hashWithSalt s $ fromEnum t
 
 edhTypeOf :: EdhValue -> EdhValue
-edhTypeOf (EdhType _)        = EdhType TypeType
+edhTypeOf EdhType{}        = EdhType TypeType
 
-edhTypeOf EdhNil             = nil
-edhTypeOf (EdhDecimal _    ) = EdhType DecimalType
-edhTypeOf (EdhBool    _    ) = EdhType BoolType
-edhTypeOf (EdhString  _    ) = EdhType StringType
-edhTypeOf (EdhSymbol  _    ) = EdhType SymbolType
-edhTypeOf (EdhObject  _    ) = EdhType ObjectType
-edhTypeOf (EdhDict    _    ) = EdhType DictType
-edhTypeOf (EdhList    _    ) = EdhType ListType
-edhTypeOf (EdhPair _ _     ) = EdhType PairType
-edhTypeOf (EdhTuple    _   ) = EdhType TupleType
-edhTypeOf (EdhArgsPack _   ) = EdhType ArgsPackType
-edhTypeOf (EdhHostProc _   ) = EdhType HostProcType
-edhTypeOf (EdhHostOper _ _ ) = EdhType HostOperType
-edhTypeOf (EdhHostGenr    _) = EdhType HostGenrType
-edhTypeOf (EdhClass       _) = EdhType ClassType
-edhTypeOf (EdhMethod      _) = EdhType MethodType
-edhTypeOf (EdhOperator    _) = EdhType OperatorType
-edhTypeOf (EdhGenrDef     _) = EdhType GeneratorType
-edhTypeOf (EdhInterpreter _) = EdhType InterpreterType
-edhTypeOf EdhBreak           = EdhType BreakType
-edhTypeOf EdhContinue        = EdhType ContinueType
-edhTypeOf (EdhCaseClose _)   = EdhType CaseCloseType
-edhTypeOf EdhFallthrough     = EdhType FallthroughType
-edhTypeOf (EdhYield  _)      = EdhType YieldType
-edhTypeOf (EdhReturn _)      = EdhType ReturnType
-edhTypeOf (EdhSink   _)      = EdhType SinkType
-edhTypeOf (EdhExpr   _)      = EdhType ExprType
+edhTypeOf EdhNil           = nil
+edhTypeOf EdhDecimal{}     = EdhType DecimalType
+edhTypeOf EdhBool{}        = EdhType BoolType
+edhTypeOf EdhString{}      = EdhType StringType
+edhTypeOf EdhSymbol{}      = EdhType SymbolType
+edhTypeOf EdhObject{}      = EdhType ObjectType
+edhTypeOf EdhDict{}        = EdhType DictType
+edhTypeOf EdhList{}        = EdhType ListType
+edhTypeOf EdhPair{}        = EdhType PairType
+edhTypeOf EdhTuple{}       = EdhType TupleType
+edhTypeOf EdhArgsPack{}    = EdhType ArgsPackType
+edhTypeOf EdhHostProc{}    = EdhType HostProcType
+edhTypeOf EdhHostOper{}    = EdhType HostOperType
+edhTypeOf EdhHostGenr{}    = EdhType HostGenrType
+edhTypeOf EdhClass{}       = EdhType ClassType
+edhTypeOf EdhMethod{}      = EdhType MethodType
+edhTypeOf EdhOperator{}    = EdhType OperatorType
+edhTypeOf EdhGenrDef{}     = EdhType GeneratorType
+edhTypeOf EdhInterpreter{} = EdhType InterpreterType
+edhTypeOf EdhBreak         = EdhType BreakType
+edhTypeOf EdhContinue      = EdhType ContinueType
+edhTypeOf EdhCaseClose{}   = EdhType CaseCloseType
+edhTypeOf EdhFallthrough   = EdhType FallthroughType
+edhTypeOf EdhYield{}       = EdhType YieldType
+edhTypeOf EdhReturn{}      = EdhType ReturnType
+edhTypeOf EdhSink{}        = EdhType SinkType
+edhTypeOf EdhExpr{}        = EdhType ExprType

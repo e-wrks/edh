@@ -4,12 +4,15 @@ module Language.Edh.Batteries.Ctrl where
 import           Prelude
 -- import           Debug.Trace
 
+import           GHC.Conc                       ( unsafeIOToSTM )
+
 import           Control.Monad.Reader
 
 import           Control.Concurrent.STM
 
+import           Data.Unique
 import qualified Data.Text                     as T
-import qualified Data.Map.Strict               as Map
+import qualified Data.HashMap.Strict           as Map
 
 import           Language.Edh.Control
 import           Language.Edh.Runtime
@@ -24,15 +27,15 @@ errorProc !argsSender _ =
       _   -> throwEdh EvalError $ edhValueStr $ EdhTuple args
     else
       let !kwDict =
-            Map.fromAscList $ (<$> Map.toAscList kwargs) $ \(attrName, val) ->
-              (ItemByStr attrName, val)
+            Map.fromList $ (<$> Map.toList kwargs) $ \(attrName, val) ->
+              (EdhString attrName, val)
       in
         throwEdh EvalError
         $ T.pack
         $ showEdhDict
         $ Map.union kwDict
-        $ Map.fromAscList
-            [ (ItemByNum (fromIntegral i), t)
+        $ Map.fromList
+            [ (EdhDecimal (fromIntegral i), t)
             | (i, t) <- zip [(0 :: Int) ..] args
             ]
 
@@ -140,10 +143,13 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
            in  contEdhSTM $ case ctxMatch of
                  EdhArgsPack (ArgsPack (h : rest) !kwargs) | Map.null kwargs ->
                    doMatched h (EdhArgsPack (ArgsPack rest kwargs))
-                 EdhTuple (h : rest) -> doMatched h (EdhTuple rest)
-                 EdhList  (List l  ) -> readTVar l >>= \case
-                   (h : rest) -> newTVar rest >>= doMatched h . EdhList . List
-                   _          -> exitEdhSTM pgs exit EdhFallthrough
+                 EdhTuple (h    : rest) -> doMatched h (EdhTuple rest)
+                 EdhList  (List _ !l  ) -> readTVar l >>= \case
+                   (h : rest) -> do
+                     rl <- newTVar rest
+                     u  <- unsafeIOToSTM newUnique
+                     doMatched h $ EdhList $ List u rl
+                   _ -> exitEdhSTM pgs exit EdhFallthrough
                  _ -> exitEdhSTM pgs exit EdhFallthrough
 
       -- {( x,y,z,... )} -- tuple pattern
@@ -162,7 +168,7 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
             case ctxMatch of
               EdhArgsPack (ArgsPack [] !kwargs) | Map.null kwargs -> doMatched
               EdhTuple [] -> doMatched
-              EdhList (List l) ->
+              EdhList (List _ !l) ->
                 readTVar l
                   >>= \ll -> if null ll
                         then doMatched

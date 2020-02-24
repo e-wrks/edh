@@ -78,6 +78,8 @@ library edh-internal
         clock -any,
         time -any,
         vector -any,
+        hashable -any,
+        unordered-containers -any,
         containers -any,
         mtl -any,
         transformers -any
@@ -108,6 +110,8 @@ executable edhi
         clock -any,
         time -any,
         vector -any,
+        hashable -any,
+        unordered-containers -any,
         containers -any,
         mtl -any,
         transformers -any

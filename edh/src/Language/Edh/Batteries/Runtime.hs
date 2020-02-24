@@ -13,7 +13,7 @@ import           Control.Concurrent.STM
 import           System.Clock
 
 import qualified Data.Text                     as T
-import qualified Data.Map.Strict               as Map
+import qualified Data.HashMap.Strict           as Map
 
 import           Text.Megaparsec
 

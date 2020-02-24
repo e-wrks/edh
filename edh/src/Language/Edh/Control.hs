@@ -11,7 +11,7 @@ import           Data.Void
 import           Data.Typeable
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
-import qualified Data.Map.Strict               as Map
+import qualified Data.HashMap.Strict           as Map
 
 import           Text.Megaparsec         hiding ( State )
 
@@ -21,7 +21,7 @@ type Precedence = Int
 
 -- use such a dict as the parsing state, to implement
 -- object-language-declarable operator precendence
-type OpPrecDict = Map.Map OpSymbol (Precedence, Text)
+type OpPrecDict = Map.HashMap OpSymbol (Precedence, Text)
 
 -- no backtracking needed for precedence dict, so it
 -- can live in the inner monad of 'ParsecT'.

@@ -29,14 +29,11 @@ import           Control.Monad.Except
 import           Control.Concurrent
 import           Control.Concurrent.STM
 
-import           Foreign.C.String
-import           Foreign.Marshal.Alloc
-import           System.Mem.Weak
-
+import           Data.Unique
 import           Data.Text.IO
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
-import qualified Data.Map.Strict               as Map
+import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 
 import           Language.Edh.Control
@@ -115,9 +112,13 @@ createEdhWorld !logger = liftIO $ do
     ]
   -- methods supporting reflected scope manipulation go into this
   scopeManiMethods <- newTVarIO Map.empty
+  rootUniq         <- newUnique
   rootSupers       <- newTVarIO []
+  moduClassUniq    <- newUnique
+  scopeClassUniq   <- newUnique
   let
-    !moduClassProc = ProcDecl { procedure'name = "<module>"
+    !moduClassProc = ProcDecl { procedure'uniq = moduClassUniq
+                              , procedure'name = "<module>"
                               , procedure'args = WildReceiver
                               , procedure'body = voidStatement
                               }
@@ -125,11 +126,13 @@ createEdhWorld !logger = liftIO $ do
     !moduClass  = Class { classLexiStack = worldScope :| []
                         , classProcedure = moduClassProc
                         }
-    !root = Object { objEntity = rootEntity
+    !root = Object { objIdent  = rootUniq
+                   , objEntity = rootEntity
                    , objClass  = moduClass
                    , objSupers = rootSupers
                    }
-    !scopeClassProc = ProcDecl { procedure'name = "<scope>"
+    !scopeClassProc = ProcDecl { procedure'uniq = scopeClassUniq
+                               , procedure'name = "<scope>"
                                , procedure'args = WildReceiver
                                , procedure'body = voidStatement
                                }
@@ -145,10 +148,12 @@ createEdhWorld !logger = liftIO $ do
   runtime <- newTMVarIO EdhRuntime { runtimeLogger   = logger
                                    , runtimeLogLevel = 20
                                    }
+  ssUniq <- newUnique
   return $ EdhWorld
     { worldRoot      = root
     , moduleClass    = moduClass
-    , scopeSuper     = Object { objEntity = scopeManiMethods
+    , scopeSuper     = Object { objIdent  = ssUniq
+                              , objEntity = scopeManiMethods
                               , objClass  = scopeClass
                               , objSupers = rootSupers
                               }
@@ -210,11 +215,12 @@ declareEdhOperators world declLoc opps = do
 
 mkHostProc
   :: (HostProcedure -> EdhValue) -> Text -> EdhProcedure -> STM EdhValue
-mkHostProc !vc !d !p = do
-  !s <- unsafeIOToSTM $ newCString $ T.unpack d
-  let !hp = HostProcedure { hostProc'name = s, hostProc'proc = p }
-  unsafeIOToSTM $ addFinalizer hp $ free s
-  return $ vc hp
+mkHostProc !vc !n !p = do
+  !u <- unsafeIOToSTM $ newUnique
+  return $ vc $ HostProcedure { hostProc'uniq = u
+                              , hostProc'name = n
+                              , hostProc'proc = p
+                              }
 
 mkHostOper :: EdhWorld -> OpSymbol -> EdhProcedure -> STM EdhValue
 mkHostOper world opSym proc =
@@ -225,10 +231,8 @@ mkHostOper world opSym proc =
         $  "No precedence declared in the world for operator: "
         <> opSym
     Just (prec, _) -> do
-      !s <- unsafeIOToSTM $ newCString $ T.unpack opSym
-      let !hp = HostProcedure s proc
-      unsafeIOToSTM $ addFinalizer hp $ free s
-      return $ EdhHostOper prec hp
+      !u <- unsafeIOToSTM newUnique
+      return $ EdhHostOper prec $ HostProcedure u opSym proc
 
 
 installEdhAttrs :: Entity -> [(AttrKey, EdhValue)] -> STM ()

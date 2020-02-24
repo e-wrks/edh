@@ -10,7 +10,7 @@ import           Control.Concurrent.STM
 
 import qualified Data.Text                     as T
 
-import qualified Data.Map.Strict               as Map
+import qualified Data.HashMap.Strict           as Map
 
 import           Language.Edh.Control
 import           Language.Edh.Runtime
@@ -28,21 +28,8 @@ assignProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
           evalExpr tgtExpr $ \(OriginalValue !tgtVal _ _) -> case tgtVal of
 
             -- indexing assign to a dict
-            EdhDict (Dict d) -> contEdhSTM $ do
-              ixKey <- case ixVal of
-                EdhString  s -> return $ ItemByStr s
-                EdhSymbol  s -> return $ ItemBySym s
-                EdhDecimal n -> return $ ItemByNum n
-                EdhBool    b -> return $ ItemByBool b
-                EdhType    t -> return $ ItemByType t
-                EdhClass   c -> return $ ItemByClass c
-                _ ->
-                  throwEdhSTM pgs EvalError
-                    $  "Invalid dict key: "
-                    <> T.pack (show $ edhTypeOf ixVal)
-                    <> ": "
-                    <> T.pack (show ixVal)
-              modifyTVar' d $ setDictItem ixKey rhVal
+            EdhDict (Dict _ !d) -> contEdhSTM $ do
+              modifyTVar' d $ setDictItem ixVal rhVal
               exitEdhSTM pgs exit rhVal
 
             -- indexing assign to an object, by calling its ([=]) method with ixVal and rhVal

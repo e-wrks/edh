@@ -11,7 +11,7 @@ import           Control.Monad.Reader
 import           Control.Concurrent
 import           Control.Concurrent.STM
 
-import qualified Data.Map.Strict               as Map
+import qualified Data.HashMap.Strict           as Map
 
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes

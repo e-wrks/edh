@@ -4,13 +4,14 @@ module Language.Edh.Details.Utils where
 
 import           Prelude
 
-import qualified Data.Map.Strict               as Map
+import           Data.Hashable
+import qualified Data.HashMap.Strict           as Map
 
 
 -- TODO seek more optimal method for this
-takeOutFromMap :: Ord k => k -> Map.Map k a -> (Maybe a, Map.Map k a)
-takeOutFromMap k m = (p, Map.union left right)
-  where (left, p, right) = Map.splitLookup k m
+takeOutFromMap
+  :: (Eq k, Hashable k) => k -> Map.HashMap k a -> (Maybe a, Map.HashMap k a)
+takeOutFromMap k m = (Map.lookup k m, Map.delete k m)
 
 
 takeOutFromList :: forall a . (a -> Bool) -> [a] -> (Maybe a, [a])

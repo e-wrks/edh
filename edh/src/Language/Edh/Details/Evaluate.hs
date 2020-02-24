@@ -6,6 +6,7 @@ import           Prelude
 -- import           Debug.Trace
 
 import           GHC.Conc                       ( unsafeIOToSTM )
+import           System.IO.Unsafe
 
 import           Control.Exception
 import           Control.Monad.Except
@@ -13,13 +14,14 @@ import           Control.Monad.Reader
 import           Control.Monad.State.Strict
 import           Control.Concurrent.STM
 
+import           Data.Unique
 import           Data.Maybe
 import qualified Data.ByteString               as B
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import           Data.Text.Encoding
 import           Data.Text.Encoding.Error
-import qualified Data.Map.Strict               as Map
+import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..)
                                                 , (<|)
                                                 )
@@ -277,7 +279,7 @@ evalStmt' !stmt !exit = do
             <> ": "
             <> T.pack (show superVal)
 
-    ClassStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
+    ClassStmt pd@(ProcDecl _ name _ _) -> contEdhSTM $ do
       let
         !cls =
           EdhClass $ Class { classLexiStack = call'stack, classProcedure = pd }
@@ -286,7 +288,7 @@ evalStmt' !stmt !exit = do
         cls
       exitEdhSTM pgs exit cls
 
-    MethodStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
+    MethodStmt pd@(ProcDecl _ name _ _) -> contEdhSTM $ do
       let
         mth = EdhMethod
           $ Method { methodLexiStack = call'stack, methodProcedure = pd }
@@ -295,7 +297,7 @@ evalStmt' !stmt !exit = do
         mth
       exitEdhSTM pgs exit mth
 
-    GeneratorStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
+    GeneratorStmt pd@(ProcDecl _ name _ _) -> contEdhSTM $ do
       let gdf = EdhGenrDef $ GenrDef { generatorLexiStack = call'stack
                                      , generatorProcedure = pd
                                      }
@@ -304,7 +306,7 @@ evalStmt' !stmt !exit = do
         gdf
       exitEdhSTM pgs exit gdf
 
-    InterpreterStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
+    InterpreterStmt pd@(ProcDecl _ name _ _) -> contEdhSTM $ do
       let mth = EdhInterpreter $ Interpreter
             { interpreterLexiStack = call'stack
             , interpreterProcedure = pd
@@ -314,7 +316,7 @@ evalStmt' !stmt !exit = do
         mth
       exitEdhSTM pgs exit mth
 
-    OpDeclStmt opSym opPrec opProc@(ProcDecl _ _ (StmtSrc (_, body'stmt))) ->
+    OpDeclStmt opSym opPrec opProc@(ProcDecl _ _ _ (StmtSrc (_, body'stmt))) ->
       case body'stmt of
         -- support re-declaring an existing operator to another name,
         -- with possibly a different precedence
@@ -411,7 +413,7 @@ importFromObject !argsRcvr !fromObj !exit = do
       !scope = contextScope ctx
   contEdhSTM $ do
     emImp <- readTVar $ objEntity fromObj
-    let !artsPk = ArgsPack [] $ Map.fromAscList $ catMaybes
+    let !artsPk = ArgsPack [] $ Map.fromList $ catMaybes
           [ (case k of
 -- only attributes with a name not started with `_` are importable,
 -- and all symbol values are not importable however named
@@ -422,7 +424,7 @@ importFromObject !argsRcvr !fromObj !exit = do
 -- symbolic attributes are not importable, thus private to a module/object
               _ -> Nothing
             )
-          | (k, v) <- Map.toAscList emImp
+          | (k, v) <- Map.toList emImp
           ]
     runEdhProg pgs $ recvEdhArgs ctx argsRcvr artsPk $ \ent -> contEdhSTM $ do
       em <- readTVar ent
@@ -525,7 +527,9 @@ loadModule !pgs !moduSlot !moduId !moduFile !exit = if edh'in'tx pgs
                           , (AttrByName "__file__", EdhString $ T.pack moduFile)
                           ]
                         !moduSupers <- newTVar []
-                        let !modu = Object { objEntity = moduEntity
+                        u           <- unsafeIOToSTM newUnique
+                        let !modu = Object { objIdent  = u
+                                           , objEntity = moduEntity
                                            , objClass  = moduleClass world
                                            , objSupers = moduSupers
                                            }
@@ -657,20 +661,7 @@ evalExpr expr exit = do
         $ \(OriginalValue !tv _ _) -> case tv of
             EdhTuple l -> contEdhSTM $ do
               dpl <- forM l $ \case
-                EdhPair kVal vVal -> (, vVal) <$> case kVal of
-                  EdhString  k -> return $ ItemByStr k
-                  EdhSymbol  k -> return $ ItemBySym k
-                  EdhDecimal k -> return $ ItemByNum k
-                  EdhBool    k -> return $ ItemByBool k
-                  EdhType    k -> return $ ItemByType k
-                  EdhClass   k -> return $ ItemByClass k
-                  k ->
-                    throwEdhSTM pgs EvalError
-                      $  "Invalid dict key "
-                      <> T.pack (show $ edhTypeOf k)
-                      <> ": "
-                      <> T.pack (show k)
-                      <> " ❌"
+                EdhPair kVal vVal -> return (kVal, vVal)
                 pv ->
                   throwEdhSTM pgs EvalError
                     $  "Invalid dict entry "
@@ -679,7 +670,8 @@ evalExpr expr exit = do
                     <> T.pack (show pv)
                     <> " ❌"
               ds <- newTVar $ Map.fromList dpl
-              exitEdhSTM pgs exit (EdhDict (Dict ds))
+              u  <- unsafeIOToSTM newUnique
+              exitEdhSTM pgs exit (EdhDict (Dict u ds))
             _ -> error "bug"
 
     ListExpr xs -> -- make sure list values are evaluated in same tx
@@ -687,8 +679,9 @@ evalExpr expr exit = do
         $ evalExprs xs
         $ \(OriginalValue !tv _ _) -> case tv of
             EdhTuple l -> contEdhSTM $ do
-              ll <- List <$> newTVar l
-              exitEdhSTM pgs exit (EdhList ll)
+              ll <- newTVar l
+              u  <- unsafeIOToSTM newUnique
+              exitEdhSTM pgs exit (EdhList $ List u ll)
             _ -> error "bug"
 
     TupleExpr xs -> -- make sure tuple values are evaluated in same tx
@@ -764,22 +757,9 @@ evalExpr expr exit = do
         evalExpr tgtExpr $ \(OriginalValue !tgtVal _ _) -> case tgtVal of
 
         -- indexing a dict
-          (EdhDict (Dict d)) -> contEdhSTM $ do
-            ixKey <- case ixVal of
-              EdhString  s -> return $ ItemByStr s
-              EdhSymbol  s -> return $ ItemBySym s
-              EdhDecimal n -> return $ ItemByNum n
-              EdhBool    b -> return $ ItemByBool b
-              EdhType    t -> return $ ItemByType t
-              EdhClass   c -> return $ ItemByClass c
-              _ ->
-                throwEdhSTM pgs EvalError
-                  $  "Invalid dict key: "
-                  <> T.pack (show $ edhTypeOf ixVal)
-                  <> ": "
-                  <> T.pack (show ixVal)
+          (EdhDict (Dict _ !d)) -> contEdhSTM $ do
             ds <- readTVar d
-            case Map.lookup ixKey ds of
+            case Map.lookup ixVal ds of
               Nothing  -> exitEdhSTM pgs exit nil
               Just val -> exitEdhSTM pgs exit val
 
@@ -834,7 +814,7 @@ evalExpr expr exit = do
         Just (OriginalValue !opVal _ !op'that) -> case opVal of
 
           -- calling a host operator
-          (EdhHostOper _ (HostProcedure _ !proc)) ->
+          (EdhHostOper _ (HostProcedure _ _ !proc)) ->
             -- insert a cycle tick here, so if no tx required for the call
             -- overall, the op resolution tx stops here then the op
             -- runs in next stm transaction
@@ -842,7 +822,7 @@ evalExpr expr exit = do
               $ \_ -> proc [SendPosArg lhExpr, SendPosArg rhExpr] exit
 
           -- calling an operator
-          (EdhOperator (Operator op'lexi'stack op'proc@(ProcDecl _ op'args op'body) op'pred _))
+          (EdhOperator (Operator op'lexi'stack op'proc@(ProcDecl _ _ op'args op'body) op'pred _))
             -> case op'args of
               -- 2 pos-args - simple lh/rh value receiving operator
               (PackReceiver [RecvArg lhName Nothing Nothing, RecvArg rhName Nothing Nothing])
@@ -896,12 +876,14 @@ evalExpr expr exit = do
               (PackReceiver [RecvArg scopeName Nothing Nothing, RecvArg lhName Nothing Nothing, RecvArg rhName Nothing Nothing])
                 -> do
                   scopeWrapper <- mkScopeWrapper world scope
+                  lhu          <- unsafeIOToSTM newUnique
+                  rhu          <- unsafeIOToSTM newUnique
                   opEnt        <-
                     newTVar
                     $  Map.fromList
                     $  [ (AttrByName scopeName, EdhObject scopeWrapper)
-                       , (AttrByName lhName   , EdhExpr lhExpr)
-                       , (AttrByName rhName   , EdhExpr rhExpr)
+                       , (AttrByName lhName   , EdhExpr lhu lhExpr)
+                       , (AttrByName rhName   , EdhExpr rhu rhExpr)
                        ]
                     ++ case op'pred of
                         -- put the overridden (predecessor) operator in the overriding
@@ -954,7 +936,7 @@ evalExpr expr exit = do
 
 
 validateOperDecl :: EdhProgState -> ProcDecl -> STM ()
-validateOperDecl !pgs (ProcDecl _ !op'args _) = case op'args of
+validateOperDecl !pgs (ProcDecl _ _ !op'args _) = case op'args of
   -- 2 pos-args - simple lh/rh value receiving operator
   (PackReceiver [RecvArg _lhName Nothing Nothing, RecvArg _rhName Nothing Nothing])
     -> return ()
@@ -1166,11 +1148,11 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
   case callee'val of
 
     -- calling a host procedure
-    (EdhHostProc (HostProcedure proc'name proc)) -> do
-      procDecl <- hostProcDecl proc'name
-      callMaker $ \exit -> do
-      -- a host procedure runs against its caller's scope, with
-      -- 'thatObject' changed to the resolution target object
+    (EdhHostProc hp@(HostProcedure _ _ proc)) -> callMaker $ \exit ->
+      contEdhSTM $ do
+        procDecl <- hostProcDecl hp
+        -- a host procedure runs against its caller's scope, with
+        -- 'thatObject' changed to the resolution target object
         let !calleeScope =
               callerScope { thatObject = callee'that, scopeProc = procDecl }
             !calleeCtx = callerCtx
@@ -1180,14 +1162,13 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
               , contextStmt     = voidStatement
               }
             !pgsCallee = pgsCaller { edh'context = calleeCtx }
-        contEdhSTM
-          -- insert a cycle tick here, so if no tx required for the call
-          -- overall, the callee resolution tx stops here then the callee
-          -- runs in next stm transaction
-          $ flip (exitEdhSTM' pgsCallee) (wuji pgsCallee)
-          $ \_ -> proc argsSndr $ \OriginalValue {..} ->
-              -- return the result in CPS with caller pgs restored
-              contEdhSTM $ exitEdhSTM pgsCaller exit valueFromOrigin
+        -- insert a cycle tick here, so if no tx required for the call
+        -- overall, the callee resolution tx stops here then the callee
+        -- runs in next stm transaction
+        flip (exitEdhSTM' pgsCallee) (wuji pgsCallee) $ \_ ->
+          proc argsSndr $ \OriginalValue {..} ->
+            -- return the result in CPS with caller pgs restored
+            contEdhSTM $ exitEdhSTM pgsCaller exit valueFromOrigin
 
     -- calling a class (constructor) procedure
     (EdhClass cls) ->
@@ -1243,7 +1224,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
 
 
 constructEdhObject :: ArgsPack -> Class -> EdhProcExit -> EdhProg (STM ())
-constructEdhObject !apk cls@(Class !cls'lexi'stack clsProc@(ProcDecl _ !ctor'args !ctor'body)) !exit
+constructEdhObject !apk cls@(Class !cls'lexi'stack clsProc@(ProcDecl _ _ !ctor'args !ctor'body)) !exit
   = do
     pgs <- ask
     let !callerCtx   = edh'context pgs
@@ -1296,7 +1277,7 @@ callEdhMethod
   -> Maybe EdhGenrCaller
   -> EdhProcExit
   -> EdhProg (STM ())
-callEdhMethod !apk !callee'that !mth'lexi'stack mth'proc@(ProcDecl _ !mth'args !mth'body) !gnr'caller !exit
+callEdhMethod !apk !callee'that !mth'lexi'stack mth'proc@(ProcDecl _ _ !mth'args !mth'body) !gnr'caller !exit
   = do
     !pgs <- ask
     let !callerCtx   = edh'context pgs
@@ -1393,33 +1374,33 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
               case callee'val of
 
                 -- calling a host generator
-                (EdhHostGenr (HostProcedure proc'name proc)) -> contEdhSTM $ do
-                  procDecl <- hostProcDecl proc'name
-                  forLooper $ \exit -> do
+                (EdhHostGenr hp@(HostProcedure _ _ proc)) ->
+                  contEdhSTM $ forLooper $ \exit -> do
                     pgs <- ask
                     let !ctx   = edh'context pgs
                         !scope = contextScope ctx
-                    -- a host procedure runs against its caller's scope, with
-                    -- 'thatObject' changed to the resolution target object
-                    let
-                      !calleeScope =
-                        scope { thatObject = callee'that, scopeProc = procDecl }
-                      !calleeCtx = ctx
-                        { callStack       = calleeScope <| callStack ctx
-                        , generatorCaller = Just (pgs, recvYield exit)
-                        , contextMatch    = true
-                        , contextStmt     = voidStatement
-                        }
-                      !pgsCallee = pgs { edh'context = calleeCtx }
-                    contEdhSTM
+                    contEdhSTM $ do
+                      procDecl <- hostProcDecl hp
+                      -- a host procedure runs against its caller's scope, with
+                      -- 'thatObject' changed to the resolution target object
+                      let
+                        !calleeScope = scope { thatObject = callee'that
+                                             , scopeProc  = procDecl
+                                             }
+                        !calleeCtx = ctx
+                          { callStack       = calleeScope <| callStack ctx
+                          , generatorCaller = Just (pgs, recvYield exit)
+                          , contextMatch    = true
+                          , contextStmt     = voidStatement
+                          }
+                        !pgsCallee = pgs { edh'context = calleeCtx }
                       -- insert a cycle tick here, so if no tx required for the call
                       -- overall, the callee resolution tx stops here then the callee
                       -- runs in next stm transaction
-                      $ flip (exitEdhSTM' pgsCallee) (wuji pgsCallee)
-                      $ \_ -> proc argsSndr $ \OriginalValue {..} ->
-                          contEdhSTM
-                                -- return the result in CPS with caller pgs restored
-                                     $ exitEdhSTM pgs exit valueFromOrigin
+                      flip (exitEdhSTM' pgsCallee) (wuji pgsCallee) $ \_ ->
+                        proc argsSndr $ \OriginalValue {..} ->
+                          -- return the result in CPS with caller pgs restored
+                          contEdhSTM $ exitEdhSTM pgs exit valueFromOrigin
 
                 -- calling a generator
                 (EdhGenrDef (GenrDef !gnr'lexi'stack !gnr'proc)) ->
@@ -1521,7 +1502,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                 ]
 
               -- loop from a list
-              (EdhList (List l)) -> do
+              (EdhList (List _ !l)) -> do
                 ll <- readTVar l
                 iterThem
                   [ case val of
@@ -1531,13 +1512,11 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                   ]
 
               -- loop from a dict
-              (EdhDict (Dict d)) -> do
+              (EdhDict (Dict _ !d)) -> do
                 ds <- readTVar d
-                iterThem -- don't be tempted to yield pairs from a dict here,
-                    -- it'll be messy if some entry values are themselves pairs
-                  [ ArgsPack [itemKeyValue k, v] Map.empty
-                  | (k, v) <- Map.toList ds
-                  ]
+                -- don't be tempted to yield pairs from a dict here,
+                -- it'll be messy if some entry values are themselves pairs
+                iterThem [ ArgsPack [k, v] Map.empty | (k, v) <- Map.toList ds ]
 
               _ ->
                 throwEdhSTM pgsLooper EvalError
@@ -1729,7 +1708,7 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
       resolveArgValue
         :: AttrName
         -> Maybe Expr
-        -> STM (EdhValue, [EdhValue], Map.Map AttrName EdhValue)
+        -> STM (EdhValue, [EdhValue], Map.HashMap AttrName EdhValue)
       resolveArgValue argName argDefault = do
         let (inKwArgs, kwArgs'') = takeOutFromMap argName kwArgs'
         case inKwArgs of
@@ -1781,7 +1760,10 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
       (apk', em) <- recvFromPack (apk, Map.empty) argRcvr
       woResidual apk' em >>= doReturn
     WildReceiver -> contEdhSTM $ if null posArgs
-      then newTVar (Map.mapKeys AttrByName kwArgs) >>= doReturn
+      then
+        newTVar
+            (Map.fromList [ (AttrByName k, v) | (k, v) <- Map.toList kwArgs ])
+          >>= doReturn
       else
         throwEdhSTM pgsRecv EvalError
         $  "Unexpected "
@@ -1813,9 +1795,13 @@ packEdhExprs (x : xs) !exit = case x of
   UnpackKwArgs _ -> throwEdh EvalError "unpack to expr not supported yet"
   UnpackPkArgs _ -> throwEdh EvalError "unpack to expr not supported yet"
   SendPosArg !argExpr -> packEdhExprs xs $ \(ArgsPack !posArgs !kwArgs) ->
-    exit (ArgsPack (EdhExpr argExpr : posArgs) kwArgs)
+    exit
+      (ArgsPack (EdhExpr (unsafePerformIO newUnique) argExpr : posArgs) kwArgs)
   SendKwArg !kw !argExpr -> packEdhExprs xs $ \(ArgsPack !posArgs !kwArgs) ->
-    exit (ArgsPack posArgs $ Map.insert kw (EdhExpr argExpr) kwArgs)
+    exit
+      ( ArgsPack posArgs
+      $ Map.insert kw (EdhExpr (unsafePerformIO newUnique) argExpr) kwArgs
+      )
 
 
 packEdhArgs
@@ -1844,7 +1830,7 @@ packEdhArgs' (x : xs) !exit = do
             <> T.pack (show k)
       dictKey2Kw :: ItemKey -> STM AttrName
       dictKey2Kw = \case
-        ItemByStr !name -> return name
+        EdhString !name -> return name
         k ->
           throwEdhSTM pgs EvalError
             $  "Invalid argument keyword from dict key: "
@@ -1859,7 +1845,7 @@ packEdhArgs' (x : xs) !exit = do
           exit (ArgsPack (posArgs ++ [k, v]) kwArgs)
         (EdhTuple !l) -> packEdhArgs' xs $ \(ArgsPack !posArgs !kwArgs) ->
           exit (ArgsPack (posArgs ++ l) kwArgs)
-        (EdhList (List !l)) ->
+        (EdhList (List _ !l)) ->
           packEdhArgs' xs $ \(ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
             ll <- readTVar l
             runEdhProg pgs $ exit (ArgsPack (posArgs ++ ll) kwArgs)
@@ -1878,12 +1864,12 @@ packEdhArgs' (x : xs) !exit = do
           (ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
             kw <- edhVal2Kw k
             runEdhProg pgs $ exit (ArgsPack posArgs $ Map.insert kw v kwArgs)
-        (EdhDict (Dict !ds)) -> packEdhArgs' xs $ \case
+        (EdhDict (Dict _ !ds)) -> packEdhArgs' xs $ \case
           (ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
             dm  <- readTVar ds
-            kvl <- forM (Map.toAscList dm) $ \(k, v) -> (, v) <$> dictKey2Kw k
-            runEdhProg pgs $ exit
-              (ArgsPack posArgs $ Map.union kwArgs $ Map.fromAscList kvl)
+            kvl <- forM (Map.toList dm) $ \(k, v) -> (, v) <$> dictKey2Kw k
+            runEdhProg pgs
+              $ exit (ArgsPack posArgs $ Map.union kwArgs $ Map.fromList kvl)
         _ ->
           throwEdh EvalError
             $  "Can not unpack kwargs from a "

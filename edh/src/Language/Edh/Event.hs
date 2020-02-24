@@ -3,9 +3,13 @@ module Language.Edh.Event where
 
 import           Prelude
 
+import           GHC.Conc                       ( unsafeIOToSTM )
+
 import           Control.Monad
 
 import           Control.Concurrent.STM
+
+import           Data.Unique
 
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
@@ -14,11 +18,13 @@ import           Language.Edh.Details.RtTypes
 -- | create a new event sink
 newEventSink :: STM EventSink
 newEventSink = do
+  u    <- unsafeIOToSTM newUnique
   seqn <- newTVar 0
   mrv  <- newTVar nil
   chan <- newBroadcastTChan
   subc <- newTVar 0
-  return EventSink { evs'seqn = seqn
+  return EventSink { evs'uniq = u
+                   , evs'seqn = seqn
                    , evs'mrv  = mrv
                    , evs'chan = chan
                    , evs'subc = subc
@@ -33,7 +39,7 @@ newEventSink = do
 -- CAVEAT: should not by other means be dup'ing the broadcast channel,
 --         to obtain a subscriber's channel.
 subscribeEvents :: EventSink -> STM (TChan EdhValue, Maybe EdhValue)
-subscribeEvents (EventSink !seqn !mrv !bcc !subc) = do
+subscribeEvents (EventSink _ !seqn !mrv !bcc !subc) = do
   subChan <- dupTChan bcc
   modifyTVar' subc $ \oldSubc ->
     let newSubc = oldSubc + 1
@@ -60,7 +66,7 @@ subscribeEvents (EventSink !seqn !mrv !bcc !subc) = do
 -- `producerAction` won't be triggered until at least one new consumer subscribed
 -- to the event sink.
 setoffEvents :: EdhProgState -> EventSink -> STM () -> STM () -> STM ()
-setoffEvents !pgs (EventSink _ _ _ !subc) !consumerSetup !producerAction =
+setoffEvents !pgs (EventSink _ _ _ _ !subc) !consumerSetup !producerAction =
   if edh'in'tx pgs
     then throwEdhSTM pgs
                      EvalError
@@ -99,7 +105,7 @@ setoffEvents !pgs (EventSink _ _ _ !subc) !consumerSetup !producerAction =
 --         will suffer overflow problem if the event sink is reused and run some
 --         time long enough.
 setoffEvents' :: EdhProgState -> EventSink -> Int -> STM () -> STM () -> STM ()
-setoffEvents' !pgs (EventSink _ _ _ !subc) !minConsumers !consumerSetup !producerAction
+setoffEvents' !pgs (EventSink _ _ _ _ !subc) !minConsumers !consumerSetup !producerAction
   = if edh'in'tx pgs
     then throwEdhSTM pgs
                      EvalError
@@ -135,7 +141,7 @@ setoffEvents' !pgs (EventSink _ _ _ !subc) !minConsumers !consumerSetup !produce
 
 -- | publish (post) an event to a sink
 publishEvent :: EventSink -> EdhValue -> STM ()
-publishEvent (EventSink !seqn !mrv !chan _) val = do
+publishEvent (EventSink _ !seqn !mrv !chan _) val = do
   modifyTVar' seqn $ \oldSeq ->
     let newSeq = oldSeq + 1
     in  if newSeq <= 0

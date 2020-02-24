@@ -3,6 +3,8 @@ module Language.Edh.Parser where
 
 import           Prelude
 
+import           System.IO.Unsafe
+
 import           Control.Applicative     hiding ( many
                                                 , some
                                                 )
@@ -10,11 +12,12 @@ import           Control.Monad
 import           Control.Monad.State.Strict
 
 import           Data.Functor
+import           Data.Unique
 import qualified Data.Char                     as Char
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import           Data.Scientific
-import qualified Data.Map.Strict               as Map
+import qualified Data.HashMap.Strict           as Map
 
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
@@ -276,7 +279,7 @@ parseWhileStmt = do
   liftA2 WhileStmt parseExpr parseStmt
 
 parseProcDecl :: Parser ProcDecl
-parseProcDecl = liftA3 ProcDecl
+parseProcDecl = liftA3 (ProcDecl (unsafePerformIO newUnique))
                        (parseMagicProcName <|> parseAlphaName)
                        parseArgsReceiver
                        parseStmt
@@ -302,7 +305,7 @@ parseOpDeclOvrdStmt = do
   --  * 3 pos-args - caller scope + lh/rh expr receiving operator
   argRcvr   <- parseArgsReceiver
   body      <- parseStmt
-  let procDecl = ProcDecl opSym argRcvr body
+  let procDecl = ProcDecl (unsafePerformIO newUnique) opSym argRcvr body
   opPD <- get
   case precDecl of
     Nothing -> case Map.lookup opSym opPD of

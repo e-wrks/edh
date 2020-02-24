@@ -4,11 +4,14 @@ module Language.Edh.Batteries.Data where
 import           Prelude
 -- import           Debug.Trace
 
+import           GHC.Conc                       ( unsafeIOToSTM )
+
 import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
+import           Data.Unique
 import qualified Data.Text                     as T
-import qualified Data.Map.Strict               as Map
+import qualified Data.HashMap.Strict           as Map
 
 import           Text.Megaparsec
 
@@ -176,43 +179,22 @@ dictProc !argsSender !exit = do
   !pgs <- ask
   packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) ->
     let !kwDict =
-            Map.fromAscList $ (<$> Map.toAscList kwargs) $ \(attrName, val) ->
-              (ItemByStr attrName, val)
+            Map.fromList $ (<$> Map.toList kwargs) $ \(attrName, val) ->
+              (EdhString attrName, val)
     in  contEdhSTM $ do
-          d <- newTVar $ Map.union kwDict $ Map.fromAscList
-            [ (ItemByNum (fromIntegral i), t)
+          u <- unsafeIOToSTM newUnique
+          d <- newTVar $ Map.union kwDict $ Map.fromList
+            [ (EdhDecimal (fromIntegral i), t)
             | (i, t) <- zip [(0 :: Int) ..] args
             ]
-          exitEdhSTM pgs exit (EdhDict (Dict d))
+          exitEdhSTM pgs exit (EdhDict (Dict u d))
 
-
-val2DictKey :: EdhProgState -> EdhValue -> STM ItemKey
-val2DictKey _ (EdhString  s) = return $ ItemByStr s
-val2DictKey _ (EdhSymbol  s) = return $ ItemBySym s
-val2DictKey _ (EdhDecimal n) = return $ ItemByNum n
-val2DictKey _ (EdhBool    b) = return $ ItemByBool b
-val2DictKey _ (EdhType    t) = return $ ItemByType t
-val2DictKey _ (EdhClass   c) = return $ ItemByClass c
-val2DictKey !pgs k =
-  throwEdhSTM pgs EvalError
-    $  "Invalid key for dict - "
-    <> T.pack (show $ edhTypeOf k)
-    <> ": "
-    <> T.pack (show k)
 
 val2DictEntry :: EdhProgState -> EdhValue -> STM (ItemKey, EdhValue)
-val2DictEntry !pgs (EdhPair !k !v) =
-  val2DictKey pgs k >>= \key -> return (key, v)
-val2DictEntry !pgs (EdhArgsPack (ArgsPack [!k, !v] !kwargs)) | Map.null kwargs =
-  val2DictKey pgs k >>= \key -> return (key, v)
-val2DictEntry _ (EdhTuple [EdhString  s, v]) = return (ItemByStr s, v)
-val2DictEntry _ (EdhTuple [EdhSymbol  s, v]) = return (ItemBySym s, v)
-val2DictEntry _ (EdhTuple [EdhDecimal n, v]) = return (ItemByNum n, v)
-val2DictEntry _ (EdhTuple [EdhBool    b, v]) = return (ItemByBool b, v)
-val2DictEntry _ (EdhTuple [EdhType    t, v]) = return (ItemByType t, v)
-val2DictEntry _ (EdhTuple [EdhClass   c, v]) = return (ItemByClass c, v)
-val2DictEntry !pgs (EdhTuple [!k, v]) =
-  val2DictKey pgs k >>= \key -> return (key, v)
+val2DictEntry _ (EdhPair !k !v    ) = return (k, v)
+val2DictEntry _ (EdhTuple [!k, !v]) = return (k, v)
+val2DictEntry _ (EdhArgsPack (ArgsPack [!k, !v] !kwargs)) | Map.null kwargs =
+  return (k, v)
 val2DictEntry !pgs !val =
   throwEdhSTM pgs EvalError
     $  "Invalid entry for dict "
@@ -227,14 +209,13 @@ elemProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
-      EdhTuple vs       -> exitEdhProc exit (EdhBool $ lhVal `elem` vs)
-      EdhList  (List l) -> contEdhSTM $ do
+      EdhTuple vs          -> exitEdhProc exit (EdhBool $ lhVal `elem` vs)
+      EdhList  (List _ !l) -> contEdhSTM $ do
         ll <- readTVar l
         exitEdhSTM pgs exit $ EdhBool $ lhVal `elem` ll
-      EdhDict (Dict d) -> contEdhSTM $ do
-        k  <- val2DictKey pgs lhVal
+      EdhDict (Dict _ !d) -> contEdhSTM $ do
         ds <- readTVar d
-        exitEdhSTM pgs exit $ EdhBool $ case Map.lookup k ds of
+        exitEdhSTM pgs exit $ EdhBool $ case Map.lookup lhVal ds of
           Nothing -> False
           Just _  -> True
       _ ->
@@ -252,11 +233,11 @@ prpdProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
-      EdhTuple vs       -> exitEdhProc exit (EdhTuple $ lhVal : vs)
-      EdhList  (List l) -> contEdhSTM $ do
+      EdhTuple vs          -> exitEdhProc exit (EdhTuple $ lhVal : vs)
+      EdhList  (List _ !l) -> contEdhSTM $ do
         modifyTVar' l (lhVal :)
         exitEdhSTM pgs exit rhVal
-      EdhDict (Dict d) -> contEdhSTM $ do
+      EdhDict (Dict _ !d) -> contEdhSTM $ do
         (k, v) <- val2DictEntry pgs lhVal
         modifyTVar' d (setDictItem k v)
         exitEdhSTM pgs exit rhVal
@@ -294,14 +275,14 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
   case rhExpr of
     ForExpr argsRcvr iterExpr doExpr ->
       evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
-        EdhList (List l) -> contEdhSTM $ edhForLoop
+        EdhList (List _ !l) -> contEdhSTM $ edhForLoop
           pgs
           argsRcvr
           iterExpr
           doExpr
           (\val -> modifyTVar' l (++ [val]))
           (\mkLoop -> runEdhProg pgs $ mkLoop $ \_ -> exitEdhProc exit lhVal)
-        EdhDict (Dict d) -> contEdhSTM $ edhForLoop
+        EdhDict (Dict _ !d) -> contEdhSTM $ edhForLoop
           pgs
           argsRcvr
           iterExpr
@@ -329,11 +310,11 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
         EdhTuple vs -> case rhVal of
           EdhArgsPack (ArgsPack !args !kwargs) | Map.null kwargs ->
             exitEdhProc exit (EdhTuple $ vs ++ args)
-          EdhTuple vs'      -> exitEdhProc exit (EdhTuple $ vs ++ vs')
-          EdhList  (List l) -> contEdhSTM $ do
+          EdhTuple vs'         -> exitEdhProc exit (EdhTuple $ vs ++ vs')
+          EdhList  (List _ !l) -> contEdhSTM $ do
             ll <- readTVar l
             exitEdhSTM pgs exit (EdhTuple $ vs ++ ll)
-          EdhDict (Dict d) -> contEdhSTM $ do
+          EdhDict (Dict _ !d) -> contEdhSTM $ do
             ds <- readTVar d
             exitEdhSTM pgs exit (EdhTuple $ vs ++ toPairList ds)
           _ ->
@@ -342,7 +323,7 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
               <> T.pack (show $ edhTypeOf rhVal)
               <> ": "
               <> T.pack (show rhVal)
-        EdhList (List l) -> case rhVal of
+        EdhList (List _ !l) -> case rhVal of
           EdhArgsPack (ArgsPack !args !kwargs) | Map.null kwargs ->
             contEdhSTM $ do
               modifyTVar' l (++ args)
@@ -350,11 +331,11 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
           EdhTuple vs -> contEdhSTM $ do
             modifyTVar' l (++ vs)
             exitEdhSTM pgs exit lhVal
-          EdhList (List l') -> contEdhSTM $ do
+          EdhList (List _ !l') -> contEdhSTM $ do
             ll <- readTVar l'
             modifyTVar' l (++ ll)
             exitEdhSTM pgs exit lhVal
-          EdhDict (Dict d) -> contEdhSTM $ do
+          EdhDict (Dict _ !d) -> contEdhSTM $ do
             ds <- readTVar d
             modifyTVar' l (++ (toPairList ds))
             exitEdhSTM pgs exit lhVal
@@ -364,7 +345,7 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
               <> T.pack (show $ edhTypeOf rhVal)
               <> ": "
               <> T.pack (show rhVal)
-        EdhDict (Dict d) -> case rhVal of
+        EdhDict (Dict _ !d) -> case rhVal of
           EdhArgsPack (ArgsPack !args !kwargs) | Map.null kwargs ->
             contEdhSTM $ do
               d' <- pvlToDict args
@@ -374,12 +355,12 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
             d' <- pvlToDict vs
             modifyTVar d $ Map.union d'
             exitEdhSTM pgs exit lhVal
-          EdhList (List l) -> contEdhSTM $ do
+          EdhList (List _ !l) -> contEdhSTM $ do
             ll <- readTVar l
             d' <- pvlToDict ll
             modifyTVar d $ Map.union d'
             exitEdhSTM pgs exit lhVal
-          EdhDict (Dict d') -> contEdhSTM $ do
+          EdhDict (Dict _ !d') -> contEdhSTM $ do
             ds <- readTVar d'
             modifyTVar d $ Map.union ds
             exitEdhSTM pgs exit lhVal

@@ -4,13 +4,17 @@ module Language.Edh.Batteries.Reflect where
 import           Prelude
 -- import           Debug.Trace
 
+import           System.IO.Unsafe
+import           GHC.Conc                       ( unsafeIOToSTM )
+
 import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
+import           Data.Unique
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
 import qualified Data.Text                     as T
-import qualified Data.Map.Strict               as Map
+import qualified Data.HashMap.Strict           as Map
 
 import           Language.Edh.Control
 import           Language.Edh.Runtime
@@ -96,14 +100,13 @@ scopeAttrsProc _ !exit = do
   contEdhSTM $ do
     em <- readTVar (scopeEntity wrappedScope)
     ad <-
-      newTVar
-      $ Map.fromAscList
-      $ [ (itemKeyOf ak, v) | (ak, v) <- Map.toAscList em ]
-    exitEdhSTM pgs exit $ EdhDict $ Dict ad
+      newTVar $ Map.fromList $ [ (itemKeyOf ak, v) | (ak, v) <- Map.toList em ]
+    u <- unsafeIOToSTM newUnique
+    exitEdhSTM pgs exit $ EdhDict $ Dict u ad
  where
   itemKeyOf :: AttrKey -> ItemKey
-  itemKeyOf (AttrByName name) = ItemByStr name
-  itemKeyOf (AttrBySym  sym ) = ItemBySym sym
+  itemKeyOf (AttrByName name) = EdhString name
+  itemKeyOf (AttrBySym  sym ) = EdhSymbol sym
 
 
 -- | utility scope.lexiLoc()
@@ -151,23 +154,20 @@ scopeEvalProc !argsSender !exit = do
     !scopeCallStack = NE.head (classLexiStack $ objClass that) :| []
     evalThePack
       :: [EdhValue]
-      -> Map.Map AttrName EdhValue
+      -> Map.HashMap AttrName EdhValue
       -> [EdhValue]
-      -> Map.Map AttrName EdhValue
+      -> [(AttrName, EdhValue)]
       -> EdhProg (STM ())
-    evalThePack !argsValues !kwargsValues [] !kwargsExprs
-      | Map.null kwargsExprs
-      = contEdhSTM
+    evalThePack !argsValues !kwargsValues [] [] =
+      contEdhSTM
         -- restore original program state and return the eval-ed values
         $ exitEdhSTM pgs exit
         $ case argsValues of
             [val] | null kwargsValues -> val
             _ -> EdhArgsPack $ ArgsPack (reverse argsValues) kwargsValues
-    evalThePack !argsValues !kwargsValues [] !kwargsExprs = do
-      let (!oneExpr, !kwargsExprs') = Map.splitAt 1 kwargsExprs
-          (!kw     , !kwExpr      ) = Map.elemAt 0 oneExpr
+    evalThePack !argsValues !kwargsValues [] (kwExpr : kwargsExprs') =
       case kwExpr of
-        EdhExpr !expr -> evalExpr expr $ \(OriginalValue !val _ _) ->
+        (!kw, EdhExpr _ !expr) -> evalExpr expr $ \(OriginalValue !val _ _) ->
           evalThePack argsValues
                       (Map.insert kw val kwargsValues)
                       []
@@ -175,7 +175,7 @@ scopeEvalProc !argsSender !exit = do
         v -> throwEdh EvalError $ "Not an expr: " <> T.pack (show v)
     evalThePack !argsValues !kwargsValues (!argExpr : argsExprs') !kwargsExprs
       = case argExpr of
-        EdhExpr !expr -> evalExpr expr $ \(OriginalValue !val _ _) ->
+        EdhExpr _ !expr -> evalExpr expr $ \(OriginalValue !val _ _) ->
           evalThePack (val : argsValues) kwargsValues argsExprs' kwargsExprs
         v -> throwEdh EvalError $ "Not an expr: " <> T.pack (show v)
   packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) ->
@@ -190,27 +190,30 @@ scopeEvalProc !argsSender !exit = do
                                       , contextStmt     = voidStatement
                                       }
             }
-        $ evalThePack [] Map.empty args kwargs
+        $ evalThePack [] Map.empty args
+        $ Map.toList kwargs
 
 
 -- | utility makeOp(lhExpr, opSym, rhExpr)
 makeOpProc :: EdhProcedure
-makeOpProc argsSender !exit =
-  packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) ->
-    if (not $ null kwargs)
-      then throwEdh EvalError "No kwargs accepted by makeOp"
-      else case args of
-        [(EdhExpr lhe), (EdhString op), (EdhExpr rhe)] ->
-          exitEdhProc exit (EdhExpr $ InfixExpr op lhe rhe)
-        _ -> throwEdh EvalError $ "Invalid arguments to makeOp: " <> T.pack
-          (show args)
+makeOpProc !argsSender !exit =
+  packEdhExprs argsSender $ \(ArgsPack args kwargs) -> if (not $ null kwargs)
+    then throwEdh EvalError "No kwargs accepted by makeOp"
+    else case args of
+      [(EdhExpr _ !lhe), EdhExpr _ (LitExpr (StringLiteral !op)), (EdhExpr _ !rhe)]
+        -> exitEdhProc
+          exit
+          (EdhExpr (unsafePerformIO newUnique) $ InfixExpr op lhe rhe)
+      _ -> throwEdh EvalError $ "Invalid arguments to makeOp: " <> T.pack
+        (show args)
 
 
 -- | utility expr(*args,**kwargs)
 makeExprProc :: EdhProcedure
 makeExprProc !argsSender !exit = case argsSender of
-  []                    -> exitEdhProc exit nil
-  [SendPosArg !argExpr] -> exitEdhProc exit (EdhExpr argExpr)
+  [] -> exitEdhProc exit nil
+  [SendPosArg !argExpr] ->
+    exitEdhProc exit (EdhExpr (unsafePerformIO newUnique) argExpr)
   argSenders ->
     packEdhExprs argSenders $ \apk -> exitEdhProc exit $ EdhArgsPack apk
 
