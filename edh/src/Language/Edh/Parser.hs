@@ -532,7 +532,6 @@ parseBlock =
            )
       , do
         ss <- parseStmt
-        unless mustBlock' $ notFollowedBy (symbol ":")
         parseBlockRest mustBlock' $ ss : t
       ]
 
