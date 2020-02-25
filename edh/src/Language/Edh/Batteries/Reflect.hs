@@ -95,10 +95,9 @@ scopeObtainProc _ !exit = do
 scopeAttrsProc :: EdhProcedure
 scopeAttrsProc _ !exit = do
   !pgs <- ask
-  let !that         = thatObject $ contextScope $ edh'context pgs
-      !wrappedScope = NE.head $ classLexiStack $ objClass that
+  let !that = thatObject $ contextScope $ edh'context pgs
   contEdhSTM $ do
-    em <- readTVar (scopeEntity wrappedScope)
+    em <- readTVar (entity'store $ scopeEntity $ wrappedScopeOf that)
     ad <-
       newTVar $ Map.fromList $ [ (itemKeyOf ak, v) | (ak, v) <- Map.toList em ]
     u <- unsafeIOToSTM newUnique
@@ -115,14 +114,7 @@ scopeLexiLocProc :: EdhProcedure
 scopeLexiLocProc _ !exit = do
   !pgs <- ask
   let !that = thatObject $ contextScope $ edh'context pgs
-      !scopesShown =
-        show
-          -- the world scope at bottom of any lexical stack has empty
-          -- lexical stack itself, and is of no interest
-          <$> (NE.takeWhile (not . null . lexiStack) $ classLexiStack $ objClass
-                that
-              )
-  exitEdhProc exit $ EdhString $ T.pack $ unlines $ reverse scopesShown
+  exitEdhProc exit $ EdhString $ T.pack $ show $ wrappedScopeOf that
 
 
 -- | utility scope.outer()
@@ -132,12 +124,9 @@ scopeOuterProc _ !exit = do
   !pgs <- ask
   let !ctx  = edh'context pgs
       !that = thatObject $ contextScope ctx
-  case NE.tail $ classLexiStack $ objClass that of
-    []          -> exitEdhProc exit nil
-    -- the world scope at bottom of any lexical stack has empty
-    -- lexical context itself, hiding it from Edh code.
-    (outer : _) | null $ lexiStack outer -> exitEdhProc exit nil
-    (outer : _) -> contEdhSTM $ do
+  case outerScopeOf $ wrappedScopeOf that of
+    Nothing     -> exitEdhProc exit nil
+    Just !outer -> contEdhSTM $ do
       wrappedObj <- mkScopeWrapper (contextWorld ctx) outer
       exitEdhSTM pgs exit $ EdhObject wrappedObj
 
@@ -151,7 +140,7 @@ scopeEvalProc !argsSender !exit = do
     !callerCtx      = edh'context pgs
     !that           = thatObject $ contextScope callerCtx
     -- eval all exprs with the original scope as the only scope in call stack
-    !scopeCallStack = NE.head (classLexiStack $ objClass that) :| []
+    !scopeCallStack = wrappedScopeOf that :| []
     evalThePack
       :: [EdhValue]
       -> Map.HashMap AttrName EdhValue

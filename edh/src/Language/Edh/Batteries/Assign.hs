@@ -39,11 +39,10 @@ assignProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                 Nothing ->
                   throwEdhSTM pgs EvalError $ "No ([=]) method from: " <> T.pack
                     (show obj)
-                Just (OriginalValue (EdhMethod (Method mth'lexi'stack mth'proc)) _ mth'that)
-                  -> runEdhProg pgs $ callEdhMethod
+                Just (OriginalValue (EdhMethod mth'proc) _ mth'that) ->
+                  runEdhProg pgs $ callEdhMethod
                     (ArgsPack [ixVal, rhVal] Map.empty)
                     mth'that
-                    mth'lexi'stack
                     mth'proc
                     Nothing
                     exit

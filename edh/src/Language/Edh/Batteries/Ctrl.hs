@@ -58,7 +58,8 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
           Just [] -> -- valid pattern, no match
             exitEdhProc exit EdhFallthrough
           Just mps -> contEdhSTM $ do -- pattern matched
-            modifyTVar' (scopeEntity callerScope) $ Map.union (Map.fromList mps)
+            modifyTVar' (entity'store $ scopeEntity callerScope)
+              $ Map.union (Map.fromList mps)
             runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
               exitEdhProc
                 exit
@@ -112,7 +113,7 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       [StmtSrc (_, ExprStmt (AttrExpr (DirectRef (NamedAttr attrName))))] ->
         contEdhSTM $ do
           when (attrName /= "_")
-            $ modifyTVar' (scopeEntity callerScope)
+            $ modifyTVar' (entity'store $ scopeEntity callerScope)
             $ Map.insert (AttrByName attrName) ctxMatch
           runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
             exitEdhProc
@@ -126,7 +127,7 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       [StmtSrc (_, ExprStmt (InfixExpr "=>" (AttrExpr (DirectRef (NamedAttr headName))) (AttrExpr (DirectRef (NamedAttr tailName)))))]
         -> let
              doMatched headVal tailVal = do
-               modifyTVar' (scopeEntity callerScope)
+               modifyTVar' (entity'store $ scopeEntity callerScope)
                  $ Map.union
                  $ Map.fromList
                      [ (AttrByName headName, headVal)
@@ -184,11 +185,13 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                 <> T.pack (show vPattern)
           case ctxMatch of
             EdhTuple vs | length vs == length vExprs -> do
-              modifyTVar' (scopeEntity callerScope) $ Map.union $ Map.fromList
-                [ (an, av)
-                | (an@(AttrByName nm), av) <- zip attrNames vs
-                , nm /= "_"
-                ]
+              modifyTVar' (entity'store $ scopeEntity callerScope)
+                $ Map.union
+                $ Map.fromList
+                    [ (an, av)
+                    | (an@(AttrByName nm), av) <- zip attrNames vs
+                    , nm /= "_"
+                    ]
               runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
                 exitEdhProc
                   exit
@@ -211,7 +214,8 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                         resolveEdhInstance class_ ctxObj >>= \case
                           Just instObj -> do
                             when (instAttr /= "_")
-                              $ modifyTVar' (scopeEntity callerScope)
+                              $ modifyTVar'
+                                  (entity'store $ scopeEntity callerScope)
                               $ Map.insert (AttrByName instAttr)
                                            (EdhObject instObj)
                             runEdhProg pgs

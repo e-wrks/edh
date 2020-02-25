@@ -10,7 +10,6 @@ import           Control.Exception
 import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
-import           Data.Unique
 import qualified Data.HashMap.Strict           as Map
 
 import           Data.Lossless.Decimal         as D
@@ -28,9 +27,7 @@ import           Language.Edh.Batteries.Runtime
 installEdhBatteries :: MonadIO m => EdhWorld -> m ()
 installEdhBatteries world = liftIO $ do
   envLogLevel <- lookupEnv "EDH_LOG_LEVEL"
-  rootCtx     <- atomically $ moduleContext world $ worldRoot world
-  rtu         <- newUnique
-  runEdhProgram' rootCtx $ do
+  runEdhProgram' (worldContext world) $ do
     pgs <- ask
     contEdhSTM $ do
 
@@ -198,7 +195,7 @@ installEdhBatteries world = liftIO $ do
       !rtEverySeconds <- mkHostProc EdhHostGenr
                                     "everySeconds"
                                     rtEverySecondsProc
-      !rtEntity <- newTVar $ Map.fromList
+      !rtEntity <- createEntity $ Map.fromList
         [ (AttrByName "debug"       , EdhDecimal 10)
         , (AttrByName "info"        , EdhDecimal 20)
         , (AttrByName "warn"        , EdhDecimal 30)
@@ -209,8 +206,7 @@ installEdhBatteries world = liftIO $ do
         , (AttrByName "everySeconds", rtEverySeconds)
         ]
       !rtSupers <- newTVar []
-      let !runtime = Object { objIdent  = rtu
-                            , objEntity = rtEntity
+      let !runtime = Object { objEntity = rtEntity
                             , objClass  = moduleClass world
                             , objSupers = rtSupers
                             }
@@ -260,7 +256,7 @@ installEdhBatteries world = liftIO $ do
       runEdhProg pgs $ importEdhModule WildReceiver "batteries/root" edhNop
 
  where
-  !rootEntity = objEntity $ worldRoot world
+  !rootEntity = objEntity $ thisObject $ worldScope world
   scopeManiMethods :: Entity
   !scopeManiMethods = objEntity $ scopeSuper world
   !wrt              = worldRuntime world

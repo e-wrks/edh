@@ -10,7 +10,6 @@ import           Control.Monad.IO.Class
 import           Control.Monad.State.Strict
 import           Control.Concurrent.STM
 
-import           Data.Unique
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
@@ -24,15 +23,13 @@ import           Language.Edh.Runtime
 
 createEdhModule :: MonadIO m => EdhWorld -> ModuleId -> m Object
 createEdhModule world moduId = liftIO $ do
-            -- prepare the module meta data
-  !moduEntity <- newTVarIO $ Map.fromList
+  -- prepare the module meta data
+  !moduEntity <- atomically $ createEntity $ Map.fromList
     [ (AttrByName "__name__", EdhString moduId)
     , (AttrByName "__file__", EdhString "<adhoc>")
     ]
   !moduSupers <- newTVarIO []
-  u           <- liftIO newUnique
-  return Object { objIdent  = u
-                , objEntity = moduEntity
+  return Object { objEntity = moduEntity
                 , objClass  = moduleClass world
                 , objSupers = moduSupers
                 }
@@ -45,7 +42,7 @@ evalEdhSource
   -> Text
   -> m (Either InterpretError EdhValue)
 evalEdhSource world modu code = liftIO $ do
-  mem <- readTVarIO (objEntity modu)
+  mem <- readTVarIO (entity'store $ objEntity modu)
   let moduName = T.unpack $ case Map.lookup (AttrByName "__name__") mem of
         Just (EdhString name) -> name
         _                     -> "<adhoc>"

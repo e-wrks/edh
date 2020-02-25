@@ -135,9 +135,8 @@ driveEdhProgram !progCtx !prog = do
         _                -> ArgsPack [ev] Map.empty
       !scopeAtReactor = contextScope ctxReactor
       !reactorProg    = ask >>= \pgsReactor ->
-        recvEdhArgs ctxReactor argsRcvr apk $ \ent -> contEdhSTM $ do
-          em <- readTVar ent
-          modifyTVar' (scopeEntity scopeAtReactor) $ Map.union em
+        recvEdhArgs ctxReactor argsRcvr apk $ \em -> contEdhSTM $ do
+          modifyTVar' (entity'store $ scopeEntity scopeAtReactor) $ Map.union em
           runEdhProg pgsReactor
             $ evalStmt stmt
             $ \(OriginalValue !reactorRtn _ _) -> do

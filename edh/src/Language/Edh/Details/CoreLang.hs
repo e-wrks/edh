@@ -9,7 +9,6 @@ import           Control.Concurrent.STM
 
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
-import qualified Data.List.NonEmpty            as NE
 
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
@@ -62,16 +61,17 @@ lookupEdhSuperAttr this addr = resolveEdhSuperAttr this addr >>= \case
 
 
 resolveEdhCtxAttr :: Scope -> AttrKey -> STM (Maybe OriginalValue)
-resolveEdhCtxAttr scope@(Scope !ent _ _ lexi'stack _) !addr =
-  readTVar ent >>= \em -> case Map.lookup addr em of
-    Just !val -> return $ Just (OriginalValue val scope $ thatObject scope)
-    Nothing   -> resolveLexicalAttr lexi'stack addr
+resolveEdhCtxAttr !scope !addr =
+  readTVar (entity'store $ scopeEntity scope) >>= \em ->
+    case Map.lookup addr em of
+      Just !val -> return $ Just (OriginalValue val scope $ thatObject scope)
+      Nothing   -> resolveLexicalAttr (outerScopeOf scope) addr
 {-# INLINE resolveEdhCtxAttr #-}
 
-resolveLexicalAttr :: [Scope] -> AttrKey -> STM (Maybe OriginalValue)
-resolveLexicalAttr [] _ = return Nothing
-resolveLexicalAttr (scope@(Scope !ent !this !_that _ _) : outerScopes) addr =
-  readTVar ent >>= \em -> case Map.lookup addr em of
+resolveLexicalAttr :: Maybe Scope -> AttrKey -> STM (Maybe OriginalValue)
+resolveLexicalAttr Nothing _ = return Nothing
+resolveLexicalAttr (Just scope@(Scope !ent !this !_that _)) addr =
+  readTVar (entity'store ent) >>= \em -> case Map.lookup addr em of
     Just !val -> return $ Just (OriginalValue val scope $ thatObject scope)
     Nothing ->
       -- go for the interesting attribute from inheritance hierarchy
@@ -87,7 +87,7 @@ resolveLexicalAttr (scope@(Scope !ent !this !_that _ _) : outerScopes) addr =
         >>= \case
               Just scope'from'object -> return $ Just scope'from'object
               -- go one level outer of the lexical stack
-              Nothing                -> resolveLexicalAttr outerScopes addr
+              Nothing -> resolveLexicalAttr (outerScopeOf scope) addr
 {-# INLINE resolveLexicalAttr #-}
 
 resolveEdhObjAttr :: Object -> AttrKey -> STM (Maybe OriginalValue)
@@ -100,25 +100,13 @@ resolveEdhSuperAttr !this !addr =
 {-# INLINE resolveEdhSuperAttr #-}
 
 resolveEdhObjAttr' :: Object -> Object -> AttrKey -> STM (Maybe OriginalValue)
-resolveEdhObjAttr' !that !this !addr = readTVar thisEnt >>= \em ->
-  case Map.lookup addr em of
-    Just !val ->
-      return
-        $ Just
-        $ (OriginalValue
-            val
-            (Scope thisEnt
-                   this
-                   that
-                   (NE.toList $ classLexiStack $ objClass this)
-                   clsProc
-            )
-            that
-          )
-    Nothing -> readTVar (objSupers this) >>= resolveEdhSuperAttr' that addr
+resolveEdhObjAttr' !that !this !addr =
+  readTVar (entity'store thisEnt) >>= \em -> case Map.lookup addr em of
+    Just !val -> return $ Just $ (OriginalValue val clsScope that)
+    Nothing   -> readTVar (objSupers this) >>= resolveEdhSuperAttr' that addr
  where
-  !thisEnt = objEntity this
-  clsProc  = classProcedure (objClass this)
+  !thisEnt  = objEntity this
+  !clsScope = Scope thisEnt this that $ objClass this
 {-# INLINE resolveEdhObjAttr' #-}
 
 resolveEdhSuperAttr'

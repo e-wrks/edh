@@ -11,6 +11,7 @@ import           Control.Monad.Reader
 
 import           Control.Concurrent.STM
 
+import           Data.Maybe
 import           Data.Foldable
 import           Data.Unique
 import           Data.Text                      ( Text )
@@ -62,7 +63,7 @@ toPairList d = (<$> Map.toList d) $ \(k, v) -> EdhPair k v
 edhDictFromEntity :: Entity -> STM Dict
 edhDictFromEntity ent = do
   u  <- unsafeIOToSTM newUnique
-  em <- readTVar ent
+  em <- readTVar $ entity'store ent
   (Dict u <$>) $ newTVar $ Map.fromList
     [ (attrKeyValue k, v) | (k, v) <- Map.toList em ]
 
@@ -70,7 +71,17 @@ edhDictFromEntity ent = do
 -- an object mounted to it with one class and many supers
 --
 -- An entity has attributes associated by 'AttrKey'.
-type Entity = TVar EntityStore
+data Entity = Entity {
+    entity'ident :: !Unique
+    , entity'store :: !(TVar EntityStore)
+  }
+instance Eq Entity where
+  Entity x'u _ == Entity y'u _ = x'u == y'u
+instance Ord Entity where
+  compare (Entity x'u _) (Entity y'u _) = compare x'u y'u
+instance Hashable Entity where
+  hashWithSalt s (Entity u _) = hashWithSalt s u
+
 type EntityStore = Map.HashMap AttrKey EdhValue
 data AttrKey = AttrByName !AttrName | AttrBySym !Symbol
     deriving (Eq, Ord, Show)
@@ -79,6 +90,11 @@ instance Hashable AttrKey where
     s `hashWithSalt` (0 :: Int) `hashWithSalt` name
   hashWithSalt s (AttrBySym sym) =
     s `hashWithSalt` (1 :: Int) `hashWithSalt` sym
+
+createEntity :: EntityStore -> STM Entity
+createEntity !es = do
+  u <- unsafeIOToSTM newUnique
+  Entity u <$> newTVar es
 
 -- | setting to `nil` value means deleting the attribute by the specified key
 setEntityAttr :: AttrKey -> EdhValue -> EntityStore -> EntityStore
@@ -194,16 +210,18 @@ data Scope = Scope {
     -- | `that` object in this scope
     -- `that` is the same as `this` unless in a scope of super-method call
     , thatObject :: !Object
-    -- | the lexical context in which the executing procedure is defined
-    , lexiStack :: ![Scope]
     -- | the Edh procedure holding this scope
-    , scopeProc :: !ProcDecl
+    , scopeProc :: !ProcDefi
   }
 instance Eq Scope where
-  Scope x'e _ _ _ _ == Scope y'e _ _ _ _ = x'e == y'e
+  Scope x'e _ _ _ == Scope y'e _ _ _ = x'e == y'e
+instance Ord Scope where
+  compare (Scope x'u _ _ _) (Scope y'u _ _ _) = compare x'u y'u
+instance Hashable Scope where
+  hashWithSalt s (Scope u _ _ _) = hashWithSalt s u
 instance Show Scope where
-  show (Scope _ _ _ _ (ProcDecl _ pName argsRcvr (StmtSrc (!srcPos, _)))) =
-    "<"
+  show (Scope _ _ _ (ProcDefi _ (ProcDecl _ pName argsRcvr (StmtSrc (!srcPos, _)))))
+    = "<"
       ++ T.unpack pName
       ++ " "
       ++ show argsRcvr
@@ -211,121 +229,45 @@ instance Show Scope where
       ++ sourcePosPretty srcPos
       ++ ">"
 
+outerScopeOf :: Scope -> Maybe Scope
+outerScopeOf = procedure'lexi . scopeProc
 
 -- | An object views an entity, with inheritance relationship 
 -- to any number of super objects.
 data Object = Object {
-    objIdent :: !Unique
     -- | the entity stores attribute set of the object
-    , objEntity :: !Entity
+      objEntity :: !Entity
     -- | the class (a.k.a constructor) procedure of the object
-    , objClass :: !Class
+    , objClass :: !ProcDefi
     -- | up-links for object inheritance hierarchy
     , objSupers :: !(TVar [Object])
   }
 instance Eq Object where
-  -- equality by identity
-  Object x'u _ _ _ == Object y'u _ _ _ = x'u == y'u
+  Object x'u _ _ == Object y'u _ _ = x'u == y'u
 instance Ord Object where
-  compare (Object x'u _ _ _) (Object y'u _ _ _) = compare x'u y'u
+  compare (Object x'u _ _) (Object y'u _ _) = compare x'u y'u
 instance Hashable Object where
-  hashWithSalt s (Object u _ _ _) = hashWithSalt s u
+  hashWithSalt s (Object u _ _) = hashWithSalt s u
 instance Show Object where
   -- it's not right to call 'atomically' here to read 'objSupers' for
   -- the show, as 'show' may be called from an stm transaction, stm
   -- will fail hard on encountering of nested 'atomically' calls.
-  show (Object _ _ (Class _ (ProcDecl _ cn _ _)) _) =
+  show (Object _ (ProcDefi _ (ProcDecl _ cn _ _)) _) =
     "<object: " ++ T.unpack cn ++ ">"
 
 -- | View an entity as object of specified class with specified ancestors
 -- this is the black magic you want to avoid
-viewAsEdhObject :: Entity -> Class -> [Object] -> STM Object
-viewAsEdhObject ent cls supers = do
-  oid <- unsafeIOToSTM newUnique
-  Object oid ent cls <$> newTVar supers
+viewAsEdhObject :: Entity -> ProcDefi -> [Object] -> STM Object
+viewAsEdhObject ent cls supers = Object ent cls <$> newTVar supers
 
-data Class = Class {
-    -- | the lexical context where this class procedure is defined
-    classLexiStack :: !(NonEmpty Scope)
-    , classProcedure :: !ProcDecl
-  }
-instance Eq Class where
-  Class _ x'p == Class _ y'p = x'p == y'p
-instance Ord Class where
-  compare (Class _ x'p) (Class _ y'p) = compare x'p y'p
-instance Hashable Class where
-  hashWithSalt s (Class _ p) = hashWithSalt s p
-instance Show Class where
-  show (Class _ (ProcDecl _ cn _ _)) = "<class: " ++ T.unpack cn ++ ">"
 
-data Method = Method {
-    methodLexiStack :: !(NonEmpty Scope)
-    , methodProcedure :: !ProcDecl
-  }
-instance Eq Method where
-  Method _ x'p == Method _ y'p = x'p == y'p
-instance Ord Method where
-  compare (Method _ x'p) (Method _ y'p) = compare x'p y'p
-instance Hashable Method where
-  hashWithSalt s (Method _ p) = hashWithSalt s p
-instance Show Method where
-  show (Method _ (ProcDecl _ mn _ _)) = "<method: " ++ T.unpack mn ++ ">"
-
-data GenrDef = GenrDef {
-    generatorLexiStack :: !(NonEmpty Scope)
-    , generatorProcedure :: !ProcDecl
-  }
-instance Eq GenrDef where
-  GenrDef _ x'p == GenrDef _ y'p = x'p == y'p
-instance Ord GenrDef where
-  compare (GenrDef _ x'p) (GenrDef _ y'p) = compare x'p y'p
-instance Hashable GenrDef where
-  hashWithSalt s (GenrDef _ p) = hashWithSalt s p
-instance Show GenrDef where
-  show (GenrDef _ (ProcDecl _ mn _ _)) = "<generator: " ++ T.unpack mn ++ ">"
-
-data Interpreter = Interpreter {
-    interpreterLexiStack :: !(NonEmpty Scope)
-    , interpreterProcedure :: !ProcDecl
-  }
-instance Eq Interpreter where
-  Interpreter _ x'p == Interpreter _ y'p = x'p == y'p
-instance Ord Interpreter where
-  compare (Interpreter _ x'p) (Interpreter _ y'p) = compare x'p y'p
-instance Hashable Interpreter where
-  hashWithSalt s (Interpreter _ p) = hashWithSalt s p
-instance Show Interpreter where
-  show (Interpreter _ (ProcDecl _ mn _ _)) =
-    "<interpreter: " ++ T.unpack mn ++ ">"
-
-data Operator = Operator {
-    operatorLexiStack :: !(NonEmpty Scope)
-    , operatorProcedure :: !ProcDecl
-    -- the overridden operator procedure
-    , operatorPredecessor :: !(Maybe EdhValue)
-    -- todo this is some redundant, as the precedences are always available
-    -- from 'worldOperators', but being an 'MVar' that's non-trivial to read
-    -- safely from a pure 'show' function. can remove this field once we
-    -- switched to a better introspection tool for operators at runtime.
-    , operatorPrecedence :: !Precedence
-  }
-instance Eq Operator where
-  Operator _ x'p _ _ == Operator _ y'p _ _ = x'p == y'p
-instance Ord Operator where
-  compare (Operator _ x'p _ _) (Operator _ y'p _ _) = compare x'p y'p
-instance Hashable Operator where
-  hashWithSalt s (Operator _ p _ _) = hashWithSalt s p
-instance Show Operator where
-  show (Operator _ (ProcDecl _ opSym _ _) _ prec) =
-    "<operator: (" ++ T.unpack opSym ++ ") " ++ show prec ++ ">"
-
+-- the class is just a type of procedure in Edh
+type Class = ProcDefi
 
 -- | A world for Edh programs to change
 data EdhWorld = EdhWorld {
-    -- | root object of this world
-    worldRoot :: !Object
     -- | all module objects in this world belong to this class
-    , moduleClass :: !Class
+    moduleClass :: !Class
     -- | all scope wrapper objects in this world belong to the same
     -- class as 'scopeSuper' and have it as the top most super,
     -- the bottom super of a scope wraper object is the original
@@ -345,9 +287,24 @@ data EdhWorld = EdhWorld {
     , worldRuntime :: !(TMVar EdhRuntime)
   }
 instance Eq EdhWorld where
-  EdhWorld x'root _ _ _ _ _ == EdhWorld y'root _ _ _ _ _ = x'root == y'root
+  EdhWorld x'root _ _ _ _ == EdhWorld y'root _ _ _ _ = x'root == y'root
 
 type ModuleId = Text
+
+worldScope :: EdhWorld -> Scope
+worldScope world = case procedure'lexi $ moduleClass world of
+  Just scope -> scope
+  Nothing    -> error "bug: world missing root scope"
+{-# INLINE worldScope #-}
+
+worldContext :: EdhWorld -> Context
+worldContext !world = Context { contextWorld    = world
+                              , callStack       = worldScope world :| []
+                              , generatorCaller = Nothing
+                              , contextMatch    = true
+                              , contextStmt     = voidStatement
+                              }
+{-# INLINE worldContext #-}
 
 data EdhRuntime = EdhRuntime {
   runtimeLogger :: !EdhLogger
@@ -357,13 +314,20 @@ type EdhLogger = LogLevel -> Maybe String -> ArgsPack -> STM ()
 type LogLevel = Int
 
 
+voidStatement :: StmtSrc
+voidStatement = StmtSrc
+  ( SourcePos { sourceName   = "<Genesis>"
+              , sourceLine   = mkPos 1
+              , sourceColumn = mkPos 1
+              }
+  , VoidStmt
+  )
+{-# INLINE voidStatement #-}
+
 -- | The ultimate nothingness (Chinese 无极/無極), i.e. <nothing> out of <chaos>
 wuji :: EdhProgState -> OriginalValue
-wuji !pgs = OriginalValue nil worldScope root
- where
-  !worldScope = NE.head $ classLexiStack $ objClass root
-  !root       = worldRoot world
-  !world      = contextWorld $ edh'context pgs
+wuji !pgs = OriginalValue nil rootScope $ thisObject rootScope
+  where rootScope = worldScope $ contextWorld $ edh'context pgs
 {-# INLINE wuji #-}
 
 
@@ -479,17 +443,17 @@ edhNop _ = return $ return ()
 -- | Construct an error context from program state and specified message
 getEdhErrorContext :: EdhProgState -> Text -> EdhErrorContext
 getEdhErrorContext !pgs !msg =
-  let !ctx               = edh'context pgs
-      (StmtSrc (!sp, _)) = contextStmt ctx
-      !frames            = foldl'
-        (\sfs (Scope _ _ _ _ (ProcDecl _ procName _ (StmtSrc (spos, _)))) ->
-          (procName, T.pack (sourcePosPretty spos)) : sfs
-        )
-        []
-        ( takeWhile (\(Scope _ _ _ lexi'stack _) -> not (null lexi'stack))
-        $ NE.toList (callStack ctx)
-        )
-  in  EdhErrorContext msg (T.pack $ sourcePosPretty sp) frames
+  let
+    !ctx               = edh'context pgs
+    (StmtSrc (!sp, _)) = contextStmt ctx
+    !frames            = foldl'
+      (\sfs (Scope _ _ _ (ProcDefi _ (ProcDecl _ procName _ (StmtSrc (spos, _))))) ->
+        (procName, T.pack (sourcePosPretty spos)) : sfs
+      )
+      []
+      (takeWhile (isJust . outerScopeOf) $ NE.toList (callStack ctx))
+  in
+    EdhErrorContext msg (T.pack $ sourcePosPretty sp) frames
 
 -- | Throw from an Edh program, be cautious NOT to have any monadic action
 -- following such a throw, or it'll silently fail to work out.
@@ -543,22 +507,25 @@ instance Hashable HostProcedure where
 instance Show HostProcedure where
   show (HostProcedure _ pn _) = "<hostproc: " <> T.unpack pn <> ">"
 
-hostProcDecl :: HostProcedure -> STM ProcDecl
-hostProcDecl !hp = do
+hostProcDefi :: HostProcedure -> STM ProcDefi
+hostProcDefi !hp = do
   u <- unsafeIOToSTM newUnique
-  return ProcDecl
-    { procedure'uniq = u
-    , procedure'name = hostProc'name hp
-    , procedure'args = WildReceiver
-    , procedure'body = StmtSrc
-                         ( SourcePos { sourceName   = "<hostcode>"
-                                     , sourceLine   = mkPos 1
-                                     , sourceColumn = mkPos 1
-                                     }
-                         , VoidStmt
-                         )
+  return ProcDefi
+    { procedure'lexi = Nothing
+    , procedure'decl = ProcDecl
+                         { procedure'uniq = u
+                         , procedure'name = hostProc'name hp
+                         , procedure'args = WildReceiver
+                         , procedure'body = StmtSrc
+                                              ( SourcePos
+                                                { sourceName   = "<hostcode>"
+                                                , sourceLine   = mkPos 1
+                                                , sourceColumn = mkPos 1
+                                                }
+                                              , VoidStmt
+                                              )
+                         }
     }
-
 
 -- | An event sink is similar to a Go channel, but is broadcast
 -- in nature, in contrast to the unicast nature of channels in Go.
@@ -633,11 +600,11 @@ data EdhValue =
     | EdhHostGenr !HostProcedure
 
   -- | precedures defined by Edh code
-    | EdhClass !Class
-    | EdhMethod !Method
-    | EdhOperator !Operator
-    | EdhGenrDef !GenrDef
-    | EdhInterpreter !Interpreter
+    | EdhClass !ProcDefi
+    | EdhMethod !ProcDefi
+    | EdhOperator !Precedence !(Maybe EdhValue) !ProcDefi
+    | EdhGenrDef !ProcDefi
+    | EdhInterpreter !ProcDefi
 
   -- | flow control
     | EdhBreak
@@ -695,22 +662,27 @@ instance Show EdhValue where
   show (EdhHostGenr (HostProcedure _ pn _)) =
     "<hostgen: " <> T.unpack pn <> ">"
 
-  show (EdhClass       v) = show v
-  show (EdhMethod      v) = show v
-  show (EdhOperator    v) = show v
-  show (EdhGenrDef     v) = show v
-  show (EdhInterpreter v) = show v
+  show (EdhClass (ProcDefi _ (ProcDecl _ pn _ _))) =
+    "<class: " ++ T.unpack pn ++ ">"
+  show (EdhMethod (ProcDefi _ (ProcDecl _ pn _ _))) =
+    "<method: " ++ T.unpack pn ++ ">"
+  show (EdhOperator precedence _predecessor (ProcDefi _ (ProcDecl _ pn _ _))) =
+    "<operator: (" ++ T.unpack pn ++ ") " ++ show precedence ++ ">"
+  show (EdhGenrDef (ProcDefi _ (ProcDecl _ pn _ _))) =
+    "<generator: " ++ T.unpack pn ++ ">"
+  show (EdhInterpreter (ProcDefi _ (ProcDecl _ pn _ _))) =
+    "<interpreter: " ++ T.unpack pn ++ ">"
 
-  show EdhBreak           = "<break>"
-  show EdhContinue        = "<continue>"
-  show (EdhCaseClose v)   = "<caseclose: " ++ show v ++ ">"
-  show EdhFallthrough     = "<fallthrough>"
-  show (EdhYield  v)      = "<yield: " ++ show v ++ ">"
-  show (EdhReturn v)      = "<return: " ++ show v ++ ">"
+  show EdhBreak         = "<break>"
+  show EdhContinue      = "<continue>"
+  show (EdhCaseClose v) = "<caseclose: " ++ show v ++ ">"
+  show EdhFallthrough   = "<fallthrough>"
+  show (EdhYield  v)    = "<yield: " ++ show v ++ ">"
+  show (EdhReturn v)    = "<return: " ++ show v ++ ">"
 
-  show (EdhSink   v)      = show v
+  show (EdhSink   v)    = show v
 
-  show (EdhExpr _ v)      = "<expr: " ++ show v ++ ">"
+  show (EdhExpr _ v)    = "<expr: " ++ show v ++ ">"
 
 -- Note:
 --
@@ -738,11 +710,11 @@ instance Eq EdhValue where
 
   EdhHostProc x        == EdhHostProc y        = x == y
   EdhHostOper _ x'proc == EdhHostOper _ y'proc = x'proc == y'proc
-  EdhHostGenr    x     == EdhHostGenr    y     = x == y
+  EdhHostGenr x        == EdhHostGenr y        = x == y
 
-  EdhClass       x     == EdhClass       y     = x == y
-  EdhMethod      x     == EdhMethod      y     = x == y
-  EdhOperator    x     == EdhOperator    y     = x == y
+  EdhClass    x        == EdhClass    y        = x == y
+  EdhMethod   x        == EdhMethod   y        = x == y
+  EdhOperator _ _ x    == EdhOperator _ _ y    = x == y
   EdhGenrDef     x     == EdhGenrDef     y     = x == y
   EdhInterpreter x     == EdhInterpreter y     = x == y
 
@@ -764,32 +736,32 @@ instance Eq EdhValue where
   _                    == _                    = False
 
 instance Hashable EdhValue where
-  hashWithSalt s (EdhType x)        = hashWithSalt s $ 1 + fromEnum x
-  hashWithSalt s EdhNil             = hashWithSalt s (0 :: Int)
-  hashWithSalt s (EdhDecimal x    ) = hashWithSalt s x
-  hashWithSalt s (EdhBool    x    ) = hashWithSalt s x
-  hashWithSalt s (EdhString  x    ) = hashWithSalt s x
-  hashWithSalt s (EdhSymbol  x    ) = hashWithSalt s x
-  hashWithSalt s (EdhObject  x    ) = hashWithSalt s x
+  hashWithSalt s (EdhType x)         = hashWithSalt s $ 1 + fromEnum x
+  hashWithSalt s EdhNil              = hashWithSalt s (0 :: Int)
+  hashWithSalt s (EdhDecimal x     ) = hashWithSalt s x
+  hashWithSalt s (EdhBool    x     ) = hashWithSalt s x
+  hashWithSalt s (EdhString  x     ) = hashWithSalt s x
+  hashWithSalt s (EdhSymbol  x     ) = hashWithSalt s x
+  hashWithSalt s (EdhObject  x     ) = hashWithSalt s x
 
-  hashWithSalt s (EdhDict    x    ) = hashWithSalt s x
-  hashWithSalt s (EdhList    x    ) = hashWithSalt s x
-  hashWithSalt s (EdhPair k v     ) = s `hashWithSalt` k `hashWithSalt` v
-  hashWithSalt s (EdhTuple    x   ) = foldl' hashWithSalt s x
-  hashWithSalt s (EdhArgsPack x   ) = hashWithSalt s x
+  hashWithSalt s (EdhDict    x     ) = hashWithSalt s x
+  hashWithSalt s (EdhList    x     ) = hashWithSalt s x
+  hashWithSalt s (EdhPair k v      ) = s `hashWithSalt` k `hashWithSalt` v
+  hashWithSalt s (EdhTuple    x    ) = foldl' hashWithSalt s x
+  hashWithSalt s (EdhArgsPack x    ) = hashWithSalt s x
 
-  hashWithSalt s (EdhHostProc x   ) = hashWithSalt s x
-  hashWithSalt s (EdhHostOper _ x ) = hashWithSalt s x
-  hashWithSalt s (EdhHostGenr    x) = hashWithSalt s x
+  hashWithSalt s (EdhHostProc x    ) = hashWithSalt s x
+  hashWithSalt s (EdhHostOper _ x  ) = hashWithSalt s x
+  hashWithSalt s (EdhHostGenr x    ) = hashWithSalt s x
 
-  hashWithSalt s (EdhClass       x) = hashWithSalt s x
-  hashWithSalt s (EdhMethod      x) = hashWithSalt s x
-  hashWithSalt s (EdhOperator    x) = hashWithSalt s x
-  hashWithSalt s (EdhGenrDef     x) = hashWithSalt s x
-  hashWithSalt s (EdhInterpreter x) = hashWithSalt s x
+  hashWithSalt s (EdhClass    x    ) = hashWithSalt s x
+  hashWithSalt s (EdhMethod   x    ) = hashWithSalt s x
+  hashWithSalt s (EdhOperator _ _ x) = hashWithSalt s x
+  hashWithSalt s (EdhGenrDef     x ) = hashWithSalt s x
+  hashWithSalt s (EdhInterpreter x ) = hashWithSalt s x
 
-  hashWithSalt s EdhBreak           = hashWithSalt s (-1 :: Int)
-  hashWithSalt s EdhContinue        = hashWithSalt s (-2 :: Int)
+  hashWithSalt s EdhBreak            = hashWithSalt s (-1 :: Int)
+  hashWithSalt s EdhContinue         = hashWithSalt s (-2 :: Int)
   hashWithSalt s (EdhCaseClose v) =
     s `hashWithSalt` (-3 :: Int) `hashWithSalt` v
   hashWithSalt s EdhFallthrough = hashWithSalt s (-4 :: Int)
@@ -933,7 +905,9 @@ data ArgSender = UnpackPosArgs !Expr
     | SendKwArg !AttrName !Expr
   deriving (Eq, Show)
 
-data ProcDecl = ProcDecl { procedure'uniq :: !Unique
+-- | Procedure declaration, result of parsing
+data ProcDecl = ProcDecl {
+      procedure'uniq :: !Unique
     , procedure'name :: !AttrName
     , procedure'args :: !ArgsReceiver
     , procedure'body :: !StmtSrc
@@ -946,6 +920,24 @@ instance Hashable ProcDecl where
   hashWithSalt s (ProcDecl u _ _ _) = hashWithSalt s u
 instance Show ProcDecl where
   show (ProcDecl _ name _ _) = "<proc " <> T.unpack name <> ">"
+
+-- | Procedure definition, result of execution of the declaration
+data ProcDefi = ProcDefi {
+    procedure'lexi :: !(Maybe Scope)
+    , procedure'decl :: {-# UNPACK #-} !ProcDecl
+  }
+instance Eq ProcDefi where
+  ProcDefi x's (ProcDecl x'u _ _ _) == ProcDefi y's (ProcDecl y'u _ _ _) =
+    x'u == y'u && x's == y's
+instance Ord ProcDefi where
+  compare (ProcDefi x's (ProcDecl x'u _ _ _)) (ProcDefi y's (ProcDecl y'u _ _ _))
+    = case declResult of
+      EQ -> compare x's y's
+      _  -> declResult
+    where !declResult = compare x'u y'u
+instance Hashable ProcDefi where
+  hashWithSalt s (ProcDefi scope (ProcDecl u _ _ _)) =
+    s `hashWithSalt` u `hashWithSalt` scope
 
 
 data Prefix = PrefixPlus | PrefixMinus | Not

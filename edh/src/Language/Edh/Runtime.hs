@@ -34,7 +34,6 @@ import           Data.Text.IO
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
-import           Data.List.NonEmpty             ( NonEmpty(..) )
 
 import           Language.Edh.Control
 import           Language.Edh.Details.CoreLang as CL
@@ -46,9 +45,8 @@ import           Language.Edh.Details.Evaluate as EV
 bootEdhModule
   :: MonadIO m => EdhWorld -> Text -> m (Either InterpretError Object)
 bootEdhModule !world impSpec = liftIO $ tryJust edhKnownError $ do
-  ctx    <- atomically $ moduleContext world $ worldRoot world
   !final <- newEmptyTMVarIO
-  runEdhProgram' ctx
+  runEdhProgram' (worldContext world)
     $ importEdhModule (SingleReceiver (RecvRestPkArgs "_")) impSpec
     $ \(OriginalValue !val _ _) -> case val of
         EdhObject modu -> contEdhSTM $ putTMVar final modu
@@ -106,39 +104,45 @@ defaultEdhLogger = do
 createEdhWorld :: MonadIO m => EdhLogger -> m EdhWorld
 createEdhWorld !logger = liftIO $ do
   -- ultimate default methods/operators/values go into this
-  rootEntity <- newTVarIO $ Map.fromList
+  rootEntity <- atomically $ createEntity $ Map.fromList
     [ (AttrByName "__name__", EdhString "<root>")
     , (AttrByName "__file__", EdhString "<Genesis>")
     ]
   -- methods supporting reflected scope manipulation go into this
-  scopeManiMethods <- newTVarIO Map.empty
-  rootUniq         <- newUnique
+  scopeManiMethods <- atomically $ createEntity Map.empty
   rootSupers       <- newTVarIO []
+  rootClassUniq    <- newUnique
   moduClassUniq    <- newUnique
   scopeClassUniq   <- newUnique
-  let
-    !moduClassProc = ProcDecl { procedure'uniq = moduClassUniq
-                              , procedure'name = "<module>"
-                              , procedure'args = WildReceiver
-                              , procedure'body = voidStatement
-                              }
-    !worldScope = Scope rootEntity root root [] moduClassProc
-    !moduClass  = Class { classLexiStack = worldScope :| []
-                        , classProcedure = moduClassProc
-                        }
-    !root = Object { objIdent  = rootUniq
-                   , objEntity = rootEntity
-                   , objClass  = moduClass
-                   , objSupers = rootSupers
-                   }
-    !scopeClassProc = ProcDecl { procedure'uniq = scopeClassUniq
-                               , procedure'name = "<scope>"
-                               , procedure'args = WildReceiver
-                               , procedure'body = voidStatement
-                               }
-    !scopeClass = Class { classLexiStack = worldScope :| []
-                        , classProcedure = scopeClassProc
-                        }
+  let !rootClass = ProcDefi
+        { procedure'lexi = Nothing
+        , procedure'decl = ProcDecl { procedure'uniq = rootClassUniq
+                                    , procedure'name = "<genesis>"
+                                    , procedure'args = WildReceiver
+                                    , procedure'body = voidStatement
+                                    }
+        }
+      !root = Object { objEntity = rootEntity
+                     , objClass  = rootClass
+                     , objSupers = rootSupers
+                     }
+      !rootScope = Scope rootEntity root root rootClass
+      !moduClass = ProcDefi
+        { procedure'lexi = Just rootScope
+        , procedure'decl = ProcDecl { procedure'uniq = moduClassUniq
+                                    , procedure'name = "<module>"
+                                    , procedure'args = WildReceiver
+                                    , procedure'body = voidStatement
+                                    }
+        }
+      !scopeClass = ProcDefi
+        { procedure'lexi = Just rootScope
+        , procedure'decl = ProcDecl { procedure'uniq = scopeClassUniq
+                                    , procedure'name = "<scope>"
+                                    , procedure'args = WildReceiver
+                                    , procedure'body = voidStatement
+                                    }
+        }
   opPD <- newTMVarIO $ Map.fromList
     [ ( "$" -- dereferencing attribute addressor
       , (10, "<Intrinsic>")
@@ -148,12 +152,9 @@ createEdhWorld !logger = liftIO $ do
   runtime <- newTMVarIO EdhRuntime { runtimeLogger   = logger
                                    , runtimeLogLevel = 20
                                    }
-  ssUniq <- newUnique
   return $ EdhWorld
-    { worldRoot      = root
-    , moduleClass    = moduClass
-    , scopeSuper     = Object { objIdent  = ssUniq
-                              , objEntity = scopeManiMethods
+    { moduleClass    = moduClass
+    , scopeSuper     = Object { objEntity = scopeManiMethods
                               , objClass  = scopeClass
                               , objSupers = rootSupers
                               }
@@ -236,8 +237,8 @@ mkHostOper world opSym proc =
 
 
 installEdhAttrs :: Entity -> [(AttrKey, EdhValue)] -> STM ()
-installEdhAttrs e as = modifyTVar' e $ \em -> Map.union ad em
+installEdhAttrs e as = modifyTVar' (entity'store e) $ \em -> Map.union ad em
   where ad = Map.fromList as
 
 installEdhAttr :: Entity -> AttrKey -> EdhValue -> STM ()
-installEdhAttr e k v = modifyTVar' e $ \em -> Map.insert k v em
+installEdhAttr e k v = modifyTVar' (entity'store e) $ \em -> Map.insert k v em

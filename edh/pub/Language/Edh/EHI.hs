@@ -98,12 +98,16 @@ module Language.Edh.EHI
   , deBlock
 
     -- ** Object system
+  , createEntity
   , lookupEdhCtxAttr
   , lookupEdhObjAttr
+  , lookupEdhSuperAttr
   , resolveEdhCtxAttr
   , resolveEdhObjAttr
+  , resolveEdhSuperAttr
   , resolveEdhInstance
   , mkScopeWrapper
+  , wrappedScopeOf
 
     -- ** Value system
   , edhTypeOf
@@ -125,13 +129,10 @@ module Language.Edh.EHI
   , List(..)
   , ArgsPack(..)
   , Object(..)
+  , Class(..)
+  , ProcDefi(..)
   , HostProcedure(..)
   , EdhGenrCaller
-  , Class(..)
-  , Method(..)
-  , Operator(..)
-  , GenrDef(..)
-  , Interpreter(..)
   , mkSymbol
   , mkHostProc
   , mkHostOper
