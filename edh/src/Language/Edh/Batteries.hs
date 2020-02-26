@@ -253,7 +253,7 @@ installEdhBatteries world = liftIO $ do
 
 
       -- import the parts written in Edh 
-      runEdhProg pgs $ importEdhModule WildReceiver "batteries/root" edhNop
+      runEdhProg pgs $ importEdhModule' WildReceiver "batteries/root" edhNop
 
  where
   !rootEntity = objEntity $ thisObject $ worldScope world

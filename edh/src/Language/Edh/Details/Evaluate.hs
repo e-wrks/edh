@@ -388,7 +388,7 @@ evalStmt' !stmt !exit = do
     ImportStmt argsRcvr srcExpr -> case srcExpr of
       LitExpr (StringLiteral importSpec) ->
         -- import from specified path
-        importEdhModule argsRcvr importSpec exit
+        importEdhModule' argsRcvr importSpec exit
       _ -> evalExpr srcExpr $ \(OriginalValue !srcVal _ _) -> case srcVal of
         EdhObject fromObj ->
           -- import from an object
@@ -430,8 +430,14 @@ importFromObject !argsRcvr !fromObj !exit = do
       modifyTVar' (entity'store $ scopeEntity scope) $ Map.union em
       exitEdhSTM pgs exit (EdhObject fromObj)
 
-importEdhModule :: ArgsReceiver -> Text -> EdhProcExit -> EdhProg (STM ())
-importEdhModule !argsRcvr !impSpec !exit = do
+importEdhModule' :: ArgsReceiver -> Text -> EdhProcExit -> EdhProg (STM ())
+importEdhModule' !argsRcvr !importSpec !exit =
+  importEdhModule importSpec $ \(OriginalValue !moduVal _ _) -> case moduVal of
+    EdhObject !modu -> importFromObject argsRcvr modu exit
+    _               -> error "bug"
+
+importEdhModule :: Text -> EdhProcExit -> EdhProg (STM ())
+importEdhModule !impSpec !exit = do
   pgs <- ask
   let !ctx   = edh'context pgs
       !world = contextWorld ctx
@@ -454,12 +460,11 @@ importEdhModule !argsRcvr !impSpec !exit = do
             readTMVar moduSlot >>= \case
               -- TODO GHC should be able to detect cyclic imports as 
               --      deadlock, find ways to report that more friendly
-              EdhObject modu ->
-                runEdhProg pgs $ importFromObject argsRcvr modu exit
+              modu@EdhObject{} -> exitEdhSTM pgs exit modu
               importError -> -- the first importer failed loading it,
                 -- replicate the error in this thread
                 throwEdhSTM pgs EvalError $ edhValueStr importError
-          Nothing -> do  -- we are the first importer
+          Nothing -> do -- we are the first importer
             -- allocate an empty slot
             moduSlot <- newEmptyTMVar
             -- put it for global visibility
@@ -467,10 +472,9 @@ importEdhModule !argsRcvr !impSpec !exit = do
             catchSTM
                 ( loadModule pgs moduSlot moduId moduFile
                 $ \(OriginalValue !result _ _) -> case result of
-                    (EdhObject modu) ->
-                      -- do the import after module successfully loaded
-                      importFromObject argsRcvr modu exit
-                    _ -> error "bug"
+                    -- successfully loaded
+                    modu@EdhObject{} -> exitEdhProc exit modu
+                    _                -> error "bug"
                 )
               $ \(e :: SomeException) -> do
                   -- cleanup on loading error

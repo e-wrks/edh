@@ -47,10 +47,10 @@ bootEdhModule
 bootEdhModule !world impSpec = liftIO $ tryJust edhKnownError $ do
   !final <- newEmptyTMVarIO
   runEdhProgram' (worldContext world)
-    $ importEdhModule (SingleReceiver (RecvRestPkArgs "_")) impSpec
+    $ importEdhModule impSpec
     $ \(OriginalValue !val _ _) -> case val of
-        EdhObject modu -> contEdhSTM $ putTMVar final modu
-        _              -> error "bug: importEdhModule returns non-object?"
+        EdhObject !modu -> contEdhSTM $ putTMVar final modu
+        _               -> error "bug: importEdhModule returns non-object?"
   atomically $ readTMVar final
 
 
