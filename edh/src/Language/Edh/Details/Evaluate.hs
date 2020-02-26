@@ -547,29 +547,33 @@ loadModule !pgs !moduSlot !moduId !moduFile !exit = if edh'in'tx pgs
 
 
 moduleContext :: EdhWorld -> Object -> STM Context
-moduleContext !world !modu = moduleInfo modu >>= \(moduName, moduFile) ->
-  let !moduScope = Scope
-        (objEntity modu)
-        modu
-        modu
-        moduClass
-          { procedure'decl = (procedure'decl moduClass)
-                               { procedure'name = moduName
-                               , procedure'body = StmtSrc
-                                                    ( SourcePos
-                                                      { sourceName   = T.unpack
-                                                                         moduFile
-                                                      , sourceLine   = mkPos 1
-                                                      , sourceColumn = mkPos 1
-                                                      }
-                                                    , VoidStmt
-                                                    )
-                               }
-          }
-  in  return worldCtx { callStack = moduScope <| callStack worldCtx }
- where
-  !moduClass = moduleClass world
-  !worldCtx  = worldContext world
+moduleContext !world !modu = do
+  moduScope <- moduleScope world modu
+  return worldCtx { callStack = moduScope <| callStack worldCtx }
+  where !worldCtx = worldContext world
+
+moduleScope :: EdhWorld -> Object -> STM Scope 
+moduleScope !world !modu = do
+  (moduName, moduFile) <- moduleInfo modu
+  return $ Scope
+    (objEntity modu)
+    modu
+    modu
+    moduClass
+      { procedure'decl = (procedure'decl moduClass)
+                           { procedure'name = moduName
+                           , procedure'body = StmtSrc
+                                                ( SourcePos
+                                                  { sourceName   = T.unpack
+                                                                     moduFile
+                                                  , sourceLine   = mkPos 1
+                                                  , sourceColumn = mkPos 1
+                                                  }
+                                                , VoidStmt
+                                                )
+                           }
+      }
+  where !moduClass = moduleClass world
 
 moduleInfo :: Object -> STM (Text, Text)
 moduleInfo !modu = do

@@ -44,6 +44,7 @@ module Language.Edh.EHI
   , bootEdhModule
   , createEdhModule
   , importEdhModule
+  , moduleScope
   , moduleContext
   , contextScope
   , evalEdhSource
