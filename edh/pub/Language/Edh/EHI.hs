@@ -40,7 +40,7 @@ module Language.Edh.EHI
   , installEdhAttrs
   , installEdhAttr
 
-    -- ** Calling Edh from Haskell
+    -- ** Splicing Edh with Haskell
   , bootEdhModule
   , createEdhModule
   , moduleContext
@@ -66,6 +66,7 @@ module Language.Edh.EHI
   , Scope(..)
   , EdhProcedure
   , EdhProcExit
+  , packHostProcArgs
   , runEdhProg
   , forkEdh
     -- ** Edh Runtime error
