@@ -21,20 +21,6 @@ import           Language.Edh.Parser
 import           Language.Edh.Runtime
 
 
-createEdhModule :: MonadIO m => EdhWorld -> ModuleId -> m Object
-createEdhModule world moduId = liftIO $ do
-  -- prepare the module meta data
-  !moduEntity <- atomically $ createEntity $ Map.fromList
-    [ (AttrByName "__name__", EdhString moduId)
-    , (AttrByName "__file__", EdhString "<adhoc>")
-    ]
-  !moduSupers <- newTVarIO []
-  return Object { objEntity = moduEntity
-                , objClass  = moduleClass world
-                , objSupers = moduSupers
-                }
-
-
 evalEdhSource
   :: MonadIO m
   => EdhWorld

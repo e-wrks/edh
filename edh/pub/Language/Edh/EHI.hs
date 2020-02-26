@@ -43,6 +43,7 @@ module Language.Edh.EHI
     -- ** Splicing Edh with Haskell
   , bootEdhModule
   , createEdhModule
+  , installEdhModule
   , importEdhModule
   , moduleScope
   , moduleContext

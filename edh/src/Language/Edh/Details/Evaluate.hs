@@ -442,53 +442,66 @@ importEdhModule !impSpec !exit = do
   let !ctx   = edh'context pgs
       !world = contextWorld ctx
       !scope = contextScope ctx
+      importFromFS :: STM ()
+      importFromFS = lookupEdhCtxAttr scope (AttrByName "__file__") >>= \case
+        Just (EdhString fromModuPath) -> do
+          (nomPath, moduFile) <- locateEdhModule
+            pgs
+            (edhPkgPathFrom $ T.unpack fromModuPath)
+            (T.unpack impSpec)
+          let !moduId = T.pack nomPath
+          moduMap' <- takeTMVar (worldModules world)
+          case Map.lookup moduId moduMap' of
+            Just !moduSlot -> do
+              -- put back immediately
+              putTMVar (worldModules world) moduMap'
+              -- blocking wait the target module loaded
+              waitEdhSTM pgs (readTMVar moduSlot) $ \case
+                -- TODO GHC should be able to detect cyclic imports as 
+                --      deadlock, find ways to report that more friendly
+                modu@EdhObject{} -> exitEdhSTM pgs exit modu
+                importError -> -- the first importer failed loading it,
+                  -- replicate the error in this thread
+                  throwEdhSTM pgs EvalError $ edhValueStr importError
+            Nothing -> do -- we are the first importer
+              -- allocate an empty slot
+              moduSlot <- newEmptyTMVar
+              -- put it for global visibility
+              putTMVar (worldModules world)
+                $ Map.insert moduId moduSlot moduMap'
+              catchSTM
+                  ( loadModule pgs moduSlot moduId moduFile
+                  $ \(OriginalValue !result _ _) -> case result of
+                      -- successfully loaded
+                      modu@EdhObject{} -> exitEdhProc exit modu
+                      _                -> error "bug"
+                  )
+                $ \(e :: SomeException) -> do
+                    -- cleanup on loading error
+                    let errStr = T.pack $ show e
+                    -- TODO catchSTM does NOT work across Edh transactions,
+                    --      need to impl. a catchEdh or sth. to be used here.                  let errStr = T.pack (show e)
+                    void $ tryPutTMVar moduSlot $ EdhString errStr
+                    moduMap'' <- takeTMVar (worldModules world)
+                    case Map.lookup moduId moduMap'' of
+                      Nothing        -> putTMVar (worldModules world) moduMap''
+                      Just moduSlot' -> if moduSlot' == moduSlot
+                        then putTMVar (worldModules world)
+                          $ Map.delete moduId moduMap''
+                        else putTMVar (worldModules world) moduMap''
+                    throwSTM e
+        _ -> error "bug: no valid `__file__` in context"
   if edh'in'tx pgs
     then throwEdh EvalError "You don't import from within a transaction"
-    else contEdhSTM $ lookupEdhCtxAttr scope (AttrByName "__file__") >>= \case
-      Just (EdhString fromModuPath) -> do
-        (nomPath, moduFile) <- locateEdhModule
-          pgs
-          (edhPkgPathFrom $ T.unpack fromModuPath)
-          (T.unpack impSpec)
-        let !moduId = T.pack nomPath
-        moduMap <- takeTMVar (worldModules world)
-        case Map.lookup moduId moduMap of
-          Just !moduSlot -> do
-            -- put back immediately
-            putTMVar (worldModules world) moduMap
-            -- blocking wait the target module loaded, then do import
-            readTMVar moduSlot >>= \case
-              -- TODO GHC should be able to detect cyclic imports as 
-              --      deadlock, find ways to report that more friendly
-              modu@EdhObject{} -> exitEdhSTM pgs exit modu
-              importError -> -- the first importer failed loading it,
-                -- replicate the error in this thread
-                throwEdhSTM pgs EvalError $ edhValueStr importError
-          Nothing -> do -- we are the first importer
-            -- allocate an empty slot
-            moduSlot <- newEmptyTMVar
-            -- put it for global visibility
-            putTMVar (worldModules world) $ Map.insert moduId moduSlot moduMap
-            catchSTM
-                ( loadModule pgs moduSlot moduId moduFile
-                $ \(OriginalValue !result _ _) -> case result of
-                    -- successfully loaded
-                    modu@EdhObject{} -> exitEdhProc exit modu
-                    _                -> error "bug"
-                )
-              $ \(e :: SomeException) -> do
-                  -- cleanup on loading error
-                  let errStr = T.pack (show e)
-                  void $ tryPutTMVar moduSlot $ EdhString errStr
-                  moduMap' <- takeTMVar (worldModules world)
-                  case Map.lookup moduId moduMap' of
-                    Just moduSlot' -> if moduSlot' == moduSlot
-                      then putTMVar (worldModules world)
-                        $ Map.delete moduId moduMap'
-                      else putTMVar (worldModules world) moduMap'
-                    _ -> putTMVar (worldModules world) moduMap'
-                  throwSTM e
-      _ -> error "bug: no valid `__file__` in context"
+    else contEdhSTM $ do
+      moduMap <- readTMVar (worldModules world)
+      case Map.lookup impSpec moduMap of
+        -- attempt the import specification as direct module id first
+        Just !moduSlot -> readTMVar moduSlot >>= \case
+          modu@EdhObject{} -> exitEdhSTM pgs exit modu
+          importError -> throwEdhSTM pgs EvalError $ edhValueStr importError
+        -- resolving to `.edh` source files from local filesystem
+        Nothing -> importFromFS
 
 loadModule
   :: EdhProgState
@@ -510,7 +523,8 @@ loadModule !pgs !moduSlot !moduId !moduFile !exit = if edh'in'tx pgs
                   !wops  = worldOperators world
               -- serialize parsing against 'worldOperators'
               opPD <- takeTMVar wops
-              flip
+              flip -- TODO catchSTM does NOT work across Edh transactions,
+                   --      need to impl. a catchEdh or sth. to be used here.
                   catchSTM
                   (\(e :: SomeException) -> tryPutTMVar wops opPD >> throwSTM e)
                 $ do
@@ -525,13 +539,12 @@ loadModule !pgs !moduSlot !moduId !moduFile !exit = if edh'in'tx pgs
                         -- release world lock as soon as parsing done successfuly
                         putTMVar wops opPD'
                         -- prepare the module meta data
-                        !moduES <- newTVar $ Map.fromList
+                        !moduEnt <- createEntity $ Map.fromList
                           [ (AttrByName "__name__", EdhString moduId)
                           , (AttrByName "__file__", EdhString $ T.pack moduFile)
                           ]
                         !moduSupers <- newTVar []
-                        u           <- unsafeIOToSTM newUnique
-                        let !modu = Object { objEntity = Entity u moduES
+                        let !modu = Object { objEntity = moduEnt
                                            , objClass  = moduleClass world
                                            , objSupers = moduSupers
                                            }
@@ -552,7 +565,7 @@ moduleContext !world !modu = do
   return worldCtx { callStack = moduScope <| callStack worldCtx }
   where !worldCtx = worldContext world
 
-moduleScope :: EdhWorld -> Object -> STM Scope 
+moduleScope :: EdhWorld -> Object -> STM Scope
 moduleScope !world !modu = do
   (moduName, moduFile) <- moduleInfo modu
   return $ Scope

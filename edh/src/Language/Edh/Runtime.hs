@@ -2,14 +2,16 @@
 module Language.Edh.Runtime
   ( createEdhWorld
   , defaultEdhLogger
-  , declareEdhOperators
-  , installEdhAttrs
-  , installEdhAttr
   , bootEdhModule
   , runEdhProgram
   , runEdhProgram'
+  , createEdhModule
+  , installEdhModule
+  , declareEdhOperators
   , mkHostProc
   , mkHostOper
+  , installEdhAttrs
+  , installEdhAttr
   , module CL
   , module RT
   , module TX
@@ -214,10 +216,35 @@ declareEdhOperators world declLoc opps = do
         else return (prevPrec, prevDeclLoc)
 
 
+createEdhModule :: MonadIO m => EdhWorld -> ModuleId -> m Object
+createEdhModule !world !moduId = liftIO $ do
+  -- prepare the module meta data
+  !moduEntity <- atomically $ createEntity $ Map.fromList
+    [ (AttrByName "__name__", EdhString moduId)
+    , (AttrByName "__file__", EdhString "<adhoc>")
+    ]
+  !moduSupers <- newTVarIO []
+  return Object { objEntity = moduEntity
+                , objClass  = moduleClass world
+                , objSupers = moduSupers
+                }
+
+installEdhModule
+  :: MonadIO m => EdhWorld -> ModuleId -> (Object -> STM ()) -> m Object
+installEdhModule !world !moduId !preInstall = liftIO $ do
+  modu <- createEdhModule world moduId
+  atomically $ preInstall modu
+  atomically $ do
+    moduSlot <- newTMVar $ EdhObject modu
+    moduMap  <- takeTMVar (worldModules world)
+    putTMVar (worldModules world) $ Map.insert moduId moduSlot moduMap
+  return modu
+
+
 mkHostProc
   :: (HostProcedure -> EdhValue) -> Text -> EdhProcedure -> STM EdhValue
 mkHostProc !vc !n !p = do
-  !u <- unsafeIOToSTM $ newUnique
+  !u <- unsafeIOToSTM newUnique
   return $ vc $ HostProcedure { hostProc'uniq = u
                               , hostProc'name = n
                               , hostProc'proc = p
