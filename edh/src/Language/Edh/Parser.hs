@@ -591,7 +591,7 @@ parsePrefixExpr = choice
   , (symbol "-" >> notFollowedBy (satisfy isOperatorChar))
   >>  PrefixExpr PrefixMinus
   <$> parseExprPrec 9
-  , symbol "not" >> PrefixExpr Not <$> parseExprPrec 4
+  , keyword "not" >> PrefixExpr Not <$> parseExprPrec 4
   , (symbol "|" >> notFollowedBy (satisfy isOperatorChar))
   >>  PrefixExpr Guard
   <$> parseExprPrec 1
