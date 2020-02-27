@@ -6,6 +6,7 @@ import           Prelude
 import           GHC.Conc                       ( unsafeIOToSTM )
 
 import           Control.Monad
+import           Control.Monad.Reader
 
 import           Control.Concurrent.STM
 
@@ -58,85 +59,38 @@ subscribeEvents (EventSink _ !seqn !mrv !bcc !subc) = do
           return (subChan, Just lv)
 
 
--- | Do event producing & consuming with an event sink
---
--- `consumerSetup` must trigger subsequent (though can be asynchronous as well as
--- synchronous) call(s) of `subscribeEvents`, or this will never progress.
---
--- `producerAction` won't be triggered until at least one new consumer subscribed
--- to the event sink.
-setoffEvents :: EdhProgState -> EventSink -> STM () -> STM () -> STM ()
-setoffEvents !pgs (EventSink _ _ _ _ !subc) !consumerSetup !producerAction =
-  if edh'in'tx pgs
-    then throwEdhSTM pgs
-                     EvalError
-                     "You don't setoff events from within a transaction"
-    else do
+-- | Fork a new Edh thread to run the specified event producer, but hold the 
+-- production until current thread has later started consuming events from the
+-- sink returned here.
+launchEventProducer
+  :: EdhProcExit -> EventSink -> EdhProg (STM ()) -> EdhProg (STM ())
+launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerProg = do
+  pgsConsumer <- ask
+  if edh'in'tx pgsConsumer
+    then throwEdh EvalError
+                  "You don't launch event producers from within a transaction"
+    else contEdhSTM $ do
       subcBefore <- readTVar subc
-      consumerSetup
       writeTQueue
-        tq
+        (edh'fork'queue pgsConsumer)
         EdhTxTask
-          { edh'task'pgs   = pgs
+          { edh'task'pgs   = pgsConsumer
           , edh'task'wait  = True
-          , edh'task'input = wuji pgs
-          , edh'task'job   = \_ -> contEdhSTM $ do
-            subcNow <- readTVar subc
-            when (subcNow == subcBefore) retry
-            writeTQueue
-              tq
-              EdhTxTask { edh'task'pgs   = pgs
-                        , edh'task'wait  = False
-                        , edh'task'input = wuji pgs
-                        , edh'task'job   = \_ -> contEdhSTM producerAction
-                        }
+          , edh'task'input = wuji pgsConsumer
+          , edh'task'job   = const $ do
+                               pgsProducer <- ask
+                               contEdhSTM $ do
+                                 subcNow <- readTVar subc
+                                 when (subcNow == subcBefore) retry
+                                 writeTQueue
+                                   (edh'task'queue pgsProducer)
+                                   EdhTxTask { edh'task'pgs   = pgsProducer
+                                             , edh'task'wait  = False
+                                             , edh'task'input = wuji pgsProducer
+                                             , edh'task'job = const producerProg
+                                             }
           }
-  where tq = edh'task'queue pgs
-
--- | Do event producing & consuming with an event sink
---
--- `consumerSetup` must trigger subsequent (though can be asynchronous as well as
--- synchronous) call(s) of `subscribeEvents`, or this will never progress.
---
--- `producerAction` won't be triggered until at least the specified `minConsumers`
--- new consumers subscribed to the event sink.
---
--- CAVEAT: the subscriber counter is currently implemented as a bounded int,
---         will suffer overflow problem if the event sink is reused and run some
---         time long enough.
-setoffEvents' :: EdhProgState -> EventSink -> Int -> STM () -> STM () -> STM ()
-setoffEvents' !pgs (EventSink _ _ _ _ !subc) !minConsumers !consumerSetup !producerAction
-  = if edh'in'tx pgs
-    then throwEdhSTM pgs
-                     EvalError
-                     "You don't setoff events from within a transaction"
-    else do
-      when (minConsumers < 1) $ error
-        (  "if no need to wait subscriber before producing events, "
-        ++ "you'd just go `publishEvent`"
-        )
-      subcBefore <- readTVar subc
-      consumerSetup
-      writeTQueue
-        tq
-        EdhTxTask
-          { edh'task'pgs   = pgs
-          , edh'task'wait  = True
-          , edh'task'input = wuji pgs
-          , edh'task'job   = \_ -> contEdhSTM $ do
-            subcNow <- readTVar subc
-            when (subcNow < subcBefore) $ error
-              "the rare thing happened, subscriber counter wrapped back"
-            when (subcNow - subcBefore < minConsumers) retry
-            writeTQueue
-              tq
-              EdhTxTask { edh'task'pgs   = pgs
-                        , edh'task'wait  = False
-                        , edh'task'input = wuji pgs
-                        , edh'task'job   = \_ -> contEdhSTM producerAction
-                        }
-          }
-  where tq = edh'task'queue pgs
+      exitEdhSTM pgsConsumer exit $ EdhSink sink
 
 
 -- | publish (post) an event to a sink

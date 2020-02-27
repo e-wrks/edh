@@ -316,6 +316,20 @@ evalStmt' !stmt !exit = do
         $ Map.insert (AttrByName name) mth
       exitEdhSTM pgs exit mth
 
+    ProducerStmt pd@(ProcDecl _ name args _) -> contEdhSTM $ do
+      let
+        mth = EdhProducer ProcDefi { procedure'lexi = Just scope
+                                   , procedure'decl = pd
+                                   }
+      unless (receivesNamedArg "outlet" args) $ throwEdhSTM
+        pgs
+        EvalError
+        "a producer procedure should receive a `outlet` keyword argument"
+      when (name /= "_")
+        $ modifyTVar' (entity'store $ scopeEntity scope)
+        $ Map.insert (AttrByName name) mth
+      exitEdhSTM pgs exit mth
+
     OpDeclStmt opSym opPrec opProc@(ProcDecl _ _ _ (StmtSrc (_, body'stmt))) ->
       case body'stmt of
         -- support re-declaring an existing operator to another name,
@@ -851,17 +865,19 @@ evalExpr expr exit = do
                                  Nothing -> []
                                  Just predProc ->
                                    [(AttrByName opSym, predProc)]
-                          let !opScope = scope { scopeEntity = opEnt
-                                               , thatObject  = op'that
-                                               , scopeProc   = op'proc
-                                               }
-                              !opCtx = ctx
-                                { callStack       = opScope <| callStack ctx
-                                , generatorCaller = Nothing
-                                , contextMatch    = true
-                                , contextStmt     = voidStatement
-                                }
-                              !pgsOp = pgs { edh'context = opCtx }
+                          let
+                            !opScope = scope { scopeEntity = opEnt
+                                             , thatObject  = op'that
+                                             , scopeProc   = op'proc
+                                             }
+                            !opCtx = ctx
+                              { callStack       = opScope <| callStack ctx
+                              , generatorCaller = Nothing
+                              , contextMatch    = true
+                              , contextStmt     = procedure'body
+                                                    $ procedure'decl op'proc
+                              }
+                            !pgsOp = pgs { edh'context = opCtx }
                           runEdhProg pgsOp
                             $ evalStmt (procedure'body $ procedure'decl op'proc)
                             $ \(OriginalValue !opRtn _ _) ->
@@ -896,16 +912,18 @@ evalExpr expr exit = do
                         -- operator's scope
                          Nothing       -> []
                          Just predProc -> [(AttrByName opSym, predProc)]
-                  let !opScope = scope { scopeEntity = opEnt
-                                       , thatObject  = op'that
-                                       , scopeProc   = op'proc
-                                       }
-                      !opCtx = ctx { callStack       = opScope <| callStack ctx
-                                   , generatorCaller = Nothing
-                                   , contextMatch    = true
-                                   , contextStmt     = voidStatement
-                                   }
-                      !pgsOp = pgs { edh'context = opCtx }
+                  let
+                    !opScope = scope { scopeEntity = opEnt
+                                     , thatObject  = op'that
+                                     , scopeProc   = op'proc
+                                     }
+                    !opCtx = ctx
+                      { callStack       = opScope <| callStack ctx
+                      , generatorCaller = Nothing
+                      , contextMatch    = true
+                      , contextStmt = procedure'body $ procedure'decl op'proc
+                      }
+                    !pgsOp = pgs { edh'context = opCtx }
                   runEdhProg pgsOp
                     $ evalStmt (procedure'body $ procedure'decl op'proc)
                     $ \(OriginalValue !opRtn _ _) ->
@@ -1207,6 +1225,31 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
               mth'proc
               Nothing
 
+    -- calling a producer procedure
+    EdhProducer !mth'proc ->
+      -- ensure atomicity of args sending
+      runEdhProg pgsCaller { edh'in'tx = True }
+        $ packEdhArgs pgsCaller argsSndr
+        $ \(ArgsPack !args !kwargs) -> contEdhSTM $ do
+            (outlet, kwargs') <- case Map.lookup "outlet" kwargs of
+              Nothing -> do
+                sink <- newEventSink
+                return (sink, Map.insert "outlet" (EdhSink sink) kwargs)
+              Just (EdhSink !sink) -> return (sink, kwargs)
+              Just !badVal ->
+                throwEdhSTM pgsCaller EvalError
+                  $ "invalid value passed to a producer procedure as `outlet` - "
+                  <> edhValueStr (edhTypeOf badVal)
+                  <> ": "
+                  <> edhValueStr badVal
+            callMaker $ \exit -> launchEventProducer exit outlet
+              $ callEdhMethod
+                  (ArgsPack args kwargs')
+                  callee'that
+                  mth'proc
+                  Nothing
+                  edhNop
+
     -- calling a host generator
     (EdhHostGenr _) -> throwEdhSTM
       pgsCaller
@@ -1237,7 +1280,7 @@ constructEdhObject !apk !cls !exit = do
                               Nothing    -> callStack callerCtx
         , generatorCaller = Nothing
         , contextMatch    = true
-        , contextStmt     = voidStatement
+        , contextStmt     = procedure'body $ procedure'decl cls
         }
   recvEdhArgs recvCtx (procedure'args $ procedure'decl cls) apk $ \es ->
     contEdhSTM $ do
@@ -1248,11 +1291,12 @@ constructEdhObject !apk !cls !exit = do
                              , thatObject  = newThis
                              , scopeProc   = cls
                              }
-          !ctorCtx = callerCtx { callStack = ctorScope <| callStack callerCtx
-                               , generatorCaller = Nothing
-                               , contextMatch    = true
-                               , contextStmt     = voidStatement
-                               }
+          !ctorCtx = callerCtx
+            { callStack       = ctorScope <| callStack callerCtx
+            , generatorCaller = Nothing
+            , contextMatch    = true
+            , contextStmt     = procedure'body $ procedure'decl cls
+            }
           !pgsCtor = pgs { edh'context = ctorCtx }
       runEdhProg pgsCtor
         $ evalStmt (procedure'body $ procedure'decl cls)
@@ -1291,7 +1335,7 @@ callEdhMethod !apk !callee'that !mth'proc !gnr'caller !exit = do
                               Nothing    -> callStack callerCtx
         , generatorCaller = Nothing
         , contextMatch    = true
-        , contextStmt     = voidStatement
+        , contextStmt     = procBodyStmt
         }
   recvEdhArgs recvCtx (procedure'args $ procedure'decl mth'proc) apk $ \es ->
     contEdhSTM $ do
@@ -1304,7 +1348,7 @@ callEdhMethod !apk !callee'that !mth'proc !gnr'caller !exit = do
           !mthCtx = callerCtx { callStack = mthScope <| callStack callerCtx
                               , generatorCaller = gnr'caller
                               , contextMatch    = true
-                              , contextStmt     = voidStatement
+                              , contextStmt     = procBodyStmt
                               }
           !pgsMth = pgs { edh'context = mthCtx }
       runEdhProg pgsMth
@@ -1321,7 +1365,7 @@ callEdhMethod !apk !callee'that !mth'proc !gnr'caller !exit = do
             -- no explicit return, assuming it returns the last
             -- value from procedure execution
             _                -> exitEdhProc exit mthRtn
-
+  where procBodyStmt = procedure'body $ procedure'decl mth'proc
 
 edhForLoop
   :: EdhProgState
@@ -1334,10 +1378,10 @@ edhForLoop
 edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
   do
     let
-      -- receive one yielded value from the generator, the 'genrCont' here is
-      -- to continue the generator execution, result passed to the 'genrCont'
-      -- here is the eval'ed value of the `yield` expression from the
-      -- generator's perspective
+        -- receive one yielded value from the generator, the 'genrCont' here is
+        -- to continue the generator execution, result passed to the 'genrCont'
+        -- here is the eval'ed value of the `yield` expression from the
+        -- generator's perspective
         recvYield
           :: EdhProcExit -> EdhValue -> (EdhValue -> STM ()) -> EdhProg (STM ())
         recvYield !exit !yielded'val !genrCont = do
@@ -1426,110 +1470,117 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                           $ \OriginalValue {..} ->
                               contEdhSTM $ exitEdhSTM pgs exit valueFromOrigin
 
+                -- calling other procedures, assume to loop over its return value
                 _ ->
-                  throwEdh EvalError
-                    $ "Can only call a generator method from for-from-do, not a "
-                    <> T.pack (show $ edhTypeOf callee'val)
-                    <> ": "
-                    <> T.pack (show callee'val)
+                  contEdhSTM
+                    $ edhMakeCall pgsLooper callee'val callee'that argsSndr
+                    $ \mkCall ->
+                        runEdhProg pgsLooper
+                          $ mkCall
+                          $ \(OriginalValue !iterVal _ _) ->
+                              loopOverValue iterVal
+
       _ -> -- loop over an iterable value
-           evalExpr iterExpr $ \(OriginalValue !iterVal _ _) ->
-        contEdhSTM $ forLooper $ \exit -> do
-          pgs <- ask
-          let !ctx   = edh'context pgs
-              !scope = contextScope ctx
-          contEdhSTM $ do
-            let -- do one iteration
-                do1 :: ArgsPack -> STM () -> STM ()
-                do1 !apk !next =
-                  runEdhProg pgs $ recvEdhArgs ctx argsRcvr apk $ \em ->
-                    contEdhSTM $ do
-                      modifyTVar' (entity'store $ scopeEntity scope)
-                        $ Map.union em
-                      runEdhProg pgs
-                        $ evalExpr doExpr
-                        $ \(OriginalValue !doResult _ _) -> case doResult of
-                            EdhBreak ->
-                              -- break for loop
-                              exitEdhProc exit nil
-                            EdhReturn rtnVal ->
-                              -- early return during for loop
-                              exitEdhProc exit rtnVal
-                            _ -> contEdhSTM $ do
-                              -- continue for loop
-                              iterCollector doResult
-                              next
+           evalExpr iterExpr
+        $ \(OriginalValue !iterVal _ _) -> loopOverValue iterVal
 
-                -- loop over a series of args packs
-                iterThem :: [ArgsPack] -> STM ()
-                iterThem []           = exitEdhSTM pgs exit nil
-                iterThem (apk : apks) = do1 apk $ iterThem apks
+ where
 
-                -- loop over a subscriber's channel of an event sink
-                iterEvt :: TChan EdhValue -> STM ()
-                iterEvt !subChan = waitEdhSTM pgs (readTChan subChan) $ \case
-                  EdhArgsPack apk -> do1 apk $ iterEvt subChan
-                  ev -> do1 (ArgsPack [ev] Map.empty) $ iterEvt subChan
+  loopOverValue :: EdhValue -> EdhProg (STM ())
+  loopOverValue !iterVal = contEdhSTM $ forLooper $ \exit -> do
+    pgs <- ask
+    let !ctx   = edh'context pgs
+        !scope = contextScope ctx
+    contEdhSTM $ do
+      let -- do one iteration
+          do1 :: ArgsPack -> STM () -> STM ()
+          do1 !apk !next =
+            runEdhProg pgs $ recvEdhArgs ctx argsRcvr apk $ \em ->
+              contEdhSTM $ do
+                modifyTVar' (entity'store $ scopeEntity scope) $ Map.union em
+                runEdhProg pgs
+                  $ evalExpr doExpr
+                  $ \(OriginalValue !doResult _ _) -> case doResult of
+                      EdhBreak ->
+                        -- break for loop
+                        exitEdhProc exit nil
+                      EdhReturn rtnVal ->
+                        -- early return during for loop
+                        exitEdhProc exit rtnVal
+                      _ -> contEdhSTM $ do
+                        -- continue for loop
+                        iterCollector doResult
+                        next
 
-            case iterVal of
+          -- loop over a series of args packs
+          iterThem :: [ArgsPack] -> STM ()
+          iterThem []           = exitEdhSTM pgs exit nil
+          iterThem (apk : apks) = do1 apk $ iterThem apks
 
-              -- loop from an event sink
-              (EdhSink sink) -> subscribeEvents sink >>= \(subChan, mrv) ->
-                case mrv of
-                  Nothing -> iterEvt subChan
-                  Just ev ->
-                    let apk = case ev of
-                          EdhArgsPack apk_ -> apk_
-                          _                -> ArgsPack [ev] Map.empty
-                    in  do1 apk $ iterEvt subChan
+          -- loop over a subscriber's channel of an event sink
+          iterEvt :: TChan EdhValue -> STM ()
+          iterEvt !subChan = waitEdhSTM pgs (readTChan subChan) $ \case
+            EdhArgsPack apk -> do1 apk $ iterEvt subChan
+            ev              -> do1 (ArgsPack [ev] Map.empty) $ iterEvt subChan
 
-              -- loop from a positonal-only args pack
-              (EdhArgsPack (ArgsPack !args !kwargs)) | Map.null kwargs ->
-                iterThem
-                  [ case val of
-                      EdhArgsPack apk' -> apk'
-                      _                -> ArgsPack [val] Map.empty
-                  | val <- args
-                  ]
+      case iterVal of
 
-              -- loop from a keyword-only args pack
-              (EdhArgsPack (ArgsPack !args !kwargs)) | null args ->
-                iterThem
-                  [ ArgsPack [EdhString k, v] $ Map.empty
-                  | (k, v) <- Map.toList kwargs
-                  ]
+        -- loop from an event sink
+        (EdhSink sink) -> subscribeEvents sink >>= \(subChan, mrv) ->
+          case mrv of
+            Nothing -> iterEvt subChan
+            Just ev ->
+              let apk = case ev of
+                    EdhArgsPack apk_ -> apk_
+                    _                -> ArgsPack [ev] Map.empty
+              in  do1 apk $ iterEvt subChan
 
-              -- loop from a tuple
-              (EdhTuple vs) -> iterThem
-                [ case val of
-                    EdhArgsPack apk' -> apk'
-                    _                -> ArgsPack [val] Map.empty
-                | val <- vs
-                ]
+        -- loop from a positonal-only args pack
+        (EdhArgsPack (ArgsPack !args !kwargs)) | Map.null kwargs -> iterThem
+          [ case val of
+              EdhArgsPack apk' -> apk'
+              _                -> ArgsPack [val] Map.empty
+          | val <- args
+          ]
 
-              -- loop from a list
-              (EdhList (List _ !l)) -> do
-                ll <- readTVar l
-                iterThem
-                  [ case val of
-                      EdhArgsPack apk' -> apk'
-                      _                -> ArgsPack [val] Map.empty
-                  | val <- ll
-                  ]
+        -- loop from a keyword-only args pack
+        (EdhArgsPack (ArgsPack !args !kwargs)) | null args ->
+          iterThem
+            [ ArgsPack [EdhString k, v] $ Map.empty
+            | (k, v) <- Map.toList kwargs
+            ]
 
-              -- loop from a dict
-              (EdhDict (Dict _ !d)) -> do
-                ds <- readTVar d
-                -- don't be tempted to yield pairs from a dict here,
-                -- it'll be messy if some entry values are themselves pairs
-                iterThem [ ArgsPack [k, v] Map.empty | (k, v) <- Map.toList ds ]
+        -- loop from a tuple
+        (EdhTuple vs) -> iterThem
+          [ case val of
+              EdhArgsPack apk' -> apk'
+              _                -> ArgsPack [val] Map.empty
+          | val <- vs
+          ]
 
-              _ ->
-                throwEdhSTM pgsLooper EvalError
-                  $  "Can not do a for loop from "
-                  <> T.pack (show $ edhTypeOf iterVal)
-                  <> ": "
-                  <> T.pack (show iterVal)
+        -- loop from a list
+        (EdhList (List _ !l)) -> do
+          ll <- readTVar l
+          iterThem
+            [ case val of
+                EdhArgsPack apk' -> apk'
+                _                -> ArgsPack [val] Map.empty
+            | val <- ll
+            ]
+
+        -- loop from a dict
+        (EdhDict (Dict _ !d)) -> do
+          ds <- readTVar d
+          -- don't be tempted to yield pairs from a dict here,
+          -- it'll be messy if some entry values are themselves pairs
+          iterThem [ ArgsPack [k, v] Map.empty | (k, v) <- Map.toList ds ]
+
+        _ ->
+          throwEdhSTM pgsLooper EvalError
+            $  "Can not do a for loop from "
+            <> T.pack (show $ edhTypeOf iterVal)
+            <> ": "
+            <> T.pack (show iterVal)
 
 
 -- | Make a reflective object wrapping the specified scope

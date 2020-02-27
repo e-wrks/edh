@@ -246,24 +246,16 @@ parseArgSends ss = (lookAhead (symbol ")") >> return ss) <|> do
 
 
 parseClassStmt :: Parser Stmt
-parseClassStmt = do
-  void $ keyword "class"
-  ClassStmt <$> parseProcDecl
+parseClassStmt = ClassStmt <$> (keyword "class" >> parseProcDecl)
 
 parseExtendsStmt :: Parser Stmt
-parseExtendsStmt = do
-  void $ keyword "extends"
-  ExtendsStmt <$> parseExpr
+parseExtendsStmt = ExtendsStmt <$> (keyword "extends" >> parseExpr)
 
 parseMethodStmt :: Parser Stmt
-parseMethodStmt = do
-  void $ keyword "method"
-  MethodStmt <$> parseProcDecl
+parseMethodStmt = MethodStmt <$> (keyword "method" >> parseProcDecl)
 
 parseGeneratorStmt :: Parser Stmt
-parseGeneratorStmt = do
-  void $ keyword "generator"
-  GeneratorStmt <$> parseProcDecl
+parseGeneratorStmt = GeneratorStmt <$> (keyword "generator" >> parseProcDecl)
 
 parseReactorStmt :: Parser Stmt
 parseReactorStmt =
@@ -272,6 +264,9 @@ parseReactorStmt =
 parseInterpreterStmt :: Parser Stmt
 parseInterpreterStmt =
   InterpreterStmt <$> (keyword "interpreter" >> parseProcDecl)
+
+parseProducerStmt :: Parser Stmt
+parseProducerStmt = ProducerStmt <$> (keyword "producer" >> parseProcDecl)
 
 parseWhileStmt :: Parser Stmt
 parseWhileStmt = do
@@ -380,6 +375,7 @@ parseStmt = optionalSemicolon *> do
           , parseGeneratorStmt
           , parseReactorStmt
           , parseInterpreterStmt
+          , parseProducerStmt
           , parseWhileStmt
     -- TODO validate break/continue must within a loop construct
           , BreakStmt <$ keyword "break"
@@ -474,6 +470,7 @@ parseLitExpr = choice
   , TypeLiteral OperatorType <$ litKw "OperatorType"
   , TypeLiteral GeneratorType <$ litKw "GeneratorType"
   , TypeLiteral InterpreterType <$ litKw "InterpreterType"
+  , TypeLiteral ProducerType <$ litKw "ProducerType"
   , TypeLiteral BreakType <$ litKw "BreakType"
   , TypeLiteral ContinueType <$ litKw "ContinueType"
   , TypeLiteral CaseCloseType <$ litKw "CaseCloseType"

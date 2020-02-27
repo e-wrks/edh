@@ -108,7 +108,7 @@ createEdhWorld !logger = liftIO $ do
   -- ultimate default methods/operators/values go into this
   rootEntity <- atomically $ createEntity $ Map.fromList
     [ (AttrByName "__name__", EdhString "<root>")
-    , (AttrByName "__file__", EdhString "<Genesis>")
+    , (AttrByName "__file__", EdhString "<genesis>")
     ]
   -- methods supporting reflected scope manipulation go into this
   scopeManiMethods <- atomically $ createEntity Map.empty

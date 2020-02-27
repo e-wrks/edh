@@ -2,6 +2,7 @@
 module Language.Edh.Details.RtTypes where
 
 import           Prelude
+-- import           Debug.Trace
 
 import           GHC.Conc                       ( unsafeIOToSTM )
 
@@ -11,7 +12,6 @@ import           Control.Monad.Reader
 
 import           Control.Concurrent.STM
 
-import           Data.Maybe
 import           Data.Foldable
 import           Data.Unique
 import           Data.Text                      ( Text )
@@ -316,7 +316,7 @@ type LogLevel = Int
 
 voidStatement :: StmtSrc
 voidStatement = StmtSrc
-  ( SourcePos { sourceName   = "<Genesis>"
+  ( SourcePos { sourceName   = "<genesis>"
               , sourceLine   = mkPos 1
               , sourceColumn = mkPos 1
               }
@@ -446,12 +446,13 @@ getEdhErrorContext !pgs !msg =
   let
     !ctx               = edh'context pgs
     (StmtSrc (!sp, _)) = contextStmt ctx
-    !frames            = foldl'
-      (\sfs (Scope _ _ _ (ProcDefi _ (ProcDecl _ procName _ (StmtSrc (spos, _))))) ->
-        (procName, T.pack (sourcePosPretty spos)) : sfs
-      )
-      []
-      (takeWhile (isJust . outerScopeOf) $ NE.toList (callStack ctx))
+    !frames =
+      foldl'
+          (\sfs (Scope _ _ _ (ProcDefi _ (ProcDecl _ procName _ (StmtSrc (spos, _))))) ->
+            (procName, T.pack (sourcePosPretty spos)) : sfs
+          )
+          []
+        $ NE.init (callStack ctx)
   in
     EdhErrorContext msg (T.pack $ sourcePosPretty sp) frames
 
@@ -605,6 +606,7 @@ data EdhValue =
     | EdhOperator !Precedence !(Maybe EdhValue) !ProcDefi
     | EdhGenrDef !ProcDefi
     | EdhInterpreter !ProcDefi
+    | EdhProducer !ProcDefi
 
   -- | flow control
     | EdhBreak
@@ -672,6 +674,8 @@ instance Show EdhValue where
     "<generator: " ++ T.unpack pn ++ ">"
   show (EdhInterpreter (ProcDefi _ (ProcDecl _ pn _ _))) =
     "<interpreter: " ++ T.unpack pn ++ ">"
+  show (EdhProducer (ProcDefi _ (ProcDecl _ pn _ _))) =
+    "<producer: " ++ T.unpack pn ++ ">"
 
   show EdhBreak         = "<break>"
   show EdhContinue      = "<continue>"
@@ -717,6 +721,7 @@ instance Eq EdhValue where
   EdhOperator _ _ x    == EdhOperator _ _ y    = x == y
   EdhGenrDef     x     == EdhGenrDef     y     = x == y
   EdhInterpreter x     == EdhInterpreter y     = x == y
+  EdhProducer    x     == EdhProducer    y     = x == y
 
   EdhBreak             == EdhBreak             = True
   EdhContinue          == EdhContinue          = True
@@ -759,6 +764,7 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhOperator _ _ x) = hashWithSalt s x
   hashWithSalt s (EdhGenrDef     x ) = hashWithSalt s x
   hashWithSalt s (EdhInterpreter x ) = hashWithSalt s x
+  hashWithSalt s (EdhProducer    x ) = hashWithSalt s x
 
   hashWithSalt s EdhBreak            = hashWithSalt s (-1 :: Int)
   hashWithSalt s EdhContinue         = hashWithSalt s (-2 :: Int)
@@ -836,6 +842,7 @@ data Stmt =
       -- in expression form rather than values, in addition to the reflective
       -- `callerScope` as first argument
     | InterpreterStmt !ProcDecl
+    | ProducerStmt !ProcDecl
       -- | while loop
     | WhileStmt !Expr !StmtSrc
       -- | break from a while/for loop, or terminate the Edh thread if given
@@ -876,6 +883,18 @@ data AttrAddressor =
     --   a left hand entity object
     | SymbolicAttr !AttrName
   deriving (Eq, Show)
+
+
+receivesNamedArg :: Text -> ArgsReceiver -> Bool
+receivesNamedArg _     WildReceiver              = True
+receivesNamedArg !name (SingleReceiver argRcvr ) = _hasNamedArg name [argRcvr]
+receivesNamedArg !name (PackReceiver   argRcvrs) = _hasNamedArg name argRcvrs
+
+_hasNamedArg :: Text -> [ArgReceiver] -> Bool
+_hasNamedArg _     []           = False
+_hasNamedArg !name (arg : rest) = case arg of
+  RecvArg !argName _ _ -> argName == name || _hasNamedArg name rest
+  _                    -> _hasNamedArg name rest
 
 data ArgsReceiver = PackReceiver ![ArgReceiver]
     | SingleReceiver !ArgReceiver
@@ -1023,6 +1042,7 @@ data EdhTypeValue = TypeType
     | OperatorType
     | GeneratorType
     | InterpreterType
+    | ProducerType
     | BreakType
     | ContinueType
     | CaseCloseType
@@ -1057,6 +1077,7 @@ edhTypeOf EdhMethod{}      = EdhType MethodType
 edhTypeOf EdhOperator{}    = EdhType OperatorType
 edhTypeOf EdhGenrDef{}     = EdhType GeneratorType
 edhTypeOf EdhInterpreter{} = EdhType InterpreterType
+edhTypeOf EdhProducer{}    = EdhType ProducerType
 edhTypeOf EdhBreak         = EdhType BreakType
 edhTypeOf EdhContinue      = EdhType ContinueType
 edhTypeOf EdhCaseClose{}   = EdhType CaseCloseType
