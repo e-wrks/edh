@@ -186,15 +186,15 @@ scopeEvalProc !argsSender !exit = do
 -- | utility makeOp(lhExpr, opSym, rhExpr)
 makeOpProc :: EdhProcedure
 makeOpProc !argsSender !exit =
-  packEdhExprs argsSender $ \(ArgsPack args kwargs) -> if (not $ null kwargs)
-    then throwEdh EvalError "No kwargs accepted by makeOp"
-    else case args of
-      [(EdhExpr _ !lhe), EdhExpr _ (LitExpr (StringLiteral !op)), (EdhExpr _ !rhe)]
-        -> exitEdhProc
+  packHostProcArgs argsSender $ \(ArgsPack args kwargs) ->
+    if (not $ null kwargs)
+      then throwEdh EvalError "No kwargs accepted by makeOp"
+      else case args of
+        [(EdhExpr _ !lhe), EdhString op, (EdhExpr _ !rhe)] -> exitEdhProc
           exit
           (EdhExpr (unsafePerformIO newUnique) $ InfixExpr op lhe rhe)
-      _ -> throwEdh EvalError $ "Invalid arguments to makeOp: " <> T.pack
-        (show args)
+        _ -> throwEdh EvalError $ "Invalid arguments to makeOp: " <> T.pack
+          (show args)
 
 
 -- | utility expr(*args,**kwargs)
