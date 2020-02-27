@@ -1,7 +1,26 @@
 
 {
 
-  producer timelyAlert (interval, outlet) {
+  # a producer procedure always runs in a forked thread, its return
+  # value will be ignored anyway, but its caller will always receive
+  # a `sink` as if returned by the producer procedure.
+  #
+  # the `sink` will be passed to the producer procedure as `outlet`
+  # arg as well, so the caller acts as the consumer of this producer.
+  producer timelyAlert (
+    interval, 
+
+    # the `outlet` arg is always filled, if not explicitly passed by
+    # the caller, Edh will create a new `sink`, to be returned to the
+    # caller as well as passed to this producer procedure as `outlet`.
+    outlet=nil
+    # have it a default value to fool the lint/IDE tooling to believe
+    # it's an optional argument for the caller. this is not necessary
+    # for correct runtime behavior though.
+  ) {
+    # no event will be missing for the first consumer (via for-from-do
+    # loop), as this procedure will only get actually running *after*
+    # the first consumer started receiving events from `outlet`.
     outlet <- 'start alerting you every ' ++ interval ++ ' second(s) ...'
     for ts from runtime.everySeconds(interval) do
       outlet <- '⏰ alarm @@ ' ++ ts
