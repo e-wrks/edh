@@ -232,6 +232,13 @@ instance Show Scope where
 outerScopeOf :: Scope -> Maybe Scope
 outerScopeOf = procedure'lexi . scopeProc
 
+objectScope :: Object -> Scope
+objectScope obj = Scope { scopeEntity = objEntity obj
+                        , thisObject  = obj
+                        , thatObject  = obj
+                        , scopeProc   = objClass obj
+                        }
+
 -- | An object views an entity, with inheritance relationship 
 -- to any number of super objects.
 data Object = Object {

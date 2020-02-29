@@ -233,6 +233,7 @@ installEdhBatteries world = liftIO $ do
       !scopeMethods <- mapM
         (\(sym, hp) -> (AttrByName sym, ) <$> mkHostProc EdhHostProc sym hp)
         [ ("eval"   , scopeEvalProc)
+        , ("put"    , scopePutProc)
         , ("attrs"  , scopeAttrsProc)
         , ("lexiLoc", scopeLexiLocProc)
         , ("outer"  , scopeOuterProc)

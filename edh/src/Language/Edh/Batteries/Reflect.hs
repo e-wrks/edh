@@ -131,6 +131,46 @@ scopeOuterProc _ !exit = do
       exitEdhSTM pgs exit $ EdhObject wrappedObj
 
 
+-- | utility scope.put(k1:v1, k2:v2, n3=v3, n4=v4, ...)
+-- put attribute values into the wrapped scope
+scopePutProc :: EdhProcedure
+scopePutProc !argsSender !exit = do
+  !pgs <- ask
+  let !callerCtx = edh'context pgs
+      !that      = thatObject $ contextScope callerCtx
+      !es        = entity'store $ scopeEntity $ wrappedScopeOf that
+  packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) -> contEdhSTM $ do
+    em  <- readTVar es
+    em' <- putAttrs pgs args (Map.toList kwargs) em
+    writeTVar es em'
+    exitEdhSTM pgs exit nil
+ where
+  putAttrs
+    :: EdhProgState
+    -> [EdhValue]
+    -> [(AttrName, EdhValue)]
+    -> EntityStore
+    -> STM EntityStore
+  putAttrs _ [] [] !em = return em
+  putAttrs pgs [] ((kw, v) : kwargs) !em =
+    putAttrs pgs [] kwargs $ Map.insert (AttrByName kw) v em
+  putAttrs pgs (arg : args) !kwargs !em = case arg of
+    EdhPair (EdhString !k) !v ->
+      putAttrs pgs args kwargs $ Map.insert (AttrByName k) v em
+    EdhPair (EdhSymbol !k) !v ->
+      putAttrs pgs args kwargs $ Map.insert (AttrBySym k) v em
+    EdhTuple [EdhString !k, v] ->
+      putAttrs pgs args kwargs $ Map.insert (AttrByName k) v em
+    EdhTuple [EdhSymbol !k, v] ->
+      putAttrs pgs args kwargs $ Map.insert (AttrBySym k) v em
+    _ ->
+      throwEdhSTM pgs EvalError
+        $  "Invalid key/value spec to put into a scope - "
+        <> edhValueStr (edhTypeOf arg)
+        <> ": "
+        <> edhValueStr arg
+
+
 -- | utility scope.eval(expr1, expr2, kw3=expr3, kw4=expr4, ...)
 -- evaluate expressions in this scope
 scopeEvalProc :: EdhProcedure

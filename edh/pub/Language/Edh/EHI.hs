@@ -111,6 +111,7 @@ module Language.Edh.EHI
   , resolveEdhObjAttr
   , resolveEdhSuperAttr
   , resolveEdhInstance
+  , objectScope
   , mkScopeWrapper
   , wrappedScopeOf
 
