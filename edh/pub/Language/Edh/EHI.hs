@@ -45,7 +45,6 @@ module Language.Edh.EHI
   , createEdhModule
   , installEdhModule
   , importEdhModule
-  , moduleScope
   , moduleContext
   , contextScope
   , evalEdhSource
@@ -185,7 +184,7 @@ runEdhShell
   -> EdhBootstrap (Either InterpretError a) -- ^ final result
 runEdhShell moduId (ReaderT f) = do
   world <- ask
-  modu  <- createEdhModule world moduId
+  modu  <- createEdhModule world moduId "<adhoc>"
   liftIO $ tryJust Just $ f (world, modu)
 
 

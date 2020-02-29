@@ -36,6 +36,6 @@ main = do
     world <- createEdhWorld logger
     installEdhBatteries world
 
-    modu <- createEdhModule world "<interactive>"
+    modu <- createEdhModule world "<interactive>" "<adhoc>"
     doLoop world modu
 

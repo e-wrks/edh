@@ -51,7 +51,7 @@ evalEdhSource world modu code = liftIO $ do
                 -- release world lock as soon as parsing done successfuly
                 atomically $ putTMVar wops opPD'
 
-                moduCtx <- atomically $ moduleContext world modu
+                let !moduCtx = moduleContext world modu
                 tryJust edhKnownError $ do
                   !final <- newEmptyTMVarIO
                   runEdhProgram' moduCtx

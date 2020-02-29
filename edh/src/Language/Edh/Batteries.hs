@@ -10,7 +10,10 @@ import           Control.Exception
 import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
+import           Data.Unique
 import qualified Data.HashMap.Strict           as Map
+
+import           Text.Megaparsec
 
 import           Data.Lossless.Decimal         as D
 
@@ -27,6 +30,7 @@ import           Language.Edh.Batteries.Runtime
 installEdhBatteries :: MonadIO m => EdhWorld -> m ()
 installEdhBatteries world = liftIO $ do
   envLogLevel <- lookupEnv "EDH_LOG_LEVEL"
+  rtClassUniq <- newUnique
   runEdhProgram' (worldContext world) $ do
     pgs <- ask
     contEdhSTM $ do
@@ -206,10 +210,26 @@ installEdhBatteries world = liftIO $ do
         , (AttrByName "everySeconds", rtEverySeconds)
         ]
       !rtSupers <- newTVar []
-      let !runtime = Object { objEntity = rtEntity
-                            , objClass  = moduleClass world
-                            , objSupers = rtSupers
+      let !runtime = Object
+            { objEntity = rtEntity
+            , objClass  = ProcDefi
+                            { procedure'lexi = Just $ worldScope world
+                            , procedure'decl = ProcDecl
+                              { procedure'uniq = rtClassUniq
+                              , procedure'name = "<runtime>"
+                              , procedure'args = PackReceiver []
+                              , procedure'body = StmtSrc
+                                                   ( SourcePos
+                                                     { sourceName = "<host-code>"
+                                                     , sourceLine = mkPos 1
+                                                     , sourceColumn = mkPos 1
+                                                     }
+                                                   , VoidStmt
+                                                   )
+                              }
                             }
+            , objSupers = rtSupers
+            }
 
       installEdhAttrs rootEntity
         $  rootOperators

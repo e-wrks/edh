@@ -553,16 +553,34 @@ loadModule !pgs !moduSlot !moduId !moduFile !exit = if edh'in'tx pgs
                         -- release world lock as soon as parsing done successfuly
                         putTMVar wops opPD'
                         -- prepare the module meta data
+                        moduUniq <- unsafeIOToSTM newUnique
                         !moduEnt <- createEntity $ Map.fromList
                           [ (AttrByName "__name__", EdhString moduId)
                           , (AttrByName "__file__", EdhString $ T.pack moduFile)
                           ]
                         !moduSupers <- newTVar []
-                        let !modu = Object { objEntity = moduEnt
-                                           , objClass  = moduleClass world
-                                           , objSupers = moduSupers
-                                           }
-                        moduCtx <- moduleContext world modu
+                        let
+                          !moduClass = ProcDefi
+                            { procedure'lexi = Just $ worldScope world
+                            , procedure'decl = ProcDecl
+                              { procedure'uniq = moduUniq
+                              , procedure'name = moduId
+                              , procedure'args = PackReceiver []
+                              , procedure'body = StmtSrc
+                                                   ( SourcePos
+                                                     { sourceName   = moduFile
+                                                     , sourceLine   = mkPos 1
+                                                     , sourceColumn = mkPos 1
+                                                     }
+                                                   , VoidStmt
+                                                   )
+                              }
+                            }
+                          !modu = Object { objEntity = moduEnt
+                                         , objClass  = moduClass
+                                         , objSupers = moduSupers
+                                         }
+                          !moduCtx = moduleContext world modu
                         -- run statements from the module with its own context
                         runEdhProg pgs { edh'context = moduCtx }
                           $ evalBlock stmts
@@ -573,34 +591,11 @@ loadModule !pgs !moduSlot !moduId !moduFile !exit = if edh'in'tx pgs
                               exitEdhSTM pgs exit (EdhObject modu)
 
 
-moduleContext :: EdhWorld -> Object -> STM Context
-moduleContext !world !modu = do
-  moduScope <- moduleScope world modu
-  return worldCtx { callStack = moduScope <| callStack worldCtx }
+moduleContext :: EdhWorld -> Object -> Context
+moduleContext !world !modu = worldCtx
+  { callStack = objectScope modu <| callStack worldCtx
+  }
   where !worldCtx = worldContext world
-
-moduleScope :: EdhWorld -> Object -> STM Scope
-moduleScope !world !modu = do
-  (moduName, moduFile) <- moduleInfo modu
-  return $ Scope
-    (objEntity modu)
-    modu
-    modu
-    moduClass
-      { procedure'decl = (procedure'decl moduClass)
-                           { procedure'name = moduName
-                           , procedure'body = StmtSrc
-                                                ( SourcePos
-                                                  { sourceName   = T.unpack
-                                                                     moduFile
-                                                  , sourceLine   = mkPos 1
-                                                  , sourceColumn = mkPos 1
-                                                  }
-                                                , VoidStmt
-                                                )
-                           }
-      }
-  where !moduClass = moduleClass world
 
 moduleInfo :: Object -> STM (Text, Text)
 moduleInfo !modu = do

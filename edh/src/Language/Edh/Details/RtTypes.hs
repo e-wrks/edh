@@ -270,8 +270,8 @@ viewAsEdhObject ent cls supers = Object ent cls <$> newTVar supers
 
 -- | A world for Edh programs to change
 data EdhWorld = EdhWorld {
-    -- | all module objects in this world belong to this class
-    moduleClass :: !Class
+    -- | root scope of this world
+    worldScope :: !Scope
     -- | all scope wrapper objects in this world belong to the same
     -- class as 'scopeSuper' and have it as the top most super,
     -- the bottom super of a scope wraper object is the original
@@ -294,12 +294,6 @@ instance Eq EdhWorld where
   EdhWorld x'root _ _ _ _ == EdhWorld y'root _ _ _ _ = x'root == y'root
 
 type ModuleId = Text
-
-worldScope :: EdhWorld -> Scope
-worldScope world = case procedure'lexi $ moduleClass world of
-  Just scope -> scope
-  Nothing    -> error "bug: world missing root scope"
-{-# INLINE worldScope #-}
 
 worldContext :: EdhWorld -> Context
 worldContext !world = Context { contextWorld    = world

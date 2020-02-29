@@ -37,6 +37,8 @@ import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
 
+import           Text.Megaparsec
+
 import           Language.Edh.Control
 import           Language.Edh.Details.CoreLang as CL
 import           Language.Edh.Details.RtTypes  as RT
@@ -114,7 +116,6 @@ createEdhWorld !logger = liftIO $ do
   scopeManiMethods <- atomically $ createEntity Map.empty
   rootSupers       <- newTVarIO []
   rootClassUniq    <- newUnique
-  moduClassUniq    <- newUnique
   scopeClassUniq   <- newUnique
   let !rootClass = ProcDefi
         { procedure'lexi = Nothing
@@ -128,15 +129,7 @@ createEdhWorld !logger = liftIO $ do
                      , objClass  = rootClass
                      , objSupers = rootSupers
                      }
-      !rootScope = Scope rootEntity root root rootClass
-      !moduClass = ProcDefi
-        { procedure'lexi = Just rootScope
-        , procedure'decl = ProcDecl { procedure'uniq = moduClassUniq
-                                    , procedure'name = "<module>"
-                                    , procedure'args = PackReceiver []
-                                    , procedure'body = voidStatement
-                                    }
-        }
+      !rootScope  = Scope rootEntity root root rootClass
       !scopeClass = ProcDefi
         { procedure'lexi = Just rootScope
         , procedure'decl = ProcDecl { procedure'uniq = scopeClassUniq
@@ -155,7 +148,7 @@ createEdhWorld !logger = liftIO $ do
                                    , runtimeLogLevel = 20
                                    }
   return $ EdhWorld
-    { moduleClass    = moduClass
+    { worldScope     = rootScope
     , scopeSuper     = Object { objEntity = scopeManiMethods
                               , objClass  = scopeClass
                               , objSupers = rootSupers
@@ -216,23 +209,39 @@ declareEdhOperators world declLoc opps = do
         else return (prevPrec, prevDeclLoc)
 
 
-createEdhModule :: MonadIO m => EdhWorld -> ModuleId -> m Object
-createEdhModule !world !moduId = liftIO $ do
+createEdhModule :: MonadIO m => EdhWorld -> ModuleId -> String -> m Object
+createEdhModule !world !moduId !moduSrc = liftIO $ do
   -- prepare the module meta data
   !moduEntity <- atomically $ createEntity $ Map.fromList
     [ (AttrByName "__name__", EdhString moduId)
-    , (AttrByName "__file__", EdhString "<adhoc>")
+    , (AttrByName "__file__", EdhString $ T.pack moduSrc)
     ]
-  !moduSupers <- newTVarIO []
-  return Object { objEntity = moduEntity
-                , objClass  = moduleClass world
-                , objSupers = moduSupers
-                }
+  !moduSupers    <- newTVarIO []
+  !moduClassUniq <- newUnique
+  return Object
+    { objEntity = moduEntity
+    , objClass  = ProcDefi
+                    { procedure'lexi = Just $ worldScope world
+                    , procedure'decl = ProcDecl
+                      { procedure'uniq = moduClassUniq
+                      , procedure'name = moduId
+                      , procedure'args = PackReceiver []
+                      , procedure'body = StmtSrc
+                                           ( SourcePos { sourceName   = moduSrc
+                                                       , sourceLine   = mkPos 1
+                                                       , sourceColumn = mkPos 1
+                                                       }
+                                           , VoidStmt
+                                           )
+                      }
+                    }
+    , objSupers = moduSupers
+    }
 
 installEdhModule
   :: MonadIO m => EdhWorld -> ModuleId -> (Object -> STM ()) -> m Object
 installEdhModule !world !moduId !preInstall = liftIO $ do
-  modu <- createEdhModule world moduId
+  modu <- createEdhModule world moduId "<host-code>"
   atomically $ preInstall modu
   atomically $ do
     moduSlot <- newTMVar $ EdhObject modu
