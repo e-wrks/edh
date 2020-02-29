@@ -423,12 +423,12 @@ evalStmt' !stmt !exit = do
 importFromObject :: ArgsReceiver -> Object -> EdhProcExit -> EdhProg (STM ())
 importFromObject !argsRcvr !fromObj !exit = do
   pgs <- ask
-  let !ctx   = edh'context pgs
-      !scope = contextScope ctx
+  let !ctx  = edh'context pgs
+      !this = thisObject $ contextScope ctx
   contEdhSTM $ do
     emImp <- readTVar $ entity'store $ objEntity fromObj
     let !artsPk = ArgsPack [] $ Map.fromList $ catMaybes
-          [ (case k of
+          [ case k of
 -- only attributes with a name not started with `_` are importable,
 -- and all symbol values are not importable however named
               AttrByName attrName | not (T.isPrefixOf "_" attrName) -> case v of
@@ -437,11 +437,10 @@ importFromObject !argsRcvr !fromObj !exit = do
 -- symbolic attributes are effective stripped off, this is desirable so that
 -- symbolic attributes are not importable, thus private to a module/object
               _ -> Nothing
-            )
           | (k, v) <- Map.toList emImp
           ]
     runEdhProg pgs $ recvEdhArgs ctx argsRcvr artsPk $ \em -> contEdhSTM $ do
-      modifyTVar' (entity'store $ scopeEntity scope) $ Map.union em
+      modifyTVar' (entity'store $ objEntity this) $ Map.union em
       exitEdhSTM pgs exit (EdhObject fromObj)
 
 importEdhModule' :: ArgsReceiver -> Text -> EdhProcExit -> EdhProg (STM ())
