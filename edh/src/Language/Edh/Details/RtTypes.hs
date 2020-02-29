@@ -127,7 +127,7 @@ instance Ord Symbol where
 instance Hashable Symbol where
   hashWithSalt s (Symbol u _) = hashWithSalt s u
 instance Show Symbol where
-  show (Symbol _ sym) = "<@" <> T.unpack sym <> ">"
+  show (Symbol _ sym) = T.unpack sym
 mkSymbol :: String -> STM Symbol
 mkSymbol !d = unsafeIOToSTM $ do
   !u <- newUnique
