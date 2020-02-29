@@ -119,8 +119,8 @@ createEdhWorld !logger = liftIO $ do
   let !rootClass = ProcDefi
         { procedure'lexi = Nothing
         , procedure'decl = ProcDecl { procedure'uniq = rootClassUniq
-                                    , procedure'name = "<genesis>"
-                                    , procedure'args = WildReceiver
+                                    , procedure'name = "<root>"
+                                    , procedure'args = PackReceiver []
                                     , procedure'body = voidStatement
                                     }
         }
@@ -133,7 +133,7 @@ createEdhWorld !logger = liftIO $ do
         { procedure'lexi = Just rootScope
         , procedure'decl = ProcDecl { procedure'uniq = moduClassUniq
                                     , procedure'name = "<module>"
-                                    , procedure'args = WildReceiver
+                                    , procedure'args = PackReceiver []
                                     , procedure'body = voidStatement
                                     }
         }
@@ -141,7 +141,7 @@ createEdhWorld !logger = liftIO $ do
         { procedure'lexi = Just rootScope
         , procedure'decl = ProcDecl { procedure'uniq = scopeClassUniq
                                     , procedure'name = "<scope>"
-                                    , procedure'args = WildReceiver
+                                    , procedure'args = PackReceiver []
                                     , procedure'body = voidStatement
                                     }
         }

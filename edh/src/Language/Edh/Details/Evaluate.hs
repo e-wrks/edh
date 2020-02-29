@@ -1271,52 +1271,65 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
 
 
 constructEdhObject :: ArgsPack -> Class -> EdhProcExit -> EdhProg (STM ())
-constructEdhObject !apk !cls !exit = do
+constructEdhObject apk@(ArgsPack args kwargs) !cls !exit = do
+  pgs <- ask
+  createEdhObject cls $ \(OriginalValue !thisVal _ _) -> case thisVal of
+    EdhObject !this ->
+      contEdhSTM $ lookupEdhObjAttr this (AttrByName "__init__") >>= \case
+        Nothing -> if null args && null kwargs
+          then exitEdhSTM pgs exit thisVal
+          else
+            throwEdhSTM pgs EvalError
+            $  "No __init__ defined by class "
+            <> procedure'name (procedure'decl cls)
+            <> " to receive argument(s)"
+        Just (EdhMethod !initMth) ->
+          runEdhProg pgs $ callEdhMethod apk this initMth Nothing $ \_ ->
+            exitEdhProc exit thisVal
+        Just badInitMth ->
+          throwEdhSTM pgs EvalError
+            $  "Invalid __init__ method from class - "
+            <> edhValueStr (edhTypeOf badInitMth)
+            <> ": "
+            <> edhValueStr badInitMth
+    _ -> error "bug: createEdhObject returned non-object"
+
+createEdhObject :: Class -> EdhProcExit -> EdhProg (STM ())
+createEdhObject !cls !exit = do
   pgs <- ask
   let !callerCtx = edh'context pgs
-      !recvCtx   = callerCtx
-        { callStack       = case procedure'lexi cls of
-                              Just scope -> scope :| []
-                              Nothing    -> callStack callerCtx
-        , generatorCaller = Nothing
-        , contextMatch    = true
-        , contextStmt     = procedure'body $ procedure'decl cls
-        }
-  recvEdhArgs recvCtx (procedure'args $ procedure'decl cls) apk $ \es ->
-    contEdhSTM $ do
-      newEnt  <- createEntity es
-      newThis <- viewAsEdhObject newEnt cls []
-      let !ctorScope = Scope { scopeEntity = newEnt
-                             , thisObject  = newThis
-                             , thatObject  = newThis
-                             , scopeProc   = cls
-                             }
-          !ctorCtx = callerCtx
-            { callStack       = ctorScope <| callStack callerCtx
-            , generatorCaller = Nothing
-            , contextMatch    = true
-            , contextStmt     = procedure'body $ procedure'decl cls
-            }
-          !pgsCtor = pgs { edh'context = ctorCtx }
-      runEdhProg pgsCtor
-        $ evalStmt (procedure'body $ procedure'decl cls)
-        $ \(OriginalValue !ctorRtn _ _) -> local (const pgs) $ case ctorRtn of
-            -- allow a class procedure to explicitly return other
-            -- value than newly constructed `this` object
-            -- it can still `return this to early stop the ctor proc
-            -- which is magically an advanced feature
-            EdhReturn !rtnVal -> exitEdhProc exit rtnVal
-            EdhContinue ->
-              throwEdh EvalError "Unexpected continue from constructor"
-            -- allow the use of `break` to early stop a constructor 
+  contEdhSTM $ do
+    newEnt  <- createEntity Map.empty
+    newThis <- viewAsEdhObject newEnt cls []
+    let !ctorScope = Scope { scopeEntity = newEnt
+                           , thisObject  = newThis
+                           , thatObject  = newThis
+                           , scopeProc   = cls
+                           }
+        !ctorCtx = callerCtx
+          { callStack       = ctorScope <| callStack callerCtx
+          , generatorCaller = Nothing
+          , contextMatch    = true
+          , contextStmt     = procedure'body $ procedure'decl cls
+          }
+        !pgsCtor = pgs { edh'context = ctorCtx }
+    runEdhProg pgsCtor
+      $ evalStmt (procedure'body $ procedure'decl cls)
+      $ \(OriginalValue !ctorRtn _ _) -> local (const pgs) $ case ctorRtn of
+          -- allow a class procedure to explicitly return other
+          -- value than newly constructed `this` object
+          -- it can still `return this to early stop the ctor proc
+          -- which is magically an advanced feature
+          EdhReturn !rtnVal -> exitEdhProc exit rtnVal
+          EdhContinue ->
+            throwEdh EvalError "Unexpected continue from constructor"
           -- allow the use of `break` to early stop a constructor 
-            -- allow the use of `break` to early stop a constructor 
-            -- procedure with nil result
-            EdhBreak -> exitEdhProc exit nil
-            -- no explicit return from class procedure, return the
-            -- newly constructed this object, throw away the last
-            -- value from the procedure execution
-            _        -> exitEdhProc exit (EdhObject newThis)
+          -- procedure with nil result
+          EdhBreak -> exitEdhProc exit nil
+          -- no explicit return from class procedure, return the
+          -- newly constructed this object, throw away the last
+          -- value from the procedure execution
+          _        -> exitEdhProc exit (EdhObject newThis)
 
 
 callEdhMethod
