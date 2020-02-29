@@ -127,7 +127,7 @@ module Language.Edh.EHI
   , inf
   , D.Decimal(..)
   , Symbol(..)
-  , Entity
+  , Entity(..)
   , AttrKey(..)
   , Dict(..)
   , ItemKey(..)
