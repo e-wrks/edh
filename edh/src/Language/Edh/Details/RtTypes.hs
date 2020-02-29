@@ -261,9 +261,6 @@ viewAsEdhObject :: Entity -> ProcDefi -> [Object] -> STM Object
 viewAsEdhObject ent cls supers = Object ent cls <$> newTVar supers
 
 
--- the class is just a type of procedure in Edh
-type Class = ProcDefi
-
 -- | A world for Edh programs to change
 data EdhWorld = EdhWorld {
     -- | all module objects in this world belong to this class
@@ -957,6 +954,9 @@ instance Ord ProcDefi where
 instance Hashable ProcDefi where
   hashWithSalt s (ProcDefi scope (ProcDecl u _ _ _)) =
     s `hashWithSalt` u `hashWithSalt` scope
+
+-- | The class is a special type of procedure, receives no argument.
+type Class = ProcDefi
 
 
 data Prefix = PrefixPlus | PrefixMinus | Not

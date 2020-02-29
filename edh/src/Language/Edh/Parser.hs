@@ -246,7 +246,12 @@ parseArgSends ss = (lookAhead (symbol ")") >> return ss) <|> do
 
 
 parseClassStmt :: Parser Stmt
-parseClassStmt = ClassStmt <$> (keyword "class" >> parseProcDecl)
+parseClassStmt = ClassStmt <$> (keyword "class" >> parseClassDecl)
+ where
+  parseClassDecl = liftA3 (ProcDecl (unsafePerformIO newUnique))
+                          parseAlphaName
+                          (return $ PackReceiver [])
+                          parseStmt
 
 parseExtendsStmt :: Parser Stmt
 parseExtendsStmt = ExtendsStmt <$> (keyword "extends" >> parseExpr)
