@@ -52,6 +52,7 @@ module Language.Edh.EHI
   , runEdhProgram'
   , createEdhObject
   , constructEdhObject
+  , edhMakeCall
   , callEdhMethod
   , evalStmt
   , evalStmt'
