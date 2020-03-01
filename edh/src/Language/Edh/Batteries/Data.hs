@@ -13,8 +13,6 @@ import           Data.Unique
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
 
-import           Text.Megaparsec
-
 import           Language.Edh.Control
 import           Language.Edh.Event
 import           Language.Edh.Runtime
@@ -105,23 +103,15 @@ attrDerefTemptProc !argsSender _ =
 symbolCtorProc :: EdhProcedure
 symbolCtorProc !argsSender !exit = do
   !pgs <- ask
-  let (StmtSrc (srcPos, _)) = contextStmt $ edh'context pgs
   packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) -> contEdhSTM $ do
-    posSyms <- sequence $ ctorSym <$> args
-    kwSyms  <- sequence $ Map.map ctorSym kwargs
-    if null kwargs
-      then case posSyms of
-        [] -> do
-          sym <- ctorSym $ EdhString $ T.pack (sourcePosPretty srcPos)
-          exitEdhSTM pgs exit sym
-        [sym] -> exitEdhSTM pgs exit sym
-        _     -> exitEdhSTM pgs exit (EdhTuple posSyms)
-      else exitEdhSTM pgs exit (EdhArgsPack $ ArgsPack posSyms kwSyms)
- where
-  ctorSym :: EdhValue -> STM EdhValue
-  ctorSym = \case
-    sym@(EdhSymbol _) -> return sym
-    val               -> EdhSymbol <$> (mkSymbol $ T.unpack $ edhValueStr val)
+    let nullSemantic = case Map.lookup "null" kwargs of
+          Just (EdhBool !ns) -> ns
+          _                  -> False
+    case args of
+      [EdhString description] -> do
+        sym <- mkSymbol (T.unpack description) nullSemantic
+        exitEdhSTM pgs exit $ EdhSymbol sym
+      _ -> throwEdhSTM pgs EvalError "Invalid arg to Symbol()"
 
 
 -- | utility pkargs(*args,**kwargs,***packed) - arguments packer

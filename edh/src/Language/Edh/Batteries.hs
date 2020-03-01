@@ -231,13 +231,32 @@ installEdhBatteries world = liftIO $ do
             , objSupers = rtSupers
             }
 
+      gNone    <- mkSymbol "None" True
+      gNothing <- mkSymbol "Nothing" True
+
       installEdhAttrs rootEntity
         $  rootOperators
         ++ rootProcedures
         ++ [
-            -- runtime module 
+            -- runtime module
              ( AttrByName "runtime"
              , EdhObject runtime
+             )
+
+            -- global symbols
+           , ( AttrByName "None"
+             , -- resembles `None` as in Python
+               -- assigning to `nil` in Edh is roughly the same of `delete` as
+               -- in JavaScript, and `del` as in Python. Assigning to `None`
+               -- will keep the dict entry or object attribute while carries
+               -- a semantic of *absence*.
+               EdhSymbol gNone
+             )
+           , ( AttrByName "Nothing"
+             , -- Similar to `None`, `Nothing` is idiomatic in VisualBasic
+               -- though we don't have `Maybe` monad in Edh, having a `Nothing`
+               -- carrying null semantic may be useful in some cases.
+               EdhSymbol gNothing
              )
 
             -- math constants

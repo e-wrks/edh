@@ -119,19 +119,19 @@ attrKeyValue (AttrBySym  sym) = EdhSymbol sym
 -- available to all procedures defined in the module, and a symbol
 -- bound within a class procedure is available to all its methods
 -- as well as nested classes.
-data Symbol = Symbol !Unique !Text
+data Symbol = Symbol !Unique !Bool !Text
 instance Eq Symbol where
-  Symbol x'u _ == Symbol y'u _ = x'u == y'u
+  Symbol x'u _ _ == Symbol y'u _ _ = x'u == y'u
 instance Ord Symbol where
-  compare (Symbol x'u _) (Symbol y'u _) = compare x'u y'u
+  compare (Symbol x'u _ _) (Symbol y'u _ _) = compare x'u y'u
 instance Hashable Symbol where
-  hashWithSalt s (Symbol u _) = hashWithSalt s u
+  hashWithSalt s (Symbol u _ _) = hashWithSalt s u
 instance Show Symbol where
-  show (Symbol _ sym) = T.unpack sym
-mkSymbol :: String -> STM Symbol
-mkSymbol !d = unsafeIOToSTM $ do
-  !u <- newUnique
-  return $ Symbol u $ T.pack d
+  show (Symbol _ _ sym) = T.unpack sym
+mkSymbol :: String -> Bool -> STM Symbol
+mkSymbol !description !nullSemantic = do
+  !u <- unsafeIOToSTM newUnique
+  return $ Symbol u nullSemantic $ T.pack description
 
 
 -- | A list in Edh is a multable, singly-linked, prepend list.
@@ -625,13 +625,14 @@ edhValueStr (EdhString s) = s
 edhValueStr v             = T.pack $ show v
 
 edhValueNull :: EdhValue -> STM Bool
-edhValueNull EdhNil                  = return True
-edhValueNull (EdhDecimal d         ) = return $ D.decimalIsNaN d || d == 0
-edhValueNull (EdhBool    b         ) = return $ b == False
-edhValueNull (EdhString  s         ) = return $ T.null s
-edhValueNull (EdhDict    (Dict _ d)) = Map.null <$> readTVar d
-edhValueNull (EdhList    (List _ l)) = null <$> readTVar l
-edhValueNull (EdhTuple   l         ) = return $ null l
+edhValueNull EdhNil                       = return True
+edhValueNull (EdhDecimal d              ) = return $ D.decimalIsNaN d || d == 0
+edhValueNull (EdhBool    b              ) = return b
+edhValueNull (EdhString  s              ) = return $ T.null s
+edhValueNull (EdhSymbol  (Symbol _ ns _)) = return ns
+edhValueNull (EdhDict    (Dict _ d     )) = Map.null <$> readTVar d
+edhValueNull (EdhList    (List _ l     )) = null <$> readTVar l
+edhValueNull (EdhTuple   l              ) = return $ null l
 edhValueNull (EdhArgsPack (ArgsPack args kwargs)) =
   return $ null args && Map.null kwargs
 edhValueNull _ = return False
