@@ -3,9 +3,9 @@
 
   operator &> (callerScope, lhe, rhe) {
     lhv = callerScope.eval(lhe)
-    if lhv != false && lhv != nil && lhv != ''
-      then callerScope.eval(rhe)
-      else nil
+    if null(lhv)
+      then lhv
+      else callerScope.eval(rhe)
   }
 
   operator |> (callerScope, lhe, rhe) {
