@@ -264,7 +264,7 @@ instance Show Object where
 
 -- | View an entity as object of specified class with specified ancestors
 -- this is the black magic you want to avoid
-viewAsEdhObject :: Entity -> ProcDefi -> [Object] -> STM Object
+viewAsEdhObject :: Entity -> Class -> [Object] -> STM Object
 viewAsEdhObject ent cls supers = Object ent cls <$> newTVar supers
 
 
