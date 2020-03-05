@@ -131,11 +131,11 @@ module Language.Edh.EHI
   , Entity(..)
   , AttrKey(..)
   , Dict(..)
-  , ItemKey(..)
+  , ItemKey
   , List(..)
   , ArgsPack(..)
   , Object(..)
-  , Class(..)
+  , Class
   , ProcDefi(..)
   , HostProcedure(..)
   , EdhGenrCaller
