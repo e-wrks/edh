@@ -1076,24 +1076,26 @@ setEdhAttrWithMagic !pgsAfter !magicKey !obj !key !val !exitNoMagic !exit = do
   setViaSupers []                   = exitNoMagic
   setViaSupers (super : restSupers) = do
     !pgs <- ask
-    getEdhAttrWithMagic (AttrByName "!<-")
-                        super
-                        magicKey
-                        (setViaSupers restSupers)
-      $ \(OriginalValue !magicMth _ _) ->
-          contEdhSTM
-            $ edhMakeCall
-                pgs
-                magicMth
-                obj
-                [ SendPosArg (GodSendExpr $ attrKeyValue key)
-                , SendPosArg (GodSendExpr val)
-                ]
+    let noMetamagic :: EdhProg (STM ())
+        noMetamagic = contEdhSTM $ resolveEdhObjAttr super magicKey >>= \case
+          Nothing -> runEdhProg pgs $ setViaSupers restSupers
+          Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
+        withMagicMethod :: EdhValue -> STM ()
+        withMagicMethod !magicMth =
+          edhMakeCall
+              pgs
+              magicMth
+              obj
+              [ SendPosArg (GodSendExpr $ attrKeyValue key)
+              , SendPosArg (GodSendExpr val)
+              ]
             $ \mkCall ->
                 runEdhProg pgs $ mkCall $ \(OriginalValue !magicRtn _ _) ->
                   case magicRtn of
                     EdhContinue -> setViaSupers restSupers
                     _ -> local (const pgsAfter) $ exitEdhProc exit magicRtn
+    getEdhAttrWithMagic (AttrByName "!<-") super magicKey noMetamagic
+      $ \(OriginalValue !magicMth _ _) -> contEdhSTM $ withMagicMethod magicMth
 
 
 setEdhAttr
@@ -1637,7 +1639,8 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
       DirectRef !addr' -> contEdhSTM $ resolveAddr pgs addr' >>= \key -> do
         modifyTVar'
             (entity'store $ scopeEntity $ contextScope $ edh'context pgs)
-          $ setEntityAttr key rhVal
+          -- do not delete an attr by assigning to nil, in case of direct assign
+          $ Map.insert key rhVal
         runEdhProg pgsAfter $ exitEdhProc exit rhVal
       -- assign to an addressed attribute
       IndirectRef !tgtExpr !addr' -> contEdhSTM $ do
