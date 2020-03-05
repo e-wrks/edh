@@ -1295,12 +1295,8 @@ createEdhObject !cls !exit = do
   contEdhSTM $ do
     newEnt  <- createEntity Map.empty
     newThis <- viewAsEdhObject newEnt cls []
-    let !ctorScope = Scope { scopeEntity = newEnt
-                           , thisObject  = newThis
-                           , thatObject  = newThis
-                           , scopeProc   = cls
-                           }
-        !ctorCtx = callerCtx
+    let !ctorScope = objectScope newThis
+        !ctorCtx   = callerCtx
           { callStack       = ctorScope <| callStack callerCtx
           , generatorCaller = Nothing
           , contextMatch    = true
@@ -1336,22 +1332,18 @@ callEdhMethod
 callEdhMethod !apk !callee'that !mth'proc !gnr'caller !exit = do
   !pgs <- ask
   let !callerCtx = edh'context pgs
-      !recvCtx   = callerCtx
-        { callStack       = case procedure'lexi mth'proc of
-                              Just scope -> scope :| []
-                              Nothing    -> callStack callerCtx
-        , generatorCaller = Nothing
-        , contextMatch    = true
-        , contextStmt     = procBodyStmt
-        }
+      !recvCtx   = callerCtx { callStack       = lexicalScopeOf mth'proc :| []
+                             , generatorCaller = Nothing
+                             , contextMatch    = true
+                             , contextStmt     = procBodyStmt
+                             }
   recvEdhArgs recvCtx (procedure'args $ procedure'decl mth'proc) apk $ \es ->
     contEdhSTM $ do
       ent <- createEntity es
-      let !mthScope = Scope { scopeEntity = ent
-                            , thisObject  = thisObject $ contextScope callerCtx
-                            , thatObject  = callee'that
-                            , scopeProc   = mth'proc
-                            }
+      let !mthScope = (lexicalScopeOf mth'proc) { scopeEntity = ent
+                                                , thatObject  = callee'that
+                                                , scopeProc   = mth'proc
+                                                }
           !mthCtx = callerCtx { callStack = mthScope <| callStack callerCtx
                               , generatorCaller = gnr'caller
                               , contextMatch    = true

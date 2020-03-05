@@ -957,6 +957,11 @@ instance Hashable ProcDefi where
   hashWithSalt s (ProcDefi scope (ProcDecl u _ _ _)) =
     s `hashWithSalt` u `hashWithSalt` scope
 
+lexicalScopeOf :: ProcDefi -> Scope
+lexicalScopeOf (ProcDefi (Just scope) _) = scope
+lexicalScopeOf (ProcDefi Nothing _) =
+  error "bug: asking for scope of world root"
+
 -- | The class is a special type of procedure, receives no argument.
 type Class = ProcDefi
 
