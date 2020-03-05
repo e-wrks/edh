@@ -464,6 +464,7 @@ parseLitExpr = choice
   , TypeLiteral ObjectType <$ litKw "ObjectType"
   , TypeLiteral DictType <$ litKw "DictType"
   , TypeLiteral ListType <$ litKw "ListType"
+  , TypeLiteral PairType <$ litKw "PairType"
   , TypeLiteral TupleType <$ litKw "TupleType"
   , TypeLiteral ArgsPackType <$ litKw "ArgsPackType"
   , TypeLiteral BlockType <$ litKw "BlockType"
