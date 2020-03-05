@@ -258,9 +258,7 @@ evalStmt' !stmt !exit = do
               Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
             withMagicMethod :: EdhValue -> STM ()
             withMagicMethod magicMth = do
-              scopeObj <- mkScopeWrapper
-                (contextWorld ctx)
-                scope { scopeEntity = objEntity this }
+              scopeObj <- mkScopeWrapper (contextWorld ctx) (objectScope this)
               edhMakeCall pgs
                           magicMth
                           this
