@@ -334,7 +334,7 @@ type EdhProg = ReaderT EdhProgState STM
 
 -- | The states of a program
 data EdhProgState = EdhProgState {
-    edh'fork'queue :: !(TQueue EdhTxTask)
+    edh'fork'queue :: !(TQueue (Either (IO ()) EdhTxTask))
     , edh'task'queue :: !(TQueue EdhTxTask)
     , edh'reactors :: !(TVar [ReactorRecord])
     , edh'defers :: !(TVar [DeferRecord])
@@ -354,8 +354,10 @@ forkEdh :: EdhProcExit -> EdhProg (STM ()) -> EdhProg (STM ())
 forkEdh !exit !prog = ask >>= \pgs -> if edh'in'tx pgs
   then throwEdh EvalError "You don't fork within a transaction"
   else contEdhSTM $ do
-    writeTQueue (edh'fork'queue pgs)
-      $ EdhTxTask pgs False (wuji pgs) (const prog)
+    writeTQueue (edh'fork'queue pgs) $ Right $ EdhTxTask pgs
+                                                         False
+                                                         (wuji pgs)
+                                                         (const prog)
     exitEdhSTM pgs exit nil
 
 -- | Continue an Edh program with stm computation, there must be NO further
@@ -421,6 +423,20 @@ waitEdhSTM !pgs !act !exit = if edh'in'tx pgs
                                      , edh'task'job = \_ -> contEdhSTM $ exit val
                                      }
       }
+
+-- | Blocking wait an asynchronous IO action from current Edh thread
+edhWaitIO :: EdhProcExit -> IO EdhValue -> EdhProg (STM ())
+edhWaitIO !exit !act = ask >>= \pgs -> if edh'in'tx pgs
+  then throwEdh EvalError "You don't fork within a transaction"
+  else contEdhSTM $ do
+    !ioResult <- newEmptyTMVar
+    writeTQueue (edh'fork'queue pgs) $ Left $ do
+      !v <- act
+      atomically $ putTMVar ioResult v
+    writeTQueue (edh'task'queue pgs) $ EdhTxTask pgs True (wuji pgs) $ \_ ->
+      contEdhSTM $ do
+        !v <- readTMVar ioResult
+        exitEdhSTM pgs exit v
 
 -- | Type of a procedure in host language that can be called from Edh code.
 --

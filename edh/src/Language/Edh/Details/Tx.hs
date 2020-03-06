@@ -37,8 +37,8 @@ driveEdhProgram !progCtx !prog = do
           -- todo special handling here ?
           throwTo mainThId asyncExc
         _ -> throwTo mainThId e
-  !(progHaltSig :: TChan ()      ) <- newBroadcastTChanIO
-  !(forkQueue :: TQueue EdhTxTask) <- newTQueueIO
+  !(progHaltSig :: TChan ()                       ) <- newBroadcastTChanIO
+  !(forkQueue :: TQueue (Either (IO ()) EdhTxTask)) <- newTQueueIO
   let
     forkDescendants :: TChan () -> IO ()
     forkDescendants haltSig =
@@ -49,7 +49,9 @@ driveEdhProgram !progCtx !prog = do
         >>= \case
               Nothing -> -- program halted, done
                 return ()
-              Just (EdhTxTask !pgsFork _ !input !task) -> do
+              Just (Left !act) -> void $ mask_ $ forkIOWithUnmask $ \unmask ->
+                catch (unmask act) onDescendantExc
+              Just (Right (EdhTxTask !pgsFork _ !input !task)) -> do
                 -- got one to fork, prepare state for the descendant thread
                 !(descQueue :: TQueue EdhTxTask) <- newTQueueIO
                 !(descHaltSig :: TChan ()) <- atomically $ dupTChan progHaltSig

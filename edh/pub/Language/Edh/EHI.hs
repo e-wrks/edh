@@ -84,6 +84,7 @@ module Language.Edh.EHI
   , exitEdhProc
   , exitEdhProc'
   , waitEdhSTM
+  , edhWaitIO
   , edhNop
     -- ** Reflective manipulation
   , StmtSrc(..)

@@ -68,25 +68,23 @@ launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerProg = do
   let !pgsLaunch = pgsConsumer { edh'in'tx = False }
   contEdhSTM $ do
     subcBefore <- readTVar subc
-    writeTQueue
-      (edh'fork'queue pgsLaunch)
-      EdhTxTask
-        { edh'task'pgs   = pgsLaunch
-        , edh'task'wait  = True
-        , edh'task'input = wuji pgsLaunch
-        , edh'task'job   = const $ do
-                             pgsProducer <- ask
-                             contEdhSTM $ do
-                               subcNow <- readTVar subc
-                               when (subcNow == subcBefore) retry
-                               writeTQueue
-                                 (edh'task'queue pgsProducer)
-                                 EdhTxTask { edh'task'pgs   = pgsProducer
-                                           , edh'task'wait  = False
-                                           , edh'task'input = wuji pgsProducer
-                                           , edh'task'job   = const producerProg
-                                           }
-        }
+    writeTQueue (edh'fork'queue pgsLaunch) $ Right EdhTxTask
+      { edh'task'pgs   = pgsLaunch
+      , edh'task'wait  = True
+      , edh'task'input = wuji pgsLaunch
+      , edh'task'job   = const $ do
+                           pgsProducer <- ask
+                           contEdhSTM $ do
+                             subcNow <- readTVar subc
+                             when (subcNow == subcBefore) retry
+                             writeTQueue
+                               (edh'task'queue pgsProducer)
+                               EdhTxTask { edh'task'pgs   = pgsProducer
+                                         , edh'task'wait  = False
+                                         , edh'task'input = wuji pgsProducer
+                                         , edh'task'job   = const producerProg
+                                         }
+      }
     exitEdhSTM pgsConsumer exit $ EdhSink sink
 
 
