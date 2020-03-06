@@ -41,41 +41,45 @@ driveEdhProgram !progCtx !prog = do
   !(forkQueue :: TQueue (Either (IO ()) EdhTxTask)) <- newTQueueIO
   let
     forkDescendants :: TChan () -> IO ()
-    forkDescendants haltSig =
+    forkDescendants !haltSig =
       atomically
           (        (Nothing <$ readTChan haltSig)
           `orElse` (Just <$> readTQueue forkQueue)
           )
         >>= \case
-              Nothing -> -- program halted, done
-                return ()
-              Just (Left !act) -> void $ mask_ $ forkIOWithUnmask $ \unmask ->
-                catch (unmask act) onDescendantExc
-              Just (Right (EdhTxTask !pgsFork _ !input !task)) -> do
-                -- got one to fork, prepare state for the descendant thread
-                !(descQueue :: TQueue EdhTxTask) <- newTQueueIO
-                !(descHaltSig :: TChan ()) <- atomically $ dupTChan progHaltSig
-                !reactors                        <- newTVarIO []
-                !defers                          <- newTVarIO []
-                let !pgsDescendant = pgsFork { edh'task'queue = descQueue
-                                             , edh'reactors   = reactors
-                                             , edh'defers     = defers
-                    -- the forker should have checked not in tx, enforce here
-                                             , edh'in'tx      = False
-                                             }
-                    !descTaskSource = (Nothing <$ readTChan descHaltSig)
-                      `orElse` tryReadTQueue descQueue
-                -- bootstrap on the descendant thread
-                atomically $ writeTQueue
-                  descQueue
-                  (EdhTxTask pgsDescendant False input task)
-                void
-                  $ mask_
-                  $ forkIOWithUnmask
-                  $ \unmask -> catch
-                      (unmask $ driveEdhThread defers descTaskSource)
-                      onDescendantExc
-                -- loop another iteration
+              Nothing        -> return () -- Edh program halted, done
+              Just !asyncJob -> do
+                case asyncJob of
+                  -- got an async IO task to fork
+                  Left !act -> void $ mask_ $ forkIOWithUnmask $ \unmask ->
+                    catch (unmask act) onDescendantExc
+                  -- got an Edh go routine to fork
+                  Right (EdhTxTask !pgsFork _ !input !task) -> do
+                    -- prepare state for the descendant thread
+                    !(descQueue :: TQueue EdhTxTask) <- newTQueueIO
+                    !(descHaltSig :: TChan ()      ) <- atomically
+                      $ dupTChan progHaltSig
+                    !reactors <- newTVarIO []
+                    !defers   <- newTVarIO []
+                    let !pgsDescendant = pgsFork { edh'task'queue = descQueue
+                                                 , edh'reactors   = reactors
+                                                 , edh'defers     = defers
+                        -- the forker should have checked not in tx, enforce here
+                                                 , edh'in'tx      = False
+                                                 }
+                        !descTaskSource = (Nothing <$ readTChan descHaltSig)
+                          `orElse` tryReadTQueue descQueue
+                    -- bootstrap on the descendant thread
+                    atomically $ writeTQueue
+                      descQueue
+                      (EdhTxTask pgsDescendant False input task)
+                    void
+                      $ mask_
+                      $ forkIOWithUnmask
+                      $ \unmask -> catch
+                          (unmask $ driveEdhThread defers descTaskSource)
+                          onDescendantExc
+                -- keep the forker running
                 forkDescendants haltSig
   -- start forker thread
   forkerHaltSig <- -- forker's sig reader chan must be dup'ed from the broadcast
