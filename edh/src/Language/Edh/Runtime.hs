@@ -64,7 +64,9 @@ runEdhProgram !ctx !prog =
   liftIO $ tryJust edhKnownError $ runEdhProgram' ctx prog
 
 runEdhProgram' :: MonadIO m => Context -> EdhProg (STM ()) -> m ()
-runEdhProgram' !ctx !prog = liftIO $ driveEdhProgram ctx prog
+runEdhProgram' !ctx !prog = liftIO $ do
+  haltResult <- atomically newEmptyTMVar
+  driveEdhProgram haltResult ctx prog
 
 
 -- | This logger serializes all log messages to 'stderr' through a 'TQueue',

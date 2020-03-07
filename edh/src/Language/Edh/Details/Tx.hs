@@ -21,8 +21,12 @@ import           Language.Edh.Details.Evaluate
 -- | Edh follows GHC's program termination criteria that the main thread
 -- decides all. see:
 --   https://hackage.haskell.org/package/base/docs/Control-Concurrent.html
-driveEdhProgram :: Context -> EdhProg (STM ()) -> IO ()
-driveEdhProgram !progCtx !prog = do
+driveEdhProgram
+  :: (TMVar (Either SomeException EdhValue))
+  -> Context
+  -> EdhProg (STM ())
+  -> IO ()
+driveEdhProgram !haltResult !progCtx !prog = do
   -- check async exception mask state
   getMaskingState >>= \case
     Unmasked -> return ()
@@ -37,13 +41,12 @@ driveEdhProgram !progCtx !prog = do
           -- todo special handling here ?
           throwTo mainThId asyncExc
         _ -> throwTo mainThId e
-  !(progHaltSig :: TChan ()                       ) <- newBroadcastTChanIO
   !(forkQueue :: TQueue (Either (IO ()) EdhTxTask)) <- newTQueueIO
   let
-    forkDescendants :: TChan () -> IO ()
-    forkDescendants !haltSig =
+    forkDescendants :: IO ()
+    forkDescendants =
       atomically
-          (        (Nothing <$ readTChan haltSig)
+          (        (Nothing <$ readTMVar haltResult)
           `orElse` (Just <$> readTQueue forkQueue)
           )
         >>= \case
@@ -57,10 +60,8 @@ driveEdhProgram !progCtx !prog = do
                   Right !edhTask -> do
                     -- prepare state for the descendant thread
                     !(descQueue :: TQueue EdhTxTask) <- newTQueueIO
-                    !(descHaltSig :: TChan ()      ) <- atomically
-                      $ dupTChan progHaltSig
-                    !reactors <- newTVarIO []
-                    !defers   <- newTVarIO []
+                    !reactors                        <- newTVarIO []
+                    !defers                          <- newTVarIO []
                     let !pgsDescendant = (edh'task'pgs edhTask)
                           { edh'task'queue = descQueue
                           , edh'reactors   = reactors
@@ -68,8 +69,6 @@ driveEdhProgram !progCtx !prog = do
                         -- the forker should have checked not in tx, enforce here
                           , edh'in'tx      = False
                           }
-                        !descTaskSource = (Nothing <$ readTChan descHaltSig)
-                          `orElse` tryReadTQueue descQueue
                     -- bootstrap on the descendant thread
                     atomically $ writeTQueue
                       descQueue
@@ -78,38 +77,45 @@ driveEdhProgram !progCtx !prog = do
                       $ mask_
                       $ forkIOWithUnmask
                       $ \unmask -> catch
-                          (unmask $ driveEdhThread defers descTaskSource)
+                          (unmask $ driveEdhThread defers descQueue)
                           onDescendantExc
                 -- keep the forker running
-                forkDescendants haltSig
+                forkDescendants
   -- start forker thread
-  forkerHaltSig <- -- forker's sig reader chan must be dup'ed from the broadcast
-    -- chan by the main thread, if by the forker thread, it can omit the signal
-    -- thus block indefinitely, bcoz racing with main thread's finish
-                   atomically $ dupTChan progHaltSig
   void $ mask_ $ forkIOWithUnmask $ \unmask ->
-    catch (unmask $ forkDescendants forkerHaltSig) onDescendantExc
-  -- broadcast the halt signal after the main thread done anyway
-  flip finally (atomically $ writeTChan progHaltSig ()) $ do
+    catch (unmask forkDescendants) onDescendantExc
+  -- set halt result after the main thread done, anyway if not already, so all
+  -- descendant threads will terminate. 
+  -- hanging STM jobs may cause the whole process killed by GHC deadlock detector.
+  flip finally (atomically $ void $ tryPutTMVar haltResult (Right nil))
+    $ handle
+        (\(e :: SomeException) -> do
+          atomically $ void $ tryPutTMVar haltResult (Left e)
+          throwIO e
+        )
+    $ do
     -- prepare program state for main thread
-    !(mainQueue :: TQueue EdhTxTask) <- newTQueueIO
-    !reactors                        <- newTVarIO []
-    !defers                          <- newTVarIO []
-    let !pgsAtBoot = EdhProgState { edh'fork'queue = forkQueue
-                                  , edh'task'queue = mainQueue
-                                  , edh'reactors   = reactors
-                                  , edh'defers     = defers
-                                  , edh'in'tx      = False
-                                  , edh'context    = progCtx
-                                  }
-    -- bootstrap the program on main thread
-    atomically $ writeTQueue
-      mainQueue
-      (EdhTxTask pgsAtBoot False (wuji pgsAtBoot) (const prog))
-    -- drive the program from main thread
-    driveEdhThread defers $ tryReadTQueue mainQueue
+        !(mainQueue :: TQueue EdhTxTask) <- newTQueueIO
+        !reactors                        <- newTVarIO []
+        !defers                          <- newTVarIO []
+        let !pgsAtBoot = EdhProgState { edh'fork'queue = forkQueue
+                                      , edh'task'queue = mainQueue
+                                      , edh'reactors   = reactors
+                                      , edh'defers     = defers
+                                      , edh'in'tx      = False
+                                      , edh'context    = progCtx
+                                      }
+        -- bootstrap the program on main thread
+        atomically $ writeTQueue
+          mainQueue
+          (EdhTxTask pgsAtBoot False (wuji pgsAtBoot) (const prog))
+        -- drive the program from main thread
+        driveEdhThread defers mainQueue
 
  where
+
+  nextTaskFromQueue :: TQueue EdhTxTask -> STM (Maybe EdhTxTask)
+  nextTaskFromQueue = orElse (Nothing <$ readTMVar haltResult) . tryReadTQueue
 
   driveDefers :: [DeferRecord] -> IO ()
   driveDefers [] = return ()
@@ -129,7 +135,7 @@ driveEdhProgram !progCtx !prog = do
         (wuji pgsDefer)
         (const deferedProg)
       )
-    driveEdhThread deferDefers (tryReadTQueue deferTaskQueue)
+    driveEdhThread deferDefers deferTaskQueue
     driveDefers restDefers
 
   driveReactor :: EdhValue -> ReactorRecord -> IO Bool
@@ -162,7 +168,7 @@ driveEdhProgram !progCtx !prog = do
     atomically $ writeTQueue
       reactTaskQueue
       (EdhTxTask pgsReactor False (wuji pgsReactor) (const reactorProg))
-    driveEdhThread reactDefers (tryReadTQueue reactTaskQueue)
+    driveEdhThread reactDefers reactTaskQueue
     atomically $ readTMVar breakThread
   driveReactors :: [(EdhValue, ReactorRecord)] -> IO Bool
   driveReactors []               = return False
@@ -170,15 +176,15 @@ driveEdhProgram !progCtx !prog = do
     True  -> return True
     False -> driveReactors rest
 
-  driveEdhThread :: TVar [DeferRecord] -> STM (Maybe EdhTxTask) -> IO ()
-  driveEdhThread !defers !taskSource = atomically taskSource >>= \case
+  driveEdhThread :: TVar [DeferRecord] -> TQueue EdhTxTask -> IO ()
+  driveEdhThread !defers !tq = atomically (nextTaskFromQueue tq) >>= \case
     Nothing -> -- this thread is done, run defers lastly
       readTVarIO defers >>= driveDefers
     Just txTask -> goSTM 0 txTask >>= \case -- run this task
       True -> -- terminate this thread, after running defers lastly
         readTVarIO defers >>= driveDefers
       False -> -- loop another iteration for the thread
-        driveEdhThread defers taskSource
+        driveEdhThread defers tq
 
   goSTM :: Int -> EdhTxTask -> IO Bool
   goSTM !rtc (EdhTxTask !pgsTask !wait !input !task) = if wait
@@ -191,9 +197,10 @@ driveEdhProgram !progCtx !prog = do
 
     waitSTM :: IO Bool
     waitSTM = atomically stmJob >>= \case
-      [] -> -- no reactor fires, the tx job has been executed
+      Nothing -> return True -- to terminate as program halted
+      Just [] -> -- no reactor fires, the tx job has been executed
         return False
-      gotevl -> driveReactors gotevl >>= \case
+      Just gotevl -> driveReactors gotevl >>= \case
         True -> -- a reactor is terminating this thread
           return True
         False ->
@@ -212,12 +219,13 @@ driveEdhProgram !progCtx !prog = do
         trace (" 🌀 " <> show tid <> " stm retry #" <> show rtc') $ return ()
 
       atomically ((Just <$> stmJob) `orElse` return Nothing) >>= \case
+        Just Nothing -> return True -- to terminate as program halted
         Nothing -> -- stm failed, do a tracked retry
           doSTM (rtc' + 1)
-        Just [] ->
+        Just (Just []) ->
           -- no reactor has fired, the tx job has already been executed
           return False
-        Just !gotevl -> driveReactors gotevl >>= \case
+        Just (Just !gotevl) -> driveReactors gotevl >>= \case
           True -> -- a reactor is terminating this thread
             return True
           False ->
@@ -226,14 +234,16 @@ driveEdhProgram !progCtx !prog = do
             -- continue with this tx job
             doSTM rtc'
 
-    stmJob :: STM [(EdhValue, ReactorRecord)]
-    stmJob =
-      (readTVar (edh'reactors pgsTask) >>= reactorChk []) >>= \gotevl ->
-        if null gotevl
-          then -- no reactor fires, execute the tx job
-               join (runReaderT (task input) pgsTask) >> return []
-          else -- skip the tx job if at least one reactor fires
-               return gotevl
+    stmJob :: STM (Maybe [(EdhValue, ReactorRecord)])
+    stmJob = tryReadTMVar haltResult >>= \case
+      Just _ -> return Nothing -- program halted
+      Nothing -> -- program still running
+        (readTVar (edh'reactors pgsTask) >>= reactorChk []) >>= \gotevl ->
+          if null gotevl
+            then -- no reactor fires, execute the tx job
+                 join (runReaderT (task input) pgsTask) >> return (Just [])
+            else -- skip the tx job if at least one reactor fires
+                 return (Just gotevl)
 
     reactorChk
       :: [(EdhValue, ReactorRecord)]
