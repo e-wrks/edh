@@ -46,8 +46,7 @@ import           Language.Edh.Details.Tx       as TX
 import           Language.Edh.Details.Evaluate as EV
 
 
-bootEdhModule
-  :: MonadIO m => EdhWorld -> Text -> m (Either InterpretError Object)
+bootEdhModule :: MonadIO m => EdhWorld -> Text -> m (Either EdhError Object)
 bootEdhModule !world impSpec = liftIO $ tryJust edhKnownError $ do
   !final <- newEmptyTMVarIO
   runEdhProgram' (worldContext world)
@@ -59,7 +58,7 @@ bootEdhModule !world impSpec = liftIO $ tryJust edhKnownError $ do
 
 
 runEdhProgram
-  :: MonadIO m => Context -> EdhProg (STM ()) -> m (Either InterpretError ())
+  :: MonadIO m => Context -> EdhProg (STM ()) -> m (Either EdhError ())
 runEdhProgram !ctx !prog =
   liftIO $ tryJust edhKnownError $ runEdhProgram' ctx prog
 

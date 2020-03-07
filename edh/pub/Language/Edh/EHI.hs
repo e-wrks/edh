@@ -11,7 +11,7 @@
 module Language.Edh.EHI
   (
     -- * Exceptions
-    InterpretError(..)
+    EdhError(..)
   , ParserError
   , EdhErrorContext(..)
   , EvalError(..)
@@ -47,6 +47,7 @@ module Language.Edh.EHI
   , importEdhModule
   , moduleContext
   , contextScope
+  , parseEdhSource
   , evalEdhSource
   , runEdhProgram
   , runEdhProgram'
@@ -174,7 +175,7 @@ import           Language.Edh.Event
 
 evalEdh
   :: Text -- ^ Edh code
-  -> EdhShell (Either InterpretError EdhValue) -- ^ eval result
+  -> EdhShell (Either EdhError EdhValue) -- ^ eval result
 evalEdh code = do
   (world, modu) <- ask
   liftIO $ evalEdhSource world modu code
@@ -183,7 +184,7 @@ evalEdh code = do
 runEdhShell
   :: ModuleId -- ^ shell module id
   -> EdhShell a -- ^ computation in an Edh shell
-  -> EdhBootstrap (Either InterpretError a) -- ^ final result
+  -> EdhBootstrap (Either EdhError a) -- ^ final result
 runEdhShell moduId (ReaderT f) = do
   world <- ask
   modu  <- createEdhModule world moduId "<adhoc>"

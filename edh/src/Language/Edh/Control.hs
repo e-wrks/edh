@@ -49,9 +49,9 @@ newtype UsageError = UsageError Text
 instance Exception UsageError
 
 
-data InterpretError = EdhParseError ParserError | EdhEvalError EvalError | EdhUsageError UsageError
+data EdhError = EdhParseError ParserError | EdhEvalError EvalError | EdhUsageError UsageError
     deriving (Eq, Typeable)
-instance Show InterpretError where
+instance Show EdhError where
   show (EdhParseError err) = "⛔ " ++ errorBundlePretty err
   show (EdhEvalError (EvalError (EdhErrorContext msg loc stack))) =
     T.unpack $ stacktrace <> "\n💣 " <> msg <> "\n👉 " <> loc
@@ -61,11 +61,11 @@ instance Show InterpretError where
       ("💔" :: Text)
       stack
   show (EdhUsageError (UsageError msg)) = "🐒 " ++ T.unpack msg
-instance Exception InterpretError
+instance Exception EdhError
 
 
-edhKnownError :: SomeException -> Maybe InterpretError
-edhKnownError err = case fromException err :: Maybe InterpretError of
+edhKnownError :: SomeException -> Maybe EdhError
+edhKnownError err = case fromException err :: Maybe EdhError of
   Just e  -> Just e
   Nothing -> case fromException err :: Maybe EvalError of
     Just e  -> Just $ EdhEvalError e

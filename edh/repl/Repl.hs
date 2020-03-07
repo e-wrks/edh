@@ -47,12 +47,11 @@ doRead pendingLines =
                       doRead $ code : pendingLines
 
 
-doEval
-  :: EdhWorld -> Object -> Text -> InputT IO (Either InterpretError EdhValue)
+doEval :: EdhWorld -> Object -> Text -> InputT IO (Either EdhError EdhValue)
 doEval = evalEdhSource
 
 
-doPrint :: Either InterpretError EdhValue -> InputT IO ()
+doPrint :: Either EdhError EdhValue -> InputT IO ()
 doPrint = \case
   Left err -> case err of
     EdhParseError _ -> do
