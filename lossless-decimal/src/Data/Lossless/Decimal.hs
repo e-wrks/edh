@@ -13,6 +13,13 @@ data Decimal = Decimal {
     , numerator'10 :: !Integer
 }
 
+castDecimalToInteger :: Decimal -> Integer
+castDecimalToInteger x@(Decimal d e n)
+  | d /= 1 || e < 0 = error $ "not an integer: " ++ show x
+  | e == 0          = n
+  | otherwise       = n * 10 ^ e
+{-# INLINE castDecimalToInteger #-}
+
 nan :: Decimal
 nan = Decimal 0 0 0
 
