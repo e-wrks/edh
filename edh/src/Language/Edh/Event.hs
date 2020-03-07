@@ -2,12 +2,14 @@
 module Language.Edh.Event where
 
 import           Prelude
+-- import           Debug.Trace
+-- import           System.IO.Unsafe
 
 import           GHC.Conc                       ( unsafeIOToSTM )
 
-import           Control.Monad
 import           Control.Monad.Reader
 
+-- import           Control.Concurrent
 import           Control.Concurrent.STM
 
 import           Data.Unique
@@ -78,12 +80,12 @@ launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerProg = do
                              subcNow <- readTVar subc
                              when (subcNow == subcBefore) retry
                              writeTQueue
-                               (edh'task'queue pgsProducer)
-                               EdhTxTask { edh'task'pgs   = pgsProducer
-                                         , edh'task'wait  = False
-                                         , edh'task'input = wuji pgsProducer
-                                         , edh'task'job   = const producerProg
-                                         }
+                                 (edh'task'queue pgsProducer)
+                                 EdhTxTask { edh'task'pgs   = pgsProducer
+                                           , edh'task'wait  = False
+                                           , edh'task'input = wuji pgsProducer
+                                           , edh'task'job   = const producerProg
+                                           }
       }
     exitEdhSTM pgsConsumer exit $ EdhSink sink
 

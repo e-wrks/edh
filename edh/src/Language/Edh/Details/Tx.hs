@@ -51,28 +51,29 @@ driveEdhProgram !progCtx !prog = do
               Just !asyncJob -> do
                 case asyncJob of
                   -- got an async IO task to fork
-                  Left !act -> void $ mask_ $ forkIOWithUnmask $ \unmask ->
-                    catch (unmask act) onDescendantExc
+                  Left !ioAct -> void $ mask_ $ forkIOWithUnmask $ \unmask ->
+                    catch (unmask ioAct) onDescendantExc
                   -- got an Edh go routine to fork
-                  Right (EdhTxTask !pgsFork _ !input !task) -> do
+                  Right !edhTask -> do
                     -- prepare state for the descendant thread
                     !(descQueue :: TQueue EdhTxTask) <- newTQueueIO
                     !(descHaltSig :: TChan ()      ) <- atomically
                       $ dupTChan progHaltSig
                     !reactors <- newTVarIO []
                     !defers   <- newTVarIO []
-                    let !pgsDescendant = pgsFork { edh'task'queue = descQueue
-                                                 , edh'reactors   = reactors
-                                                 , edh'defers     = defers
+                    let !pgsDescendant = (edh'task'pgs edhTask)
+                          { edh'task'queue = descQueue
+                          , edh'reactors   = reactors
+                          , edh'defers     = defers
                         -- the forker should have checked not in tx, enforce here
-                                                 , edh'in'tx      = False
-                                                 }
+                          , edh'in'tx      = False
+                          }
                         !descTaskSource = (Nothing <$ readTChan descHaltSig)
                           `orElse` tryReadTQueue descQueue
                     -- bootstrap on the descendant thread
                     atomically $ writeTQueue
                       descQueue
-                      (EdhTxTask pgsDescendant False input task)
+                      edhTask { edh'task'pgs = pgsDescendant }
                     void
                       $ mask_
                       $ forkIOWithUnmask
@@ -180,7 +181,7 @@ driveEdhProgram !progCtx !prog = do
         driveEdhThread defers taskSource
 
   goSTM :: Int -> EdhTxTask -> IO Bool
-  goSTM !rtc (EdhTxTask !pgsThread !wait !input !task) = if wait
+  goSTM !rtc (EdhTxTask !pgsTask !wait !input !task) = if wait
     then -- let stm do the retry, for blocking read of a 'TChan' etc.
          waitSTM
     else -- blocking wait not expected, track stm retries explicitly
@@ -227,10 +228,10 @@ driveEdhProgram !progCtx !prog = do
 
     stmJob :: STM [(EdhValue, ReactorRecord)]
     stmJob =
-      (readTVar (edh'reactors pgsThread) >>= reactorChk []) >>= \gotevl ->
+      (readTVar (edh'reactors pgsTask) >>= reactorChk []) >>= \gotevl ->
         if null gotevl
           then -- no reactor fires, execute the tx job
-               join (runReaderT (task input) pgsThread) >> return []
+               join (runReaderT (task input) pgsTask) >> return []
           else -- skip the tx job if at least one reactor fires
                return gotevl
 

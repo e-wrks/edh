@@ -5,11 +5,13 @@ import           Prelude
 -- import           Debug.Trace
 
 import           GHC.Conc                       ( unsafeIOToSTM )
+import           System.IO.Unsafe
 
 import           Control.Exception
 import           Control.Monad.Except
 import           Control.Monad.Reader
 
+-- import           Control.Concurrent
 import           Control.Concurrent.STM
 
 import           Data.Foldable
@@ -21,7 +23,6 @@ import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
 
-import           System.IO.Unsafe
 
 import           Text.Megaparsec
 
@@ -430,13 +431,14 @@ edhWaitIO !exit !act = ask >>= \pgs -> if edh'in'tx pgs
   then throwEdh EvalError "You don't wait IO within a transaction"
   else contEdhSTM $ do
     !ioResult <- newEmptyTMVar
-    writeTQueue (edh'fork'queue pgs) $ Left $ do
-      !v <- act
-      atomically $ putTMVar ioResult v
+    writeTQueue (edh'fork'queue pgs)
+      $ Left
+      $ catch (act >>= atomically . void . tryPutTMVar ioResult . Right)
+      $ \(e :: SomeException) -> atomically $ putTMVar ioResult (Left e)
     writeTQueue (edh'task'queue pgs) $ EdhTxTask pgs True (wuji pgs) $ \_ ->
-      contEdhSTM $ do
-        !v <- readTMVar ioResult
-        exitEdhSTM pgs exit v
+      contEdhSTM $ readTMVar ioResult >>= \case
+        Right v -> exitEdhSTM pgs exit v
+        Left  e -> throwEdhSTM pgs EvalError $ T.pack $ displayException e
 
 -- | Type of a procedure in host language that can be called from Edh code.
 --
