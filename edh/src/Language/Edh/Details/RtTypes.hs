@@ -427,7 +427,7 @@ waitEdhSTM !pgs !act !exit = if edh'in'tx pgs
 -- | Blocking wait an asynchronous IO action from current Edh thread
 edhWaitIO :: EdhProcExit -> IO EdhValue -> EdhProg (STM ())
 edhWaitIO !exit !act = ask >>= \pgs -> if edh'in'tx pgs
-  then throwEdh EvalError "You don't fork within a transaction"
+  then throwEdh EvalError "You don't wait IO within a transaction"
   else contEdhSTM $ do
     !ioResult <- newEmptyTMVar
     writeTQueue (edh'fork'queue pgs) $ Left $ do
