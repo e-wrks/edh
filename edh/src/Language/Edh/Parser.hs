@@ -39,7 +39,7 @@ lexeme :: Parser a -> Parser a
 lexeme = L.lexeme sc
 
 keyword :: Text -> Parser Text
-keyword kw = try $ lexeme (string kw <* notFollowedBy alphaNumChar)
+keyword kw = try $ lexeme (string kw <* notFollowedBy parseAlphaName)
 
 trailingComma :: Parser ()
 trailingComma = void $ optional $ symbol ","
