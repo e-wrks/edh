@@ -1,6 +1,6 @@
 
-# get most-recent-value from an event sink
+# get the most-recent-event from an event sink
 #
 # this will block in waiting the 1st event into the sink if no
 # one has ever been posted to it.
-method mrv ( s ) for v from s do { return v }
+method mre ( s ) for e from s do { return e }
