@@ -103,15 +103,11 @@ attrDerefTemptProc !argsSender _ =
 symbolCtorProc :: EdhProcedure
 symbolCtorProc !argsSender !exit = do
   !pgs <- ask
-  packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) -> contEdhSTM $ do
-    let nullSemantic = case Map.lookup "null" kwargs of
-          Just (EdhBool !ns) -> ns
-          _                  -> False
-    case args of
-      [EdhString description] -> do
-        sym <- mkSymbol (T.unpack description) nullSemantic
-        exitEdhSTM pgs exit $ EdhSymbol sym
-      _ -> throwEdhSTM pgs EvalError "Invalid arg to Symbol()"
+  packHostProcArgs argsSender $ \(ArgsPack !args _) -> contEdhSTM $ case args of
+    [EdhString description] -> do
+      sym <- mkSymbol description
+      exitEdhSTM pgs exit $ EdhSymbol sym
+    _ -> throwEdhSTM pgs EvalError "Invalid arg to Symbol()"
 
 
 -- | utility pkargs(*args,**kwargs,***packed) - arguments packer
