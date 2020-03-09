@@ -4,7 +4,7 @@ module Language.Edh.Batteries.Reflect where
 import           Prelude
 -- import           Debug.Trace
 
-import           System.IO.Unsafe
+-- import           System.IO.Unsafe
 import           GHC.Conc                       ( unsafeIOToSTM )
 
 import           Control.Monad.Reader
@@ -196,15 +196,16 @@ scopeEvalProc !argsSender !exit = do
             _ -> EdhArgsPack $ ArgsPack (reverse argsValues) kwargsValues
     evalThePack !argsValues !kwargsValues [] (kwExpr : kwargsExprs') =
       case kwExpr of
-        (!kw, EdhExpr _ !expr) -> evalExpr expr $ \(OriginalValue !val _ _) ->
-          evalThePack argsValues
-                      (Map.insert kw val kwargsValues)
-                      []
-                      kwargsExprs'
+        (!kw, EdhExpr _ !expr _) ->
+          evalExpr expr $ \(OriginalValue !val _ _) -> evalThePack
+            argsValues
+            (Map.insert kw val kwargsValues)
+            []
+            kwargsExprs'
         v -> throwEdh EvalError $ "Not an expr: " <> T.pack (show v)
     evalThePack !argsValues !kwargsValues (!argExpr : argsExprs') !kwargsExprs
       = case argExpr of
-        EdhExpr _ !expr -> evalExpr expr $ \(OriginalValue !val _ _) ->
+        EdhExpr _ !expr _ -> evalExpr expr $ \(OriginalValue !val _ _) ->
           evalThePack (val : argsValues) kwargsValues argsExprs' kwargsExprs
         v -> throwEdh EvalError $ "Not an expr: " <> T.pack (show v)
   packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) ->
@@ -230,19 +231,17 @@ makeOpProc !argsSender !exit =
     if (not $ null kwargs)
       then throwEdh EvalError "No kwargs accepted by makeOp"
       else case args of
-        [(EdhExpr _ !lhe), EdhString op, (EdhExpr _ !rhe)] -> exitEdhProc
-          exit
-          (EdhExpr (unsafePerformIO newUnique) $ InfixExpr op lhe rhe)
+        [(EdhExpr _ !lhe _), EdhString op, (EdhExpr _ !rhe _)] ->
+          exitEdhProc exit (edhExpr $ InfixExpr op lhe rhe)
         _ -> throwEdh EvalError $ "Invalid arguments to makeOp: " <> T.pack
           (show args)
 
 
--- | utility expr(*args,**kwargs)
+-- | utility makeExpr(*args,**kwargs)
 makeExprProc :: EdhProcedure
 makeExprProc !argsSender !exit = case argsSender of
-  [] -> exitEdhProc exit nil
-  [SendPosArg !argExpr] ->
-    exitEdhProc exit (EdhExpr (unsafePerformIO newUnique) argExpr)
+  []                    -> exitEdhProc exit nil
+  [SendPosArg !argExpr] -> exitEdhProc exit (edhExpr argExpr)
   argSenders ->
     packEdhExprs argSenders $ \apk -> exitEdhProc exit $ EdhArgsPack apk
 

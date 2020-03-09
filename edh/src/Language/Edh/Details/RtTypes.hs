@@ -636,7 +636,7 @@ data EdhValue =
     | EdhSink !EventSink
 
   -- | reflection
-    | EdhExpr !Unique !Expr
+    | EdhExpr !Unique !Expr !Text
 
 edhValueStr :: EdhValue -> Text
 edhValueStr (EdhString s) = s
@@ -703,7 +703,8 @@ instance Show EdhValue where
 
   show (EdhSink   v)    = show v
 
-  show (EdhExpr _ v)    = "<expr: " ++ show v ++ ">"
+  show (EdhExpr _ x s) =
+    "<expr: " ++ (if T.null s then show x else T.unpack s) ++ ">"
 
 -- Note:
 --
@@ -750,7 +751,7 @@ instance Eq EdhValue where
 
   EdhSink   x          == EdhSink   y          = x == y
 
-  EdhExpr x'u _        == EdhExpr y'u _        = x'u == y'u
+  EdhExpr x'u _ _      == EdhExpr y'u _ _      = x'u == y'u
 
 -- todo: support coercing equality ?
 --       * without this, we are a strongly typed dynamic language
@@ -787,14 +788,19 @@ instance Hashable EdhValue where
   hashWithSalt s EdhContinue         = hashWithSalt s (-2 :: Int)
   hashWithSalt s (EdhCaseClose v) =
     s `hashWithSalt` (-3 :: Int) `hashWithSalt` v
-  hashWithSalt s EdhFallthrough = hashWithSalt s (-4 :: Int)
-  hashWithSalt s (EdhYield  v)  = s `hashWithSalt` (-5 :: Int) `hashWithSalt` v
-  hashWithSalt s (EdhReturn v)  = s `hashWithSalt` (-6 :: Int) `hashWithSalt` v
+  hashWithSalt s EdhFallthrough  = hashWithSalt s (-4 :: Int)
+  hashWithSalt s (EdhYield  v  ) = s `hashWithSalt` (-5 :: Int) `hashWithSalt` v
+  hashWithSalt s (EdhReturn v  ) = s `hashWithSalt` (-6 :: Int) `hashWithSalt` v
 
-  hashWithSalt s (EdhSink   x)  = hashWithSalt s x
+  hashWithSalt s (EdhSink   x  ) = hashWithSalt s x
 
-  hashWithSalt s (EdhExpr u _)  = hashWithSalt s u
+  hashWithSalt s (EdhExpr u _ _) = hashWithSalt s u
 
+
+edhExpr :: Expr -> EdhValue
+edhExpr (ExprWithSrc !xpr !xprSrc) =
+  EdhExpr (unsafePerformIO newUnique) xpr xprSrc
+edhExpr x = EdhExpr (unsafePerformIO newUnique) x ""
 
 nil :: EdhValue
 nil = EdhNil
@@ -1032,7 +1038,10 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
 
     | InfixExpr !OpSymbol !Expr !Expr
 
-    | GodSendExpr EdhValue
+    | ExprWithSrc !Expr !Text
+
+     -- for host (Haskell) code to bake some cake in
+    | GodSendExpr !EdhValue
   deriving (Eq, Show)
 
 

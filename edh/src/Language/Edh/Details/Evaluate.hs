@@ -6,7 +6,7 @@ import           Prelude
 -- import           Debug.Trace
 
 import           GHC.Conc                       ( unsafeIOToSTM )
-import           System.IO.Unsafe
+-- import           System.IO.Unsafe
 
 import           Control.Exception
 import           Control.Monad.Except
@@ -612,9 +612,11 @@ evalExpr expr exit = do
       (StmtSrc (!srcPos, _)) = contextStmt ctx
       !scope                 = contextScope ctx
   case expr of
-    GodSendExpr !val -> exitEdhProc exit val
 
-    LitExpr     lit  -> case lit of
+    GodSendExpr !val -> exitEdhProc exit val
+    x@ExprWithSrc{}  -> exitEdhProc exit $ edhExpr x
+
+    LitExpr lit      -> case lit of
       DecLiteral    v -> exitEdhProc exit (EdhDecimal v)
       StringLiteral v -> exitEdhProc exit (EdhString v)
       BoolLiteral   v -> exitEdhProc exit (EdhBool v)
@@ -890,14 +892,12 @@ evalExpr expr exit = do
               (PackReceiver [RecvArg scopeName Nothing Nothing, RecvArg lhName Nothing Nothing, RecvArg rhName Nothing Nothing])
                 -> do
                   scopeWrapper <- mkScopeWrapper world scope
-                  lhu          <- unsafeIOToSTM newUnique
-                  rhu          <- unsafeIOToSTM newUnique
                   opEnt        <-
                     createEntity
                     $  Map.fromList
                     $  [ (AttrByName scopeName, EdhObject scopeWrapper)
-                       , (AttrByName lhName   , EdhExpr lhu lhExpr)
-                       , (AttrByName rhName   , EdhExpr rhu rhExpr)
+                       , (AttrByName lhName   , edhExpr lhExpr)
+                       , (AttrByName rhName   , edhExpr rhExpr)
                        ]
                     ++ case op'pred of
                         -- put the overridden (predecessor) operator in the overriding
@@ -1856,13 +1856,9 @@ packEdhExprs (x : xs) !exit = case x of
   UnpackKwArgs _ -> throwEdh EvalError "unpack to expr not supported yet"
   UnpackPkArgs _ -> throwEdh EvalError "unpack to expr not supported yet"
   SendPosArg !argExpr -> packEdhExprs xs $ \(ArgsPack !posArgs !kwArgs) ->
-    exit
-      (ArgsPack (EdhExpr (unsafePerformIO newUnique) argExpr : posArgs) kwArgs)
+    exit (ArgsPack (edhExpr argExpr : posArgs) kwArgs)
   SendKwArg !kw !argExpr -> packEdhExprs xs $ \(ArgsPack !posArgs !kwArgs) ->
-    exit
-      ( ArgsPack posArgs
-      $ Map.insert kw (EdhExpr (unsafePerformIO newUnique) argExpr) kwArgs
-      )
+    exit (ArgsPack posArgs $ Map.insert kw (edhExpr argExpr) kwArgs)
 
 
 packEdhArgs

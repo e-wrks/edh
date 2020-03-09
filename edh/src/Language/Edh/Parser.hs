@@ -39,7 +39,7 @@ lexeme :: Parser a -> Parser a
 lexeme = L.lexeme sc
 
 keyword :: Text -> Parser Text
-keyword kw = try $ lexeme (string kw <* notFollowedBy parseAlphaName)
+keyword kw = try $ lexeme (string kw <* notFollowedBy (satisfy isIdentChar))
 
 trailingComma :: Parser ()
 trailingComma = void $ optional $ symbol ","
@@ -694,4 +694,9 @@ parseExprPrec prec =
 
 
 parseExpr' :: Parser Expr
-parseExpr' = parseExprPrec (-1)
+parseExpr' = optional (keyword "expr") >>= \case
+  Nothing -> parseExprPrec (-1)
+  Just _  -> do
+    (xprSrc, xpr) <- match $ parseExprPrec (-1)
+    return $ ExprWithSrc xpr xprSrc
+
