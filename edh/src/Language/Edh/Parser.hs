@@ -396,45 +396,9 @@ parseStmt = optionalSemicolon *> do
 
           -- NOTE: statements above should probably all be detected by
           -- `illegalExprStart` as invalid start for an expr
-          , ExprStmt <$> parseExpr'
+          , ExprStmt <$> parseExpr
           ]
     <*  optionalSemicolon
-
-parseExpr :: Parser Expr
-parseExpr = lookAhead illegalExprStart >>= \case
-  True  -> fail "Illegal expression"
-  False -> parseExpr' -- the real expr parsing
-
--- NOTE: a keyword will parse as identifier in an expr, if not forbidden here
-illegalExprStart :: Parser Bool
-illegalExprStart =
-  True
-    <$  choice
-          [ keyword "ai"
-          , keyword "go"
-          , keyword "defer"
-          , keyword "import"
-          , keyword "let"
-          , keyword "class"
-          , keyword "extends"
-          , keyword "method"
-          , keyword "generator"
-          , keyword "reactor"
-          , keyword "interpreter"
-          , keyword "producer"
-          , keyword "while"
-          , keyword "break"
-          , keyword "continue"
-          , keyword "fallthrough"
-          , keyword "operator"
-          , keyword "try"
-          , keyword "except"
-          , keyword "finally"
-          , keyword "return"
-          , keyword "throw"
-          , keyword "pass"
-          ]
-    <|> return False
 
 
 parseIfExpr :: Parser Expr
@@ -640,25 +604,70 @@ parsePrefixExpr = choice
   ]
 
 
+-- NOTE: a keyword for statement will parse as identifier in an expr,
+--       if not forbidden here.
+illegalExprStart :: Parser Bool
+illegalExprStart =
+  True
+    <$  choice
+          [ keyword "ai"
+          , keyword "go"
+          , keyword "defer"
+          , keyword "import"
+          , keyword "let"
+          , keyword "class"
+          , keyword "extends"
+          , keyword "method"
+          , keyword "generator"
+          , keyword "reactor"
+          , keyword "interpreter"
+          , keyword "producer"
+          , keyword "while"
+          , keyword "break"
+          , keyword "continue"
+          , keyword "fallthrough"
+          , keyword "operator"
+          , keyword "try"
+          , keyword "except"
+          , keyword "finally"
+          , keyword "return"
+          , keyword "throw"
+          , keyword "pass"
+          ]
+    <|> return False
+
+
 -- besides hardcoded prefix operators, all other operators are infix binary
 -- operators, they can be declared and further overridden everywhere,
 -- while they are left-assosciative only
 
 parseExprPrec :: Precedence -> Parser Expr
-parseExprPrec prec =
-  choice
-      [ parsePrefixExpr
-      , parseYieldExpr
-      , parseForExpr
-      , parseIfExpr
-      , parseCaseExpr
-      , parseListExpr
-      , parseBlockOrDict
-      , parseOpAddrOrTupleOrParen
-      , LitExpr <$> parseLitExpr
-      , AttrExpr <$> parseAttrAddr
-      ]
-    >>= parseMoreOps
+parseExprPrec prec = lookAhead illegalExprStart >>= \case
+  True -> fail "Illegal expression"
+  False ->
+    choice
+        [ -- a reflective expr token parsed while carrying original source.
+          -- the source can be passed to a remote environment for eval/exec
+          -- after parsed again, in which case the local parsing serves 
+          -- some preliminary validation purpose, in addition for the local
+          -- environment to be able to introspect it programmatically, as
+          -- well to get syntax-highlighting and other authoring convenience.
+          keyword "expr" >> uncurry (flip ExprWithSrc) <$> match
+          (parseExprPrec (-1))
+
+          -- more normal/routine exprs
+        , parsePrefixExpr
+        , parseYieldExpr
+        , parseForExpr
+        , parseIfExpr
+        , parseCaseExpr
+        , parseListExpr
+        , parseBlockOrDict
+        , parseOpAddrOrTupleOrParen
+        , LitExpr <$> parseLitExpr
+        , AttrExpr <$> parseAttrAddr
+        ]
+      >>= parseMoreOps
  where
   parseMoreOps :: Expr -> Parser Expr
   parseMoreOps expr = choice
@@ -693,10 +702,5 @@ parseExprPrec prec =
               return Nothing
 
 
-parseExpr' :: Parser Expr
-parseExpr' = optional (keyword "expr") >>= \case
-  Nothing -> parseExprPrec (-1)
-  Just _  -> do
-    (xprSrc, xpr) <- match $ parseExprPrec (-1)
-    return $ ExprWithSrc xpr xprSrc
-
+parseExpr :: Parser Expr
+parseExpr = parseExprPrec (-1)

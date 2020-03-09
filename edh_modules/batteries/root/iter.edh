@@ -9,7 +9,7 @@
     }
 
     if nil == stop then let (stop, start) = (start, 0)
-    start == stop -> return nil
+    start == stop -> { return nil }
     n = start
     
     start < stop -> {

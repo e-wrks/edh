@@ -10,7 +10,7 @@
  to see verbose log of the finishing up
 #}
 method concur(*tasks, c=6, dbgLogger=0) {
-  null(tasks) -> return nil
+  null(tasks) -> { return nil }
   c < 1 -> error("Invalid concurrency: " ++ c)
 
   # event sink for decreased number of running tasks, this will

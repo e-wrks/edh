@@ -653,6 +653,11 @@ edhValueNull (EdhList    (List _ l     )) = null <$> readTVar l
 edhValueNull (EdhTuple   l              ) = return $ null l
 edhValueNull (EdhArgsPack (ArgsPack args kwargs)) =
   return $ null args && Map.null kwargs
+edhValueNull (EdhExpr _ (LitExpr NilLiteral) _) = return True
+edhValueNull (EdhExpr _ (LitExpr (DecLiteral d)) _) =
+  return $ D.decimalIsNaN d || d == 0
+edhValueNull (EdhExpr _ (LitExpr (BoolLiteral b)) _) = return b
+edhValueNull (EdhExpr _ (LitExpr (StringLiteral s)) _) = return $ T.null s
 edhValueNull _ = return False
 
 instance Show EdhValue where
@@ -698,13 +703,16 @@ instance Show EdhValue where
   show EdhContinue      = "<continue>"
   show (EdhCaseClose v) = "<caseclose: " ++ show v ++ ">"
   show EdhFallthrough   = "<fallthrough>"
-  show (EdhYield  v)    = "<yield: " ++ show v ++ ">"
-  show (EdhReturn v)    = "<return: " ++ show v ++ ">"
+  show (EdhYield  v  )  = "<yield: " ++ show v ++ ">"
+  show (EdhReturn v  )  = "<return: " ++ show v ++ ">"
 
-  show (EdhSink   v)    = show v
+  show (EdhSink   v  )  = show v
 
-  show (EdhExpr _ x s) =
-    "<expr: " ++ (if T.null s then show x else T.unpack s) ++ ">"
+  show (EdhExpr _ x s)  = if T.null s
+    then -- source-less form
+         "<expr: " ++ show x ++ ">"
+    else -- source form
+         T.unpack s
 
 -- Note:
 --
@@ -715,48 +723,49 @@ instance Show EdhValue where
 -- for types of:  object/dict/list
 
 instance Eq EdhValue where
-  EdhType x            == EdhType y            = x == y
-  EdhNil               == EdhNil               = True
-  EdhDecimal x         == EdhDecimal y         = x == y
-  EdhBool    x         == EdhBool    y         = x == y
-  EdhString  x         == EdhString  y         = x == y
-  EdhSymbol  x         == EdhSymbol  y         = x == y
+  EdhType x                   == EdhType y                   = x == y
+  EdhNil                      == EdhNil                      = True
+  EdhDecimal x                == EdhDecimal y                = x == y
+  EdhBool    x                == EdhBool    y                = x == y
+  EdhString  x                == EdhString  y                = x == y
+  EdhSymbol  x                == EdhSymbol  y                = x == y
 
-  EdhObject  x         == EdhObject  y         = x == y
+  EdhObject  x                == EdhObject  y                = x == y
 
-  EdhDict    x         == EdhDict    y         = x == y
-  EdhList    x         == EdhList    y         = x == y
-  EdhPair x'k x'v      == EdhPair y'k y'v      = x'k == y'k && x'v == y'v
-  EdhTuple    x        == EdhTuple    y        = x == y
-  EdhArgsPack x        == EdhArgsPack y        = x == y
+  EdhDict    x                == EdhDict    y                = x == y
+  EdhList    x                == EdhList    y                = x == y
+  EdhPair x'k x'v == EdhPair y'k y'v = x'k == y'k && x'v == y'v
+  EdhTuple    x               == EdhTuple    y               = x == y
+  EdhArgsPack x               == EdhArgsPack y               = x == y
 
-  EdhHostProc x        == EdhHostProc y        = x == y
-  EdhHostOper _ x'proc == EdhHostOper _ y'proc = x'proc == y'proc
-  EdhHostGenr x        == EdhHostGenr y        = x == y
+  EdhHostProc x               == EdhHostProc y               = x == y
+  EdhHostOper _ x'proc        == EdhHostOper _ y'proc        = x'proc == y'proc
+  EdhHostGenr x               == EdhHostGenr y               = x == y
 
-  EdhClass    x        == EdhClass    y        = x == y
-  EdhMethod   x        == EdhMethod   y        = x == y
-  EdhOperator _ _ x    == EdhOperator _ _ y    = x == y
-  EdhGenrDef     x     == EdhGenrDef     y     = x == y
-  EdhInterpreter x     == EdhInterpreter y     = x == y
-  EdhProducer    x     == EdhProducer    y     = x == y
+  EdhClass    x               == EdhClass    y               = x == y
+  EdhMethod   x               == EdhMethod   y               = x == y
+  EdhOperator _ _ x           == EdhOperator _ _ y           = x == y
+  EdhGenrDef     x            == EdhGenrDef     y            = x == y
+  EdhInterpreter x            == EdhInterpreter y            = x == y
+  EdhProducer    x            == EdhProducer    y            = x == y
 
-  EdhBreak             == EdhBreak             = True
-  EdhContinue          == EdhContinue          = True
-  EdhCaseClose x       == EdhCaseClose y       = x == y
-  EdhFallthrough       == EdhFallthrough       = True
+  EdhBreak                    == EdhBreak                    = True
+  EdhContinue                 == EdhContinue                 = True
+  EdhCaseClose x              == EdhCaseClose y              = x == y
+  EdhFallthrough              == EdhFallthrough              = True
 -- todo: regard a yielded/returned value equal to the value itself ?
-  EdhYield  x'v        == EdhYield  y'v        = x'v == y'v
-  EdhReturn x'v        == EdhReturn y'v        = x'v == y'v
+  EdhYield  x'v               == EdhYield  y'v               = x'v == y'v
+  EdhReturn x'v               == EdhReturn y'v               = x'v == y'v
 
-  EdhSink   x          == EdhSink   y          = x == y
+  EdhSink   x                 == EdhSink   y                 = x == y
 
-  EdhExpr x'u _ _      == EdhExpr y'u _ _      = x'u == y'u
+  EdhExpr _   (LitExpr x'l) _ == EdhExpr _   (LitExpr y'l) _ = x'l == y'l
+  EdhExpr x'u _             _ == EdhExpr y'u _             _ = x'u == y'u
 
 -- todo: support coercing equality ?
 --       * without this, we are a strongly typed dynamic language
 --       * with this, we'll be a weakly typed dynamic language
-  _                    == _                    = False
+  _                           == _                           = False
 
 instance Hashable EdhValue where
   hashWithSalt s (EdhType x)         = hashWithSalt s $ 1 + fromEnum x
