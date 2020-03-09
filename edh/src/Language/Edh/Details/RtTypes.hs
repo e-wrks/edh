@@ -797,12 +797,13 @@ instance Hashable EdhValue where
   hashWithSalt s EdhContinue         = hashWithSalt s (-2 :: Int)
   hashWithSalt s (EdhCaseClose v) =
     s `hashWithSalt` (-3 :: Int) `hashWithSalt` v
-  hashWithSalt s EdhFallthrough  = hashWithSalt s (-4 :: Int)
-  hashWithSalt s (EdhYield  v  ) = s `hashWithSalt` (-5 :: Int) `hashWithSalt` v
-  hashWithSalt s (EdhReturn v  ) = s `hashWithSalt` (-6 :: Int) `hashWithSalt` v
+  hashWithSalt s EdhFallthrough = hashWithSalt s (-4 :: Int)
+  hashWithSalt s (EdhYield v) = s `hashWithSalt` (-5 :: Int) `hashWithSalt` v
+  hashWithSalt s (EdhReturn v) = s `hashWithSalt` (-6 :: Int) `hashWithSalt` v
 
-  hashWithSalt s (EdhSink   x  ) = hashWithSalt s x
+  hashWithSalt s (EdhSink x) = hashWithSalt s x
 
+  hashWithSalt s (EdhExpr _ (LitExpr l) _) = hashWithSalt s l
   hashWithSalt s (EdhExpr u _ _) = hashWithSalt s u
 
 
@@ -1054,13 +1055,20 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
   deriving (Eq, Show)
 
 
-data Literal = NilLiteral
+data Literal = SinkCtor
+    | NilLiteral
     | DecLiteral !Decimal
     | BoolLiteral !Bool
     | StringLiteral !Text
-    | SinkCtor -- sink constructor
     | TypeLiteral !EdhTypeValue
   deriving (Eq, Show)
+instance Hashable Literal where
+  hashWithSalt s SinkCtor          = hashWithSalt s (-1 :: Int)
+  hashWithSalt s NilLiteral        = hashWithSalt s (0 :: Int)
+  hashWithSalt s (DecLiteral    x) = hashWithSalt s x
+  hashWithSalt s (BoolLiteral   x) = hashWithSalt s x
+  hashWithSalt s (StringLiteral x) = hashWithSalt s x
+  hashWithSalt s (TypeLiteral   x) = hashWithSalt s x
 
 
 -- | the type for the value of type of a value
