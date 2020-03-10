@@ -11,6 +11,7 @@ import           Control.Concurrent.STM
 import qualified Data.Text                     as T
 
 import qualified Data.HashMap.Strict           as Map
+import           Data.List.NonEmpty             ( (<|) )
 
 import           Language.Edh.Control
 import           Language.Edh.Runtime
@@ -40,12 +41,43 @@ assignProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                   throwEdhSTM pgs EvalError $ "No ([=]) method from: " <> T.pack
                     (show obj)
                 Just (OriginalValue (EdhMethod mth'proc) _ mth'that) ->
-                  runEdhProg pgs $ callEdhMethod
-                    (ArgsPack [ixVal, rhVal] Map.empty)
-                    mth'that
-                    mth'proc
-                    Nothing
-                    exit
+                  case procedure'body $ procedure'decl mth'proc of
+
+                    -- calling a host method procedure
+                    Right !hp -> do
+                      -- a host procedure runs against its caller's scope, with
+                      -- 'thatObject' changed to the resolution target object
+                      let
+                        !ctx   = edh'context pgs
+                        !scope = contextScope ctx
+                        !calleeScope =
+                          scope { thatObject = mth'that, scopeProc = mth'proc }
+                        !calleeCtx = ctx
+                          { callStack       = calleeScope <| callStack ctx
+                          , generatorCaller = Nothing
+                          , contextMatch    = true
+                          }
+                        !pgsCallee = pgs { edh'context = calleeCtx }
+                      -- insert a cycle tick here, so if no tx required for the call
+                      -- overall, the callee resolution tx stops here then the callee
+                      -- runs in next stm transaction
+                      flip (exitEdhSTM' pgsCallee) (wuji pgsCallee) $ \_ ->
+                        hp
+                            [ SendPosArg (GodSendExpr ixVal)
+                            , SendPosArg (GodSendExpr rhVal)
+                            ]
+                          $ \(OriginalValue !val _ _) ->
+                              -- return the result in CPS with caller pgs restored
+                              contEdhSTM $ exitEdhSTM pgs exit val
+
+                    Left !pb -> runEdhProg pgs $ callEdhMethod
+                      (ArgsPack [ixVal, rhVal] Map.empty)
+                      mth'that
+                      mth'proc
+                      pb
+                      Nothing
+                      exit
+
                 Just (OriginalValue !badIndexer _ _) ->
                   throwEdhSTM pgs EvalError
                     $  "Malformed index method ([=]) on "

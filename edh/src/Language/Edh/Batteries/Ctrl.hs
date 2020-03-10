@@ -59,7 +59,7 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
             exitEdhProc exit EdhFallthrough
           Just mps -> contEdhSTM $ do -- pattern matched
             modifyTVar' (entity'store $ scopeEntity callerScope)
-              $ Map.union (Map.fromList mps)
+              $ \es -> updateEntityAttrs es mps
             runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
               exitEdhProc
                 exit
@@ -114,7 +114,8 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
         contEdhSTM $ do
           when (attrName /= "_")
             $ modifyTVar' (entity'store $ scopeEntity callerScope)
-            $ Map.insert (AttrByName attrName) ctxMatch
+            $ \es ->
+                changeEntityAttr es (AttrByName attrName) (noneNil ctxMatch)
           runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
             exitEdhProc
               exit
@@ -127,12 +128,12 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       [StmtSrc (_, ExprStmt (InfixExpr "=>" (AttrExpr (DirectRef (NamedAttr headName))) (AttrExpr (DirectRef (NamedAttr tailName)))))]
         -> let
              doMatched headVal tailVal = do
-               modifyTVar' (entity'store $ scopeEntity callerScope)
-                 $ Map.union
-                 $ Map.fromList
-                     [ (AttrByName headName, headVal)
-                     , (AttrByName tailName, tailVal)
-                     ]
+               modifyTVar' (entity'store $ scopeEntity callerScope) $ \es ->
+                 updateEntityAttrs
+                   es
+                   [ (AttrByName headName, headVal)
+                   , (AttrByName tailName, tailVal)
+                   ]
                runEdhProg pgs
                  $ evalExpr rhExpr
                  $ \(OriginalValue !rhVal _ _) -> exitEdhProc
@@ -185,13 +186,13 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                 <> T.pack (show vPattern)
           case ctxMatch of
             EdhTuple vs | length vs == length vExprs -> do
-              modifyTVar' (entity'store $ scopeEntity callerScope)
-                $ Map.union
-                $ Map.fromList
-                    [ (an, av)
-                    | (an@(AttrByName nm), av) <- zip attrNames vs
-                    , nm /= "_"
-                    ]
+              modifyTVar' (entity'store $ scopeEntity callerScope) $ \es ->
+                updateEntityAttrs
+                  es
+                  [ (an, noneNil av)
+                  | (an@(AttrByName nm), av) <- zip attrNames vs
+                  , nm /= "_"
+                  ]
               runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
                 exitEdhProc
                   exit
@@ -209,15 +210,17 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
             contEdhSTM
               $   lookupEdhCtxAttr callerScope (AttrByName classAttr)
               >>= \case
-                    Just val -> case val of
+                    EdhNil -> exitEdhSTM pgs exit EdhFallthrough
+                    val    -> case val of
                       EdhClass class_ ->
                         resolveEdhInstance class_ ctxObj >>= \case
                           Just instObj -> do
                             when (instAttr /= "_")
                               $ modifyTVar'
                                   (entity'store $ scopeEntity callerScope)
-                              $ Map.insert (AttrByName instAttr)
-                                           (EdhObject instObj)
+                              $ \es -> changeEntityAttr es
+                                                        (AttrByName instAttr)
+                                                        (EdhObject instObj)
                             runEdhProg pgs
                               $ evalExpr rhExpr
                               $ \(OriginalValue !rhVal _ _) -> exitEdhProc
@@ -235,7 +238,6 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                           <> T.pack (show $ edhTypeOf val)
                           <> ": "
                           <> T.pack (show val)
-                    Nothing -> exitEdhSTM pgs exit EdhFallthrough
           _ -> exitEdhProc exit EdhFallthrough
 
       -- {[ x,y,z,... ]} -- any-of pattern

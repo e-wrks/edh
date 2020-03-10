@@ -22,8 +22,10 @@ where
 import           Prelude
 -- import           Debug.Trace
 
+-- import           GHC.Conc                       ( unsafeIOToSTM )
+import           System.IO.Unsafe
+
 import           System.IO                      ( stderr )
-import           GHC.Conc                       ( unsafeIOToSTM )
 
 import           Control.Exception
 import           Control.Monad.Except
@@ -109,12 +111,14 @@ defaultEdhLogger = do
 createEdhWorld :: MonadIO m => EdhLogger -> m EdhWorld
 createEdhWorld !logger = liftIO $ do
   -- ultimate default methods/operators/values go into this
-  rootEntity <- atomically $ createEntity $ Map.fromList
+  rootEntity <- atomically $ createEntity $ hashEntityStore $ Map.fromList
     [ (AttrByName "__name__", EdhString "<root>")
     , (AttrByName "__file__", EdhString "<genesis>")
+    , (AttrByName "None"    , edhNone)
+    , (AttrByName "Nothing" , edhNothing)
     ]
   -- methods supporting reflected scope manipulation go into this
-  scopeManiMethods <- atomically $ createEntity Map.empty
+  scopeManiMethods <- atomically $ createEntity $ hashEntityStore Map.empty
   rootSupers       <- newTVarIO []
   rootClassUniq    <- newUnique
   scopeClassUniq   <- newUnique
@@ -123,7 +127,7 @@ createEdhWorld !logger = liftIO $ do
         , procedure'decl = ProcDecl { procedure'uniq = rootClassUniq
                                     , procedure'name = "<root>"
                                     , procedure'args = PackReceiver []
-                                    , procedure'body = voidStatement
+                                    , procedure'body = Right edhNop
                                     }
         }
       !root = Object { objEntity = rootEntity
@@ -136,7 +140,7 @@ createEdhWorld !logger = liftIO $ do
         , procedure'decl = ProcDecl { procedure'uniq = scopeClassUniq
                                     , procedure'name = "<scope>"
                                     , procedure'args = PackReceiver []
-                                    , procedure'body = voidStatement
+                                    , procedure'body = Right edhNop
                                     }
         }
   opPD <- newTMVarIO $ Map.fromList
@@ -213,7 +217,7 @@ declareEdhOperators world declLoc opps = do
 createEdhModule :: MonadIO m => EdhWorld -> ModuleId -> String -> m Object
 createEdhModule !world !moduId !moduSrc = liftIO $ do
   -- prepare the module meta data
-  !moduEntity <- atomically $ createEntity $ Map.fromList
+  !moduEntity <- atomically $ createEntity $ hashEntityStore $ Map.fromList
     [ (AttrByName "__name__", EdhString moduId)
     , (AttrByName "__file__", EdhString $ T.pack moduSrc)
     ]
@@ -227,7 +231,7 @@ createEdhModule !world !moduId !moduSrc = liftIO $ do
                       { procedure'uniq = moduClassUniq
                       , procedure'name = moduId
                       , procedure'args = PackReceiver []
-                      , procedure'body = StmtSrc
+                      , procedure'body = Left $ StmtSrc
                                            ( SourcePos { sourceName   = moduSrc
                                                        , sourceLine   = mkPos 1
                                                        , sourceColumn = mkPos 1
@@ -252,30 +256,48 @@ installEdhModule !world !moduId !preInstall = liftIO $ do
 
 
 mkHostProc
-  :: (HostProcedure -> EdhValue) -> Text -> EdhProcedure -> STM EdhValue
-mkHostProc !vc !n !p = do
-  !u <- unsafeIOToSTM newUnique
-  return $ vc $ HostProcedure { hostProc'uniq = u
-                              , hostProc'name = n
-                              , hostProc'proc = p
+  :: Scope
+  -> (ProcDefi -> EdhValue)
+  -> Text
+  -> EdhProcedure
+  -> ArgsReceiver
+  -> EdhValue
+mkHostProc !scope !vc !nm !p !args = vc ProcDefi
+  { procedure'lexi = Just scope
+  , procedure'decl = ProcDecl { procedure'uniq = unsafePerformIO newUnique
+                              , procedure'name = nm
+                              , procedure'args = args
+                              , procedure'body = Right p
                               }
+  }
 
-mkHostOper :: EdhWorld -> OpSymbol -> EdhProcedure -> STM EdhValue
-mkHostOper world opSym proc =
+mkHostOper :: EdhWorld -> Scope -> OpSymbol -> EdhProcedure -> STM EdhValue
+mkHostOper !world !scope !opSym !hp =
   Map.lookup opSym <$> readTMVar (worldOperators world) >>= \case
     Nothing ->
       throwSTM
         $  UsageError
         $  "No precedence declared in the world for operator: "
         <> opSym
-    Just (prec, _) -> do
-      !u <- unsafeIOToSTM newUnique
-      return $ EdhHostOper prec $ HostProcedure u opSym proc
+    Just (prec, _) -> return $ EdhOperator
+      prec
+      Nothing
+      ProcDefi
+        { procedure'lexi = Just scope
+        , procedure'decl = ProcDecl
+          { procedure'uniq = unsafePerformIO newUnique
+          , procedure'name = opSym
+          , procedure'args = PackReceiver
+            [RecvArg "lhv" Nothing Nothing, RecvArg "rhv" Nothing Nothing]
+          , procedure'body = Right hp
+          }
+        }
 
 
 installEdhAttrs :: Entity -> [(AttrKey, EdhValue)] -> STM ()
-installEdhAttrs e as = modifyTVar' (entity'store e) $ \em -> Map.union ad em
-  where ad = Map.fromList as
+installEdhAttrs e as =
+  modifyTVar' (entity'store e) $ \es -> updateEntityAttrs es as
 
 installEdhAttr :: Entity -> AttrKey -> EdhValue -> STM ()
-installEdhAttr e k v = modifyTVar' (entity'store e) $ \em -> Map.insert k v em
+installEdhAttr e k v =
+  modifyTVar' (entity'store e) $ \es -> changeEntityAttr es k v

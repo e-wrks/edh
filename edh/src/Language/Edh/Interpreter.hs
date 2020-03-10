@@ -12,7 +12,6 @@ import           Control.Concurrent.STM
 
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
-import qualified Data.HashMap.Strict           as Map
 
 import           Text.Megaparsec
 
@@ -42,10 +41,10 @@ parseEdhSource !world !moduFileName !edhSource =
 evalEdhSource
   :: MonadIO m => EdhWorld -> Object -> Text -> m (Either EdhError EdhValue)
 evalEdhSource !world !modu !edhSource = liftIO $ do
-  mem <- readTVarIO (entity'store $ objEntity modu)
-  let moduFileName = case Map.lookup (AttrByName "__file__") mem of
-        Just (EdhString !name) -> name
-        _                      -> "<adhoc>"
+  mes <- readTVarIO (entity'store $ objEntity modu)
+  let moduFileName = case lookupEntityAttr mes (AttrByName "__file__") of
+        EdhString !name -> name
+        _               -> "<adhoc>"
   parseEdhSource world moduFileName edhSource >>= \case
     Left  !err   -> return $ Left err
     Right !stmts -> do

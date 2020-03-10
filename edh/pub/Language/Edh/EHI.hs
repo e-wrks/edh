@@ -51,6 +51,7 @@ module Language.Edh.EHI
   , evalEdhSource
   , runEdhProgram
   , runEdhProgram'
+  , viewAsEdhObject
   , createEdhObject
   , constructEdhObject
   , edhMakeCall
@@ -87,6 +88,7 @@ module Language.Edh.EHI
   , waitEdhSTM
   , edhWaitIO
   , edhNop
+  , edhEndOfProc
     -- ** Reflective manipulation
   , StmtSrc(..)
   , Stmt(..)

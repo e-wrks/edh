@@ -97,15 +97,8 @@ scopeAttrsProc _ !exit = do
   !pgs <- ask
   let !that = thatObject $ contextScope $ edh'context pgs
   contEdhSTM $ do
-    em <- readTVar (entity'store $ scopeEntity $ wrappedScopeOf that)
-    ad <-
-      newTVar $ Map.fromList $ [ (itemKeyOf ak, v) | (ak, v) <- Map.toList em ]
-    u <- unsafeIOToSTM newUnique
-    exitEdhSTM pgs exit $ EdhDict $ Dict u ad
- where
-  itemKeyOf :: AttrKey -> ItemKey
-  itemKeyOf (AttrByName name) = EdhString name
-  itemKeyOf (AttrBySym  sym ) = EdhSymbol sym
+    ad <- edhDictFromEntity $ scopeEntity $ wrappedScopeOf that
+    exitEdhSTM pgs exit $ EdhDict ad
 
 
 -- | utility scope.lexiLoc()
@@ -151,18 +144,18 @@ scopePutProc !argsSender !exit = do
     -> [(AttrName, EdhValue)]
     -> EntityStore
     -> STM EntityStore
-  putAttrs _ [] [] !em = return em
-  putAttrs pgs [] ((kw, v) : kwargs) !em =
-    putAttrs pgs [] kwargs $ Map.insert (AttrByName kw) v em
-  putAttrs pgs (arg : args) !kwargs !em = case arg of
+  putAttrs _ [] [] !es = return es
+  putAttrs pgs [] ((kw, v) : kwargs) !es =
+    putAttrs pgs [] kwargs $ changeEntityAttr es (AttrByName kw) v
+  putAttrs pgs (arg : args) !kwargs !es = case arg of
     EdhPair (EdhString !k) !v ->
-      putAttrs pgs args kwargs $ Map.insert (AttrByName k) v em
+      putAttrs pgs args kwargs $ changeEntityAttr es (AttrByName k) v
     EdhPair (EdhSymbol !k) !v ->
-      putAttrs pgs args kwargs $ Map.insert (AttrBySym k) v em
+      putAttrs pgs args kwargs $ changeEntityAttr es (AttrBySym k) v
     EdhTuple [EdhString !k, v] ->
-      putAttrs pgs args kwargs $ Map.insert (AttrByName k) v em
+      putAttrs pgs args kwargs $ changeEntityAttr es (AttrByName k) v
     EdhTuple [EdhSymbol !k, v] ->
-      putAttrs pgs args kwargs $ Map.insert (AttrBySym k) v em
+      putAttrs pgs args kwargs $ changeEntityAttr es (AttrBySym k) v
     _ ->
       throwEdhSTM pgs EvalError
         $  "Invalid key/value spec to put into a scope - "

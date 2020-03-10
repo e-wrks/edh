@@ -251,7 +251,7 @@ parseClassStmt = ClassStmt <$> (keyword "class" >> parseClassDecl)
   parseClassDecl = liftA3 (ProcDecl (unsafePerformIO newUnique))
                           parseAlphaName
                           (return $ PackReceiver [])
-                          parseStmt
+                          (Left <$> parseStmt)
 
 parseExtendsStmt :: Parser Stmt
 parseExtendsStmt = ExtendsStmt <$> (keyword "extends" >> parseExpr)
@@ -282,7 +282,7 @@ parseProcDecl :: Parser ProcDecl
 parseProcDecl = liftA3 (ProcDecl (unsafePerformIO newUnique))
                        (parseMagicProcName <|> parseAlphaName)
                        parseArgsReceiver
-                       parseStmt
+                       (Left <$> parseStmt)
 
 parseMagicProcName :: Parser Text
 parseMagicProcName = between (symbol "(") (symbol ")") $ lexeme $ takeWhile1P
@@ -305,7 +305,7 @@ parseOpDeclOvrdStmt = do
   --  * 3 pos-args - caller scope + lh/rh expr receiving operator
   argRcvr   <- parseArgsReceiver
   body      <- parseStmt
-  let procDecl = ProcDecl (unsafePerformIO newUnique) opSym argRcvr body
+  let procDecl = ProcDecl (unsafePerformIO newUnique) opSym argRcvr (Left body)
   opPD <- get
   case precDecl of
     Nothing -> case Map.lookup opSym opPD of
@@ -471,7 +471,8 @@ parseLitExpr = choice
   , TypeLiteral TupleType <$ litKw "TupleType"
   , TypeLiteral ArgsPackType <$ litKw "ArgsPackType"
   , TypeLiteral BlockType <$ litKw "BlockType"
-  , TypeLiteral HostProcType <$ litKw "HostProcType"
+  , TypeLiteral HostClassType <$ litKw "HostClassType"
+  , TypeLiteral HostMethodType <$ litKw "HostMethodType"
   , TypeLiteral HostOperType <$ litKw "HostOperType"
   , TypeLiteral HostGenrType <$ litKw "HostGenrType"
   , TypeLiteral ClassType <$ litKw "ClassType"

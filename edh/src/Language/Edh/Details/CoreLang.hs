@@ -8,7 +8,6 @@ import           Prelude
 import           Control.Concurrent.STM
 
 import qualified Data.Text                     as T
-import qualified Data.HashMap.Strict           as Map
 
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
@@ -41,39 +40,38 @@ resolveAddr !pgs (SymbolicAttr !symName) =
 -- * Edh attribute resolution
 
 
-lookupEdhCtxAttr :: Scope -> AttrKey -> STM (Maybe EdhValue)
+lookupEdhCtxAttr :: Scope -> AttrKey -> STM EdhValue
 lookupEdhCtxAttr fromScope addr = resolveEdhCtxAttr fromScope addr >>= \case
-  Nothing                       -> return Nothing
-  Just (OriginalValue !val _ _) -> return $ Just val
+  Nothing                       -> return EdhNil
+  Just (OriginalValue !val _ _) -> return val
 {-# INLINE lookupEdhCtxAttr #-}
 
-lookupEdhObjAttr :: Object -> AttrKey -> STM (Maybe EdhValue)
+lookupEdhObjAttr :: Object -> AttrKey -> STM EdhValue
 lookupEdhObjAttr this addr = resolveEdhObjAttr this addr >>= \case
-  Nothing                       -> return Nothing
-  Just (OriginalValue !val _ _) -> return $ Just val
+  Nothing                       -> return EdhNil
+  Just (OriginalValue !val _ _) -> return val
 {-# INLINE lookupEdhObjAttr #-}
 
-lookupEdhSuperAttr :: Object -> AttrKey -> STM (Maybe EdhValue)
+lookupEdhSuperAttr :: Object -> AttrKey -> STM EdhValue
 lookupEdhSuperAttr this addr = resolveEdhSuperAttr this addr >>= \case
-  Nothing                       -> return Nothing
-  Just (OriginalValue !val _ _) -> return $ Just val
+  Nothing                       -> return EdhNil
+  Just (OriginalValue !val _ _) -> return val
 {-# INLINE lookupEdhSuperAttr #-}
 
 
 resolveEdhCtxAttr :: Scope -> AttrKey -> STM (Maybe OriginalValue)
 resolveEdhCtxAttr !scope !addr =
-  readTVar (entity'store $ scopeEntity scope) >>= \em ->
-    case Map.lookup addr em of
-      Just !val -> return $ Just (OriginalValue val scope $ thatObject scope)
-      Nothing   -> resolveLexicalAttr (outerScopeOf scope) addr
+  readTVar (entity'store $ scopeEntity scope) >>= \es ->
+    case lookupEntityAttr es addr of
+      EdhNil -> resolveLexicalAttr (outerScopeOf scope) addr
+      val    -> return $ Just (OriginalValue val scope $ thatObject scope)
 {-# INLINE resolveEdhCtxAttr #-}
 
 resolveLexicalAttr :: Maybe Scope -> AttrKey -> STM (Maybe OriginalValue)
 resolveLexicalAttr Nothing _ = return Nothing
 resolveLexicalAttr (Just scope@(Scope !ent !this !_that _)) addr =
-  readTVar (entity'store ent) >>= \em -> case Map.lookup addr em of
-    Just !val -> return $ Just (OriginalValue val scope $ thatObject scope)
-    Nothing ->
+  readTVar (entity'store ent) >>= \es -> case lookupEntityAttr es addr of
+    EdhNil ->
       -- go for the interesting attribute from inheritance hierarchy
       -- of this context object, so a module as an object, can `extends`
       -- some objects too, in addition to the `import` mechanism
@@ -88,6 +86,7 @@ resolveLexicalAttr (Just scope@(Scope !ent !this !_that _)) addr =
               Just scope'from'object -> return $ Just scope'from'object
               -- go one level outer of the lexical stack
               Nothing -> resolveLexicalAttr (outerScopeOf scope) addr
+    !val -> return $ Just (OriginalValue val scope $ thatObject scope)
 {-# INLINE resolveLexicalAttr #-}
 
 resolveEdhObjAttr :: Object -> AttrKey -> STM (Maybe OriginalValue)
@@ -101,9 +100,9 @@ resolveEdhSuperAttr !this !addr =
 
 resolveEdhObjAttr' :: Object -> Object -> AttrKey -> STM (Maybe OriginalValue)
 resolveEdhObjAttr' !that !this !addr =
-  readTVar (entity'store thisEnt) >>= \em -> case Map.lookup addr em of
-    Just !val -> return $ Just $ (OriginalValue val clsScope that)
-    Nothing   -> readTVar (objSupers this) >>= resolveEdhSuperAttr' that addr
+  readTVar (entity'store thisEnt) >>= \es -> case lookupEntityAttr es addr of
+    EdhNil -> readTVar (objSupers this) >>= resolveEdhSuperAttr' that addr
+    !val   -> return $ Just $ (OriginalValue val clsScope that)
  where
   !thisEnt  = objEntity this
   !clsScope = Scope thisEnt this that $ objClass this

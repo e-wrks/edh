@@ -3,8 +3,6 @@ module Language.Edh.Batteries where
 
 import           Prelude
 
-import           System.IO.Unsafe
-
 import           System.Environment
 import           Text.Read
 
@@ -14,8 +12,6 @@ import           Control.Concurrent.STM
 
 import           Data.Unique
 import qualified Data.HashMap.Strict           as Map
-
-import           Text.Megaparsec
 
 import           Data.Lossless.Decimal         as D
 
@@ -153,7 +149,7 @@ installEdhBatteries world = liftIO $ do
 
 
       !rootOperators <- mapM
-        (\(sym, hp) -> (AttrByName sym, ) <$> mkHostOper world sym hp)
+        (\(sym, hp) -> (AttrByName sym, ) <$> mkHostOper world rootScope sym hp)
         [ ("$"  , attrDerefAddrProc)
         , (":"  , consProc)
         , ("?"  , attrTemptProc)
@@ -181,57 +177,60 @@ installEdhBatteries world = liftIO $ do
         , ("<|" , loggingProc)
         ]
 
-      !rootProcedures <- mapM
-        (\(nm, hp) -> (AttrByName nm, ) <$> mkHostProc EdhHostProc nm hp)
-        [ ("Symbol"     , symbolCtorProc)
-        , ("pkargs"     , pkargsProc)
-        , ("dict"       , dictProc)
-        , ("null"       , isNullProc)
-        , ("type"       , typeProc)
-        , ("error"      , errorProc)
-        , ("constructor", ctorProc)
-        , ("supers"     , supersProc)
-        , ("scope"      , scopeObtainProc)
-        , ("makeOp"     , makeOpProc)
-        , ("makeExpr"   , makeExprProc)
-        ]
+      let !rootProcedures =
+            [ (AttrByName nm, mkHostProc rootScope EdhMethod nm hp WildReceiver)
+            | (nm, hp) <-
+              [ ("Symbol"     , symbolCtorProc)
+              , ("pkargs"     , pkargsProc)
+              , ("dict"       , dictProc)
+              , ("null"       , isNullProc)
+              , ("type"       , typeProc)
+              , ("error"      , errorProc)
+              , ("constructor", ctorProc)
+              , ("supers"     , supersProc)
+              , ("scope"      , scopeObtainProc)
+              , ("makeOp"     , makeOpProc)
+              , ("makeExpr"   , makeExprProc)
+              ]
+            ]
 
-      !rtEveryMicros  <- mkHostProc EdhHostGenr "everyMicros" rtEveryMicrosProc
-      !rtEveryMillis  <- mkHostProc EdhHostGenr "everyMillis" rtEveryMillisProc
-      !rtEverySeconds <- mkHostProc EdhHostGenr
-                                    "everySeconds"
-                                    rtEverySecondsProc
-      !rtEntity <- createEntity $ Map.fromList
-        [ (AttrByName "debug"       , EdhDecimal 10)
-        , (AttrByName "info"        , EdhDecimal 20)
-        , (AttrByName "warn"        , EdhDecimal 30)
-        , (AttrByName "error"       , EdhDecimal 40)
-        , (AttrByName "fatal"       , EdhDecimal 50)
-        , (AttrByName "everyMicros" , rtEveryMicros)
-        , (AttrByName "everyMillis" , rtEveryMillis)
-        , (AttrByName "everySeconds", rtEverySeconds)
-        ]
+      !rtEntity <- createEntity $ hashEntityStore $ Map.empty
       !rtSupers <- newTVar []
       let !runtime = Object
             { objEntity = rtEntity
             , objClass  = ProcDefi
-                            { procedure'lexi = Just $ worldScope world
+                            { procedure'lexi = Just $ rootScope
                             , procedure'decl = ProcDecl
-                              { procedure'uniq = rtClassUniq
-                              , procedure'name = "<runtime>"
-                              , procedure'args = PackReceiver []
-                              , procedure'body = StmtSrc
-                                                   ( SourcePos
-                                                     { sourceName = "<host-code>"
-                                                     , sourceLine = mkPos 1
-                                                     , sourceColumn = mkPos 1
-                                                     }
-                                                   , VoidStmt
-                                                   )
-                              }
+                                                 { procedure'uniq = rtClassUniq
+                                                 , procedure'name = "<runtime>"
+                                                 , procedure'args = PackReceiver
+                                                                      []
+                                                 , procedure'body = Right edhNop
+                                                 }
                             }
             , objSupers = rtSupers
             }
+          !rtScope = objectScope runtime
+      installEdhAttrs rtEntity
+        $  [ (AttrByName "debug", EdhDecimal 10)
+           , (AttrByName "info" , EdhDecimal 20)
+           , (AttrByName "warn" , EdhDecimal 30)
+           , (AttrByName "error", EdhDecimal 40)
+           , (AttrByName "fatal", EdhDecimal 50)
+           ]
+        ++ [ ( AttrByName nm
+             , mkHostProc rtScope
+                          EdhGenrDef
+                          nm
+                          hp
+                          (PackReceiver [RecvArg "interval" Nothing Nothing])
+             )
+           | (nm, hp) <-
+             [ ("everyMicros" , rtEveryMicrosProc)
+             , ("everyMillis" , rtEveryMillisProc)
+             , ("everySeconds", rtEverySecondsProc)
+             ]
+           ]
 
       installEdhAttrs rootEntity
         $  rootOperators
@@ -240,24 +239,6 @@ installEdhBatteries world = liftIO $ do
             -- runtime module
              ( AttrByName "runtime"
              , EdhObject runtime
-             )
-
-            -- global tokens
-           , ( AttrByName "None"
-             , -- resembles `None` as in Python
-               -- assigning to `nil` in Edh is roughly the same of `delete` as
-               -- in JavaScript, and `del` as in Python. Assigning to `None`
-               -- will keep the dict entry or object attribute while still
-               -- carrying a semantic of *absence*.
-               EdhExpr (unsafePerformIO newUnique) (LitExpr NilLiteral) "None"
-             )
-           , ( AttrByName "Nothing"
-             , -- Similar to `None`, `Nothing` is idiomatic in VisualBasic
-               -- though we don't have `Maybe` monad in Edh, having a `Nothing`
-               -- carrying null semantic may be useful in some cases.
-               EdhExpr (unsafePerformIO newUnique)
-                       (LitExpr NilLiteral)
-                       "Nothing"
              )
 
             -- math constants
@@ -269,17 +250,17 @@ installEdhBatteries world = liftIO $ do
              )
            ]
 
-
-      !scopeMethods <- mapM
-        (\(sym, hp) -> (AttrByName sym, ) <$> mkHostProc EdhHostProc sym hp)
-        [ ("eval"   , scopeEvalProc)
-        , ("put"    , scopePutProc)
-        , ("attrs"  , scopeAttrsProc)
-        , ("lexiLoc", scopeLexiLocProc)
-        , ("outer"  , scopeOuterProc)
+      installEdhAttrs
+        (objEntity scopeSuperObj)
+        [ (AttrByName nm, mkHostProc rootScope EdhMethod nm hp WildReceiver)
+        | (nm, hp) <-
+          [ ("eval"   , scopeEvalProc)
+          , ("put"    , scopePutProc)
+          , ("attrs"  , scopeAttrsProc)
+          , ("lexiLoc", scopeLexiLocProc)
+          , ("outer"  , scopeOuterProc)
+          ]
         ]
-
-      installEdhAttrs scopeManiMethods scopeMethods
 
       case envLogLevel of
         Nothing      -> return ()
@@ -294,13 +275,14 @@ installEdhBatteries world = liftIO $ do
 
 
       -- import the parts written in Edh 
-      runEdhProg pgs $ importEdhModule' WildReceiver "batteries/root" edhNop
+      runEdhProg pgs
+        $ importEdhModule' WildReceiver "batteries/root" edhEndOfProc
 
  where
-  !rootEntity = objEntity $ thisObject $ worldScope world
-  scopeManiMethods :: Entity
-  !scopeManiMethods = objEntity $ scopeSuper world
-  !wrt              = worldRuntime world
+  !rootScope     = worldScope world
+  !rootEntity    = objEntity $ thisObject rootScope
+  !scopeSuperObj = scopeSuper world
+  !wrt           = worldRuntime world
   setLogLevel :: LogLevel -> STM ()
   setLogLevel l = do
     rt <- takeTMVar wrt
