@@ -99,7 +99,7 @@ attrDerefTemptProc !argsSender _ =
   throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
--- | the Symbol() constructor
+-- | the Symbol(description) constructor
 symbolCtorProc :: EdhProcedure
 symbolCtorProc !argsSender !exit = do
   !pgs <- ask

@@ -147,7 +147,7 @@ installEdhBatteries world = liftIO $ do
         , ("<|", 1)
         ]
 
-
+      -- global operators at world root scope
       !rootOperators <- mapM
         (\(sym, hp) -> (AttrByName sym, ) <$> mkHostOper world rootScope sym hp)
         [ ("$"  , attrDerefAddrProc)
@@ -176,23 +176,6 @@ installEdhBatteries world = liftIO $ do
         , ("->" , branchProc)
         , ("<|" , loggingProc)
         ]
-
-      let !rootProcedures =
-            [ (AttrByName nm, mkHostProc rootScope EdhMethod nm hp WildReceiver)
-            | (nm, hp) <-
-              [ ("Symbol"     , symbolCtorProc)
-              , ("pkargs"     , pkargsProc)
-              , ("dict"       , dictProc)
-              , ("null"       , isNullProc)
-              , ("type"       , typeProc)
-              , ("error"      , errorProc)
-              , ("constructor", ctorProc)
-              , ("supers"     , supersProc)
-              , ("scope"      , scopeObtainProc)
-              , ("makeOp"     , makeOpProc)
-              , ("makeExpr"   , makeExprProc)
-              ]
-            ]
 
       !rtEntity <- createEntity $ hashEntityStore $ Map.empty
       !rtSupers <- newTVar []
@@ -234,8 +217,36 @@ installEdhBatteries world = liftIO $ do
 
       installEdhAttrs rootEntity
         $  rootOperators
-        ++ rootProcedures
+        ++ [ -- global procedures at world root scope
+             (AttrByName nm, mkHostProc rootScope mc nm hp args)
+           | (mc, nm, hp, args) <-
+             [ ( EdhMethod
+               , "Symbol"
+               , symbolCtorProc
+               , PackReceiver [RecvArg "description" Nothing Nothing]
+               )
+             , (EdhMethod, "pkargs"     , pkargsProc     , WildReceiver)
+             , (EdhMethod, "dict"       , dictProc       , WildReceiver)
+             , (EdhMethod, "null"       , isNullProc     , WildReceiver)
+             , (EdhMethod, "type"       , typeProc       , WildReceiver)
+             , (EdhMethod, "error"      , errorProc      , WildReceiver)
+             , (EdhMethod, "constructor", ctorProc       , WildReceiver)
+             , (EdhMethod, "supers"     , supersProc     , WildReceiver)
+             , (EdhMethod, "scope"      , scopeObtainProc, PackReceiver [])
+             , ( EdhMethod
+               , "makeOp"
+               , makeOpProc
+               , PackReceiver
+                 [ RecvArg "lhe"   Nothing Nothing
+                 , RecvArg "opSym" Nothing Nothing
+                 , RecvArg "rhe"   Nothing Nothing
+                 ]
+               )
+             , (EdhMethod, "makeExpr", makeExprProc, WildReceiver)
+             ]
+           ]
         ++ [
+
             -- runtime module
              ( AttrByName "runtime"
              , EdhObject runtime
@@ -252,13 +263,17 @@ installEdhBatteries world = liftIO $ do
 
       installEdhAttrs
         (objEntity scopeSuperObj)
-        [ (AttrByName nm, mkHostProc rootScope EdhMethod nm hp WildReceiver)
-        | (nm, hp) <-
-          [ ("eval"   , scopeEvalProc)
-          , ("put"    , scopePutProc)
-          , ("attrs"  , scopeAttrsProc)
-          , ("lexiLoc", scopeLexiLocProc)
-          , ("outer"  , scopeOuterProc)
+        [ (AttrByName nm, mkHostProc (objectScope scopeSuperObj) mc nm hp args)
+        | (mc, nm, hp, args) <-
+          [ (EdhMethod, "eval", scopeEvalProc, WildReceiver)
+          , ( EdhMethod
+            , "put"
+            , scopePutProc
+            , PackReceiver [RecvRestKwArgs "kv'pairs"]
+            )
+          , (EdhMethod, "attrs"  , scopeAttrsProc  , PackReceiver [])
+          , (EdhMethod, "lexiLoc", scopeLexiLocProc, PackReceiver [])
+          , (EdhMethod, "outer"  , scopeOuterProc  , PackReceiver [])
           ]
         ]
 
