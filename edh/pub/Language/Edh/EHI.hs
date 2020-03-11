@@ -40,7 +40,7 @@ module Language.Edh.EHI
   , installEdhAttrs
   , installEdhAttr
 
-    -- ** Splicing Edh with Haskell
+    -- ** Spliced execution
   , bootEdhModule
   , createEdhModule
   , installEdhModule
@@ -107,7 +107,16 @@ module Language.Edh.EHI
   , deBlock
 
     -- ** Object system
+  , Object(..)
+  , Class
+  , Entity(..)
+  , EntityStore(..)
   , createEntity
+  , maoEntityStore
+  , hashEntityStore
+  , constEntityStore
+  , AttrKey(..)
+  , attrKeyValue
   , lookupEdhCtxAttr
   , lookupEdhObjAttr
   , lookupEdhSuperAttr
@@ -126,22 +135,19 @@ module Language.Edh.EHI
   , EdhValue(..)
   , EdhTypeValue(..)
   , nil
+  , edhNone
+  , edhNothing
   , true
   , false
   , nan
   , inf
   , D.Decimal(..)
   , Symbol(..)
-  , Entity(..)
-  , AttrKey(..)
   , Dict(..)
   , ItemKey
   , List(..)
   , ArgsPack(..)
-  , Object(..)
-  , Class
   , ProcDefi(..)
-  , HostProcedure(..)
   , EdhGenrCaller
   , mkSymbol
   , mkHostProc
