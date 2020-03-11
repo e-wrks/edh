@@ -1714,9 +1714,9 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
         _ ->
           throwEdh EvalError
             $  "Invalid attribute reference - "
-            <> edhValueStr (edhTypeOf rhVal)
+            <> edhValueStr (edhTypeOf addrVal)
             <> ": "
-            <> edhValueStr rhVal
+            <> edhValueStr addrVal
     x ->
       throwEdh EvalError $ "Invalid left hand value for assignment: " <> T.pack
         (show x)
