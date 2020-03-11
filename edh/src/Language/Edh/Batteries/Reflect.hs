@@ -5,12 +5,11 @@ import           Prelude
 -- import           Debug.Trace
 
 -- import           System.IO.Unsafe
-import           GHC.Conc                       ( unsafeIOToSTM )
+-- import           GHC.Conc                       ( unsafeIOToSTM )
 
 import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
-import           Data.Unique
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
 import qualified Data.Text                     as T
