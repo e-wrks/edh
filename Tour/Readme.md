@@ -1938,15 +1938,12 @@ there ought to be comprehensive API to do more useful things.
 Đ|  5:     return (scope(), g(5))
 Đ|  6:   }
 Đ|  7: }
-<method: f>
+f
 Đ: let (s1, s2) = (*f(3))
 Đ: s2.lexiLoc()
-<<interactive> * @ <adhoc>:1:1>
-<f ( n, ) @ <adhoc>:1:15>
-<g ( m, ) @ <adhoc>:2:17>
-
+g ( m, ) @ <adhoc>:2:17
 Đ: s1.attrs()
-{ "g":<method: g>, "n":3, }
+{ "g":g, "n":3, }
 Đ: s2.attrs()
 { "m":5, }
 Đ: s2.eval(makeExpr(m/n))

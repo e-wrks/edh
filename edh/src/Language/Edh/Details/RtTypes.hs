@@ -290,8 +290,13 @@ instance Ord Scope where
 instance Hashable Scope where
   hashWithSalt s (Scope u _ _ _) = hashWithSalt s u
 instance Show Scope where
-  show (Scope _ _ _ (ProcDefi _ _ (ProcDecl pName argsRcvr _))) =
-    "<" ++ T.unpack pName ++ " " ++ show argsRcvr ++ ">"
+  show (Scope _ _ _ (ProcDefi _ _ (ProcDecl pName argsRcvr procBody))) =
+    T.unpack pName ++ " " ++ show argsRcvr ++ " @ " ++ srcLoc
+   where
+    srcLoc = case procBody of
+      Right _                 -> "<host-code>"
+      Left  (StmtSrc (sp, _)) -> sourcePosPretty sp
+
 
 outerScopeOf :: Scope -> Maybe Scope
 outerScopeOf = procedure'lexi . scopeProc
