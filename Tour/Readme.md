@@ -48,6 +48,7 @@ See [Edh Im](https://github.com/e-wrks/edhim) for an example.
   - [Class Procedures](#class-procedures)
   - [Inheritance Hierarchy](#inheritance-hierarchy)
   - [Reactor Procedure](#reactor-procedure)
+  - [Event Producing / Consuming](#event-producing--consuming)
 - [Go Routines](#go-routines)
 - [Programming Concurrency and Data Consistency as a whole](#programming-concurrency-and-data-consistency-as-a-whole)
 - [Event Sink / Reactor / Defer](#event-sink--reactor--defer)
@@ -83,6 +84,7 @@ See [Edh Im](https://github.com/e-wrks/edhim) for an example.
       - [Operator Procedure](#operator-procedure)
       - [Generator Procedure](#generator-procedure)
       - [Interpreter Procedure](#interpreter-procedure)
+      - [Producer Procedure](#producer-procedure)
   - [Go Routine](#go-routine)
     - [The go keyword](#the-go-keyword)
     - [The defer keyword](#the-defer-keyword)
@@ -1432,6 +1434,12 @@ attribute of the **scope** **entity**), instead, it is associated with an
 See [Event Sink / Reactor / Defer](#event-sink--reactor--defer) for its
 usage in action.
 
+### Event Producing / Consuming
+
+See [Producer Procedure](#producer-procedure)
+
+**TODO** add examples here.
+
 ## Go Routines
 
 Checkout [goroutine.edh](./goroutine.edh)
@@ -2429,6 +2437,21 @@ which is same as a vanilla **method** procedure except it receives arguments in
 reflective expr forms rather than evaluated values, in addition to the reflective
 `callerScope` as first argument
 
+##### Producer Procedure
+
+Defined by an `producer` statement in **Edh**, being a start point of event
+producing via an [Event Sink](#event-sink), while its caller is the start
+point of event consuming via the same event **sink**.
+
+A **producer** procedure must take an `outlet` argument, which is the very
+event **sink**. Whatever a **producer** procedure returns is just ignored,
+the caller (event consumer) of a **producer** procedure will immediately
+receive the same event **sink** as passed to the **producer** as its `outlet`
+argument, while the **producer** procedure won't be actually executed until
+the caller subscribed to that event **sink**. This way no event produced
+after the **producer** procedure started will be missed by the caller
+(event consumer).
+
 ### Go Routine
 
 Checkout [Goroutine](https://tour.golang.org/concurrency) as in
@@ -2576,39 +2599,35 @@ Code may tell better here:
 data EdhValue =
   -- | type itself is a kind of (immutable) value
       EdhType !EdhTypeValue
-  -- * end values (immutable)
+  -- | end values (immutable)
     | EdhNil
     | EdhDecimal !Decimal
     | EdhBool !Bool
     | EdhString !Text
     | EdhSymbol !Symbol
 
-  -- * direct pointer (to entities) values
+  -- | direct pointer (to entities) values
     | EdhObject !Object
 
-  -- * mutable containers
+  -- | mutable containers
     | EdhDict !Dict
     | EdhList !List
 
-  -- * immutable containers
+  -- | immutable containers
   --   the elements may still pointer to mutable data
     | EdhPair !EdhValue !EdhValue
     | EdhTuple ![EdhValue]
     | EdhArgsPack ArgsPack
 
-  -- * host procedures callable from Edh world
-    | EdhHostProc !HostProcedure
-    | EdhHostOper !Precedence !HostProcedure
-    | EdhHostGenr !HostProcedure
+  -- executable precedures
+    | EdhClass !ProcDefi
+    | EdhMethod !ProcDefi
+    | EdhOperator !Precedence !(Maybe EdhValue) !ProcDefi
+    | EdhGenrDef !ProcDefi
+    | EdhInterpreter !ProcDefi
+    | EdhProducer !ProcDefi
 
-  -- * precedures defined by Edh code
-    | EdhClass !Class
-    | EdhMethod !Method
-    | EdhOperator !Operator
-    | EdhGenrDef !GenrDef
-    | EdhInterpreter !Interpreter
-
-  -- * flow control
+  -- | flow control
     | EdhBreak
     | EdhContinue
     | EdhCaseClose !EdhValue
@@ -2616,27 +2635,76 @@ data EdhValue =
     | EdhYield !EdhValue
     | EdhReturn !EdhValue
 
-  -- * event sink
+  -- | event sink
     | EdhSink !EventSink
 
-  -- * reflection
-    | EdhExpr !Expr
+  -- | reflection
+    | EdhExpr !Unique !Expr !Text  -- expr with source(-less if empty)
 
 edhValueStr :: EdhValue -> Text
 edhValueStr (EdhString s) = s
 edhValueStr v             = T.pack $ show v
 
 edhValueNull :: EdhValue -> STM Bool
-edhValueNull EdhNil                = return True
-edhValueNull (EdhDecimal d       ) = return $ D.decimalIsNaN d || d == 0
-edhValueNull (EdhBool    b       ) = return $ b == False
-edhValueNull (EdhString  s       ) = return $ T.null s
-edhValueNull (EdhDict    (Dict d)) = Map.null <$> readTVar d
-edhValueNull (EdhList    (List l)) = null <$> readTVar l
-edhValueNull (EdhTuple   l       ) = return $ null l
+edhValueNull EdhNil                  = return True
+edhValueNull (EdhDecimal d         ) = return $ D.decimalIsNaN d || d == 0
+edhValueNull (EdhBool    b         ) = return $ not b
+edhValueNull (EdhString  s         ) = return $ T.null s
+edhValueNull (EdhSymbol  _         ) = return False
+edhValueNull (EdhDict    (Dict _ d)) = Map.null <$> readTVar d
+edhValueNull (EdhList    (List _ l)) = null <$> readTVar l
+edhValueNull (EdhTuple   l         ) = return $ null l
 edhValueNull (EdhArgsPack (ArgsPack args kwargs)) =
   return $ null args && Map.null kwargs
+edhValueNull (EdhExpr _ (LitExpr NilLiteral) _) = return True
+edhValueNull (EdhExpr _ (LitExpr (DecLiteral d)) _) =
+  return $ D.decimalIsNaN d || d == 0
+edhValueNull (EdhExpr _ (LitExpr (BoolLiteral b)) _) = return b
+edhValueNull (EdhExpr _ (LitExpr (StringLiteral s)) _) = return $ T.null s
 edhValueNull _ = return False
+```
+
+```haskell
+nil :: EdhValue
+nil = EdhNil
+
+-- | Resembles `None` as in Python.
+--
+-- assigning to `nil` in Edh is roughly the same of `delete` as
+-- in JavaScript, and `del` as in Python. Assigning to `None`
+-- will keep the dict entry or object attribute while still
+-- carrying a semantic of *absence*.
+edhNone :: EdhValue
+edhNone = EdhExpr (unsafePerformIO newUnique) (LitExpr NilLiteral) "None"
+-- Note `unsafePerformIO newUnique` is safe here but mostly NOT elsewhere
+
+-- | Similar to `None`, `Nothing` is idiomatic in VisualBasic.
+--
+-- though we don't have `Maybe` monad in Edh, having a `Nothing`
+-- carrying null semantic may be useful in some cases.
+edhNothing :: EdhValue
+edhNothing = EdhExpr (unsafePerformIO newUnique) (LitExpr NilLiteral) "Nothing"
+-- Note `unsafePerformIO newUnique` is safe here but mostly NOT elsewhere
+
+-- | With `nil` converted to `None` so the result will never be `nil`.
+--
+-- As `nil` carries *delete* semantic in assignment, in some cases it's better
+-- avoided.
+noneNil :: EdhValue -> EdhValue
+noneNil EdhNil = edhNone
+noneNil !v     = v
+
+nan :: EdhValue
+nan = EdhDecimal D.nan
+
+inf :: EdhValue
+inf = EdhDecimal D.inf
+
+true :: EdhValue
+true = EdhBool True
+
+false :: EdhValue
+false = EdhBool False
 ```
 
 ### Object / Class
@@ -2653,6 +2721,11 @@ and _many_ (reads zero-to-multiple) **supers** (declared by _many_
 > A **class** procedure can explicitly return another **object**, another
 > **value** or even `nil`, but again, this is the black magic you want to
 > avoid.
+
+A **class** procedure can take no argument, to receive arguments for
+object construction, a `__init__()` method should be defined within the
+**class** procedure, then construction arguments are passed to it
+automatically.
 
 Note in traditional **Object Oriented** languages, the **class** is
 sensibly a part of the definition of the world structure, which carries
