@@ -1449,13 +1449,13 @@ Checkout [goroutine.edh](./goroutine.edh)
 Đ|  9:
 Đ| 10: }
 ℹ️ <adhoc>:3:3
-  ⏰ tick#1 ⏲️  1.579282582441298693e18ns
+  ⏰ tick#1 ⏲️  1.58403548958834931e18ns
 ℹ️ <adhoc>:3:3
-  ⏰ tick#2 ⏲️  1.579282583446034569e18ns
+  ⏰ tick#2 ⏲️  1.58403549058993302e18ns
 ℹ️ <adhoc>:3:3
-  ⏰ tick#3 ⏲️  1.579282584449083228e18ns
+  ⏰ tick#3 ⏲️  1.584035491591482713e18ns
 ℹ️ <adhoc>:3:3
-  ⏰ tick#4 ⏲️  1.579282585449430099e18ns
+  ⏰ tick#4 ⏲️  1.584035492593035501e18ns
 Đ:
 ```
 
@@ -1509,7 +1509,7 @@ logics in similar ways.
 Đ| 23:   }
 Đ| 24:
 Đ| 25: }
-<generator: allWorksToDo>
+allWorksToDo
 Đ:
 Đ: {
 Đ|  1:
@@ -1547,42 +1547,62 @@ logics in similar ways.
 ℹ️ <adhoc>:9:9
   🏎️  #4 started
 ℹ️ <adhoc>:17:13
-  📝  #3 tick 1.579333753092014804e18
+  📝  #3 tick 1.584036045605982177e18
 ℹ️ <adhoc>:17:13
-  📝  #2 tick 1.579333753092287532e18
+  📝  #2 tick 1.584036045606286008e18
 ℹ️ <adhoc>:17:13
-  📝  #1 tick 1.579333753092451355e18
+  📝  #1 tick 1.584036045606457333e18
 ℹ️ <adhoc>:17:13
-  📝  #0 tick 1.579333753092594537e18
+  📝  #0 tick 1.584036045606627563e18
+ℹ️ <adhoc>:17:13
+  📝  #4 tick 1.584036045605940946e18
+ℹ️ <adhoc>:17:13
+  📝  #0 tick 1.58403604660768493e18
+ℹ️ <adhoc>:17:13
+  📝  #1 tick 1.584036046607955259e18
+ℹ️ <adhoc>:17:13
+  📝  #2 tick 1.58403604660843663e18
+ℹ️ <adhoc>:17:13
+  📝  #3 tick 1.584036046608599326e18
+ℹ️ <adhoc>:17:13
+  📝  #4 tick 1.584036046607649489e18
+ℹ️ <adhoc>:17:13
+  📝  #3 tick 1.584036047609439892e18
+ℹ️ <adhoc>:17:13
+  📝  #2 tick 1.584036047609659296e18
+ℹ️ <adhoc>:17:13
+  📝  #1 tick 1.584036047609800474e18
+ℹ️ <adhoc>:13:13
+  🏁  #0 done
+ℹ️ <adhoc>:9:9
+  🏎️  #5 started
+ℹ️ <adhoc>:17:13
+  📝  #4 tick 1.584036047609387539e18
 ℹ️ <adhoc>:17:13
 
 ...
 
-  📝  #9 tick 1.579333766119424579e18
-ℹ️ <adhoc>:17:13
-  📝  #8 tick 1.579333767121141122e18
-ℹ️ <adhoc>:13:13
-  🏁  #7 done
-ℹ️ <adhoc>:17:13
-  📝  #9 tick 1.579333767121039419e18
-ℹ️ /home/cyue/m3works/edh/edh_modules/batteries/root/concur.edh:85:5
+ℹ️ /home/cyue/Wander/e-wrks/edh/edh_modules/batteries/root/concur.edh:83:5
   ⏲️  finishing up concur tasks, 2 still running.
 ℹ️ <adhoc>:17:13
-  📝  #8 tick 1.579333768122743608e18
+  📝  #8 tick 1.584036059629547698e18
 ℹ️ <adhoc>:17:13
-  📝  #9 tick 1.57933376812269955e18
+  📝  #9 tick 1.584036060630714579e18
+ℹ️ <adhoc>:17:13
+  📝  #8 tick 1.584036060630699973e18
+ℹ️ <adhoc>:17:13
+  📝  #9 tick 1.584036061632301518e18
 ℹ️ <adhoc>:13:13
   🏁  #8 done
-ℹ️ <adhoc>:17:13
-  📝  #9 tick 1.579333769124342985e18
-ℹ️ /home/cyue/m3works/edh/edh_modules/batteries/root/concur.edh:85:5
+ℹ️ /home/cyue/Wander/e-wrks/edh/edh_modules/batteries/root/concur.edh:83:5
   ⏲️  finishing up concur tasks, 1 still running.
 ℹ️ <adhoc>:17:13
-  📝  #9 tick 1.579333770126210104e18
-ℹ️ <adhoc>:13:13
+  📝  #9 tick 1.584036062633883264e18
+Đ: ℹ️ <adhoc>:13:13
   🏁  #9 done
-Đ: ℹ️ /home/cyue/m3works/edh/edh_modules/batteries/root/concur.edh:82:5
+ℹ️ /home/cyue/Wander/e-wrks/edh/edh_modules/batteries/root/concur.edh:80:5
   🎉  all concur tasks done.
+
 Đ:
 ```
 

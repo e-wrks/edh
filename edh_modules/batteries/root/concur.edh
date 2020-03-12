@@ -24,10 +24,8 @@ method concur(*tasks, c=6, dbgLogger=0) {
   # method procedure (`concur()` in this case) is not possible
   # to be assigned from another procedure (the later
   # `scheduleMore()` method in this case)
-  class Scheduler(
-    # arguments to a class (constructor) procedure automatically
-    tasks # become instance attributes
-  ){
+  class Scheduler {
+    method __init__ ( tasks as this.tasks ) pass
 
     # this somewhat emulates a WaitGroup in Go
     cntRunning = 0 # 'this.' at ctor proc scope is optional
@@ -37,14 +35,14 @@ method concur(*tasks, c=6, dbgLogger=0) {
       # snoc this.tasks within an *atoiso* tx block
       ai case this.tasks of {
 
-        {()} -> task2do = nil # no more tasks in backlog
+        {()} -> task2do = None # no more tasks in backlog
 
         { task2do => rest } -> # one task taken out of backlog
           this.tasks = rest # update this.task within tx
 
       }
 
-      if nil == task2do then {
+      if None == task2do then {
         doneSig <- this.cntRunning # notify about overall finishing up
         return nil # skip all following code
       }
