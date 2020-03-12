@@ -1,7 +1,9 @@
 
 {
 
-  class C (a) {
+  class C {
+    method __init__ (a as this.a) pass
+
     b = 5
     method f (n) n*a/b
     method g (n) { v = (n+3)/a; return v*b}

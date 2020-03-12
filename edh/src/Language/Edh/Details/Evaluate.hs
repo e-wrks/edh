@@ -762,11 +762,12 @@ evalExpr expr exit = do
         runEdhProg pgs $ getEdhAttr
           tgtExpr
           key
-          (  throwEdh EvalError
-          $  "No such attribute "
-          <> T.pack (show key)
-          <> " from "
-          <> T.pack (show tgtExpr)
+          (\tgtVal ->
+            throwEdh EvalError
+              $  "No such attribute "
+              <> T.pack (show key)
+              <> " from "
+              <> T.pack (show tgtVal)
           )
           exit
 
@@ -989,7 +990,11 @@ validateOperDecl !pgs (ProcDecl _ !op'args _) = case op'args of
 
 
 getEdhAttr
-  :: Expr -> AttrKey -> EdhProg (STM ()) -> EdhProcExit -> EdhProg (STM ())
+  :: Expr
+  -> AttrKey
+  -> (EdhValue -> EdhProg (STM ()))
+  -> EdhProcExit
+  -> EdhProg (STM ())
 getEdhAttr !fromExpr !key !exitNoAttr !exit = do
   !pgs <- ask
   let scope = contextScope $ edh'context pgs
@@ -1000,14 +1005,14 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
       let !this = thisObject scope
           noMagic :: EdhProg (STM ())
           noMagic = contEdhSTM $ resolveEdhObjAttr this key >>= \case
-            Nothing         -> runEdhProg pgs exitNoAttr
+            Nothing         -> runEdhProg pgs $ exitNoAttr $ EdhObject this
             Just !originVal -> exitEdhSTM' pgs exit originVal
       in  getEdhAttrWithMagic (AttrByName "@<-") this key noMagic exit
     -- no magic layer laid over access via `that` ref
     AttrExpr ThatRef ->
       let !that = thatObject scope
       in  contEdhSTM $ resolveEdhObjAttr that key >>= \case
-            Nothing         -> runEdhProg pgs exitNoAttr
+            Nothing         -> runEdhProg pgs $ exitNoAttr $ EdhObject that
             Just !originVal -> exitEdhSTM' pgs exit originVal
     -- give super objects of an super object the metamagical power to
     -- intercept attribute access on super object, via `super` ref
@@ -1015,7 +1020,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
       let !this = thisObject scope
           noMagic :: EdhProg (STM ())
           noMagic = contEdhSTM $ resolveEdhSuperAttr this key >>= \case
-            Nothing         -> runEdhProg pgs exitNoAttr
+            Nothing         -> runEdhProg pgs $ exitNoAttr $ EdhObject this
             Just !originVal -> exitEdhSTM' pgs exit originVal
           getFromSupers :: [Object] -> EdhProg (STM ())
           getFromSupers []                   = noMagic
@@ -1035,7 +1040,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
       (EdhObject !obj) -> do
         let noMagic :: EdhProg (STM ())
             noMagic = contEdhSTM $ resolveEdhObjAttr obj key >>= \case
-              Nothing         -> runEdhProg pgs exitNoAttr
+              Nothing         -> runEdhProg pgs $ exitNoAttr fromVal
               Just !originVal -> exitEdhSTM' pgs exit originVal
         getEdhAttrWithMagic (AttrByName "@<-*") obj key noMagic exit
       _ ->
@@ -1293,58 +1298,61 @@ constructEdhObject !cls !argsSndr !exit = do
   createEdhObject cls argsSndr $ \(OriginalValue !thisVal _ _) ->
     case thisVal of
       EdhObject !this ->
-        contEdhSTM $ lookupEdhObjAttr this (AttrByName "__init__") >>= \case
-          EdhNil -> if null argsSndr
-            then exitEdhSTM pgsCaller exit thisVal
-            else
+        contEdhSTM $ readTVar (entity'store $ objEntity this) >>= \es ->
+          case lookupEntityAttr es (AttrByName "__init__") of
+            EdhNil -> if null argsSndr
+              then exitEdhSTM pgsCaller exit thisVal
+              else
+                throwEdhSTM pgsCaller EvalError
+                $  "No __init__() defined by class "
+                <> procedure'name (procedure'decl cls)
+                <> " to receive argument(s)"
+            EdhMethod !initMth ->
+              case procedure'body $ procedure'decl initMth of
+                Right _ -> throwEdhSTM
+                  pgsCaller
+                  EvalError
+                  "not supported: __init__() of host method procedure"
+                Left !pb -> do -- the __init__() mth is as-if called from ctor proc
+                  let
+                    !callerCtx   = edh'context pgsCaller
+                    !callerScope = contextScope callerCtx
+                    !initScope   = callerScope { thisObject = this
+                                               , thatObject = this
+                                               , scopeProc  = cls
+                                               }
+                    !initCtx = callerCtx
+                      { callStack       = initScope <| callStack callerCtx
+                      , generatorCaller = Nothing
+                      , contextMatch    = true
+                      , contextStmt     = pb
+                      }
+                    !pgsInit = pgsCaller { edh'context = initCtx }
+                  runEdhProg pgsInit $ packEdhArgs' argsSndr $ \apk ->
+                    callEdhMethod apk this initMth pb Nothing
+                      $ \(OriginalValue !initRtn _ _) ->
+                          local (const pgsCaller) $ case initRtn of
+                            -- allow a __init__() procedure to explicitly return other
+                            -- value than newly constructed `this` object
+                            -- it can still `return this` to early stop the proc
+                            -- which is magically an advanced feature
+                            EdhReturn !rtnVal -> exitEdhProc exit rtnVal
+                            EdhContinue       -> throwEdh
+                              EvalError
+                              "Unexpected continue from __init__()"
+                            -- allow the use of `break` to early stop a __init__() 
+                            -- procedure with nil result
+                            EdhBreak -> exitEdhProc exit nil
+                            -- no explicit return from __init__() procedure, return the
+                            -- newly constructed this object, throw away the last
+                            -- value from the procedure execution
+                            _        -> exitEdhProc exit thisVal
+            badInitMth ->
               throwEdhSTM pgsCaller EvalError
-              $  "No __init__ defined by class "
-              <> procedure'name (procedure'decl cls)
-              <> " to receive argument(s)"
-          EdhMethod !initMth -> case procedure'body $ procedure'decl initMth of
-            Right _ -> throwEdhSTM
-              pgsCaller
-              EvalError
-              "not supported: __init__() of host method procedure"
-            Left !pb -> do -- the __init__() mth is as-if called from ctor proc
-              let
-                !callerCtx   = edh'context pgsCaller
-                !callerScope = contextScope callerCtx
-                !initScope   = callerScope { thisObject = this
-                                           , thatObject = this
-                                           , scopeProc  = cls
-                                           }
-                !initCtx = callerCtx
-                  { callStack       = initScope <| callStack callerCtx
-                  , generatorCaller = Nothing
-                  , contextMatch    = true
-                  , contextStmt     = pb
-                  }
-                !pgsInit = pgsCaller { edh'context = initCtx }
-              runEdhProg pgsInit $ packEdhArgs' argsSndr $ \apk ->
-                callEdhMethod apk this initMth pb Nothing
-                  $ \(OriginalValue !initRtn _ _) ->
-                      local (const pgsCaller) $ case initRtn of
-                        -- allow a __init__ procedure to explicitly return other
-                        -- value than newly constructed `this` object
-                        -- it can still `return this` to early stop the proc
-                        -- which is magically an advanced feature
-                        EdhReturn !rtnVal -> exitEdhProc exit rtnVal
-                        EdhContinue ->
-                          throwEdh EvalError "Unexpected continue from __init__"
-                        -- allow the use of `break` to early stop a __init__ 
-                        -- procedure with nil result
-                        EdhBreak -> exitEdhProc exit nil
-                        -- no explicit return from __init__ procedure, return the
-                        -- newly constructed this object, throw away the last
-                        -- value from the procedure execution
-                        _        -> exitEdhProc exit thisVal
-          badInitMth ->
-            throwEdhSTM pgsCaller EvalError
-              $  "Invalid __init__() method from class - "
-              <> edhValueStr (edhTypeOf badInitMth)
-              <> ": "
-              <> edhValueStr badInitMth
+                $  "Invalid __init__() method from class - "
+                <> edhValueStr (edhTypeOf badInitMth)
+                <> ": "
+                <> edhValueStr badInitMth
       _ -> -- return whatever the constructor returned if not an object
         exitEdhProc exit thisVal
 

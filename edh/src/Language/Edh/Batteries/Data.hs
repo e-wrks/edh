@@ -25,21 +25,23 @@ attrDerefAddrProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
     EdhString !attrName -> getEdhAttr
       lhExpr
       (AttrByName attrName)
-      (  throwEdh EvalError
-      $  "No such attribute "
-      <> edhValueStr rhVal
-      <> " from "
-      <> T.pack (show lhExpr)
+      (\lhVal ->
+        throwEdh EvalError
+          $  "No such attribute "
+          <> edhValueStr rhVal
+          <> " from "
+          <> T.pack (show lhVal)
       )
       exit
     EdhSymbol !sym -> getEdhAttr
       lhExpr
       (AttrBySym sym)
-      (  throwEdh EvalError
-      $  "No such attribute "
-      <> edhValueStr rhVal
-      <> " from "
-      <> T.pack (show lhExpr)
+      (\lhVal ->
+        throwEdh EvalError
+          $  "No such attribute "
+          <> edhValueStr rhVal
+          <> " from "
+          <> T.pack (show lhVal)
       )
       exit
     _ ->
@@ -74,7 +76,7 @@ attrTemptProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
   case rhExpr of
     AttrExpr (DirectRef !addr) -> contEdhSTM $ do
       key <- resolveAddr pgs addr
-      runEdhProg pgs $ getEdhAttr lhExpr key (exitEdhProc exit nil) exit
+      runEdhProg pgs $ getEdhAttr lhExpr key (const $ exitEdhProc exit nil) exit
     _ -> throwEdh EvalError $ "Invalid attribute expression: " <> T.pack
       (show rhExpr)
 attrTemptProc !argsSender _ =
@@ -85,10 +87,12 @@ attrTemptProc !argsSender _ =
 attrDerefTemptProc :: EdhProcedure
 attrDerefTemptProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
   evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
-    EdhString !attrName ->
-      getEdhAttr lhExpr (AttrByName attrName) (exitEdhProc exit nil) exit
+    EdhString !attrName -> getEdhAttr lhExpr
+                                      (AttrByName attrName)
+                                      (const $ exitEdhProc exit nil)
+                                      exit
     EdhSymbol !sym ->
-      getEdhAttr lhExpr (AttrBySym sym) (exitEdhProc exit nil) exit
+      getEdhAttr lhExpr (AttrBySym sym) (const $ exitEdhProc exit nil) exit
     _ ->
       throwEdh EvalError
         $  "Invalid attribute reference - "

@@ -1275,23 +1275,25 @@ Checkout [simple-class.edh](./simple-class.edh)
 ```bash
 Đ: {
 Đ|  1:
-Đ|  2:   class C (a) {
-Đ|  3:     b = 5
-Đ|  4:     method f (n) n*a/b
-Đ|  5:     method g (n) { v = (n+3)/a; return v*b}
-Đ|  6:
-Đ|  7:     method setA(a as this.a) pass
-Đ|  8:     method setB(b as this.b) pass
-Đ|  9:   }
-Đ| 10:
-Đ| 11:   c = C(17); # this semicolon is necessary,
-Đ| 12:   # or the following tuple will parse as a call
-Đ| 13:   # against the assignment result, which is the
-Đ| 14:   # newly constructed C object.
-Đ| 15:
-Đ| 16:   ( c.f(7) , c.g(7) )
+Đ|  2:   class C {
+Đ|  3:     method __init__ (a as this.a) pass
+Đ|  4:
+Đ|  5:     b = 5
+Đ|  6:     method f (n) n*a/b
+Đ|  7:     method g (n) { v = (n+3)/a; return v*b}
+Đ|  8:
+Đ|  9:     method setA(a as this.a) pass
+Đ| 10:     method setB(b as this.b) pass
+Đ| 11:   }
+Đ| 12:
+Đ| 13:   c = C(17); # this semicolon is necessary,
+Đ| 14:   # or the following tuple will parse as a call
+Đ| 15:   # against the assignment result, which is the
+Đ| 16:   # newly constructed C object.
 Đ| 17:
-Đ| 18: }
+Đ| 18:   ( c.f(7) , c.g(7) )
+Đ| 19:
+Đ| 20: }
 ( 119/5, 50/17, )
 Đ:
 Đ: c.setA(11); c.setB(23)
@@ -1299,18 +1301,31 @@ Checkout [simple-class.edh](./simple-class.edh)
 Đ: ( c.f(7) , c.g(7) )
 ( 77/23, 230/11, )
 Đ:
+Đ: c.b = 3
+3
+Đ:
+Đ: ( c.f(7) , c.g(7) )
+( 77/3, 30/11, )
+Đ:
 ```
 
 ### Inheritance Hierarchy
 
-Many don't consider **Go** ([GoLang](https://golang.org)) an
-_Object Oriented_ programming language, neither is **Edh** in similar
-respect. **Edh** does pointer-wise
+Many don't consider **Go** ([GoLang](https://golang.org)) (and **Rust**
+similarly in this respect) an _Object Oriented_ programming language,
+neither is **Edh** under the same conception. **Edh** does pointer-wise
 [Type Embedding](https://go101.org/article/type-embedding.html)
-in **Go** spirit, while it takes a small step further to offer `that`
+in **Go** spirit.
+
+And **Edh** takes a small step further to offer `that`
 reference, which refers to a descendant record from an ancestor
 method, in addition to `this` reference which refers to the lexical
 self record.
+
+> Further more, magic methods can be defined at `super` objects to
+> intercept some actions performed on descendant objects, e.g.
+> attribute read/write. Details of the magic methods are still WIP
+> on feature branches, check back later to see updates.
 
 This is yet another much under explored area in **Edh**, trying to do
 traditional style object oriented inheritance is problematic:
@@ -1320,33 +1335,35 @@ Checkout [inheritance.edh](./inheritance.edh)
 ```bash
 Đ: {
 Đ|  1:
-Đ|  2:   class B (name) {
-Đ|  3:       method greeting(guest) {
-Đ|  4:           runtime.info <| ("Hello "++guest++", I am "++name++', your guide.')
-Đ|  5:       }
-Đ|  6:   }
-Đ|  7:
-Đ|  8:   class C () {
-Đ|  9:       extends B('Nobleman')
-Đ| 10:   }
-Đ| 11:
-Đ| 12:   class D () {
-Đ| 13:       extends B('Farmer')
-Đ| 14:
-Đ| 15:       method hello() {
-Đ| 16:           runtime.info <| (`Hello there!`)
-Đ| 17:       }
-Đ| 18:   }
-Đ| 19:
-Đ| 20:   class E () {
-Đ| 21:       extends C()
-Đ| 22:       extends D()
-Đ| 23:       # an E object will contain 2 copies of B object,
-Đ| 24:       # the order above matters in resolving the `greeting` method.
-Đ| 25:   }
-Đ| 26:
-Đ| 27: }
-<class: E>
+Đ|  2:   class B {
+Đ|  3:       method __init__ (name as this.name) pass
+Đ|  4:
+Đ|  5:       method greeting(guest) {
+Đ|  6:           runtime.info <| ("Hello "++guest++", I am "++name++', your guide.')
+Đ|  7:       }
+Đ|  8:   }
+Đ|  9:
+Đ| 10:   class C {
+Đ| 11:       extends B('Nobleman')
+Đ| 12:   }
+Đ| 13:
+Đ| 14:   class D {
+Đ| 15:       extends B('Farmer')
+Đ| 16:
+Đ| 17:       method hello() {
+Đ| 18:           runtime.info <| (`Hello there!`)
+Đ| 19:       }
+Đ| 20:   }
+Đ| 21:
+Đ| 22:   class E {
+Đ| 23:       extends C()
+Đ| 24:       extends D()
+Đ| 25:       # an E object will contain 2 copies of B object,
+Đ| 26:       # the order above matters in resolving the `greeting` method.
+Đ| 27:   }
+Đ| 28:
+Đ| 29: }
+E
 Đ:
 Đ: e = E()
 <object: E>
@@ -1355,20 +1372,20 @@ Checkout [inheritance.edh](./inheritance.edh)
 ( <object: D>, <object: C>, )
 Đ:
 Đ: e.hello()
-Đ: ℹ️ <adhoc>:16:11
+Đ: ℹ️ <adhoc>:18:11
 Hello there!
 
 Đ: e.greeting('New Comer')
-Đ: ℹ️ <adhoc>:4:11
-Hello New Comer, I am Farmer, your guide.
-
+Đ:
 Đ: embededD = case e of {{ D:d }} -> d
+ℹ️ <adhoc>:6:11
+Hello New Comer, I am Farmer, your guide.
 <object: D>
 Đ: embededD.hello()
-Đ: ℹ️ <adhoc>:16:11
-Hello there!
-
+Đ:
 Đ: d = D()
+ℹ️ <adhoc>:18:11
+Hello there!
 <object: D>
 Đ: case d of {{ C:c }} -> c
 <fallthrough>

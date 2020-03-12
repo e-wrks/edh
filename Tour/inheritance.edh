@@ -1,17 +1,19 @@
 
 {
 
-  class B (name) {
+  class B {
+      method __init__ (name as this.name) pass
+
       method greeting(guest) {
           runtime.info <| ("Hello "++guest++", I am "++name++', your guide.')
       }
   }
 
-  class C () {
+  class C {
       extends B('Nobleman')
   }
 
-  class D () {
+  class D {
       extends B('Farmer')
 
       method hello() {
@@ -19,7 +21,7 @@
       }
   }
 
-  class E () {
+  class E {
       extends C()
       extends D()
       # an E object will contain 2 copies of B object,
