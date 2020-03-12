@@ -1205,7 +1205,6 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
               { callStack       = calleeScope <| callStack callerCtx
               , generatorCaller = Nothing
               , contextMatch    = true
-              , contextStmt     = voidStatement
               }
             !pgsCallee = pgsCaller { edh'context = calleeCtx }
         -- insert a cycle tick here, so if no tx required for the call
@@ -1314,7 +1313,7 @@ constructEdhObject !cls !argsSndr !exit = do
                   { callStack       = initScope <| callStack callerCtx
                   , generatorCaller = Nothing
                   , contextMatch    = true
-                  , contextStmt     = voidStatement
+                  , contextStmt     = pb
                   }
                 !pgsInit = pgsCaller { edh'context = initCtx }
               runEdhProg pgsInit $ packEdhArgs argsSndr $ \apk ->
@@ -1521,7 +1520,6 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                             { callStack       = calleeScope <| callStack ctx
                             , generatorCaller = Just (pgs, recvYield exit)
                             , contextMatch    = true
-                            , contextStmt     = voidStatement
                             }
                           !pgsCallee = pgs { edh'context = calleeCtx }
                         -- insert a cycle tick here, so if no tx required for the call
