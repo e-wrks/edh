@@ -1680,7 +1680,7 @@ This is meant to attract people to port **Pandas** and **Numpy** to
 
 ```bash
 Đ: {
-Đ|  1:   class Data () {
+Đ|  1:   class Data {
 Đ|  2:
 Đ|  3:     data = {}
 Đ|  4:

@@ -1,6 +1,6 @@
 
 {
-  class Data () {
+  class Data {
 
     data = {}
 

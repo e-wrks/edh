@@ -1313,23 +1313,18 @@ constructEdhObject !cls !argsSndr !exit = do
                   pgsCaller
                   EvalError
                   "not supported: __init__() of host method procedure"
-                Left !pb -> do -- the __init__() mth is as-if called from ctor proc
+                Left !pb -> do
                   let
                     !callerCtx   = edh'context pgsCaller
                     !callerScope = contextScope callerCtx
-                    !initScope   = callerScope { thisObject = this
-                                               , thatObject = this
-                                               , scopeProc  = cls
-                                               }
-                    !initCtx = callerCtx
-                      { callStack       = initScope <| callStack callerCtx
-                      , generatorCaller = Nothing
-                      , contextMatch    = true
-                      , contextStmt     = pb
-                      }
+                    !initScope =
+                      callerScope { thisObject = this, thatObject = this }
+                    !initCtx =
+                      callerCtx { callStack = initScope <| callStack callerCtx }
                     !pgsInit = pgsCaller { edh'context = initCtx }
-                  runEdhProg pgsInit $ packEdhArgs' argsSndr $ \apk ->
-                    callEdhMethod apk this initMth pb Nothing
+                  runEdhProg pgsCaller $ packEdhArgs' argsSndr $ \apk ->
+                    local (const pgsInit) -- with `this` and `that` changed to new this
+                      $ callEdhMethod apk this initMth pb Nothing
                       $ \(OriginalValue !initRtn _ _) ->
                           local (const pgsCaller) $ case initRtn of
                             -- allow a __init__() procedure to explicitly return other

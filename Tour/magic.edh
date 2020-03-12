@@ -3,7 +3,9 @@ import * 'batteries/magic'
 
 {
 
-  class Tensor (name) {
+  class Tensor {
+
+    method __init__ (name as this.name) pass
 
     method (+) (other) case type(other) of {
       # add to a constant
