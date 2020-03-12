@@ -1,19 +1,19 @@
 
   # resembles `range` in Python
-  generator range(start, stop=nil, step=nil) {
+  generator range(start, stop=None, step=None) {
 
-    if nil == stop && nil == step then case start of {
+    if None == stop && None == step then case start of {
       # enable the hidden *Edhic* version of `range` using pair
       {(start:stop:step)} -> {fallthrough}
       {(start:stop)} -> {fallthrough}
     }
 
-    if nil == stop then let (stop, start) = (start, 0)
+    if None == stop then let (stop, start) = (start, 0)
     start == stop -> { return nil }
     n = start
     
     start < stop -> {
-      if nil == step
+      if None == step
         then step = 1
         else if step <= 0 then {
           runtime.warn <| 'step of ' ++ step ++ ' for range [' ++
@@ -27,7 +27,7 @@
     }
 
     start > stop -> {
-      if nil == step
+      if None == step
         then step = -1
         else if step >= 0 then {
           runtime.warn <| 'step of ' ++ step ++ ' for range [' ++

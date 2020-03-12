@@ -290,7 +290,7 @@ instance Ord Scope where
 instance Hashable Scope where
   hashWithSalt s (Scope u _ _ _) = hashWithSalt s u
 instance Show Scope where
-  show (Scope _ _ _ (ProcDefi _ (ProcDecl _ pName argsRcvr _))) =
+  show (Scope _ _ _ (ProcDefi _ _ (ProcDecl pName argsRcvr _))) =
     "<" ++ T.unpack pName ++ " " ++ show argsRcvr ++ ">"
 
 outerScopeOf :: Scope -> Maybe Scope
@@ -323,7 +323,7 @@ instance Show Object where
   -- it's not right to call 'atomically' here to read 'objSupers' for
   -- the show, as 'show' may be called from an stm transaction, stm
   -- will fail hard on encountering of nested 'atomically' calls.
-  show (Object _ (ProcDefi _ (ProcDecl _ cn _ _)) _) =
+  show (Object _ (ProcDefi _ _ (ProcDecl cn _ _)) _) =
     "<object: " ++ T.unpack cn ++ ">"
 
 -- | View an entity as object of specified class with specified ancestors
@@ -536,7 +536,7 @@ getEdhErrorContext !pgs !msg = EdhErrorContext msg
   (StmtSrc (!sp, _)) = contextStmt ctx
   !frames =
     foldl'
-        (\sfs (Scope _ _ _ (ProcDefi _ (ProcDecl _ procName _ procBody))) ->
+        (\sfs (Scope _ _ _ (ProcDefi _ _ (ProcDecl procName _ procBody))) ->
           (procName, procSrcLoc procBody) : sfs
         )
         []
@@ -714,13 +714,13 @@ instance Show EdhValue where
          "( " ++ concat [ show i ++ ", " | i <- v ] ++ ")"
   show (EdhArgsPack v) = "pkargs" ++ show v
 
-  show (EdhClass (ProcDefi _ (ProcDecl _ pn _ _))) = T.unpack pn
-  show (EdhMethod (ProcDefi _ (ProcDecl _ pn _ _))) = T.unpack pn
-  show (EdhOperator precedence _predecessor (ProcDefi _ (ProcDecl _ pn _ _))) =
+  show (EdhClass (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
+  show (EdhMethod (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
+  show (EdhOperator precedence _predecessor (ProcDefi _ _ (ProcDecl pn _ _))) =
     "<operator: (" ++ T.unpack pn ++ ") " ++ show precedence ++ ">"
-  show (EdhGenrDef (ProcDefi _ (ProcDecl _ pn _ _))) = T.unpack pn
-  show (EdhInterpreter (ProcDefi _ (ProcDecl _ pn _ _))) = T.unpack pn
-  show (EdhProducer (ProcDefi _ (ProcDecl _ pn _ _))) = T.unpack pn
+  show (EdhGenrDef (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
+  show (EdhInterpreter (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
+  show (EdhProducer (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
 
   show EdhBreak         = "<break>"
   show EdhContinue      = "<continue>"
@@ -838,6 +838,7 @@ nil = EdhNil
 -- carrying a semantic of *absence*.
 edhNone :: EdhValue
 edhNone = EdhExpr (unsafePerformIO newUnique) (LitExpr NilLiteral) "None"
+-- Note `unsafePerformIO newUnique` is safe here but mostly NOT elsewhere
 
 -- | Similar to `None`, `Nothing` is idiomatic in VisualBasic.
 --
@@ -845,6 +846,7 @@ edhNone = EdhExpr (unsafePerformIO newUnique) (LitExpr NilLiteral) "None"
 -- carrying null semantic may be useful in some cases.
 edhNothing :: EdhValue
 edhNothing = EdhExpr (unsafePerformIO newUnique) (LitExpr NilLiteral) "Nothing"
+-- Note `unsafePerformIO newUnique` is safe here but mostly NOT elsewhere
 
 -- | With `nil` converted to `None` so the result will never be `nil`.
 --
@@ -869,8 +871,7 @@ false = EdhBool False
 
 newtype StmtSrc = StmtSrc (SourcePos, Stmt)
 instance Eq StmtSrc where
-  StmtSrc (x'sp, x'stmt) == StmtSrc (y'sp, y'stmt) =
-    x'sp == y'sp && x'stmt == y'stmt
+  StmtSrc (x'sp, _) == StmtSrc (y'sp, _) = x'sp == y'sp
 instance Show StmtSrc where
   show (StmtSrc (sp, stmt)) = show stmt ++ "\n@ " ++ sourcePosPretty sp
 
@@ -938,7 +939,7 @@ data Stmt =
     | ReturnStmt !Expr
       -- | expression with precedence
     | ExprStmt !Expr
-  deriving (Eq, Show)
+  deriving (Show)
 
 -- Attribute addressor
 data AttrAddr = ThisRef | ThatRef | SuperRef
@@ -998,43 +999,33 @@ data ArgSender = UnpackPosArgs !Expr
 
 -- | Procedure declaration, result of parsing
 data ProcDecl = ProcDecl {
-      procedure'uniq :: !Unique
-    , procedure'name :: !AttrName
+      procedure'name :: !AttrName
     , procedure'args :: !ArgsReceiver
     , procedure'body :: !(Either StmtSrc EdhProcedure)
   }
-instance Eq ProcDecl where
-  ProcDecl x'u _ _ _ == ProcDecl y'u _ _ _ = x'u == y'u
-instance Ord ProcDecl where
-  compare (ProcDecl x'u _ _ _) (ProcDecl y'u _ _ _) = compare x'u y'u
-instance Hashable ProcDecl where
-  hashWithSalt s (ProcDecl u _ _ _) = hashWithSalt s u
 instance Show ProcDecl where
-  show (ProcDecl _ name _ pb) = case pb of
+  show (ProcDecl name _ pb) = case pb of
     Left  _ -> "<edh-proc " <> T.unpack name <> ">"
     Right _ -> "<host-proc " <> T.unpack name <> ">"
 
 -- | Procedure definition, result of execution of the declaration
 data ProcDefi = ProcDefi {
-    procedure'lexi :: !(Maybe Scope)
+    procedure'uniq :: !Unique
+    , procedure'lexi :: !(Maybe Scope)
     , procedure'decl :: {-# UNPACK #-} !ProcDecl
   }
 instance Eq ProcDefi where
-  ProcDefi x's (ProcDecl x'u _ _ _) == ProcDefi y's (ProcDecl y'u _ _ _) =
-    x'u == y'u && x's == y's
+  ProcDefi x'u _ _ == ProcDefi y'u _ _ = x'u == y'u
 instance Ord ProcDefi where
-  compare (ProcDefi x's (ProcDecl x'u _ _ _)) (ProcDefi y's (ProcDecl y'u _ _ _))
-    = case declResult of
-      EQ -> compare x's y's
-      _  -> declResult
-    where !declResult = compare x'u y'u
+  compare (ProcDefi x'u _ _) (ProcDefi y'u _ _) = compare x'u y'u
 instance Hashable ProcDefi where
-  hashWithSalt s (ProcDefi scope (ProcDecl u _ _ _)) =
-    s `hashWithSalt` u `hashWithSalt` scope
+  hashWithSalt s (ProcDefi u scope _) = s `hashWithSalt` u `hashWithSalt` scope
+instance Show ProcDefi where
+  show (ProcDefi _ _ decl) = show decl
 
 lexicalScopeOf :: ProcDefi -> Scope
-lexicalScopeOf (ProcDefi (Just scope) _) = scope
-lexicalScopeOf (ProcDefi Nothing _) =
+lexicalScopeOf (ProcDefi _ (Just scope) _) = scope
+lexicalScopeOf (ProcDefi _ Nothing _) =
   error "bug: asking for scope of world root"
 
 
@@ -1164,16 +1155,16 @@ edhTypeOf EdhPair{}                                   = EdhType PairType
 edhTypeOf EdhTuple{}                                  = EdhType TupleType
 edhTypeOf EdhArgsPack{}                               = EdhType ArgsPackType
 
-edhTypeOf (EdhClass (ProcDefi _ (ProcDecl _ _ _ pb))) = case pb of
+edhTypeOf (EdhClass (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> EdhType ClassType
   Right _ -> EdhType HostClassType
-edhTypeOf (EdhMethod (ProcDefi _ (ProcDecl _ _ _ pb))) = case pb of
+edhTypeOf (EdhMethod (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> EdhType MethodType
   Right _ -> EdhType HostMethodType
-edhTypeOf (EdhOperator _ _ (ProcDefi _ (ProcDecl _ _ _ pb))) = case pb of
+edhTypeOf (EdhOperator _ _ (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> EdhType OperatorType
   Right _ -> EdhType HostOperType
-edhTypeOf (EdhGenrDef (ProcDefi _ (ProcDecl _ _ _ pb))) = case pb of
+edhTypeOf (EdhGenrDef (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> EdhType GeneratorType
   Right _ -> EdhType HostGenrType
 

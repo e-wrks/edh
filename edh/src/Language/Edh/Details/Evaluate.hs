@@ -6,7 +6,6 @@ import           Prelude
 -- import           Debug.Trace
 
 import           GHC.Conc                       ( unsafeIOToSTM )
-import           System.IO.Unsafe
 
 import           Control.Exception
 import           Control.Monad.Except
@@ -274,37 +273,43 @@ evalStmt' !stmt !exit = do
             <> ": "
             <> T.pack (show superVal)
 
-    ClassStmt pd@(ProcDecl _ name _ _) -> contEdhSTM $ do
-      let
-        !cls =
-          EdhClass ProcDefi { procedure'lexi = Just scope, procedure'decl = pd }
+    ClassStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
+      u <- unsafeIOToSTM newUnique
+      let !cls = EdhClass ProcDefi { procedure'uniq = u
+                                   , procedure'lexi = Just scope
+                                   , procedure'decl = pd
+                                   }
       when (name /= "_")
         $ modifyTVar' (entity'store $ scopeEntity scope)
         $ \es -> changeEntityAttr es (AttrByName name) cls
       exitEdhSTM pgs exit cls
 
-    MethodStmt pd@(ProcDecl _ name _ _) -> contEdhSTM $ do
-      let
-        mth = EdhMethod ProcDefi { procedure'lexi = Just scope
-                                 , procedure'decl = pd
-                                 }
+    MethodStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
+      u <- unsafeIOToSTM newUnique
+      let mth = EdhMethod ProcDefi { procedure'uniq = u
+                                   , procedure'lexi = Just scope
+                                   , procedure'decl = pd
+                                   }
       when (name /= "_")
         $ modifyTVar' (entity'store $ scopeEntity scope)
         $ \es -> changeEntityAttr es (AttrByName name) mth
       exitEdhSTM pgs exit mth
 
-    GeneratorStmt pd@(ProcDecl _ name _ _) -> contEdhSTM $ do
-      let
-        gdf = EdhGenrDef ProcDefi { procedure'lexi = Just scope
-                                  , procedure'decl = pd
-                                  }
+    GeneratorStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
+      u <- unsafeIOToSTM newUnique
+      let gdf = EdhGenrDef ProcDefi { procedure'uniq = u
+                                    , procedure'lexi = Just scope
+                                    , procedure'decl = pd
+                                    }
       when (name /= "_")
         $ modifyTVar' (entity'store $ scopeEntity scope)
         $ \es -> changeEntityAttr es (AttrByName name) gdf
       exitEdhSTM pgs exit gdf
 
-    InterpreterStmt pd@(ProcDecl _ name _ _) -> contEdhSTM $ do
-      let mth = EdhInterpreter ProcDefi { procedure'lexi = Just scope
+    InterpreterStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
+      u <- unsafeIOToSTM newUnique
+      let mth = EdhInterpreter ProcDefi { procedure'uniq = u
+                                        , procedure'lexi = Just scope
                                         , procedure'decl = pd
                                         }
       when (name /= "_")
@@ -312,11 +317,12 @@ evalStmt' !stmt !exit = do
         $ \es -> changeEntityAttr es (AttrByName name) mth
       exitEdhSTM pgs exit mth
 
-    ProducerStmt pd@(ProcDecl _ name args _) -> contEdhSTM $ do
-      let
-        mth = EdhProducer ProcDefi { procedure'lexi = Just scope
-                                   , procedure'decl = pd
-                                   }
+    ProducerStmt pd@(ProcDecl name args _) -> contEdhSTM $ do
+      u <- unsafeIOToSTM newUnique
+      let mth = EdhProducer ProcDefi { procedure'uniq = u
+                                     , procedure'lexi = Just scope
+                                     , procedure'decl = pd
+                                     }
       unless (receivesNamedArg "outlet" args) $ throwEdhSTM
         pgs
         EvalError
@@ -326,7 +332,7 @@ evalStmt' !stmt !exit = do
         $ \es -> changeEntityAttr es (AttrByName name) mth
       exitEdhSTM pgs exit mth
 
-    OpDeclStmt opSym opPrec opProc@(ProcDecl _ _ _ !pb) -> case pb of
+    OpDeclStmt opSym opPrec opProc@(ProcDecl _ _ !pb) -> case pb of
       -- support re-declaring an existing operator to another name,
       -- with possibly a different precedence
       Left (StmtSrc (_, ExprStmt (AttrExpr (DirectRef (NamedAttr !origOpSym)))))
@@ -350,10 +356,14 @@ evalStmt' !stmt !exit = do
           exitEdhSTM pgs exit origOp
       _ -> contEdhSTM $ do
         validateOperDecl pgs opProc
+        u <- unsafeIOToSTM newUnique
         let op = EdhOperator
               opPrec
               Nothing
-              ProcDefi { procedure'lexi = Just scope, procedure'decl = opProc }
+              ProcDefi { procedure'uniq = u
+                       , procedure'lexi = Just scope
+                       , procedure'decl = opProc
+                       }
         modifyTVar' (entity'store $ scopeEntity scope)
           $ \es -> changeEntityAttr es (AttrByName opSym) op
         exitEdhSTM pgs exit op
@@ -382,10 +392,14 @@ evalStmt' !stmt !exit = do
                 Map.empty
               return Nothing
       predecessor <- findPredecessor
+      u           <- unsafeIOToSTM newUnique
       let op = EdhOperator
             opPrec
             predecessor
-            ProcDefi { procedure'lexi = Just scope, procedure'decl = opProc }
+            ProcDefi { procedure'uniq = u
+                     , procedure'lexi = Just scope
+                     , procedure'decl = opProc
+                     }
       modifyTVar' (entity'store $ scopeEntity scope)
         $ \es -> changeEntityAttr es (AttrByName opSym) op
       exitEdhSTM pgs exit op
@@ -519,69 +533,66 @@ loadModule !pgs !moduSlot !moduId !moduFile !exit = if edh'in'tx pgs
   then throwEdhSTM pgs
                    EvalError
                    "You don't load a module from within a transaction"
-  else
-    unsafeIOToSTM (streamDecodeUtf8With lenientDecode <$> B.readFile moduFile)
-      >>= \case
-            Some moduSource _ _ -> do
-              let !ctx   = edh'context pgs
-                  !world = contextWorld ctx
-                  !wops  = worldOperators world
-              -- serialize parsing against 'worldOperators'
-              opPD <- takeTMVar wops
-              flip -- TODO catchSTM does NOT work across Edh transactions,
-                   --      need to impl. a catchEdh or sth. to be used here.
-                  catchSTM
-                  (\(e :: SomeException) -> tryPutTMVar wops opPD >> throwSTM e)
-                $ do
-                    -- parse module source
-                    let
-                      (pr, opPD') = runState
-                        (runParserT parseProgram moduFile moduSource)
-                        opPD
-                    case pr of
-                      Left  !err   -> throwSTM $ EdhParseError err
-                      Right !stmts -> do
-                        -- release world lock as soon as parsing done successfuly
-                        putTMVar wops opPD'
-                        -- prepare the module meta data
-                        !moduEnt <-
-                          createEntity $ hashEntityStore $ Map.fromList
-                            [ (AttrByName "__name__", EdhString moduId)
-                            , ( AttrByName "__file__"
-                              , EdhString $ T.pack moduFile
-                              )
-                            ]
-                        !moduSupers <- newTVar []
-                        let
-                          !moduClass = ProcDefi
-                            { procedure'lexi = Just $ worldScope world
-                            , procedure'decl = ProcDecl
-                              { procedure'uniq = unsafePerformIO newUnique
-                              , procedure'name = moduId
-                              , procedure'args = PackReceiver []
-                              , procedure'body = Left $ StmtSrc
-                                                   ( SourcePos
-                                                     { sourceName   = moduFile
-                                                     , sourceLine   = mkPos 1
-                                                     , sourceColumn = mkPos 1
-                                                     }
-                                                   , VoidStmt
-                                                   )
-                              }
-                            }
-                          !modu = Object { objEntity = moduEnt
-                                         , objClass  = moduClass
-                                         , objSupers = moduSupers
-                                         }
-                          !moduCtx = moduleContext world modu
-                        -- run statements from the module with its own context
-                        runEdhProg pgs { edh'context = moduCtx }
-                          $ evalBlock stmts
-                          $ \_ -> contEdhSTM $ do
-                              -- arm the successfully loaded module
-                              putTMVar moduSlot $ EdhObject modu
-                              -- switch back to module importer's scope and continue
-                              exitEdhSTM pgs exit (EdhObject modu)
+  else do
+    (moduUniq, fileContent) <- unsafeIOToSTM $ do
+      dr <- streamDecodeUtf8With lenientDecode <$> B.readFile moduFile
+      mu <- newUnique
+      return (mu, dr)
+    case fileContent of
+      Some moduSource _ _ -> do
+        let !ctx   = edh'context pgs
+            !world = contextWorld ctx
+            !wops  = worldOperators world
+        -- serialize parsing against 'worldOperators'
+        opPD <- takeTMVar wops
+        flip -- TODO catchSTM does NOT work across Edh transactions,
+             --      need to impl. a catchEdh or sth. to be used here.
+             catchSTM
+             (\(e :: SomeException) -> tryPutTMVar wops opPD >> throwSTM e)
+          $ do
+              -- parse module source
+              let (pr, opPD') =
+                    runState (runParserT parseProgram moduFile moduSource) opPD
+              case pr of
+                Left  !err   -> throwSTM $ EdhParseError err
+                Right !stmts -> do
+                  -- release world lock as soon as parsing done successfuly
+                  putTMVar wops opPD'
+                  -- prepare the module meta data
+                  !moduEnt <- createEntity $ hashEntityStore $ Map.fromList
+                    [ (AttrByName "__name__", EdhString moduId)
+                    , (AttrByName "__file__", EdhString $ T.pack moduFile)
+                    ]
+                  !moduSupers <- newTVar []
+                  let !moduClass = ProcDefi
+                        { procedure'uniq = moduUniq
+                        , procedure'lexi = Just $ worldScope world
+                        , procedure'decl = ProcDecl
+                          { procedure'name = moduId
+                          , procedure'args = PackReceiver []
+                          , procedure'body = Left $ StmtSrc
+                                               ( SourcePos
+                                                 { sourceName   = moduFile
+                                                 , sourceLine   = mkPos 1
+                                                 , sourceColumn = mkPos 1
+                                                 }
+                                               , VoidStmt
+                                               )
+                          }
+                        }
+                      !modu = Object { objEntity = moduEnt
+                                     , objClass  = moduClass
+                                     , objSupers = moduSupers
+                                     }
+                      !moduCtx = moduleContext world modu
+                  -- run statements from the module with its own context
+                  runEdhProg pgs { edh'context = moduCtx }
+                    $ evalBlock stmts
+                    $ \_ -> contEdhSTM $ do
+                        -- arm the successfully loaded module
+                        putTMVar moduSlot $ EdhObject modu
+                        -- switch back to module importer's scope and continue
+                        exitEdhSTM pgs exit (EdhObject modu)
 
 
 moduleContext :: EdhWorld -> Object -> Context
@@ -972,7 +983,7 @@ evalExpr expr exit = do
 
 
 validateOperDecl :: EdhProgState -> ProcDecl -> STM ()
-validateOperDecl !pgs (ProcDecl _ _ !op'args _) = case op'args of
+validateOperDecl !pgs (ProcDecl _ !op'args _) = case op'args of
   -- 2 pos-args - simple lh/rh value receiving operator
   (PackReceiver [RecvArg _lhName Nothing Nothing, RecvArg _rhName Nothing Nothing])
     -> return ()

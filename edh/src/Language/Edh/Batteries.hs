@@ -148,33 +148,65 @@ installEdhBatteries world = liftIO $ do
         ]
 
       -- global operators at world root scope
-      !rootOperators <- mapM
-        (\(sym, hp) -> (AttrByName sym, ) <$> mkHostOper world rootScope sym hp)
-        [ ("$"  , attrDerefAddrProc)
-        , (":"  , consProc)
-        , ("?"  , attrTemptProc)
-        , ("?$" , attrDerefTemptProc)
-        , ("++" , concatProc)
-        , ("=<" , cprhProc)
-        , ("?<=", elemProc)
-        , ("=>" , prpdProc)
-        , ("<-" , evtPubProc)
-        , ("+"  , addProc)
-        , ("-"  , subsProc)
-        , ("*"  , mulProc)
-        , ("/"  , divProc)
-        , ("**" , powProc)
-        , ("&&" , logicalAndProc)
-        , ("||" , logicalOrProc)
-        , ("~=" , valEqProc)
-        , ("==" , idEqProc)
-        , (">"  , isGtProc)
-        , (">=" , isGeProc)
-        , ("<"  , isLtProc)
-        , ("<=" , isLeProc)
-        , ("="  , assignProc)
-        , ("->" , branchProc)
-        , ("<|" , loggingProc)
+      !rootOperators <- sequence
+        [ (AttrByName sym, ) <$> mkHostOper world rootScope sym hp
+        | (sym, hp) <-
+          [ ("$"  , attrDerefAddrProc)
+          , (":"  , consProc)
+          , ("?"  , attrTemptProc)
+          , ("?$" , attrDerefTemptProc)
+          , ("++" , concatProc)
+          , ("=<" , cprhProc)
+          , ("?<=", elemProc)
+          , ("=>" , prpdProc)
+          , ("<-" , evtPubProc)
+          , ("+"  , addProc)
+          , ("-"  , subsProc)
+          , ("*"  , mulProc)
+          , ("/"  , divProc)
+          , ("**" , powProc)
+          , ("&&" , logicalAndProc)
+          , ("||" , logicalOrProc)
+          , ("~=" , valEqProc)
+          , ("==" , idEqProc)
+          , (">"  , isGtProc)
+          , (">=" , isGeProc)
+          , ("<"  , isLtProc)
+          , ("<=" , isLeProc)
+          , ("="  , assignProc)
+          , ("->" , branchProc)
+          , ("<|" , loggingProc)
+          ]
+        ]
+
+      -- global procedures at world root scope
+      !rootProcs <- sequence
+        [ ((AttrByName nm, ) <$> mkHostProc rootScope mc nm hp args)
+        | (mc, nm, hp, args) <-
+          [ ( EdhMethod
+            , "Symbol"
+            , symbolCtorProc
+            , PackReceiver [RecvArg "description" Nothing Nothing]
+            )
+          , (EdhMethod, "pkargs"     , pkargsProc     , WildReceiver)
+          , (EdhMethod, "dict"       , dictProc       , WildReceiver)
+          , (EdhMethod, "null"       , isNullProc     , WildReceiver)
+          , (EdhMethod, "type"       , typeProc       , WildReceiver)
+          , (EdhMethod, "error"      , errorProc      , WildReceiver)
+          , (EdhMethod, "constructor", ctorProc       , WildReceiver)
+          , (EdhMethod, "supers"     , supersProc     , WildReceiver)
+          , (EdhMethod, "scope"      , scopeObtainProc, PackReceiver [])
+          , ( EdhMethod
+            , "makeOp"
+            , makeOpProc
+            , PackReceiver
+              [ RecvArg "lhe"   Nothing Nothing
+              , RecvArg "opSym" Nothing Nothing
+              , RecvArg "rhe"   Nothing Nothing
+              ]
+            )
+          , (EdhMethod, "makeExpr", makeExprProc, WildReceiver)
+          ]
         ]
 
       !rtEntity <- createEntity $ hashEntityStore $ Map.empty
@@ -182,10 +214,10 @@ installEdhBatteries world = liftIO $ do
       let !runtime = Object
             { objEntity = rtEntity
             , objClass  = ProcDefi
-                            { procedure'lexi = Just $ rootScope
+                            { procedure'uniq = rtClassUniq
+                            , procedure'lexi = Just $ rootScope
                             , procedure'decl = ProcDecl
-                                                 { procedure'uniq = rtClassUniq
-                                                 , procedure'name = "<runtime>"
+                                                 { procedure'name = "<runtime>"
                                                  , procedure'args = PackReceiver
                                                                       []
                                                  , procedure'body = Right edhNop
@@ -194,6 +226,19 @@ installEdhBatteries world = liftIO $ do
             , objSupers = rtSupers
             }
           !rtScope = objectScope runtime
+      !rtGenrs <- sequence
+        [ (AttrByName nm, ) <$> mkHostProc
+            rtScope
+            EdhGenrDef
+            nm
+            hp
+            (PackReceiver [RecvArg "interval" Nothing Nothing])
+        | (nm, hp) <-
+          [ ("everyMicros" , rtEveryMicrosProc)
+          , ("everyMillis" , rtEveryMillisProc)
+          , ("everySeconds", rtEverySecondsProc)
+          ]
+        ]
       installEdhAttrs rtEntity
         $  [ (AttrByName "debug", EdhDecimal 10)
            , (AttrByName "info" , EdhDecimal 20)
@@ -201,50 +246,11 @@ installEdhBatteries world = liftIO $ do
            , (AttrByName "error", EdhDecimal 40)
            , (AttrByName "fatal", EdhDecimal 50)
            ]
-        ++ [ ( AttrByName nm
-             , mkHostProc rtScope
-                          EdhGenrDef
-                          nm
-                          hp
-                          (PackReceiver [RecvArg "interval" Nothing Nothing])
-             )
-           | (nm, hp) <-
-             [ ("everyMicros" , rtEveryMicrosProc)
-             , ("everyMillis" , rtEveryMillisProc)
-             , ("everySeconds", rtEverySecondsProc)
-             ]
-           ]
+        ++ rtGenrs
 
       installEdhAttrs rootEntity
         $  rootOperators
-        ++ [ -- global procedures at world root scope
-             (AttrByName nm, mkHostProc rootScope mc nm hp args)
-           | (mc, nm, hp, args) <-
-             [ ( EdhMethod
-               , "Symbol"
-               , symbolCtorProc
-               , PackReceiver [RecvArg "description" Nothing Nothing]
-               )
-             , (EdhMethod, "pkargs"     , pkargsProc     , WildReceiver)
-             , (EdhMethod, "dict"       , dictProc       , WildReceiver)
-             , (EdhMethod, "null"       , isNullProc     , WildReceiver)
-             , (EdhMethod, "type"       , typeProc       , WildReceiver)
-             , (EdhMethod, "error"      , errorProc      , WildReceiver)
-             , (EdhMethod, "constructor", ctorProc       , WildReceiver)
-             , (EdhMethod, "supers"     , supersProc     , WildReceiver)
-             , (EdhMethod, "scope"      , scopeObtainProc, PackReceiver [])
-             , ( EdhMethod
-               , "makeOp"
-               , makeOpProc
-               , PackReceiver
-                 [ RecvArg "lhe"   Nothing Nothing
-                 , RecvArg "opSym" Nothing Nothing
-                 , RecvArg "rhe"   Nothing Nothing
-                 ]
-               )
-             , (EdhMethod, "makeExpr", makeExprProc, WildReceiver)
-             ]
-           ]
+        ++ rootProcs
         ++ [
 
             -- runtime module
@@ -261,9 +267,9 @@ installEdhBatteries world = liftIO $ do
              )
            ]
 
-      installEdhAttrs
-        (objEntity scopeSuperObj)
-        [ (AttrByName nm, mkHostProc (objectScope scopeSuperObj) mc nm hp args)
+      !scopeSuperMethods <- sequence
+        [ (AttrByName nm, )
+            <$> mkHostProc (objectScope scopeSuperObj) mc nm hp args
         | (mc, nm, hp, args) <-
           [ (EdhMethod, "eval", scopeEvalProc, WildReceiver)
           , ( EdhMethod
@@ -276,6 +282,7 @@ installEdhBatteries world = liftIO $ do
           , (EdhMethod, "outer"  , scopeOuterProc  , PackReceiver [])
           ]
         ]
+      installEdhAttrs (objEntity scopeSuperObj) scopeSuperMethods
 
       case envLogLevel of
         Nothing      -> return ()

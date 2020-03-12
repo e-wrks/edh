@@ -3,8 +3,6 @@ module Language.Edh.Parser where
 
 import           Prelude
 
-import           System.IO.Unsafe
-
 import           Control.Applicative     hiding ( many
                                                 , some
                                                 )
@@ -12,7 +10,6 @@ import           Control.Monad
 import           Control.Monad.State.Strict
 
 import           Data.Functor
-import           Data.Unique
 import qualified Data.Char                     as Char
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
@@ -248,7 +245,7 @@ parseArgSends ss = (lookAhead (symbol ")") >> return ss) <|> do
 parseClassStmt :: Parser Stmt
 parseClassStmt = ClassStmt <$> (keyword "class" >> parseClassDecl)
  where
-  parseClassDecl = liftA3 (ProcDecl (unsafePerformIO newUnique))
+  parseClassDecl = liftA3 ProcDecl
                           parseAlphaName
                           (return $ PackReceiver [])
                           (Left <$> parseStmt)
@@ -279,7 +276,7 @@ parseWhileStmt = do
   liftA2 WhileStmt parseExpr parseStmt
 
 parseProcDecl :: Parser ProcDecl
-parseProcDecl = liftA3 (ProcDecl (unsafePerformIO newUnique))
+parseProcDecl = liftA3 ProcDecl
                        (parseMagicProcName <|> parseAlphaName)
                        parseArgsReceiver
                        (Left <$> parseStmt)
@@ -305,7 +302,7 @@ parseOpDeclOvrdStmt = do
   --  * 3 pos-args - caller scope + lh/rh expr receiving operator
   argRcvr   <- parseArgsReceiver
   body      <- parseStmt
-  let procDecl = ProcDecl (unsafePerformIO newUnique) opSym argRcvr (Left body)
+  let procDecl = ProcDecl opSym argRcvr (Left body)
   opPD <- get
   case precDecl of
     Nothing -> case Map.lookup opSym opPD of

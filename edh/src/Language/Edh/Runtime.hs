@@ -22,8 +22,7 @@ where
 import           Prelude
 -- import           Debug.Trace
 
--- import           GHC.Conc                       ( unsafeIOToSTM )
-import           System.IO.Unsafe
+import           GHC.Conc                       ( unsafeIOToSTM )
 
 import           System.IO                      ( stderr )
 
@@ -123,9 +122,9 @@ createEdhWorld !logger = liftIO $ do
   rootClassUniq    <- newUnique
   scopeClassUniq   <- newUnique
   let !rootClass = ProcDefi
-        { procedure'lexi = Nothing
-        , procedure'decl = ProcDecl { procedure'uniq = rootClassUniq
-                                    , procedure'name = "<root>"
+        { procedure'uniq = rootClassUniq
+        , procedure'lexi = Nothing
+        , procedure'decl = ProcDecl { procedure'name = "<root>"
                                     , procedure'args = PackReceiver []
                                     , procedure'body = Right edhNop
                                     }
@@ -136,9 +135,9 @@ createEdhWorld !logger = liftIO $ do
                      }
       !rootScope  = Scope rootEntity root root rootClass
       !scopeClass = ProcDefi
-        { procedure'lexi = Just rootScope
-        , procedure'decl = ProcDecl { procedure'uniq = scopeClassUniq
-                                    , procedure'name = "<scope>"
+        { procedure'uniq = scopeClassUniq
+        , procedure'lexi = Just rootScope
+        , procedure'decl = ProcDecl { procedure'name = "<scope>"
                                     , procedure'args = PackReceiver []
                                     , procedure'body = Right edhNop
                                     }
@@ -226,10 +225,10 @@ createEdhModule !world !moduId !moduSrc = liftIO $ do
   return Object
     { objEntity = moduEntity
     , objClass  = ProcDefi
-                    { procedure'lexi = Just $ worldScope world
+                    { procedure'uniq = moduClassUniq
+                    , procedure'lexi = Just $ worldScope world
                     , procedure'decl = ProcDecl
-                      { procedure'uniq = moduClassUniq
-                      , procedure'name = moduId
+                      { procedure'name = moduId
                       , procedure'args = PackReceiver []
                       , procedure'body = Left $ StmtSrc
                                            ( SourcePos { sourceName   = moduSrc
@@ -261,18 +260,21 @@ mkHostProc
   -> Text
   -> EdhProcedure
   -> ArgsReceiver
-  -> EdhValue
-mkHostProc !scope !vc !nm !p !args = vc ProcDefi
-  { procedure'lexi = Just scope
-  , procedure'decl = ProcDecl { procedure'uniq = unsafePerformIO newUnique
-                              , procedure'name = nm
-                              , procedure'args = args
-                              , procedure'body = Right p
-                              }
-  }
+  -> STM EdhValue
+mkHostProc !scope !vc !nm !p !args = do
+  u <- unsafeIOToSTM newUnique
+  return $ vc ProcDefi
+    { procedure'uniq = u
+    , procedure'lexi = Just scope
+    , procedure'decl = ProcDecl { procedure'name = nm
+                                , procedure'args = args
+                                , procedure'body = Right p
+                                }
+    }
 
 mkHostOper :: EdhWorld -> Scope -> OpSymbol -> EdhProcedure -> STM EdhValue
-mkHostOper !world !scope !opSym !hp =
+mkHostOper !world !scope !opSym !hp = do
+  u <- unsafeIOToSTM newUnique
   Map.lookup opSym <$> readTMVar (worldOperators world) >>= \case
     Nothing ->
       throwSTM
@@ -283,10 +285,10 @@ mkHostOper !world !scope !opSym !hp =
       prec
       Nothing
       ProcDefi
-        { procedure'lexi = Just scope
+        { procedure'uniq = u
+        , procedure'lexi = Just scope
         , procedure'decl = ProcDecl
-          { procedure'uniq = unsafePerformIO newUnique
-          , procedure'name = opSym
+          { procedure'name = opSym
           , procedure'args = PackReceiver
             [RecvArg "lhv" Nothing Nothing, RecvArg "rhv" Nothing Nothing]
           , procedure'body = Right hp

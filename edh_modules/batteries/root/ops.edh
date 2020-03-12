@@ -2,17 +2,19 @@
   operator != (lhv, rhv) not (lhv == rhv)
 
   operator &> (callerScope, lhe, rhe) {
-    lhv = callerScope.eval(lhe)
-    if null(lhv)
-      then lhv
-      else callerScope.eval(rhe)
+    case callerScope.eval(lhe) of {
+      nil -> nil
+      { lhv } -> if null(lhv) then return lhv
+    }
+    callerScope.eval(rhe)
   }
 
   operator |> (callerScope, lhe, rhe) {
-    lhv = callerScope.eval(lhe)
-    if null(lhv)
-      then callerScope.eval(rhe)
-      else lhv
+    case callerScope.eval(lhe) of {
+      nil -> { pass }
+      { lhv } -> if not null(lhv) then return lhv
+    }
+    callerScope.eval(rhe)
   }
 
   operator += (callerScope, lhe, rhe) {

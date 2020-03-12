@@ -15,6 +15,7 @@ See [Edh Im](https://github.com/e-wrks/edhim) for an example.
   - [Run with verbose (or lean) log level](#run-with-verbose-or-lean-log-level)
   - [Multi / Single line input modes](#multi--single-line-input-modes)
   - [Paste code snippets from this Tour](#paste-code-snippets-from-this-tour)
+- [Program / Threading Model](#program--threading-model)
 - [Package / Module Structures](#package--module-structures)
 - [Micro Structures](#micro-structures)
   - [Importing other Edh modules](#importing-other-edh-modules)
@@ -186,10 +187,10 @@ You'll see:
 Đ: 'a tale' 📣 'the goat'
 Đ:
 Đ: let (a, b) = ( 'Orange', 'Apple', )
-ℹ️ <interactive>:2:5
+ℹ️ <adhoc>:2:5
 the goat is telling a tale
 Đ: a 🆚 b
-Đ: ℹ️ <interactive>:6:5
+Đ: ℹ️ <adhoc>:6:5
 🌀 What's the difference?
      Orange
   🆚
@@ -197,6 +198,46 @@ the goat is telling a tale
 
 Đ:
 ```
+
+## Program / Threading Model
+
+An **Edh** program consists of a _main_ **Edh** thread and many descendant
+**Edh** threads forked from that _main_ thread with `go` keyword (see
+[Go Routine](#go-routine) ). Once the _main_ thread terminates, all its
+descendant threads will terminate as well, this is largely different from
+other runtime systems, but roughly follows how **GHC** manages threads.
+
+**Edh** threads have **1:1** mapping relationship to **GHC**'s lightweight
+threads. Any **Haskell** process hosting **Edh** worlds should have been
+compiled with **GHC** `-threaded` option, and launched with the **RTS**
+controlling the parallelism.
+
+A single **GHC** **RTS** process can run many **Edh** programs conurrently,
+against a same or various separate **Edh** [World](#world)s.
+
+Combined with the _main_ thread's program terminating behavior, this provides
+a more elegant solution to the _context_ problem, than **Go**'s `context`
+mechanism. E.g. each http request handler starts an **Edh** program,
+both frameworks and applications can take advantage of **Edh**/**GHC**
+concurrency as much as appropriate, and has nothing required to do for
+async task cancellation. (While with prevention of resource leakage by
+proper usage of [defer](#the-defer-keyword) ).
+
+- About **Go** context from: https://blog.golang.org/context
+
+> At Google, we require that Go programmers pass a Context parameter as
+> the first argument to every function on the call path between incoming
+> and outgoing requests. This allows Go code developed by many different
+> teams to interoperate well. It provides simple control over timeouts and
+> cancelation and ensures that critical values like security credentials
+> transit Go programs properly.
+>
+> Server frameworks that want to build on Context should provide
+> implementations of Context to bridge between their packages and those
+> that expect a Context parameter. Their client libraries would then accept
+> a Context from the calling code. By establishing a common interface for
+> request-scoped data and cancelation, Context makes it easier for package
+> developers to share code for creating scalable services.
 
 ## Package / Module Structures
 
@@ -288,7 +329,7 @@ pkargs( *=<operator: (*) 7>, +=<operator: (+) 6>, -=<operator: (-) 6>, /=<operat
 💔
 📜 <interactive> 🔎 <adhoc>:1:1
 💣 Extraneous keyword arguments: * - /
-👉 <interactive>:1:1
+👉 <adhoc>:1:1
 Đ:
 ```
 
@@ -397,8 +438,8 @@ f (3, 7, 21, *[9, 11], name='doer', **{'msg': "you've got it", 'keynum': 2})
 #### pkargs() the utility
 
 ```bash
-Đ: pkargs
-<hostproc: pkargs>
+Đ: type(pkargs)
+HostMethodType
 Đ:
 Đ: apk = pkargs(3,7,5,z=9,y=11)
 pkargs( 3, 7, 5, y=11, z=9, )
@@ -409,7 +450,7 @@ pkargs( 3, 7, 5, y=11, z=9, )
 
 ```bash
 Đ: method f (x, y, z, a, b) [x, y, z, a, b]
-<method: f>
+f
 Đ: f (***apk)
 [ 3, 11, 9, 7, 5, ]
 Đ:
@@ -419,12 +460,12 @@ pkargs( 3, 7, 5, y=11, z=9, )
 
 ```bash
 Đ: method f (*args, **kwargs) [args, kwargs]
-<method: f>
+f
 Đ: f (***apk)
 [ pkargs( 3, 7, 5, ), pkargs( y=11, z=9, ), ]
 Đ:
 Đ: method f (***argspk) { 'full args': argspk }
-<method: f>
+f
 Đ: f (***apk)
 { "full args":pkargs( 3, 7, 5, y=11, z=9, ), }
 Đ:
@@ -449,15 +490,15 @@ pkargs( 3, 7, 5, y=11, z=9, )
 
 ```bash
 Đ: for (x, y, z, a, b) from [apk] do runtime.info <| [x, y, z, a, b]
-Đ: ℹ️ <interactive>:1:1
+Đ: ℹ️ <adhoc>:1:1
 [ 3, 11, 9, 7, 5, ]
 
 Đ: for (*args, **kwargs) from [apk] do runtime.info <| [args, kwargs]
-Đ: ℹ️ <interactive>:1:1
+Đ: ℹ️ <adhoc>:1:1
 [ pkargs( 3, 7, 5, ), pkargs( y=11, z=9, ), ]
 
 Đ: for (***argspk) from [apk] do runtime.info <| { 'full args': argspk }
-Đ: ℹ️ <interactive>:1:1
+Đ: ℹ️ <adhoc>:1:1
 { "full args":pkargs( 3, 7, 5, y=11, z=9, ), }
 
 Đ:
@@ -467,9 +508,9 @@ pkargs( 3, 7, 5, y=11, z=9, )
 
 ```bash
 Đ: import (**magics) 'batteries/magic'
-<object: <module>>
+<object: /home/cyue/Wander/e-wrks/edh/edh_modules/batteries/magic>
 Đ: magics
-pkargs( *=<operator: (*) 7>, +=<operator: (+) 6>, -=<operator: (-) 6>, /=<operator: (/) 7>, )
+pkargs( *=<operator: (*) 7>, -=<operator: (-) 6>, +=<operator: (+) 6>, /=<operator: (/) 7>, )
 Đ:
 ```
 
@@ -491,15 +532,15 @@ Checkout [argspk.edh](./argspk.edh)
 Đ| 10:   for (x, y, desc="the result") from g(5) do
 Đ| 11:     runtime.info <| (x ++ ": " ++ desc ++ " is " ++ y)
 Đ| 12: }
-Đ: ℹ️ <interactive>:10:3
+Đ: ℹ️ <adhoc>:10:3
 0: square of 0 is 0
-ℹ️ <interactive>:10:3
+ℹ️ <adhoc>:10:3
 1: square of 1 is 1
-ℹ️ <interactive>:10:3
+ℹ️ <adhoc>:10:3
 2: square of 2 is 4
-ℹ️ <interactive>:10:3
+ℹ️ <adhoc>:10:3
 3: square of 3 is 9
-ℹ️ <interactive>:10:3
+ℹ️ <adhoc>:10:3
 4: square of 4 is 16
 
 Đ:
@@ -519,7 +560,7 @@ The (**=<**) operator does comprehension as well as concatenation by default:
 [ 7, 11, 0, 1, 2, 3, 4, ]
 Đ:
 Đ: {'a': 7, 'b': 11} =< for n from range(5) do 'square of '++n : n*n
-{ "a":7, "b":11, "square of 0":0, "square of 1":1, "square of 2":4, "square of 3":9, "square of 4":16, }
+{ "square of 4":16, "square of 2":4, "square of 3":9, "a":7, "b":11, "square of 0":0, "square of 1":1, }
 Đ:
 Đ: (31, 17) =< for n from range(5) do n
 ( 31, 17, 0, 1, 2, 3, 4, )
@@ -534,17 +575,17 @@ fresh ones are created, you can do this:
 
 ```bash
 Đ: import * 'batteries/SeparateConcatAndComprehOp'
-<object: <module>>
+<object: /home/cyue/Wander/e-wrks/edh/edh_modules/batteries/SeparateConcatAndComprehOp>
 Đ: [3, 7] <=< [2, 9]
 [ 3, 7, 2, 9, ]
 Đ: [3, 7] =< [2, 9]
 * 😱 *
 💔
 📜 <interactive> 🔎 <adhoc>:1:1
-📜 =< 🔎 /qw/m3works/edh/edh_modules/batteries/SeparateConcatAndComprehOp.edh:11:37
-📜 error 🔎 <hostcode>:1:1
+📜 =< 🔎 /home/cyue/Wander/e-wrks/edh/edh_modules/batteries/SeparateConcatAndComprehOp.edh:11:37
+📜 error 🔎 <host-code>
 💣 You don't comprehend into non-empty ones!
-👉 <Genesis>:1:1
+👉 /home/cyue/Wander/e-wrks/edh/edh_modules/batteries/SeparateConcatAndComprehOp.edh:14:5
 Đ:
 ```
 
@@ -556,9 +597,11 @@ You can inspect an operator at the REPL, just print it:
 
 ```bash
 Đ: (++)
-<hostop: (++) 2>
+<operator: (++) 2>
 Đ: (+=)
 <operator: (+=) 2>
+Đ: type( (++), (+=) )
+( HostOperType, OperatorType, )
 Đ:
 ```
 
@@ -581,10 +624,10 @@ All operators can be overridden in **Edh**
 Đ| 13:     before 🆚 after
 Đ| 14:   }
 Đ| 15: }
-<method: localOverrides>
+localOverrides
 Đ:
 Đ: localOverrides()
-Đ: ℹ️ <interactive>:6:5
+Đ: ℹ️ <adhoc>:6:5
 🌀 What's the difference?
      You and me
   🆚
@@ -627,11 +670,11 @@ operator =< (callerScope, lhe, rhe) {
 Đ: l =< [2,'bar',9]
 [ 3, "foo", 5, 2, "bar", 9, ]
 Đ: d =< {'b': 1, 'm': 'cool!'}
-{ "a":"good", "b":1, "m":"cool!", }
+{ "m":"cool!", "a":"good", "b":1, }
 Đ: 'baz' => l
 [ "baz", 3, "foo", 5, 2, "bar", 9, ]
 Đ: ('n', 'yeah') => d
-{ "a":"good", "b":1, "m":"cool!", "n":"yeah", }
+{ "m":"cool!", "n":"yeah", "a":"good", "b":1, }
 Đ:
 ```
 
@@ -651,6 +694,14 @@ onCnd and oneThing or theOther
 
 well in **Edh** you do:
 
+the **Haskellish** way:
+
+```haskell
+if onCnd then oneThing else theOther
+```
+
+or the **Pythonic** way:
+
 ```haskell
 onCnd &> oneThing |> theOther
 ```
@@ -658,6 +709,34 @@ onCnd &> oneThing |> theOther
 ```bash
 Đ: 2 < 1 &> 'no way!' |> 'of coz'
 of coz
+```
+
+simulating the `Maybe` monad:
+
+```haskell
+Đ: {
+Đ|  1:   method fetchEgg () Symbol('Egg')
+Đ|  2:   method lightFire () true
+Đ|  3:   method putPanOnFire () true
+Đ|  4:   method putEggInPan () true
+Đ|  5:   method getFriedEgg () Symbol('FriedEgg')
+Đ|  6:
+Đ|  7:   method cookMeal () fetchEgg()
+Đ|  8:     &> lightFire()
+Đ|  9:     &> putPanOnFire()
+Đ| 10:     &> putEggInPan()
+Đ| 11:     &> getFriedEgg()
+Đ| 12:
+Đ| 13:   'got meal - ' ++ cookMeal()
+Đ| 14: }
+got meal - FriedEgg
+Đ:
+Đ: {
+Đ|  1:   method lightFire () Nothing
+Đ|  2:   'still got meal - ' ++ cookMeal()
+Đ|  3: }
+still got meal - Nothing
+Đ:
 ```
 
 ### Logging
@@ -695,13 +774,13 @@ $ edhi
 * Blank Screen Syndrome ? Take the Tour as your companion, checkout:
   https://github.com/e-wrks/edh/tree/master/Tour
 Đ: runtime.info <| "Source location is informative most of the time, right?"
-Đ: ℹ️ <interactive>:1:1
+Đ: ℹ️ <adhoc>:1:1
 Source location is informative most of the time, right?
 Đ: runtime.debug <| "Especially when trouble shooting some unexpected results."
-Đ: 🐞 <interactive>:1:1
+Đ: 🐞 <adhoc>:1:1
 Especially when trouble shooting some unexpected results.
 Đ: 50<|'use a number works the same way!'
-Đ: 🔥 <interactive>:1:1
+Đ: 🔥 <adhoc>:1:1
 use a number works the same way!
 Đ:
 ```
@@ -769,6 +848,8 @@ yeath
 ```
 
 ```bash
+
+Đ:
 Đ: {
 Đ|  1:   method essay (v) case type(v) of {
 Đ|  2:     BoolType -> "to be or not to be, that's a problem"
@@ -791,7 +872,7 @@ yeath
 Đ| 19:     "do you known, that " ++ quiz ++ " ?"
 Đ| 20:   }
 Đ| 21: }
-<method: essay>
+essay
 Đ:
 Đ: essay(true)
 to be or not to be, that's a problem
@@ -814,8 +895,8 @@ do you known, that mistery attracts most people ?
 Đ: essay(this)
 do you known, that I live in <interactive> ?
 Đ:
-Đ: class C * pass
-<class: C>
+Đ: class C pass
+C
 Đ: essay(C())
 do you known, that I live in no where ?
 Đ:
@@ -854,10 +935,10 @@ tuple pattern matches the length
 Đ: case (3, 5, 7) of { (x, y) } -> 'tuple pattern matches the length'
 <fallthrough>
 Đ:
-Đ: class B () pass
-<class: B>
-Đ: class C () extends B()
-<class: C>
+Đ: class B pass
+B
+Đ: class C extends B()
+C
 Đ: c = C()
 <object: C>
 Đ:
@@ -912,37 +993,37 @@ to be evaluated sequentially.
 <method: countdown>
 Đ:
 Đ: countdown(3)
-ℹ️ <interactive>:14:7
+ℹ️ <adhoc>:14:7
   ⏲️  3
-ℹ️ <interactive>:14:7
+ℹ️ <adhoc>:14:7
   ⏲️  2
-ℹ️ <interactive>:14:7
+ℹ️ <adhoc>:14:7
   ⏲️  1
-ℹ️ <interactive>:15:7
+ℹ️ <adhoc>:15:7
   🎉 !!
 Đ:
 Đ: countdown(50)
-⚠️ <interactive>:8:9
+⚠️ <adhoc>:8:9
   😓 that's too many to count, doing my most ...
-ℹ️ <interactive>:14:7
+ℹ️ <adhoc>:14:7
   ⏲️  5
-ℹ️ <interactive>:14:7
+ℹ️ <adhoc>:14:7
   ⏲️  4
-ℹ️ <interactive>:14:7
+ℹ️ <adhoc>:14:7
   ⏲️  3
-ℹ️ <interactive>:14:7
+ℹ️ <adhoc>:14:7
   ⏲️  2
-ℹ️ <interactive>:14:7
+ℹ️ <adhoc>:14:7
   ⏲️  1
-ℹ️ <interactive>:15:7
+ℹ️ <adhoc>:15:7
   🎉 !!
 Đ:
 Đ: countdown(-1)
-ℹ️ <interactive>:5:7
+ℹ️ <adhoc>:5:7
   🎉 instantly !!
 Đ:
 Đ: countdown('the hell')
-Đ: ❗ <interactive>:19:5
+Đ: ❗ <adhoc>:19:5
 I don't know what you want from a StringType: the hell
 Đ:
 ```
@@ -1114,11 +1195,11 @@ Also values can be exchanged between the generator and the `do` expr
 <generator: ss>
 Đ:
 Đ: for n from ss(3) do { runtime.info<|n; if n > 100 then break else n }
-Đ: ℹ️ <interactive>:1:23
+Đ: ℹ️ <adhoc>:1:23
 9
-ℹ️ <interactive>:1:23
+ℹ️ <adhoc>:1:23
 81
-ℹ️ <interactive>:1:23
+ℹ️ <adhoc>:1:23
 6561
 Đ:
 ```
@@ -1143,9 +1224,9 @@ Check out [interpreter.edh](./interpreter.edh)
 Đ| 12:   runtime.info <| " then later it's " ++ sum()
 Đ| 13:
 Đ| 14: }
-Đ: ℹ️ <interactive>:9:3
+Đ: ℹ️ <adhoc>:9:3
  once upon a time it's 8
-ℹ️ <interactive>:12:3
+ℹ️ <adhoc>:12:3
  then later it's 10
 Đ:
 ```
@@ -1248,17 +1329,17 @@ Checkout [inheritance.edh](./inheritance.edh)
 ( <object: D>, <object: C>, )
 Đ:
 Đ: e.hello()
-Đ: ℹ️ <interactive>:16:11
+Đ: ℹ️ <adhoc>:16:11
 Hello there!
 
 Đ: e.greeting('New Comer')
-Đ: ℹ️ <interactive>:4:11
+Đ: ℹ️ <adhoc>:4:11
 Hello New Comer, I am Farmer, your guide.
 
 Đ: embededD = case e of {{ D:d }} -> d
 <object: D>
 Đ: embededD.hello()
-Đ: ℹ️ <interactive>:16:11
+Đ: ℹ️ <adhoc>:16:11
 Hello there!
 
 Đ: d = D()
@@ -1273,7 +1354,7 @@ Hello there!
 💔
 📜 <interactive> 🔎 <adhoc>:1:1
 💣 No such attribute AttrByName "hello" from <object: C>
-👉 <interactive>:1:1
+👉 <adhoc>:1:1
 Đ:
 ```
 
@@ -1324,13 +1405,13 @@ Checkout [goroutine.edh](./goroutine.edh)
 Đ|  8:   for _ from runtime.everySeconds(5) do { break }
 Đ|  9:
 Đ| 10: }
-ℹ️ <interactive>:3:3
+ℹ️ <adhoc>:3:3
   ⏰ tick#1 ⏲️  1.579282582441298693e18ns
-ℹ️ <interactive>:3:3
+ℹ️ <adhoc>:3:3
   ⏰ tick#2 ⏲️  1.579282583446034569e18ns
-ℹ️ <interactive>:3:3
+ℹ️ <adhoc>:3:3
   ⏰ tick#3 ⏲️  1.579282584449083228e18ns
-ℹ️ <interactive>:3:3
+ℹ️ <adhoc>:3:3
   ⏰ tick#4 ⏲️  1.579282585449430099e18ns
 Đ:
 ```
@@ -1412,50 +1493,50 @@ logics in similar ways.
 Đ| 22:
 Đ| 23:   )
 Đ| 24: }
-ℹ️ <interactive>:9:9
+ℹ️ <adhoc>:9:9
   🏎️  #0 started
-ℹ️ <interactive>:9:9
+ℹ️ <adhoc>:9:9
   🏎️  #1 started
-ℹ️ <interactive>:9:9
+ℹ️ <adhoc>:9:9
   🏎️  #2 started
-ℹ️ <interactive>:9:9
+ℹ️ <adhoc>:9:9
   🏎️  #3 started
-ℹ️ <interactive>:9:9
+ℹ️ <adhoc>:9:9
   🏎️  #4 started
-ℹ️ <interactive>:17:13
+ℹ️ <adhoc>:17:13
   📝  #3 tick 1.579333753092014804e18
-ℹ️ <interactive>:17:13
+ℹ️ <adhoc>:17:13
   📝  #2 tick 1.579333753092287532e18
-ℹ️ <interactive>:17:13
+ℹ️ <adhoc>:17:13
   📝  #1 tick 1.579333753092451355e18
-ℹ️ <interactive>:17:13
+ℹ️ <adhoc>:17:13
   📝  #0 tick 1.579333753092594537e18
-ℹ️ <interactive>:17:13
+ℹ️ <adhoc>:17:13
 
 ...
 
   📝  #9 tick 1.579333766119424579e18
-ℹ️ <interactive>:17:13
+ℹ️ <adhoc>:17:13
   📝  #8 tick 1.579333767121141122e18
-ℹ️ <interactive>:13:13
+ℹ️ <adhoc>:13:13
   🏁  #7 done
-ℹ️ <interactive>:17:13
+ℹ️ <adhoc>:17:13
   📝  #9 tick 1.579333767121039419e18
 ℹ️ /home/cyue/m3works/edh/edh_modules/batteries/root/concur.edh:85:5
   ⏲️  finishing up concur tasks, 2 still running.
-ℹ️ <interactive>:17:13
+ℹ️ <adhoc>:17:13
   📝  #8 tick 1.579333768122743608e18
-ℹ️ <interactive>:17:13
+ℹ️ <adhoc>:17:13
   📝  #9 tick 1.57933376812269955e18
-ℹ️ <interactive>:13:13
+ℹ️ <adhoc>:13:13
   🏁  #8 done
-ℹ️ <interactive>:17:13
+ℹ️ <adhoc>:17:13
   📝  #9 tick 1.579333769124342985e18
 ℹ️ /home/cyue/m3works/edh/edh_modules/batteries/root/concur.edh:85:5
   ⏲️  finishing up concur tasks, 1 still running.
-ℹ️ <interactive>:17:13
+ℹ️ <adhoc>:17:13
   📝  #9 tick 1.579333770126210104e18
-ℹ️ <interactive>:13:13
+ℹ️ <adhoc>:13:13
   🏁  #9 done
 Đ: ℹ️ /home/cyue/m3works/edh/edh_modules/batteries/root/concur.edh:82:5
   🎉  all concur tasks done.
@@ -1516,13 +1597,13 @@ Checkout [reactor.edh](./reactor.edh)
 Đ| 43:   for _ from runtime.everySeconds(1) do { break }
 Đ| 44:   # runtime.info <| 'main program terminating ...'
 Đ| 45: }
-ℹ️ <interactive>:16:7
+ℹ️ <adhoc>:16:7
   🎐  sth happening:   🛎️  ding.ding..
-ℹ️ <interactive>:16:7
+ℹ️ <adhoc>:16:7
   🎐  sth happening:   🍃  chill..chill...
-ℹ️ <interactive>:11:7
+ℹ️ <adhoc>:11:7
   🎬  stopping because: that's enough!
-ℹ️ <interactive>:7:7
+ℹ️ <adhoc>:7:7
 I'm really done.
 Đ:
 ```
@@ -1610,32 +1691,32 @@ This is meant to attract people to port **Pandas** and **Numpy** to
 5
 Đ: d[3]
 5
-Đ: ℹ️ <interactive>:47:11
+Đ: ℹ️ <adhoc>:47:11
 Indexing 1d element: 3
 Đ: d['price'] = [1.2,1.3,1.1]
 [ 1.2, 1.3, 1.1, ]
 Đ: d['price']
 [ 1.2, 1.3, 1.1, ]
-Đ: ℹ️ <interactive>:50:11
+Đ: ℹ️ <adhoc>:50:11
 Indexing column by name: price
 Đ: d[3:5] = 7
 * 😱 *
 💔
 📜 <interactive> 🔎 <adhoc>:1:1
-📜 [=] 🔎 <interactive>:62:28
+📜 [=] 🔎 <adhoc>:62:28
 💣 Invalid dict key: PairType: 3:5
-👉 <interactive>:62:28
+👉 <adhoc>:62:28
 Đ:
 Đ: d[3:5]
-Đ: ℹ️ <interactive>:18:11
+Đ: ℹ️ <adhoc>:18:11
 Indexing contiguous 1d range: 3:5
 Đ: d[3:5:2, 0:7:3]
-Đ: ℹ️ <interactive>:24:11
+Đ: ℹ️ <adhoc>:24:11
 Indexing 2d space with: ( 3:5:2, 0:7:3, )
-ℹ️ <interactive>:28:15
+ℹ️ <adhoc>:28:15
 Indexing interleaved 1st dimension range: 3:5:2
 Đ: d[3, 5, 7]
-Đ: ℹ️ <interactive>:53:11
+Đ: ℹ️ <adhoc>:53:11
 Suspicious index TupleType: ( 3, 5, 7, )
 Đ:
 ```
@@ -1796,8 +1877,8 @@ there ought to be comprehensive API to do more useful things.
 Đ: let (s1, s2) = (*f(3))
 Đ: s2.lexiLoc()
 <<interactive> * @ <adhoc>:1:1>
-<f ( n, ) @ <interactive>:1:15>
-<g ( m, ) @ <interactive>:2:17>
+<f ( n, ) @ <adhoc>:1:15>
+<g ( m, ) @ <adhoc>:2:17>
 
 Đ: s1.attrs()
 { "g":<method: g>, "n":3, }
