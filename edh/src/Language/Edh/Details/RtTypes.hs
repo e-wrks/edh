@@ -679,7 +679,7 @@ edhValueStr v             = T.pack $ show v
 edhValueNull :: EdhValue -> STM Bool
 edhValueNull EdhNil                  = return True
 edhValueNull (EdhDecimal d         ) = return $ D.decimalIsNaN d || d == 0
-edhValueNull (EdhBool    b         ) = return b
+edhValueNull (EdhBool    b         ) = return $ not b
 edhValueNull (EdhString  s         ) = return $ T.null s
 edhValueNull (EdhSymbol  _         ) = return False
 edhValueNull (EdhDict    (Dict _ d)) = Map.null <$> readTVar d
