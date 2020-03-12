@@ -72,7 +72,6 @@ module Language.Edh.EHI
   , Scope(..)
   , EdhProcedure
   , EdhProcExit
-  , packHostProcArgs
   , runEdhProg
   , forkEdh
     -- ** Edh Runtime error

@@ -21,7 +21,7 @@ import           Language.Edh.Runtime
 -- | utility error(*args,**kwargs) - eval error reporter
 errorProc :: EdhProcedure
 errorProc !argsSender _ =
-  packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) -> if null kwargs
+  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) -> if null kwargs
     then case args of
       [v] -> throwEdh EvalError $ edhValueStr v
       _   -> throwEdh EvalError $ edhValueStr $ EdhTuple args

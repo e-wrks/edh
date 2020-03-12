@@ -1010,7 +1010,9 @@ instance Ord ProcDecl where
 instance Hashable ProcDecl where
   hashWithSalt s (ProcDecl u _ _ _) = hashWithSalt s u
 instance Show ProcDecl where
-  show (ProcDecl _ name _ _) = "<proc " <> T.unpack name <> ">"
+  show (ProcDecl _ name _ pb) = case pb of
+    Left  _ -> "<edh-proc " <> T.unpack name <> ">"
+    Right _ -> "<host-proc " <> T.unpack name <> ">"
 
 -- | Procedure definition, result of execution of the declaration
 data ProcDefi = ProcDefi {

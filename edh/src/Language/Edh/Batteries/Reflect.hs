@@ -25,7 +25,7 @@ ctorProc !argsSender !exit = do
   !pgs <- ask
   let callerCtx   = edh'context pgs
       callerScope = contextScope callerCtx
-  packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) ->
+  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) ->
     let !argsCls = edhClassOf <$> args
     in  if null kwargs
           then case argsCls of
@@ -53,19 +53,18 @@ supersProc !argsSender !exit = do
       supers <-
         map EdhObject <$> (readTVar $ objSupers $ thatObject callerScope)
       exitEdhSTM pgs exit (EdhTuple supers)
-    else packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) ->
-      if null kwargs
-        then case args of
-          [v] -> contEdhSTM $ do
-            supers <- supersOf v
-            exitEdhSTM pgs exit supers
-          _ -> contEdhSTM $ do
-            argsSupers <- sequence $ supersOf <$> args
-            exitEdhSTM pgs exit (EdhTuple argsSupers)
-        else contEdhSTM $ do
-          argsSupers   <- sequence $ supersOf <$> args
-          kwargsSupers <- sequence $ Map.map supersOf kwargs
-          exitEdhSTM pgs exit (EdhArgsPack $ ArgsPack argsSupers kwargsSupers)
+    else packEdhArgs argsSender $ \(ArgsPack !args !kwargs) -> if null kwargs
+      then case args of
+        [v] -> contEdhSTM $ do
+          supers <- supersOf v
+          exitEdhSTM pgs exit supers
+        _ -> contEdhSTM $ do
+          argsSupers <- sequence $ supersOf <$> args
+          exitEdhSTM pgs exit (EdhTuple argsSupers)
+      else contEdhSTM $ do
+        argsSupers   <- sequence $ supersOf <$> args
+        kwargsSupers <- sequence $ Map.map supersOf kwargs
+        exitEdhSTM pgs exit (EdhArgsPack $ ArgsPack argsSupers kwargsSupers)
  where
   supersOf :: EdhValue -> STM EdhValue
   supersOf v = case v of
@@ -131,7 +130,7 @@ scopePutProc !argsSender !exit = do
   let !callerCtx = edh'context pgs
       !that      = thatObject $ contextScope callerCtx
       !es        = entity'store $ scopeEntity $ wrappedScopeOf that
-  packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) -> contEdhSTM $ do
+  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) -> contEdhSTM $ do
     em  <- readTVar es
     em' <- putAttrs pgs args (Map.toList kwargs) em
     writeTVar es em'
@@ -200,7 +199,7 @@ scopeEvalProc !argsSender !exit = do
         EdhExpr _ !expr _ -> evalExpr expr $ \(OriginalValue !val _ _) ->
           evalThePack (val : argsValues) kwargsValues argsExprs' kwargsExprs
         v -> throwEdh EvalError $ "Not an expr: " <> T.pack (show v)
-  packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) ->
+  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) ->
     if null kwargs && null args
       then exitEdhProc exit nil
       else
@@ -219,14 +218,13 @@ scopeEvalProc !argsSender !exit = do
 -- | utility makeOp(lhExpr, opSym, rhExpr)
 makeOpProc :: EdhProcedure
 makeOpProc !argsSender !exit =
-  packHostProcArgs argsSender $ \(ArgsPack args kwargs) ->
-    if (not $ null kwargs)
-      then throwEdh EvalError "No kwargs accepted by makeOp"
-      else case args of
-        [(EdhExpr _ !lhe _), EdhString op, (EdhExpr _ !rhe _)] ->
-          exitEdhProc exit (edhExpr $ InfixExpr op lhe rhe)
-        _ -> throwEdh EvalError $ "Invalid arguments to makeOp: " <> T.pack
-          (show args)
+  packEdhArgs argsSender $ \(ArgsPack args kwargs) -> if (not $ null kwargs)
+    then throwEdh EvalError "No kwargs accepted by makeOp"
+    else case args of
+      [(EdhExpr _ !lhe _), EdhString op, (EdhExpr _ !rhe _)] ->
+        exitEdhProc exit (edhExpr $ InfixExpr op lhe rhe)
+      _ -> throwEdh EvalError $ "Invalid arguments to makeOp: " <> T.pack
+        (show args)
 
 
 -- | utility makeExpr(*args,**kwargs)

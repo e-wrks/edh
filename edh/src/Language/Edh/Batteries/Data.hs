@@ -103,7 +103,7 @@ attrDerefTemptProc !argsSender _ =
 symbolCtorProc :: EdhProcedure
 symbolCtorProc !argsSender !exit = do
   !pgs <- ask
-  packHostProcArgs argsSender $ \(ArgsPack !args _) -> contEdhSTM $ case args of
+  packEdhArgs argsSender $ \(ArgsPack !args _) -> contEdhSTM $ case args of
     [EdhString description] -> do
       sym <- mkSymbol description
       exitEdhSTM pgs exit $ EdhSymbol sym
@@ -113,7 +113,7 @@ symbolCtorProc !argsSender !exit = do
 -- | utility pkargs(*args,**kwargs,***packed) - arguments packer
 pkargsProc :: EdhProcedure
 pkargsProc !argsSender !exit =
-  packHostProcArgs argsSender $ \apk -> exitEdhProc exit (EdhArgsPack apk)
+  packEdhArgs argsSender $ \apk -> exitEdhProc exit (EdhArgsPack apk)
 
 
 -- | operator (++) - string coercing concatenator
@@ -130,7 +130,7 @@ concatProc !argsSender _ =
 isNullProc :: EdhProcedure
 isNullProc !argsSender !exit = do
   !pgs <- ask
-  packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) -> if null kwargs
+  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) -> if null kwargs
     then case args of
       [v] -> contEdhSTM $ do
         isNull <- EdhBool <$> edhValueNull v
@@ -147,7 +147,7 @@ isNullProc !argsSender !exit = do
 -- | utility type(*args,**kwargs) - value type introspector
 typeProc :: EdhProcedure
 typeProc !argsSender !exit =
-  packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) ->
+  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) ->
     let !argsType = edhTypeOf <$> args
     in  if null kwargs
           then case argsType of
@@ -163,7 +163,7 @@ typeProc !argsSender !exit =
 dictProc :: EdhProcedure
 dictProc !argsSender !exit = do
   !pgs <- ask
-  packHostProcArgs argsSender $ \(ArgsPack !args !kwargs) ->
+  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) ->
     let !kwDict =
             Map.fromList $ (<$> Map.toList kwargs) $ \(attrName, val) ->
               (EdhString attrName, val)

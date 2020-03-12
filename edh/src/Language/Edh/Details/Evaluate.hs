@@ -25,7 +25,6 @@ import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..)
                                                 , (<|)
                                                 )
-import qualified Data.List.NonEmpty            as NE
 
 import           Text.Megaparsec
 
@@ -112,16 +111,15 @@ evalStmt' !stmt !exit = do
     LetStmt argsRcvr argsSndr ->
       -- ensure args sending and receiving happens within a same tx
       -- for atomicity of the let statement
-      local (const pgs { edh'in'tx = True })
-        $ packEdhArgs pgs argsSndr
-        $ \pk -> recvEdhArgs ctx argsRcvr pk $ \um -> contEdhSTM $ do
+      local (const pgs { edh'in'tx = True }) $ packEdhArgs argsSndr $ \pk ->
+        recvEdhArgs ctx argsRcvr pk $ \um -> contEdhSTM $ do
           -- overwrite current scope entity with attributes from the
           -- received entity
-            modifyTVar' (entity'store $ scopeEntity scope)
-              $ \es -> updateEntityAttrs es $ Map.toList um
-            -- let statement evaluates to nil always, with previous tx
-            -- state restored
-            exitEdhSTM pgs exit nil
+          modifyTVar' (entity'store $ scopeEntity scope)
+            $ \es -> updateEntityAttrs es $ Map.toList um
+          -- let statement evaluates to nil always, with previous tx
+          -- state restored
+          exitEdhSTM pgs exit nil
 
     BreakStmt       -> exitEdhProc exit EdhBreak
     ContinueStmt    -> exitEdhProc exit EdhContinue
@@ -1191,32 +1189,8 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
   case callee'val of
 
     -- calling a class (constructor) procedure
-    EdhClass !cls -> case procedure'body $ procedure'decl cls of
-
-      -- calling a host class (constructor) procedure
-      Right !hp -> callMaker $ \exit -> contEdhSTM $ do
-        -- the host ctor procedure is responsible for instance creation
-        let !calleeScope =
-              callerScope { thatObject = callee'that, scopeProc = cls }
-            !calleeCtx = callerCtx
-              { callStack       = calleeScope <| callStack callerCtx
-              , generatorCaller = Nothing
-              , contextMatch    = true
-              }
-            !pgsCallee = pgsCaller { edh'context = calleeCtx }
-        -- insert a cycle tick here, so if no tx required for the call
-        -- overall, the callee resolution tx stops here then the callee
-        -- runs in next stm transaction
-        flip (exitEdhSTM' pgsCallee) (wuji pgsCallee) $ \_ ->
-          hp argsSndr $ \(OriginalValue !val _ _) ->
-            -- return the result in CPS with caller pgs restored
-            contEdhSTM $ exitEdhSTM pgsCaller exit val
-
-      Left !pb ->
-        -- ensure atomicity of args sending
-        runEdhProg pgsCaller { edh'in'tx = True }
-          $ packEdhArgs pgsCaller argsSndr
-          $ \apk -> contEdhSTM $ callMaker $ constructEdhObject apk cls pb
+    EdhClass !cls ->
+      callMaker $ \ !exit -> constructEdhObject cls argsSndr exit
 
     -- calling a method procedure
     EdhMethod !mth'proc -> case procedure'body $ procedure'decl mth'proc of
@@ -1242,15 +1216,12 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
             -- return the result in CPS with caller pgs restored
             contEdhSTM $ exitEdhSTM pgsCaller exit val
 
-      Left !pb ->
-        -- ensure atomicity of args sending
-        runEdhProg pgsCaller { edh'in'tx = True }
-          $ packEdhArgs pgsCaller argsSndr
-          $ \apk -> contEdhSTM $ callMaker $ callEdhMethod apk
-                                                           callee'that
-                                                           mth'proc
-                                                           pb
-                                                           Nothing
+      Left !pb -> runEdhProg pgsCaller $ packEdhArgs argsSndr $ \apk ->
+        contEdhSTM $ callMaker $ callEdhMethod apk
+                                               callee'that
+                                               mth'proc
+                                               pb
+                                               Nothing
 
     -- calling an interpreter procedure
     EdhInterpreter !mth'proc ->
@@ -1258,8 +1229,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
         Right _ ->
           throwEdhSTM pgsCaller EvalError "bug: host interpreter procedure"
         Left !pb ->
-          -- ensure atomicity of args sending
-          runEdhProg pgsCaller { edh'in'tx = True }
+          runEdhProg pgsCaller
             $ packEdhExprs argsSndr
             $ \(ArgsPack !args !kwargs) -> contEdhSTM $ do
                 argCallerScope <- mkScopeWrapper (contextWorld callerCtx)
@@ -1275,9 +1245,8 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
     EdhProducer !mth'proc -> case procedure'body $ procedure'decl mth'proc of
       Right _ -> throwEdhSTM pgsCaller EvalError "bug: host producer procedure"
       Left !pb ->
-        -- ensure atomicity of args sending
-        runEdhProg pgsCaller { edh'in'tx = True }
-          $ packEdhArgs pgsCaller argsSndr
+        runEdhProg pgsCaller
+          $ packEdhArgs argsSndr
           $ \(ArgsPack !args !kwargs) -> contEdhSTM $ do
               (outlet, kwargs') <- case Map.lookup "outlet" kwargs of
                 Nothing -> do
@@ -1313,66 +1282,120 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
         <> T.pack (show callee'val)
 
 
-constructEdhObject
-  :: ArgsPack -> Class -> StmtSrc -> EdhProcExit -> EdhProg (STM ())
-constructEdhObject apk@(ArgsPack args kwargs) !cls !cls'body !exit = do
-  pgs <- ask
-  createEdhObject cls cls'body $ \(OriginalValue !thisVal _ _) ->
+-- | Construct an Edh object from a class
+constructEdhObject :: Class -> ArgsSender -> EdhProcExit -> EdhProg (STM ())
+constructEdhObject !cls !argsSndr !exit = do
+  pgsCaller <- ask
+  createEdhObject cls argsSndr $ \(OriginalValue !thisVal _ _) ->
     case thisVal of
       EdhObject !this ->
         contEdhSTM $ lookupEdhObjAttr this (AttrByName "__init__") >>= \case
-          EdhNil -> if null args && null kwargs
-            then exitEdhSTM pgs exit thisVal
+          EdhNil -> if null argsSndr
+            then exitEdhSTM pgsCaller exit thisVal
             else
-              throwEdhSTM pgs EvalError
+              throwEdhSTM pgsCaller EvalError
               $  "No __init__ defined by class "
               <> procedure'name (procedure'decl cls)
               <> " to receive argument(s)"
           EdhMethod !initMth -> case procedure'body $ procedure'decl initMth of
-            Right _ ->
-              throwEdhSTM pgs EvalError "bug: host __init__ method procedure"
-            Left !pb ->
-              runEdhProg pgs
-                $ callEdhMethod apk this initMth pb Nothing
-                $ \_ -> exitEdhProc exit thisVal
+            Right _ -> throwEdhSTM
+              pgsCaller
+              EvalError
+              "not supported: __init__() of host method procedure"
+            Left !pb -> do -- the __init__() mth is as-if called from ctor proc
+              let
+                !callerCtx   = edh'context pgsCaller
+                !callerScope = contextScope callerCtx
+                !initScope   = callerScope { thisObject = this
+                                           , thatObject = this
+                                           , scopeProc  = cls
+                                           }
+                !initCtx = callerCtx
+                  { callStack       = initScope <| callStack callerCtx
+                  , generatorCaller = Nothing
+                  , contextMatch    = true
+                  , contextStmt     = voidStatement
+                  }
+                !pgsInit = pgsCaller { edh'context = initCtx }
+              runEdhProg pgsInit $ packEdhArgs argsSndr $ \apk ->
+                callEdhMethod apk this initMth pb Nothing
+                  $ \(OriginalValue !initRtn _ _) ->
+                      local (const pgsCaller) $ case initRtn of
+                        -- allow a __init__ procedure to explicitly return other
+                        -- value than newly constructed `this` object
+                        -- it can still `return this` to early stop the proc
+                        -- which is magically an advanced feature
+                        EdhReturn !rtnVal -> exitEdhProc exit rtnVal
+                        EdhContinue ->
+                          throwEdh EvalError "Unexpected continue from __init__"
+                        -- allow the use of `break` to early stop a __init__ 
+                        -- procedure with nil result
+                        EdhBreak -> exitEdhProc exit nil
+                        -- no explicit return from __init__ procedure, return the
+                        -- newly constructed this object, throw away the last
+                        -- value from the procedure execution
+                        _        -> exitEdhProc exit thisVal
           badInitMth ->
-            throwEdhSTM pgs EvalError
-              $  "Invalid __init__ method from class - "
+            throwEdhSTM pgsCaller EvalError
+              $  "Invalid __init__() method from class - "
               <> edhValueStr (edhTypeOf badInitMth)
               <> ": "
               <> edhValueStr badInitMth
-      _ -> error "bug: createEdhObject returned non-object"
+      _ -> -- return whatever the constructor returned if not an object
+        exitEdhProc exit thisVal
 
-createEdhObject :: Class -> StmtSrc -> EdhProcExit -> EdhProg (STM ())
-createEdhObject !cls !cls'body !exit = do
-  pgs <- ask
-  let !callerCtx = edh'context pgs
-  contEdhSTM $ do
-    newEnt  <- createEntity $ hashEntityStore Map.empty
-    newThis <- viewAsEdhObject newEnt cls []
-    let !ctorScope = objectScope newThis
-        !ctorCtx   = callerCtx { callStack = ctorScope <| callStack callerCtx
-                               , generatorCaller = Nothing
-                               , contextMatch    = true
-                               , contextStmt     = cls'body
-                               }
-        !pgsCtor = pgs { edh'context = ctorCtx }
-    runEdhProg pgsCtor $ evalStmt cls'body $ \(OriginalValue !ctorRtn _ _) ->
-      local (const pgs) $ case ctorRtn of
+-- | Creating an Edh object from a class, without calling its `__init__()` method
+createEdhObject :: Class -> ArgsSender -> EdhProcExit -> EdhProg (STM ())
+createEdhObject !cls !argsSndr !exit = do
+  pgsCaller <- ask
+  let !callerCtx   = edh'context pgsCaller
+      !callerScope = contextScope callerCtx
+  case procedure'body $ procedure'decl cls of
+
+    -- calling a host class (constructor) procedure
+    Right !hp -> contEdhSTM $ do
+      -- the host ctor procedure is responsible for instance creation
+      let !calleeScope = callerScope { scopeProc = cls }
+          !calleeCtx   = callerCtx
+            { callStack       = calleeScope <| callStack callerCtx
+            , generatorCaller = Nothing
+            , contextMatch    = true
+            }
+          !pgsCallee = pgsCaller { edh'context = calleeCtx }
+      -- insert a cycle tick here, so if no tx required for the call
+      -- overall, the callee resolution tx stops here then the callee
+      -- runs in next stm transaction
+      flip (exitEdhSTM' pgsCallee) (wuji pgsCallee) $ \_ ->
+        hp argsSndr $ \(OriginalValue !val _ _) ->
+          -- return the result in CPS with caller pgs restored
+          contEdhSTM $ exitEdhSTM pgsCaller exit val
+
+    Left !pb -> contEdhSTM $ do
+      newEnt  <- createEntity $ hashEntityStore Map.empty
+      newThis <- viewAsEdhObject newEnt cls []
+      let !ctorScope = objectScope newThis
+          !ctorCtx   = callerCtx { callStack = ctorScope <| callStack callerCtx
+                                 , generatorCaller = Nothing
+                                 , contextMatch    = true
+                                 , contextStmt     = pb
+                                 }
+          !pgsCtor = pgsCaller { edh'context = ctorCtx }
+      runEdhProg pgsCtor $ evalStmt pb $ \(OriginalValue !ctorRtn _ _) ->
+        local (const pgsCaller) $ case ctorRtn of
           -- allow a class procedure to explicitly return other
           -- value than newly constructed `this` object
-          -- it can still `return this to early stop the ctor proc
+          -- it can still `return this` to early stop the proc
           -- which is magically an advanced feature
-        EdhReturn !rtnVal -> exitEdhProc exit rtnVal
-        EdhContinue ->
-          throwEdh EvalError "Unexpected continue from constructor"
-        -- allow the use of `break` to early stop a constructor 
-        -- procedure with nil result
-        EdhBreak -> exitEdhProc exit nil
-        -- no explicit return from class procedure, return the
-        -- newly constructed this object, throw away the last
-        -- value from the procedure execution
-        _        -> exitEdhProc exit (EdhObject newThis)
+          EdhReturn !rtnVal -> exitEdhProc exit rtnVal
+          EdhContinue ->
+            throwEdh EvalError "Unexpected continue from constructor"
+          -- allow the use of `break` to early stop a constructor 
+          -- procedure with nil result
+          EdhBreak -> exitEdhProc exit nil
+          -- no explicit return from class procedure, return the
+          -- newly constructed this object, throw away the last
+          -- value from the procedure execution
+          _        -> exitEdhProc exit (EdhObject newThis)
 
 
 callEdhMethod
@@ -1482,7 +1505,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                 (EdhGenrDef !gnr'proc) ->
                   case procedure'body $ procedure'decl gnr'proc of
 
-                  -- calling a host generator
+                    -- calling a host generator
                     Right !hp -> contEdhSTM $ forLooper $ \exit -> do
                       pgs <- ask
                       let !ctx   = edh'context pgs
@@ -1505,24 +1528,21 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                         -- overall, the callee resolution tx stops here then the callee
                         -- runs in next stm transaction
                         flip (exitEdhSTM' pgsCallee) (wuji pgsCallee) $ \_ ->
-                          hp argsSndr $ \OriginalValue {..} ->
+                          hp argsSndr $ \(OriginalValue val _ _) ->
                             -- return the result in CPS with caller pgs restored
-                            contEdhSTM $ exitEdhSTM pgs exit valueFromOrigin
+                            contEdhSTM $ exitEdhSTM pgsLooper exit val
 
-                    Left !pb ->
-                      -- ensure atomicity of args sending
-                      local (const pgsLooper { edh'in'tx = True })
-                        $ packEdhArgs pgsLooper argsSndr
-                        $ \apk -> contEdhSTM $ forLooper $ \exit -> do
-                            pgs <- ask
-                            callEdhMethod apk
-                                          callee'that
-                                          gnr'proc
-                                          pb
-                                          (Just (pgs, recvYield exit))
+                    Left !pb -> packEdhArgs argsSndr $ \apk ->
+                      contEdhSTM $ forLooper $ \exit -> do
+                        pgs <- ask
+                        callEdhMethod apk
+                                      callee'that
+                                      gnr'proc
+                                      pb
+                                      (Just (pgs, recvYield exit))
+                          $ \(OriginalValue !val _ _) ->
                               -- return the result in CPS with looper pgs restored
-                              $ \OriginalValue {..} -> contEdhSTM
-                                  $ exitEdhSTM pgs exit valueFromOrigin
+                              contEdhSTM $ exitEdhSTM pgsLooper exit val
 
                 -- calling other procedures, assume to loop over its return value
                 _ ->
@@ -1891,22 +1911,6 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
         <> " positional argument(s) to wild receiver"
 
 
-packHostProcArgs
-  :: ArgsSender -> (ArgsPack -> EdhProg (STM ())) -> EdhProg (STM ())
-packHostProcArgs !argsSender !exit = do
-  !pgs <- ask
-  -- a host procedure has its own call frame, underneath is the caller's stack
-  let !pgsCaller = pgs { edh'context = callerCtx }
-      !callerCtx = calleeCtx
-        { callStack = case callerStack of
-                        (top : rest) -> top :| rest
-                        _ -> error "bug: host proc called from nowhere"
-        }
-      !callerStack = NE.tail $ callStack calleeCtx
-      !calleeCtx   = edh'context pgs
-  packEdhArgs pgsCaller argsSender exit
-
-
 packEdhExprs
   :: [ArgSender] -> (ArgsPack -> EdhProg (STM ())) -> EdhProg (STM ())
 packEdhExprs []       !exit = exit (ArgsPack [] Map.empty)
@@ -1920,17 +1924,12 @@ packEdhExprs (x : xs) !exit = case x of
     exit (ArgsPack posArgs $ Map.insert kw (edhExpr argExpr) kwArgs)
 
 
-packEdhArgs
-  :: EdhProgState
-  -> ArgsSender
-  -> (ArgsPack -> EdhProg (STM ()))
-  -> EdhProg (STM ())
-packEdhArgs !pgsFrom !argsSender !exit = do
-  !pgsAfter <- ask
+packEdhArgs :: ArgsSender -> (ArgsPack -> EdhProg (STM ())) -> EdhProg (STM ())
+packEdhArgs !argsSender !exit = do
+  !pgs <- ask
   -- make sure values in a pack are evaluated in same tx
-  local (const pgsFrom { edh'in'tx = True })
-    $ packEdhArgs' argsSender
-    $ \apk -> local (const pgsAfter) $ exit apk
+  local (const pgs { edh'in'tx = True }) $ packEdhArgs' argsSender $ \apk ->
+    local (const pgs) $ exit apk
 
 packEdhArgs'
   :: [ArgSender] -> (ArgsPack -> EdhProg (STM ())) -> EdhProg (STM ())
