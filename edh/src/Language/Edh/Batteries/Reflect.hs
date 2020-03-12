@@ -4,9 +4,6 @@ module Language.Edh.Batteries.Reflect where
 import           Prelude
 -- import           Debug.Trace
 
--- import           System.IO.Unsafe
--- import           GHC.Conc                       ( unsafeIOToSTM )
-
 import           Control.Monad.Reader
 import           Control.Concurrent.STM
 

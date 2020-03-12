@@ -24,6 +24,7 @@ import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..)
                                                 , (<|)
                                                 )
+import qualified Data.List.NonEmpty            as NE
 
 import           Text.Megaparsec
 
@@ -55,34 +56,33 @@ evalStmt ss@(StmtSrc (_, !stmt)) !exit =
 
 evalBlock :: [StmtSrc] -> EdhProcExit -> EdhProg (STM ())
 evalBlock []    !exit = exitEdhProc exit nil
-evalBlock [!ss] !exit = evalStmt ss $ \OriginalValue {..} ->
-  case valueFromOrigin of
+evalBlock [!ss] !exit = evalStmt ss $ \(OriginalValue !val _ _) -> case val of
     -- last branch does match
-    (EdhCaseClose !val) -> exitEdhProc exit val
-    -- explicit `fallthrough` at end of this block, cascade to outer block
-    EdhFallthrough      -> exitEdhProc exit EdhFallthrough
-    -- ctrl to be propagated outwards
-    EdhBreak            -> exitEdhProc exit EdhBreak
-    EdhContinue         -> exitEdhProc exit EdhContinue
-    (EdhReturn !val)    -> exitEdhProc exit (EdhReturn val)
-    -- yield should have been handled by 'evalExpr'
-    (EdhYield  _   )    -> throwEdh EvalError "bug yield reached block"
-    -- last stmt no special branching result, propagate as is
-    _                   -> exitEdhProc exit valueFromOrigin
-evalBlock (ss : rest) !exit = evalStmt ss $ \OriginalValue {..} ->
-  case valueFromOrigin of
+  (EdhCaseClose !v) -> exitEdhProc exit v
+  -- explicit `fallthrough` at end of this block, cascade to outer block
+  EdhFallthrough    -> exitEdhProc exit EdhFallthrough
+  -- ctrl to be propagated outwards
+  EdhBreak          -> exitEdhProc exit EdhBreak
+  EdhContinue       -> exitEdhProc exit EdhContinue
+  (EdhReturn !v)    -> exitEdhProc exit (EdhReturn v)
+  -- yield should have been handled by 'evalExpr'
+  (EdhYield  _ )    -> throwEdh EvalError "bug yield reached block"
+  -- last stmt no special branching result, propagate as is
+  _                 -> exitEdhProc exit val
+evalBlock (ss : rest) !exit = evalStmt ss $ \(OriginalValue !val _ _) ->
+  case val of
     -- this branch matches without fallthrough, done this block
-    (EdhCaseClose !val) -> exitEdhProc exit val
+    (EdhCaseClose !v) -> exitEdhProc exit v
     -- should fallthrough to next branch (or stmt)
-    EdhFallthrough      -> evalBlock rest exit
+    EdhFallthrough    -> evalBlock rest exit
     -- ctrl to be propagated outwards
-    EdhBreak            -> exitEdhProc exit EdhBreak
-    EdhContinue         -> exitEdhProc exit EdhContinue
-    (EdhReturn !val)    -> exitEdhProc exit (EdhReturn val)
+    EdhBreak          -> exitEdhProc exit EdhBreak
+    EdhContinue       -> exitEdhProc exit EdhContinue
+    (EdhReturn !v)    -> exitEdhProc exit (EdhReturn v)
     -- yield should have been handled by 'evalExpr'
-    (EdhYield  _   )    -> throwEdh EvalError "bug yield reached block"
+    (EdhYield  _ )    -> throwEdh EvalError "bug yield reached block"
     -- no special branching result, continue this block
-    _                   -> evalBlock rest exit
+    _                 -> evalBlock rest exit
 
 
 -- | a left-to-right expr list eval'er, returning a tuple
@@ -90,9 +90,9 @@ evalExprs :: [Expr] -> EdhProcExit -> EdhProg (STM ())
 -- here 'EdhTuple' is used for intermediate tag,
 -- not returning actual tuple values as in Edh.
 evalExprs []       !exit = exitEdhProc exit (EdhTuple [])
-evalExprs (x : xs) !exit = evalExpr x $ \OriginalValue {..} ->
+evalExprs (x : xs) !exit = evalExpr x $ \(OriginalValue !val _ _) ->
   evalExprs xs $ \(OriginalValue !tv _ _) -> case tv of
-    EdhTuple l -> exitEdhProc exit (EdhTuple (valueFromOrigin : l))
+    EdhTuple l -> exitEdhProc exit (EdhTuple (val : l))
     _          -> error "bug"
 
 
@@ -110,7 +110,7 @@ evalStmt' !stmt !exit = do
     LetStmt argsRcvr argsSndr ->
       -- ensure args sending and receiving happens within a same tx
       -- for atomicity of the let statement
-      local (const pgs { edh'in'tx = True }) $ packEdhArgs argsSndr $ \pk ->
+      local (const pgs { edh'in'tx = True }) $ packEdhArgs' argsSndr $ \pk ->
         recvEdhArgs ctx argsRcvr pk $ \um -> contEdhSTM $ do
           -- overwrite current scope entity with attributes from the
           -- received entity
@@ -125,26 +125,24 @@ evalStmt' !stmt !exit = do
     FallthroughStmt -> exitEdhProc exit EdhFallthrough
 
     ReturnStmt expr -> evalExpr expr
-      $ \OriginalValue {..} -> exitEdhProc exit (EdhReturn valueFromOrigin)
+      $ \(OriginalValue !val _ _) -> exitEdhProc exit (EdhReturn val)
 
 
     AtoIsoStmt expr ->
       contEdhSTM
         $ runEdhProg pgs { edh'in'tx = True } -- ensure in'tx state
         $ evalExpr expr
-        $ \OriginalValue {..} -> -- restore original tx state
-            contEdhSTM $ exitEdhSTM pgs exit valueFromOrigin
+        $ \(OriginalValue !val _ _) -> -- restore original tx state
+                                       contEdhSTM $ exitEdhSTM pgs exit val
 
 
     GoStmt expr -> case expr of
 
       CaseExpr tgtExpr branchesStmt ->
-        evalExpr tgtExpr $ \OriginalValue {..} ->
+        evalExpr tgtExpr $ \(OriginalValue !val _ _) ->
           forkEdh exit
             $ contEdhSTM
-            $ runEdhProg pgs
-                { edh'context = ctx { contextMatch = valueFromOrigin }
-                } -- eval the branch(es) expr with the case target being
+            $ runEdhProg pgs { edh'context = ctx { contextMatch = val } } -- eval the branch(es) expr with the case target being
                   -- the 'contextMatch'
             $ evalBlock (deBlock branchesStmt) edhEndOfProc
 
@@ -169,11 +167,9 @@ evalStmt' !stmt !exit = do
       case expr of
 
         CaseExpr tgtExpr branchesStmt ->
-          evalExpr tgtExpr $ \OriginalValue {..} ->
+          evalExpr tgtExpr $ \(OriginalValue !val _ _) ->
             contEdhSTM
-              $ schedDefered pgs
-                  { edh'context = ctx { contextMatch = valueFromOrigin }
-                  } -- eval the branch(es) expr with the case target being
+              $ schedDefered pgs { edh'context = ctx { contextMatch = val } } -- eval the branch(es) expr with the case target being
                     -- the 'contextMatch'
               $ evalBlock (deBlock branchesStmt) edhEndOfProc
 
@@ -799,8 +795,7 @@ evalExpr expr exit = do
 
                   -- calling a host method procedure
                   Right !hp -> do
-                    -- a host procedure runs against its caller's scope, with
-                    -- 'thatObject' changed to the resolution target object
+                    -- a host procedure views the same scope entity as of the caller's call frame
                     let !calleeScope =
                           scope { thatObject = mth'that, scopeProc = mth'proc }
                         !calleeCtx = ctx
@@ -1208,8 +1203,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
 
       -- calling a host method procedure
       Right !hp -> callMaker $ \exit -> contEdhSTM $ do
-        -- a host procedure runs against its caller's scope, with
-        -- 'thatObject' changed to the resolution target object
+        -- a host procedure views the same scope entity as of the caller's call frame
         let !calleeScope =
               callerScope { thatObject = callee'that, scopeProc = mth'proc }
             !calleeCtx = callerCtx
@@ -1226,7 +1220,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
             -- return the result in CPS with caller pgs restored
             contEdhSTM $ exitEdhSTM pgsCaller exit val
 
-      Left !pb -> runEdhProg pgsCaller $ packEdhArgs argsSndr $ \apk ->
+      Left !pb -> runEdhProg pgsCaller $ packEdhArgs' argsSndr $ \apk ->
         contEdhSTM $ callMaker $ callEdhMethod apk
                                                callee'that
                                                mth'proc
@@ -1256,7 +1250,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
       Right _ -> throwEdhSTM pgsCaller EvalError "bug: host producer procedure"
       Left !pb ->
         runEdhProg pgsCaller
-          $ packEdhArgs argsSndr
+          $ packEdhArgs' argsSndr
           $ \(ArgsPack !args !kwargs) -> contEdhSTM $ do
               (outlet, kwargs') <- case Map.lookup "outlet" kwargs of
                 Nothing -> do
@@ -1327,7 +1321,7 @@ constructEdhObject !cls !argsSndr !exit = do
                   , contextStmt     = pb
                   }
                 !pgsInit = pgsCaller { edh'context = initCtx }
-              runEdhProg pgsInit $ packEdhArgs argsSndr $ \apk ->
+              runEdhProg pgsInit $ packEdhArgs' argsSndr $ \apk ->
                 callEdhMethod apk this initMth pb Nothing
                   $ \(OriginalValue !initRtn _ _) ->
                       local (const pgsCaller) $ case initRtn of
@@ -1364,7 +1358,9 @@ createEdhObject !cls !argsSndr !exit = do
 
     -- calling a host class (constructor) procedure
     Right !hp -> contEdhSTM $ do
-      -- the host ctor procedure is responsible for instance creation
+      -- a host procedure views the same scope entity as of the caller's call frame
+      -- the host ctor procedure is responsible for instance creation, so `this` and
+      -- `that` are not changed for its call frame
       let !calleeScope = callerScope { scopeProc = cls }
           !calleeCtx   = callerCtx
             { callStack       = calleeScope <| callStack callerCtx
@@ -1541,7 +1537,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                             -- return the result in CPS with caller pgs restored
                             contEdhSTM $ exitEdhSTM pgsLooper exit val
 
-                    Left !pb -> packEdhArgs argsSndr $ \apk ->
+                    Left !pb -> packEdhArgs' argsSndr $ \apk ->
                       contEdhSTM $ forLooper $ \exit -> do
                         pgs <- ask
                         callEdhMethod apk
@@ -1869,8 +1865,8 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
                 -- always eval the default value atomically in callee's contex
                 runEdhProg pgsRecv $ evalExpr
                   defaultExpr
-                  (\OriginalValue {..} ->
-                    contEdhSTM (putTMVar defaultVar valueFromOrigin)
+                  (\(OriginalValue !val _ _) ->
+                    contEdhSTM (putTMVar defaultVar val)
                   )
                 defaultVal <- readTMVar defaultVar
                 return (defaultVal, posArgs', kwArgs'')
@@ -1932,18 +1928,40 @@ packEdhExprs (x : xs) !exit = case x of
   SendKwArg !kw !argExpr -> packEdhExprs xs $ \(ArgsPack !posArgs !kwArgs) ->
     exit (ArgsPack posArgs $ Map.insert kw (edhExpr argExpr) kwArgs)
 
-
+-- | This intends to be called from an already invoked host procedure, so one
+-- call frame is unwounded for arg expressions to be eval'ed at the callers
+-- lexical scope, instead of current stack top's lexical scope.
 packEdhArgs :: ArgsSender -> (ArgsPack -> EdhProg (STM ())) -> EdhProg (STM ())
 packEdhArgs !argsSender !exit = do
   !pgs <- ask
   -- make sure values in a pack are evaluated in same tx
-  local (const pgs { edh'in'tx = True }) $ packEdhArgs' argsSender $ \apk ->
+  let !pgsPacking = pgs { edh'in'tx = True, edh'context = callerCtx }
+      !callerCtx  = calleeCtx
+        { callStack = case NE.tail calleeStack of
+                        (top : rest) -> top :| rest
+                        _            -> calleeStack -- well, no unwind if so
+        }
+      !calleeStack = callStack calleeCtx
+      !calleeCtx   = edh'context pgs
+  -- make sure values in a pack are evaluated in same tx
+  local (const pgsPacking) $ _packEdhArgs argsSender $ \apk ->
+    -- restore original state after args packed
     local (const pgs) $ exit apk
 
-packEdhArgs'
+-- | Pack args before calling a procedure
+packEdhArgs' :: ArgsSender -> (ArgsPack -> EdhProg (STM ())) -> EdhProg (STM ())
+packEdhArgs' !argsSender !exit = do
+  !pgs <- ask
+  -- make sure values in a pack are evaluated in same tx
+  let !pgsPacking = pgs { edh'in'tx = True }
+  local (const pgsPacking) $ _packEdhArgs argsSender $ \apk ->
+    -- restore original tx state after args packed
+    local (const pgs) $ exit apk
+
+_packEdhArgs
   :: [ArgSender] -> (ArgsPack -> EdhProg (STM ())) -> EdhProg (STM ())
-packEdhArgs' []       !exit = exit (ArgsPack [] Map.empty)
-packEdhArgs' (x : xs) !exit = do
+_packEdhArgs []       !exit = exit (ArgsPack [] Map.empty)
+_packEdhArgs (x : xs) !exit = do
   !pgs <- ask
   let edhVal2Kw :: EdhValue -> STM AttrName
       edhVal2Kw = \case
@@ -1960,35 +1978,35 @@ packEdhArgs' (x : xs) !exit = do
             $  "Invalid argument keyword from dict key: "
             <> T.pack (show k)
   case x of
-    UnpackPosArgs !posExpr -> evalExpr posExpr $ \OriginalValue {..} ->
-      case valueFromOrigin of
+    UnpackPosArgs !posExpr -> evalExpr posExpr $ \(OriginalValue !val _ _) ->
+      case val of
         (EdhArgsPack (ArgsPack !posArgs' _kwArgs')) ->
-          packEdhArgs' xs $ \(ArgsPack !posArgs !kwArgs) ->
+          _packEdhArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
             exit (ArgsPack (posArgs ++ posArgs') kwArgs)
-        (EdhPair !k !v) -> packEdhArgs' xs $ \(ArgsPack !posArgs !kwArgs) ->
+        (EdhPair !k !v) -> _packEdhArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
           exit (ArgsPack (posArgs ++ [k, v]) kwArgs)
-        (EdhTuple !l) -> packEdhArgs' xs $ \(ArgsPack !posArgs !kwArgs) ->
+        (EdhTuple !l) -> _packEdhArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
           exit (ArgsPack (posArgs ++ l) kwArgs)
         (EdhList (List _ !l)) ->
-          packEdhArgs' xs $ \(ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
+          _packEdhArgs xs $ \(ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
             ll <- readTVar l
             runEdhProg pgs $ exit (ArgsPack (posArgs ++ ll) kwArgs)
         _ ->
           throwEdh EvalError
             $  "Can not unpack args from a "
-            <> T.pack (show $ edhTypeOf valueFromOrigin)
+            <> T.pack (show $ edhTypeOf val)
             <> ": "
-            <> T.pack (show valueFromOrigin)
-    UnpackKwArgs !kwExpr -> evalExpr kwExpr $ \OriginalValue {..} ->
-      case valueFromOrigin of
+            <> T.pack (show val)
+    UnpackKwArgs !kwExpr -> evalExpr kwExpr $ \(OriginalValue !val _ _) ->
+      case val of
         EdhArgsPack (ArgsPack _posArgs' !kwArgs') ->
-          packEdhArgs' xs $ \(ArgsPack !posArgs !kwArgs) ->
+          _packEdhArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
             exit (ArgsPack posArgs (Map.union kwArgs kwArgs'))
-        (EdhPair !k !v) -> packEdhArgs' xs $ \case
+        (EdhPair !k !v) -> _packEdhArgs xs $ \case
           (ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
             kw <- edhVal2Kw k
             runEdhProg pgs $ exit (ArgsPack posArgs $ Map.insert kw v kwArgs)
-        (EdhDict (Dict _ !ds)) -> packEdhArgs' xs $ \case
+        (EdhDict (Dict _ !ds)) -> _packEdhArgs xs $ \case
           (ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
             dm  <- readTVar ds
             kvl <- forM (Map.toList dm) $ \(k, v) -> (, v) <$> dictKey2Kw k
@@ -1997,34 +2015,31 @@ packEdhArgs' (x : xs) !exit = do
         _ ->
           throwEdh EvalError
             $  "Can not unpack kwargs from a "
-            <> T.pack (show $ edhTypeOf valueFromOrigin)
+            <> T.pack (show $ edhTypeOf val)
             <> ": "
-            <> T.pack (show valueFromOrigin)
-    UnpackPkArgs !pkExpr -> evalExpr pkExpr $ \OriginalValue {..} ->
-      case valueFromOrigin of
-        (EdhArgsPack (ArgsPack !posArgs' !kwArgs')) -> packEdhArgs' xs $ \case
+            <> T.pack (show val)
+    UnpackPkArgs !pkExpr -> evalExpr pkExpr $ \(OriginalValue !val _ _) ->
+      case val of
+        (EdhArgsPack (ArgsPack !posArgs' !kwArgs')) -> _packEdhArgs xs $ \case
           (ArgsPack !posArgs !kwArgs) ->
             exit (ArgsPack (posArgs ++ posArgs') (Map.union kwArgs kwArgs'))
         _ ->
           throwEdh EvalError
             $  "Can not unpack pkargs from a "
-            <> T.pack (show $ edhTypeOf valueFromOrigin)
+            <> T.pack (show $ edhTypeOf val)
             <> ": "
-            <> T.pack (show valueFromOrigin)
-    SendPosArg !argExpr ->
-      evalExpr argExpr
-        $ \OriginalValue {..} ->
-            packEdhArgs' xs $ \(ArgsPack !posArgs !kwArgs) ->
-              exit (ArgsPack (valueFromOrigin : posArgs) kwArgs)
-    SendKwArg !kw !argExpr -> evalExpr argExpr $ \OriginalValue {..} ->
-      packEdhArgs' xs $ \pk@(ArgsPack !posArgs !kwArgs) -> case kw of
-        "_" ->
-          -- silently drop the value to keyword of single underscore
-          exit pk
+            <> T.pack (show val)
+    SendPosArg !argExpr -> evalExpr argExpr $ \(OriginalValue !val _ _) ->
+      _packEdhArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
+        exit (ArgsPack (val : posArgs) kwArgs)
+    SendKwArg !kw !argExpr -> evalExpr argExpr $ \(OriginalValue !val _ _) ->
+      _packEdhArgs xs $ \pk@(ArgsPack !posArgs !kwArgs) -> case kw of
+        "_" -> -- silently drop the value to keyword of single underscore
+          exit pk -- the user may just want its side-effect
         _ -> exit
           (ArgsPack posArgs $ Map.alter
             (\case -- make sure latest value with same kw take effect
-              Nothing        -> Just valueFromOrigin
+              Nothing        -> Just val
               Just !laterVal -> Just laterVal
             )
             kw

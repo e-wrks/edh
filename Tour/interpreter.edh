@@ -1,8 +1,8 @@
 
 {
 
-  interpreter lazy(callerScope, expr) {
-    method lazyEval () callerScope.eval(expr)
+  interpreter lazy(callerScope, x) {
+    method lazyEval () callerScope.eval(x)
   }
 
   a = 5; b = 3

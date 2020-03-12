@@ -950,7 +950,7 @@ any-of pattern feels like list element-of test
 Đ:
 ```
 
-More patterns can be added in the future.
+And more patterns tend to be added in the future.
 
 #### Branching semantics, Fallthrough
 
@@ -990,10 +990,10 @@ to be evaluated sequentially.
 Đ| 22:     runtime.fatal <| "don't worry, this will never happen."
 Đ| 23:   }
 Đ| 24: }
-<method: countdown>
+countdown
 Đ:
 Đ: countdown(3)
-ℹ️ <adhoc>:14:7
+Đ: ℹ️ <adhoc>:14:7
   ⏲️  3
 ℹ️ <adhoc>:14:7
   ⏲️  2
@@ -1001,9 +1001,9 @@ to be evaluated sequentially.
   ⏲️  1
 ℹ️ <adhoc>:15:7
   🎉 !!
-Đ:
+
 Đ: countdown(50)
-⚠️ <adhoc>:8:9
+Đ: ⚠️ <adhoc>:8:9
   😓 that's too many to count, doing my most ...
 ℹ️ <adhoc>:14:7
   ⏲️  5
@@ -1017,14 +1017,15 @@ to be evaluated sequentially.
   ⏲️  1
 ℹ️ <adhoc>:15:7
   🎉 !!
-Đ:
+
 Đ: countdown(-1)
-ℹ️ <adhoc>:5:7
+Đ: ℹ️ <adhoc>:5:7
   🎉 instantly !!
-Đ:
+
 Đ: countdown('the hell')
 Đ: ❗ <adhoc>:19:5
 I don't know what you want from a StringType: the hell
+
 Đ:
 ```
 
@@ -1122,20 +1123,20 @@ Checkout how the `range()` clone from **Python** is
 
 ```js
   # resembles `range` in Python
-  generator range(start, stop=nil, step=nil) {
+  generator range(start, stop=None, step=None) {
 
-    if nil == stop && nil == step then case start of {
+    if None == stop && None == step then case start of {
       # enable the hidden *Edhic* version of `range` using pair
       {(start:stop:step)} -> {fallthrough}
       {(start:stop)} -> {fallthrough}
     }
 
-    if nil == stop then let (stop, start) = (start, 0)
-    start == stop -> return nil
+    if None == stop then let (stop, start) = (start, 0)
+    start == stop -> { return nil }
     n = start
 
     start < stop -> {
-      if nil == step
+      if None == step
         then step = 1
         else if step <= 0 then {
           runtime.warn <| 'step of ' ++ step ++ ' for range [' ++
@@ -1149,7 +1150,7 @@ Checkout how the `range()` clone from **Python** is
     }
 
     start > stop -> {
-      if nil == step
+      if None == step
         then step = -1
         else if step >= 0 then {
           runtime.warn <| 'step of ' ++ step ++ ' for range [' ++
@@ -1192,8 +1193,7 @@ Also values can be exchanged between the generator and the `do` expr
 
 ```bash
 Đ: generator ss n while true n = yield n*n
-<generator: ss>
-Đ:
+ss
 Đ: for n from ss(3) do { runtime.info<|n; if n > 100 then break else n }
 Đ: ℹ️ <adhoc>:1:23
 9
@@ -1201,6 +1201,34 @@ Also values can be exchanged between the generator and the `do` expr
 81
 ℹ️ <adhoc>:1:23
 6561
+
+Đ:
+```
+
+An extra feature of **Edh** generator than in other languages, is that the
+`for-from-do` loop is an expression, and its final value evaluates to the
+return value of the generator procedure as invoked:
+
+```bash
+Đ: {
+Đ|  1:
+Đ|  2:   generator g () {
+Đ|  3:     yield 1
+Đ|  4:     yield 2
+Đ|  5:     return 3
+Đ|  6:   }
+Đ|  7:
+Đ|  8:   result = for n from g() do runtime.info <| 'got ' ++ n
+Đ|  9:
+Đ| 10:   runtime.info <| 'Result is: ' ++ result
+Đ| 11: }
+Đ: ℹ️ <adhoc>:8:3
+got 1
+ℹ️ <adhoc>:8:3
+got 2
+ℹ️ <adhoc>:10:3
+Result is: 3
+
 Đ:
 ```
 
@@ -1211,8 +1239,8 @@ Check out [interpreter.edh](./interpreter.edh)
 ```bash
 Đ: {
 Đ|  1:
-Đ|  2:   interpreter lazy(callerScope, expr) {
-Đ|  3:     method lazyEval () callerScope.eval(expr)
+Đ|  2:   interpreter lazy(callerScope, x) {
+Đ|  3:     method lazyEval () callerScope.eval(x)
 Đ|  4:   }
 Đ|  5:
 Đ|  6:   a = 5; b = 3
@@ -1228,6 +1256,7 @@ Check out [interpreter.edh](./interpreter.edh)
  once upon a time it's 8
 ℹ️ <adhoc>:12:3
  then later it's 10
+
 Đ:
 ```
 
@@ -1238,9 +1267,6 @@ be the rival of
 And maybe a rival of
 [Macros in Julia](https://docs.julialang.org/en/v1/manual/metaprogramming/#man-macros-1)
 ? Though never in performance-wise respects.
-
-But lacks a well thought out, reflective **AST** (especially **Expr**)
-manipulation API.
 
 ### Class Procedures
 
