@@ -1800,86 +1800,88 @@ crunchings.
 
 ```bash
 Đ: import * 'batteries/magic'
-<object: <module>>
+<object: /home/cyue/Wander/e-wrks/edh/edh_modules/batteries/magic>
 Đ:
 Đ: {
 Đ|  1:
-Đ|  2:   class Tensor (name) {
+Đ|  2:   class Tensor {
 Đ|  3:
-Đ|  4:     method (+) (other) case type(other) of {
-Đ|  5:       # add to a constant
-Đ|  6:       DecimalType -> Tensor(name= '('++ this.name ++ '+' ++ other ++')')
-Đ|  7:
-Đ|  8:       case other of {{ Tensor:_ }} -> {
-Đ|  9:         # add to another Tensor
-Đ| 10:         return Tensor(name= '('++ this.name ++ '+' ++ other.name ++')')
-Đ| 11:       }
-Đ| 12:
-Đ| 13:       continue # as NotImplemented in Python
-Đ| 14:     }
-Đ| 15:
-Đ| 16:     method (*) (other) case type(other) of {
-Đ| 17:       # mul to a constant
-Đ| 18:       DecimalType -> Tensor(name= '('++ this.name ++ '*' ++ other ++')')
-Đ| 19:
-Đ| 20:       case other of {{ Tensor:_ }} -> {
-Đ| 21:         # mul to another Tensor
-Đ| 22:         return Tensor(name= '('++ this.name ++ '*' ++ other.name ++')')
-Đ| 23:       }
-Đ| 24:
-Đ| 25:       continue # as NotImplemented in Python
-Đ| 26:     }
-Đ| 27:
-Đ| 28:     method (-) (other) case type(other) of {
-Đ| 29:       # sub a constant
-Đ| 30:       DecimalType -> Tensor(name= '('++ this.name ++ '-' ++ other ++')')
-Đ| 31:
-Đ| 32:       case other of {{ Tensor:_ }} -> {
-Đ| 33:         # sub another Tensor
-Đ| 34:         return Tensor(name= '('++ this.name ++ '-' ++ other.name ++')')
-Đ| 35:       }
-Đ| 36:
-Đ| 37:       continue # as NotImplemented in Python
-Đ| 38:     }
-Đ| 39:
-Đ| 40:     method (-@) (other) case type(other) of {
-Đ| 41:       # sub from a constant
-Đ| 42:       DecimalType -> Tensor(name= '('++ other ++ '-' ++ this.name ++')')
-Đ| 43:
-Đ| 44:       case other of {{ Tensor:_ }} -> {
-Đ| 45:         error('not resolved to magic (-) of ' ++ lhv ++ ' ?!')
-Đ| 46:       }
-Đ| 47:
-Đ| 48:       continue # as NotImplemented in Python
-Đ| 49:     }
-Đ| 50:
-Đ| 51:     method (/) (other) case type(other) of {
-Đ| 52:       # div by a constant
-Đ| 53:       DecimalType -> Tensor(name= '('++ this.name ++ '/' ++ other ++')')
-Đ| 54:
-Đ| 55:       case other of {{ Tensor:_ }} -> {
-Đ| 56:         # div by another Tensor
-Đ| 57:         return Tensor(name= '('++ this.name ++ '/' ++ other.name ++')')
-Đ| 58:       }
-Đ| 59:
-Đ| 60:       continue # as NotImplemented in Python
-Đ| 61:     }
-Đ| 62:
-Đ| 63:     method (/@) (other) case type(other) of {
-Đ| 64:       # div to a constant
-Đ| 65:       DecimalType -> Tensor(name= '('++ other ++ '/' ++ this.name ++')')
-Đ| 66:
-Đ| 67:       case other of {{ Tensor:_ }} -> {
-Đ| 68:         error('not resolved to magic (/) of ' ++ lhv ++ ' ?!')
-Đ| 69:       }
-Đ| 70:
-Đ| 71:       continue # as NotImplemented in Python
-Đ| 72:     }
-Đ| 73:
-Đ| 74:   }
+Đ|  4:     method __init__ (name as this.name) pass
+Đ|  5:
+Đ|  6:     method (+) (other) case type(other) of {
+Đ|  7:       # add to a constant
+Đ|  8:       DecimalType -> Tensor(name= '('++ this.name ++ '+' ++ other ++')')
+Đ|  9:
+Đ| 10:       case other of {{ Tensor:_ }} -> {
+Đ| 11:         # add to another Tensor
+Đ| 12:         return Tensor(name= '('++ this.name ++ '+' ++ other.name ++')')
+Đ| 13:       }
+Đ| 14:
+Đ| 15:       continue # as NotImplemented in Python
+Đ| 16:     }
+Đ| 17:
+Đ| 18:     method (*) (other) case type(other) of {
+Đ| 19:       # mul to a constant
+Đ| 20:       DecimalType -> Tensor(name= '('++ this.name ++ '*' ++ other ++')')
+Đ| 21:
+Đ| 22:       case other of {{ Tensor:_ }} -> {
+Đ| 23:         # mul to another Tensor
+Đ| 24:         return Tensor(name= '('++ this.name ++ '*' ++ other.name ++')')
+Đ| 25:       }
+Đ| 26:
+Đ| 27:       continue # as NotImplemented in Python
+Đ| 28:     }
+Đ| 29:
+Đ| 30:     method (-) (other) case type(other) of {
+Đ| 31:       # sub a constant
+Đ| 32:       DecimalType -> Tensor(name= '('++ this.name ++ '-' ++ other ++')')
+Đ| 33:
+Đ| 34:       case other of {{ Tensor:_ }} -> {
+Đ| 35:         # sub another Tensor
+Đ| 36:         return Tensor(name= '('++ this.name ++ '-' ++ other.name ++')')
+Đ| 37:       }
+Đ| 38:
+Đ| 39:       continue # as NotImplemented in Python
+Đ| 40:     }
+Đ| 41:
+Đ| 42:     method (-@) (other) case type(other) of {
+Đ| 43:       # sub from a constant
+Đ| 44:       DecimalType -> Tensor(name= '('++ other ++ '-' ++ this.name ++')')
+Đ| 45:
+Đ| 46:       case other of {{ Tensor:_ }} -> {
+Đ| 47:         error('not resolved to magic (-) of ' ++ lhv ++ ' ?!')
+Đ| 48:       }
+Đ| 49:
+Đ| 50:       continue # as NotImplemented in Python
+Đ| 51:     }
+Đ| 52:
+Đ| 53:     method (/) (other) case type(other) of {
+Đ| 54:       # div by a constant
+Đ| 55:       DecimalType -> Tensor(name= '('++ this.name ++ '/' ++ other ++')')
+Đ| 56:
+Đ| 57:       case other of {{ Tensor:_ }} -> {
+Đ| 58:         # div by another Tensor
+Đ| 59:         return Tensor(name= '('++ this.name ++ '/' ++ other.name ++')')
+Đ| 60:       }
+Đ| 61:
+Đ| 62:       continue # as NotImplemented in Python
+Đ| 63:     }
+Đ| 64:
+Đ| 65:     method (/@) (other) case type(other) of {
+Đ| 66:       # div to a constant
+Đ| 67:       DecimalType -> Tensor(name= '('++ other ++ '/' ++ this.name ++')')
+Đ| 68:
+Đ| 69:       case other of {{ Tensor:_ }} -> {
+Đ| 70:         error('not resolved to magic (/) of ' ++ lhv ++ ' ?!')
+Đ| 71:       }
+Đ| 72:
+Đ| 73:       continue # as NotImplemented in Python
+Đ| 74:     }
 Đ| 75:
-Đ| 76: }
-<class: Tensor>
+Đ| 76:   }
+Đ| 77:
+Đ| 78: }
+Tensor
 Đ:
 Đ: let (x, y) = (Tensor('x'), Tensor('y'))
 Đ:
@@ -1913,10 +1915,10 @@ crunchings.
 * 😱 *
 💔
 📜 <interactive> 🔎 <adhoc>:1:1
-📜 + 🔎 /qw/m3works/edh/edh_modules/batteries/magic/arith.edh:2:23
-📜 error 🔎 <hostcode>:1:1
+📜 + 🔎 /home/cyue/Wander/e-wrks/edh/edh_modules/batteries/magic/arith.edh:2:23
+📜 error 🔎 <host-code>
 💣 Not possible to do (+) with ObjectType: <object: Tensor> and StringType: z
-👉 <Genesis>:1:1
+👉 /home/cyue/Wander/e-wrks/edh/edh_modules/batteries/magic/arith.edh:19:3
 Đ:
 ```
 

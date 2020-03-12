@@ -1043,12 +1043,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
               Nothing         -> runEdhProg pgs $ exitNoAttr fromVal
               Just !originVal -> exitEdhSTM' pgs exit originVal
         getEdhAttrWithMagic (AttrByName "@<-*") obj key noMagic exit
-      _ ->
-        throwEdh EvalError
-          $  "Expecting an object but got a "
-          <> T.pack (show $ edhTypeOf fromVal)
-          <> ": "
-          <> T.pack (show fromVal)
+      _ -> contEdhSTM $ runEdhProg pgs $ exitNoAttr fromVal
 
 
 -- There're 2 tiers of magic happen during object attribute resolution in Edh.
