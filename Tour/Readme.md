@@ -1984,10 +1984,38 @@ Tensor
 
 Checkout [reflection.edh](./reflection.edh)
 
-So far there's only `makeOp` and `makeExpr()` for **AST** manipulation,
-there ought to be comprehensive API to do more useful things.
-
 ```bash
+Đ: # expression is 1st class citizen in Edh
+Đ: x = expr a + b*c
+a + b*c
+Đ: type(x)
+ExprType
+Đ:
+Đ: # a scope can be captured anywhere within Edh source
+Đ: this'modu'scope = scope()
+<object: <scope>>
+Đ:
+Đ: # this will fail as `x` references attributes unavailable
+Đ: this'modu'scope.eval( x )
+* 😱 *
+💔
+💣 Not in scope: NamedAttr "a"
+👉 <genesis>:1:1
+Đ:
+Đ: # `scope.put()` is used to update attributes reflectively
+Đ: this'modu'scope.put( a=5, b=3 )
+Đ: # of course Edh code can update attributes normally
+Đ: c = 7
+7
+Đ:
+Đ: # now it should happliy eval
+Đ: this'modu'scope.eval( x )
+26
+Đ:
+Đ:
+Đ: # a reflective scope can only be captured and exposed
+Đ: # by its owning procedure willingly, some more demos
+Đ:
 Đ: {
 Đ|  1:   method f(n) {
 Đ|  2:     method g(m) {
@@ -1998,16 +2026,26 @@ there ought to be comprehensive API to do more useful things.
 Đ|  7: }
 f
 Đ: let (s1, s2) = (*f(3))
+Đ:
 Đ: s2.lexiLoc()
 g ( m, ) @ <adhoc>:2:17
+Đ:
 Đ: s1.attrs()
 { "g":g, "n":3, }
+Đ:
 Đ: s2.attrs()
 { "m":5, }
-Đ: s2.eval(makeExpr(m/n))
+Đ:
+Đ: s2.eval( expr m/n )
 5/3
-Đ: s2.eval(makeExpr( (t=n/m) ))
-3/5
+Đ:
+Đ: {
+Đ|  1:   s2.eval( assign'result = (expr
+Đ|  2:     t=n/m
+Đ|  3:   ) )
+Đ|  4: }
+pkargs( assign'result=3/5, )
+Đ:
 Đ: s2.attrs()
 { "m":5, "t":3/5, }
 Đ: s2.t

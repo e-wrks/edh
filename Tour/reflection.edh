@@ -1,4 +1,26 @@
 
+# expression is 1st class citizen in Edh
+x = expr a + b*c
+type(x)
+
+# a scope can be captured anywhere within Edh source
+this'modu'scope = scope()
+
+# this will fail as `x` references attributes unavailable
+this'modu'scope.eval( x )
+
+# `scope.put()` is used to update attributes reflectively
+this'modu'scope.put( a=5, b=3 )
+# of course Edh code can update attributes normally
+c = 7
+
+# now it should happliy eval
+this'modu'scope.eval( x )
+
+
+# a reflective scope can only be captured and exposed
+# by its owning procedure willingly, some more demos
+
 {
   method f(n) {
     method g(m) {
@@ -8,10 +30,20 @@
   }
 }
 let (s1, s2) = (*f(3))
+
 s2.lexiLoc()
+
 s1.attrs()
+
 s2.attrs()
-s2.eval(makeExpr(m/n))
-s2.eval(makeExpr( (t=n/m) ))
+
+s2.eval( expr m/n )
+
+{
+  s2.eval( assign'result = (expr
+    t=n/m
+  ) )
+}
+
 s2.attrs()
 s2.t
