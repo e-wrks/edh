@@ -1436,9 +1436,59 @@ usage in action.
 
 ### Event Producing / Consuming
 
+Checkout [producer.edh](./producer.edh)
+
 See [Producer Procedure](#producer-procedure)
 
-**TODO** add examples here.
+```bash
+Đ: {
+Đ|  1:
+Đ|  2:   # a producer procedure always runs in a forked thread, its return
+Đ|  3:   # value will be ignored anyway, but its caller will always receive
+Đ|  4:   # a `sink` as if returned by the producer procedure.
+Đ|  5:   #
+Đ|  6:   # the `sink` will be passed to the producer procedure as `outlet`
+Đ|  7:   # arg as well, so the caller acts as the consumer of this producer.
+Đ|  8:   producer timelyAlert (
+Đ|  9:     interval,
+Đ| 10:
+Đ| 11:     # the `outlet` arg is always filled, if not explicitly passed by
+Đ| 12:     # the caller, Edh will create a new `sink`, to be returned to the
+Đ| 13:     # caller as well as passed to this producer procedure as `outlet`.
+Đ| 14:     outlet=sink
+Đ| 15:     # have it a default value to fool the lint/IDE tooling to believe
+Đ| 16:     # it's an optional argument for the caller. this is not necessary
+Đ| 17:     # for correct runtime behavior though.
+Đ| 18:   ) {
+Đ| 19:     # no event will be missing for the first consumer (via for-from-do
+Đ| 20:     # loop), as this procedure will only get actually running *after*
+Đ| 21:     # the first consumer started receiving events from `outlet`.
+Đ| 22:     outlet <- 'start alerting you every ' ++ interval ++ ' second(s) ...'
+Đ| 23:     for ts from runtime.everySeconds(interval) do
+Đ| 24:       outlet <- '⏰ alarm @@ ' ++ ts
+Đ| 25:   }
+Đ| 26:
+Đ| 27: }
+timelyAlert
+Đ:
+Đ: {
+Đ|  1:
+Đ|  2:   n = 1
+Đ|  3:   for notif from timelyAlert(1) do {
+Đ|  4:     runtime.info<| ' ALARM #' ++ n ++ ' - ' ++ notif
+Đ|  5:     if (n+=1) > 3 then { break }
+Đ|  6:   }
+Đ|  7:
+Đ|  8: }
+ℹ️ <adhoc>:4:5
+ ALARM #1 - start alerting you every 1 second(s) ...
+ℹ️ <adhoc>:4:5
+ ALARM #2 - ⏰ alarm @@ 1.584071853155282515e18
+Đ: ℹ️ <adhoc>:4:5
+ ALARM #3 - ⏰ alarm @@ 1.584071854156773843e18
+
+Đ:
+```
 
 ## Go Routines
 

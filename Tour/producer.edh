@@ -13,7 +13,7 @@
     # the `outlet` arg is always filled, if not explicitly passed by
     # the caller, Edh will create a new `sink`, to be returned to the
     # caller as well as passed to this producer procedure as `outlet`.
-    outlet=nil
+    outlet=sink
     # have it a default value to fool the lint/IDE tooling to believe
     # it's an optional argument for the caller. this is not necessary
     # for correct runtime behavior though.
