@@ -1986,12 +1986,20 @@ Checkout [reflection.edh](./reflection.edh)
 
 ```bash
 Đ: # expression is 1st class citizen in Edh
+Đ:
+Đ: # with original src reserved
 Đ: x = expr a + b*c
 a + b*c
 Đ: type(x)
 ExprType
 Đ:
-Đ: # a scope can be captured anywhere within Edh source
+Đ: # without src info
+Đ: x' = makeExpr( a + b*c )
+<expr: InfixExpr "+" (AttrExpr (DirectRef (NamedAttr "a"))) (InfixExpr "*" (AttrExpr (DirectRef (NamedAttr "b"))) (AttrExpr (DirectRef (NamedAttr "c"))))>
+Đ: type(x')
+ExprType
+Đ:
+Đ: # a scope can be captured anywhere within Edh code
 Đ: this'modu'scope = scope()
 <object: <scope>>
 Đ:
@@ -2008,10 +2016,9 @@ ExprType
 Đ: c = 7
 7
 Đ:
-Đ: # now it should happliy eval
+Đ: # now it should happily eval
 Đ: this'modu'scope.eval( x )
 26
-Đ:
 Đ:
 Đ: # a reflective scope can only be captured and exposed
 Đ: # by its owning procedure willingly, some more demos

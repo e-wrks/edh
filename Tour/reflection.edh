@@ -1,9 +1,15 @@
 
 # expression is 1st class citizen in Edh
+
+# with original src reserved
 x = expr a + b*c
 type(x)
 
-# a scope can be captured anywhere within Edh source
+# without src info
+x' = makeExpr( a + b*c )
+type(x')
+
+# a scope can be captured anywhere within Edh code
 this'modu'scope = scope()
 
 # this will fail as `x` references attributes unavailable
@@ -14,9 +20,8 @@ this'modu'scope.put( a=5, b=3 )
 # of course Edh code can update attributes normally
 c = 7
 
-# now it should happliy eval
+# now it should happily eval
 this'modu'scope.eval( x )
-
 
 # a reflective scope can only be captured and exposed
 # by its owning procedure willingly, some more demos
