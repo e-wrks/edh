@@ -9,6 +9,7 @@ module Language.Edh.Runtime
   , installEdhModule
   , declareEdhOperators
   , mkHostProc
+  , mkHostClass
   , mkHostOper
   , installEdhAttrs
   , installEdhAttr
@@ -28,6 +29,7 @@ import           System.IO                      ( stderr )
 
 import           Control.Exception
 import           Control.Monad.Except
+import           Control.Monad.Reader
 
 import           Control.Concurrent
 import           Control.Concurrent.STM
@@ -110,14 +112,14 @@ defaultEdhLogger = do
 createEdhWorld :: MonadIO m => EdhLogger -> m EdhWorld
 createEdhWorld !logger = liftIO $ do
   -- ultimate default methods/operators/values go into this
-  rootEntity <- atomically $ createEntity $ hashEntityStore $ Map.fromList
+  rootEntity <- atomically $ createHashEntity $ Map.fromList
     [ (AttrByName "__name__", EdhString "<root>")
     , (AttrByName "__file__", EdhString "<genesis>")
     , (AttrByName "None"    , edhNone)
     , (AttrByName "Nothing" , edhNothing)
     ]
   -- methods supporting reflected scope manipulation go into this
-  scopeManiMethods <- atomically $ createEntity $ hashEntityStore Map.empty
+  scopeManiMethods <- atomically $ createHashEntity Map.empty
   rootSupers       <- newTVarIO []
   rootClassUniq    <- newUnique
   scopeClassUniq   <- newUnique
@@ -216,7 +218,7 @@ declareEdhOperators world declLoc opps = do
 createEdhModule :: MonadIO m => EdhWorld -> ModuleId -> String -> m Object
 createEdhModule !world !moduId !moduSrc = liftIO $ do
   -- prepare the module meta data
-  !moduEntity <- atomically $ createEntity $ hashEntityStore $ Map.fromList
+  !moduEntity <- atomically $ createHashEntity $ Map.fromList
     [ (AttrByName "__name__", EdhString moduId)
     , (AttrByName "__file__", EdhString $ T.pack moduSrc)
     ]
@@ -272,6 +274,29 @@ mkHostProc !scope !vc !nm !p !args = do
                                 }
     }
 
+mkHostClass
+  :: Scope
+  -> Text
+  -> ArgsReceiver
+  -> (Scope -> ArgsSender -> STM (Entity, [Object]))
+  -> STM EdhValue
+mkHostClass !scope !nm !args !hcp = do
+  u <- unsafeIOToSTM newUnique
+  let !cls = ProcDefi
+        { procedure'uniq = u
+        , procedure'lexi = Just scope
+        , procedure'decl = ProcDecl { procedure'name = nm
+                                    , procedure'args = args
+                                    , procedure'body = Right ctor
+                                    }
+        }
+      ctor :: EdhProcedure
+      ctor !argsSndr !exit = ask >>= \pgs -> contEdhSTM $ do
+        (ent, supers) <- hcp scope argsSndr
+        !newThis      <- viewAsEdhObject ent cls supers
+        exitEdhSTM pgs exit $ EdhObject newThis
+  return $ EdhClass cls
+
 mkHostOper :: EdhWorld -> Scope -> OpSymbol -> EdhProcedure -> STM EdhValue
 mkHostOper !world !scope !opSym !hp = do
   u <- unsafeIOToSTM newUnique
@@ -298,8 +323,8 @@ mkHostOper !world !scope !opSym !hp = do
 
 installEdhAttrs :: Entity -> [(AttrKey, EdhValue)] -> STM ()
 installEdhAttrs e as =
-  modifyTVar' (entity'store e) $ \es -> updateEntityAttrs es as
+  modifyTVar' (entity'store e) $ updateEntityAttrs (entity'man e) as
 
 installEdhAttr :: Entity -> AttrKey -> EdhValue -> STM ()
 installEdhAttr e k v =
-  modifyTVar' (entity'store e) $ \es -> changeEntityAttr es k v
+  modifyTVar' (entity'store e) $ changeEntityAttr (entity'man e) k v

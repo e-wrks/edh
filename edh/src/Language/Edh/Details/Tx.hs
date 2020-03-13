@@ -141,22 +141,25 @@ driveEdhProgram !haltResult !progCtx !prog = do
   driveReactor :: EdhValue -> ReactorRecord -> IO Bool
   driveReactor !ev (_, pgsOrigin, argsRcvr, stmt) = do
     !breakThread <- newEmptyTMVarIO
-    let !ctxReactor = edh'context pgsOrigin
-        !apk        = case ev of
-          EdhArgsPack apk_ -> apk_
-          _                -> ArgsPack [ev] Map.empty
-        !scopeAtReactor = contextScope ctxReactor
-        !reactorProg    = ask >>= \pgsReactor ->
-          recvEdhArgs ctxReactor argsRcvr apk $ \em -> contEdhSTM $ do
-            modifyTVar' (entity'store $ scopeEntity scopeAtReactor)
-              $ \es -> updateEntityAttrs es $ Map.toList em
-            runEdhProg pgsReactor
-              $ evalStmt stmt
-              $ \(OriginalValue !reactorRtn _ _) -> do
-                  let doBreak = case reactorRtn of
-                        EdhBreak -> True -- terminate this thread
-                        _        -> False
-                  contEdhSTM $ putTMVar breakThread doBreak
+    let
+      !ctxReactor = edh'context pgsOrigin
+      !apk        = case ev of
+        EdhArgsPack apk_ -> apk_
+        _                -> ArgsPack [ev] Map.empty
+      !scopeAtReactor = contextScope ctxReactor
+      !reactorProg    = ask >>= \pgsReactor ->
+        recvEdhArgs ctxReactor argsRcvr apk $ \em -> contEdhSTM $ do
+          let ent = scopeEntity scopeAtReactor
+          modifyTVar' (entity'store ent)
+            $ updateEntityAttrs (entity'man ent)
+            $ Map.toList em
+          runEdhProg pgsReactor
+            $ evalStmt stmt
+            $ \(OriginalValue !reactorRtn _ _) -> do
+                let doBreak = case reactorRtn of
+                      EdhBreak -> True -- terminate this thread
+                      _        -> False
+                contEdhSTM $ putTMVar breakThread doBreak
     !reactReactors                        <- newTVarIO []
     !reactDefers                          <- newTVarIO []
     !(reactTaskQueue :: TQueue EdhTxTask) <- newTQueueIO

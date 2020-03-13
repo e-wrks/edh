@@ -14,6 +14,7 @@ import           Control.Monad.Reader
 -- import           Control.Concurrent
 import           Control.Concurrent.STM
 
+import           Data.Maybe
 import           Data.Foldable
 import           Data.Unique
 import           Data.Text                      ( Text )
@@ -22,7 +23,7 @@ import           Data.Hashable
 import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
-
+import           Data.Dynamic
 
 import           Text.Megaparsec
 
@@ -66,26 +67,28 @@ edhDictFromEntity ent = do
   u  <- unsafeIOToSTM newUnique
   es <- readTVar $ entity'store ent
   (Dict u <$>) $ newTVar $ Map.fromList
-    [ (attrKeyValue k, v) | (k, v) <- allEntityAttrs es ]
+    [ (attrKeyValue k, v) | (k, v) <- allEntityAttrs (entity'man ent) es ]
 
 -- | An entity in Edh is the backing storage for a scope, with possibly 
--- an object mounted to it with one class and many supers
+-- an object (actually more objects still possible, but god forbid it)
+-- mounted to it with one class and many supers.
 --
 -- An entity has attributes associated by 'AttrKey'.
 data Entity = Entity {
     entity'ident :: !Unique
-    , entity'store :: !(TVar EntityStore)
+    , entity'store :: !(TVar Dynamic)
+    , entity'man :: !EntityManipulater
   }
 instance Eq Entity where
-  Entity x'u _ == Entity y'u _ = x'u == y'u
+  Entity x'u _ _ == Entity y'u _ _ = x'u == y'u
 instance Ord Entity where
-  compare (Entity x'u _) (Entity y'u _) = compare x'u y'u
+  compare (Entity x'u _ _) (Entity y'u _ _) = compare x'u y'u
 instance Hashable Entity where
-  hashWithSalt s (Entity u _) = hashWithSalt s u
+  hashWithSalt s (Entity u _ _) = hashWithSalt s u
 
 
--- | Backing storage interface for an entity, this is essentially a record of
--- functions establishing the access patterns for a single entity.
+-- | Backing storage manipulation interface for entity stores of a certain (but
+-- dynamic) type.
 --
 -- Arbitrary resources (esp. statically typed artifacts bearing high machine
 -- performance purpose) can be wrapped as virtual entities through this interface.
@@ -93,25 +96,22 @@ instance Hashable Entity where
 -- Note the entity storage interface has all ways to be pure, but various procedures
 --      can be returned per different 'AttrKey', each to do impure or even crazy
 --      things when executed in an Edh world as context.
---
--- todo storing several closures seems to be a higher overhead than desirable,
---      better approach ?
-data EntityStore = EntityStore {
+data EntityManipulater = EntityManipulater {
     -- a result of `EdhNil` (i.e. `nil`) means no such attr, should usually lead
     -- to error;
     -- while an `EdhExpr _ (LitExpr NilLiteral) _` (i.e. `None` or `Nothing`)
     -- means knowingly absent, usually be okay and handled via pattern matching
     -- or equality test.
-    lookupEntityAttr :: !(AttrKey -> EdhValue)
+    lookupEntityAttr :: !(AttrKey -> Dynamic -> EdhValue)
 
     -- enumeration of attrs (this better be lazy)
-    , allEntityAttrs :: [(AttrKey, EdhValue)]
+    , allEntityAttrs :: !(Dynamic -> [(AttrKey, EdhValue)])
 
     -- single attr change
-    , changeEntityAttr :: !(AttrKey -> EdhValue -> EntityStore)
+    , changeEntityAttr :: !(AttrKey -> EdhValue -> Dynamic -> Dynamic)
 
     -- bulk attr change
-    , updateEntityAttrs :: !([(AttrKey, EdhValue)] -> EntityStore)
+    , updateEntityAttrs :: !([(AttrKey, EdhValue)] -> Dynamic -> Dynamic)
   }
 
 data AttrKey = AttrByName !AttrName | AttrBySym !Symbol
@@ -128,54 +128,62 @@ attrKeyValue :: AttrKey -> EdhValue
 attrKeyValue (AttrByName nm ) = EdhString nm
 attrKeyValue (AttrBySym  sym) = EdhSymbol sym
 
-createEntity :: EntityStore -> STM Entity
-createEntity !es = do
-  u <- unsafeIOToSTM newUnique
-  Entity u <$> newTVar es
 
--- | Create a constantly empty store - 冇
-maoEntityStore :: EntityStore
-maoEntityStore = es
+-- | Create a constantly empty entity - 冇
+createMaoEntity :: STM Entity
+createMaoEntity = do
+  u  <- unsafeIOToSTM newUnique
+  es <- newTVar $ toDyn EdhNil
+  return $ Entity u es maoEntityManipulater
+maoEntityManipulater :: EntityManipulater
+maoEntityManipulater = EntityManipulater the'lookupEntityAttr
+                                         the'allEntityAttrs
+                                         the'changeEntityAttr
+                                         the'updateEntityAttrs
  where
-  the'lookupEntityAttr _ = EdhNil
-  the'allEntityAttrs = []
-  the'changeEntityAttr _ _ = es  -- TODO raise error instead ?
-  the'updateEntityAttrs _ = es  -- TODO raise error instead ?
-  !es = EntityStore the'lookupEntityAttr
-                    the'allEntityAttrs
-                    the'changeEntityAttr
-                    the'updateEntityAttrs
+  the'lookupEntityAttr _ _ = EdhNil
+  the'allEntityAttrs _ = []
+  the'changeEntityAttr _ _ = id  -- TODO raise error instead ?
+  the'updateEntityAttrs _ = id  -- TODO raise error instead ?
 
--- | Create an entity store backed by a 'Data.HashMap.Strict.HashMap'
-hashEntityStore :: Map.HashMap AttrKey EdhValue -> EntityStore
-hashEntityStore !hm = EntityStore the'lookupEntityAttr
-                                  the'allEntityAttrs
-                                  the'changeEntityAttr
-                                  the'updateEntityAttrs
+
+-- | Create an entity backed by a 'Data.HashMap.Strict.HashMap'
+createHashEntity :: Map.HashMap AttrKey EdhValue -> STM Entity
+createHashEntity !m = do
+  u  <- unsafeIOToSTM newUnique
+  es <- newTVar $ toDyn m
+  return $ Entity u es hashEntityManipulater
+hashEntityManipulater :: EntityManipulater
+hashEntityManipulater = EntityManipulater the'lookupEntityAttr
+                                          the'allEntityAttrs
+                                          the'changeEntityAttr
+                                          the'updateEntityAttrs
  where
-  the'lookupEntityAttr !k = case Map.lookup k hm of
-    Nothing -> EdhNil
-    Just !v -> v
-  the'allEntityAttrs = Map.toList hm
+  hm = flip fromDyn Map.empty
+  the'lookupEntityAttr !k = fromMaybe EdhNil . Map.lookup k . hm
+  the'allEntityAttrs = Map.toList . hm
   the'changeEntityAttr !k !v =
-    hashEntityStore $ if v == EdhNil then Map.delete k hm else Map.insert k v hm
-  the'updateEntityAttrs !ps = hashEntityStore $ Map.union (Map.fromList ps) hm
+    toDyn . if v == EdhNil then Map.delete k . hm else Map.insert k v . hm
+  the'updateEntityAttrs !ps = toDyn . Map.union (Map.fromList ps) . hm
 
--- | Create an entity store for some key-value pairs that accepts no change
-constEntityStore :: [(AttrKey, EdhValue)] -> EntityStore
-constEntityStore !ps = es
+
+-- | Create an entity for some key-value pairs that accepts no change
+createConstEntity :: [(AttrKey, EdhValue)] -> STM Entity
+createConstEntity !ps = do
+  u  <- unsafeIOToSTM newUnique
+  es <- newTVar $ toDyn $ Map.fromList ps
+  return $ Entity u es constEntityManipulater
+constEntityManipulater :: EntityManipulater
+constEntityManipulater = EntityManipulater the'lookupEntityAttr
+                                           the'allEntityAttrs
+                                           the'changeEntityAttr
+                                           the'updateEntityAttrs
  where
-  !hm = Map.fromList ps
-  the'lookupEntityAttr !k = case Map.lookup k hm of
-    Nothing -> EdhNil
-    Just !v -> v
-  the'allEntityAttrs = ps
-  the'changeEntityAttr _ _ = es  -- TODO raise error instead ?
-  the'updateEntityAttrs _ = es  -- TODO raise error instead ?
-  !es = EntityStore the'lookupEntityAttr
-                    the'allEntityAttrs
-                    the'changeEntityAttr
-                    the'updateEntityAttrs
+  hm = flip fromDyn Map.empty
+  the'lookupEntityAttr !k = fromMaybe EdhNil . Map.lookup k . hm
+  the'allEntityAttrs = Map.toList . hm
+  the'changeEntityAttr _ _ = id  -- TODO raise error instead ?
+  the'updateEntityAttrs _ = id  -- TODO raise error instead ?
 
 
 -- | A symbol can stand in place of an alphanumeric name, used to
@@ -365,12 +373,19 @@ instance Eq EdhWorld where
 type ModuleId = Text
 
 worldContext :: EdhWorld -> Context
-worldContext !world = Context { contextWorld    = world
-                              , callStack       = worldScope world :| []
-                              , generatorCaller = Nothing
-                              , contextMatch    = true
-                              , contextStmt     = voidStatement
-                              }
+worldContext !world = Context
+  { contextWorld    = world
+  , callStack       = worldScope world :| []
+  , generatorCaller = Nothing
+  , contextMatch    = true
+  , contextStmt     = StmtSrc
+                        ( SourcePos { sourceName   = "<genesis>"
+                                    , sourceLine   = mkPos 1
+                                    , sourceColumn = mkPos 1
+                                    }
+                        , VoidStmt
+                        )
+  }
 {-# INLINE worldContext #-}
 
 data EdhRuntime = EdhRuntime {
@@ -380,16 +395,6 @@ data EdhRuntime = EdhRuntime {
 type EdhLogger = LogLevel -> Maybe String -> ArgsPack -> STM ()
 type LogLevel = Int
 
-
-voidStatement :: StmtSrc
-voidStatement = StmtSrc
-  ( SourcePos { sourceName   = "<genesis>"
-              , sourceLine   = mkPos 1
-              , sourceColumn = mkPos 1
-              }
-  , VoidStmt
-  )
-{-# INLINE voidStatement #-}
 
 -- | The ultimate nothingness (Chinese 无极/無極), i.e. <nothing> out of <chaos>
 wuji :: EdhProgState -> OriginalValue

@@ -41,10 +41,12 @@ parseEdhSource !world !moduFileName !edhSource =
 evalEdhSource
   :: MonadIO m => EdhWorld -> Object -> Text -> m (Either EdhError EdhValue)
 evalEdhSource !world !modu !edhSource = liftIO $ do
-  mes <- readTVarIO (entity'store $ objEntity modu)
-  let moduFileName = case lookupEntityAttr mes (AttrByName "__file__") of
-        EdhString !name -> name
-        _               -> "<adhoc>"
+  let ent = objEntity modu
+  mes <- readTVarIO (entity'store ent)
+  let moduFileName =
+        case lookupEntityAttr (entity'man ent) (AttrByName "__file__") mes of
+          EdhString !name -> name
+          _               -> "<adhoc>"
   parseEdhSource world moduFileName edhSource >>= \case
     Left  !err   -> return $ Left err
     Right !stmts -> do

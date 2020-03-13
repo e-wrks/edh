@@ -209,7 +209,7 @@ installEdhBatteries world = liftIO $ do
           ]
         ]
 
-      !rtEntity <- createEntity $ hashEntityStore $ Map.empty
+      !rtEntity <- createHashEntity Map.empty
       !rtSupers <- newTVar []
       let !runtime = Object
             { objEntity = rtEntity

@@ -110,10 +110,9 @@ module Language.Edh.EHI
   , Class
   , Entity(..)
   , EntityStore(..)
-  , createEntity
-  , maoEntityStore
-  , hashEntityStore
-  , constEntityStore
+  , createMaoEntity
+  , createHashEntity
+  , createConstEntity
   , AttrKey(..)
   , attrKeyValue
   , lookupEdhCtxAttr
@@ -150,6 +149,7 @@ module Language.Edh.EHI
   , EdhGenrCaller
   , mkSymbol
   , mkHostProc
+  , mkHostClass
   , mkHostOper
 
     -- * Monadic API for textual interpreter
