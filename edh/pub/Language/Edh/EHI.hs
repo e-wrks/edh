@@ -109,7 +109,7 @@ module Language.Edh.EHI
   , Object(..)
   , Class
   , Entity(..)
-  , EntityStore(..)
+  , EntityManipulater(..)
   , createMaoEntity
   , createHashEntity
   , createConstEntity
