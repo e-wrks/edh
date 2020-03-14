@@ -780,9 +780,13 @@ evalExpr expr exit = do
 
                   -- calling a host method procedure
                   Right !hp -> do
-                    -- a host procedure views the same scope entity as of the caller's call frame
-                    let !calleeScope =
-                          scope { thatObject = mth'that, scopeProc = mth'proc }
+                    -- a host procedure views the same scope entity as of the caller's
+                    -- call frame
+                    let !calleeScope = (lexicalScopeOf mth'proc)
+                          { scopeEntity = scopeEntity scope
+                          , thatObject  = mth'that
+                          , scopeProc   = mth'proc
+                          }
                         !calleeCtx = ctx
                           { callStack       = calleeScope <| callStack ctx
                           , generatorCaller = Nothing
@@ -1184,21 +1188,18 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
       -- calling a host method procedure
       Right !hp -> callMaker $ \exit -> contEdhSTM $ do
         -- a host procedure views the same scope entity as of the caller's call frame
-        let !calleeScope =
-              callerScope { thatObject = callee'that, scopeProc = mth'proc }
-            !calleeCtx = callerCtx
-              { callStack       = calleeScope <| callStack callerCtx
-              , generatorCaller = Nothing
-              , contextMatch    = true
-              }
-            !pgsCallee = pgsCaller { edh'context = calleeCtx }
-        -- insert a cycle tick here, so if no tx required for the call
-        -- overall, the callee resolution tx stops here then the callee
-        -- runs in next stm transaction
-        flip (exitEdhSTM' pgsCallee) (wuji pgsCallee) $ \_ ->
-          hp argsSndr $ \(OriginalValue !val _ _) ->
-            -- return the result in CPS with caller pgs restored
-            contEdhSTM $ exitEdhSTM pgsCaller exit val
+        let !mthScope = (lexicalScopeOf mth'proc) { scopeEntity = scopeEntity
+                                                    callerScope
+                                                  , thatObject  = callee'that
+                                                  , scopeProc   = mth'proc
+                                                  }
+            !mthCtx = callerCtx { callStack = mthScope <| callStack callerCtx
+                                , generatorCaller = Nothing
+                                , contextMatch = true
+                                }
+            !pgsMth = pgsCaller { edh'context = mthCtx }
+        runEdhProg pgsMth $ hp argsSndr $ \(OriginalValue !val _ _) ->
+          contEdhSTM $ exitEdhSTM pgsCaller exit val
 
       Left !pb -> runEdhProg pgsCaller $ packEdhArgs' argsSndr $ \apk ->
         contEdhSTM $ callMaker $ callEdhMethod apk
@@ -1492,18 +1493,19 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                       let !ctx   = edh'context pgs
                           !scope = contextScope ctx
                       contEdhSTM $ do
-                        -- a host procedure runs against its caller's scope, with
-                        -- 'thatObject' changed to the resolution target object
-                        let
-                          !calleeScope = scope { thatObject = callee'that
-                                               , scopeProc  = gnr'proc
-                                               }
-                          !calleeCtx = ctx
-                            { callStack       = calleeScope <| callStack ctx
-                            , generatorCaller = Just (pgs, recvYield exit)
-                            , contextMatch    = true
-                            }
-                          !pgsCallee = pgs { edh'context = calleeCtx }
+                        -- a host procedure views the same scope entity as of the caller's
+                        -- call frame
+                        let !calleeScope = (lexicalScopeOf gnr'proc)
+                              { scopeEntity = scopeEntity scope
+                              , thatObject  = callee'that
+                              , scopeProc   = gnr'proc
+                              }
+                            !calleeCtx = ctx
+                              { callStack       = calleeScope <| callStack ctx
+                              , generatorCaller = Just (pgs, recvYield exit)
+                              , contextMatch    = true
+                              }
+                            !pgsCallee = pgs { edh'context = calleeCtx }
                         -- insert a cycle tick here, so if no tx required for the call
                         -- overall, the callee resolution tx stops here then the callee
                         -- runs in next stm transaction
