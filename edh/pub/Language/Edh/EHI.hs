@@ -93,6 +93,7 @@ module Language.Edh.EHI
   , Prefix(..)
   , Literal(..)
   , AttrAddr(..)
+  , AttrAddressor(..)
   , ArgsReceiver(..)
   , ArgReceiver(..)
   , ArgsSender

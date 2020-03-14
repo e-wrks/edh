@@ -33,6 +33,8 @@ import           Control.Concurrent
 import           Control.Concurrent.STM
 
 import           Data.Unique
+import           Data.List.NonEmpty             ( NonEmpty(..) )
+import qualified Data.List.NonEmpty            as NE
 import           Data.Text.IO
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
@@ -279,39 +281,42 @@ mkHostProc !scope !vc !nm !p !args = do
     }
 
 mkHostClass
-  :: Scope -- outer lexical scope
-  -> Text  -- class name
-  -> Bool  -- write protected
-  -> (  Scope       -- constructor scope
-     -> ArgsSender  -- construction args
+  :: Scope -- ^ outer lexical scope
+  -> Text  -- ^ class name
+  -> Bool  -- ^ write protect the out-of-band attribute store
+  -> (  EdhProgState
+     -> ArgsSender
      -> TVar (Map.HashMap AttrKey EdhValue)  -- out-of-band attr store 
      -> STM ()
      )
   -> STM EdhValue
 mkHostClass !scope !nm !writeProtected !hc = do
   classUniq <- unsafeIOToSTM newUnique
-  let !cls = ProcDefi
-        { procedure'uniq = classUniq
-        , procedure'lexi = Just scope
-        , procedure'decl = ProcDecl { procedure'name = nm
-                                    , procedure'args = PackReceiver []
-                                    , procedure'body = Right ctor
-                                    }
-        }
-      ctor :: EdhProcedure
-      ctor !argsSndr !exit = do
-        -- note: cross check logic here with `createEdhObject`
-        pgs <- ask
-        contEdhSTM $ do
-          (ent, obs) <- createSideEntity writeProtected
-          !newThis   <- viewAsEdhObject ent cls []
-          let !ctorScope = Scope { scopeEntity = ent
-                                 , thisObject  = newThis
-                                 , thatObject  = newThis
-                                 , scopeProc   = cls
-                                 }
-          hc ctorScope argsSndr obs
-          exitEdhSTM pgs exit $ EdhObject newThis
+  let
+    !cls = ProcDefi
+      { procedure'uniq = classUniq
+      , procedure'lexi = Just scope
+      , procedure'decl = ProcDecl { procedure'name = nm
+                                  , procedure'args = PackReceiver []
+                                  , procedure'body = Right ctor
+                                  }
+      }
+    ctor :: EdhProcedure
+    ctor !argsSndr !exit = do
+      -- note: cross check logic here with `createEdhObject`
+      pgs <- ask
+      contEdhSTM $ do
+        (ent, obs) <- createSideEntity writeProtected
+        !newThis   <- viewAsEdhObject ent cls []
+        let ctx       = edh'context pgs
+            pgsCtor   = pgs { edh'context = ctorCtx }
+            ctorCtx   = ctx { callStack = ctorScope :| NE.tail (callStack ctx) }
+            ctorScope = (contextScope ctx) { scopeEntity = ent
+                                           , thisObject  = newThis
+                                           , thatObject  = newThis
+                                           }
+        hc pgsCtor argsSndr obs
+        exitEdhSTM pgs exit $ EdhObject newThis
   return $ EdhClass cls
 
 mkHostOper :: EdhWorld -> Scope -> OpSymbol -> EdhProcedure -> STM EdhValue
