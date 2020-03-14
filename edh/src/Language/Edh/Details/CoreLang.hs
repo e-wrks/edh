@@ -18,7 +18,7 @@ resolveAddr :: EdhProgState -> AttrAddressor -> STM AttrKey
 resolveAddr _ (NamedAttr !attrName) = return (AttrByName attrName)
 resolveAddr !pgs (SymbolicAttr !symName) =
   let scope = contextScope $ edh'context pgs
-  in  resolveEdhCtxAttr scope (AttrByName symName) >>= \case
+  in  resolveEdhCtxAttr pgs scope (AttrByName symName) >>= \case
         Just (OriginalValue !val _ _) -> case val of
           (EdhSymbol !symVal) -> return (AttrBySym symVal)
           _ ->
@@ -40,89 +40,96 @@ resolveAddr !pgs (SymbolicAttr !symName) =
 -- * Edh attribute resolution
 
 
-lookupEdhCtxAttr :: Scope -> AttrKey -> STM EdhValue
-lookupEdhCtxAttr fromScope addr = resolveEdhCtxAttr fromScope addr >>= \case
-  Nothing                       -> return EdhNil
-  Just (OriginalValue !val _ _) -> return val
+lookupEdhCtxAttr :: EdhProgState -> Scope -> AttrKey -> STM EdhValue
+lookupEdhCtxAttr pgs fromScope addr =
+  resolveEdhCtxAttr pgs fromScope addr >>= \case
+    Nothing                       -> return EdhNil
+    Just (OriginalValue !val _ _) -> return val
 {-# INLINE lookupEdhCtxAttr #-}
 
-lookupEdhObjAttr :: Object -> AttrKey -> STM EdhValue
-lookupEdhObjAttr this addr = resolveEdhObjAttr this addr >>= \case
+lookupEdhObjAttr :: EdhProgState -> Object -> AttrKey -> STM EdhValue
+lookupEdhObjAttr pgs this addr = resolveEdhObjAttr pgs this addr >>= \case
   Nothing                       -> return EdhNil
   Just (OriginalValue !val _ _) -> return val
 {-# INLINE lookupEdhObjAttr #-}
 
-lookupEdhSuperAttr :: Object -> AttrKey -> STM EdhValue
-lookupEdhSuperAttr this addr = resolveEdhSuperAttr this addr >>= \case
+lookupEdhSuperAttr :: EdhProgState -> Object -> AttrKey -> STM EdhValue
+lookupEdhSuperAttr pgs this addr = resolveEdhSuperAttr pgs this addr >>= \case
   Nothing                       -> return EdhNil
   Just (OriginalValue !val _ _) -> return val
 {-# INLINE lookupEdhSuperAttr #-}
 
 
-resolveEdhCtxAttr :: Scope -> AttrKey -> STM (Maybe OriginalValue)
-resolveEdhCtxAttr !scope !addr =
-  lookupEntityAttr (scopeEntity scope) addr >>= \case
-    EdhNil -> resolveLexicalAttr (outerScopeOf scope) addr
+resolveEdhCtxAttr
+  :: EdhProgState -> Scope -> AttrKey -> STM (Maybe OriginalValue)
+resolveEdhCtxAttr pgs !scope !addr =
+  lookupEntityAttr pgs (scopeEntity scope) addr >>= \case
+    EdhNil -> resolveLexicalAttr pgs (outerScopeOf scope) addr
     val    -> return $ Just (OriginalValue val scope $ thatObject scope)
 {-# INLINE resolveEdhCtxAttr #-}
 
-resolveLexicalAttr :: Maybe Scope -> AttrKey -> STM (Maybe OriginalValue)
-resolveLexicalAttr Nothing _ = return Nothing
-resolveLexicalAttr (Just scope@(Scope !ent !this !_that _)) addr =
-  lookupEntityAttr ent addr >>= \case
+resolveLexicalAttr
+  :: EdhProgState -> Maybe Scope -> AttrKey -> STM (Maybe OriginalValue)
+resolveLexicalAttr _ Nothing _ = return Nothing
+resolveLexicalAttr pgs (Just scope@(Scope !ent !this !_that _)) addr =
+  lookupEntityAttr pgs ent addr >>= \case
     EdhNil ->
       -- go for the interesting attribute from inheritance hierarchy
       -- of this context object, so a module as an object, can `extends`
       -- some objects too, in addition to the `import` mechanism
       (if ent == objEntity this
           -- go directly to supers as entity has just got negative result
-          then readTVar (objSupers this) >>= resolveEdhSuperAttr' this addr
+          then readTVar (objSupers this) >>= resolveEdhSuperAttr' pgs this addr
           -- context scope is different entity from this context object,
           -- start next from this object
-          else resolveEdhObjAttr' this this addr
+          else resolveEdhObjAttr' pgs this this addr
         )
         >>= \case
               Just scope'from'object -> return $ Just scope'from'object
               -- go one level outer of the lexical stack
-              Nothing -> resolveLexicalAttr (outerScopeOf scope) addr
+              Nothing -> resolveLexicalAttr pgs (outerScopeOf scope) addr
     !val -> return $ Just (OriginalValue val scope $ thatObject scope)
 {-# INLINE resolveLexicalAttr #-}
 
-resolveEdhObjAttr :: Object -> AttrKey -> STM (Maybe OriginalValue)
-resolveEdhObjAttr !this !addr = resolveEdhObjAttr' this this addr
+resolveEdhObjAttr
+  :: EdhProgState -> Object -> AttrKey -> STM (Maybe OriginalValue)
+resolveEdhObjAttr pgs !this !addr = resolveEdhObjAttr' pgs this this addr
 {-# INLINE resolveEdhObjAttr #-}
 
-resolveEdhSuperAttr :: Object -> AttrKey -> STM (Maybe OriginalValue)
-resolveEdhSuperAttr !this !addr =
-  readTVar (objSupers this) >>= resolveEdhSuperAttr' this addr
+resolveEdhSuperAttr
+  :: EdhProgState -> Object -> AttrKey -> STM (Maybe OriginalValue)
+resolveEdhSuperAttr pgs !this !addr =
+  readTVar (objSupers this) >>= resolveEdhSuperAttr' pgs this addr
 {-# INLINE resolveEdhSuperAttr #-}
 
-resolveEdhObjAttr' :: Object -> Object -> AttrKey -> STM (Maybe OriginalValue)
-resolveEdhObjAttr' !that !this !addr = lookupEntityAttr thisEnt addr >>= \case
-  EdhNil -> readTVar (objSupers this) >>= resolveEdhSuperAttr' that addr
-  !val   -> return $ Just $ OriginalValue val clsScope that
+resolveEdhObjAttr'
+  :: EdhProgState -> Object -> Object -> AttrKey -> STM (Maybe OriginalValue)
+resolveEdhObjAttr' pgs !that !this !addr =
+  lookupEntityAttr pgs thisEnt addr >>= \case
+    EdhNil -> readTVar (objSupers this) >>= resolveEdhSuperAttr' pgs that addr
+    !val   -> return $ Just $ OriginalValue val clsScope that
  where
   !thisEnt  = objEntity this
   !clsScope = Scope thisEnt this that $ objClass this
 {-# INLINE resolveEdhObjAttr' #-}
 
 resolveEdhSuperAttr'
-  :: Object -> AttrKey -> [Object] -> STM (Maybe OriginalValue)
-resolveEdhSuperAttr' _ _ [] = return Nothing
-resolveEdhSuperAttr' !that !addr (super : restSupers) =
-  resolveEdhObjAttr' that super addr >>= \case
+  :: EdhProgState -> Object -> AttrKey -> [Object] -> STM (Maybe OriginalValue)
+resolveEdhSuperAttr' _ _ _ [] = return Nothing
+resolveEdhSuperAttr' pgs !that !addr (super : restSupers) =
+  resolveEdhObjAttr' pgs that super addr >>= \case
     Just scope -> return $ Just scope
-    Nothing    -> resolveEdhSuperAttr' that addr restSupers
+    Nothing    -> resolveEdhSuperAttr' pgs that addr restSupers
 {-# INLINE resolveEdhSuperAttr' #-}
 
 
-resolveEdhInstance' :: Class -> [Object] -> STM (Maybe Object)
-resolveEdhInstance' _ [] = return Nothing
-resolveEdhInstance' !class_ (obj : rest)
+resolveEdhInstance' :: EdhProgState -> Class -> [Object] -> STM (Maybe Object)
+resolveEdhInstance' _ _ [] = return Nothing
+resolveEdhInstance' pgs !class_ (obj : rest)
   | objClass obj == class_ = return (Just obj)
-  | otherwise = resolveEdhInstance' class_ . (rest ++) =<< readTVar
+  | otherwise = resolveEdhInstance' pgs class_ . (rest ++) =<< readTVar
     (objSupers obj)
 {-# INLINE resolveEdhInstance' #-}
-resolveEdhInstance :: Class -> Object -> STM (Maybe Object)
-resolveEdhInstance !class_ !this = resolveEdhInstance' class_ [this]
+resolveEdhInstance :: EdhProgState -> Class -> Object -> STM (Maybe Object)
+resolveEdhInstance pgs !class_ !this = resolveEdhInstance' pgs class_ [this]
 {-# INLINE resolveEdhInstance #-}

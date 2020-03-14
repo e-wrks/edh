@@ -22,12 +22,12 @@ import           Language.Edh.Runtime
 
 parseEdhSource
   :: MonadIO m => EdhWorld -> Text -> Text -> m (Either EdhError [StmtSrc])
-parseEdhSource !world !moduFileName !edhSource =
+parseEdhSource !world !srcName !srcCode =
   liftIO -- serialize parsing against 'worldOperators'
     $ bracket (atomically $ takeTMVar wops) (atomically . tryPutTMVar wops)
     $ \opPD ->
         let (pr, opPD') = runState
-              (runParserT parseProgram (T.unpack moduFileName) edhSource)
+              (runParserT parseProgram (T.unpack srcName) srcCode)
               opPD
         in  case pr of
               Left  !err   -> return $ Left $ EdhParseError err
@@ -39,14 +39,14 @@ parseEdhSource !world !moduFileName !edhSource =
 
 
 evalEdhSource
-  :: MonadIO m => EdhWorld -> Object -> Text -> m (Either EdhError EdhValue)
-evalEdhSource !world !modu !edhSource = liftIO $ do
-  let ent = objEntity modu
-  moduFile <- liftIO $ atomically $ lookupEntityAttr ent (AttrByName "__file__")
-  let moduFileName = case moduFile of
-        EdhString !name -> name
-        _               -> "<adhoc>"
-  parseEdhSource world moduFileName edhSource >>= \case
+  :: MonadIO m
+  => EdhWorld
+  -> Object
+  -> Text
+  -> Text
+  -> m (Either EdhError EdhValue)
+evalEdhSource !world !modu !srcName !srcCode =
+  liftIO $ parseEdhSource world srcName srcCode >>= \case
     Left  !err   -> return $ Left err
     Right !stmts -> do
       let !moduCtx = moduleContext world modu

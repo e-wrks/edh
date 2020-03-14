@@ -114,7 +114,7 @@ evalStmt' !stmt !exit = do
         recvEdhArgs ctx argsRcvr pk $ \um -> contEdhSTM $ do
           -- overwrite current scope entity with attributes from the
           -- received entity
-          updateEntityAttrs (scopeEntity scope) $ Map.toList um
+          updateEntityAttrs pgs (scopeEntity scope) $ Map.toList um
           -- let statement evaluates to nil always, with previous tx
           -- state restored
           exitEdhSTM pgs exit nil
@@ -245,7 +245,7 @@ evalStmt' !stmt !exit = do
               modifyTVar' (objSupers this) (superObj :)
               exitEdhSTM pgs exit nil
             noMagic :: EdhProg (STM ())
-            noMagic = contEdhSTM $ resolveEdhObjAttr superObj key >>= \case
+            noMagic = contEdhSTM $ resolveEdhObjAttr pgs superObj key >>= \case
               Nothing                            -> doExtend
               Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
             withMagicMethod :: EdhValue -> STM ()
@@ -275,7 +275,7 @@ evalStmt' !stmt !exit = do
                                    , procedure'decl = pd
                                    }
       when (name /= "_")
-        $ changeEntityAttr (scopeEntity scope) (AttrByName name) cls
+        $ changeEntityAttr pgs (scopeEntity scope) (AttrByName name) cls
       exitEdhSTM pgs exit cls
 
     MethodStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
@@ -285,7 +285,7 @@ evalStmt' !stmt !exit = do
                                    , procedure'decl = pd
                                    }
       when (name /= "_")
-        $ changeEntityAttr (scopeEntity scope) (AttrByName name) mth
+        $ changeEntityAttr pgs (scopeEntity scope) (AttrByName name) mth
       exitEdhSTM pgs exit mth
 
     GeneratorStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
@@ -295,7 +295,7 @@ evalStmt' !stmt !exit = do
                                     , procedure'decl = pd
                                     }
       when (name /= "_")
-        $ changeEntityAttr (scopeEntity scope) (AttrByName name) gdf
+        $ changeEntityAttr pgs (scopeEntity scope) (AttrByName name) gdf
       exitEdhSTM pgs exit gdf
 
     InterpreterStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
@@ -305,7 +305,7 @@ evalStmt' !stmt !exit = do
                                         , procedure'decl = pd
                                         }
       when (name /= "_")
-        $ changeEntityAttr (scopeEntity scope) (AttrByName name) mth
+        $ changeEntityAttr pgs (scopeEntity scope) (AttrByName name) mth
       exitEdhSTM pgs exit mth
 
     ProducerStmt pd@(ProcDecl name args _) -> contEdhSTM $ do
@@ -319,7 +319,7 @@ evalStmt' !stmt !exit = do
         EvalError
         "a producer procedure should receive a `outlet` keyword argument"
       when (name /= "_")
-        $ changeEntityAttr (scopeEntity scope) (AttrByName name) mth
+        $ changeEntityAttr pgs (scopeEntity scope) (AttrByName name) mth
       exitEdhSTM pgs exit mth
 
     OpDeclStmt opSym opPrec opProc@(ProcDecl _ _ !pb) -> case pb of
@@ -327,7 +327,7 @@ evalStmt' !stmt !exit = do
       -- with possibly a different precedence
       Left (StmtSrc (_, ExprStmt (AttrExpr (DirectRef (NamedAttr !origOpSym)))))
         -> contEdhSTM $ do
-          origOp <- lookupEdhCtxAttr scope (AttrByName origOpSym) >>= \case
+          origOp <- lookupEdhCtxAttr pgs scope (AttrByName origOpSym) >>= \case
             EdhNil ->
               throwEdhSTM pgs EvalError
                 $  "Original operator ("
@@ -341,7 +341,7 @@ evalStmt' !stmt !exit = do
                 <> ": "
                 <> T.pack (show val)
                 <> " as an operator"
-          changeEntityAttr (scopeEntity scope) (AttrByName opSym) origOp
+          changeEntityAttr pgs (scopeEntity scope) (AttrByName opSym) origOp
           exitEdhSTM pgs exit origOp
       _ -> contEdhSTM $ do
         validateOperDecl pgs opProc
@@ -353,32 +353,33 @@ evalStmt' !stmt !exit = do
                        , procedure'lexi = Just scope
                        , procedure'decl = opProc
                        }
-        changeEntityAttr (scopeEntity scope) (AttrByName opSym) op
+        changeEntityAttr pgs (scopeEntity scope) (AttrByName opSym) op
         exitEdhSTM pgs exit op
 
     OpOvrdStmt opSym opProc opPrec -> contEdhSTM $ do
       validateOperDecl pgs opProc
       let findPredecessor :: STM (Maybe EdhValue)
-          findPredecessor = lookupEdhCtxAttr scope (AttrByName opSym) >>= \case
-            EdhNil -> -- do
-              -- (EdhRuntime logger _) <- readTMVar $ worldRuntime world
-              -- logger 30 (Just $ sourcePosPretty srcPos)
-              --   $ ArgsPack
-              --       [EdhString "overriding an unavailable operator"]
-              --       Map.empty
-              return Nothing
-            op@EdhOperator{} -> return $ Just op
-            opVal            -> do
-              (EdhRuntime logger _) <- readTMVar $ worldRuntime world
-              logger 30 (Just $ sourcePosPretty srcPos) $ ArgsPack
-                [ EdhString
-                  $  "overriding an invalid operator "
-                  <> T.pack (show $ edhTypeOf opVal)
-                  <> ": "
-                  <> T.pack (show opVal)
-                ]
-                Map.empty
-              return Nothing
+          findPredecessor =
+            lookupEdhCtxAttr pgs scope (AttrByName opSym) >>= \case
+              EdhNil -> -- do
+                -- (EdhRuntime logger _) <- readTMVar $ worldRuntime world
+                -- logger 30 (Just $ sourcePosPretty srcPos)
+                --   $ ArgsPack
+                --       [EdhString "overriding an unavailable operator"]
+                --       Map.empty
+                return Nothing
+              op@EdhOperator{} -> return $ Just op
+              opVal            -> do
+                (EdhRuntime logger _) <- readTMVar $ worldRuntime world
+                logger 30 (Just $ sourcePosPretty srcPos) $ ArgsPack
+                  [ EdhString
+                    $  "overriding an invalid operator "
+                    <> T.pack (show $ edhTypeOf opVal)
+                    <> ": "
+                    <> T.pack (show opVal)
+                  ]
+                  Map.empty
+                return Nothing
       predecessor <- findPredecessor
       u           <- unsafeIOToSTM newUnique
       let op = EdhOperator
@@ -388,7 +389,7 @@ evalStmt' !stmt !exit = do
                      , procedure'lexi = Just scope
                      , procedure'decl = opProc
                      }
-      changeEntityAttr (scopeEntity scope) (AttrByName opSym) op
+      changeEntityAttr pgs (scopeEntity scope) (AttrByName opSym) op
       exitEdhSTM pgs exit op
 
     ImportStmt argsRcvr srcExpr -> case srcExpr of
@@ -418,7 +419,7 @@ importFromObject !argsRcvr !fromObj !exit = do
   let !ctx  = edh'context pgs
       !this = thisObject $ contextScope ctx
   contEdhSTM $ do
-    ps <- allEntityAttrs $ objEntity fromObj
+    ps <- allEntityAttrs pgs $ objEntity fromObj
     let !artsPk = ArgsPack [] $ Map.fromList $ catMaybes
           [ case k of
 -- only attributes with a name not started with `_` are importable,
@@ -432,7 +433,7 @@ importFromObject !argsRcvr !fromObj !exit = do
           | (k, v) <- ps
           ]
     runEdhProg pgs $ recvEdhArgs ctx argsRcvr artsPk $ \em -> contEdhSTM $ do
-      updateEntityAttrs (objEntity this) $ Map.toList em
+      updateEntityAttrs pgs (objEntity this) $ Map.toList em
       exitEdhSTM pgs exit (EdhObject fromObj)
 
 importEdhModule' :: ArgsReceiver -> Text -> EdhProcExit -> EdhProg (STM ())
@@ -444,58 +445,58 @@ importEdhModule' !argsRcvr !importSpec !exit =
 importEdhModule :: Text -> EdhProcExit -> EdhProg (STM ())
 importEdhModule !impSpec !exit = do
   pgs <- ask
-  let !ctx   = edh'context pgs
-      !world = contextWorld ctx
-      !scope = contextScope ctx
-      importFromFS :: STM ()
-      importFromFS = lookupEdhCtxAttr scope (AttrByName "__file__") >>= \case
-        EdhString !fromModuPath -> do
-          (nomPath, moduFile) <- locateEdhModule
-            pgs
-            (edhPkgPathFrom $ T.unpack fromModuPath)
-            (T.unpack impSpec)
-          let !moduId = T.pack nomPath
-          moduMap' <- takeTMVar (worldModules world)
-          case Map.lookup moduId moduMap' of
-            Just !moduSlot -> do
-              -- put back immediately
-              putTMVar (worldModules world) moduMap'
-              -- blocking wait the target module loaded
-              waitEdhSTM pgs (readTMVar moduSlot) $ \case
-                -- TODO GHC should be able to detect cyclic imports as 
-                --      deadlock, find ways to report that more friendly
-                modu@EdhObject{} -> exitEdhSTM pgs exit modu
-                importError -> -- the first importer failed loading it,
-                  -- replicate the error in this thread
-                  throwEdhSTM pgs EvalError $ edhValueStr importError
-            Nothing -> do -- we are the first importer
-              -- allocate an empty slot
-              moduSlot <- newEmptyTMVar
-              -- put it for global visibility
-              putTMVar (worldModules world)
-                $ Map.insert moduId moduSlot moduMap'
-              catchSTM
-                  ( loadModule pgs moduSlot moduId moduFile
-                  $ \(OriginalValue !result _ _) -> case result of
-                      -- successfully loaded
-                      modu@EdhObject{} -> exitEdhProc exit modu
-                      _                -> error "bug"
-                  )
-                $ \(e :: SomeException) -> do
-                    -- cleanup on loading error
-                    let errStr = T.pack $ show e
-                    -- TODO catchSTM does NOT work across Edh transactions,
-                    --      need to impl. a catchEdh or sth. to be used here.                  let errStr = T.pack (show e)
-                    void $ tryPutTMVar moduSlot $ EdhString errStr
-                    moduMap'' <- takeTMVar (worldModules world)
-                    case Map.lookup moduId moduMap'' of
-                      Nothing        -> putTMVar (worldModules world) moduMap''
-                      Just moduSlot' -> if moduSlot' == moduSlot
-                        then putTMVar (worldModules world)
-                          $ Map.delete moduId moduMap''
-                        else putTMVar (worldModules world) moduMap''
-                    throwSTM e
-        _ -> error "bug: no valid `__file__` in context"
+  let
+    !ctx   = edh'context pgs
+    !world = contextWorld ctx
+    !scope = contextScope ctx
+    importFromFS :: STM ()
+    importFromFS = lookupEdhCtxAttr pgs scope (AttrByName "__file__") >>= \case
+      EdhString !fromModuPath -> do
+        (nomPath, moduFile) <- locateEdhModule
+          pgs
+          (edhPkgPathFrom $ T.unpack fromModuPath)
+          (T.unpack impSpec)
+        let !moduId = T.pack nomPath
+        moduMap' <- takeTMVar (worldModules world)
+        case Map.lookup moduId moduMap' of
+          Just !moduSlot -> do
+            -- put back immediately
+            putTMVar (worldModules world) moduMap'
+            -- blocking wait the target module loaded
+            waitEdhSTM pgs (readTMVar moduSlot) $ \case
+              -- TODO GHC should be able to detect cyclic imports as 
+              --      deadlock, find ways to report that more friendly
+              modu@EdhObject{} -> exitEdhSTM pgs exit modu
+              importError -> -- the first importer failed loading it,
+                -- replicate the error in this thread
+                throwEdhSTM pgs EvalError $ edhValueStr importError
+          Nothing -> do -- we are the first importer
+            -- allocate an empty slot
+            moduSlot <- newEmptyTMVar
+            -- put it for global visibility
+            putTMVar (worldModules world) $ Map.insert moduId moduSlot moduMap'
+            catchSTM
+                ( loadModule pgs moduSlot moduId moduFile
+                $ \(OriginalValue !result _ _) -> case result of
+                    -- successfully loaded
+                    modu@EdhObject{} -> exitEdhProc exit modu
+                    _                -> error "bug"
+                )
+              $ \(e :: SomeException) -> do
+                  -- cleanup on loading error
+                  let errStr = T.pack $ show e
+                  -- TODO catchSTM does NOT work across Edh transactions,
+                  --      need to impl. a catchEdh or sth. to be used here.                  let errStr = T.pack (show e)
+                  void $ tryPutTMVar moduSlot $ EdhString errStr
+                  moduMap'' <- takeTMVar (worldModules world)
+                  case Map.lookup moduId moduMap'' of
+                    Nothing        -> putTMVar (worldModules world) moduMap''
+                    Just moduSlot' -> if moduSlot' == moduSlot
+                      then putTMVar (worldModules world)
+                        $ Map.delete moduId moduMap''
+                      else putTMVar (worldModules world) moduMap''
+                  throwSTM e
+      _ -> error "bug: no valid `__file__` in context"
   if edh'in'tx pgs
     then throwEdh EvalError "You don't import from within a transaction"
     else contEdhSTM $ do
@@ -736,7 +737,7 @@ evalExpr expr exit = do
       SuperRef -> throwEdh EvalError "Can not address a single super alone"
       DirectRef !addr' -> contEdhSTM $ do
         !key <- resolveAddr pgs addr'
-        resolveEdhCtxAttr scope key >>= \case
+        resolveEdhCtxAttr pgs scope key >>= \case
           Nothing ->
             throwEdhSTM pgs EvalError $ "Not in scope: " <> T.pack (show addr')
           Just !originVal -> exitEdhSTM' pgs exit originVal
@@ -768,7 +769,7 @@ evalExpr expr exit = do
 
           -- indexing an object, by calling its ([]) method with ixVal as the single arg
           (EdhObject obj) ->
-            contEdhSTM $ resolveEdhObjAttr obj (AttrByName "[]") >>= \case
+            contEdhSTM $ resolveEdhObjAttr pgs obj (AttrByName "[]") >>= \case
 
               Nothing ->
                 throwEdhSTM pgs EvalError $ "No ([]) method from: " <> T.pack
@@ -834,7 +835,7 @@ evalExpr expr exit = do
 
 
     InfixExpr !opSym !lhExpr !rhExpr ->
-      contEdhSTM $ resolveEdhCtxAttr scope (AttrByName opSym) >>= \case
+      contEdhSTM $ resolveEdhCtxAttr pgs scope (AttrByName opSym) >>= \case
         Nothing ->
           throwEdhSTM pgs EvalError
             $  "Operator ("
@@ -985,14 +986,14 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
     AttrExpr ThisRef ->
       let !this = thisObject scope
           noMagic :: EdhProg (STM ())
-          noMagic = contEdhSTM $ resolveEdhObjAttr this key >>= \case
+          noMagic = contEdhSTM $ resolveEdhObjAttr pgs this key >>= \case
             Nothing         -> runEdhProg pgs $ exitNoAttr $ EdhObject this
             Just !originVal -> exitEdhSTM' pgs exit originVal
       in  getEdhAttrWithMagic (AttrByName "@<-") this key noMagic exit
     -- no magic layer laid over access via `that` ref
     AttrExpr ThatRef ->
       let !that = thatObject scope
-      in  contEdhSTM $ resolveEdhObjAttr that key >>= \case
+      in  contEdhSTM $ resolveEdhObjAttr pgs that key >>= \case
             Nothing         -> runEdhProg pgs $ exitNoAttr $ EdhObject that
             Just !originVal -> exitEdhSTM' pgs exit originVal
     -- give super objects of an super object the metamagical power to
@@ -1000,7 +1001,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
     AttrExpr SuperRef ->
       let !this = thisObject scope
           noMagic :: EdhProg (STM ())
-          noMagic = contEdhSTM $ resolveEdhSuperAttr this key >>= \case
+          noMagic = contEdhSTM $ resolveEdhSuperAttr pgs this key >>= \case
             Nothing         -> runEdhProg pgs $ exitNoAttr $ EdhObject this
             Just !originVal -> exitEdhSTM' pgs exit originVal
           getFromSupers :: [Object] -> EdhProg (STM ())
@@ -1020,7 +1021,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
     _ -> evalExpr fromExpr $ \(OriginalValue !fromVal _ _) -> case fromVal of
       (EdhObject !obj) -> do
         let noMagic :: EdhProg (STM ())
-            noMagic = contEdhSTM $ resolveEdhObjAttr obj key >>= \case
+            noMagic = contEdhSTM $ resolveEdhObjAttr pgs obj key >>= \case
               Nothing         -> runEdhProg pgs $ exitNoAttr fromVal
               Just !originVal -> exitEdhSTM' pgs exit originVal
         getEdhAttrWithMagic (AttrByName "@<-*") obj key noMagic exit
@@ -1051,7 +1052,7 @@ getEdhAttrWithMagic !magicKey !obj !key !exitNoMagic !exit = do
             contEdhSTM $ withMagicMethod magicMth
      where
       noMetamagic :: EdhProg (STM ())
-      noMetamagic = contEdhSTM $ resolveEdhObjAttr super magicKey >>= \case
+      noMetamagic = contEdhSTM $ resolveEdhObjAttr pgs super magicKey >>= \case
         Nothing -> runEdhProg pgs $ getViaSupers restSupers
         Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
       withMagicMethod :: EdhValue -> STM ()
@@ -1085,9 +1086,10 @@ setEdhAttrWithMagic !pgsAfter !magicKey !obj !key !val !exitNoMagic !exit = do
   setViaSupers (super : restSupers) = do
     !pgs <- ask
     let noMetamagic :: EdhProg (STM ())
-        noMetamagic = contEdhSTM $ resolveEdhObjAttr super magicKey >>= \case
-          Nothing -> runEdhProg pgs $ setViaSupers restSupers
-          Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
+        noMetamagic =
+          contEdhSTM $ resolveEdhObjAttr pgs super magicKey >>= \case
+            Nothing -> runEdhProg pgs $ setViaSupers restSupers
+            Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
         withMagicMethod :: EdhValue -> STM ()
         withMagicMethod !magicMth =
           edhMakeCall
@@ -1122,7 +1124,7 @@ setEdhAttr !pgsAfter !tgtExpr !key !val !exit = do
     AttrExpr ThisRef ->
       let noMagic :: EdhProg (STM ())
           noMagic = contEdhSTM $ do
-            changeEntityAttr (objEntity this) key val
+            changeEntityAttr pgs (objEntity this) key val
             runEdhProg pgsAfter $ exitEdhProc exit val
       in  setEdhAttrWithMagic pgsAfter
                               (AttrByName "<-@")
@@ -1133,7 +1135,7 @@ setEdhAttr !pgsAfter !tgtExpr !key !val !exit = do
                               exit
     -- no magic layer laid over assignment via `that` ref
     AttrExpr ThatRef -> contEdhSTM $ do
-      changeEntityAttr (objEntity that) key val
+      changeEntityAttr pgs (objEntity that) key val
       runEdhProg pgsAfter $ exitEdhProc exit val
     -- not allowing assignment via super
     AttrExpr SuperRef -> throwEdh EvalError "Can not assign via super"
@@ -1143,7 +1145,7 @@ setEdhAttr !pgsAfter !tgtExpr !key !val !exit = do
       EdhObject !tgtObj ->
         let noMagic :: EdhProg (STM ())
             noMagic = contEdhSTM $ do
-              changeEntityAttr (objEntity tgtObj) key val
+              changeEntityAttr pgs (objEntity tgtObj) key val
               runEdhProg pgsAfter $ exitEdhProc exit val
         in  setEdhAttrWithMagic pgsAfter
                                 (AttrByName "*<-@")
@@ -1278,47 +1280,52 @@ constructEdhObject !cls !argsSndr !exit = do
           initScope   = callerScope { thisObject = this, thatObject = this }
           initCtx = callerCtx { callStack = initScope <| callStack callerCtx }
           pgsInit     = pgsCaller { edh'context = initCtx }
-        contEdhSTM $ lookupEntityAttr thisEnt (AttrByName "__init__") >>= \case
-          EdhNil -> if null argsSndr
-            then exitEdhSTM pgsCaller exit thisVal
-            else
-              throwEdhSTM pgsCaller EvalError
-              $  "No __init__() defined by class "
-              <> procedure'name (procedure'decl cls)
-              <> " to receive argument(s)"
-          EdhMethod !initMth -> case procedure'body $ procedure'decl initMth of
-            Right !hp ->
-              runEdhProg pgsInit
-                $ hp argsSndr
-                $ \(OriginalValue !hostInitRtn _ _) ->
-                    -- a host __init__() method is responsible to return new
-                    -- `this` explicitly, or another value as appropriate
-                    contEdhSTM $ exitEdhSTM pgsCaller exit hostInitRtn
-            Left !pb -> runEdhProg pgsCaller $ packEdhArgs' argsSndr $ \apk ->
-              local (const pgsInit)
-                $ callEdhMethod apk this initMth pb Nothing
-                $ \(OriginalValue !initRtn _ _) ->
-                    local (const pgsCaller) $ case initRtn of
-                        -- allow a __init__() procedure to explicitly return other
-                        -- value than newly constructed `this` object
-                        -- it can still `return this` to early stop the proc
-                        -- which is magically an advanced feature
-                      EdhReturn !rtnVal -> exitEdhProc exit rtnVal
-                      EdhContinue ->
-                        throwEdh EvalError "Unexpected continue from __init__()"
-                      -- allow the use of `break` to early stop a __init__() 
-                      -- procedure with nil result
-                      EdhBreak -> exitEdhProc exit nil
-                      -- no explicit return from __init__() procedure, return the
-                      -- newly constructed this object, throw away the last
-                      -- value from the procedure execution
-                      _        -> exitEdhProc exit thisVal
-          badInitMth ->
-            throwEdhSTM pgsCaller EvalError
-              $  "Invalid __init__() method from class - "
-              <> edhValueStr (edhTypeOf badInitMth)
-              <> ": "
-              <> edhValueStr badInitMth
+        contEdhSTM
+          $   lookupEntityAttr pgsInit thisEnt (AttrByName "__init__")
+          >>= \case
+                EdhNil -> if null argsSndr
+                  then exitEdhSTM pgsCaller exit thisVal
+                  else
+                    throwEdhSTM pgsCaller EvalError
+                    $  "No __init__() defined by class "
+                    <> procedure'name (procedure'decl cls)
+                    <> " to receive argument(s)"
+                EdhMethod !initMth ->
+                  case procedure'body $ procedure'decl initMth of
+                    Right !hp ->
+                      runEdhProg pgsInit
+                        $ hp argsSndr
+                        $ \(OriginalValue !hostInitRtn _ _) ->
+                            -- a host __init__() method is responsible to return new
+                            -- `this` explicitly, or another value as appropriate
+                            contEdhSTM $ exitEdhSTM pgsCaller exit hostInitRtn
+                    Left !pb ->
+                      runEdhProg pgsCaller $ packEdhArgs' argsSndr $ \apk ->
+                        local (const pgsInit)
+                          $ callEdhMethod apk this initMth pb Nothing
+                          $ \(OriginalValue !initRtn _ _) ->
+                              local (const pgsCaller) $ case initRtn of
+                                -- allow a __init__() procedure to explicitly return other
+                                -- value than newly constructed `this` object
+                                -- it can still `return this` to early stop the proc
+                                -- which is magically an advanced feature
+                                EdhReturn !rtnVal -> exitEdhProc exit rtnVal
+                                EdhContinue       -> throwEdh
+                                  EvalError
+                                  "Unexpected continue from __init__()"
+                                -- allow the use of `break` to early stop a __init__() 
+                                -- procedure with nil result
+                                EdhBreak -> exitEdhProc exit nil
+                                -- no explicit return from __init__() procedure, return the
+                                -- newly constructed this object, throw away the last
+                                -- value from the procedure execution
+                                _        -> exitEdhProc exit thisVal
+                badInitMth ->
+                  throwEdhSTM pgsCaller EvalError
+                    $  "Invalid __init__() method from class - "
+                    <> edhValueStr (edhTypeOf badInitMth)
+                    <> ": "
+                    <> edhValueStr badInitMth
       _ -> -- return whatever the constructor returned if not an object
         exitEdhProc exit thisVal
 
@@ -1451,7 +1458,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                     _               -> ArgsPack [yielded'val] Map.empty
                   )
                 $ \em -> contEdhSTM $ do
-                    updateEntityAttrs (scopeEntity scope) $ Map.toList em
+                    updateEntityAttrs pgs (scopeEntity scope) $ Map.toList em
                     runEdhProg pgs
                       $ evalExpr doExpr
                       $ \(OriginalValue !doResult _ _) -> case doResult of
@@ -1544,7 +1551,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
           do1 !apk !next =
             runEdhProg pgs $ recvEdhArgs ctx argsRcvr apk $ \em ->
               contEdhSTM $ do
-                updateEntityAttrs (scopeEntity scope) $ Map.toList em
+                updateEntityAttrs pgs (scopeEntity scope) $ Map.toList em
                 runEdhProg pgs
                   $ evalExpr doExpr
                   $ \(OriginalValue !doResult _ _) -> case doResult of
@@ -1683,7 +1690,8 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
         contEdhSTM $ runEdhProg pgsAfter $ exitEdhProc exit nil
       -- no magic imposed to direct assignment in a (possibly class) proc
       DirectRef !addr' -> contEdhSTM $ resolveAddr pgs addr' >>= \key -> do
-        changeEntityAttr (scopeEntity $ contextScope $ edh'context pgs)
+        changeEntityAttr pgs
+                         (scopeEntity $ contextScope $ edh'context pgs)
                          key
                          rhVal
         runEdhProg pgsAfter $ exitEdhProc exit rhVal

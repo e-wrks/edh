@@ -243,14 +243,20 @@ createEdhModule !world !moduId !moduSrc = liftIO $ do
     }
 
 installEdhModule
-  :: MonadIO m => EdhWorld -> ModuleId -> (Object -> STM ()) -> m Object
+  :: MonadIO m
+  => EdhWorld
+  -> ModuleId
+  -> (EdhProgState -> Object -> STM ())
+  -> m Object
 installEdhModule !world !moduId !preInstall = liftIO $ do
   modu <- createEdhModule world moduId "<host-code>"
-  atomically $ preInstall modu
-  atomically $ do
-    moduSlot <- newTMVar $ EdhObject modu
-    moduMap  <- takeTMVar (worldModules world)
-    putTMVar (worldModules world) $ Map.insert moduId moduSlot moduMap
+  runEdhProgram' (worldContext world) $ do
+    pgs <- ask
+    contEdhSTM $ do
+      preInstall pgs modu
+      moduSlot <- newTMVar $ EdhObject modu
+      moduMap  <- takeTMVar (worldModules world)
+      putTMVar (worldModules world) $ Map.insert moduId moduSlot moduMap
   return modu
 
 
@@ -275,13 +281,14 @@ mkHostProc !scope !vc !nm !p !args = do
 mkHostClass
   :: Scope -- outer lexical scope
   -> Text  -- class name
+  -> Bool  -- write protected
   -> (  Scope       -- constructor scope
      -> ArgsSender  -- construction args
      -> TVar (Map.HashMap AttrKey EdhValue)  -- out-of-band attr store 
      -> STM ()
      )
   -> STM EdhValue
-mkHostClass !scope !nm !hc = do
+mkHostClass !scope !nm !writeProtected !hc = do
   classUniq <- unsafeIOToSTM newUnique
   let !cls = ProcDefi
         { procedure'uniq = classUniq
@@ -296,7 +303,7 @@ mkHostClass !scope !nm !hc = do
         -- note: cross check logic here with `createEdhObject`
         pgs <- ask
         contEdhSTM $ do
-          (ent, obs) <- createSideEntity True
+          (ent, obs) <- createSideEntity writeProtected
           !newThis   <- viewAsEdhObject ent cls []
           let !ctorScope = Scope { scopeEntity = ent
                                  , thisObject  = newThis

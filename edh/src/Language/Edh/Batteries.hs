@@ -181,7 +181,7 @@ installEdhBatteries world = liftIO $ do
 
       -- global procedures at world root scope
       !rootProcs <- sequence
-        [ ((AttrByName nm, ) <$> mkHostProc rootScope mc nm hp args)
+        [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp args
         | (mc, nm, hp, args) <-
           [ ( EdhMethod
             , "Symbol"
@@ -239,7 +239,7 @@ installEdhBatteries world = liftIO $ do
           , ("everySeconds", rtEverySecondsProc)
           ]
         ]
-      updateEntityAttrs rtEntity
+      updateEntityAttrs pgs rtEntity
         $  [ (AttrByName "debug", EdhDecimal 10)
            , (AttrByName "info" , EdhDecimal 20)
            , (AttrByName "warn" , EdhDecimal 30)
@@ -248,7 +248,7 @@ installEdhBatteries world = liftIO $ do
            ]
         ++ rtGenrs
 
-      updateEntityAttrs rootEntity
+      updateEntityAttrs pgs rootEntity
         $  rootOperators
         ++ rootProcs
         ++ [
@@ -282,7 +282,7 @@ installEdhBatteries world = liftIO $ do
           , (EdhMethod, "outer"  , scopeOuterProc  , PackReceiver [])
           ]
         ]
-      updateEntityAttrs (objEntity scopeSuperObj) scopeSuperMethods
+      updateEntityAttrs pgs (objEntity scopeSuperObj) scopeSuperMethods
 
       case envLogLevel of
         Nothing      -> return ()

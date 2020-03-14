@@ -48,7 +48,7 @@ doRead pendingLines =
 
 
 doEval :: EdhWorld -> Object -> Text -> InputT IO (Either EdhError EdhValue)
-doEval = evalEdhSource
+doEval !world !modu !edhSrc = evalEdhSource world modu "<adhoc>" edhSrc
 
 
 doPrint :: Either EdhError EdhValue -> InputT IO ()

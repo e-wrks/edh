@@ -183,11 +183,12 @@ import           Language.Edh.Event
 
 
 evalEdh
-  :: Text -- ^ Edh code
+  :: Text -- ^ source name
+  -> Text -- ^ source code
   -> EdhShell (Either EdhError EdhValue) -- ^ eval result
-evalEdh code = do
+evalEdh name code = do
   (world, modu) <- ask
-  liftIO $ evalEdhSource world modu code
+  liftIO $ evalEdhSource world modu name code
 
 
 runEdhShell

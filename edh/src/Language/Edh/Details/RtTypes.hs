@@ -62,11 +62,10 @@ setDictItem !k v !ds =
 toPairList :: DictStore -> [EdhValue]
 toPairList d = (<$> Map.toList d) $ \(k, v) -> EdhPair k v
 
-edhDictFromEntity :: Entity -> STM Dict
-edhDictFromEntity ent = do
+edhDictFromEntity :: EdhProgState -> Entity -> STM Dict
+edhDictFromEntity pgs ent = do
   u  <- unsafeIOToSTM newUnique
-  es <- readTVar $ entity'store ent
-  ps <- all'entity'attrs (entity'man ent) es
+  ps <- allEntityAttrs pgs ent
   (Dict u <$>) $ newTVar $ Map.fromList [ (attrKeyValue k, v) | (k, v) <- ps ]
 
 -- | An entity in Edh is the backing storage for a scope, with possibly 
@@ -96,41 +95,41 @@ data EntityManipulater = EntityManipulater {
     -- while an `EdhExpr _ (LitExpr NilLiteral) _` (i.e. `None` or `Nothing`)
     -- means knowingly absent, usually be okay and handled via pattern matching
     -- or equality test.
-    lookup'entity'attr :: !(AttrKey -> Dynamic -> STM EdhValue)
+    lookup'entity'attr :: !(EdhProgState -> AttrKey -> Dynamic -> STM EdhValue)
 
     -- enumeration of attrs (this better be lazy)
-    , all'entity'attrs :: !(Dynamic -> STM [(AttrKey, EdhValue)])
+    , all'entity'attrs :: !(EdhProgState -> Dynamic -> STM [(AttrKey, EdhValue)])
 
     -- single attr change
-    , change'entity'attr :: !(AttrKey -> EdhValue -> Dynamic ->  STM Dynamic)
+    , change'entity'attr :: !(EdhProgState -> AttrKey -> EdhValue -> Dynamic ->  STM Dynamic)
 
     -- bulk attr change
-    , update'entity'attrs :: !([(AttrKey, EdhValue)] -> Dynamic -> STM Dynamic)
+    , update'entity'attrs :: !(EdhProgState -> [(AttrKey, EdhValue)] -> Dynamic -> STM Dynamic)
   }
 
-lookupEntityAttr :: Entity -> AttrKey -> STM EdhValue
-lookupEntityAttr (Entity _ !es !em) !k = do
+lookupEntityAttr :: EdhProgState -> Entity -> AttrKey -> STM EdhValue
+lookupEntityAttr pgs (Entity _ !es !em) !k = do
   esd <- readTVar es
-  lookup'entity'attr em k esd
+  lookup'entity'attr em pgs k esd
 {-# INLINE lookupEntityAttr #-}
 
-allEntityAttrs :: Entity -> STM [(AttrKey, EdhValue)]
-allEntityAttrs (Entity _ !es !em) = do
+allEntityAttrs :: EdhProgState -> Entity -> STM [(AttrKey, EdhValue)]
+allEntityAttrs pgs (Entity _ !es !em) = do
   esd <- readTVar es
-  all'entity'attrs em esd
+  all'entity'attrs em pgs esd
 {-# INLINE allEntityAttrs #-}
 
-changeEntityAttr :: Entity -> AttrKey -> EdhValue -> STM ()
-changeEntityAttr (Entity _ !es !em) !k !v = do
+changeEntityAttr :: EdhProgState -> Entity -> AttrKey -> EdhValue -> STM ()
+changeEntityAttr pgs (Entity _ !es !em) !k !v = do
   esd  <- readTVar es
-  esd' <- change'entity'attr em k v esd
+  esd' <- change'entity'attr em pgs k v esd
   writeTVar es esd'
 {-# INLINE changeEntityAttr #-}
 
-updateEntityAttrs :: Entity -> [(AttrKey, EdhValue)] -> STM ()
-updateEntityAttrs (Entity _ !es !em) !ps = do
+updateEntityAttrs :: EdhProgState -> Entity -> [(AttrKey, EdhValue)] -> STM ()
+updateEntityAttrs pgs (Entity _ !es !em) !ps = do
   esd  <- readTVar es
-  esd' <- update'entity'attrs em ps esd
+  esd' <- update'entity'attrs em pgs ps esd
   writeTVar es esd'
 {-# INLINE updateEntityAttrs #-}
 
@@ -159,10 +158,10 @@ createMaoEntity = do
                                            the'change'entity'attr
                                            the'update'entity'attrs
  where
-  the'lookup'entity'attr _ _ = return EdhNil
-  the'all'entity'attrs _ = return []
-  the'change'entity'attr _ _ = return  -- TODO raise error instead ?
-  the'update'entity'attrs _ = return  -- TODO raise error instead ?
+  the'lookup'entity'attr _ _ _ = return EdhNil
+  the'all'entity'attrs _ _ = return []
+  the'change'entity'attr _ _ _ = return  -- TODO raise error instead ?
+  the'update'entity'attrs _ _ = return  -- TODO raise error instead ?
 
 
 -- | Create an entity with an in-band 'Data.HashMap.Strict.HashMap'
@@ -177,12 +176,12 @@ createHashEntity !m = do
                                            the'update'entity'attrs
  where
   hm = flip fromDyn Map.empty
-  the'lookup'entity'attr !k = return . fromMaybe EdhNil . Map.lookup k . hm
-  the'all'entity'attrs = return . Map.toList . hm
-  the'change'entity'attr !k !v = return . toDyn . if v == EdhNil
+  the'lookup'entity'attr _ !k = return . fromMaybe EdhNil . Map.lookup k . hm
+  the'all'entity'attrs _ = return . Map.toList . hm
+  the'change'entity'attr _ !k !v = return . toDyn . if v == EdhNil
     then Map.delete k . hm
     else Map.insert k v . hm
-  the'update'entity'attrs !ps =
+  the'update'entity'attrs _ !ps =
     return . toDyn . Map.union (Map.fromList ps) . hm
 
 
@@ -191,16 +190,16 @@ createHashEntity !m = do
 createSideEntity :: Bool -> STM (Entity, TVar (Map.HashMap AttrKey EdhValue))
 createSideEntity !writeProtected = do
   obs <- newTVar Map.empty
-  let the'lookup'entity'attr !k _ =
+  let the'lookup'entity'attr _ !k _ =
         fromMaybe EdhNil . Map.lookup k <$> readTVar obs
-      the'all'entity'attrs _ = Map.toList <$> readTVar obs
-      the'change'entity'attr !k !v inband = if writeProtected
-        then error "Writing a protected entity"
+      the'all'entity'attrs _ _ = Map.toList <$> readTVar obs
+      the'change'entity'attr pgs !k !v inband = if writeProtected
+        then throwEdhSTM pgs EvalError "Writing a protected entity"
         else do
           modifyTVar' obs $ Map.insert k v
           return inband
-      the'update'entity'attrs !ps inband = if writeProtected
-        then error "Writing a protected entity"
+      the'update'entity'attrs pgs !ps inband = if writeProtected
+        then throwEdhSTM pgs EvalError "Writing a protected entity"
         else do
           modifyTVar' obs $ Map.union (Map.fromList ps)
           return inband

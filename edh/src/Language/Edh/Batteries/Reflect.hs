@@ -92,7 +92,7 @@ scopeAttrsProc _ !exit = do
   !pgs <- ask
   let !that = thatObject $ contextScope $ edh'context pgs
   contEdhSTM $ do
-    ad <- edhDictFromEntity $ scopeEntity $ wrappedScopeOf that
+    ad <- edhDictFromEntity pgs $ scopeEntity $ wrappedScopeOf that
     exitEdhSTM pgs exit $ EdhDict ad
 
 
@@ -129,7 +129,7 @@ scopePutProc !argsSender !exit = do
       !ent       = scopeEntity $ wrappedScopeOf that
   packEdhArgs argsSender $ \(ArgsPack !args !kwargs) -> contEdhSTM $ do
     attrs <- putAttrs pgs args []
-    updateEntityAttrs ent
+    updateEntityAttrs pgs ent
       $  attrs
       ++ [ (AttrByName k, v) | (k, v) <- Map.toList kwargs ]
     exitEdhSTM pgs exit nil

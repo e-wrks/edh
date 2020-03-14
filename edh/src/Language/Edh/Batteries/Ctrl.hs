@@ -58,7 +58,7 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
           Just [] -> -- valid pattern, no match
             exitEdhProc exit EdhFallthrough
           Just mps -> contEdhSTM $ do -- pattern matched
-            updateEntityAttrs (scopeEntity callerScope) mps
+            updateEntityAttrs pgs (scopeEntity callerScope) mps
             runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
               exitEdhProc
                 exit
@@ -112,7 +112,8 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       [StmtSrc (_, ExprStmt (AttrExpr (DirectRef (NamedAttr attrName))))] ->
         contEdhSTM $ do
           when (attrName /= "_") $ do
-            changeEntityAttr (scopeEntity callerScope)
+            changeEntityAttr pgs
+                             (scopeEntity callerScope)
                              (AttrByName attrName)
                              (noneNil ctxMatch)
           runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
@@ -127,6 +128,7 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       [StmtSrc (_, ExprStmt (InfixExpr "=>" (AttrExpr (DirectRef (NamedAttr headName))) (AttrExpr (DirectRef (NamedAttr tailName)))))]
         -> let doMatched headVal tailVal = do
                  updateEntityAttrs
+                   pgs
                    (scopeEntity callerScope)
                    [ (AttrByName headName, headVal)
                    , (AttrByName tailName, tailVal)
@@ -184,6 +186,7 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
           case ctxMatch of
             EdhTuple vs | length vs == length vExprs -> do
               updateEntityAttrs
+                pgs
                 (scopeEntity callerScope)
                 [ (an, noneNil av)
                 | (an@(AttrByName nm), av) <- zip attrNames vs
@@ -204,14 +207,15 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
            case ctxMatch of
           EdhObject ctxObj ->
             contEdhSTM
-              $   lookupEdhCtxAttr callerScope (AttrByName classAttr)
+              $   lookupEdhCtxAttr pgs callerScope (AttrByName classAttr)
               >>= \case
                     EdhNil -> exitEdhSTM pgs exit EdhFallthrough
                     val    -> case val of
                       EdhClass class_ ->
-                        resolveEdhInstance class_ ctxObj >>= \case
+                        resolveEdhInstance pgs class_ ctxObj >>= \case
                           Just instObj -> do
                             when (instAttr /= "_") $ changeEntityAttr
+                              pgs
                               (scopeEntity callerScope)
                               (AttrByName instAttr)
                               (EdhObject instObj)
