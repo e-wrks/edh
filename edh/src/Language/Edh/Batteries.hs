@@ -239,7 +239,7 @@ installEdhBatteries world = liftIO $ do
           , ("everySeconds", rtEverySecondsProc)
           ]
         ]
-      installEdhAttrs rtEntity
+      updateEntityAttrs rtEntity
         $  [ (AttrByName "debug", EdhDecimal 10)
            , (AttrByName "info" , EdhDecimal 20)
            , (AttrByName "warn" , EdhDecimal 30)
@@ -248,7 +248,7 @@ installEdhBatteries world = liftIO $ do
            ]
         ++ rtGenrs
 
-      installEdhAttrs rootEntity
+      updateEntityAttrs rootEntity
         $  rootOperators
         ++ rootProcs
         ++ [
@@ -282,7 +282,7 @@ installEdhBatteries world = liftIO $ do
           , (EdhMethod, "outer"  , scopeOuterProc  , PackReceiver [])
           ]
         ]
-      installEdhAttrs (objEntity scopeSuperObj) scopeSuperMethods
+      updateEntityAttrs (objEntity scopeSuperObj) scopeSuperMethods
 
       case envLogLevel of
         Nothing      -> return ()

@@ -66,8 +66,8 @@ edhDictFromEntity :: Entity -> STM Dict
 edhDictFromEntity ent = do
   u  <- unsafeIOToSTM newUnique
   es <- readTVar $ entity'store ent
-  (Dict u <$>) $ newTVar $ Map.fromList
-    [ (attrKeyValue k, v) | (k, v) <- allEntityAttrs (entity'man ent) es ]
+  ps <- all'entity'attrs (entity'man ent) es
+  (Dict u <$>) $ newTVar $ Map.fromList [ (attrKeyValue k, v) | (k, v) <- ps ]
 
 -- | An entity in Edh is the backing storage for a scope, with possibly 
 -- an object (actually more objects still possible, but god forbid it)
@@ -86,33 +86,53 @@ instance Ord Entity where
 instance Hashable Entity where
   hashWithSalt s (Entity u _ _) = hashWithSalt s u
 
-
--- | Backing storage manipulation interface for entity stores of a certain (but
--- dynamic) type.
+-- | Backing storage manipulation interface for entities
 --
 -- Arbitrary resources (esp. statically typed artifacts bearing high machine
 -- performance purpose) can be wrapped as virtual entities through this interface.
---
--- Note the entity storage interface has all ways to be pure, but various procedures
---      can be returned per different 'AttrKey', each to do impure or even crazy
---      things when executed in an Edh world as context.
 data EntityManipulater = EntityManipulater {
     -- a result of `EdhNil` (i.e. `nil`) means no such attr, should usually lead
     -- to error;
     -- while an `EdhExpr _ (LitExpr NilLiteral) _` (i.e. `None` or `Nothing`)
     -- means knowingly absent, usually be okay and handled via pattern matching
     -- or equality test.
-    lookupEntityAttr :: !(AttrKey -> Dynamic -> EdhValue)
+    lookup'entity'attr :: !(AttrKey -> Dynamic -> STM EdhValue)
 
     -- enumeration of attrs (this better be lazy)
-    , allEntityAttrs :: !(Dynamic -> [(AttrKey, EdhValue)])
+    , all'entity'attrs :: !(Dynamic -> STM [(AttrKey, EdhValue)])
 
     -- single attr change
-    , changeEntityAttr :: !(AttrKey -> EdhValue -> Dynamic -> Dynamic)
+    , change'entity'attr :: !(AttrKey -> EdhValue -> Dynamic ->  STM Dynamic)
 
     -- bulk attr change
-    , updateEntityAttrs :: !([(AttrKey, EdhValue)] -> Dynamic -> Dynamic)
+    , update'entity'attrs :: !([(AttrKey, EdhValue)] -> Dynamic -> STM Dynamic)
   }
+
+lookupEntityAttr :: Entity -> AttrKey -> STM EdhValue
+lookupEntityAttr (Entity _ !es !em) !k = do
+  esd <- readTVar es
+  lookup'entity'attr em k esd
+{-# INLINE lookupEntityAttr #-}
+
+allEntityAttrs :: Entity -> STM [(AttrKey, EdhValue)]
+allEntityAttrs (Entity _ !es !em) = do
+  esd <- readTVar es
+  all'entity'attrs em esd
+{-# INLINE allEntityAttrs #-}
+
+changeEntityAttr :: Entity -> AttrKey -> EdhValue -> STM ()
+changeEntityAttr (Entity _ !es !em) !k !v = do
+  esd  <- readTVar es
+  esd' <- change'entity'attr em k v esd
+  writeTVar es esd'
+{-# INLINE changeEntityAttr #-}
+
+updateEntityAttrs :: Entity -> [(AttrKey, EdhValue)] -> STM ()
+updateEntityAttrs (Entity _ !es !em) !ps = do
+  esd  <- readTVar es
+  esd' <- update'entity'attrs em ps esd
+  writeTVar es esd'
+{-# INLINE updateEntityAttrs #-}
 
 data AttrKey = AttrByName !AttrName | AttrBySym !Symbol
     deriving (Eq, Ord, Show)
@@ -134,56 +154,65 @@ createMaoEntity :: STM Entity
 createMaoEntity = do
   u  <- unsafeIOToSTM newUnique
   es <- newTVar $ toDyn EdhNil
-  return $ Entity u es maoEntityManipulater
-maoEntityManipulater :: EntityManipulater
-maoEntityManipulater = EntityManipulater the'lookupEntityAttr
-                                         the'allEntityAttrs
-                                         the'changeEntityAttr
-                                         the'updateEntityAttrs
+  return $ Entity u es $ EntityManipulater the'lookup'entity'attr
+                                           the'all'entity'attrs
+                                           the'change'entity'attr
+                                           the'update'entity'attrs
  where
-  the'lookupEntityAttr _ _ = EdhNil
-  the'allEntityAttrs _ = []
-  the'changeEntityAttr _ _ = id  -- TODO raise error instead ?
-  the'updateEntityAttrs _ = id  -- TODO raise error instead ?
+  the'lookup'entity'attr _ _ = return EdhNil
+  the'all'entity'attrs _ = return []
+  the'change'entity'attr _ _ = return  -- TODO raise error instead ?
+  the'update'entity'attrs _ = return  -- TODO raise error instead ?
 
 
--- | Create an entity backed by a 'Data.HashMap.Strict.HashMap'
+-- | Create an entity with an in-band 'Data.HashMap.Strict.HashMap'
+-- as backing storage
 createHashEntity :: Map.HashMap AttrKey EdhValue -> STM Entity
 createHashEntity !m = do
   u  <- unsafeIOToSTM newUnique
   es <- newTVar $ toDyn m
-  return $ Entity u es hashEntityManipulater
-hashEntityManipulater :: EntityManipulater
-hashEntityManipulater = EntityManipulater the'lookupEntityAttr
-                                          the'allEntityAttrs
-                                          the'changeEntityAttr
-                                          the'updateEntityAttrs
+  return $ Entity u es $ EntityManipulater the'lookup'entity'attr
+                                           the'all'entity'attrs
+                                           the'change'entity'attr
+                                           the'update'entity'attrs
  where
   hm = flip fromDyn Map.empty
-  the'lookupEntityAttr !k = fromMaybe EdhNil . Map.lookup k . hm
-  the'allEntityAttrs = Map.toList . hm
-  the'changeEntityAttr !k !v =
-    toDyn . if v == EdhNil then Map.delete k . hm else Map.insert k v . hm
-  the'updateEntityAttrs !ps = toDyn . Map.union (Map.fromList ps) . hm
+  the'lookup'entity'attr !k = return . fromMaybe EdhNil . Map.lookup k . hm
+  the'all'entity'attrs = return . Map.toList . hm
+  the'change'entity'attr !k !v = return . toDyn . if v == EdhNil
+    then Map.delete k . hm
+    else Map.insert k v . hm
+  the'update'entity'attrs !ps =
+    return . toDyn . Map.union (Map.fromList ps) . hm
 
 
--- | Create an entity for some key-value pairs that accepts no change
-createConstEntity :: [(AttrKey, EdhValue)] -> STM Entity
-createConstEntity !ps = do
+-- | Create an entity with an out-of-band 'Data.HashMap.Strict.HashMap'
+-- as backing storage
+createSideEntity :: Bool -> STM (Entity, TVar (Map.HashMap AttrKey EdhValue))
+createSideEntity !writeProtected = do
+  obs <- newTVar Map.empty
+  let the'lookup'entity'attr !k _ =
+        fromMaybe EdhNil . Map.lookup k <$> readTVar obs
+      the'all'entity'attrs _ = Map.toList <$> readTVar obs
+      the'change'entity'attr !k !v inband = if writeProtected
+        then error "Writing a protected entity"
+        else do
+          modifyTVar' obs $ Map.insert k v
+          return inband
+      the'update'entity'attrs !ps inband = if writeProtected
+        then error "Writing a protected entity"
+        else do
+          modifyTVar' obs $ Map.union (Map.fromList ps)
+          return inband
   u  <- unsafeIOToSTM newUnique
-  es <- newTVar $ toDyn $ Map.fromList ps
-  return $ Entity u es constEntityManipulater
-constEntityManipulater :: EntityManipulater
-constEntityManipulater = EntityManipulater the'lookupEntityAttr
-                                           the'allEntityAttrs
-                                           the'changeEntityAttr
-                                           the'updateEntityAttrs
- where
-  hm = flip fromDyn Map.empty
-  the'lookupEntityAttr !k = fromMaybe EdhNil . Map.lookup k . hm
-  the'allEntityAttrs = Map.toList . hm
-  the'changeEntityAttr _ _ = id  -- TODO raise error instead ?
-  the'updateEntityAttrs _ = id  -- TODO raise error instead ?
+  es <- newTVar $ toDyn nil -- put a nil in-band atm
+  return
+    ( Entity u es $ EntityManipulater the'lookup'entity'attr
+                                      the'all'entity'attrs
+                                      the'change'entity'attr
+                                      the'update'entity'attrs
+    , obs
+    )
 
 
 -- | A symbol can stand in place of an alphanumeric name, used to

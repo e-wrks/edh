@@ -60,34 +60,32 @@ lookupEdhSuperAttr this addr = resolveEdhSuperAttr this addr >>= \case
 
 
 resolveEdhCtxAttr :: Scope -> AttrKey -> STM (Maybe OriginalValue)
-resolveEdhCtxAttr !scope !addr = readTVar (entity'store ent) >>= \es ->
-  case lookupEntityAttr (entity'man ent) addr es of
+resolveEdhCtxAttr !scope !addr =
+  lookupEntityAttr (scopeEntity scope) addr >>= \case
     EdhNil -> resolveLexicalAttr (outerScopeOf scope) addr
     val    -> return $ Just (OriginalValue val scope $ thatObject scope)
-  where ent = scopeEntity scope
 {-# INLINE resolveEdhCtxAttr #-}
 
 resolveLexicalAttr :: Maybe Scope -> AttrKey -> STM (Maybe OriginalValue)
 resolveLexicalAttr Nothing _ = return Nothing
 resolveLexicalAttr (Just scope@(Scope !ent !this !_that _)) addr =
-  readTVar (entity'store ent) >>= \es ->
-    case lookupEntityAttr (entity'man ent) addr es of
-      EdhNil ->
-        -- go for the interesting attribute from inheritance hierarchy
-        -- of this context object, so a module as an object, can `extends`
-        -- some objects too, in addition to the `import` mechanism
-        (if ent == objEntity this
-            -- go directly to supers as entity has just got negative result
-            then readTVar (objSupers this) >>= resolveEdhSuperAttr' this addr
-            -- context scope is different entity from this context object,
-            -- start next from this object
-            else resolveEdhObjAttr' this this addr
-          )
-          >>= \case
-                Just scope'from'object -> return $ Just scope'from'object
-                -- go one level outer of the lexical stack
-                Nothing -> resolveLexicalAttr (outerScopeOf scope) addr
-      !val -> return $ Just (OriginalValue val scope $ thatObject scope)
+  lookupEntityAttr ent addr >>= \case
+    EdhNil ->
+      -- go for the interesting attribute from inheritance hierarchy
+      -- of this context object, so a module as an object, can `extends`
+      -- some objects too, in addition to the `import` mechanism
+      (if ent == objEntity this
+          -- go directly to supers as entity has just got negative result
+          then readTVar (objSupers this) >>= resolveEdhSuperAttr' this addr
+          -- context scope is different entity from this context object,
+          -- start next from this object
+          else resolveEdhObjAttr' this this addr
+        )
+        >>= \case
+              Just scope'from'object -> return $ Just scope'from'object
+              -- go one level outer of the lexical stack
+              Nothing -> resolveLexicalAttr (outerScopeOf scope) addr
+    !val -> return $ Just (OriginalValue val scope $ thatObject scope)
 {-# INLINE resolveLexicalAttr #-}
 
 resolveEdhObjAttr :: Object -> AttrKey -> STM (Maybe OriginalValue)
@@ -100,11 +98,9 @@ resolveEdhSuperAttr !this !addr =
 {-# INLINE resolveEdhSuperAttr #-}
 
 resolveEdhObjAttr' :: Object -> Object -> AttrKey -> STM (Maybe OriginalValue)
-resolveEdhObjAttr' !that !this !addr =
-  readTVar (entity'store thisEnt) >>= \es ->
-    case lookupEntityAttr (entity'man thisEnt) addr es of
-      EdhNil -> readTVar (objSupers this) >>= resolveEdhSuperAttr' that addr
-      !val   -> return $ Just $ (OriginalValue val clsScope that)
+resolveEdhObjAttr' !that !this !addr = lookupEntityAttr thisEnt addr >>= \case
+  EdhNil -> readTVar (objSupers this) >>= resolveEdhSuperAttr' that addr
+  !val   -> return $ Just $ OriginalValue val clsScope that
  where
   !thisEnt  = objEntity this
   !clsScope = Scope thisEnt this that $ objClass this

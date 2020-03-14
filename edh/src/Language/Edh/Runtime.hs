@@ -11,8 +11,6 @@ module Language.Edh.Runtime
   , mkHostProc
   , mkHostClass
   , mkHostOper
-  , installEdhAttrs
-  , installEdhAttr
   , module CL
   , module RT
   , module TX
@@ -275,26 +273,38 @@ mkHostProc !scope !vc !nm !p !args = do
     }
 
 mkHostClass
-  :: Scope
-  -> Text
-  -> ArgsReceiver
-  -> (Scope -> ArgsSender -> STM (Entity, [Object]))
+  :: Scope -- outer lexical scope
+  -> Text  -- class name
+  -> (  Scope       -- constructor scope
+     -> ArgsSender  -- construction args
+     -> TVar (Map.HashMap AttrKey EdhValue)  -- out-of-band attr store 
+     -> STM ()
+     )
   -> STM EdhValue
-mkHostClass !scope !nm !args !hcp = do
-  u <- unsafeIOToSTM newUnique
+mkHostClass !scope !nm !hc = do
+  classUniq <- unsafeIOToSTM newUnique
   let !cls = ProcDefi
-        { procedure'uniq = u
+        { procedure'uniq = classUniq
         , procedure'lexi = Just scope
         , procedure'decl = ProcDecl { procedure'name = nm
-                                    , procedure'args = args
+                                    , procedure'args = PackReceiver []
                                     , procedure'body = Right ctor
                                     }
         }
       ctor :: EdhProcedure
-      ctor !argsSndr !exit = ask >>= \pgs -> contEdhSTM $ do
-        (ent, supers) <- hcp scope argsSndr
-        !newThis      <- viewAsEdhObject ent cls supers
-        exitEdhSTM pgs exit $ EdhObject newThis
+      ctor !argsSndr !exit = do
+        -- note: cross check logic here with `createEdhObject`
+        pgs <- ask
+        contEdhSTM $ do
+          (ent, obs) <- createSideEntity True
+          !newThis   <- viewAsEdhObject ent cls []
+          let !ctorScope = Scope { scopeEntity = ent
+                                 , thisObject  = newThis
+                                 , thatObject  = newThis
+                                 , scopeProc   = cls
+                                 }
+          hc ctorScope argsSndr obs
+          exitEdhSTM pgs exit $ EdhObject newThis
   return $ EdhClass cls
 
 mkHostOper :: EdhWorld -> Scope -> OpSymbol -> EdhProcedure -> STM EdhValue
@@ -320,11 +330,3 @@ mkHostOper !world !scope !opSym !hp = do
           }
         }
 
-
-installEdhAttrs :: Entity -> [(AttrKey, EdhValue)] -> STM ()
-installEdhAttrs e as =
-  modifyTVar' (entity'store e) $ updateEntityAttrs (entity'man e) as
-
-installEdhAttr :: Entity -> AttrKey -> EdhValue -> STM ()
-installEdhAttr e k v =
-  modifyTVar' (entity'store e) $ changeEntityAttr (entity'man e) k v

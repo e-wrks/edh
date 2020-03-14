@@ -11,7 +11,6 @@ import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
-import           Data.Dynamic
 
 import           Language.Edh.Control
 import           Language.Edh.Runtime
@@ -128,36 +127,24 @@ scopePutProc !argsSender !exit = do
   let !callerCtx = edh'context pgs
       !that      = thatObject $ contextScope callerCtx
       !ent       = scopeEntity $ wrappedScopeOf that
-      !es        = entity'store ent
   packEdhArgs argsSender $ \(ArgsPack !args !kwargs) -> contEdhSTM $ do
-    sd  <- readTVar es
-    sd' <- putAttrs pgs
-                    args
-                    (Map.toList kwargs)
-                    (changeEntityAttr $ entity'man ent)
-                    sd
-    writeTVar es sd'
+    attrs <- putAttrs pgs args []
+    updateEntityAttrs ent
+      $  attrs
+      ++ [ (AttrByName k, v) | (k, v) <- Map.toList kwargs ]
     exitEdhSTM pgs exit nil
  where
   putAttrs
     :: EdhProgState
     -> [EdhValue]
-    -> [(AttrName, EdhValue)]
-    -> (AttrKey -> EdhValue -> Dynamic -> Dynamic)
-    -> Dynamic
-    -> STM Dynamic
-  putAttrs _ [] [] _ !es = return es
-  putAttrs pgs [] ((kw, v) : kwargs) !sm !es =
-    putAttrs pgs [] kwargs sm $ sm (AttrByName kw) v es
-  putAttrs pgs (arg : args) !kwargs !sm !es = case arg of
-    EdhPair (EdhString !k) !v ->
-      putAttrs pgs args kwargs sm $ sm (AttrByName k) v es
-    EdhPair (EdhSymbol !k) !v ->
-      putAttrs pgs args kwargs sm $ sm (AttrBySym k) v es
-    EdhTuple [EdhString !k, v] ->
-      putAttrs pgs args kwargs sm $ sm (AttrByName k) v es
-    EdhTuple [EdhSymbol !k, v] ->
-      putAttrs pgs args kwargs sm $ sm (AttrBySym k) v es
+    -> [(AttrKey, EdhValue)]
+    -> STM [(AttrKey, EdhValue)]
+  putAttrs _   []           cumu = return cumu
+  putAttrs pgs (arg : args) cumu = case arg of
+    EdhPair (EdhString !k) !v  -> putAttrs pgs args ((AttrByName k, v) : cumu)
+    EdhPair (EdhSymbol !k) !v  -> putAttrs pgs args ((AttrBySym k, v) : cumu)
+    EdhTuple [EdhString !k, v] -> putAttrs pgs args ((AttrByName k, v) : cumu)
+    EdhTuple [EdhSymbol !k, v] -> putAttrs pgs args ((AttrBySym k, v) : cumu)
     _ ->
       throwEdhSTM pgs EvalError
         $  "Invalid key/value spec to put into a scope - "

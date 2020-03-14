@@ -37,8 +37,6 @@ module Language.Edh.EHI
   , createEdhWorld
   , installEdhBatteries
   , declareEdhOperators
-  , installEdhAttrs
-  , installEdhAttr
 
     -- ** Spliced execution
   , bootEdhModule
@@ -110,9 +108,13 @@ module Language.Edh.EHI
   , Class
   , Entity(..)
   , EntityManipulater(..)
+  , lookupEntityAttr
+  , allEntityAttrs
+  , changeEntityAttr
+  , updateEntityAttrs
   , createMaoEntity
   , createHashEntity
-  , createConstEntity
+  , createSideEntity
   , AttrKey(..)
   , attrKeyValue
   , lookupEdhCtxAttr
