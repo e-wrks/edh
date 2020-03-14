@@ -134,7 +134,10 @@ updateEntityAttrs pgs (Entity _ !es !em) !ps = do
 {-# INLINE updateEntityAttrs #-}
 
 data AttrKey = AttrByName !AttrName | AttrBySym !Symbol
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord)
+instance Show AttrKey where
+  show (AttrByName attrName      ) = T.unpack attrName
+  show (AttrBySym  (Symbol _ sym)) = "@" <> T.unpack sym
 instance Hashable AttrKey where
   hashWithSalt s (AttrByName name) =
     s `hashWithSalt` (0 :: Int) `hashWithSalt` name
