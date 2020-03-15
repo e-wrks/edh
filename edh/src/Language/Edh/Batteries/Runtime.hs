@@ -17,7 +17,9 @@ import qualified Data.HashMap.Strict           as Map
 
 import           Text.Megaparsec
 
-import           Data.Lossless.Decimal          ( Decimal(..) )
+import           Data.Lossless.Decimal          ( Decimal(..)
+                                                , castDecimalToInteger
+                                                )
 
 import           Language.Edh.Control
 import           Language.Edh.Runtime
@@ -79,8 +81,9 @@ rtEveryMicrosProc !argsSender _ = ask >>= \pgs ->
     Just genr'caller -> case argsSender of
       [SendPosArg !nExpr] -> evalExpr nExpr $ \(OriginalValue nVal _ _) ->
         case nVal of
-          (EdhDecimal (Decimal d e n)) | d == 1 ->
-            contEdhSTM $ timelyNotify (fromIntegral n * 10 ^ e) genr'caller
+          (EdhDecimal d) ->
+            let n = fromInteger $ castDecimalToInteger d
+            in  contEdhSTM $ timelyNotify n genr'caller
           _ -> throwEdh EvalError $ "Invalid argument: " <> T.pack (show nVal)
       _ ->
         throwEdh EvalError $ "Invalid argument: " <> T.pack (show argsSender)
@@ -94,8 +97,9 @@ rtEveryMillisProc !argsSender _ = ask >>= \pgs ->
     Just genr'caller -> case argsSender of
       [SendPosArg !nExpr] -> evalExpr nExpr $ \(OriginalValue nVal _ _) ->
         case nVal of
-          (EdhDecimal (Decimal d e n)) | d == 1 -> contEdhSTM
-            $ timelyNotify (fromIntegral n * 10 ^ (e + 3)) genr'caller
+          (EdhDecimal d) ->
+            let n = 1000 * fromInteger (castDecimalToInteger d)
+            in  contEdhSTM $ timelyNotify n genr'caller
           _ -> throwEdh EvalError $ "Invalid argument: " <> T.pack (show nVal)
       _ ->
         throwEdh EvalError $ "Invalid argument: " <> T.pack (show argsSender)
@@ -109,8 +113,9 @@ rtEverySecondsProc !argsSender _ = ask >>= \pgs ->
     Just genr'caller -> case argsSender of
       [SendPosArg !nExpr] -> evalExpr nExpr $ \(OriginalValue nVal _ _) ->
         case nVal of
-          (EdhDecimal (Decimal d e n)) | d == 1 -> contEdhSTM
-            $ timelyNotify (fromIntegral n * 10 ^ (e + 6)) genr'caller
+          (EdhDecimal d) ->
+            let n = 1000000 * fromInteger (castDecimalToInteger d)
+            in  contEdhSTM $ timelyNotify n genr'caller
           _ -> throwEdh EvalError $ "Invalid argument: " <> T.pack (show nVal)
       _ ->
         throwEdh EvalError $ "Invalid argument: " <> T.pack (show argsSender)
