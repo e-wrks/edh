@@ -555,7 +555,7 @@ loadModule !pgs !moduSlot !moduId !moduFile !exit = if edh'in'tx pgs
                         { procedure'uniq = moduUniq
                         , procedure'lexi = Just $ worldScope world
                         , procedure'decl = ProcDecl
-                          { procedure'name = moduId
+                          { procedure'name = "module:" <> moduId
                           , procedure'args = PackReceiver []
                           , procedure'body = Left $ StmtSrc
                                                ( SourcePos
