@@ -36,6 +36,9 @@ library
         lossless-decimal -any,
         edh-internal -any,
         text -any,
+        hashable -any,
+        unordered-containers -any,
+        containers -any,
         mtl -any,
         transformers -any
 
