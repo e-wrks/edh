@@ -47,6 +47,8 @@ See [Edh Im](https://github.com/e-wrks/edhim) for an example.
   - [Interpreter Procedures](#interpreter-procedures)
   - [Class Procedures](#class-procedures)
   - [Inheritance Hierarchy](#inheritance-hierarchy)
+    - [Magical Supers](#magical-supers)
+    - [More OO Approaches](#more-oo-approaches)
   - [Reactor Procedure](#reactor-procedure)
   - [Event Producing / Consuming](#event-producing--consuming)
 - [Go Routines](#go-routines)
@@ -1324,13 +1326,18 @@ reference, which refers to a descendant record from an ancestor
 method, in addition to `this` reference which refers to the lexical
 self record.
 
-> Further more, magic methods can be defined at `super` objects to
-> intercept some actions performed on descendant objects, e.g.
-> attribute read/write. Details of the magic methods are still WIP
-> on feature branches, check back later to see updates.
+#### Magical Supers
 
-This is yet another much under explored area in **Edh**, trying to do
-traditional style object oriented inheritance is problematic:
+Checkout [magical-supers.edh](./magical-supers.edh), note you can only
+run that with master branch (considered nightly) of **Edh** interpreter,
+released versions have not support of it.
+
+This is under heavy prototyping with a (not publicly visible) in-memory
+graph database project, will be described more clearly later.
+
+#### More OO Approaches
+
+Trying to do traditional style object oriented inheritance is problematic:
 
 Checkout [inheritance.edh](./inheritance.edh)
 
@@ -1403,7 +1410,7 @@ Hello there!
 Đ:
 ```
 
-And `that` reference is not very useful alone, as you can barely make
+Otherwise `that` reference is not very useful alone, as you can barely make
 any assumption about the record it points to. Well further ideas to leverage
 the inheritance constructs so far may include:
 

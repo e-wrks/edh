@@ -79,7 +79,7 @@
 
   class BusObj1 * {
 
-    boEntity = scope()  # for debug purpose
+    _selfScope = scope()  # for debug purpose
 
     method n () {
       30<| 'super provided n - ' ++ super?n
