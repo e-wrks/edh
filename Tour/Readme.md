@@ -40,7 +40,7 @@ See [Edh Im](https://github.com/e-wrks/edhim) for an example.
     - [Case-Of](#case-of)
     - [Pattern Matching](#pattern-matching)
     - [Branching semantics, Fallthrough](#branching-semantics-fallthrough)
-- [Procedures](#procedures)
+- [Procedures in Action](#procedures-in-action)
   - [Host Procedures](#host-procedures)
   - [Method Procedures](#method-procedures)
   - [Generator Procedures](#generator-procedures)
@@ -50,7 +50,7 @@ See [Edh Im](https://github.com/e-wrks/edhim) for an example.
     - [Magical Supers](#magical-supers)
     - [More OO Approaches](#more-oo-approaches)
   - [Reactor Procedure](#reactor-procedure)
-- [Event Producing / Consuming](#event-producing--consuming)
+  - [Producer Procedures](#producer-procedures)
 - [Go Routines](#go-routines)
 - [Programming Concurrency and Data Consistency as a whole](#programming-concurrency-and-data-consistency-as-a-whole)
 - [Event Sink / Reactor / Defer](#event-sink--reactor--defer)
@@ -1033,7 +1033,7 @@ I don't know what you want from a StringType: the hell
 Đ:
 ```
 
-## Procedures
+## Procedures in Action
 
 ### Host Procedures
 
@@ -1441,7 +1441,7 @@ attribute of the **scope** **entity**), instead, it is associated with an
 See [Event Sink / Reactor / Defer](#event-sink--reactor--defer) for its
 usage in action.
 
-## Event Producing / Consuming
+### Producer Procedures
 
 Checkout [producer.edh](./producer.edh)
 
