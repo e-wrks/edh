@@ -1719,8 +1719,9 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
             <> ": "
             <> edhValueStr addrVal
     x ->
-      throwEdh EvalError $ "Invalid left hand value for assignment: " <> T.pack
-        (show x)
+      throwEdh EvalError
+        $  "Invalid left hand expression for assignment: "
+        <> T.pack (show x)
 
 
 -- The Edh call convention is so called call-by-repacking, i.e. a new pack of
