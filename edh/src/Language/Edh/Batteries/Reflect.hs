@@ -119,6 +119,47 @@ scopeOuterProc _ !exit = do
       exitEdhSTM pgs exit $ EdhObject wrappedObj
 
 
+-- | utility scope.get(k1, k2, n1=k3, n2=k4, ...)
+-- get attribute values from the wrapped scope
+scopeGetProc :: EdhProcedure
+scopeGetProc !argsSender !exit = do
+  !pgs <- ask
+  let !callerCtx = edh'context pgs
+      !that      = thatObject $ contextScope callerCtx
+      !ent       = scopeEntity $ wrappedScopeOf that
+      lookupAttrs
+        :: [EdhValue]
+        -> [(AttrName, EdhValue)]
+        -> [EdhValue]
+        -> [(AttrName, EdhValue)]
+        -> STM ([EdhValue], [(AttrName, EdhValue)])
+      lookupAttrs rtnArgs rtnKwArgs [] [] = return (rtnArgs, rtnKwArgs)
+      lookupAttrs rtnArgs rtnKwArgs [] ((n, v) : restKwArgs) = do
+        k       <- attrKeyFrom pgs v
+        attrVal <- lookupEntityAttr pgs ent k
+        lookupAttrs rtnArgs ((n, attrVal) : rtnKwArgs) [] restKwArgs
+      lookupAttrs rtnArgs rtnKwArgs (v : restArgs) kwargs = do
+        k       <- attrKeyFrom pgs v
+        attrVal <- lookupEntityAttr pgs ent k
+        lookupAttrs (attrVal : rtnArgs) rtnKwArgs restArgs kwargs
+  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) ->
+    contEdhSTM $ lookupAttrs [] [] args (Map.toList kwargs) >>= \case
+      ([v]    , []       ) -> exitEdhSTM pgs exit v
+      (rtnArgs, rtnKwArgs) -> exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack
+        (reverse rtnArgs)
+        (Map.fromList rtnKwArgs)
+ where
+  attrKeyFrom :: EdhProgState -> EdhValue -> STM AttrKey
+  attrKeyFrom _ (EdhString attrName) = return $ AttrByName attrName
+  attrKeyFrom _ (EdhSymbol sym     ) = return $ AttrBySym sym
+  attrKeyFrom pgs badVal =
+    throwEdhSTM pgs EvalError
+      $  "Invalid attribute reference - "
+      <> edhValueStr (edhTypeOf badVal)
+      <> ": "
+      <> edhValueStr badVal
+
+
 -- | utility scope.put(k1:v1, k2:v2, n3=v3, n4=v4, ...)
 -- put attribute values into the wrapped scope
 scopePutProc :: EdhProcedure

@@ -271,12 +271,9 @@ installEdhBatteries world = liftIO $ do
         [ (AttrByName nm, )
             <$> mkHostProc (objectScope scopeSuperObj) mc nm hp args
         | (mc, nm, hp, args) <-
-          [ (EdhMethod, "eval", scopeEvalProc, WildReceiver)
-          , ( EdhMethod
-            , "put"
-            , scopePutProc
-            , PackReceiver [RecvRestKwArgs "kv'pairs"]
-            )
+          [ (EdhMethod, "eval"   , scopeEvalProc   , WildReceiver)
+          , (EdhMethod, "get"    , scopeGetProc    , WildReceiver)
+          , (EdhMethod, "put"    , scopePutProc    , WildReceiver)
           , (EdhMethod, "attrs"  , scopeAttrsProc  , PackReceiver [])
           , (EdhMethod, "lexiLoc", scopeLexiLocProc, PackReceiver [])
           , (EdhMethod, "outer"  , scopeOuterProc  , PackReceiver [])
