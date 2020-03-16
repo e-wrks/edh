@@ -46,10 +46,10 @@ See [Edh Im](https://github.com/e-wrks/edhim) for an example.
   - [Generator Procedures](#generator-procedures)
   - [Interpreter Procedures](#interpreter-procedures)
   - [Class Procedures](#class-procedures)
-  - [Inheritance Hierarchy](#inheritance-hierarchy)
-    - [Magical Supers](#magical-supers)
-    - [More OO Approaches](#more-oo-approaches)
-  - [Reactor Procedure](#reactor-procedure)
+    - [Inheritance Hierarchy](#inheritance-hierarchy)
+      - [Magical Supers](#magical-supers)
+      - [More OO Approaches](#more-oo-approaches)
+  - [Reactor Procedures](#reactor-procedures)
   - [Producer Procedures](#producer-procedures)
 - [Go Routines](#go-routines)
 - [Programming Concurrency and Data Consistency as a whole](#programming-concurrency-and-data-consistency-as-a-whole)
@@ -1313,7 +1313,7 @@ Checkout [simple-class.edh](./simple-class.edh)
 Đ:
 ```
 
-### Inheritance Hierarchy
+#### Inheritance Hierarchy
 
 Many don't consider **Go** ([GoLang](https://golang.org)) (and **Rust**
 similarly in this respect) an _Object Oriented_ programming language,
@@ -1326,7 +1326,7 @@ reference, which refers to a descendant record from an ancestor
 method, in addition to `this` reference which refers to the lexical
 self record.
 
-#### Magical Supers
+##### Magical Supers
 
 Checkout [magical-supers.edh](./magical-supers.edh), note you can only
 run that with master branch (considered nightly) of **Edh** interpreter,
@@ -1335,7 +1335,7 @@ released versions have not support of it.
 This is under heavy prototyping with a (not publicly visible) in-memory
 graph database project, will be described more clearly later.
 
-#### More OO Approaches
+##### More OO Approaches
 
 Trying to do traditional style object oriented inheritance is problematic:
 
@@ -1430,7 +1430,7 @@ the inheritance constructs so far may include:
   decendant classes to follow. Personally I don't like this idea, but it
   is trivially doable.
 
-### Reactor Procedure
+### Reactor Procedures
 
 A **reactor procedure** is a [Method Procedure](#method-procedure) per se,
 what makes it special is that it is not bound to a **scope** (as an
