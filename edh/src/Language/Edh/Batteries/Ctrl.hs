@@ -107,22 +107,25 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                 )
         _ -> exitEdhProc exit EdhFallthrough
 
-      -- { val } -- wild capture pattern, useful when what in case-of is a complex
-      -- expression, then this is used to capture the result as an attribute
+      -- { val } -- wild capture pattern, used to capture a non-nil result as
+      -- an attribute.
+      -- Note: a nil value should be value-matched explicitly
       [StmtSrc (_, ExprStmt (AttrExpr (DirectRef (NamedAttr attrName))))] ->
-        contEdhSTM $ do
-          when (attrName /= "_") $ do
-            changeEntityAttr pgs
-                             (scopeEntity callerScope)
-                             (AttrByName attrName)
-                             (noneNil ctxMatch)
-          runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-            exitEdhProc
-              exit
-              (case rhVal of
-                EdhFallthrough -> EdhFallthrough
-                _              -> EdhCaseClose rhVal
-              )
+        if EdhNil == ctxMatch -- don't match nil here
+          then exitEdhProc exit EdhFallthrough
+          else contEdhSTM $ do
+            when (attrName /= "_") $ changeEntityAttr
+              pgs
+              (scopeEntity callerScope)
+              (AttrByName attrName)
+              ctxMatch
+            runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+              exitEdhProc
+                exit
+                (case rhVal of
+                  EdhFallthrough -> EdhFallthrough
+                  _              -> EdhCaseClose rhVal
+                )
 
       -- { head => tail } -- snoc pattern
       [StmtSrc (_, ExprStmt (InfixExpr "=>" (AttrExpr (DirectRef (NamedAttr headName))) (AttrExpr (DirectRef (NamedAttr tailName)))))]
