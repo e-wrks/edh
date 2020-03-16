@@ -1,7 +1,7 @@
 
 {
 
-  class MetaSuper1 * {
+  class MetaSuper1 {
 
     # handles magic method resolution on a magic child (referred to by `that`),
     # for:
@@ -15,7 +15,7 @@
       30<| 'casting spell (' ++ magicSpell ++ ')'
 
       # treat explicit nil/false still as not present
-      that?$magicSpell |> continue
+      that?$magicSpell |> { continue }
     }
 
     # handles super attribute resolution, on a magic child (referred to by `that`),
@@ -24,7 +24,7 @@
       20<| 'getting super.' ++ attrKey ++ ' from the super'
 
       case that?$attrKey of {
-        nil -> continue  # to consult next super
+        nil -> { continue }  # to consult next super
         { n } -> n / 2  # can do some transformation here
       }
     }
@@ -35,7 +35,7 @@
 
 {
 
-  class Super1 * {
+  class Super1 {
 
     # handles `extends` from a business child (referred to by `that`),
     # `this` is the new super object being added to `that`, if this 
@@ -77,7 +77,7 @@
 
   }
 
-  class BusObj1 * {
+  class BusObj1 {
 
     _selfScope = scope()  # for debug purpose
 
