@@ -205,16 +205,21 @@ the goat is telling a tale
 
 ## Program / Threading Model
 
+Each [go](#go-routine) keyword (can be placed anywhere) in **Edh** code
+starts a new **Edh** thread.
+
 An **Edh** program consists of a _main_ **Edh** thread and many descendant
-**Edh** threads forked from that _main_ thread with `go` keyword (see
-[Go Routine](#go-routine) ). Once the _main_ thread terminates, all its
-descendant threads will terminate as well, this is largely different from
-other runtime systems, but roughly follows how **GHC** manages threads.
+**Edh** threads directly or indirectly started from that _main_ thread.
+
+All uncaught errors will be `throwTo` the _main_ thread, causing it to
+terminate. And once the _main_ thread terminates, all its descendant threads
+will terminate as well. (This is largely different from other runtime
+systems, but roughly follows how **GHC** manages processes and threads)
 
 **Edh** threads have **1:1** mapping relationship to **GHC**'s lightweight
 threads. Any **Haskell** process hosting **Edh** worlds should have been
-compiled with **GHC** `-threaded` option, and launched with the **RTS**
-controlling the parallelism.
+compiled with **GHC** `-threaded` option, and launched with proper **RTS**
+options controlling the parallelism.
 
 A single **GHC** **RTS** process can run many **Edh** programs conurrently,
 against a same or various separate **Edh** [World](#world)s.
