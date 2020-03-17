@@ -12,6 +12,8 @@ import qualified Data.List.NonEmpty            as NE
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
 
+import           Text.Megaparsec
+
 import           Language.Edh.Control
 import           Language.Edh.Runtime
 
@@ -200,10 +202,21 @@ scopeEvalProc :: EdhProcedure
 scopeEvalProc !argsSender !exit = do
   !pgs <- ask
   let
-    !callerCtx      = edh'context pgs
-    !that           = thatObject $ contextScope callerCtx
+    !callerCtx = edh'context pgs
+    !that      = thatObject $ contextScope callerCtx
+    !theScope  = wrappedScopeOf that
+    !theScopeBody =
+      case procedure'body $ procedure'decl $ scopeProc theScope of
+        Left  pb -> pb
+        Right _  -> StmtSrc
+          ( SourcePos { sourceName   = "<dynamic>"
+                      , sourceLine   = mkPos 1
+                      , sourceColumn = mkPos 1
+                      }
+          , VoidStmt
+          )
     -- eval all exprs with the original scope as the only scope in call stack
-    !scopeCallStack = wrappedScopeOf that <| callStack callerCtx
+    !scopeCallStack = theScope <| callStack callerCtx
     evalThePack
       :: [EdhValue]
       -> Map.HashMap AttrName EdhValue
@@ -240,6 +253,7 @@ scopeEvalProc !argsSender !exit = do
             { edh'context = callerCtx { callStack       = scopeCallStack
                                       , generatorCaller = Nothing
                                       , contextMatch    = true
+                                      , contextStmt     = theScopeBody
                                       }
             }
         $ evalThePack [] Map.empty args
