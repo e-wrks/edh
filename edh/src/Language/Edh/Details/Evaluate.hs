@@ -1450,6 +1450,8 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
             EdhContinue ->
               throwEdh EvalError "Unexpected continue from generator"
             EdhBreak -> throwEdh EvalError "Unexpected break from generator"
+            EdhNil -> -- nil yielded from a generator effectively early stops
+              exitEdhProc exit nil
             _ ->
               recvEdhArgs
                   ctx
@@ -1467,7 +1469,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                             -- propagate the continue to generator
                             contEdhSTM $ genrCont EdhContinue
                           EdhBreak ->
-                            -- early stop the for-from-do with nil result
+                            -- break out of the for-from-do loop
                             exitEdhProc exit nil
                           EdhReturn !rtnVal ->
                             -- early return from for-from-do
@@ -1576,8 +1578,10 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
           -- loop over a subscriber's channel of an event sink
           iterEvt :: TChan EdhValue -> STM ()
           iterEvt !subChan = waitEdhSTM pgs (readTChan subChan) $ \case
+            EdhNil -> -- nil marks end-of-stream from an event sink
+              exitEdhSTM pgs exit nil -- stop the for-from-do loop
             EdhArgsPack apk -> do1 apk $ iterEvt subChan
-            ev              -> do1 (ArgsPack [ev] Map.empty) $ iterEvt subChan
+            v               -> do1 (ArgsPack [v] Map.empty) $ iterEvt subChan
 
       case iterVal of
 
@@ -1585,11 +1589,11 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
         (EdhSink sink) -> subscribeEvents sink >>= \(subChan, mrv) ->
           case mrv of
             Nothing -> iterEvt subChan
-            Just ev ->
-              let apk = case ev of
-                    EdhArgsPack apk_ -> apk_
-                    _                -> ArgsPack [ev] Map.empty
-              in  do1 apk $ iterEvt subChan
+            Just ev -> case ev of
+              EdhNil -> -- this sink is already marked at end-of-stream
+                exitEdhSTM pgs exit nil
+              EdhArgsPack apk -> do1 apk $ iterEvt subChan
+              v               -> do1 (ArgsPack [v] Map.empty) $ iterEvt subChan
 
         -- loop from a positonal-only args pack
         (EdhArgsPack (ArgsPack !args !kwargs)) | Map.null kwargs -> iterThem
@@ -1630,6 +1634,9 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
           -- don't be tempted to yield pairs from a dict here,
           -- it'll be messy if some entry values are themselves pairs
           iterThem [ ArgsPack [k, v] Map.empty | (k, v) <- Map.toList ds ]
+
+        -- TODO define the magic method for an object to be able to respond
+        --      to for-from-do looping
 
         _ ->
           throwEdhSTM pgsLooper EvalError
