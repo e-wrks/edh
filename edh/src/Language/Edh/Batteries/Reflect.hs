@@ -7,7 +7,7 @@ import           Prelude
 import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
-import           Data.List.NonEmpty             ( NonEmpty(..) )
+import           Data.List.NonEmpty             ( (<|) )
 import qualified Data.List.NonEmpty            as NE
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
@@ -203,7 +203,7 @@ scopeEvalProc !argsSender !exit = do
     !callerCtx      = edh'context pgs
     !that           = thatObject $ contextScope callerCtx
     -- eval all exprs with the original scope as the only scope in call stack
-    !scopeCallStack = wrappedScopeOf that :| []
+    !scopeCallStack = wrappedScopeOf that <| callStack callerCtx
     evalThePack
       :: [EdhValue]
       -> Map.HashMap AttrName EdhValue
