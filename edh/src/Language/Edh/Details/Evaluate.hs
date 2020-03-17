@@ -1,4 +1,3 @@
-{-# LANGUAGE RecordWildCards #-}
 
 module Language.Edh.Details.Evaluate where
 
@@ -850,89 +849,39 @@ evalExpr expr exit = do
           -- calling an operator
           EdhOperator _ !op'pred !op'proc ->
             case procedure'body $ procedure'decl op'proc of
+
+              -- calling a host operator
+              --  *) a host operator creates no new call frame
+              --  *) insert a cycle tick here, so if no tx required for the call
+              --     overall, the op resolution tx stops here then the op runs in
+              --     next stm transaction
+              --  *) a host operator procedure is responsible to return an appropriate
+              --     value in all cases
               Right !hp -> flip (exitEdhSTM' pgs) (wuji pgs)
-                -- calling a host operator
-                -- insert a cycle tick here, so if no tx required for the call
-                -- overall, the op resolution tx stops here then the op
-                -- runs in next stm transaction
                 $ \_ -> hp [SendPosArg lhExpr, SendPosArg rhExpr] exit
 
-              Left !pb -> case procedure'args $ procedure'decl op'proc of
-                 -- 2 pos-args - simple lh/rh value receiving operator
-                (PackReceiver [RecvArg lhName Nothing Nothing, RecvArg rhName Nothing Nothing])
-                  -> runEdhProg pgs
-                    $ evalExpr lhExpr
-                    $ \(OriginalValue !lhVal _ _) ->
-                        evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-                          contEdhSTM $ do
-                            opEnt <-
-                              createHashEntity
-                              $  Map.fromList
-                              $  [ (AttrByName lhName, lhVal)
-                                 , (AttrByName rhName, rhVal)
-                                 ]
-                              ++ case op'pred of
-                                  -- put the overridden (predecessor) operator in the overriding
-                                  -- operator's scope
-                                   Nothing -> []
-                                   Just predProc ->
-                                     [(AttrByName opSym, predProc)]
-                            let !opScope = scope { scopeEntity = opEnt
-                                                 , thatObject  = op'that
-                                                 , scopeProc   = op'proc
-                                                 }
-                                !opCtx = ctx
-                                  { callStack       = opScope <| callStack ctx
-                                  , generatorCaller = Nothing
-                                  , contextMatch    = true
-                                  , contextStmt     = pb
-                                  }
-                                !pgsOp = pgs { edh'context = opCtx }
-                            runEdhProg pgsOp
-                              $ evalStmt pb
-                              $ \(OriginalValue !opRtn _ _) ->
-                                  local (const pgs) $ case opRtn of
-                                  -- allow continue to be return from a operator proc,
-                                  -- to carry similar semantics like `NotImplemented` in Python
-                                    EdhContinue -> exitEdhProc exit EdhContinue
-                                    -- allow the use of `break` to early stop a operator 
-                                    -- operator with nil result
-                                    EdhBreak         -> exitEdhProc exit nil
-                                    -- explicit return
-                                    EdhReturn rtnVal -> exitEdhProc exit rtnVal
-                                    -- no explicit return, assuming it returns the last
-                                    -- value from operator execution
-                                    _                -> exitEdhProc exit opRtn
-
-                -- 3 pos-args - caller scope + lh/rh expr receiving operator
-                (PackReceiver [RecvArg scopeName Nothing Nothing, RecvArg lhName Nothing Nothing, RecvArg rhName Nothing Nothing])
-                  -> do
-                    scopeWrapper <- mkScopeWrapper world scope
-                    opEnt        <-
-                      createHashEntity
-                      $  Map.fromList
-                      $  [ (AttrByName scopeName, EdhObject scopeWrapper)
-                         , (AttrByName lhName   , edhExpr lhExpr)
-                         , (AttrByName rhName   , edhExpr rhExpr)
-                         ]
-                      ++ case op'pred of
-                          -- put the overridden (predecessor) operator in the overriding
-                          -- operator's scope
-                           Nothing       -> []
-                           Just predProc -> [(AttrByName opSym, predProc)]
-                    let !opScope = scope { scopeEntity = opEnt
-                                         , thatObject  = op'that
-                                         , scopeProc   = op'proc
-                                         }
-                        !opCtx = ctx { callStack = opScope <| callStack ctx
-                                     , generatorCaller = Nothing
-                                     , contextMatch    = true
-                                     , contextStmt     = pb
-                                     }
-                        !pgsOp = pgs { edh'context = opCtx }
+              Left !pb -> do -- calling an Edh operator
+                opEnt <- createHashEntity $ case op'pred of
+                  Nothing       -> Map.empty
+                  -- put the overridden (predecessor) operator in the overriding
+                  -- operator's scope
+                  Just predProc -> Map.fromList [(AttrByName opSym, predProc)]
+                let
+                  !opScope = scope { scopeEntity = opEnt
+                                   , thatObject  = op'that
+                                   , scopeProc   = op'proc
+                                   }
+                  !opCtx = ctx { callStack       = opScope <| callStack ctx
+                               , generatorCaller = Nothing
+                               , contextMatch    = true
+                               , contextStmt     = pb
+                               }
+                  !pgsOp = pgs { edh'context = opCtx }
+                  runOp =
                     runEdhProg pgsOp
                       $ evalStmt pb
                       $ \(OriginalValue !opRtn _ _) ->
+                          -- pop stack after op procedure returned
                           local (const pgs) $ case opRtn of
                             -- allow continue to be return from a operator proc,
                             -- to carry similar semantics like `NotImplemented` in Python
@@ -945,11 +894,37 @@ evalExpr expr exit = do
                             -- no explicit return, assuming it returns the last
                             -- value from operator execution
                             _                -> exitEdhProc exit opRtn
-
-                _ ->
-                  throwEdhSTM pgs EvalError
-                    $  "Invalid operator signature: "
-                    <> T.pack (show $ procedure'args $ procedure'decl op'proc)
+                case procedure'args $ procedure'decl op'proc of
+                  -- 2 pos-args - simple lh/rh value receiving operator
+                  (PackReceiver [RecvArg lhName Nothing Nothing, RecvArg rhName Nothing Nothing])
+                    -> runEdhProg pgsOp
+                      $ evalExpr lhExpr
+                      $ \(OriginalValue !lhVal _ _) ->
+                          evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+                            contEdhSTM $ do
+                              updateEntityAttrs
+                                pgs
+                                opEnt
+                                [ (AttrByName lhName, lhVal)
+                                , (AttrByName rhName, rhVal)
+                                ]
+                              runOp
+                  -- 3 pos-args - caller scope + lh/rh expr receiving operator
+                  (PackReceiver [RecvArg scopeName Nothing Nothing, RecvArg lhName Nothing Nothing, RecvArg rhName Nothing Nothing])
+                    -> do
+                      scopeWrapper <- mkScopeWrapper world scope
+                      updateEntityAttrs
+                        pgs
+                        opEnt
+                        [ (AttrByName scopeName, EdhObject scopeWrapper)
+                        , (AttrByName lhName   , edhExpr lhExpr)
+                        , (AttrByName rhName   , edhExpr rhExpr)
+                        ]
+                      runOp
+                  _ ->
+                    throwEdhSTM pgs EvalError
+                      $  "Invalid operator signature: "
+                      <> T.pack (show $ procedure'args $ procedure'decl op'proc)
 
           _ ->
             throwEdhSTM pgs EvalError
@@ -1201,6 +1176,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker = do
         runEdhProg pgsMth $ hp argsSndr $ \(OriginalValue !val _ _) ->
           contEdhSTM $ exitEdhSTM pgsCaller exit val
 
+      -- calling an Edh method procedure
       Left !pb -> runEdhProg pgsCaller $ packEdhArgs' argsSndr $ \apk ->
         contEdhSTM $ callMaker $ callEdhMethod apk
                                                callee'that
@@ -1353,6 +1329,7 @@ createEdhObject !cls !argsSndr !exit = do
       runEdhProg pgsCallee $ hp argsSndr $ \(OriginalValue !val _ _) ->
         contEdhSTM $ exitEdhSTM pgsCaller exit val
 
+    -- calling an Edh class (constructor) procedure
     Left !pb -> contEdhSTM $ do
       newEnt  <- createHashEntity Map.empty
       newThis <- viewAsEdhObject newEnt cls []
