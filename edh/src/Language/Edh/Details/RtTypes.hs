@@ -59,8 +59,8 @@ setDictItem :: ItemKey -> EdhValue -> DictStore -> DictStore
 setDictItem !k v !ds =
   if v == EdhNil then Map.delete k ds else Map.insert k v ds
 
-toPairList :: DictStore -> [EdhValue]
-toPairList d = (<$> Map.toList d) $ \(k, v) -> EdhPair k v
+dictEntryList :: DictStore -> [EdhValue]
+dictEntryList d = (<$> Map.toList d) $ \(k, v) -> EdhTuple [k, v]
 
 edhDictFromEntity :: EdhProgState -> Entity -> STM Dict
 edhDictFromEntity pgs ent = do

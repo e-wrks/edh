@@ -306,7 +306,7 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
             exitEdhSTM pgs exit (EdhTuple $ vs ++ ll)
           EdhDict (Dict _ !d) -> contEdhSTM $ do
             ds <- readTVar d
-            exitEdhSTM pgs exit (EdhTuple $ vs ++ toPairList ds)
+            exitEdhSTM pgs exit (EdhTuple $ vs ++ dictEntryList ds)
           _ ->
             throwEdh EvalError
               $  "Don't know how to comprehend from a "
@@ -327,7 +327,7 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
             exitEdhSTM pgs exit lhVal
           EdhDict (Dict _ !d) -> contEdhSTM $ do
             ds <- readTVar d
-            modifyTVar' l (++ (toPairList ds))
+            modifyTVar' l (++ (dictEntryList ds))
             exitEdhSTM pgs exit lhVal
           _ ->
             throwEdh EvalError
