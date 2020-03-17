@@ -905,8 +905,8 @@ evalExpr expr exit = do
                               updateEntityAttrs
                                 pgs
                                 opEnt
-                                [ (AttrByName lhName, lhVal)
-                                , (AttrByName rhName, rhVal)
+                                [ (AttrByName lhName, noneNil lhVal)
+                                , (AttrByName rhName, noneNil rhVal)
                                 ]
                               runOp
                   -- 3 pos-args - caller scope + lh/rh expr receiving operator

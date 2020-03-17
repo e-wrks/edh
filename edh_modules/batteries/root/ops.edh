@@ -1,6 +1,4 @@
 
-  operator != (lhv, rhv) not (lhv == rhv)
-
   operator &> (callerScope, lhe, rhe) {
     case callerScope.eval(lhe) of {
       nil -> nil

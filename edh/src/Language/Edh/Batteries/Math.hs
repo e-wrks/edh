@@ -202,6 +202,15 @@ idEqProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
 idEqProc !argsSender _ =
   throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
+-- | operator (!=)
+idNeProc :: EdhProcedure
+idNeProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
+    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+      exitEdhProc exit (EdhBool $ lhVal /= rhVal)
+idNeProc !argsSender _ =
+  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
+
 
 -- | operator (>)
 isGtProc :: EdhProcedure
