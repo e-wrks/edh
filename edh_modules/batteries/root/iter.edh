@@ -8,7 +8,7 @@
       {(start:stop)} -> {fallthrough}
     }
 
-    if None == stop then let (stop, start) = (start, 0)
+    if None == stop then { let (stop, start) = (start, 0) }
     start == stop -> { return nil }
     n = start
     

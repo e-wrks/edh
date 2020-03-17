@@ -2,7 +2,7 @@
   operator &> (callerScope, lhe, rhe) {
     case callerScope.eval(lhe) of {
       nil -> { return nil }
-      { lhv } -> if null(lhv) then return lhv
+      { lhv } -> if null(lhv) then { return lhv }
     }
     callerScope.eval(rhe)
   }
@@ -10,7 +10,7 @@
   operator |> (callerScope, lhe, rhe) {
     case callerScope.eval(lhe) of {
       nil -> { pass }
-      { lhv } -> if not null(lhv) then return lhv
+      { lhv } -> if not null(lhv) then { return lhv }
     }
     callerScope.eval(rhe)
   }
