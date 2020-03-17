@@ -41,22 +41,33 @@ deParen x = case x of
   ParenExpr x' -> deParen x'
   _            -> x
 
-deBlock :: StmtSrc -> [StmtSrc]
-deBlock stmt = case stmt of
-  (StmtSrc (_, ExprStmt (BlockExpr stmts'))) -> stmts'
-  _ -> [stmt]
-
-
 evalStmt :: StmtSrc -> EdhProcExit -> EdhProg (STM ())
 evalStmt ss@(StmtSrc (_, !stmt)) !exit =
   local (\pgs -> pgs { edh'context = (edh'context pgs) { contextStmt = ss } })
     $ evalStmt' stmt exit
 
 
+evalCaseBlock :: Expr -> EdhProcExit -> EdhProg (STM ())
+evalCaseBlock !expr !exit = case expr of
+  BlockExpr stmts' -> evalBlock stmts' exit
+  _                -> evalExpr expr $ \(OriginalValue !val _ _) -> case val of
+    -- only branch does match
+    (EdhCaseClose !v) -> exitEdhProc exit v
+    -- explicit `fallthrough` from this single-expr block, cascade to outer block
+    EdhFallthrough    -> exitEdhProc exit EdhFallthrough
+    -- ctrl to be propagated outwards
+    EdhBreak          -> exitEdhProc exit EdhBreak
+    EdhContinue       -> exitEdhProc exit EdhContinue
+    (EdhReturn !v)    -> exitEdhProc exit (EdhReturn v)
+    -- yield should have been handled by 'evalExpr'
+    (EdhYield  _ )    -> throwEdh EvalError "bug yield reached block"
+    -- the only expr has no special branching result, propagate as is
+    _                 -> exitEdhProc exit val
+
 evalBlock :: [StmtSrc] -> EdhProcExit -> EdhProg (STM ())
 evalBlock []    !exit = exitEdhProc exit nil
 evalBlock [!ss] !exit = evalStmt ss $ \(OriginalValue !val _ _) -> case val of
-    -- last branch does match
+  -- last branch does match
   (EdhCaseClose !v) -> exitEdhProc exit v
   -- explicit `fallthrough` at end of this block, cascade to outer block
   EdhFallthrough    -> exitEdhProc exit EdhFallthrough
@@ -66,7 +77,7 @@ evalBlock [!ss] !exit = evalStmt ss $ \(OriginalValue !val _ _) -> case val of
   (EdhReturn !v)    -> exitEdhProc exit (EdhReturn v)
   -- yield should have been handled by 'evalExpr'
   (EdhYield  _ )    -> throwEdh EvalError "bug yield reached block"
-  -- last stmt no special branching result, propagate as is
+  -- last stmt has no special branching result, propagate as is
   _                 -> exitEdhProc exit val
 evalBlock (ss : rest) !exit = evalStmt ss $ \(OriginalValue !val _ _) ->
   case val of
@@ -136,13 +147,13 @@ evalStmt' !stmt !exit = do
 
     GoStmt expr -> case expr of
 
-      CaseExpr tgtExpr branchesStmt ->
+      CaseExpr tgtExpr branchesExpr ->
         evalExpr tgtExpr $ \(OriginalValue !val _ _) ->
           forkEdh exit
             $ contEdhSTM
-            $ runEdhProg pgs { edh'context = ctx { contextMatch = val } } -- eval the branch(es) expr with the case target being
-                  -- the 'contextMatch'
-            $ evalBlock (deBlock branchesStmt) edhEndOfProc
+            $ runEdhProg pgs { edh'context = ctx { contextMatch = val } }
+             -- eval the branch(es) expr with the case target being the 'contextMatch'
+            $ evalCaseBlock branchesExpr edhEndOfProc
 
       (CallExpr procExpr argsSndr) ->
         evalExpr procExpr $ \(OriginalValue !callee'val _ !callee'that) ->
@@ -164,12 +175,12 @@ evalStmt' !stmt !exit = do
             exitEdhSTM pgs exit nil
       case expr of
 
-        CaseExpr tgtExpr branchesStmt ->
+        CaseExpr tgtExpr branchesExpr ->
           evalExpr tgtExpr $ \(OriginalValue !val _ _) ->
             contEdhSTM
-              $ schedDefered pgs { edh'context = ctx { contextMatch = val } } -- eval the branch(es) expr with the case target being
-                    -- the 'contextMatch'
-              $ evalBlock (deBlock branchesStmt) edhEndOfProc
+              $ schedDefered pgs { edh'context = ctx { contextMatch = val } }
+              -- eval the branch(es) expr with the case target being the 'contextMatch'
+              $ evalCaseBlock branchesExpr edhEndOfProc
 
         (CallExpr procExpr argsSndr) ->
           evalExpr procExpr $ \(OriginalValue callee'val _ callee'that) ->
@@ -205,32 +216,31 @@ evalStmt' !stmt !exit = do
     -- ThrowStmt excExpr                         -> undefined
 
 
-    WhileStmt cndExpr bodyStmt -> do
-      let
-        !stmts = deBlock bodyStmt
-        doWhile :: EdhProg (STM ())
-        doWhile = evalExpr cndExpr $ \(OriginalValue !cndVal _ _) ->
-          case cndVal of
-            (EdhBool True) ->
-              evalBlock stmts $ \(OriginalValue !blkVal _ _) -> case blkVal of
-                -- early stop of procedure
-                EdhReturn rtnVal   -> exitEdhProc exit rtnVal
-                -- break while loop
-                EdhBreak           -> exitEdhProc exit nil
-                -- treat as break here, TODO judge this decision
-                EdhFallthrough     -> exitEdhProc exit nil
-                -- treat as continue here, TODO judge this decision
-                EdhCaseClose ccVal -> exitEdhProc exit ccVal
-                -- continue while loop
-                _                  -> doWhile
-            (EdhBool False) -> exitEdhProc exit nil
-            EdhNil          -> exitEdhProc exit nil
-            _ ->
-              throwEdh EvalError
-                $  "Invalid condition value for while: "
-                <> T.pack (show $ edhTypeOf cndVal)
-                <> ": "
-                <> T.pack (show cndVal)
+    WhileStmt cndExpr bodyExpr -> do
+      let doWhile :: EdhProg (STM ())
+          doWhile = evalExpr cndExpr $ \(OriginalValue !cndVal _ _) ->
+            case cndVal of
+              (EdhBool True) ->
+                evalExpr bodyExpr $ \(OriginalValue !blkVal _ _) ->
+                  case blkVal of
+                  -- early stop of procedure
+                    EdhReturn rtnVal   -> exitEdhProc exit rtnVal
+                    -- break while loop
+                    EdhBreak           -> exitEdhProc exit nil
+                    -- treat as break here, TODO judge this decision
+                    EdhFallthrough     -> exitEdhProc exit nil
+                    -- treat as continue here, TODO judge this decision
+                    EdhCaseClose ccVal -> exitEdhProc exit ccVal
+                    -- continue while loop
+                    _                  -> doWhile
+              (EdhBool False) -> exitEdhProc exit nil
+              EdhNil          -> exitEdhProc exit nil
+              _ ->
+                throwEdh EvalError
+                  $  "Invalid condition value for while: "
+                  <> T.pack (show $ edhTypeOf cndVal)
+                  <> ": "
+                  <> T.pack (show cndVal)
       doWhile
 
     ExtendsStmt superExpr ->
@@ -644,9 +654,9 @@ evalExpr expr exit = do
 
     IfExpr cond cseq alt -> evalExpr cond $ \(OriginalValue !val _ _) ->
       case val of
-        (EdhBool True ) -> evalStmt cseq exit
+        (EdhBool True ) -> evalExpr cseq exit
         (EdhBool False) -> case alt of
-          Just elseClause -> evalStmt elseClause exit
+          Just elseClause -> evalExpr elseClause exit
           _               -> exitEdhProc exit nil
         _ ->
           -- we are so strongly typed
@@ -703,11 +713,11 @@ evalExpr expr exit = do
         $ \(OriginalValue !blkResult _ _) ->
             local (const pgs) $ exitEdhProc exit blkResult
 
-    CaseExpr tgtExpr branchesStmt ->
+    CaseExpr tgtExpr branchesExpr ->
       evalExpr tgtExpr $ \(OriginalValue !tgtVal _ _) ->
         -- eval the branch(es) expr with the case target being the 'contextMatch'
         local (const pgs { edh'context = ctx { contextMatch = tgtVal } })
-          $ evalBlock (deBlock branchesStmt)
+          $ evalCaseBlock branchesExpr
           -- restore program state after block done
           $ \(OriginalValue !blkResult _ _) ->
               local (const pgs) $ exitEdhProc exit blkResult

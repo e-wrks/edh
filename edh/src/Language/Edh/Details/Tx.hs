@@ -139,7 +139,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
     driveDefers restDefers
 
   driveReactor :: EdhValue -> ReactorRecord -> IO Bool
-  driveReactor !ev (_, pgsOrigin, argsRcvr, stmt) = do
+  driveReactor !ev (_, pgsOrigin, argsRcvr, expr) = do
     !breakThread <- newEmptyTMVarIO
     let
       !ctxReactor = edh'context pgsOrigin
@@ -152,7 +152,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
           updateEntityAttrs pgsReactor (scopeEntity scopeAtReactor)
             $ Map.toList em
           runEdhProg pgsReactor
-            $ evalStmt stmt
+            $ evalExpr expr
             $ \(OriginalValue !reactorRtn _ _) -> do
                 let doBreak = case reactorRtn of
                       EdhBreak -> True -- terminate this thread

@@ -261,7 +261,7 @@ parseGeneratorStmt = GeneratorStmt <$> (keyword "generator" >> parseProcDecl)
 
 parseReactorStmt :: Parser Stmt
 parseReactorStmt =
-  keyword "reactor" >> liftA3 ReactorStmt parseExpr parseArgsReceiver parseStmt
+  keyword "reactor" >> liftA3 ReactorStmt parseExpr parseArgsReceiver parseExpr
 
 parseInterpreterStmt :: Parser Stmt
 parseInterpreterStmt =
@@ -273,7 +273,7 @@ parseProducerStmt = ProducerStmt <$> (keyword "producer" >> parseProcDecl)
 parseWhileStmt :: Parser Stmt
 parseWhileStmt = do
   void $ keyword "while"
-  liftA2 WhileStmt parseExpr parseStmt
+  liftA2 WhileStmt parseExpr parseExpr
 
 parseProcDecl :: Parser ProcDecl
 parseProcDecl = liftA3 ProcDecl
@@ -403,10 +403,10 @@ parseIfExpr = do
   void $ keyword "if"
   cond <- parseExpr
   void $ keyword "then"
-  cseq <- parseStmt
+  cseq <- parseExpr
   alt  <- optional $ do
     void $ keyword "else"
-    parseStmt
+    parseExpr
   return $ IfExpr cond cseq alt
 
 parseCaseExpr :: Parser Expr
@@ -414,7 +414,7 @@ parseCaseExpr = do
   void $ keyword "case"
   tgt <- parseExpr
   void $ keyword "of"
-  CaseExpr tgt <$> parseStmt
+  CaseExpr tgt <$> parseExpr
 
 parseYieldExpr :: Parser Expr
 parseYieldExpr = do

@@ -447,7 +447,7 @@ data EdhProgState = EdhProgState {
     , edh'context :: !Context
   }
 
-type ReactorRecord = (TChan EdhValue, EdhProgState, ArgsReceiver, StmtSrc)
+type ReactorRecord = (TChan EdhValue, EdhProgState, ArgsReceiver, Expr)
 type DeferRecord = (EdhProgState, EdhProg (STM ()))
 
 -- | Run an Edh program from within STM monad
@@ -950,7 +950,7 @@ data Stmt =
       -- next transactional task normally
       -- the reactor mechanism is somewhat similar to traditional signal
       -- handling mechanism in OS process management
-    | ReactorStmt !Expr !ArgsReceiver !StmtSrc
+    | ReactorStmt !Expr !ArgsReceiver !Expr
       -- | interpreter declaration, an interpreter procedure is not otherwise
       -- different from a method procedure, except it receives arguments
       -- in expression form rather than values, in addition to the reflective
@@ -958,7 +958,7 @@ data Stmt =
     | InterpreterStmt !ProcDecl
     | ProducerStmt !ProcDecl
       -- | while loop
-    | WhileStmt !Expr !StmtSrc
+    | WhileStmt !Expr !Expr
       -- | break from a while/for loop, or terminate the Edh thread if given
       -- from a reactor
     | BreakStmt
@@ -1082,10 +1082,10 @@ data Prefix = PrefixPlus | PrefixMinus | Not
 
 data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
     | IfExpr { if'condition :: !Expr
-            , if'consequence :: !StmtSrc
-            , if'alternative :: !(Maybe StmtSrc)
+            , if'consequence :: !Expr
+            , if'alternative :: !(Maybe Expr)
             }
-    | CaseExpr { case'target :: !Expr , case'branches :: !StmtSrc }
+    | CaseExpr { case'target :: !Expr , case'branches :: !Expr }
 
     | DictExpr ![Expr] -- should all be Infix ":"
     | ListExpr ![Expr]

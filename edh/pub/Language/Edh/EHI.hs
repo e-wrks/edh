@@ -57,6 +57,7 @@ module Language.Edh.EHI
   , evalStmt
   , evalStmt'
   , evalBlock
+  , evalCaseBlock
   , evalExpr
   , evalExprs
   , recvEdhArgs
@@ -103,7 +104,6 @@ module Language.Edh.EHI
   , SourcePos(..)
   , sourcePosPretty
   , deParen
-  , deBlock
 
     -- ** Object system
   , Object(..)
