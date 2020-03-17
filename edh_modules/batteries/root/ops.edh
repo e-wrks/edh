@@ -1,7 +1,7 @@
 
   operator &> (callerScope, lhe, rhe) {
     case callerScope.eval(lhe) of {
-      nil -> nil
+      nil -> { return nil }
       { lhv } -> if null(lhv) then return lhv
     }
     callerScope.eval(rhe)
