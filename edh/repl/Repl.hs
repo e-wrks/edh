@@ -5,6 +5,8 @@ import           Prelude
 -- import           Debug.Trace
 import           Text.Printf
 
+import           Control.Monad
+
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 
@@ -63,7 +65,7 @@ doPrint = \case
     EdhUsageError _ -> do
       outputStrLn "* 🙈 *"
       outputStrLn $ show err
-  Right repr -> outputStrLn $ T.unpack repr
+  Right repr -> unless (T.null repr) $ outputStrLn $ T.unpack repr
 
 
 doLoop :: EdhWorld -> Object -> InputT IO ()

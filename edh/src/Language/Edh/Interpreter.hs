@@ -67,8 +67,11 @@ evalEdhSource' !world !modu !srcName !srcCode =
       tryJust edhKnownError $ do
         !final <- newEmptyTMVarIO
         runEdhProgram' moduCtx $ evalBlock stmts $ \(OriginalValue !val _ _) ->
-          edhValueRepr val $ \(OriginalValue !reprVal _ _) -> case reprVal of
-            EdhString !repr -> contEdhSTM $ putTMVar final repr
-            _               -> error "bug: edhValueRepr returned non-string"
+          case val of
+            EdhNil -> contEdhSTM $ putTMVar final ""
+            _      -> edhValueRepr val $ \(OriginalValue !reprVal _ _) ->
+              case reprVal of
+                EdhString !repr -> contEdhSTM $ putTMVar final repr
+                _               -> error "bug: edhValueRepr returned non-string"
         atomically $ readTMVar final
 
