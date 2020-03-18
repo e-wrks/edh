@@ -159,7 +159,8 @@ typeProc !argsSender !exit =
             (EdhArgsPack $ ArgsPack argsType $ Map.map edhTypeValOf kwargs)
  where
   edhTypeValOf :: EdhValue -> EdhValue
-  edhTypeValOf = EdhType . edhTypeOf
+  edhTypeValOf EdhNil = EdhNil
+  edhTypeValOf v      = EdhType $ edhTypeOf v
 
 -- | utility dict(***pkargs,**kwargs,*args) - dict constructor by arguments
 -- can be used to convert arguments pack into dict
