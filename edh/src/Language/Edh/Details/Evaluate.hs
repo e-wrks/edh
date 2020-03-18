@@ -50,12 +50,14 @@ evalStmt ss@(StmtSrc (_, !stmt)) !exit = ask >>= \pgs ->
 
 evalCaseBlock :: Expr -> EdhProcExit -> EdhProg (STM ())
 evalCaseBlock !expr !exit = case expr of
+  -- case-of with a block is normal
   BlockExpr stmts' -> evalBlock stmts' exit
+  -- single branch case is some special
   _                -> evalExpr expr $ \(OriginalValue !val _ _) -> case val of
-    -- only branch does match
+    -- the only branch does match
     (EdhCaseClose !v) -> exitEdhProc exit v
-    -- explicit `fallthrough` from this single-expr block, cascade to outer block
-    EdhFallthrough    -> exitEdhProc exit EdhFallthrough
+    -- the only branch does not match
+    EdhFallthrough    -> exitEdhProc exit nil
     -- ctrl to be propagated outwards
     EdhBreak          -> exitEdhProc exit EdhBreak
     EdhContinue       -> exitEdhProc exit EdhContinue
