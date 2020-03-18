@@ -12,9 +12,7 @@ import qualified Data.Text                     as T
 
 import           System.Console.Haskeline
 
-import           Language.Edh.Control
-import           Language.Edh.Runtime
-import           Language.Edh.Interpreter
+import           Language.Edh.EHI
 
 
 doRead :: [Text] -> InputT IO (Maybe Text)

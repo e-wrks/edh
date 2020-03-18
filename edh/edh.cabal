@@ -96,7 +96,7 @@ executable edhi
     default-extensions: NoImplicitPrelude OverloadedStrings LambdaCase
                         BangPatterns TupleSections ScopedTypeVariables
     build-depends:
-        edh-internal -any,
+        edh -any,
         haskeline -any,
         -- same dependencies as edh-internal, so you can:
         -- cabal v2-repl edhi --repl-options=-isrc

@@ -6,9 +6,7 @@ import           Prelude
 
 import           System.Console.Haskeline
 
-import           Language.Edh.Runtime
-import           Language.Edh.Interpreter
-import           Language.Edh.Batteries
+import           Language.Edh.EHI
 
 import           Repl                           ( doLoop )
 
