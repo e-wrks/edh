@@ -48,7 +48,7 @@ type DictStore = Map.HashMap EdhValue EdhValue
 
 showEdhDict :: DictStore -> String
 showEdhDict ds = if Map.null ds
-  then "{,}" -- make it obvious this is an empty dict
+  then "{}" -- no space should show in an empty dict
   else -- advocate trailing comma here
     "{ "
     ++ concat [ show k ++ ":" ++ show v ++ ", " | (k, v) <- Map.toList ds ]
@@ -750,7 +750,7 @@ instance Show EdhValue where
 
   show (EdhPair k v ) = show k <> ":" <> show v
   show (EdhTuple v  ) = if null v
-    then "(,)" -- mimic the denotation of empty tuple in Python
+    then "()" -- no space should show in an empty tuple
     else -- advocate trailing comma here
          "( " ++ concat [ show i ++ ", " | i <- v ] ++ ")"
   show (EdhArgsPack v) = "pkargs" ++ show v
