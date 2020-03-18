@@ -26,7 +26,7 @@ errorProc !argsSender _ =
     [v] | null kwargs -> throwEdh EvalError $ logString v
     _ ->
       throwEdh EvalError
-        $  T.unlines
+        $  T.intercalate "\n"
         $  (logString <$> args)
         ++ [ k <> ": " <> logString v | (k, v) <- Map.toList kwargs ]
  where
