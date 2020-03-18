@@ -47,6 +47,7 @@ module Language.Edh.EHI
   , contextScope
   , parseEdhSource
   , evalEdhSource
+  , evalEdhSource'
   , runEdhProgram
   , runEdhProgram'
   , viewAsEdhObject
@@ -132,8 +133,8 @@ module Language.Edh.EHI
 
     -- ** Value system
   , edhTypeOf
-  , edhValueStr
   , edhValueNull
+  , edhValueRepr
   , EdhValue(..)
   , EdhTypeValue(..)
   , nil

@@ -713,10 +713,6 @@ data EdhValue =
   -- | reflection
     | EdhExpr !Unique !Expr !Text  -- expr with source(-less if empty)
 
-edhValueStr :: EdhValue -> Text
-edhValueStr (EdhString s) = s
-edhValueStr v             = T.pack $ show v
-
 edhValueNull :: EdhValue -> STM Bool
 edhValueNull EdhNil                  = return True
 edhValueNull (EdhDecimal d         ) = return $ D.decimalIsNaN d || d == 0
@@ -1181,41 +1177,41 @@ data EdhTypeValue = TypeType
 instance Hashable EdhTypeValue where
   hashWithSalt s t = hashWithSalt s $ fromEnum t
 
-edhTypeOf :: EdhValue -> EdhValue
-edhTypeOf EdhType{}                                   = EdhType TypeType
+edhTypeOf :: EdhValue -> EdhTypeValue
+edhTypeOf EdhNil                                      = undefined -- this is a tamboo
+edhTypeOf EdhType{}                                   = TypeType
 
-edhTypeOf EdhNil                                      = nil
-edhTypeOf EdhDecimal{}                                = EdhType DecimalType
-edhTypeOf EdhBool{}                                   = EdhType BoolType
-edhTypeOf EdhString{}                                 = EdhType StringType
-edhTypeOf EdhSymbol{}                                 = EdhType SymbolType
-edhTypeOf EdhObject{}                                 = EdhType ObjectType
-edhTypeOf EdhDict{}                                   = EdhType DictType
-edhTypeOf EdhList{}                                   = EdhType ListType
-edhTypeOf EdhPair{}                                   = EdhType PairType
-edhTypeOf EdhTuple{}                                  = EdhType TupleType
-edhTypeOf EdhArgsPack{}                               = EdhType ArgsPackType
+edhTypeOf EdhDecimal{}                                = DecimalType
+edhTypeOf EdhBool{}                                   = BoolType
+edhTypeOf EdhString{}                                 = StringType
+edhTypeOf EdhSymbol{}                                 = SymbolType
+edhTypeOf EdhObject{}                                 = ObjectType
+edhTypeOf EdhDict{}                                   = DictType
+edhTypeOf EdhList{}                                   = ListType
+edhTypeOf EdhPair{}                                   = PairType
+edhTypeOf EdhTuple{}                                  = TupleType
+edhTypeOf EdhArgsPack{}                               = ArgsPackType
 
 edhTypeOf (EdhClass (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
-  Left  _ -> EdhType ClassType
-  Right _ -> EdhType HostClassType
+  Left  _ -> ClassType
+  Right _ -> HostClassType
 edhTypeOf (EdhMethod (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
-  Left  _ -> EdhType MethodType
-  Right _ -> EdhType HostMethodType
+  Left  _ -> MethodType
+  Right _ -> HostMethodType
 edhTypeOf (EdhOperator _ _ (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
-  Left  _ -> EdhType OperatorType
-  Right _ -> EdhType HostOperType
+  Left  _ -> OperatorType
+  Right _ -> HostOperType
 edhTypeOf (EdhGenrDef (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
-  Left  _ -> EdhType GeneratorType
-  Right _ -> EdhType HostGenrType
+  Left  _ -> GeneratorType
+  Right _ -> HostGenrType
 
-edhTypeOf EdhInterpreter{} = EdhType InterpreterType
-edhTypeOf EdhProducer{}    = EdhType ProducerType
-edhTypeOf EdhBreak         = EdhType BreakType
-edhTypeOf EdhContinue      = EdhType ContinueType
-edhTypeOf EdhCaseClose{}   = EdhType CaseCloseType
-edhTypeOf EdhFallthrough   = EdhType FallthroughType
-edhTypeOf EdhYield{}       = EdhType YieldType
-edhTypeOf EdhReturn{}      = EdhType ReturnType
-edhTypeOf EdhSink{}        = EdhType SinkType
-edhTypeOf EdhExpr{}        = EdhType ExprType
+edhTypeOf EdhInterpreter{} = InterpreterType
+edhTypeOf EdhProducer{}    = ProducerType
+edhTypeOf EdhBreak         = BreakType
+edhTypeOf EdhContinue      = ContinueType
+edhTypeOf EdhCaseClose{}   = CaseCloseType
+edhTypeOf EdhFallthrough   = FallthroughType
+edhTypeOf EdhYield{}       = YieldType
+edhTypeOf EdhReturn{}      = ReturnType
+edhTypeOf EdhSink{}        = SinkType
+edhTypeOf EdhExpr{}        = ExprType

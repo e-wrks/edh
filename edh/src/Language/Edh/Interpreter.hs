@@ -56,3 +56,19 @@ evalEdhSource !world !modu !srcName !srcCode =
           contEdhSTM $ putTMVar final val
         atomically $ readTMVar final
 
+
+evalEdhSource'
+  :: MonadIO m => EdhWorld -> Object -> Text -> Text -> m (Either EdhError Text)
+evalEdhSource' !world !modu !srcName !srcCode =
+  liftIO $ parseEdhSource world srcName srcCode >>= \case
+    Left  !err   -> return $ Left err
+    Right !stmts -> do
+      let !moduCtx = moduleContext world modu
+      tryJust edhKnownError $ do
+        !final <- newEmptyTMVarIO
+        runEdhProgram' moduCtx $ evalBlock stmts $ \(OriginalValue !val _ _) ->
+          edhValueRepr val $ \(OriginalValue !reprVal _ _) -> case reprVal of
+            EdhString !repr -> contEdhSTM $ putTMVar final repr
+            _               -> error "bug: edhValueRepr returned non-string"
+        atomically $ readTMVar final
+

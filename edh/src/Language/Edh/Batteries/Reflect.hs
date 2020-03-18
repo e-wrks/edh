@@ -155,11 +155,8 @@ scopeGetProc !argsSender !exit = do
   attrKeyFrom _ (EdhString attrName) = return $ AttrByName attrName
   attrKeyFrom _ (EdhSymbol sym     ) = return $ AttrBySym sym
   attrKeyFrom pgs badVal =
-    throwEdhSTM pgs EvalError
-      $  "Invalid attribute reference - "
-      <> edhValueStr (edhTypeOf badVal)
-      <> ": "
-      <> edhValueStr badVal
+    throwEdhSTM pgs EvalError $ "Invalid attribute reference type - " <> T.pack
+      (show $ edhTypeOf badVal)
 
 
 -- | utility scope.put(k1:v1, k2:v2, n3=v3, n4=v4, ...)
@@ -190,10 +187,8 @@ scopePutProc !argsSender !exit = do
     EdhTuple [EdhSymbol !k, v] -> putAttrs pgs args ((AttrBySym k, v) : cumu)
     _ ->
       throwEdhSTM pgs EvalError
-        $  "Invalid key/value spec to put into a scope - "
-        <> edhValueStr (edhTypeOf arg)
-        <> ": "
-        <> edhValueStr arg
+        $  "Invalid key/value type to put into a scope - "
+        <> T.pack (show $ edhTypeOf arg)
 
 
 -- | utility scope.eval(expr1, expr2, kw3=expr3, kw4=expr4, ...)

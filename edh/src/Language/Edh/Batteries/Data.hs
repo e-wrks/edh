@@ -28,28 +28,21 @@ attrDerefAddrProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
       (\lhVal ->
         throwEdh EvalError
           $  "No such attribute "
-          <> edhValueStr rhVal
+          <> attrName
           <> " from "
           <> T.pack (show lhVal)
       )
       exit
-    EdhSymbol !sym -> getEdhAttr
+    EdhSymbol sym@(Symbol _ desc) -> getEdhAttr
       lhExpr
       (AttrBySym sym)
       (\lhVal ->
-        throwEdh EvalError
-          $  "No such attribute "
-          <> edhValueStr rhVal
-          <> " from "
-          <> T.pack (show lhVal)
+        throwEdh EvalError $ "No such attribute @" <> desc <> " from " <> T.pack
+          (show lhVal)
       )
       exit
-    _ ->
-      throwEdh EvalError
-        $  "Invalid attribute reference - "
-        <> edhValueStr (edhTypeOf rhVal)
-        <> ": "
-        <> edhValueStr rhVal
+    _ -> throwEdh EvalError $ "Invalid attribute reference type - " <> T.pack
+      (show $ edhTypeOf rhVal)
 attrDerefAddrProc !argsSender _ =
   throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
@@ -93,12 +86,8 @@ attrDerefTemptProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
                                       exit
     EdhSymbol !sym ->
       getEdhAttr lhExpr (AttrBySym sym) (const $ exitEdhProc exit nil) exit
-    _ ->
-      throwEdh EvalError
-        $  "Invalid attribute reference - "
-        <> edhValueStr (edhTypeOf rhVal)
-        <> ": "
-        <> edhValueStr rhVal
+    _ -> throwEdh EvalError $ "Invalid attribute reference type - " <> T.pack
+      (show $ edhTypeOf rhVal)
 attrDerefTemptProc !argsSender _ =
   throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
@@ -124,8 +113,16 @@ pkargsProc !argsSender !exit =
 concatProc :: EdhProcedure
 concatProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
-    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      exitEdhProc exit (EdhString $ edhValueStr lhVal <> edhValueStr rhVal)
+    edhValueStr lhVal $ \(OriginalValue lhStr _ _) -> case lhStr of
+      EdhString !lhs -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+        edhValueStr rhVal $ \(OriginalValue rhStr _ _) -> case rhStr of
+          EdhString !rhs -> exitEdhProc exit (EdhString $ lhs <> rhs)
+          _              -> error "bug: edhValueStr returned non-string"
+      _ -> error "bug: edhValueStr returned non-string"
+ where
+  edhValueStr :: EdhValue -> EdhProcExit -> EdhProg (STM ())
+  edhValueStr s@(EdhString{}) !exit' = exitEdhProc exit' s
+  edhValueStr !v              !exit' = edhValueRepr v exit'
 concatProc !argsSender _ =
   throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
@@ -152,15 +149,17 @@ isNullProc !argsSender !exit = do
 typeProc :: EdhProcedure
 typeProc !argsSender !exit =
   packEdhArgs argsSender $ \(ArgsPack !args !kwargs) ->
-    let !argsType = edhTypeOf <$> args
+    let !argsType = edhTypeValOf <$> args
     in  if null kwargs
           then case argsType of
             [t] -> exitEdhProc exit t
             _   -> exitEdhProc exit (EdhTuple argsType)
           else exitEdhProc
             exit
-            (EdhArgsPack $ ArgsPack argsType $ Map.map edhTypeOf kwargs)
-
+            (EdhArgsPack $ ArgsPack argsType $ Map.map edhTypeValOf kwargs)
+ where
+  edhTypeValOf :: EdhValue -> EdhValue
+  edhTypeValOf = EdhType . edhTypeOf
 
 -- | utility dict(***pkargs,**kwargs,*args) - dict constructor by arguments
 -- can be used to convert arguments pack into dict

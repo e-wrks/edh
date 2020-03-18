@@ -47,11 +47,11 @@ doRead pendingLines =
                       doRead $ code : pendingLines
 
 
-doEval :: EdhWorld -> Object -> Text -> InputT IO (Either EdhError EdhValue)
-doEval !world !modu !edhSrc = evalEdhSource world modu "<adhoc>" edhSrc
+doEval :: EdhWorld -> Object -> Text -> InputT IO (Either EdhError Text)
+doEval !world !modu !edhSrc = evalEdhSource' world modu "<adhoc>" edhSrc
 
 
-doPrint :: Either EdhError EdhValue -> InputT IO ()
+doPrint :: Either EdhError Text -> InputT IO ()
 doPrint = \case
   Left err -> case err of
     EdhParseError _ -> do
@@ -63,9 +63,7 @@ doPrint = \case
     EdhUsageError _ -> do
       outputStrLn "* 🙈 *"
       outputStrLn $ show err
-  Right val -> case val of
-    EdhNil -> return ()
-    _      -> outputStrLn $ T.unpack $ edhValueStr val
+  Right repr -> outputStrLn $ T.unpack repr
 
 
 doLoop :: EdhWorld -> Object -> InputT IO ()

@@ -89,9 +89,12 @@ defaultEdhLogger = do
       logger :: EdhLogger
       logger !level !srcLoc !pkargs = case pkargs of
         ArgsPack [!argVal] !kwargs | Map.null kwargs ->
-          writeTQueue logQueue $! T.pack logPrefix <> edhValueStr argVal
+          writeTQueue logQueue $! T.pack logPrefix <> logString argVal
         _ -> writeTQueue logQueue $! T.pack $ logPrefix ++ show pkargs
        where
+        logString :: EdhValue -> Text
+        logString (EdhString s) = s
+        logString v             = T.pack $ show v
         logPrefix :: String
         logPrefix =
           (case srcLoc of

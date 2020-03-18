@@ -11,6 +11,7 @@ import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
 import           Data.Unique
+import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
 
@@ -21,24 +22,17 @@ import           Language.Edh.Runtime
 -- | utility error(*args,**kwargs) - eval error reporter
 errorProc :: EdhProcedure
 errorProc !argsSender _ =
-  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) -> if null kwargs
-    then case args of
-      [v] -> throwEdh EvalError $ edhValueStr v
-      _   -> throwEdh EvalError $ edhValueStr $ EdhTuple args
-    else
-      let !kwDict =
-            Map.fromList $ (<$> Map.toList kwargs) $ \(attrName, val) ->
-              (EdhString attrName, val)
-      in
-        throwEdh EvalError
-        $ T.pack
-        $ showEdhDict
-        $ Map.union kwDict
-        $ Map.fromList
-            [ (EdhDecimal (fromIntegral i), t)
-            | (i, t) <- zip [(0 :: Int) ..] args
-            ]
-
+  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) -> case args of
+    [v] | null kwargs -> throwEdh EvalError $ logString v
+    _ ->
+      throwEdh EvalError
+        $  T.unlines
+        $  (logString <$> args)
+        ++ [ k <> ": " <> logString v | (k, v) <- Map.toList kwargs ]
+ where
+  logString :: EdhValue -> Text
+  logString (EdhString s) = s
+  logString v             = T.pack $ show v
 
 -- | operator (->) - the brancher, if its left-hand matches, early stop its
 -- enclosing code block (commonly a case-of block, but other blocks as well),
