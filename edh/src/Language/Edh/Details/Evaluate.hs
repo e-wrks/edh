@@ -42,9 +42,10 @@ deParen x = case x of
   _            -> x
 
 evalStmt :: StmtSrc -> EdhProcExit -> EdhProg (STM ())
-evalStmt ss@(StmtSrc (_, !stmt)) !exit =
-  local (\pgs -> pgs { edh'context = (edh'context pgs) { contextStmt = ss } })
-    $ evalStmt' stmt exit
+evalStmt ss@(StmtSrc (_, !stmt)) !exit = ask >>= \pgs ->
+  local (const pgs { edh'context = (edh'context pgs) { contextStmt = ss } })
+    $ evalStmt' stmt
+    $ \rtn -> local (const pgs) $ exitEdhProc' exit rtn
 
 
 evalCaseBlock :: Expr -> EdhProcExit -> EdhProg (STM ())
@@ -259,7 +260,7 @@ evalStmt' !stmt !exit = do
               Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
             withMagicMethod :: EdhValue -> STM ()
             withMagicMethod magicMth = do
-              scopeObj <- mkScopeWrapper (contextWorld ctx) (objectScope this)
+              scopeObj <- mkScopeWrapper ctx $ objectScope this
               edhMakeCall pgs
                           magicMth
                           this
@@ -895,7 +896,7 @@ evalExpr expr exit = do
                   -- 3 pos-args - caller scope + lh/rh expr receiving operator
                   (PackReceiver [RecvArg scopeName Nothing Nothing, RecvArg lhName Nothing Nothing, RecvArg rhName Nothing Nothing])
                     -> do
-                      scopeWrapper <- mkScopeWrapper world scope
+                      scopeWrapper <- mkScopeWrapper ctx scope
                       updateEntityAttrs
                         pgs
                         opEnt
@@ -1145,8 +1146,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
     -- calling an interpreter procedure
     EdhInterpreter !mth'proc -> do
       let callerCtx = edh'context pgsCaller
-      !argCallerScope <- mkScopeWrapper (contextWorld callerCtx)
-                                        (contextScope callerCtx)
+      !argCallerScope <- mkScopeWrapper callerCtx $ contextScope callerCtx
       callMaker $ \exit -> callEdhMethod
         (SendPosArg (GodSendExpr (EdhObject argCallerScope)) : argsSndr)
         callee'that
@@ -1610,12 +1610,15 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
             <> T.pack (show iterVal)
 
 
--- | Make a reflective object wrapping the specified scope
+-- | Create a reflective object capturing the specified scope as from the
+-- specified context
+--
+-- the contextStmt is captured as the procedure body of its fake class
 --
 -- todo currently only lexical context is recorded, the call frames may
 --      be needed in the future
-mkScopeWrapper :: EdhWorld -> Scope -> STM Object
-mkScopeWrapper world scope = do
+mkScopeWrapper :: Context -> Scope -> STM Object
+mkScopeWrapper !ctx !scope = do
   -- use an object to wrap the scope entity
   entWrapper <- viewAsEdhObject (scopeEntity scope) wrapperClass []
   -- a scope wrapper object is itself a mao object, no attr can be put into it
@@ -1630,14 +1633,19 @@ mkScopeWrapper world scope = do
   -- put the object wrapping the entity as the bottom super object, so attrs
   -- not shadowed by those manually assigned ones to 'wrapperEnt', or scope
   -- manipulation methods, can be read off directly from the wrapper object,
-  -- caveat: you don't rely on this in writing attr reading Edh code, this
-  -- is convenient for interactive human inspectors, but problematic for
-  -- automatic code.
+  -- caveat: use scope.get() to access scope attrs programmatically, this is
+  -- only for convenience of interactive human usage.
     , entWrapper
     ]
  where
-  -- save the scope as lexical scope of the fake class for wrapper
-  !wrapperClass = (objClass $ scopeSuper world) { procedure'lexi = Just scope }
+  !world        = contextWorld ctx
+  !wrapperClass = (objClass $ scopeSuper world)
+    { procedure'lexi = Just scope
+    , procedure'decl = ProcDecl { procedure'name = "<captured-scope>"
+                                , procedure'args = PackReceiver []
+                                , procedure'body = Left $ contextStmt ctx
+                                }
+    }
 
 -- | Get the wrapped scope from a wrapper object
 wrappedScopeOf :: Object -> Scope
@@ -2074,6 +2082,7 @@ edhValueRepr (EdhDict (Dict _ dsv)) !exit = do
 edhValueRepr (EdhObject !o) !exit = do
   pgs <- ask
   contEdhSTM $ lookupEdhObjAttr pgs o (AttrByName "__repr__") >>= \case
+    EdhNil -> exitEdhSTM pgs exit $ EdhString $ T.pack $ show o
     EdhMethod !reprMth ->
       runEdhProg pgs
         $ callEdhMethod [] o reprMth Nothing

@@ -8,7 +8,6 @@ import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
 import           Data.List.NonEmpty             ( (<|) )
-import qualified Data.List.NonEmpty            as NE
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
 
@@ -77,13 +76,9 @@ supersProc !argsSender !exit = do
 scopeObtainProc :: EdhProcedure
 scopeObtainProc _ !exit = do
   !pgs <- ask
-  let !ctx      = edh'context pgs
-      !tgtScope = case NE.tail $ callStack ctx of
-        -- a host proc has its own stack frame, should wrap the next frame
-        (edhScope : _) -> edhScope
-        _ -> error "bug: host procedure `scope()` called from nowhere"
+  let !ctx = edh'context pgs
   contEdhSTM $ do
-    wrapperObj <- mkScopeWrapper (contextWorld ctx) tgtScope
+    wrapperObj <- mkScopeWrapper ctx $ contextScope ctx
     exitEdhSTM pgs exit $ EdhObject wrapperObj
 
 
@@ -103,8 +98,11 @@ scopeAttrsProc _ !exit = do
 scopeLexiLocProc :: EdhProcedure
 scopeLexiLocProc _ !exit = do
   !pgs <- ask
-  let !that = thatObject $ contextScope $ edh'context pgs
-  exitEdhProc exit $ EdhString $ T.pack $ show $ wrappedScopeOf that
+  let !that                  = thatObject $ contextScope $ edh'context pgs
+      ProcDecl _ _ !fakeBody = procedure'decl $ objClass that
+  exitEdhProc exit $ EdhString $ case fakeBody of
+    Left  (StmtSrc (srcLoc, _)) -> T.pack $ sourcePosPretty srcLoc
+    Right _                     -> "<host-code>"
 
 
 -- | utility scope.outer()
@@ -117,7 +115,34 @@ scopeOuterProc _ !exit = do
   case outerScopeOf $ wrappedScopeOf that of
     Nothing     -> exitEdhProc exit nil
     Just !outer -> contEdhSTM $ do
-      wrappedObj <- mkScopeWrapper (contextWorld ctx) outer
+      let
+        !world        = contextWorld ctx
+        !wrapperClass = (objClass $ scopeSuper world)
+          { procedure'lexi = Just outer
+          , procedure'decl = ProcDecl
+            { procedure'name = "<outer-scope>"
+            , procedure'args = PackReceiver []
+            , procedure'body = procedure'body $ procedure'decl $ scopeProc outer
+            }
+          }
+      -- use an object to wrap the scope entity
+      entWrapper <- viewAsEdhObject (scopeEntity outer) wrapperClass []
+      -- a scope wrapper object is itself a mao object, no attr can be put into it
+      wrapperEnt <- createMaoEntity
+      wrappedObj <- viewAsEdhObject
+        wrapperEnt
+        wrapperClass
+        [
+      -- put the 'scopeSuper' object as the top super, from it the builtin
+      -- scope manipulation methods are resolved
+          scopeSuper world
+      -- put the object wrapping the entity as the bottom super object, so attrs
+      -- not shadowed by those manually assigned ones to 'wrapperEnt', or scope
+      -- manipulation methods, can be read off directly from the wrapper object,
+      -- caveat: use scope.get() to access scope attrs programmatically, this is
+      -- only for convenience of interactive human usage.
+        , entWrapper
+        ]
       exitEdhSTM pgs exit $ EdhObject wrappedObj
 
 
@@ -197,21 +222,12 @@ scopeEvalProc :: EdhProcedure
 scopeEvalProc !argsSender !exit = do
   !pgs <- ask
   let
-    !callerCtx = edh'context pgs
-    !that      = thatObject $ contextScope callerCtx
-    !theScope  = wrappedScopeOf that
-    !theScopeBody =
-      case procedure'body $ procedure'decl $ scopeProc theScope of
-        Left  pb -> pb
-        Right _  -> StmtSrc
-          ( SourcePos { sourceName   = "<dynamic>"
-                      , sourceLine   = mkPos 1
-                      , sourceColumn = mkPos 1
-                      }
-          , VoidStmt
-          )
+    !callerCtx             = edh'context pgs
+    !that                  = thatObject $ contextScope callerCtx
+    !theScope              = wrappedScopeOf that
+    ProcDecl _ _ !fakeBody = procedure'decl $ objClass that
     -- eval all exprs with the original scope as the only scope in call stack
-    !scopeCallStack = theScope <| callStack callerCtx
+    !scopeCallStack        = theScope <| callStack callerCtx
     evalThePack
       :: [EdhValue]
       -> Map.HashMap AttrName EdhValue
@@ -245,11 +261,15 @@ scopeEvalProc !argsSender !exit = do
       else
         contEdhSTM
         $ runEdhProg pgs
-            { edh'context = callerCtx { callStack       = scopeCallStack
-                                      , generatorCaller = Nothing
-                                      , contextMatch    = true
-                                      , contextStmt     = theScopeBody
-                                      }
+            { edh'context = callerCtx
+                              { callStack       = scopeCallStack
+                              , generatorCaller = Nothing
+                              , contextMatch    = true
+                              , contextStmt     = case fakeBody of
+                                                    Left pb -> pb
+                                                    Right _ ->
+                                                      contextStmt callerCtx
+                              }
             }
         $ evalThePack [] Map.empty args
         $ Map.toList kwargs
