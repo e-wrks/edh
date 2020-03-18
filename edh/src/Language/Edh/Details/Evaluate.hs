@@ -2103,6 +2103,17 @@ edhValueRepr (EdhObject !o) !exit = do
             s@EdhString{} -> exitEdhProc exit s
             _             -> edhValueRepr reprVal exit
     reprVal -> runEdhProg pgs $ edhValueRepr reprVal exit
+-- repr of named value
+edhValueRepr (EdhNamedValue !n v@EdhNamedValue{}) !exit =
+  -- Edh operators are all left-associative, parenthesis needed
+  edhValueRepr v $ \(OriginalValue r _ _) -> case r of
+    EdhString repr ->
+      exitEdhProc exit $ EdhString $ n <> " := (" <> repr <> ")"
+    _ -> error "bug: edhValueRepr returned non-string in CPS"
+edhValueRepr (EdhNamedValue !n !v) !exit =
+  edhValueRepr v $ \(OriginalValue r _ _) -> case r of
+    EdhString repr -> exitEdhProc exit $ EdhString $ n <> " := " <> repr
+    _              -> error "bug: edhValueRepr returned non-string in CPS"
 -- repr of other values simply as to show itself
 edhValueRepr !v !exit = exitEdhProc exit $ EdhString $ T.pack $ show v
 

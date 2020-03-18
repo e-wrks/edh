@@ -47,6 +47,45 @@ attrDerefAddrProc !argsSender _ =
   throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
+-- | operator (:=) - value definition
+defProc :: EdhProcedure
+defProc [SendPosArg (AttrExpr (DirectRef (NamedAttr !valName))), SendPosArg !rhExpr] !exit
+  = do
+    pgs <- ask
+    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> contEdhSTM $ do
+      let !ent = scopeEntity $ contextScope $ edh'context pgs
+          nv   = EdhNamedValue valName rhVal
+      lookupEntityAttr pgs ent (AttrByName valName) >>= \case
+        EdhNil -> do
+          changeEntityAttr pgs ent (AttrByName valName) nv
+          exitEdhSTM pgs exit nv
+        oldDef@(EdhNamedValue n v) -> if v /= rhVal
+          then
+            runEdhProg pgs $ edhValueRepr rhVal $ \(OriginalValue newR _ _) ->
+              edhValueRepr oldDef $ \(OriginalValue oldR _ _) -> case newR of
+                EdhString !newRepr -> case oldR of
+                  EdhString oldRepr ->
+                    throwEdh EvalError
+                      $  "Can not redefine "
+                      <> valName
+                      <> " from { "
+                      <> oldRepr
+                      <> " } to { "
+                      <> newRepr
+                      <> " }"
+                  _ -> error "bug: edhValueRepr returned non-string"
+                _ -> error "bug: edhValueRepr returned non-string"
+          else do
+            unless (n == valName) -- avoid writing the entity if all same
+              $ changeEntityAttr pgs ent (AttrByName valName) nv
+            exitEdhSTM pgs exit nv
+        _ -> do
+          changeEntityAttr pgs ent (AttrByName valName) nv
+          exitEdhSTM pgs exit nv
+defProc !argsSender _ =
+  throwEdh EvalError $ "Invalid value definition: " <> T.pack (show argsSender)
+
+
 -- | operator (:) - pair constructor
 consProc :: EdhProcedure
 consProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do

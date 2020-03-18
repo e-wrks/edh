@@ -41,8 +41,13 @@ installEdhBatteries world = liftIO $ do
         "<batteries>"
         [ -- format: (symbol, precedence)
 
+        -- the definition operator, creates named value in Edh
+          ( ":="
+          , 1
+          )
+
         -- the cons operator, creates pairs in Edh
-          ( ":"
+        , ( ":"
           , 2
           ) -- why brittany insists on formatting it like this ?.?
 
@@ -152,6 +157,7 @@ installEdhBatteries world = liftIO $ do
         [ (AttrByName sym, ) <$> mkHostOper world rootScope sym hp
         | (sym, hp) <-
           [ ("$"  , attrDerefAddrProc)
+          , (":=" , defProc)
           , (":"  , consProc)
           , ("?"  , attrTemptProc)
           , ("?$" , attrDerefTemptProc)
