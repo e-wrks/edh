@@ -17,9 +17,7 @@ import qualified Data.HashMap.Strict           as Map
 
 import           Text.Megaparsec
 
-import           Data.Lossless.Decimal          ( Decimal(..)
-                                                , castDecimalToInteger
-                                                )
+import           Data.Lossless.Decimal          ( castDecimalToInteger )
 
 import           Language.Edh.Control
 import           Language.Edh.Runtime
@@ -35,51 +33,50 @@ loggingProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
     -- TODO interpret a pair of decimals at left-hand to be
     --        logging-level : stack-rewind-count
     --      and use source position at the stack frame after specified rewinding
-    EdhDecimal (Decimal d e n) | d == 1 && e == 0 ->
-      let !logLevel = fromIntegral n
-      in -- as the log queue is a TQueue per se, log msgs from a failing STM
+    EdhDecimal d -> do
+      let !logLevel = fromInteger $ castDecimalToInteger d
+      -- as the log queue is a TQueue per se, log msgs from a failing STM
       -- transaction has no way to go into the queue then get logged, but the
       -- failing cases are especially in need of diagnostics, so negative log
       -- level number is used to instruct a debug trace.
-        if logLevel < 0
-          then
-            let tracePrefix = " 🐞 " ++ sourcePosPretty srcPos ++ " ❗ "
-            in
-              evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
-                EdhString !logStr ->
-                  trace (tracePrefix ++ T.unpack logStr) $ exitEdhProc exit nil
-                _ -> edhValueRepr rhVal $ \(OriginalValue !rhRepr _ _) ->
-                  case rhRepr of
-                    EdhString !logStr ->
-                      trace (tracePrefix ++ T.unpack logStr)
-                        $ exitEdhProc exit nil
-                    _ ->
-                      trace (tracePrefix ++ show rhRepr) $ exitEdhProc exit nil
-          else contEdhSTM $ do
-            (EdhRuntime logger rtLogLevel) <-
-              readTMVar $ worldRuntime $ contextWorld ctx
-            if logLevel < rtLogLevel
-              then -- drop log msg without even eval it
-                   exitEdhSTM pgs exit nil
-              else
-                runEdhProg pgs
-                $ evalExpr rhExpr
-                $ \(OriginalValue !rhVal _ _) -> do
-                    let !srcLoc = if rtLogLevel <= 20
-                          then -- with source location info
-                               Just $ sourcePosPretty srcPos
-                          else -- no source location info
-                               Nothing
-                    contEdhSTM $ case rhVal of
-                      EdhArgsPack pkargs -> do
-                        logger logLevel srcLoc pkargs
-                        exitEdhSTM pgs exit nil
-                      EdhTuple vals -> do
-                        logger logLevel srcLoc $ ArgsPack vals Map.empty
-                        exitEdhSTM pgs exit nil
-                      _ -> do
-                        logger logLevel srcLoc $ ArgsPack [rhVal] Map.empty
-                        exitEdhSTM pgs exit nil
+      if logLevel < 0
+        then
+          let tracePrefix = " 🐞 " ++ sourcePosPretty srcPos ++ " ❗ "
+          in
+            evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
+              EdhString !logStr ->
+                trace (tracePrefix ++ T.unpack logStr) $ exitEdhProc exit nil
+              _ -> edhValueRepr rhVal $ \(OriginalValue !rhRepr _ _) ->
+                case rhRepr of
+                  EdhString !logStr ->
+                    trace (tracePrefix ++ T.unpack logStr)
+                      $ exitEdhProc exit nil
+                  _ ->
+                    trace (tracePrefix ++ show rhRepr) $ exitEdhProc exit nil
+        else contEdhSTM $ do
+          (EdhRuntime logger rtLogLevel) <-
+            readTMVar $ worldRuntime $ contextWorld ctx
+          if logLevel < rtLogLevel
+            then -- drop log msg without even eval it
+                 exitEdhSTM pgs exit nil
+            else
+              runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+                do
+                  let !srcLoc = if rtLogLevel <= 20
+                        then -- with source location info
+                             Just $ sourcePosPretty srcPos
+                        else -- no source location info
+                             Nothing
+                  contEdhSTM $ case rhVal of
+                    EdhArgsPack pkargs -> do
+                      logger logLevel srcLoc pkargs
+                      exitEdhSTM pgs exit nil
+                    EdhTuple vals -> do
+                      logger logLevel srcLoc $ ArgsPack vals Map.empty
+                      exitEdhSTM pgs exit nil
+                    _ -> do
+                      logger logLevel srcLoc $ ArgsPack [rhVal] Map.empty
+                      exitEdhSTM pgs exit nil
     _ -> throwEdh EvalError $ "Invalid log level: " <> T.pack (show lhVal)
 loggingProc !argsSender _ =
   throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
