@@ -56,8 +56,9 @@ showEdhDict ds = if Map.null ds
 
 -- | setting to `nil` value means deleting the item by the specified key
 setDictItem :: ItemKey -> EdhValue -> DictStore -> DictStore
-setDictItem !k v !ds =
-  if v == EdhNil then Map.delete k ds else Map.insert k v ds
+setDictItem !k v !ds = case v of
+  EdhNil -> Map.delete k ds
+  _      -> Map.insert k v ds
 
 dictEntryList :: DictStore -> [EdhValue]
 dictEntryList d = (<$> Map.toList d) $ \(k, v) -> EdhTuple [k, v]
@@ -181,9 +182,11 @@ createHashEntity !m = do
   hm = flip fromDyn Map.empty
   the'lookup'entity'attr _ !k = return . fromMaybe EdhNil . Map.lookup k . hm
   the'all'entity'attrs _ = return . Map.toList . hm
-  the'change'entity'attr _ !k !v = return . toDyn . if v == EdhNil
-    then Map.delete k . hm
-    else Map.insert k v . hm
+  the'change'entity'attr _ !k !v !d =
+    let !ds = fromDyn d Map.empty
+    in  return $ toDyn $ case v of
+          EdhNil -> Map.delete k ds
+          _      -> Map.insert k v ds
   the'update'entity'attrs _ !ps =
     return . toDyn . Map.union (Map.fromList ps) . hm
 
@@ -710,8 +713,11 @@ data EdhValue =
   -- | event sink
     | EdhSink !EventSink
 
-  -- | reflection
-    | EdhExpr !Unique !Expr !Text  -- expr with source(-less if empty)
+  -- | named value
+    | EdhNamedValue !AttrName !EdhValue
+
+  -- | reflective expr, with source (or not, if empty)
+    | EdhExpr !Unique !Expr !Text
 
 edhValueNull :: EdhValue -> STM Bool
 edhValueNull EdhNil                  = return True
@@ -729,6 +735,7 @@ edhValueNull (EdhExpr _ (LitExpr (DecLiteral d)) _) =
   return $ D.decimalIsNaN d || d == 0
 edhValueNull (EdhExpr _ (LitExpr (BoolLiteral b)) _) = return b
 edhValueNull (EdhExpr _ (LitExpr (StringLiteral s)) _) = return $ T.null s
+edhValueNull (EdhNamedValue _ v) = edhValueNull v
 edhValueNull _ = return False
 
 instance Show EdhValue where
@@ -763,12 +770,17 @@ instance Show EdhValue where
   show EdhContinue      = "<continue>"
   show (EdhCaseClose v) = "<caseclose: " ++ show v ++ ">"
   show EdhFallthrough   = "<fallthrough>"
-  show (EdhYield  v  )  = "<yield: " ++ show v ++ ">"
-  show (EdhReturn v  )  = "<return: " ++ show v ++ ">"
+  show (EdhYield  v)    = "<yield: " ++ show v ++ ">"
+  show (EdhReturn v)    = "<return: " ++ show v ++ ">"
 
-  show (EdhSink   v  )  = show v
+  show (EdhSink   v)    = show v
 
-  show (EdhExpr _ x s)  = if T.null s
+  show (EdhNamedValue n v@EdhNamedValue{}) =
+    -- Edh operators are all left-associative, parenthesis needed
+    T.unpack n <> " := (" <> show v <> ")"
+  show (EdhNamedValue n v) = T.unpack n <> " := " <> show v
+
+  show (EdhExpr _ x s    ) = if T.null s
     then -- source-less form
          "<expr: " ++ show x ++ ">"
     else -- source form
@@ -815,6 +827,10 @@ instance Eq EdhValue where
 
   EdhSink   x                 == EdhSink   y                 = x == y
 
+  EdhNamedValue _ x'v         == EdhNamedValue _ y'v         = x'v == y'v
+  EdhNamedValue _ x'v         == y                           = x'v == y
+  x                           == EdhNamedValue _ y'v         = x == y'v
+
   EdhExpr _   (LitExpr x'l) _ == EdhExpr _   (LitExpr y'l) _ = x'l == y'l
   EdhExpr x'u _             _ == EdhExpr y'u _             _ = x'u == y'u
 
@@ -849,20 +865,25 @@ instance Hashable EdhValue where
   hashWithSalt s EdhContinue         = hashWithSalt s (-2 :: Int)
   hashWithSalt s (EdhCaseClose v) =
     s `hashWithSalt` (-3 :: Int) `hashWithSalt` v
-  hashWithSalt s EdhFallthrough = hashWithSalt s (-4 :: Int)
+  hashWithSalt s EdhFallthrough            = hashWithSalt s (-4 :: Int)
   hashWithSalt s (EdhYield v) = s `hashWithSalt` (-5 :: Int) `hashWithSalt` v
   hashWithSalt s (EdhReturn v) = s `hashWithSalt` (-6 :: Int) `hashWithSalt` v
 
-  hashWithSalt s (EdhSink x) = hashWithSalt s x
+  hashWithSalt s (EdhSink   x            ) = hashWithSalt s x
+
+  hashWithSalt s (EdhNamedValue _ v      ) = hashWithSalt s v
 
   hashWithSalt s (EdhExpr _ (LitExpr l) _) = hashWithSalt s l
-  hashWithSalt s (EdhExpr u _ _) = hashWithSalt s u
+  hashWithSalt s (EdhExpr u _           _) = hashWithSalt s u
 
 
-edhExpr :: Expr -> EdhValue
-edhExpr (ExprWithSrc !xpr !xprSrc) =
-  EdhExpr (unsafePerformIO newUnique) xpr xprSrc
-edhExpr x = EdhExpr (unsafePerformIO newUnique) x ""
+edhExpr :: Expr -> STM EdhValue
+edhExpr (ExprWithSrc !xpr !xprSrc) = do
+  u <- unsafeIOToSTM newUnique
+  return $ EdhExpr u xpr xprSrc
+edhExpr x = do
+  u <- unsafeIOToSTM newUnique
+  return $ EdhExpr u x ""
 
 nil :: EdhValue
 nil = EdhNil
@@ -874,16 +895,14 @@ nil = EdhNil
 -- will keep the dict entry or object attribute while still
 -- carrying a semantic of *absence*.
 edhNone :: EdhValue
-edhNone = EdhExpr (unsafePerformIO newUnique) (LitExpr NilLiteral) "None"
--- Note `unsafePerformIO newUnique` is safe here but mostly NOT elsewhere
+edhNone = EdhNamedValue "None" EdhNil
 
 -- | Similar to `None`, `Nothing` is idiomatic in VisualBasic.
 --
 -- though we don't have `Maybe` monad in Edh, having a `Nothing`
 -- carrying null semantic may be useful in some cases.
 edhNothing :: EdhValue
-edhNothing = EdhExpr (unsafePerformIO newUnique) (LitExpr NilLiteral) "Nothing"
--- Note `unsafePerformIO newUnique` is safe here but mostly NOT elsewhere
+edhNothing = EdhNamedValue "Nothing" EdhNil
 
 -- | With `nil` converted to `None` so the result will never be `nil`.
 --
@@ -1205,13 +1224,14 @@ edhTypeOf (EdhGenrDef (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> GeneratorType
   Right _ -> HostGenrType
 
-edhTypeOf EdhInterpreter{} = InterpreterType
-edhTypeOf EdhProducer{}    = ProducerType
-edhTypeOf EdhBreak         = BreakType
-edhTypeOf EdhContinue      = ContinueType
-edhTypeOf EdhCaseClose{}   = CaseCloseType
-edhTypeOf EdhFallthrough   = FallthroughType
-edhTypeOf EdhYield{}       = YieldType
-edhTypeOf EdhReturn{}      = ReturnType
-edhTypeOf EdhSink{}        = SinkType
-edhTypeOf EdhExpr{}        = ExprType
+edhTypeOf EdhInterpreter{}    = InterpreterType
+edhTypeOf EdhProducer{}       = ProducerType
+edhTypeOf EdhBreak            = BreakType
+edhTypeOf EdhContinue         = ContinueType
+edhTypeOf EdhCaseClose{}      = CaseCloseType
+edhTypeOf EdhFallthrough      = FallthroughType
+edhTypeOf EdhYield{}          = YieldType
+edhTypeOf EdhReturn{}         = ReturnType
+edhTypeOf EdhSink{}           = SinkType
+edhTypeOf (EdhNamedValue _ v) = edhTypeOf v
+edhTypeOf EdhExpr{}           = ExprType

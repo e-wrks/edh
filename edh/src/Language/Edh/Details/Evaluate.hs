@@ -611,10 +611,12 @@ evalExpr expr exit = do
       !scope                 = contextScope ctx
   case expr of
 
-    GodSendExpr !val -> exitEdhProc exit val
-    x@ExprWithSrc{}  -> exitEdhProc exit $ edhExpr x
+    GodSendExpr !val    -> exitEdhProc exit val
+    ExprWithSrc !x !src -> contEdhSTM $ do
+      u <- unsafeIOToSTM newUnique
+      exitEdhSTM pgs exit $ EdhExpr u x src
 
-    LitExpr lit      -> case lit of
+    LitExpr lit -> case lit of
       DecLiteral    v -> exitEdhProc exit (EdhDecimal v)
       StringLiteral v -> exitEdhProc exit (EdhString v)
       BoolLiteral   v -> exitEdhProc exit (EdhBool v)
@@ -898,13 +900,15 @@ evalExpr expr exit = do
                   -- 3 pos-args - caller scope + lh/rh expr receiving operator
                   (PackReceiver [RecvArg scopeName Nothing Nothing, RecvArg lhName Nothing Nothing, RecvArg rhName Nothing Nothing])
                     -> do
+                      lhXV         <- edhExpr lhExpr
+                      rhXV         <- edhExpr rhExpr
                       scopeWrapper <- mkScopeWrapper ctx scope
                       updateEntityAttrs
                         pgs
                         opEnt
                         [ (AttrByName scopeName, EdhObject scopeWrapper)
-                        , (AttrByName lhName   , edhExpr lhExpr)
-                        , (AttrByName rhName   , edhExpr rhExpr)
+                        , (AttrByName lhName   , lhXV)
+                        , (AttrByName rhName   , rhXV)
                         ]
                       runOp
                   _ ->
@@ -1878,10 +1882,17 @@ packEdhExprs (x : xs) !exit = case x of
   UnpackPosArgs _ -> throwEdh EvalError "unpack to expr not supported yet"
   UnpackKwArgs _ -> throwEdh EvalError "unpack to expr not supported yet"
   UnpackPkArgs _ -> throwEdh EvalError "unpack to expr not supported yet"
-  SendPosArg !argExpr -> packEdhExprs xs $ \(ArgsPack !posArgs !kwArgs) ->
-    exit (ArgsPack (edhExpr argExpr : posArgs) kwArgs)
-  SendKwArg !kw !argExpr -> packEdhExprs xs $ \(ArgsPack !posArgs !kwArgs) ->
-    exit (ArgsPack posArgs $ Map.insert kw (edhExpr argExpr) kwArgs)
+  SendPosArg !argExpr -> packEdhExprs xs $ \(ArgsPack !posArgs !kwArgs) -> do
+    pgs <- ask
+    contEdhSTM $ do
+      xv <- edhExpr argExpr
+      runEdhProg pgs $ exit (ArgsPack (xv : posArgs) kwArgs)
+  SendKwArg !kw !argExpr -> do
+    pgs <- ask
+    contEdhSTM $ do
+      xv <- edhExpr argExpr
+      runEdhProg pgs $ packEdhExprs xs $ \(ArgsPack !posArgs !kwArgs) ->
+        exit (ArgsPack posArgs $ Map.insert kw xv kwArgs)
 
 -- | This intends to be called from an already invoked host procedure, so one
 -- call frame is unwounded for arg expressions to be eval'ed at the callers

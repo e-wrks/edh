@@ -277,21 +277,21 @@ scopeEvalProc !argsSender !exit = do
 
 -- | utility makeOp(lhExpr, opSym, rhExpr)
 makeOpProc :: EdhProcedure
-makeOpProc !argsSender !exit =
+makeOpProc !argsSender !exit = do
+  pgs <- ask
   packEdhArgs argsSender $ \(ArgsPack args kwargs) -> if (not $ null kwargs)
     then throwEdh EvalError "No kwargs accepted by makeOp"
     else case args of
-      [(EdhExpr _ !lhe _), EdhString op, (EdhExpr _ !rhe _)] ->
-        exitEdhProc exit (edhExpr $ InfixExpr op lhe rhe)
+      [(EdhExpr _ !lhe _), EdhString op, (EdhExpr _ !rhe _)] -> contEdhSTM $ do
+        expr <- edhExpr $ InfixExpr op lhe rhe
+        exitEdhSTM pgs exit expr
       _ -> throwEdh EvalError $ "Invalid arguments to makeOp: " <> T.pack
         (show args)
 
 
 -- | utility makeExpr(*args,**kwargs)
 makeExprProc :: EdhProcedure
-makeExprProc !argsSender !exit = case argsSender of
-  []                    -> exitEdhProc exit nil
-  [SendPosArg !argExpr] -> exitEdhProc exit (edhExpr argExpr)
-  argSenders ->
-    packEdhExprs argSenders $ \apk -> exitEdhProc exit $ EdhArgsPack apk
+makeExprProc !argsSender !exit = packEdhExprs argsSender $ \case
+  ArgsPack [v] kwargs | Map.null kwargs -> exitEdhProc exit v
+  apk -> exitEdhProc exit $ EdhArgsPack apk
 
