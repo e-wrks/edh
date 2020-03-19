@@ -148,6 +148,32 @@ pkargsProc !argsSender !exit =
   packEdhArgs argsSender $ \apk -> exitEdhProc exit (EdhArgsPack apk)
 
 
+-- | utility repr(*args,**kwargs) - repr extractor
+reprProc :: EdhProcedure
+reprProc !argsSender !exit = do
+  pgs <- ask
+  let go
+        :: [EdhValue]
+        -> [(AttrName, EdhValue)]
+        -> [EdhValue]
+        -> [(AttrName, EdhValue)]
+        -> STM ()
+      go [repr] kwReprs [] [] | null kwReprs = exitEdhSTM pgs exit repr
+      go reprs kwReprs [] [] =
+        exitEdhSTM pgs exit
+          $ EdhArgsPack
+          $ ArgsPack (reverse reprs)
+          $ Map.fromList kwReprs
+      go reprs kwReprs (v : rest) kwps =
+        runEdhProg pgs $ edhValueRepr v $ \(OriginalValue r _ _) ->
+          contEdhSTM $ go (r : reprs) kwReprs rest kwps
+      go reprs kwReprs [] ((k, v) : rest) =
+        runEdhProg pgs $ edhValueRepr v $ \(OriginalValue r _ _) ->
+          contEdhSTM $ go reprs ((k, r) : kwReprs) [] rest
+  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) ->
+    contEdhSTM $ go [] [] args (Map.toList kwargs)
+
+
 -- | operator (++) - string coercing concatenator
 concatProc :: EdhProcedure
 concatProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =

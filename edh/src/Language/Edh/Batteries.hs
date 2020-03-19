@@ -196,6 +196,7 @@ installEdhBatteries world = liftIO $ do
             , PackReceiver [RecvArg "description" Nothing Nothing]
             )
           , (EdhMethod, "pkargs"     , pkargsProc     , WildReceiver)
+          , (EdhMethod, "repr"       , reprProc       , WildReceiver)
           , (EdhMethod, "dict"       , dictProc       , WildReceiver)
           , (EdhMethod, "null"       , isNullProc     , WildReceiver)
           , (EdhMethod, "type"       , typeProc       , WildReceiver)
