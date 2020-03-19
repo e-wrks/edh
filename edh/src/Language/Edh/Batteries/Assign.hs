@@ -33,30 +33,26 @@ assignProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
             -- indexing assign to an object, by calling its ([=]) method with ixVal and rhVal
             -- as the args
             EdhObject obj ->
-              contEdhSTM
-                $   resolveEdhObjAttr pgs obj (AttrByName "[=]")
-                >>= \case
-                      Nothing ->
-                        throwEdhSTM pgs EvalError
-                          $  "No ([=]) method from: "
-                          <> T.pack (show obj)
-                      Just (OriginalValue (EdhMethod mth'proc) _ mth'that) ->
-                        runEdhProg pgs $ callEdhMethod
-                          [ SendPosArg (GodSendExpr ixVal)
-                          , SendPosArg (GodSendExpr rhVal)
-                          ]
-                          mth'that
-                          mth'proc
-                          Nothing
-                          exit
-                      Just (OriginalValue !badIndexer _ _) ->
-                        throwEdhSTM pgs EvalError
-                          $  "Malformed index method ([=]) on "
-                          <> T.pack (show obj)
-                          <> " - "
-                          <> T.pack (show $ edhTypeOf badIndexer)
-                          <> ": "
-                          <> T.pack (show badIndexer)
+              contEdhSTM $ lookupEdhObjAttr pgs obj (AttrByName "[=]") >>= \case
+                EdhNil ->
+                  throwEdhSTM pgs EvalError $ "No ([=]) method from: " <> T.pack
+                    (show obj)
+                EdhMethod !mth'proc -> runEdhProg pgs $ callEdhMethod
+                  [ SendPosArg (GodSendExpr ixVal)
+                  , SendPosArg (GodSendExpr rhVal)
+                  ]
+                  obj
+                  mth'proc
+                  Nothing
+                  exit
+                !badIndexer ->
+                  throwEdhSTM pgs EvalError
+                    $  "Malformed index method ([=]) on "
+                    <> T.pack (show obj)
+                    <> " - "
+                    <> T.pack (show $ edhTypeOf badIndexer)
+                    <> ": "
+                    <> T.pack (show badIndexer)
 
             _ ->
               throwEdh EvalError

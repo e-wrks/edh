@@ -324,31 +324,34 @@ data Scope = Scope {
     , thatObject :: !Object
     -- | the Edh procedure holding this scope
     , scopeProc :: !ProcDefi
+    -- | the Edh stmt caused creation of this scope
+    , scopeCaller :: !StmtSrc
   }
 instance Eq Scope where
-  Scope x'e _ _ _ == Scope y'e _ _ _ = x'e == y'e
+  Scope x'e _ _ _ _ == Scope y'e _ _ _ _ = x'e == y'e
 instance Ord Scope where
-  compare (Scope x'u _ _ _) (Scope y'u _ _ _) = compare x'u y'u
+  compare (Scope x'u _ _ _ _) (Scope y'u _ _ _ _) = compare x'u y'u
 instance Hashable Scope where
-  hashWithSalt s (Scope u _ _ _) = hashWithSalt s u
+  hashWithSalt s (Scope u _ _ _ _) = hashWithSalt s u
 instance Show Scope where
-  show (Scope _ _ _ (ProcDefi _ _ (ProcDecl pName argsRcvr procBody))) =
-    T.unpack pName ++ " " ++ show argsRcvr ++ " @ " ++ srcLoc
+  show (Scope _ _ _ (ProcDefi _ _ (ProcDecl pName _ procBody)) (StmtSrc (cPos, _)))
+    = "📜 " ++ T.unpack pName ++ " 🔎 " ++ defLoc ++ " 👈 " ++ sourcePosPretty cPos
    where
-    srcLoc = case procBody of
-      Right _                 -> "<host-code>"
-      Left  (StmtSrc (sp, _)) -> sourcePosPretty sp
+    defLoc = case procBody of
+      Right _                   -> "<host-code>"
+      Left  (StmtSrc (dPos, _)) -> sourcePosPretty dPos
 
 
 outerScopeOf :: Scope -> Maybe Scope
 outerScopeOf = procedure'lexi . scopeProc
 
-objectScope :: Object -> Scope
-objectScope obj = Scope { scopeEntity = objEntity obj
-                        , thisObject  = obj
-                        , thatObject  = obj
-                        , scopeProc   = objClass obj
-                        }
+objectScope :: Context -> Object -> Scope
+objectScope ctx obj = Scope { scopeEntity = objEntity obj
+                            , thisObject  = obj
+                            , thatObject  = obj
+                            , scopeProc   = objClass obj
+                            , scopeCaller = contextStmt ctx
+                            }
 
 -- | An object views an entity, with inheritance relationship 
 -- to any number of super objects.
@@ -580,8 +583,9 @@ getEdhErrorContext !pgs !msg = EdhErrorContext msg
   (StmtSrc (!sp, _)) = contextStmt ctx
   !frames =
     foldl'
-        (\sfs (Scope _ _ _ (ProcDefi _ _ (ProcDecl procName _ procBody))) ->
-          (procName, procSrcLoc procBody) : sfs
+        (\sfs (Scope _ _ _ (ProcDefi _ _ (ProcDecl procName _ procBody)) (StmtSrc (callerPos, _))) ->
+          (procName, procSrcLoc procBody, T.pack $ sourcePosPretty callerPos)
+            : sfs
         )
         []
       $ NE.init (callStack ctx)

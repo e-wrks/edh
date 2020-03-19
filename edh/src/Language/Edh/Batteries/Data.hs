@@ -107,7 +107,7 @@ attrTemptProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
   !pgs <- ask
   case rhExpr of
     AttrExpr (DirectRef !addr) -> contEdhSTM $ do
-      key <- resolveAddr pgs addr
+      key <- resolveEdhAttrAddr pgs addr
       runEdhProg pgs $ getEdhAttr lhExpr key (const $ exitEdhProc exit nil) exit
     _ -> throwEdh EvalError $ "Invalid attribute expression: " <> T.pack
       (show rhExpr)

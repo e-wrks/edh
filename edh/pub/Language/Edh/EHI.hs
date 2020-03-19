@@ -121,11 +121,9 @@ module Language.Edh.EHI
   , AttrKey(..)
   , attrKeyValue
   , lookupEdhCtxAttr
+  , resolveEdhCtxAttr
   , lookupEdhObjAttr
   , lookupEdhSuperAttr
-  , resolveEdhCtxAttr
-  , resolveEdhObjAttr
-  , resolveEdhSuperAttr
   , resolveEdhInstance
   , objectScope
   , mkScopeWrapper

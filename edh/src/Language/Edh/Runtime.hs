@@ -118,6 +118,7 @@ createEdhWorld !logger = liftIO $ do
   rootEntity <- atomically $ createHashEntity $ Map.fromList
     [ (AttrByName "__name__", EdhString "<root>")
     , (AttrByName "__file__", EdhString "<genesis>")
+    , (AttrByName "__repr__", EdhString "<world>")
     , (AttrByName "None"    , edhNone)
     , (AttrByName "Nothing" , edhNothing)
     ]
@@ -138,7 +139,13 @@ createEdhWorld !logger = liftIO $ do
                      , objClass  = rootClass
                      , objSupers = rootSupers
                      }
-      !rootScope  = Scope rootEntity root root rootClass
+      !rootScope = Scope rootEntity root root rootClass $ StmtSrc
+        ( SourcePos { sourceName   = "<world-root>"
+                    , sourceLine   = mkPos 1
+                    , sourceColumn = mkPos 1
+                    }
+        , VoidStmt
+        )
       !scopeClass = ProcDefi
         { procedure'uniq = scopeClassUniq
         , procedure'lexi = Just rootScope
@@ -224,6 +231,7 @@ createEdhModule !world !moduId !moduSrc = liftIO $ do
   !moduEntity <- atomically $ createHashEntity $ Map.fromList
     [ (AttrByName "__name__", EdhString moduId)
     , (AttrByName "__file__", EdhString $ T.pack moduSrc)
+    , (AttrByName "__repr__", EdhString $ "module:" <> T.pack moduSrc)
     ]
   !moduSupers    <- newTVarIO []
   !moduClassUniq <- newUnique
@@ -314,10 +322,12 @@ mkHostClass !scope !nm !writeProtected !hc = do
         let ctx       = edh'context pgs
             pgsCtor   = pgs { edh'context = ctorCtx }
             ctorCtx   = ctx { callStack = ctorScope :| NE.tail (callStack ctx) }
-            ctorScope = (contextScope ctx) { scopeEntity = ent
-                                           , thisObject  = newThis
-                                           , thatObject  = newThis
-                                           }
+            ctorScope = Scope { scopeEntity = ent
+                              , thisObject  = newThis
+                              , thatObject  = newThis
+                              , scopeProc   = cls
+                              , scopeCaller = contextStmt ctx
+                              }
         hc pgsCtor argsSndr obs
         exitEdhSTM pgs exit $ EdhObject newThis
   return $ EdhClass cls

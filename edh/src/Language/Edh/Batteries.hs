@@ -232,7 +232,7 @@ installEdhBatteries world = liftIO $ do
                             }
             , objSupers = rtSupers
             }
-          !rtScope = objectScope runtime
+          !rtScope = objectScope (edh'context pgs) runtime
       !rtGenrs <- sequence
         [ (AttrByName nm, ) <$> mkHostProc
             rtScope
@@ -276,7 +276,11 @@ installEdhBatteries world = liftIO $ do
 
       !scopeSuperMethods <- sequence
         [ (AttrByName nm, )
-            <$> mkHostProc (objectScope scopeSuperObj) mc nm hp args
+            <$> mkHostProc (objectScope (edh'context pgs) scopeSuperObj)
+                           mc
+                           nm
+                           hp
+                           args
         | (mc, nm, hp, args) <-
           [ (EdhMethod, "eval"   , scopeEvalProc   , WildReceiver)
           , (EdhMethod, "get"    , scopeGetProc    , WildReceiver)

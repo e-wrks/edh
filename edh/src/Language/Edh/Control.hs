@@ -31,10 +31,18 @@ type Parser = ParsecT Void Text (State OpPrecDict)
 type ParserError = ParseErrorBundle Text Void
 
 
+type ProcedureName = Text
+type ProcedureDefineLoc = Text
+type ProcedureCallerLoc = Text
+
 data EdhErrorContext = EdhErrorContext {
     edhErrorMsg :: !Text
     , edhErrorLocation :: !Text
-    , edhErrorStack :: ![(Text, Text)]
+    , edhErrorStack :: ![(
+        ProcedureName,
+        ProcedureDefineLoc,
+        ProcedureCallerLoc
+        )]
   } deriving (Eq, Typeable)
 
 newtype EvalError = EvalError EdhErrorContext
@@ -54,10 +62,12 @@ data EdhError = EdhParseError ParserError | EdhEvalError EvalError | EdhUsageErr
 instance Show EdhError where
   show (EdhParseError err) = "⛔ " ++ errorBundlePretty err
   show (EdhEvalError (EvalError (EdhErrorContext msg loc stack))) =
-    T.unpack $ stacktrace <> "\n💣 " <> msg <> "\n👉 " <> loc
+    T.unpack $ backtrace <> "\n💣 " <> msg <> "\n👉 " <> loc
    where
-    stacktrace = foldl'
-      (\st (pname, ploc) -> st <> "\n📜 " <> pname <> " 🔎 " <> ploc)
+    backtrace = foldl'
+      (\st (pname, pdef, pcaller) ->
+        st <> "\n📜 " <> pname <> " 🔎 " <> pdef <> " 👈 " <> pcaller
+      )
       ("💔" :: Text)
       stack
   show (EdhUsageError (UsageError msg)) = "🐒 " ++ T.unpack msg
