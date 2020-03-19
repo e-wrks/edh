@@ -44,6 +44,22 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
   let !callerCtx   = edh'context pgs
       !callerScope = contextScope callerCtx
       !ctxMatch    = contextMatch callerCtx
+      updAttrs :: [(AttrKey, EdhValue)] -> STM ()
+      updAttrs [] = -- todo: which one is semantically more correct ?
+        -- to trigger a write, or avoid the write
+        return ()  -- this avoids triggering stm write
+      updAttrs !ps' = updateEntityAttrs pgs (scopeEntity callerScope) ps'
+      branchMatched :: [(AttrName, EdhValue)] -> STM ()
+      branchMatched !ps = do
+        updAttrs [ (AttrByName n, noneNil v) | (n, v) <- ps, n /= "_" ]
+        runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+          exitEdhProc
+            exit
+            (case rhVal of
+              EdhFallthrough -> rhVal
+              EdhCaseClose{} -> rhVal
+              _              -> EdhCaseClose rhVal
+            )
 
       handlePairPattern !pairPattern =
         case matchPairPattern pairPattern ctxMatch [] of
@@ -51,29 +67,17 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
             (show pairPattern)
           Just [] -> -- valid pattern, no match
             exitEdhProc exit EdhFallthrough
-          Just mps -> contEdhSTM $ do -- pattern matched
-            updateEntityAttrs pgs (scopeEntity callerScope) mps
-            runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-              exitEdhProc
-                exit
-                (case rhVal of
-                  EdhFallthrough -> EdhFallthrough
-                  _              -> EdhCaseClose rhVal
-                )
+          Just !mps -> contEdhSTM $ branchMatched mps
 
   case lhExpr of
     -- recognize `_` as similar to the wildcard pattern match in Haskell,
     -- it always matches
-    AttrExpr (DirectRef (NamedAttr "_")) ->
-      evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> exitEdhProc
-        exit
-        (case rhVal of
-          EdhFallthrough -> EdhFallthrough
-          _              -> EdhCaseClose rhVal
-        )
+    AttrExpr (DirectRef (NamedAttr "_")) -> contEdhSTM $ branchMatched []
+
+    -- TODO support nested patterns
 
     -- { x:y:z:... } -- pair pattern matching
-    DictExpr [pairPattern] -> handlePairPattern pairPattern
+    DictExpr [pairPattern              ] -> handlePairPattern pairPattern
     -- this is to establish the intuition that `{ ... }` always invokes
     -- pattern matching. if a literal dict value really meant to be matched,
     -- the parenthesized form `( {k1: v1, k2: v2, ...} )` should be used.
@@ -89,55 +93,29 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
 
       -- { continue } -- match with continue
       [StmtSrc (_, ContinueStmt)] -> case ctxMatch of
-        EdhContinue ->
-          contEdhSTM
-            $ runEdhProg pgs
-            $ evalExpr rhExpr
-            $ \(OriginalValue !rhVal _ _) -> exitEdhProc
-                exit
-                (case rhVal of
-                  EdhFallthrough -> EdhFallthrough
-                  _              -> EdhCaseClose rhVal
-                )
-        _ -> exitEdhProc exit EdhFallthrough
+        EdhContinue -> contEdhSTM $ branchMatched []
+        _           -> exitEdhProc exit EdhFallthrough
 
       -- { val } -- wild capture pattern, used to capture a non-nil result as
       -- an attribute.
-      -- Note: a nil value should be value-matched explicitly
+      -- Note: a raw nil value should be value-matched explicitly
       [StmtSrc (_, ExprStmt (AttrExpr (DirectRef (NamedAttr attrName))))] ->
-        if EdhNil == ctxMatch -- don't match nil here
-          then exitEdhProc exit EdhFallthrough
-          else contEdhSTM $ do
-            when (attrName /= "_") $ changeEntityAttr
-              pgs
-              (scopeEntity callerScope)
-              (AttrByName attrName)
-              ctxMatch
-            runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-              exitEdhProc
-                exit
-                (case rhVal of
-                  EdhFallthrough -> EdhFallthrough
-                  _              -> EdhCaseClose rhVal
-                )
+        case ctxMatch of -- don't match raw nil here, 
+          EdhNil -> exitEdhProc exit EdhFallthrough
+          -- but a named nil (i.e. None/Nothing etc.) should be matched
+          _      -> contEdhSTM $ branchMatched [(attrName, ctxMatch)]
+
+      -- { term := value } -- definition pattern
+      [StmtSrc (_, ExprStmt (InfixExpr ":=" (AttrExpr (DirectRef (NamedAttr termName))) (AttrExpr (DirectRef (NamedAttr valueName)))))]
+        -> contEdhSTM $ case ctxMatch of
+          EdhNamedValue !n !v ->
+            branchMatched [(termName, EdhString n), (valueName, v)]
+          _ -> exitEdhSTM pgs exit EdhFallthrough
 
       -- { head => tail } -- snoc pattern
       [StmtSrc (_, ExprStmt (InfixExpr "=>" (AttrExpr (DirectRef (NamedAttr headName))) (AttrExpr (DirectRef (NamedAttr tailName)))))]
-        -> let doMatched headVal tailVal = do
-                 updateEntityAttrs
-                   pgs
-                   (scopeEntity callerScope)
-                   [ (AttrByName headName, headVal)
-                   , (AttrByName tailName, tailVal)
-                   ]
-                 runEdhProg pgs
-                   $ evalExpr rhExpr
-                   $ \(OriginalValue !rhVal _ _) -> exitEdhProc
-                       exit
-                       (case rhVal of
-                         EdhFallthrough -> EdhFallthrough
-                         _              -> EdhCaseClose rhVal
-                       )
+        -> let doMatched headVal tailVal =
+                   branchMatched [(headName, headVal), (tailName, tailVal)]
            in  contEdhSTM $ case ctxMatch of
                  EdhArgsPack (ArgsPack (h : rest) !kwargs) | Map.null kwargs ->
                    doMatched h (EdhArgsPack (ArgsPack rest kwargs))
@@ -153,49 +131,26 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       -- {( x,y,z,... )} -- tuple pattern
       [StmtSrc (_, ExprStmt (TupleExpr vExprs))] -> contEdhSTM $ if null vExprs
         then -- an empty tuple pattern matches any empty sequence
-          let doMatched =
-                runEdhProg pgs
-                  $ evalExpr rhExpr
-                  $ \(OriginalValue !rhVal _ _) -> exitEdhProc
-                      exit
-                      (case rhVal of
-                        EdhFallthrough -> EdhFallthrough
-                        _              -> EdhCaseClose rhVal
-                      )
-          in
-            case ctxMatch of
-              EdhArgsPack (ArgsPack [] !kwargs) | Map.null kwargs -> doMatched
-              EdhTuple [] -> doMatched
-              EdhList (List _ !l) ->
-                readTVar l
-                  >>= \ll -> if null ll
-                        then doMatched
-                        else exitEdhSTM pgs exit EdhFallthrough
-              _ -> exitEdhSTM pgs exit EdhFallthrough
+             case ctxMatch of
+          EdhArgsPack (ArgsPack [] !kwargs) | Map.null kwargs ->
+            branchMatched []
+          EdhTuple [] -> branchMatched []
+          EdhList (List _ !l) ->
+            readTVar l
+              >>= \ll -> if null ll
+                    then branchMatched []
+                    else exitEdhSTM pgs exit EdhFallthrough
+          _ -> exitEdhSTM pgs exit EdhFallthrough
         else do
           attrNames <- sequence $ (<$> vExprs) $ \case
-            (AttrExpr (DirectRef (NamedAttr vAttr))) ->
-              return $ AttrByName vAttr
+            (AttrExpr (DirectRef (NamedAttr vAttr))) -> return $ vAttr
             vPattern ->
               throwEdhSTM pgs EvalError
                 $  "Invalid element in tuple pattern: "
                 <> T.pack (show vPattern)
           case ctxMatch of
-            EdhTuple vs | length vs == length vExprs -> do
-              updateEntityAttrs
-                pgs
-                (scopeEntity callerScope)
-                [ (an, noneNil av)
-                | (an@(AttrByName nm), av) <- zip attrNames vs
-                , nm /= "_"
-                ]
-              runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-                exitEdhProc
-                  exit
-                  (case rhVal of
-                    EdhFallthrough -> EdhFallthrough
-                    _              -> EdhCaseClose rhVal
-                  )
+            EdhTuple vs | length vs == length vExprs ->
+              branchMatched $ zip attrNames vs
             _ -> exitEdhSTM pgs exit EdhFallthrough
 
       -- {{ class:inst }} -- instance resolving pattern
@@ -210,20 +165,8 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                     val    -> case val of
                       EdhClass class_ ->
                         resolveEdhInstance pgs class_ ctxObj >>= \case
-                          Just instObj -> do
-                            when (instAttr /= "_") $ changeEntityAttr
-                              pgs
-                              (scopeEntity callerScope)
-                              (AttrByName instAttr)
-                              (EdhObject instObj)
-                            runEdhProg pgs
-                              $ evalExpr rhExpr
-                              $ \(OriginalValue !rhVal _ _) -> exitEdhProc
-                                  exit
-                                  (case rhVal of
-                                    EdhFallthrough -> EdhFallthrough
-                                    _              -> EdhCaseClose rhVal
-                                  )
+                          Just instObj ->
+                            branchMatched [(instAttr, EdhObject instObj)]
                           Nothing -> exitEdhSTM pgs exit EdhFallthrough
                       _ ->
                         throwEdhSTM pgs EvalError
@@ -241,10 +184,7 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
         else evalExprs vExprs $ \(OriginalValue matchVals _ _) ->
           case matchVals of
             EdhTuple l -> if ctxMatch `elem` l
-              then evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-                exitEdhProc exit $ case rhVal of
-                  EdhFallthrough -> EdhFallthrough
-                  _              -> EdhCaseClose rhVal
+              then contEdhSTM $ branchMatched []
               else exitEdhProc exit EdhFallthrough
             _ -> error "bug: evalExprs returned non-tuple"
 
@@ -260,22 +200,20 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       evalExpr guardedExpr $ \(OriginalValue !predValue _ _) ->
         if predValue /= true
           then exitEdhProc exit EdhFallthrough
-          else evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> exitEdhProc
-            exit
-            (case rhVal of
-              EdhFallthrough -> EdhFallthrough
-              _              -> EdhCaseClose rhVal
-            )
+          else contEdhSTM $ branchMatched []
 
     -- value-wise matching against the target in context
-    _ -> evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> if lhVal /= ctxMatch
-      then exitEdhProc exit EdhFallthrough
-      else evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> exitEdhProc
-        exit
-        (case rhVal of
-          EdhFallthrough -> EdhFallthrough
-          _              -> EdhCaseClose rhVal
-        )
+    _ -> evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
+      let namelyMatch :: EdhValue -> EdhValue -> Bool
+          namelyMatch (EdhNamedValue x'n x'v) (EdhNamedValue y'n y'v) =
+              x'n == y'n && x'v == y'v
+          namelyMatch EdhNamedValue{} _               = False
+          namelyMatch _               EdhNamedValue{} = False
+          namelyMatch x               y               = x == y
+      in  if not $ namelyMatch lhVal ctxMatch
+            then exitEdhProc exit EdhFallthrough
+            else contEdhSTM $ branchMatched []
+
 branchProc !argsSender _ =
   throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
@@ -283,19 +221,15 @@ branchProc !argsSender _ =
 -- | `Nothing` means invalid pattern, `[]` means no match, non-empty list is
 -- the aligned values along with attr names as matched
 matchPairPattern
-  :: Expr -> EdhValue -> [(AttrKey, EdhValue)] -> Maybe [(AttrKey, EdhValue)]
+  :: Expr -> EdhValue -> [(AttrName, EdhValue)] -> Maybe [(AttrName, EdhValue)]
 matchPairPattern p v matches = case p of
   InfixExpr ":" leftExpr (AttrExpr (DirectRef (NamedAttr vAttr))) -> case v of
     EdhPair leftVal val ->
-      let matches' = case vAttr of
-            "_" -> matches
-            _   -> ((AttrByName vAttr, val) : matches)
+      let matches' = (vAttr, val) : matches
       in  case leftExpr of
             (AttrExpr (DirectRef (NamedAttr leftAttr))) -> case leftVal of
               EdhPair _ _ -> Just []
-              _           -> Just $ case leftAttr of
-                "_" -> matches'
-                _   -> ((AttrByName leftAttr, leftVal) : matches')
+              _           -> Just $ (leftAttr, leftVal) : matches'
             InfixExpr ":" _ _ -> matchPairPattern leftExpr leftVal matches'
             _                 -> Nothing
     _ -> Just []
