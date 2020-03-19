@@ -248,31 +248,37 @@ evalStmt' !stmt !exit = do
 
     ExtendsStmt superExpr ->
       evalExpr superExpr $ \(OriginalValue !superVal _ _) -> case superVal of
-        (EdhObject superObj) ->
+        (EdhObject superObj) -> contEdhSTM $ do
           let
-            !this = thisObject scope
-            !key  = AttrByName "<-^"
-            doExtend :: STM ()
-            doExtend = do
-              modifyTVar' (objSupers this) (superObj :)
-              exitEdhSTM pgs exit nil
+            !this       = thisObject scope
+            !magicSpell = AttrByName "<-^"
             noMagic :: EdhProg (STM ())
-            noMagic = contEdhSTM $ resolveEdhObjAttr pgs superObj key >>= \case
-              Nothing                            -> doExtend
-              Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
+            noMagic =
+              contEdhSTM $ resolveEdhObjAttr pgs superObj magicSpell >>= \case
+                Nothing                            -> exitEdhSTM pgs exit nil
+                Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
             withMagicMethod :: EdhValue -> STM ()
-            withMagicMethod magicMth = do
-              scopeObj <- mkScopeWrapper ctx $ objectScope this
-              edhMakeCall pgs
-                          magicMth
-                          this
-                          [SendPosArg (GodSendExpr $ EdhObject scopeObj)]
-                $ \mkCall ->
-                    runEdhProg pgs $ mkCall $ const $ contEdhSTM doExtend
-          in
-            getEdhAttrWithMagic (AttrByName "!<-") superObj key noMagic
-              $ \(OriginalValue !magicMth _ _) ->
-                  contEdhSTM $ withMagicMethod magicMth
+            withMagicMethod magicMth = case magicMth of
+              EdhNil              -> exitEdhSTM pgs exit nil
+              EdhMethod !mth'proc -> do
+                scopeObj <- mkScopeWrapper ctx $ objectScope this
+                runEdhProg pgs
+                  $ callEdhMethod
+                      [SendPosArg (GodSendExpr $ EdhObject scopeObj)]
+                      this
+                      mth'proc
+                      Nothing
+                  $ \_ -> contEdhSTM $ exitEdhSTM pgs exit nil
+              _ ->
+                throwEdhSTM pgs EvalError
+                  $  "Invalid magic (<-^) method type: "
+                  <> T.pack (show $ edhTypeOf magicMth)
+          modifyTVar' (objSupers this) (superObj :)
+          exitEdhSTM pgs exit nil
+          runEdhProg pgs
+            $ getEdhAttrWithMagic edhMetaMagicSpell superObj magicSpell noMagic
+            $ \(OriginalValue !magicMth _ _) ->
+                contEdhSTM $ withMagicMethod magicMth
         _ ->
           throwEdh EvalError
             $  "Can only extends an object, not "
@@ -1003,6 +1009,9 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
 --  *) a metamagical super controls its direct descendants in behaving as a magical
 --     super, by intercepting the magic method (as attr) resolution
 
+edhMetaMagicSpell :: AttrKey
+edhMetaMagicSpell = AttrByName "!<-"
+
 getEdhAttrWithMagic
   :: AttrKey
   -> Object
@@ -1010,20 +1019,21 @@ getEdhAttrWithMagic
   -> EdhProg (STM ())
   -> EdhProcExit
   -> EdhProg (STM ())
-getEdhAttrWithMagic !magicKey !obj !key !exitNoMagic !exit = do
+getEdhAttrWithMagic !magicSpell !obj !key !exitNoMagic !exit = do
   !pgs <- ask
   let
     getViaSupers :: [Object] -> EdhProg (STM ())
     getViaSupers [] = exitNoMagic
     getViaSupers (super : restSupers) =
-      getEdhAttrWithMagic (AttrByName "!<-") super magicKey noMetamagic
+      getEdhAttrWithMagic edhMetaMagicSpell super magicSpell noMetamagic
         $ \(OriginalValue !magicMth _ _) ->
             contEdhSTM $ withMagicMethod magicMth
      where
       noMetamagic :: EdhProg (STM ())
-      noMetamagic = contEdhSTM $ resolveEdhObjAttr pgs super magicKey >>= \case
-        Nothing -> runEdhProg pgs $ getViaSupers restSupers
-        Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
+      noMetamagic =
+        contEdhSTM $ resolveEdhObjAttr pgs super magicSpell >>= \case
+          Nothing -> runEdhProg pgs $ getViaSupers restSupers
+          Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
       withMagicMethod :: EdhValue -> STM ()
       withMagicMethod !magicMth =
         edhMakeCall pgs
@@ -1046,9 +1056,10 @@ setEdhAttrWithMagic
   -> EdhProg (STM ())
   -> EdhProcExit
   -> EdhProg (STM ())
-setEdhAttrWithMagic !pgsAfter !magicKey !obj !key !val !exitNoMagic !exit = do
-  !pgs <- ask
-  contEdhSTM $ readTVar (objSupers obj) >>= runEdhProg pgs . setViaSupers
+setEdhAttrWithMagic !pgsAfter !magicSpell !obj !key !val !exitNoMagic !exit =
+  do
+    !pgs <- ask
+    contEdhSTM $ readTVar (objSupers obj) >>= runEdhProg pgs . setViaSupers
  where
   setViaSupers :: [Object] -> EdhProg (STM ())
   setViaSupers []                   = exitNoMagic
@@ -1056,7 +1067,7 @@ setEdhAttrWithMagic !pgsAfter !magicKey !obj !key !val !exitNoMagic !exit = do
     !pgs <- ask
     let noMetamagic :: EdhProg (STM ())
         noMetamagic =
-          contEdhSTM $ resolveEdhObjAttr pgs super magicKey >>= \case
+          contEdhSTM $ resolveEdhObjAttr pgs super magicSpell >>= \case
             Nothing -> runEdhProg pgs $ setViaSupers restSupers
             Just (OriginalValue !magicMth _ _) -> withMagicMethod magicMth
         withMagicMethod :: EdhValue -> STM ()
@@ -1073,7 +1084,7 @@ setEdhAttrWithMagic !pgsAfter !magicKey !obj !key !val !exitNoMagic !exit = do
                   case magicRtn of
                     EdhContinue -> setViaSupers restSupers
                     _ -> local (const pgsAfter) $ exitEdhProc exit magicRtn
-    getEdhAttrWithMagic (AttrByName "!<-") super magicKey noMetamagic
+    getEdhAttrWithMagic edhMetaMagicSpell super magicSpell noMetamagic
       $ \(OriginalValue !magicMth _ _) -> contEdhSTM $ withMagicMethod magicMth
 
 
@@ -2021,17 +2032,36 @@ _edhCSR reprs (v : rest) !exit = edhValueRepr v $ \(OriginalValue r _ _) ->
   case r of
     EdhString repr -> _edhCSR (repr : reprs) rest exit
     _              -> error "bug: edhValueRepr returned non-string in CPS"
--- comma separated repr string with keys
-_edhKeyedCSR
+-- comma separated repr string for kwargs
+_edhKwArgsCSR
   :: [(Text, Text)] -> [(Text, EdhValue)] -> EdhProcExit -> EdhProg (STM ())
-_edhKeyedCSR entries [] !exit' = exitEdhProc exit' $ EdhString $ T.concat
-  [ k <> v <> ", " | (k, v) <- reverse entries ]
-_edhKeyedCSR entries ((k, v) : rest) exit' =
+_edhKwArgsCSR entries [] !exit' = exitEdhProc exit' $ EdhString $ T.concat
+  [ k <> "=" <> v <> ", " | (k, v) <- reverse entries ]
+_edhKwArgsCSR entries ((k, v) : rest) exit' =
   edhValueRepr v $ \(OriginalValue r _ _) -> case r of
-    EdhString repr -> _edhKeyedCSR ((k, repr) : entries) rest exit'
+    EdhString repr -> _edhKwArgsCSR ((k, repr) : entries) rest exit'
     _              -> error "bug: edhValueRepr returned non-string in CPS"
+-- comma separated repr string for dict entries
+_edhDictCSR
+  :: [(Text, Text)] -> [(EdhValue, EdhValue)] -> EdhProcExit -> EdhProg (STM ())
+_edhDictCSR entries [] !exit' = exitEdhProc exit' $ EdhString $ T.concat
+  [ k <> ":" <> v <> ", " | (k, v) <- reverse entries ]
+_edhDictCSR entries ((k, v) : rest) exit' =
+  edhValueRepr k $ \(OriginalValue kr _ _) -> case kr of
+    EdhString !kRepr -> do
+      let vrDecor :: Text -> Text
+          vrDecor = case v of
+            -- quote the value repr in the entry if it's a pair
+            EdhPair{} -> \r -> "(" <> r <> ")"
+            _         -> id
+      edhValueRepr v $ \(OriginalValue vr _ _) -> case vr of
+        EdhString !vRepr ->
+          _edhDictCSR ((kRepr, vrDecor vRepr) : entries) rest exit'
+        _ -> error "bug: edhValueRepr returned non-string in CPS"
+    _ -> error "bug: edhValueRepr returned non-string in CPS"
 
 edhValueRepr :: EdhValue -> EdhProcExit -> EdhProg (STM ())
+
 -- pair repr
 edhValueRepr (EdhPair v1 v2) !exit =
   edhValueRepr v1 $ \(OriginalValue r1 _ _) -> case r1 of
@@ -2039,6 +2069,7 @@ edhValueRepr (EdhPair v1 v2) !exit =
       EdhString repr2 -> exitEdhProc exit $ EdhString $ repr1 <> ":" <> repr2
       _               -> error "bug: edhValueRepr returned non-string in CPS"
     _ -> error "bug: edhValueRepr returned non-string in CPS"
+
 -- tuple repr
 edhValueRepr (EdhTuple []) !exit = -- no space should show in an empty tuple
   exitEdhProc exit $ EdhString "()"
@@ -2047,22 +2078,24 @@ edhValueRepr (EdhTuple vs) !exit = _edhCSR [] vs $ \(OriginalValue csr _ _) ->
     -- advocate trailing comma here
     EdhString !csRepr -> exitEdhProc exit $ EdhString $ "( " <> csRepr <> ")"
     _                 -> error "bug: edhValueRepr returned non-string in CPS"
+
 -- argspack repr
 edhValueRepr (EdhArgsPack (ArgsPack !args !kwargs)) !exit
   | null args && Map.null kwargs = exitEdhProc exit $ EdhString "pkargs()"
   | otherwise = _edhCSR [] args $ \(OriginalValue argsR _ _) -> case argsR of
     EdhString argsCSR ->
-      _edhKeyedCSR [] [ (k <> "=", v) | (k, v) <- Map.toList kwargs ]
-        $ \(OriginalValue kwargsR _ _) -> case kwargsR of
-            EdhString kwargsCSR ->
-              exitEdhProc exit
-                $  EdhString
-                $  "pkargs( "
-                <> argsCSR
-                <> kwargsCSR
-                <> ")"
-            _ -> error "bug: edhValueRepr returned non-string in CPS"
+      _edhKwArgsCSR [] (Map.toList kwargs) $ \(OriginalValue kwargsR _ _) ->
+        case kwargsR of
+          EdhString kwargsCSR ->
+            exitEdhProc exit
+              $  EdhString
+              $  "pkargs( "
+              <> argsCSR
+              <> kwargsCSR
+              <> ")"
+          _ -> error "bug: edhValueRepr returned non-string in CPS"
     _ -> error "bug: edhValueRepr returned non-string in CPS"
+
 -- list repr
 edhValueRepr (EdhList (List _ ls)) !exit = do
   pgs <- ask
@@ -2075,6 +2108,7 @@ edhValueRepr (EdhList (List _ ls)) !exit = do
         EdhString !csRepr ->
           exitEdhProc exit $ EdhString $ "[ " <> csRepr <> "]"
         _ -> error "bug: edhValueRepr returned non-string in CPS"
+
 -- dict repr
 edhValueRepr (EdhDict (Dict _ dsv)) !exit = do
   pgs <- ask
@@ -2084,13 +2118,12 @@ edhValueRepr (EdhDict (Dict _ dsv)) !exit = do
       then exitEdhSTM pgs exit $ EdhString "{}" -- no space should show in an empty dict
       else
         runEdhProg pgs
-        $ _edhKeyedCSR
-            []
-            [ (T.pack (show k) <> ":", v) | (k, v) <- Map.toList ds ]
+        $ _edhDictCSR [] (Map.toList ds)
         $ \(OriginalValue entriesR _ _) -> case entriesR of
             EdhString entriesCSR ->
               exitEdhProc exit $ EdhString $ "{ " <> entriesCSR <> "}"
             _ -> error "bug: edhValueRepr returned non-string in CPS"
+
 -- object repr
 edhValueRepr (EdhObject !o) !exit = do
   pgs <- ask
@@ -2102,7 +2135,9 @@ edhValueRepr (EdhObject !o) !exit = do
         $ \(OriginalValue reprVal _ _) -> case reprVal of
             s@EdhString{} -> exitEdhProc exit s
             _             -> edhValueRepr reprVal exit
-    reprVal -> runEdhProg pgs $ edhValueRepr reprVal exit
+    repr@EdhString{} -> exitEdhSTM pgs exit repr
+    reprVal          -> runEdhProg pgs $ edhValueRepr reprVal exit
+
 -- repr of named value
 edhValueRepr (EdhNamedValue !n v@EdhNamedValue{}) !exit =
   -- Edh operators are all left-associative, parenthesis needed
@@ -2114,6 +2149,7 @@ edhValueRepr (EdhNamedValue !n !v) !exit =
   edhValueRepr v $ \(OriginalValue r _ _) -> case r of
     EdhString repr -> exitEdhProc exit $ EdhString $ n <> " := " <> repr
     _              -> error "bug: edhValueRepr returned non-string in CPS"
+
 -- repr of other values simply as to show itself
 edhValueRepr !v !exit = exitEdhProc exit $ EdhString $ T.pack $ show v
 

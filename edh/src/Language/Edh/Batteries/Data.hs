@@ -160,8 +160,8 @@ concatProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
       _ -> error "bug: edhValueStr returned non-string"
  where
   edhValueStr :: EdhValue -> EdhProcExit -> EdhProg (STM ())
-  edhValueStr s@(EdhString{}) !exit' = exitEdhProc exit' s
-  edhValueStr !v              !exit' = edhValueRepr v exit'
+  edhValueStr s@EdhString{} !exit' = exitEdhProc exit' s
+  edhValueStr !v            !exit' = edhValueRepr v exit'
 concatProc !argsSender _ =
   throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
