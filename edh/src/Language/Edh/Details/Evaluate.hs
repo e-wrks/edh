@@ -248,7 +248,7 @@ evalStmt' !stmt !exit = do
 
     ExtendsStmt superExpr ->
       evalExpr superExpr $ \(OriginalValue !superVal _ _) -> case superVal of
-        (EdhObject superObj) -> contEdhSTM $ do
+        (EdhObject !superObj) -> contEdhSTM $ do
           let
             !this       = thisObject scope
             !magicSpell = AttrByName "<-^"
@@ -274,7 +274,6 @@ evalStmt' !stmt !exit = do
                   $  "Invalid magic (<-^) method type: "
                   <> T.pack (show $ edhTypeOf magicMth)
           modifyTVar' (objSupers this) (superObj :)
-          exitEdhSTM pgs exit nil
           runEdhProg pgs
             $ getEdhAttrWithMagic edhMetaMagicSpell superObj magicSpell noMagic
             $ \(OriginalValue !magicMth _ _) ->
