@@ -13,6 +13,8 @@ import           Control.Concurrent.STM
 
 import qualified Data.HashMap.Strict           as Map
 
+import           Text.Megaparsec
+
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
@@ -195,6 +197,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
          doSTM 0
 
    where
+    callCtx = getEdhCallContext pgsTask
 
     waitSTM :: IO Bool
     waitSTM = atomically stmJob >>= \case
@@ -217,7 +220,15 @@ driveEdhProgram !haltResult !progCtx !prog = do
            (rtc > 0) $ do
         -- trace out the retries so the end users can be aware of them
         tid <- myThreadId
-        trace (" 🌀 " <> show tid <> " stm retry #" <> show rtc) $ return ()
+        trace
+            (  "🔙\n"
+            <> show callCtx
+            <> "🌀 "
+            <> show tid
+            <> " stm retry #"
+            <> show rtc
+            )
+          $ return ()
 
       atomically ((Just <$> stmJob) `orElse` return Nothing) >>= \case
         Just Nothing -> return True -- to terminate as program halted

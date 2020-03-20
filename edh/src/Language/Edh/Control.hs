@@ -6,7 +6,6 @@ import           Prelude
 import           Control.Exception
 import           Control.Monad.State.Strict
 
-import           Data.Foldable
 import           Data.Void
 import           Data.Typeable
 import           Data.Text                      ( Text )
@@ -31,24 +30,32 @@ type Parser = ParsecT Void Text (State OpPrecDict)
 type ParserError = ParseErrorBundle Text Void
 
 
-type ProcedureName = Text
-type ProcedureDefineLoc = Text
-type ProcedureCallerLoc = Text
-
-data EdhErrorContext = EdhErrorContext {
-    edhErrorMsg :: !Text
-    , edhErrorLocation :: !Text
-    , edhErrorStack :: ![(
-        ProcedureName,
-        ProcedureDefineLoc,
-        ProcedureCallerLoc
-        )]
+data EdhCallFrame = EdhCallFrame {
+      edhCalleeProcName :: !Text
+    , edhCalleeDefiLoca :: !Text
+    , edhCallerFromLoca :: !Text
   } deriving (Eq, Typeable)
+instance Show EdhCallFrame where
+  show = T.unpack . dispEdhCallFrame
+dispEdhCallFrame :: EdhCallFrame -> Text
+dispEdhCallFrame (EdhCallFrame !pname !pdefi !pcaller) =
+  "📜 " <> pname <> " 🔎 " <> pdefi <> " 👈 " <> pcaller
 
-newtype EvalError = EvalError EdhErrorContext
+data EdhCallContext = EdhCallContext {
+      edhCallTipLoca :: !Text
+    , edhCallFrames :: ![EdhCallFrame]
+  } deriving (Eq, Typeable)
+instance Show EdhCallContext where
+  show = T.unpack . dispEdhCallContext
+dispEdhCallContext :: EdhCallContext -> Text
+dispEdhCallContext (EdhCallContext !tip !frames) =
+  T.unlines $ (dispEdhCallFrame <$> reverse frames) ++ ["👉 " <> tip]
+
+
+data EvalError = EvalError !Text !EdhCallContext
   deriving (Eq, Typeable)
 instance Show EvalError where
-  show (EvalError (EdhErrorContext msg _ _)) = T.unpack msg
+  show (EvalError msg _) = T.unpack msg
 instance Exception EvalError
 
 
@@ -60,16 +67,9 @@ instance Exception UsageError
 data EdhError = EdhParseError ParserError | EdhEvalError EvalError | EdhUsageError UsageError
     deriving (Eq, Typeable)
 instance Show EdhError where
-  show (EdhParseError err) = "⛔ " ++ errorBundlePretty err
-  show (EdhEvalError (EvalError (EdhErrorContext msg loc stack))) =
-    T.unpack $ backtrace <> "\n💣 " <> msg <> "\n👉 " <> loc
-   where
-    backtrace = foldl'
-      (\st (pname, pdef, pcaller) ->
-        st <> "\n📜 " <> pname <> " 🔎 " <> pdef <> " 👈 " <> pcaller
-      )
-      ("💔" :: Text)
-      stack
+  show (EdhParseError !err) = "⛔ " ++ errorBundlePretty err
+  show (EdhEvalError (EvalError !msg !ctx)) =
+    "💔\n" <> show ctx <> "💣 " <> T.unpack msg
   show (EdhUsageError (UsageError msg)) = "🐒 " ++ T.unpack msg
 instance Exception EdhError
 

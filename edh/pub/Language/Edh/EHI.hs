@@ -13,7 +13,8 @@ module Language.Edh.EHI
     -- * Exceptions
     EdhError(..)
   , ParserError
-  , EdhErrorContext(..)
+  , EdhCallFrame(..)
+  , EdhCallContext(..)
   , EvalError(..)
   , UsageError(..)
   , edhKnownError
@@ -75,7 +76,7 @@ module Language.Edh.EHI
   , runEdhProg
   , forkEdh
     -- ** Edh Runtime error
-  , getEdhErrorContext
+  , getEdhCallContext
   , throwEdh
   , throwEdhSTM
     -- ** CPS helpers

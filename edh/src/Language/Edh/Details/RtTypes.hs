@@ -573,18 +573,19 @@ edhNop _ !exit = do
 edhEndOfProc :: EdhProcExit
 edhEndOfProc _ = return $ return ()
 
--- | Construct an error context from program state and specified message
-getEdhErrorContext :: EdhProgState -> Text -> EdhErrorContext
-getEdhErrorContext !pgs !msg = EdhErrorContext msg
-                                               (T.pack $ sourcePosPretty sp)
-                                               frames
+-- | Construct an call context from program state
+getEdhCallContext :: EdhProgState -> EdhCallContext
+getEdhCallContext !pgs = EdhCallContext (T.pack $ sourcePosPretty tip) frames
  where
-  !ctx               = edh'context pgs
-  (StmtSrc (!sp, _)) = contextStmt ctx
+  !ctx                = edh'context pgs
+  (StmtSrc (!tip, _)) = contextStmt ctx
   !frames =
     foldl'
         (\sfs (Scope _ _ _ (ProcDefi _ _ (ProcDecl procName _ procBody)) (StmtSrc (callerPos, _))) ->
-          (procName, procSrcLoc procBody, T.pack $ sourcePosPretty callerPos)
+          ( EdhCallFrame procName (procSrcLoc procBody)
+            $ T.pack
+            $ sourcePosPretty callerPos
+            )
             : sfs
         )
         []
@@ -596,15 +597,20 @@ getEdhErrorContext !pgs !msg = EdhErrorContext msg
 
 -- | Throw from an Edh program, be cautious NOT to have any monadic action
 -- following such a throw, or it'll silently fail to work out.
-throwEdh :: Exception e => (EdhErrorContext -> e) -> Text -> EdhProg (STM ())
+throwEdh
+  :: Exception e => (Text -> EdhCallContext -> e) -> Text -> EdhProg (STM ())
 throwEdh !excCtor !msg = do
   !pgs <- ask
-  return $ throwSTM (excCtor $ getEdhErrorContext pgs msg)
+  return $ throwSTM (excCtor msg $ getEdhCallContext pgs)
 
 -- | Throw from the stm operation of an Edh program.
 throwEdhSTM
-  :: Exception e => EdhProgState -> (EdhErrorContext -> e) -> Text -> STM a
-throwEdhSTM pgs !excCtor !msg = throwSTM (excCtor $ getEdhErrorContext pgs msg)
+  :: Exception e
+  => EdhProgState
+  -> (Text -> EdhCallContext -> e)
+  -> Text
+  -> STM a
+throwEdhSTM pgs !excCtor !msg = throwSTM (excCtor msg $ getEdhCallContext pgs)
 
 
 -- | A pack of evaluated argument values with positional/keyword origin,
