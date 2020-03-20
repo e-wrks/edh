@@ -231,7 +231,7 @@ createEdhModule !world !moduId !moduSrc = liftIO $ do
   !moduEntity <- atomically $ createHashEntity $ Map.fromList
     [ (AttrByName "__name__", EdhString moduId)
     , (AttrByName "__file__", EdhString $ T.pack moduSrc)
-    , (AttrByName "__repr__", EdhString $ "module:" <> T.pack moduSrc)
+    , (AttrByName "__repr__", EdhString $ "module:" <> moduId)
     ]
   !moduSupers    <- newTVarIO []
   !moduClassUniq <- newUnique

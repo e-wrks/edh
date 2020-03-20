@@ -567,9 +567,7 @@ loadModule !pgs !moduSlot !moduId !moduFile !exit = if edh'in'tx pgs
                   !moduEnt <- createHashEntity $ Map.fromList
                     [ (AttrByName "__name__", EdhString moduId)
                     , (AttrByName "__file__", EdhString $ T.pack moduFile)
-                    , ( AttrByName "__repr__"
-                      , EdhString $ "module:" <> T.pack moduFile
-                      )
+                    , (AttrByName "__repr__", EdhString $ "module:" <> moduId)
                     ]
                   !moduSupers <- newTVar []
                   let !moduClass = ProcDefi
