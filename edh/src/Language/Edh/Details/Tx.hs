@@ -13,8 +13,6 @@ import           Control.Concurrent.STM
 
 import qualified Data.HashMap.Strict           as Map
 
-import           Text.Megaparsec
-
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
