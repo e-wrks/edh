@@ -582,10 +582,9 @@ getEdhCallContext !pgs = EdhCallContext (T.pack $ sourcePosPretty tip) frames
   !frames =
     foldl'
         (\sfs (Scope _ _ _ (ProcDefi _ _ (ProcDecl procName _ procBody)) (StmtSrc (callerPos, _))) ->
-          ( EdhCallFrame procName (procSrcLoc procBody)
-            $ T.pack
-            $ sourcePosPretty callerPos
-            )
+          EdhCallFrame procName
+                       (procSrcLoc procBody)
+                       (T.pack $ sourcePosPretty callerPos)
             : sfs
         )
         []

@@ -49,7 +49,7 @@ instance Show EdhCallContext where
   show = T.unpack . dispEdhCallContext
 dispEdhCallContext :: EdhCallContext -> Text
 dispEdhCallContext (EdhCallContext !tip !frames) =
-  T.unlines $ (dispEdhCallFrame <$> reverse frames) ++ ["👉 " <> tip]
+  T.unlines $ (dispEdhCallFrame <$> frames) ++ ["👉 " <> tip]
 
 
 data EvalError = EvalError !Text !EdhCallContext
