@@ -181,18 +181,18 @@ driveEdhProgram !haltResult !progCtx !prog = do
   driveEdhThread !defers !tq = atomically (nextTaskFromQueue tq) >>= \case
     Nothing -> -- this thread is done, run defers lastly
       readTVarIO defers >>= driveDefers
-    Just txTask -> goSTM 0 txTask >>= \case -- run this task
+    Just txTask -> goSTM txTask >>= \case -- run this task
       True -> -- terminate this thread, after running defers lastly
         readTVarIO defers >>= driveDefers
       False -> -- loop another iteration for the thread
         driveEdhThread defers tq
 
-  goSTM :: Int -> EdhTxTask -> IO Bool
-  goSTM !rtc (EdhTxTask !pgsTask !wait !input !task) = if wait
+  goSTM :: EdhTxTask -> IO Bool
+  goSTM (EdhTxTask !pgsTask !wait !input !task) = if wait
     then -- let stm do the retry, for blocking read of a 'TChan' etc.
          waitSTM
     else -- blocking wait not expected, track stm retries explicitly
-         doSTM rtc
+         doSTM 0
 
    where
 
@@ -211,18 +211,18 @@ driveEdhProgram !haltResult !progCtx !prog = do
           waitSTM
 
     doSTM :: Int -> IO Bool
-    doSTM !rtc' = do
+    doSTM !rtc = do
 
       when -- todo increase the threshold of reporting?
-           (rtc' > 0) $ do
+           (rtc > 0) $ do
         -- trace out the retries so the end users can be aware of them
         tid <- myThreadId
-        trace (" 🌀 " <> show tid <> " stm retry #" <> show rtc') $ return ()
+        trace (" 🌀 " <> show tid <> " stm retry #" <> show rtc) $ return ()
 
       atomically ((Just <$> stmJob) `orElse` return Nothing) >>= \case
         Just Nothing -> return True -- to terminate as program halted
         Nothing -> -- stm failed, do a tracked retry
-          doSTM (rtc' + 1)
+          doSTM (rtc + 1)
         Just (Just []) ->
           -- no reactor has fired, the tx job has already been executed
           return False
@@ -233,7 +233,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
             -- there've been one or more reactors fired, the tx job have
             -- been skipped, as no reactor is terminating the thread,
             -- continue with this tx job
-            doSTM rtc'
+            doSTM rtc
 
     stmJob :: STM (Maybe [(EdhValue, ReactorRecord)])
     stmJob = tryReadTMVar haltResult >>= \case
