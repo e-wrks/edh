@@ -21,8 +21,10 @@ import           Language.Edh.Details.Evaluate
 -- | Edh follows GHC's program termination criteria that the main thread
 -- decides all. see:
 --   https://hackage.haskell.org/package/base/docs/Control-Concurrent.html
+-- description at:
+--   https://github.com/e-wrks/edh/tree/master/Tour#program--threading-model
 driveEdhProgram
-  :: (TMVar (Either SomeException EdhValue))
+  :: TMVar (Either SomeException EdhValue)
   -> Context
   -> EdhProg (STM ())
   -> IO ()
