@@ -1125,25 +1125,26 @@ setEdhAttr !pgsAfter !tgtExpr !key !val !exit = do
     AttrExpr SuperRef -> throwEdh EvalError "Can not assign via super"
     -- give super objects the magical power to intercept
     -- attribute assignment to descendant objects, via obj ref
-    _ -> evalExpr tgtExpr $ \(OriginalValue !tgtVal _ _) -> case tgtVal of
-      EdhObject !tgtObj ->
-        let noMagic :: EdhProg (STM ())
-            noMagic = contEdhSTM $ do
-              changeEntityAttr pgs (objEntity tgtObj) key val
-              runEdhProg pgsAfter $ exitEdhProc exit val
-        in  setEdhAttrWithMagic pgsAfter
-                                (AttrByName "*<-@")
-                                tgtObj
-                                key
-                                val
-                                noMagic
-                                exit
-      _ ->
-        throwEdh EvalError
-          $  "Invalid assignment target, it's a "
-          <> T.pack (show $ edhTypeOf tgtVal)
-          <> ": "
-          <> T.pack (show tgtVal)
+    _                 -> evalExpr tgtExpr $ \(OriginalValue !tgtVal _ _) ->
+      case edhUltimate tgtVal of
+        EdhObject !tgtObj ->
+          let noMagic :: EdhProg (STM ())
+              noMagic = contEdhSTM $ do
+                changeEntityAttr pgs (objEntity tgtObj) key val
+                runEdhProg pgsAfter $ exitEdhProc exit val
+          in  setEdhAttrWithMagic pgsAfter
+                                  (AttrByName "*<-@")
+                                  tgtObj
+                                  key
+                                  val
+                                  noMagic
+                                  exit
+        _ ->
+          throwEdh EvalError
+            $  "Invalid assignment target, it's a "
+            <> T.pack (show $ edhTypeOf tgtVal)
+            <> ": "
+            <> T.pack (show tgtVal)
 
 
 edhMakeCall

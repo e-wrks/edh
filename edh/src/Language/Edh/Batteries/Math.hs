@@ -19,9 +19,9 @@ import           Data.Lossless.Decimal
 -- | operator (+)
 addProc :: EdhProcedure
 addProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      case rhVal of
+      case edhUltimate rhVal of
         EdhDecimal rhNum -> exitEdhProc exit (EdhDecimal $ lhNum + rhNum)
         _ ->
           throwEdh EvalError
@@ -38,9 +38,9 @@ addProc !argsSender _ =
 -- | operator (-)
 subsProc :: EdhProcedure
 subsProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      case rhVal of
+      case edhUltimate rhVal of
         EdhDecimal rhNum -> exitEdhProc exit (EdhDecimal $ lhNum - rhNum)
         _ ->
           throwEdh EvalError
@@ -57,9 +57,9 @@ subsProc !argsSender _ =
 -- | operator (*)
 mulProc :: EdhProcedure
 mulProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      case rhVal of
+      case edhUltimate rhVal of
         EdhDecimal rhNum -> exitEdhProc exit (EdhDecimal $ lhNum * rhNum)
         _ ->
           throwEdh EvalError
@@ -76,9 +76,9 @@ mulProc !argsSender _ =
 -- | operator (/)
 divProc :: EdhProcedure
 divProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      case rhVal of
+      case edhUltimate rhVal of
         EdhDecimal rhNum -> exitEdhProc exit (EdhDecimal $ lhNum / rhNum)
         _ ->
           throwEdh EvalError
@@ -95,9 +95,9 @@ divProc !argsSender _ =
 -- | operator (**)
 powProc :: EdhProcedure
 powProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      case rhVal of
+      case edhUltimate rhVal of
         EdhDecimal (Decimal rh'd rh'e rh'n) -> if rh'd /= 1
           then
             throwEdh EvalError
@@ -119,9 +119,9 @@ powProc !argsSender _ =
 -- | operator (&&)
 logicalAndProc :: EdhProcedure
 logicalAndProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhBool lhBool -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      case rhVal of
+      case edhUltimate rhVal of
         EdhBool rhBool -> exitEdhProc exit (EdhBool $ lhBool && rhBool)
         _ -> throwEdh EvalError $ "Invalid right-hand value type: " <> T.pack
           (show $ edhTypeOf rhVal)
@@ -133,9 +133,9 @@ logicalAndProc !argsSender _ =
 -- | operator (||)
 logicalOrProc :: EdhProcedure
 logicalOrProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhBool lhBool -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      case rhVal of
+      case edhUltimate rhVal of
         EdhBool rhBool -> exitEdhProc exit (EdhBool $ lhBool || rhBool)
         _ -> throwEdh EvalError $ "Invalid right-hand value type: " <> T.pack
           (show $ edhTypeOf rhVal)
@@ -170,14 +170,14 @@ valEqProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
     cmp2Val :: EdhValue -> EdhValue -> STM Bool
     cmp2Val lhVal rhVal = if lhVal == rhVal
       then return True
-      else case lhVal of
-        EdhList (List _ lhll) -> case rhVal of
+      else case edhUltimate lhVal of
+        EdhList (List _ lhll) -> case edhUltimate rhVal of
           EdhList (List _ rhll) -> do
             lhl <- readTVar lhll
             rhl <- readTVar rhll
             cmp2List lhl rhl
           _ -> return False
-        EdhDict (Dict _ lhd) -> case rhVal of
+        EdhDict (Dict _ lhd) -> case edhUltimate rhVal of
           EdhDict (Dict _ rhd) -> do
             lhm <- readTVar lhd
             rhm <- readTVar rhd
@@ -280,14 +280,14 @@ doEdhComparison pgs exit lhVal rhVal cm = compareEdhValue lhVal rhVal >>= \case
   Just ord -> exitEdhSTM pgs exit (EdhBool $ cm ord)
 
 compareEdhValue :: EdhValue -> EdhValue -> STM (Maybe Ordering)
-compareEdhValue lhVal rhVal = case lhVal of
-  EdhDecimal lhNum -> case rhVal of
+compareEdhValue lhVal rhVal = case edhUltimate lhVal of
+  EdhDecimal lhNum -> case edhUltimate rhVal of
     EdhDecimal rhNum -> return $ Just $ compare lhNum rhNum
     _                -> return Nothing
-  EdhString lhStr -> case rhVal of
+  EdhString lhStr -> case edhUltimate rhVal of
     EdhString rhStr -> return $ Just $ compare lhStr rhStr
     _               -> return Nothing
-  EdhBool lhCnd -> case rhVal of
+  EdhBool lhCnd -> case edhUltimate rhVal of
     EdhBool rhCnd -> return $ Just $ compare lhCnd rhCnd
     _             -> return Nothing
   _ -> return Nothing

@@ -886,6 +886,10 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhExpr u _           _) = hashWithSalt s u
 
 
+edhUltimate :: EdhValue -> EdhValue
+edhUltimate (EdhNamedValue _ v) = edhUltimate v
+edhUltimate v                   = v
+
 edhExpr :: Expr -> STM EdhValue
 edhExpr (ExprWithSrc !xpr !xprSrc) = do
   u <- unsafeIOToSTM newUnique

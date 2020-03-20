@@ -136,6 +136,8 @@ module Language.Edh.EHI
   , edhValueRepr
   , EdhValue(..)
   , EdhTypeValue(..)
+  , edhUltimate
+  , edhExpr
   , nil
   , edhNone
   , edhNothing
