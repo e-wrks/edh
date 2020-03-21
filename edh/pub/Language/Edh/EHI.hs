@@ -24,6 +24,9 @@ module Language.Edh.EHI
   , newEventSink
   , subscribeEvents
   , publishEvent
+  , forkEventProducer
+  , forkEventConsumer
+  , waitEventConsumer
 
     -- * STM/IO API for spliced interpreter
 

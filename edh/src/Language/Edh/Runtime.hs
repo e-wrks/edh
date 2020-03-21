@@ -98,22 +98,25 @@ defaultEdhRuntime = do
       flushLogs :: IO ()
       flushLogs = atomically (tryPeekTQueue logQueue) >>= \case
         Nothing -> return ()
-        _       -> atomically (readTMVar logIdle)
+        _       -> atomically $ readTMVar logIdle
       logPrinter :: IO ()
       logPrinter = do
-        msg <- atomically $ tryReadTQueue logQueue >>= \case
-          Just !lr -> return lr
-          Nothing  -> do
-            void $ tryPutTMVar logIdle ()
-            lr <- readTQueue logQueue
-            void $ tryTakeTMVar logIdle
+        lr <- atomically (tryReadTQueue logQueue) >>= \case
+          Just !lr -> do
+            void $ atomically $ tryTakeTMVar logIdle
             return lr
-        hPutStrLn stderr msg
+          Nothing -> do
+            void $ atomically $ tryPutTMVar logIdle ()
+            lr <- atomically $ readTQueue logQueue
+            void $ atomically $ tryTakeTMVar logIdle
+            return lr
+        hPutStrLn stderr lr
         logPrinter
       logger :: EdhLogger
       logger !level !srcLoc !pkargs = case pkargs of
         ArgsPack [!argVal] !kwargs | Map.null kwargs ->
           writeTQueue logQueue $! T.pack logPrefix <> logString argVal
+        -- todo: format structured log record with log parser in mind
         _ -> writeTQueue logQueue $! T.pack $ logPrefix ++ show pkargs
        where
         logString :: EdhValue -> Text
@@ -132,7 +135,8 @@ defaultEdhRuntime = do
                 _ | level >= 20 -> "ℹ️ "
                 _ | level >= 10 -> "🐞 "
                 _               -> "😥 "
-  void $ forkIO logPrinter
+  void $ mask_ $ forkIOWithUnmask $ \unmask ->
+    finally (unmask logPrinter) $ atomically $ tryPutTMVar logIdle ()
   return EdhRuntime { runtimeLogger    = logger
                     , runtimeLogLevel  = logLevel
                     , flushRuntimeLogs = flushLogs

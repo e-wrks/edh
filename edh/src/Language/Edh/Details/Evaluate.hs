@@ -1159,7 +1159,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
 
     -- calling a class (constructor) procedure
     EdhClass !cls ->
-      callMaker $ \ !exit -> constructEdhObject cls argsSndr exit
+      callMaker $ \exit -> constructEdhObject cls argsSndr exit
 
     -- calling a method procedure
     EdhMethod !mth'proc ->

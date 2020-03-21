@@ -4,6 +4,8 @@ module Main where
 import           Prelude
 -- import           Debug.Trace
 
+import           Control.Concurrent
+
 import           System.Console.Haskeline
 
 import           Language.Edh.EHI
@@ -37,3 +39,4 @@ main = do
     modu <- createEdhModule world "<interactive>" "<adhoc>"
     doLoop world modu
 
+  flushRuntimeLogs runtime
