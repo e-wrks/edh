@@ -1028,27 +1028,35 @@ getEdhAttrWithMagic !magicSpell !obj !key !exitNoMagic !exit = do
     getViaSupers [] = exitNoMagic
     getViaSupers (super : restSupers) =
       getEdhAttrWithMagic edhMetaMagicSpell super magicSpell noMetamagic
-        $ \(OriginalValue !magicMth !magicScope _) ->
-            contEdhSTM $ withMagicMethod magicScope magicMth
+        $ \(OriginalValue !magicVal !magicScope _) ->
+            case edhUltimate magicVal of
+              EdhMethod magicMth ->
+                contEdhSTM $ withMagicMethod magicScope magicMth
+              _ -> throwEdh EvalError $ "Invalid magic method type: " <> T.pack
+                (edhTypeNameOf magicVal)
      where
       superScope = objectScope ctx super
       noMetamagic :: EdhProg (STM ())
       noMetamagic =
-        contEdhSTM $ lookupEdhObjAttr pgs super magicSpell >>= \case
-          EdhNil    -> runEdhProg pgs $ getViaSupers restSupers
-          !magicMth -> withMagicMethod superScope magicMth
-      withMagicMethod :: Scope -> EdhValue -> STM ()
+        contEdhSTM
+          $   edhUltimate
+          <$> lookupEdhObjAttr pgs super magicSpell
+          >>= \case
+                EdhNil              -> runEdhProg pgs $ getViaSupers restSupers
+                EdhMethod !magicMth -> withMagicMethod superScope magicMth
+                magicVal ->
+                  throwEdhSTM pgs EvalError
+                    $  "Invalid magic method type: "
+                    <> T.pack (edhTypeNameOf magicVal)
+      withMagicMethod :: Scope -> ProcDefi -> STM ()
       withMagicMethod !magicScope !magicMth =
-        edhMakeCall pgs
-                    magicMth
-                    obj
-                    [SendPosArg (GodSendExpr $ attrKeyValue key)]
-          $ \mkCall ->
-              runEdhProg pgs $ mkCall $ \(OriginalValue !magicRtn _ _) ->
-                case magicRtn of
-                  EdhContinue -> getViaSupers restSupers
-                  _ ->
-                    exitEdhProc' exit $ OriginalValue magicRtn magicScope obj
+        runEdhProg pgs
+          $ callEdhMethod obj
+                          magicMth
+                          [SendPosArg (GodSendExpr $ attrKeyValue key)]
+          $ \(OriginalValue !magicRtn _ _) -> case magicRtn of
+              EdhContinue -> getViaSupers restSupers
+              _ -> exitEdhProc' exit $ OriginalValue magicRtn magicScope obj
   contEdhSTM $ readTVar (objSupers obj) >>= runEdhProg pgs . getViaSupers
 
 setEdhAttrWithMagic
@@ -1069,27 +1077,36 @@ setEdhAttrWithMagic !pgsAfter !magicSpell !obj !key !val !exitNoMagic !exit =
   setViaSupers []                   = exitNoMagic
   setViaSupers (super : restSupers) = do
     !pgs <- ask
-    let noMetamagic :: EdhProg (STM ())
-        noMetamagic =
-          contEdhSTM $ lookupEdhObjAttr pgs super magicSpell >>= \case
-            EdhNil    -> runEdhProg pgs $ setViaSupers restSupers
-            !magicMth -> withMagicMethod magicMth
-        withMagicMethod :: EdhValue -> STM ()
-        withMagicMethod !magicMth =
-          edhMakeCall
-              pgs
-              magicMth
+    let
+      noMetamagic :: EdhProg (STM ())
+      noMetamagic =
+        contEdhSTM
+          $   edhUltimate
+          <$> lookupEdhObjAttr pgs super magicSpell
+          >>= \case
+                EdhNil              -> runEdhProg pgs $ setViaSupers restSupers
+                EdhMethod !magicMth -> withMagicMethod magicMth
+                magicVal ->
+                  throwEdhSTM pgs EvalError
+                    $  "Invalid magic method type: "
+                    <> T.pack (edhTypeNameOf magicVal)
+      withMagicMethod :: ProcDefi -> STM ()
+      withMagicMethod !magicMth =
+        runEdhProg pgs
+          $ callEdhMethod
               obj
+              magicMth
               [ SendPosArg (GodSendExpr $ attrKeyValue key)
               , SendPosArg (GodSendExpr val)
               ]
-            $ \mkCall ->
-                runEdhProg pgs $ mkCall $ \(OriginalValue !magicRtn _ _) ->
-                  case magicRtn of
-                    EdhContinue -> setViaSupers restSupers
-                    _ -> local (const pgsAfter) $ exitEdhProc exit magicRtn
+          $ \(OriginalValue !magicRtn _ _) -> case magicRtn of
+              EdhContinue -> setViaSupers restSupers
+              _           -> local (const pgsAfter) $ exitEdhProc exit magicRtn
     getEdhAttrWithMagic edhMetaMagicSpell super magicSpell noMetamagic
-      $ \(OriginalValue !magicMth _ _) -> contEdhSTM $ withMagicMethod magicMth
+      $ \(OriginalValue !magicVal _ _) -> case edhUltimate magicVal of
+          EdhMethod !magicMth -> contEdhSTM $ withMagicMethod magicMth
+          _ -> throwEdh EvalError $ "Invalid magic method type: " <> T.pack
+            (edhTypeNameOf magicVal)
 
 
 setEdhAttr
@@ -1158,8 +1175,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
   case callee'val of
 
     -- calling a class (constructor) procedure
-    EdhClass !cls ->
-      callMaker $ \exit -> constructEdhObject cls argsSndr exit
+    EdhClass !cls -> callMaker $ \exit -> constructEdhObject cls argsSndr exit
 
     -- calling a method procedure
     EdhMethod !mth'proc ->
