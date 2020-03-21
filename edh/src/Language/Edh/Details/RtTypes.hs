@@ -402,7 +402,7 @@ data EdhWorld = EdhWorld {
     -- if successfully loaded
     , worldModules :: !(TMVar (Map.HashMap ModuleId (TMVar EdhValue)))
     -- | interface to the embedding host runtime
-    , worldRuntime :: !(TMVar EdhRuntime)
+    , worldRuntime :: !EdhRuntime
   }
 instance Eq EdhWorld where
   EdhWorld x'root _ _ _ _ == EdhWorld y'root _ _ _ _ = x'root == y'root
@@ -426,8 +426,9 @@ worldContext !world = Context
 {-# INLINE worldContext #-}
 
 data EdhRuntime = EdhRuntime {
-  runtimeLogger :: !EdhLogger
+    runtimeLogger :: !EdhLogger
   , runtimeLogLevel :: !LogLevel
+  , flushRuntimeLogs :: IO ()
   }
 type EdhLogger = LogLevel -> Maybe String -> ArgsPack -> STM ()
 type LogLevel = Int
@@ -1209,8 +1210,18 @@ data EdhTypeValue = TypeType
 instance Hashable EdhTypeValue where
   hashWithSalt s t = hashWithSalt s $ fromEnum t
 
+edhTypeNameOf :: EdhValue -> String
+edhTypeNameOf EdhNil = "nil"
+edhTypeNameOf v      = show $ edhTypeOf v
+
+-- | Get the type tag of an value
+--
+-- Passing in a `nil` value will hit bottom (crash the process) here,
+-- use `edhTypeNameOf` if all you want is a type name shown to user.
 edhTypeOf :: EdhValue -> EdhTypeValue
-edhTypeOf EdhNil                                      = undefined -- this is a tamboo
+edhTypeOf EdhNil = -- this is a tamboo
+  undefined
+
 edhTypeOf EdhType{}                                   = TypeType
 
 edhTypeOf EdhDecimal{}                                = DecimalType

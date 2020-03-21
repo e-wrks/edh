@@ -30,7 +30,7 @@ module Language.Edh.EHI
     -- ** Logging interface
   , EdhLogger
   , LogLevel
-  , defaultEdhLogger
+  , defaultEdhRuntime
 
     -- ** Booting up
   , EdhWorld(..)
@@ -131,6 +131,7 @@ module Language.Edh.EHI
   , wrappedScopeOf
 
     -- ** Value system
+  , edhTypeNameOf
   , edhTypeOf
   , edhValueNull
   , edhValueRepr
@@ -211,15 +212,15 @@ runEdhShell moduId (ReaderT f) = do
   liftIO $ tryJust Just $ f (world, modu)
 
 
-runEdh :: MonadIO m => EdhBootstrap a -> EdhLogger -> m a
-runEdh (ReaderT !f) !logger = liftIO $ do
-  world <- createEdhWorld logger
+runEdh :: MonadIO m => EdhBootstrap a -> EdhRuntime -> m a
+runEdh (ReaderT !f) !runtime = liftIO $ do
+  world <- createEdhWorld runtime
   installEdhBatteries world
   f world
 
-runEdhWithoutBatteries :: MonadIO m => EdhLogger -> EdhBootstrap a -> m a
-runEdhWithoutBatteries !logger (ReaderT f) =
-  liftIO $ createEdhWorld logger >>= f
+runEdhWithoutBatteries :: MonadIO m => EdhRuntime -> EdhBootstrap a -> m a
+runEdhWithoutBatteries !runtime (ReaderT f) =
+  liftIO $ createEdhWorld runtime >>= f
 
 
 type EdhShell a = ReaderT (EdhWorld, Object) IO a

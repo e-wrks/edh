@@ -38,30 +38,29 @@ assignProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                   throwEdhSTM pgs EvalError $ "No ([=]) method from: " <> T.pack
                     (show obj)
                 EdhMethod !mth'proc -> runEdhProg pgs $ callEdhMethod
+                  obj
+                  mth'proc
                   [ SendPosArg (GodSendExpr ixVal)
                   , SendPosArg (GodSendExpr rhVal)
                   ]
-                  obj
-                  mth'proc
-                  Nothing
                   exit
                 !badIndexer ->
                   throwEdhSTM pgs EvalError
                     $  "Malformed index method ([=]) on "
                     <> T.pack (show obj)
                     <> " - "
-                    <> T.pack (show $ edhTypeOf badIndexer)
+                    <> T.pack (edhTypeNameOf badIndexer)
                     <> ": "
                     <> T.pack (show badIndexer)
 
             _ ->
               throwEdh EvalError
                 $  "Don't know how to index assign "
-                <> T.pack (show $ edhTypeOf tgtVal)
+                <> T.pack (edhTypeNameOf tgtVal)
                 <> ": "
                 <> T.pack (show tgtVal)
                 <> " with "
-                <> T.pack (show $ edhTypeOf ixVal)
+                <> T.pack (edhTypeNameOf ixVal)
                 <> ": "
                 <> T.pack (show ixVal)
 

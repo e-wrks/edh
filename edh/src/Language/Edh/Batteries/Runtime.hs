@@ -54,8 +54,8 @@ loggingProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                   _ ->
                     trace (tracePrefix ++ show rhRepr) $ exitEdhProc exit nil
         else contEdhSTM $ do
-          (EdhRuntime logger rtLogLevel) <-
-            readTMVar $ worldRuntime $ contextWorld ctx
+          let (EdhRuntime logger rtLogLevel _) =
+                worldRuntime $ contextWorld ctx
           if logLevel < rtLogLevel
             then -- drop log msg without even eval it
                  exitEdhSTM pgs exit nil

@@ -274,9 +274,9 @@ doEdhComparison pgs exit lhVal rhVal cm = compareEdhValue lhVal rhVal >>= \case
   Nothing ->
     throwEdhSTM pgs EvalError
       $  "Not comparable: "
-      <> T.pack (show $ edhTypeOf lhVal)
+      <> T.pack (edhTypeNameOf lhVal)
       <> " vs "
-      <> T.pack (show $ edhTypeOf rhVal)
+      <> T.pack (edhTypeNameOf rhVal)
   Just ord -> exitEdhSTM pgs exit (EdhBool $ cm ord)
 
 compareEdhValue :: EdhValue -> EdhValue -> STM (Maybe Ordering)

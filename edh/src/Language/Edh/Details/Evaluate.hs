@@ -209,7 +209,7 @@ evalStmt' !stmt !exit = do
         _ ->
           throwEdh EvalError
             $  "Can only reacting to an event sink, not a "
-            <> T.pack (show $ edhTypeOf val)
+            <> T.pack (edhTypeNameOf val)
             <> ": "
             <> T.pack (show val)
 
@@ -241,7 +241,7 @@ evalStmt' !stmt !exit = do
               _ ->
                 throwEdh EvalError
                   $  "Invalid condition value for while: "
-                  <> T.pack (show $ edhTypeOf cndVal)
+                  <> T.pack (edhTypeNameOf cndVal)
                   <> ": "
                   <> T.pack (show cndVal)
       doWhile
@@ -264,15 +264,14 @@ evalStmt' !stmt !exit = do
                 scopeObj <- mkScopeWrapper ctx $ objectScope ctx this
                 runEdhProg pgs
                   $ callEdhMethod
-                      [SendPosArg (GodSendExpr $ EdhObject scopeObj)]
                       this
                       mth'proc
-                      Nothing
+                      [SendPosArg (GodSendExpr $ EdhObject scopeObj)]
                   $ \_ -> contEdhSTM $ exitEdhSTM pgs exit nil
               _ ->
                 throwEdhSTM pgs EvalError
                   $  "Invalid magic (<-^) method type: "
-                  <> T.pack (show $ edhTypeOf magicMth)
+                  <> T.pack (edhTypeNameOf magicMth)
           modifyTVar' (objSupers this) (superObj :)
           runEdhProg pgs
             $ getEdhAttrWithMagic edhMetaMagicSpell superObj magicSpell noMagic
@@ -281,7 +280,7 @@ evalStmt' !stmt !exit = do
         _ ->
           throwEdh EvalError
             $  "Can only extends an object, not "
-            <> T.pack (show $ edhTypeOf superVal)
+            <> T.pack (edhTypeNameOf superVal)
             <> ": "
             <> T.pack (show superVal)
 
@@ -354,7 +353,7 @@ evalStmt' !stmt !exit = do
             val ->
               throwEdhSTM pgs EvalError
                 $  "Can not re-declare a "
-                <> T.pack (show $ edhTypeOf val)
+                <> T.pack (edhTypeNameOf val)
                 <> ": "
                 <> T.pack (show val)
                 <> " as an operator"
@@ -375,28 +374,31 @@ evalStmt' !stmt !exit = do
 
     OpOvrdStmt opSym opProc opPrec -> contEdhSTM $ do
       validateOperDecl pgs opProc
-      let findPredecessor :: STM (Maybe EdhValue)
-          findPredecessor =
-            lookupEdhCtxAttr pgs scope (AttrByName opSym) >>= \case
-              EdhNil -> -- do
-                -- (EdhRuntime logger _) <- readTMVar $ worldRuntime world
-                -- logger 30 (Just $ sourcePosPretty srcPos)
-                --   $ ArgsPack
-                --       [EdhString "overriding an unavailable operator"]
-                --       Map.empty
-                return Nothing
-              op@EdhOperator{} -> return $ Just op
-              opVal            -> do
-                (EdhRuntime logger _) <- readTMVar $ worldRuntime world
-                logger 30 (Just $ sourcePosPretty srcPos) $ ArgsPack
-                  [ EdhString
-                    $  "overriding an invalid operator "
-                    <> T.pack (show $ edhTypeOf opVal)
-                    <> ": "
-                    <> T.pack (show opVal)
-                  ]
-                  Map.empty
-                return Nothing
+      let
+        findPredecessor :: STM (Maybe EdhValue)
+        findPredecessor =
+          lookupEdhCtxAttr pgs scope (AttrByName opSym) >>= \case
+            EdhNil -> -- do
+              -- (EdhRuntime logger _) <- readTMVar $ worldRuntime world
+              -- logger 30 (Just $ sourcePosPretty srcPos)
+              --   $ ArgsPack
+              --       [EdhString "overriding an unavailable operator"]
+              --       Map.empty
+              return Nothing
+            op@EdhOperator{} -> return $ Just op
+            opVal            -> do
+              (runtimeLogger $ worldRuntime world)
+                  30
+                  (Just $ sourcePosPretty srcPos)
+                $ ArgsPack
+                    [ EdhString
+                      $  "overriding an invalid operator "
+                      <> T.pack (edhTypeNameOf opVal)
+                      <> ": "
+                      <> T.pack (show opVal)
+                    ]
+                    Map.empty
+              return Nothing
       predecessor <- findPredecessor
       u           <- unsafeIOToSTM newUnique
       let op = EdhOperator
@@ -421,7 +423,7 @@ evalStmt' !stmt !exit = do
           -- todo support more sources of import ?
           throwEdh EvalError
             $  "Don't know how to import from a "
-            <> T.pack (show $ edhTypeOf srcVal)
+            <> T.pack (edhTypeNameOf srcVal)
             <> ": "
             <> T.pack (show srcVal)
 
@@ -640,7 +642,7 @@ evalExpr expr exit = do
         _ ->
           throwEdh EvalError
             $  "Can not negate a "
-            <> T.pack (show $ edhTypeOf val)
+            <> T.pack (edhTypeNameOf val)
             <> ": "
             <> T.pack (show val)
             <> " ❌"
@@ -649,16 +651,15 @@ evalExpr expr exit = do
         _ ->
           throwEdh EvalError
             $  "Expect bool but got a "
-            <> T.pack (show $ edhTypeOf val)
+            <> T.pack (edhTypeNameOf val)
             <> ": "
             <> T.pack (show val)
             <> " ❌"
       Guard -> contEdhSTM $ do
-        (EdhRuntime logger _) <- readTMVar $ worldRuntime world
-        logger
+        (runtimeLogger $ worldRuntime world)
           30
           (Just $ sourcePosPretty srcPos)
-          (ArgsPack [EdhString $ "Standalone guard treated as plain value."]
+          (ArgsPack [EdhString "Standalone guard treated as plain value."]
                     Map.empty
           )
         runEdhProg pgs $ evalExpr expr' exit
@@ -673,7 +674,7 @@ evalExpr expr exit = do
           -- we are so strongly typed
           throwEdh EvalError
             $  "Expecting a boolean value but got a "
-            <> T.pack (show $ edhTypeOf val)
+            <> T.pack (edhTypeNameOf val)
             <> ": "
             <> T.pack (show val)
             <> " ❌"
@@ -688,7 +689,7 @@ evalExpr expr exit = do
                 pv ->
                   throwEdhSTM pgs EvalError
                     $  "Invalid dict entry "
-                    <> T.pack (show $ edhTypeOf pv)
+                    <> T.pack (edhTypeNameOf pv)
                     <> ": "
                     <> T.pack (show pv)
                     <> " ❌"
@@ -796,10 +797,9 @@ evalExpr expr exit = do
                   (show obj)
 
               EdhMethod !mth'proc -> runEdhProg pgs $ callEdhMethod
-                [SendPosArg (GodSendExpr ixVal)]
                 obj
                 mth'proc
-                Nothing
+                [SendPosArg (GodSendExpr ixVal)]
                 exit
 
               !badIndexer ->
@@ -807,18 +807,18 @@ evalExpr expr exit = do
                   $  "Malformed index method ([]) on "
                   <> T.pack (show obj)
                   <> " - "
-                  <> T.pack (show $ edhTypeOf badIndexer)
+                  <> T.pack (edhTypeNameOf badIndexer)
                   <> ": "
                   <> T.pack (show badIndexer)
 
           _ ->
             throwEdh EvalError
               $  "Don't know how to index "
-              <> T.pack (show $ edhTypeOf tgtVal)
+              <> T.pack (edhTypeNameOf tgtVal)
               <> ": "
               <> T.pack (show tgtVal)
               <> " with "
-              <> T.pack (show $ edhTypeOf ixVal)
+              <> T.pack (edhTypeNameOf ixVal)
               <> ": "
               <> T.pack (show ixVal)
 
@@ -925,7 +925,7 @@ evalExpr expr exit = do
           _ ->
             throwEdhSTM pgs EvalError
               $  "Not callable "
-              <> T.pack (show $ edhTypeOf opVal)
+              <> T.pack (edhTypeNameOf opVal)
               <> ": "
               <> T.pack (show opVal)
               <> " expressed with: "
@@ -1142,7 +1142,7 @@ setEdhAttr !pgsAfter !tgtExpr !key !val !exit = do
         _ ->
           throwEdh EvalError
             $  "Invalid assignment target, it's a "
-            <> T.pack (show $ edhTypeOf tgtVal)
+            <> T.pack (edhTypeNameOf tgtVal)
             <> ": "
             <> T.pack (show tgtVal)
 
@@ -1162,18 +1162,17 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
       callMaker $ \ !exit -> constructEdhObject cls argsSndr exit
 
     -- calling a method procedure
-    EdhMethod !mth'proc -> callMaker
-      $ \exit -> callEdhMethod argsSndr callee'that mth'proc Nothing exit
+    EdhMethod !mth'proc ->
+      callMaker $ \exit -> callEdhMethod callee'that mth'proc argsSndr exit
 
     -- calling an interpreter procedure
     EdhInterpreter !mth'proc -> do
       let callerCtx = edh'context pgsCaller
       !argCallerScope <- mkScopeWrapper callerCtx $ contextScope callerCtx
       callMaker $ \exit -> callEdhMethod
-        (SendPosArg (GodSendExpr (EdhObject argCallerScope)) : argsSndr)
         callee'that
         mth'proc
-        Nothing
+        (SendPosArg (GodSendExpr (EdhObject argCallerScope)) : argsSndr)
         exit
 
     -- calling a producer procedure
@@ -1191,14 +1190,14 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
                 Just !badVal ->
                   throwEdhSTM pgsCaller EvalError
                     $ "What's passed to a producer procedure as `outlet` is not a sink but a "
-                    <> T.pack (show $ edhTypeOf badVal)
+                    <> T.pack (edhTypeNameOf badVal)
               callMaker $ \exit ->
                 launchEventProducer exit outlet $ callEdhMethod'
-                  (ArgsPack args kwargs')
+                  Nothing
                   callee'that
                   mth'proc
                   pb
-                  Nothing
+                  (ArgsPack args kwargs')
                   edhEndOfProc
 
     -- calling a generator
@@ -1210,7 +1209,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
     _ ->
       throwEdhSTM pgsCaller EvalError
         $  "Can not call a "
-        <> T.pack (show $ edhTypeOf callee'val)
+        <> T.pack (edhTypeNameOf callee'val)
         <> ": "
         <> T.pack (show callee'val)
 
@@ -1255,7 +1254,7 @@ constructEdhObject !cls !argsSndr !exit = do
                     Left !pb ->
                       runEdhProg pgsCaller $ packEdhArgs' argsSndr $ \apk ->
                         local (const pgsCtor)
-                          $ callEdhMethod' apk this initMth pb Nothing
+                          $ callEdhMethod' Nothing this initMth pb apk
                           $ \(OriginalValue !initRtn _ _) ->
                               local (const pgsCaller) $ case initRtn of
                                 -- allow a __init__() procedure to explicitly return other
@@ -1276,7 +1275,7 @@ constructEdhObject !cls !argsSndr !exit = do
                 badInitMth ->
                   throwEdhSTM pgsCaller EvalError
                     $  "Invalid __init__() method type from class - "
-                    <> T.pack (show $ edhTypeOf badInitMth)
+                    <> T.pack (edhTypeNameOf badInitMth)
       _ -> -- return whatever the constructor returned if not an object
         exitEdhProc exit thisVal
 
@@ -1334,13 +1333,8 @@ createEdhObject !cls !argsSndr !exit = do
 
 
 callEdhMethod
-  :: ArgsSender
-  -> Object
-  -> ProcDefi
-  -> Maybe EdhGenrCaller
-  -> EdhProcExit
-  -> EdhProg (STM ())
-callEdhMethod !argsSndr !mth'that !mth'proc !gnr'caller !exit = do
+  :: Object -> ProcDefi -> ArgsSender -> EdhProcExit -> EdhProg (STM ())
+callEdhMethod !mth'that !mth'proc !argsSndr !exit = do
   pgsCaller <- ask
   let callerCtx   = edh'context pgsCaller
       callerScope = contextScope callerCtx
@@ -1370,7 +1364,7 @@ callEdhMethod !argsSndr !mth'that !mth'proc !gnr'caller !exit = do
 
     -- calling an Edh method procedure
     Left !pb -> packEdhArgs' argsSndr $ \apk ->
-      callEdhMethod' apk mth'that mth'proc pb gnr'caller
+      callEdhMethod' Nothing mth'that mth'proc pb apk
         $ \(OriginalValue !mthRtn _ _) -> case mthRtn of
             -- allow continue to be return from a method proc,
             -- to carry similar semantics like `NotImplemented` in Python
@@ -1385,14 +1379,14 @@ callEdhMethod !argsSndr !mth'that !mth'proc !gnr'caller !exit = do
             _                -> exitEdhProc exit mthRtn
 
 callEdhMethod'
-  :: ArgsPack
+  :: Maybe EdhGenrCaller
   -> Object
   -> ProcDefi
   -> StmtSrc
-  -> Maybe EdhGenrCaller
+  -> ArgsPack
   -> EdhProcExit
   -> EdhProg (STM ())
-callEdhMethod' !apk !callee'that !mth'proc !mth'body !gnr'caller !exit = do
+callEdhMethod' !gnr'caller !callee'that !mth'proc !mth'body !apk !exit = do
   !pgsCaller <- ask
   let !callerCtx = edh'context pgsCaller
       !recvCtx   = callerCtx { callStack       = lexicalScopeOf mth'proc :| []
@@ -1515,11 +1509,11 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                     Left !pb -> packEdhArgs' argsSndr $ \apk ->
                       contEdhSTM $ forLooper $ \exit -> do
                         pgs <- ask
-                        callEdhMethod' apk
+                        callEdhMethod' (Just (pgs, recvYield exit))
                                        callee'that
                                        gnr'proc
                                        pb
-                                       (Just (pgs, recvYield exit))
+                                       apk
                           $ \(OriginalValue !val _ _) ->
                               -- return the result in CPS with looper pgs restored
                               contEdhSTM $ exitEdhSTM pgsLooper exit val
@@ -1637,7 +1631,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
         _ ->
           throwEdhSTM pgsLooper EvalError
             $  "Can not do a for loop from "
-            <> T.pack (show $ edhTypeOf iterVal)
+            <> T.pack (edhTypeNameOf iterVal)
             <> ": "
             <> T.pack (show iterVal)
 
@@ -1987,7 +1981,7 @@ _packEdhArgs (x : xs) !exit = do
         _ ->
           throwEdh EvalError
             $  "Can not unpack args from a "
-            <> T.pack (show $ edhTypeOf val)
+            <> T.pack (edhTypeNameOf val)
             <> ": "
             <> T.pack (show val)
     UnpackKwArgs !kwExpr -> evalExpr kwExpr $ \(OriginalValue !val _ _) ->
@@ -2008,7 +2002,7 @@ _packEdhArgs (x : xs) !exit = do
         _ ->
           throwEdh EvalError
             $  "Can not unpack kwargs from a "
-            <> T.pack (show $ edhTypeOf val)
+            <> T.pack (edhTypeNameOf val)
             <> ": "
             <> T.pack (show val)
     UnpackPkArgs !pkExpr -> evalExpr pkExpr $ \(OriginalValue !val _ _) ->
@@ -2019,7 +2013,7 @@ _packEdhArgs (x : xs) !exit = do
         _ ->
           throwEdh EvalError
             $  "Can not unpack pkargs from a "
-            <> T.pack (show $ edhTypeOf val)
+            <> T.pack (edhTypeNameOf val)
             <> ": "
             <> T.pack (show val)
     SendPosArg !argExpr -> evalExpr argExpr $ \(OriginalValue !val _ _) ->
@@ -2147,7 +2141,7 @@ edhValueRepr (EdhObject !o) !exit = do
     EdhNil -> exitEdhSTM pgs exit $ EdhString $ T.pack $ show o
     EdhMethod !reprMth ->
       runEdhProg pgs
-        $ callEdhMethod [] o reprMth Nothing
+        $ callEdhMethod o reprMth []
         $ \(OriginalValue reprVal _ _) -> case reprVal of
             s@EdhString{} -> exitEdhProc exit s
             _             -> edhValueRepr reprVal exit

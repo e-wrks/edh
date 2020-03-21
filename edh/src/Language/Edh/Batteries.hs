@@ -3,10 +3,6 @@ module Language.Edh.Batteries where
 
 import           Prelude
 
-import           System.Environment
-import           Text.Read
-
-import           Control.Exception
 import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
@@ -27,7 +23,6 @@ import           Language.Edh.Batteries.Runtime
 
 installEdhBatteries :: MonadIO m => EdhWorld -> m ()
 installEdhBatteries world = liftIO $ do
-  envLogLevel <- lookupEnv "EDH_LOG_LEVEL"
   rtClassUniq <- newUnique
   runEdhProgram' (worldContext world) $ do
     pgs <- ask
@@ -293,18 +288,6 @@ installEdhBatteries world = liftIO $ do
         ]
       updateEntityAttrs pgs (objEntity scopeSuperObj) scopeSuperMethods
 
-      case envLogLevel of
-        Nothing      -> return ()
-        Just "DEBUG" -> setLogLevel 10
-        Just "INFO"  -> setLogLevel 20
-        Just "WARN"  -> setLogLevel 30
-        Just "ERROR" -> setLogLevel 40
-        Just "FATAL" -> setLogLevel 50
-        Just ns      -> case readEither ns of
-          Left  _           -> return ()
-          Right (ln :: Int) -> setLogLevel ln
-
-
       -- import the parts written in Edh 
       runEdhProg pgs
         $ importEdhModule' WildReceiver "batteries/root" edhEndOfProc
@@ -313,9 +296,3 @@ installEdhBatteries world = liftIO $ do
   !rootScope     = worldScope world
   !rootEntity    = objEntity $ thisObject rootScope
   !scopeSuperObj = scopeSuper world
-  !wrt           = worldRuntime world
-  setLogLevel :: LogLevel -> STM ()
-  setLogLevel l = do
-    rt <- takeTMVar wrt
-    catchSTM (putTMVar wrt rt { runtimeLogLevel = l })
-      $ \(e :: SomeException) -> tryPutTMVar wrt rt >> throwSTM e

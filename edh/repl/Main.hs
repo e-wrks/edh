@@ -21,8 +21,8 @@ inputSettings = Settings { complete       = \(_left, _right) -> return ("", [])
 main :: IO ()
 main = do
 
-  -- todo create a logger coop'ing with haskeline specifically ?
-  logger <- defaultEdhLogger
+  -- todo create a runtime with logger coop'ing with haskeline specifically ?
+  runtime <- defaultEdhRuntime
 
   runInputT inputSettings $ do
 
@@ -31,7 +31,7 @@ main = do
       "* Blank Screen Syndrome ? Take the Tour as your companion, checkout:"
     outputStrLn "  https://github.com/e-wrks/edh/tree/master/Tour"
 
-    world <- createEdhWorld logger
+    world <- createEdhWorld runtime
     installEdhBatteries world
 
     modu <- createEdhModule world "<interactive>" "<adhoc>"

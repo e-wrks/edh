@@ -1,7 +1,7 @@
 
 module Language.Edh.Runtime
   ( createEdhWorld
-  , defaultEdhLogger
+  , defaultEdhRuntime
   , bootEdhModule
   , runEdhProgram
   , runEdhProgram'
@@ -24,6 +24,8 @@ import           Prelude
 import           GHC.Conc                       ( unsafeIOToSTM )
 
 import           System.IO                      ( stderr )
+import           System.Environment
+import           Text.Read
 
 import           Control.Exception
 import           Control.Monad.Except
@@ -71,19 +73,41 @@ runEdhProgram' !ctx !prog = liftIO $ do
   driveEdhProgram haltResult ctx prog
 
 
--- | This logger serializes all log messages to 'stderr' through a 'TQueue',
+-- | This runtime serializes all log messages to 'stderr' through a 'TQueue',
 -- this is crucial under heavy concurrency.
 --
 -- known issues:
 --  *) can mess up with others writing to 'stderr'
 --  *) if all others use 'trace' only, there're minimum messups but emojis 
 --     seem to be break points
-defaultEdhLogger :: IO EdhLogger
-defaultEdhLogger = do
-  logQueue <- newTQueueIO
-  let logPrinter :: IO ()
+defaultEdhRuntime :: IO EdhRuntime
+defaultEdhRuntime = do
+  envLogLevel <- lookupEnv "EDH_LOG_LEVEL"
+  logIdle     <- newEmptyTMVarIO
+  logQueue    <- newTQueueIO
+  let logLevel = case envLogLevel of
+        Nothing      -> 20
+        Just "DEBUG" -> 10
+        Just "INFO"  -> 20
+        Just "WARN"  -> 30
+        Just "ERROR" -> 40
+        Just "FATAL" -> 50
+        Just ns      -> case readEither ns of
+          Left  _           -> 0
+          Right (ln :: Int) -> ln
+      flushLogs :: IO ()
+      flushLogs = atomically (tryPeekTQueue logQueue) >>= \case
+        Nothing -> return ()
+        _       -> atomically (readTMVar logIdle)
+      logPrinter :: IO ()
       logPrinter = do
-        msg <- atomically $ readTQueue logQueue
+        msg <- atomically $ tryReadTQueue logQueue >>= \case
+          Just !lr -> return lr
+          Nothing  -> do
+            void $ tryPutTMVar logIdle ()
+            lr <- readTQueue logQueue
+            void $ tryTakeTMVar logIdle
+            return lr
         hPutStrLn stderr msg
         logPrinter
       logger :: EdhLogger
@@ -109,11 +133,14 @@ defaultEdhLogger = do
                 _ | level >= 10 -> "🐞 "
                 _               -> "😥 "
   void $ forkIO logPrinter
-  return logger
+  return EdhRuntime { runtimeLogger    = logger
+                    , runtimeLogLevel  = logLevel
+                    , flushRuntimeLogs = flushLogs
+                    }
 
 
-createEdhWorld :: MonadIO m => EdhLogger -> m EdhWorld
-createEdhWorld !logger = liftIO $ do
+createEdhWorld :: MonadIO m => EdhRuntime -> m EdhWorld
+createEdhWorld !runtime = liftIO $ do
   -- ultimate default methods/operators/values go into this
   rootEntity <- atomically $ createHashEntity $ Map.fromList
     [ (AttrByName "__name__", EdhString "<root>")
@@ -159,10 +186,7 @@ createEdhWorld !logger = liftIO $ do
       , (10, "<Intrinsic>")
       )
     ]
-  modus   <- newTMVarIO Map.empty
-  runtime <- newTMVarIO EdhRuntime { runtimeLogger   = logger
-                                   , runtimeLogLevel = 20
-                                   }
+  modus <- newTMVarIO Map.empty
   return $ EdhWorld
     { worldScope     = rootScope
     , scopeSuper     = Object { objEntity = scopeManiMethods

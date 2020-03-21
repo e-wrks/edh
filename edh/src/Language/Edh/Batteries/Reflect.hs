@@ -213,7 +213,7 @@ scopePutProc !argsSender !exit = do
     _ ->
       throwEdhSTM pgs EvalError
         $  "Invalid key/value type to put into a scope - "
-        <> T.pack (show $ edhTypeOf arg)
+        <> T.pack (edhTypeNameOf arg)
 
 
 -- | utility scope.eval(expr1, expr2, kw3=expr3, kw4=expr4, ...)

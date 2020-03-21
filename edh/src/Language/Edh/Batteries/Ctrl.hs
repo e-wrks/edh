@@ -173,7 +173,7 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                           $  "Invalid class "
                           <> classAttr
                           <> ", it is a "
-                          <> T.pack (show $ edhTypeOf val)
+                          <> T.pack (edhTypeNameOf val)
                           <> ": "
                           <> T.pack (show val)
           _ -> exitEdhProc exit EdhFallthrough

@@ -29,7 +29,7 @@ resolveEdhAttrAddr !pgs (SymbolicAttr !symName) =
               $  "Not a symbol as "
               <> symName
               <> ", it is a "
-              <> T.pack (show $ edhTypeOf val)
+              <> T.pack (edhTypeNameOf val)
               <> ": "
               <> T.pack (show val)
         Nothing ->

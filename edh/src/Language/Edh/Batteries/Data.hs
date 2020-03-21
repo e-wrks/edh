@@ -254,7 +254,7 @@ val2DictEntry _ (EdhArgsPack (ArgsPack [!k, !v] !kwargs)) | Map.null kwargs =
 val2DictEntry !pgs !val =
   throwEdhSTM pgs EvalError
     $  "Invalid entry for dict "
-    <> T.pack (show $ edhTypeOf val)
+    <> T.pack (edhTypeNameOf val)
     <> ": "
     <> T.pack (show val)
 
@@ -277,7 +277,7 @@ elemProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       _ ->
         throwEdh EvalError
           $  "Don't know how to prepend to a "
-          <> T.pack (show $ edhTypeOf rhVal)
+          <> T.pack (edhTypeNameOf rhVal)
           <> ": "
           <> T.pack (show rhVal)
 elemProc !argsSender _ =
@@ -300,7 +300,7 @@ prpdProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       _ ->
         throwEdh EvalError
           $  "Don't know how to prepend to a "
-          <> T.pack (show $ edhTypeOf rhVal)
+          <> T.pack (edhTypeNameOf rhVal)
           <> ": "
           <> T.pack (show rhVal)
 prpdProc !argsSender _ =
@@ -358,7 +358,7 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
         _ ->
           throwEdh EvalError
             $  "Don't know how to comprehend into a "
-            <> T.pack (show $ edhTypeOf lhVal)
+            <> T.pack (edhTypeNameOf lhVal)
             <> ": "
             <> T.pack (show lhVal)
     _ -> evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
@@ -376,7 +376,7 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
           _ ->
             throwEdh EvalError
               $  "Don't know how to comprehend from a "
-              <> T.pack (show $ edhTypeOf rhVal)
+              <> T.pack (edhTypeNameOf rhVal)
               <> ": "
               <> T.pack (show rhVal)
         EdhList (List _ !l) -> case rhVal of
@@ -398,7 +398,7 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
           _ ->
             throwEdh EvalError
               $  "Don't know how to comprehend from a "
-              <> T.pack (show $ edhTypeOf rhVal)
+              <> T.pack (edhTypeNameOf rhVal)
               <> ": "
               <> T.pack (show rhVal)
         EdhDict (Dict _ !d) -> case rhVal of
@@ -423,13 +423,13 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
           _ ->
             throwEdh EvalError
               $  "Don't know how to comprehend from a "
-              <> T.pack (show $ edhTypeOf rhVal)
+              <> T.pack (edhTypeNameOf rhVal)
               <> ": "
               <> T.pack (show rhVal)
         _ ->
           throwEdh EvalError
             $  "Don't know how to comprehend into a "
-            <> T.pack (show $ edhTypeOf lhVal)
+            <> T.pack (edhTypeNameOf lhVal)
             <> ": "
             <> T.pack (show lhVal)
 cprhProc !argsSender _ =
@@ -448,7 +448,7 @@ evtPubProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
     _ ->
       throwEdh EvalError
         $  "Can only publish event to a sink, not a "
-        <> T.pack (show $ edhTypeOf lhVal)
+        <> T.pack (edhTypeNameOf lhVal)
         <> ": "
         <> T.pack (show lhVal)
 evtPubProc !argsSender _ =
