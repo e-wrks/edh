@@ -365,8 +365,8 @@ mkHostOper !world !scope !opSym !hp = do
         $  UsageError
         $  "No precedence declared in the world for operator: "
         <> opSym
-    Just (prec, _) -> return $ EdhOperator
-      prec
+    Just (preced, _) -> return $ EdhOperator
+      preced
       Nothing
       ProcDefi
         { procedure'uniq = u
