@@ -166,14 +166,6 @@ module Language.Edh.EHI
     -- * args pack parsing
   , ArgsPackParser(..)
   , parseArgsPack
-
-    -- * Monadic API for textual interpreter
-  , runEdh
-  , runEdhWithoutBatteries
-  , runEdhShell
-  , evalEdh
-  , EdhShell
-  , EdhBootstrap
   )
 where
 
@@ -194,41 +186,6 @@ import           Language.Edh.Interpreter
 import           Language.Edh.Batteries
 import           Language.Edh.Runtime
 import           Language.Edh.Event
-
-
-evalEdh
-  :: Text -- ^ source name
-  -> Text -- ^ source code
-  -> EdhShell (Either EdhError EdhValue) -- ^ eval result
-evalEdh name code = do
-  (world, modu) <- ask
-  liftIO $ evalEdhSource world modu name code
-
-
-runEdhShell
-  :: ModuleId -- ^ shell module id
-  -> EdhShell a -- ^ computation in an Edh shell
-  -> EdhBootstrap (Either EdhError a) -- ^ final result
-runEdhShell moduId (ReaderT f) = do
-  world <- ask
-  modu  <- createEdhModule world moduId "<adhoc>"
-  liftIO $ tryJust Just $ f (world, modu)
-
-
-runEdh :: MonadIO m => EdhBootstrap a -> EdhRuntime -> m a
-runEdh (ReaderT !f) !runtime = liftIO $ do
-  world <- createEdhWorld runtime
-  installEdhBatteries world
-  f world
-
-runEdhWithoutBatteries :: MonadIO m => EdhRuntime -> EdhBootstrap a -> m a
-runEdhWithoutBatteries !runtime (ReaderT f) =
-  liftIO $ createEdhWorld runtime >>= f
-
-
-type EdhShell a = ReaderT (EdhWorld, Object) IO a
-
-type EdhBootstrap a = ReaderT EdhWorld IO a
 
 
 data ArgsPackParser a = ArgsPackParser {
