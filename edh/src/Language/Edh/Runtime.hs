@@ -369,7 +369,7 @@ mkHostOper !world !scope !opSym !hp = do
         $  UsageError
         $  "No precedence declared in the world for operator: "
         <> opSym
-    Just (preced, _) -> return $ EdhOperator
+    Just (preced, _) -> return $ EdhOprtor
       preced
       Nothing
       ProcDefi

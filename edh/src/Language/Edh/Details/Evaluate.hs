@@ -306,30 +306,30 @@ evalStmt' !stmt !exit = do
 
     GeneratorStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
       u <- unsafeIOToSTM newUnique
-      let gdf = EdhGenrDef ProcDefi { procedure'uniq = u
-                                    , procedure'lexi = Just scope
-                                    , procedure'decl = pd
-                                    }
+      let gdf = EdhGnrtor ProcDefi { procedure'uniq = u
+                                   , procedure'lexi = Just scope
+                                   , procedure'decl = pd
+                                   }
       when (name /= "_")
         $ changeEntityAttr pgs (scopeEntity scope) (AttrByName name) gdf
       exitEdhSTM pgs exit gdf
 
     InterpreterStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
       u <- unsafeIOToSTM newUnique
-      let mth = EdhInterpreter ProcDefi { procedure'uniq = u
-                                        , procedure'lexi = Just scope
-                                        , procedure'decl = pd
-                                        }
+      let mth = EdhIntrpr ProcDefi { procedure'uniq = u
+                                   , procedure'lexi = Just scope
+                                   , procedure'decl = pd
+                                   }
       when (name /= "_")
         $ changeEntityAttr pgs (scopeEntity scope) (AttrByName name) mth
       exitEdhSTM pgs exit mth
 
     ProducerStmt pd@(ProcDecl name args _) -> contEdhSTM $ do
       u <- unsafeIOToSTM newUnique
-      let mth = EdhProducer ProcDefi { procedure'uniq = u
-                                     , procedure'lexi = Just scope
-                                     , procedure'decl = pd
-                                     }
+      let mth = EdhPrducr ProcDefi { procedure'uniq = u
+                                   , procedure'lexi = Just scope
+                                   , procedure'decl = pd
+                                   }
       unless (receivesNamedArg "outlet" args) $ throwEdhSTM
         pgs
         EvalError
@@ -349,7 +349,7 @@ evalStmt' !stmt !exit = do
                 $  "Original operator ("
                 <> origOpSym
                 <> ") not in scope"
-            op@EdhOperator{} -> return op
+            op@EdhOprtor{} -> return op
             val ->
               throwEdhSTM pgs EvalError
                 $  "Can not re-declare a "
@@ -362,7 +362,7 @@ evalStmt' !stmt !exit = do
       _ -> contEdhSTM $ do
         validateOperDecl pgs opProc
         u <- unsafeIOToSTM newUnique
-        let op = EdhOperator
+        let op = EdhOprtor
               opPrec
               Nothing
               ProcDefi { procedure'uniq = u
@@ -385,8 +385,8 @@ evalStmt' !stmt !exit = do
               --       [EdhString "overriding an unavailable operator"]
               --       Map.empty
               return Nothing
-            op@EdhOperator{} -> return $ Just op
-            opVal            -> do
+            op@EdhOprtor{} -> return $ Just op
+            opVal          -> do
               (runtimeLogger $ worldRuntime world)
                   30
                   (Just $ sourcePosPretty srcPos)
@@ -401,7 +401,7 @@ evalStmt' !stmt !exit = do
               return Nothing
       predecessor <- findPredecessor
       u           <- unsafeIOToSTM newUnique
-      let op = EdhOperator
+      let op = EdhOprtor
             opPrec
             predecessor
             ProcDefi { procedure'uniq = u
@@ -840,7 +840,7 @@ evalExpr expr exit = do
         Just (!opVal, !op'lexi) -> case opVal of
 
           -- calling an operator
-          EdhOperator _ !op'pred !op'proc ->
+          EdhOprtor _ !op'pred !op'proc ->
             case procedure'body $ procedure'decl op'proc of
 
               -- calling a host operator
@@ -1182,7 +1182,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
       callMaker $ \exit -> callEdhMethod callee'that mth'proc argsSndr exit
 
     -- calling an interpreter procedure
-    EdhInterpreter !mth'proc -> do
+    EdhIntrpr !mth'proc -> do
       let callerCtx = edh'context pgsCaller
       !argCallerScope <- mkScopeWrapper callerCtx $ contextScope callerCtx
       callMaker $ \exit -> callEdhMethod
@@ -1192,7 +1192,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
         exit
 
     -- calling a producer procedure
-    EdhProducer !mth'proc -> case procedure'body $ procedure'decl mth'proc of
+    EdhPrducr !mth'proc -> case procedure'body $ procedure'decl mth'proc of
       Right _ -> throwEdhSTM pgsCaller EvalError "bug: host producer procedure"
       Left !pb ->
         runEdhProg pgsCaller
@@ -1217,7 +1217,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
                   edhEndOfProc
 
     -- calling a generator
-    (EdhGenrDef _) -> throwEdhSTM
+    (EdhGnrtor _) -> throwEdhSTM
       pgsCaller
       EvalError
       "Can only call a generator method by for-from-do"
@@ -1491,7 +1491,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
               case callee'val of
 
                 -- calling a generator
-                (EdhGenrDef !gnr'proc) ->
+                (EdhGnrtor !gnr'proc) ->
                   case procedure'body $ procedure'decl gnr'proc of
 
                     -- calling a host generator

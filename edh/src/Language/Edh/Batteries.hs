@@ -232,7 +232,7 @@ installEdhBatteries world = liftIO $ do
       !rtGenrs <- sequence
         [ (AttrByName nm, ) <$> mkHostProc
             rtScope
-            EdhGenrDef
+            EdhGnrtor
             nm
             hp
             (PackReceiver [RecvArg "interval" Nothing Nothing])

@@ -707,10 +707,10 @@ data EdhValue =
   -- executable precedures
     | EdhClass !ProcDefi
     | EdhMethod !ProcDefi
-    | EdhOperator !Precedence !(Maybe EdhValue) !ProcDefi
-    | EdhGenrDef !ProcDefi
-    | EdhInterpreter !ProcDefi
-    | EdhProducer !ProcDefi
+    | EdhOprtor !Precedence !(Maybe EdhValue) !ProcDefi
+    | EdhGnrtor !ProcDefi
+    | EdhIntrpr !ProcDefi
+    | EdhPrducr !ProcDefi
 
   -- | flow control
     | EdhBreak
@@ -770,11 +770,11 @@ instance Show EdhValue where
 
   show (EdhClass (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
   show (EdhMethod (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
-  show (EdhOperator precedence _predecessor (ProcDefi _ _ (ProcDecl pn _ _))) =
+  show (EdhOprtor precedence _predecessor (ProcDefi _ _ (ProcDecl pn _ _))) =
     "<operator: (" ++ T.unpack pn ++ ") " ++ show precedence ++ ">"
-  show (EdhGenrDef (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
-  show (EdhInterpreter (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
-  show (EdhProducer (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
+  show (EdhGnrtor (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
+  show (EdhIntrpr (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
+  show (EdhPrducr (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
 
   show EdhBreak         = "<break>"
   show EdhContinue      = "<continue>"
@@ -822,10 +822,10 @@ instance Eq EdhValue where
 
   EdhClass    x               == EdhClass    y               = x == y
   EdhMethod   x               == EdhMethod   y               = x == y
-  EdhOperator _ _ x           == EdhOperator _ _ y           = x == y
-  EdhGenrDef     x            == EdhGenrDef     y            = x == y
-  EdhInterpreter x            == EdhInterpreter y            = x == y
-  EdhProducer    x            == EdhProducer    y            = x == y
+  EdhOprtor _ _ x             == EdhOprtor _ _ y             = x == y
+  EdhGnrtor x                 == EdhGnrtor y                 = x == y
+  EdhIntrpr x                 == EdhIntrpr y                 = x == y
+  EdhPrducr x                 == EdhPrducr y                 = x == y
 
   EdhBreak                    == EdhBreak                    = True
   EdhContinue                 == EdhContinue                 = True
@@ -850,29 +850,29 @@ instance Eq EdhValue where
   _                           == _                           = False
 
 instance Hashable EdhValue where
-  hashWithSalt s (EdhType x)         = hashWithSalt s $ 1 + fromEnum x
-  hashWithSalt s EdhNil              = hashWithSalt s (0 :: Int)
-  hashWithSalt s (EdhDecimal x     ) = hashWithSalt s x
-  hashWithSalt s (EdhBool    x     ) = hashWithSalt s x
-  hashWithSalt s (EdhString  x     ) = hashWithSalt s x
-  hashWithSalt s (EdhSymbol  x     ) = hashWithSalt s x
-  hashWithSalt s (EdhObject  x     ) = hashWithSalt s x
+  hashWithSalt s (EdhType x)       = hashWithSalt s $ 1 + fromEnum x
+  hashWithSalt s EdhNil            = hashWithSalt s (0 :: Int)
+  hashWithSalt s (EdhDecimal x   ) = hashWithSalt s x
+  hashWithSalt s (EdhBool    x   ) = hashWithSalt s x
+  hashWithSalt s (EdhString  x   ) = hashWithSalt s x
+  hashWithSalt s (EdhSymbol  x   ) = hashWithSalt s x
+  hashWithSalt s (EdhObject  x   ) = hashWithSalt s x
 
-  hashWithSalt s (EdhDict    x     ) = hashWithSalt s x
-  hashWithSalt s (EdhList    x     ) = hashWithSalt s x
-  hashWithSalt s (EdhPair k v      ) = s `hashWithSalt` k `hashWithSalt` v
-  hashWithSalt s (EdhTuple    x    ) = foldl' hashWithSalt s x
-  hashWithSalt s (EdhArgsPack x    ) = hashWithSalt s x
+  hashWithSalt s (EdhDict    x   ) = hashWithSalt s x
+  hashWithSalt s (EdhList    x   ) = hashWithSalt s x
+  hashWithSalt s (EdhPair k v    ) = s `hashWithSalt` k `hashWithSalt` v
+  hashWithSalt s (EdhTuple    x  ) = foldl' hashWithSalt s x
+  hashWithSalt s (EdhArgsPack x  ) = hashWithSalt s x
 
-  hashWithSalt s (EdhClass    x    ) = hashWithSalt s x
-  hashWithSalt s (EdhMethod   x    ) = hashWithSalt s x
-  hashWithSalt s (EdhOperator _ _ x) = hashWithSalt s x
-  hashWithSalt s (EdhGenrDef     x ) = hashWithSalt s x
-  hashWithSalt s (EdhInterpreter x ) = hashWithSalt s x
-  hashWithSalt s (EdhProducer    x ) = hashWithSalt s x
+  hashWithSalt s (EdhClass    x  ) = hashWithSalt s x
+  hashWithSalt s (EdhMethod   x  ) = hashWithSalt s x
+  hashWithSalt s (EdhOprtor _ _ x) = hashWithSalt s x
+  hashWithSalt s (EdhGnrtor x    ) = hashWithSalt s x
+  hashWithSalt s (EdhIntrpr x    ) = hashWithSalt s x
+  hashWithSalt s (EdhPrducr x    ) = hashWithSalt s x
 
-  hashWithSalt s EdhBreak            = hashWithSalt s (-1 :: Int)
-  hashWithSalt s EdhContinue         = hashWithSalt s (-2 :: Int)
+  hashWithSalt s EdhBreak          = hashWithSalt s (-1 :: Int)
+  hashWithSalt s EdhContinue       = hashWithSalt s (-2 :: Int)
   hashWithSalt s (EdhCaseClose v) =
     s `hashWithSalt` (-3 :: Int) `hashWithSalt` v
   hashWithSalt s EdhFallthrough            = hashWithSalt s (-4 :: Int)
@@ -1241,15 +1241,15 @@ edhTypeOf (EdhClass (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
 edhTypeOf (EdhMethod (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> MethodType
   Right _ -> HostMethodType
-edhTypeOf (EdhOperator _ _ (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
+edhTypeOf (EdhOprtor _ _ (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> OperatorType
   Right _ -> HostOperType
-edhTypeOf (EdhGenrDef (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
+edhTypeOf (EdhGnrtor (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> GeneratorType
   Right _ -> HostGenrType
 
-edhTypeOf EdhInterpreter{}    = InterpreterType
-edhTypeOf EdhProducer{}       = ProducerType
+edhTypeOf EdhIntrpr{}         = InterpreterType
+edhTypeOf EdhPrducr{}         = ProducerType
 edhTypeOf EdhBreak            = BreakType
 edhTypeOf EdhContinue         = ContinueType
 edhTypeOf EdhCaseClose{}      = CaseCloseType
