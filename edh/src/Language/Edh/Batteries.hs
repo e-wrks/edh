@@ -149,8 +149,8 @@ installEdhBatteries world = liftIO $ do
 
       -- global operators at world root scope
       !rootOperators <- sequence
-        [ (AttrByName sym, ) <$> mkHostOper world rootScope sym hp
-        | (sym, hp) <-
+        [ (AttrByName sym, ) <$> mkIntrinsicOp world sym iop
+        | (sym, iop) <-
           [ ("$"  , attrDerefAddrProc)
           , (":=" , defProc)
           , (":"  , consProc)

@@ -19,21 +19,19 @@ import           Language.Edh.Runtime
 
 -- | utility constructor(*args,**kwargs)
 ctorProc :: EdhProcedure
-ctorProc !argsSender !exit = do
+ctorProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   let callerCtx   = edh'context pgs
       callerScope = contextScope callerCtx
-  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) ->
-    let !argsCls = edhClassOf <$> args
-    in  if null kwargs
-          then case argsCls of
-            [] ->
-              exitEdhProc exit (EdhClass $ objClass $ thisObject callerScope)
-            [t] -> exitEdhProc exit t
-            _   -> exitEdhProc exit (EdhTuple argsCls)
-          else exitEdhProc
-            exit
-            (EdhArgsPack $ ArgsPack argsCls $ Map.map edhClassOf kwargs)
+      !argsCls    = edhClassOf <$> args
+  if null kwargs
+    then case argsCls of
+      []  -> exitEdhProc exit (EdhClass $ objClass $ thisObject callerScope)
+      [t] -> exitEdhProc exit t
+      _   -> exitEdhProc exit (EdhTuple argsCls)
+    else exitEdhProc
+      exit
+      (EdhArgsPack $ ArgsPack argsCls $ Map.map edhClassOf kwargs)
  where
   edhClassOf :: EdhValue -> EdhValue
   edhClassOf (EdhObject o) = EdhClass $ objClass o
@@ -41,17 +39,16 @@ ctorProc !argsSender !exit = do
 
 -- | utility supers(*args,**kwargs)
 supersProc :: EdhProcedure
-supersProc !argsSender !exit = do
+supersProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   let !callerCtx   = edh'context pgs
       !callerScope = contextScope callerCtx
-      !argCnt      = length argsSender
-  if argCnt < 1
+  if null args && Map.null kwargs
     then contEdhSTM $ do
       supers <-
         map EdhObject <$> (readTVar $ objSupers $ thatObject callerScope)
       exitEdhSTM pgs exit (EdhTuple supers)
-    else packEdhArgs argsSender $ \(ArgsPack !args !kwargs) -> if null kwargs
+    else if null kwargs
       then case args of
         [v] -> contEdhSTM $ do
           supers <- supersOf v
@@ -149,7 +146,7 @@ scopeOuterProc _ !exit = do
 -- | utility scope.get(k1, k2, n1=k3, n2=k4, ...)
 -- get attribute values from the wrapped scope
 scopeGetProc :: EdhProcedure
-scopeGetProc !argsSender !exit = do
+scopeGetProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   let !callerCtx = edh'context pgs
       !that      = thatObject $ contextScope callerCtx
@@ -165,16 +162,15 @@ scopeGetProc !argsSender !exit = do
         k       <- attrKeyFrom pgs v
         attrVal <- lookupEntityAttr pgs ent k
         lookupAttrs rtnArgs ((n, attrVal) : rtnKwArgs) [] restKwArgs
-      lookupAttrs rtnArgs rtnKwArgs (v : restArgs) kwargs = do
+      lookupAttrs rtnArgs rtnKwArgs (v : restArgs) kwargs' = do
         k       <- attrKeyFrom pgs v
         attrVal <- lookupEntityAttr pgs ent k
-        lookupAttrs (attrVal : rtnArgs) rtnKwArgs restArgs kwargs
-  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) ->
-    contEdhSTM $ lookupAttrs [] [] args (Map.toList kwargs) >>= \case
-      ([v]    , []       ) -> exitEdhSTM pgs exit v
-      (rtnArgs, rtnKwArgs) -> exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack
-        (reverse rtnArgs)
-        (Map.fromList rtnKwArgs)
+        lookupAttrs (attrVal : rtnArgs) rtnKwArgs restArgs kwargs'
+  contEdhSTM $ lookupAttrs [] [] args (Map.toList kwargs) >>= \case
+    ([v]    , []       ) -> exitEdhSTM pgs exit v
+    (rtnArgs, rtnKwArgs) -> exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack
+      (reverse rtnArgs)
+      (Map.fromList rtnKwArgs)
  where
   attrKeyFrom :: EdhProgState -> EdhValue -> STM AttrKey
   attrKeyFrom _ (EdhString attrName) = return $ AttrByName attrName
@@ -187,12 +183,12 @@ scopeGetProc !argsSender !exit = do
 -- | utility scope.put(k1:v1, k2:v2, n3=v3, n4=v4, ...)
 -- put attribute values into the wrapped scope
 scopePutProc :: EdhProcedure
-scopePutProc !argsSender !exit = do
+scopePutProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   let !callerCtx = edh'context pgs
       !that      = thatObject $ contextScope callerCtx
       !ent       = scopeEntity $ wrappedScopeOf that
-  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) -> contEdhSTM $ do
+  contEdhSTM $ do
     attrs <- putAttrs pgs args []
     updateEntityAttrs pgs ent
       $  attrs
@@ -205,11 +201,11 @@ scopePutProc !argsSender !exit = do
     -> [(AttrKey, EdhValue)]
     -> STM [(AttrKey, EdhValue)]
   putAttrs _   []           cumu = return cumu
-  putAttrs pgs (arg : args) cumu = case arg of
-    EdhPair (EdhString !k) !v  -> putAttrs pgs args ((AttrByName k, v) : cumu)
-    EdhPair (EdhSymbol !k) !v  -> putAttrs pgs args ((AttrBySym k, v) : cumu)
-    EdhTuple [EdhString !k, v] -> putAttrs pgs args ((AttrByName k, v) : cumu)
-    EdhTuple [EdhSymbol !k, v] -> putAttrs pgs args ((AttrBySym k, v) : cumu)
+  putAttrs pgs (arg : rest) cumu = case arg of
+    EdhPair (EdhString !k) !v  -> putAttrs pgs rest ((AttrByName k, v) : cumu)
+    EdhPair (EdhSymbol !k) !v  -> putAttrs pgs rest ((AttrBySym k, v) : cumu)
+    EdhTuple [EdhString !k, v] -> putAttrs pgs rest ((AttrByName k, v) : cumu)
+    EdhTuple [EdhSymbol !k, v] -> putAttrs pgs rest ((AttrBySym k, v) : cumu)
     _ ->
       throwEdhSTM pgs EvalError
         $  "Invalid key/value type to put into a scope - "
@@ -219,7 +215,7 @@ scopePutProc !argsSender !exit = do
 -- | utility scope.eval(expr1, expr2, kw3=expr3, kw4=expr4, ...)
 -- evaluate expressions in this scope
 scopeEvalProc :: EdhProcedure
-scopeEvalProc !argsSender !exit = do
+scopeEvalProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   let
     !callerCtx             = edh'context pgs
@@ -255,31 +251,29 @@ scopeEvalProc !argsSender !exit = do
         EdhExpr _ !expr _ -> evalExpr expr $ \(OriginalValue !val _ _) ->
           evalThePack (val : argsValues) kwargsValues argsExprs' kwargsExprs
         v -> throwEdh EvalError $ "Not an expr: " <> T.pack (show v)
-  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) ->
-    if null kwargs && null args
-      then exitEdhProc exit nil
-      else
-        contEdhSTM
-        $ runEdhProg pgs
-            { edh'context = callerCtx
-                              { callStack       = scopeCallStack
-                              , generatorCaller = Nothing
-                              , contextMatch    = true
-                              , contextStmt     = case fakeBody of
-                                                    Left pb -> pb
-                                                    Right _ ->
-                                                      contextStmt callerCtx
-                              }
-            }
-        $ evalThePack [] Map.empty args
-        $ Map.toList kwargs
+  if null kwargs && null args
+    then exitEdhProc exit nil
+    else
+      contEdhSTM
+      $ runEdhProg pgs
+          { edh'context = callerCtx
+                            { callStack       = scopeCallStack
+                            , generatorCaller = Nothing
+                            , contextMatch    = true
+                            , contextStmt     = case fakeBody of
+                                                  Left pb -> pb
+                                                  Right _ -> contextStmt callerCtx
+                            }
+          }
+      $ evalThePack [] Map.empty args
+      $ Map.toList kwargs
 
 
 -- | utility makeOp(lhExpr, opSym, rhExpr)
 makeOpProc :: EdhProcedure
-makeOpProc !argsSender !exit = do
+makeOpProc (ArgsPack args kwargs) !exit = do
   pgs <- ask
-  packEdhArgs argsSender $ \(ArgsPack args kwargs) -> if (not $ null kwargs)
+  if (not $ null kwargs)
     then throwEdh EvalError "No kwargs accepted by makeOp"
     else case args of
       [(EdhExpr _ !lhe _), EdhString op, (EdhExpr _ !rhe _)] -> contEdhSTM $ do
@@ -291,7 +285,7 @@ makeOpProc !argsSender !exit = do
 
 -- | utility makeExpr(*args,**kwargs)
 makeExprProc :: EdhProcedure
-makeExprProc !argsSender !exit = packEdhExprs argsSender $ \case
+makeExprProc !apk !exit = case apk of
   ArgsPack [v] kwargs | Map.null kwargs -> exitEdhProc exit v
-  apk -> exitEdhProc exit $ EdhArgsPack apk
+  _ -> exitEdhProc exit $ EdhArgsPack apk
 

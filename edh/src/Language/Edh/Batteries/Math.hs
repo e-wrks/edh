@@ -17,8 +17,8 @@ import           Data.Lossless.Decimal
 
 
 -- | operator (+)
-addProc :: EdhProcedure
-addProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
+addProc :: EdhIntrinsicOp
+addProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
@@ -31,13 +31,11 @@ addProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
       throwEdh EvalError
         $  "Invalid left-hand value for (+) operation: "
         <> T.pack (show lhVal)
-addProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | operator (-)
-subsProc :: EdhProcedure
-subsProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
+subsProc :: EdhIntrinsicOp
+subsProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
@@ -50,13 +48,11 @@ subsProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
       throwEdh EvalError
         $  "Invalid left-hand value for (-) operation: "
         <> T.pack (show lhVal)
-subsProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | operator (*)
-mulProc :: EdhProcedure
-mulProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
+mulProc :: EdhIntrinsicOp
+mulProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
@@ -69,13 +65,11 @@ mulProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
       throwEdh EvalError
         $  "Invalid left-hand value for (*) operation: "
         <> T.pack (show lhVal)
-mulProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | operator (/)
-divProc :: EdhProcedure
-divProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
+divProc :: EdhIntrinsicOp
+divProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
@@ -88,13 +82,11 @@ divProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
       throwEdh EvalError
         $  "Invalid left-hand value for (/) operation: "
         <> T.pack (show lhVal)
-divProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | operator (**)
-powProc :: EdhProcedure
-powProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
+powProc :: EdhIntrinsicOp
+powProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
@@ -112,13 +104,11 @@ powProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
       throwEdh EvalError
         $  "Invalid left-hand value for (**) operation: "
         <> T.pack (show lhVal)
-powProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | operator (&&)
-logicalAndProc :: EdhProcedure
-logicalAndProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
+logicalAndProc :: EdhIntrinsicOp
+logicalAndProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhBool lhBool -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
@@ -127,12 +117,10 @@ logicalAndProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
           (show $ edhTypeOf rhVal)
     _ -> throwEdh EvalError $ "Invalid left-hand value type: " <> T.pack
       (show $ edhTypeOf lhVal)
-logicalAndProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 -- | operator (||)
-logicalOrProc :: EdhProcedure
-logicalOrProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
+logicalOrProc :: EdhIntrinsicOp
+logicalOrProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhBool lhBool -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
@@ -141,13 +129,11 @@ logicalOrProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
           (show $ edhTypeOf rhVal)
     _ -> throwEdh EvalError $ "Invalid left-hand value type: " <> T.pack
       (show $ edhTypeOf lhVal)
-logicalOrProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | operator (~=)
-valEqProc :: EdhProcedure
-valEqProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+valEqProc :: EdhIntrinsicOp
+valEqProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   let
     cmp2List :: [EdhValue] -> [EdhValue] -> STM Bool
@@ -189,44 +175,36 @@ valEqProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       then exitEdhProc exit true
       else contEdhSTM $ cmp2Val lhVal rhVal >>= \conclusion ->
         exitEdhSTM pgs exit (EdhBool conclusion)
-valEqProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | operator (==)
-idEqProc :: EdhProcedure
-idEqProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
+idEqProc :: EdhIntrinsicOp
+idEqProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       exitEdhProc exit (EdhBool $ lhVal == rhVal)
-idEqProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 -- | operator (!=)
-idNeProc :: EdhProcedure
-idNeProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
+idNeProc :: EdhIntrinsicOp
+idNeProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       exitEdhProc exit (EdhBool $ lhVal /= rhVal)
-idNeProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | operator (>)
-isGtProc :: EdhProcedure
-isGtProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+isGtProc :: EdhIntrinsicOp
+isGtProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       contEdhSTM $ doEdhComparison pgs exit lhVal rhVal $ \case
         GT -> True
         _  -> False
-isGtProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 -- | operator (>=)
-isGeProc :: EdhProcedure
-isGeProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+isGeProc :: EdhIntrinsicOp
+isGeProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
@@ -234,24 +212,20 @@ isGeProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
         GT -> True
         EQ -> True
         _  -> False
-isGeProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 -- | operator (<)
-isLtProc :: EdhProcedure
-isLtProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+isLtProc :: EdhIntrinsicOp
+isLtProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       contEdhSTM $ doEdhComparison pgs exit lhVal rhVal $ \case
         LT -> True
         _  -> False
-isLtProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 -- | operator (<=)
-isLeProc :: EdhProcedure
-isLeProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+isLeProc :: EdhIntrinsicOp
+isLeProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
@@ -259,8 +233,6 @@ isLeProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
         LT -> True
         EQ -> True
         _  -> False
-isLeProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 doEdhComparison

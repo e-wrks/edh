@@ -161,7 +161,7 @@ module Language.Edh.EHI
   , mkSymbol
   , mkHostProc
   , mkHostClass
-  , mkHostOper
+  , mkIntrinsicOp
 
     -- * args pack parsing
   , ArgsPackParser(..)

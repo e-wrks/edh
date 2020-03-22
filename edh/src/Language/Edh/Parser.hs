@@ -468,6 +468,7 @@ parseLitExpr = choice
   , TypeLiteral TupleType <$ litKw "TupleType"
   , TypeLiteral ArgsPackType <$ litKw "ArgsPackType"
   , TypeLiteral BlockType <$ litKw "BlockType"
+  , TypeLiteral IntrinsicType <$ litKw "IntrinsicType"
   , TypeLiteral HostClassType <$ litKw "HostClassType"
   , TypeLiteral HostMethodType <$ litKw "HostMethodType"
   , TypeLiteral HostOperType <$ litKw "HostOperType"

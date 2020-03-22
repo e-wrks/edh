@@ -2727,12 +2727,13 @@ data EdhValue =
     | EdhArgsPack ArgsPack
 
   -- executable precedures
+    | EdhIntrOp !Precedence !IntrinOpDefi
     | EdhClass !ProcDefi
     | EdhMethod !ProcDefi
-    | EdhOperator !Precedence !(Maybe EdhValue) !ProcDefi
-    | EdhGenrDef !ProcDefi
-    | EdhInterpreter !ProcDefi
-    | EdhProducer !ProcDefi
+    | EdhOprtor !Precedence !(Maybe EdhValue) !ProcDefi
+    | EdhGnrtor !ProcDefi
+    | EdhIntrpr !ProcDefi
+    | EdhPrducr !ProcDefi
 
   -- | flow control
     | EdhBreak
@@ -2745,12 +2746,11 @@ data EdhValue =
   -- | event sink
     | EdhSink !EventSink
 
-  -- | reflection
-    | EdhExpr !Unique !Expr !Text  -- expr with source(-less if empty)
+  -- | named value
+    | EdhNamedValue !AttrName !EdhValue
 
-edhValueStr :: EdhValue -> Text
-edhValueStr (EdhString s) = s
-edhValueStr v             = T.pack $ show v
+  -- | reflective expr, with source (or not, if empty)
+    | EdhExpr !Unique !Expr !Text
 
 edhValueNull :: EdhValue -> STM Bool
 edhValueNull EdhNil                  = return True
@@ -2768,30 +2768,41 @@ edhValueNull (EdhExpr _ (LitExpr (DecLiteral d)) _) =
   return $ D.decimalIsNaN d || d == 0
 edhValueNull (EdhExpr _ (LitExpr (BoolLiteral b)) _) = return b
 edhValueNull (EdhExpr _ (LitExpr (StringLiteral s)) _) = return $ T.null s
+edhValueNull (EdhNamedValue _ v) = edhValueNull v
 edhValueNull _ = return False
 ```
 
 ```haskell
+edhUltimate :: EdhValue -> EdhValue
+edhUltimate (EdhNamedValue _ v) = edhUltimate v
+edhUltimate v                   = v
+
+edhExpr :: Expr -> STM EdhValue
+edhExpr (ExprWithSrc !xpr !xprSrc) = do
+  u <- unsafeIOToSTM newUnique
+  return $ EdhExpr u xpr xprSrc
+edhExpr x = do
+  u <- unsafeIOToSTM newUnique
+  return $ EdhExpr u x ""
+
 nil :: EdhValue
 nil = EdhNil
 
--- | Resembles `None` as in Python.
+-- | Resembles `None` as in Python
 --
 -- assigning to `nil` in Edh is roughly the same of `delete` as
 -- in JavaScript, and `del` as in Python. Assigning to `None`
 -- will keep the dict entry or object attribute while still
 -- carrying a semantic of *absence*.
 edhNone :: EdhValue
-edhNone = EdhExpr (unsafePerformIO newUnique) (LitExpr NilLiteral) "None"
--- Note `unsafePerformIO newUnique` is safe here but mostly NOT elsewhere
+edhNone = EdhNamedValue "None" EdhNil
 
--- | Similar to `None`, `Nothing` is idiomatic in VisualBasic.
+-- | Similar to `None`
 --
 -- though we don't have `Maybe` monad in Edh, having a `Nothing`
 -- carrying null semantic may be useful in some cases.
 edhNothing :: EdhValue
-edhNothing = EdhExpr (unsafePerformIO newUnique) (LitExpr NilLiteral) "Nothing"
--- Note `unsafePerformIO newUnique` is safe here but mostly NOT elsewhere
+edhNothing = EdhNamedValue "Nothing" EdhNil
 
 -- | With `nil` converted to `None` so the result will never be `nil`.
 --

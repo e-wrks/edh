@@ -10,13 +10,15 @@ import           Control.Concurrent.STM
 
 import qualified Data.Text                     as T
 
+import qualified Data.HashMap.Strict           as Map
+
 import           Language.Edh.Control
 import           Language.Edh.Runtime
 
 
 -- | operator (=)
-assignProc :: EdhProcedure
-assignProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+assignProc :: EdhIntrinsicOp
+assignProc !lhExpr !rhExpr !exit = do
   pgs <- ask
   case lhExpr of
     IndexExpr ixExpr tgtExpr ->
@@ -40,9 +42,7 @@ assignProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                 EdhMethod !mth'proc -> runEdhProg pgs $ callEdhMethod
                   obj
                   mth'proc
-                  [ SendPosArg (GodSendExpr ixVal)
-                  , SendPosArg (GodSendExpr rhVal)
-                  ]
+                  (ArgsPack [ixVal, rhVal] Map.empty)
                   exit
                 !badIndexer ->
                   throwEdhSTM pgs EvalError
@@ -69,7 +69,3 @@ assignProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       local (const pgs { edh'in'tx = True })
         $ evalExpr rhExpr
         $ \(OriginalValue !rhVal _ _) -> assignEdhTarget pgs lhExpr exit rhVal
-
-assignProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
-

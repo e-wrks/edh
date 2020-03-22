@@ -551,12 +551,24 @@ edhWaitIO !exit !act = ask >>= \pgs -> if edh'in'tx pgs
         Right v -> exitEdhSTM pgs exit v
         Left  e -> throwEdhSTM pgs EvalError $ T.pack $ displayException e
 
+-- | Type of an intrinsic infix operator in host language.
+--
+-- Note no stack frame is created/pushed when an intrinsic operator is called.
+type EdhIntrinsicOp = Expr -> Expr -> EdhProcExit -> EdhProg (STM ())
+
+data IntrinOpDefi = IntrinOpDefi {
+      intrinsic'op'uniq :: !Unique
+    , intrinsic'op'symbol :: !AttrName
+    , intrinsic'op :: EdhIntrinsicOp
+  }
+
 -- | Type of a procedure in host language that can be called from Edh code.
 --
--- Note the caller context/scope can be obtained from callstack of the
--- program state.
+-- Note the top frame of the call stack from program state is the one for the
+-- callee, that scope should have mounted the caller's scope entity, not a new
+-- entity in contrast to when an Edh procedure as the callee.
 type EdhProcedure -- such a procedure servs as the callee
-  =  ArgsSender  -- ^ the manifestation of how the caller wills to send args
+  =  ArgsPack    -- ^ the pack of arguments
   -> EdhProcExit -- ^ the CPS exit to return a value from this procedure
   -> EdhProg (STM ())
 
@@ -705,6 +717,7 @@ data EdhValue =
     | EdhArgsPack ArgsPack
 
   -- executable precedures
+    | EdhIntrOp !Precedence !IntrinOpDefi
     | EdhClass !ProcDefi
     | EdhMethod !ProcDefi
     | EdhOprtor !Precedence !(Maybe EdhValue) !ProcDefi
@@ -768,10 +781,12 @@ instance Show EdhValue where
          "( " ++ concat [ show i ++ ", " | i <- v ] ++ ")"
   show (EdhArgsPack v) = "pkargs" ++ show v
 
-  show (EdhClass (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
+  show (EdhIntrOp preced (IntrinOpDefi _ opSym _)) =
+    "<intrinsic: (" ++ T.unpack opSym ++ ") " ++ show preced ++ ">"
+  show (EdhClass  (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
   show (EdhMethod (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
-  show (EdhOprtor precedence _predecessor (ProcDefi _ _ (ProcDecl pn _ _))) =
-    "<operator: (" ++ T.unpack pn ++ ") " ++ show precedence ++ ">"
+  show (EdhOprtor preced _ (ProcDefi _ _ (ProcDecl pn _ _))) =
+    "<operator: (" ++ T.unpack pn ++ ") " ++ show preced ++ ">"
   show (EdhGnrtor (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
   show (EdhIntrpr (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
   show (EdhPrducr (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
@@ -805,23 +820,25 @@ instance Show EdhValue where
 -- for types of:  object/dict/list
 
 instance Eq EdhValue where
-  EdhType x                   == EdhType y                   = x == y
-  EdhNil                      == EdhNil                      = True
-  EdhDecimal x                == EdhDecimal y                = x == y
-  EdhBool    x                == EdhBool    y                = x == y
-  EdhString  x                == EdhString  y                = x == y
-  EdhSymbol  x                == EdhSymbol  y                = x == y
+  EdhType x       == EdhType y       = x == y
+  EdhNil          == EdhNil          = True
+  EdhDecimal x    == EdhDecimal y    = x == y
+  EdhBool    x    == EdhBool    y    = x == y
+  EdhString  x    == EdhString  y    = x == y
+  EdhSymbol  x    == EdhSymbol  y    = x == y
 
-  EdhObject  x                == EdhObject  y                = x == y
+  EdhObject  x    == EdhObject  y    = x == y
 
-  EdhDict    x                == EdhDict    y                = x == y
-  EdhList    x                == EdhList    y                = x == y
+  EdhDict    x    == EdhDict    y    = x == y
+  EdhList    x    == EdhList    y    = x == y
   EdhPair x'k x'v == EdhPair y'k y'v = x'k == y'k && x'v == y'v
-  EdhTuple    x               == EdhTuple    y               = x == y
-  EdhArgsPack x               == EdhArgsPack y               = x == y
+  EdhTuple    x   == EdhTuple    y   = x == y
+  EdhArgsPack x   == EdhArgsPack y   = x == y
 
-  EdhClass    x               == EdhClass    y               = x == y
-  EdhMethod   x               == EdhMethod   y               = x == y
+  EdhIntrOp _ (IntrinOpDefi x'u _ _) == EdhIntrOp _ (IntrinOpDefi y'u _ _) =
+    x'u == y'u
+  EdhClass  x                 == EdhClass  y                 = x == y
+  EdhMethod x                 == EdhMethod y                 = x == y
   EdhOprtor _ _ x             == EdhOprtor _ _ y             = x == y
   EdhGnrtor x                 == EdhGnrtor y                 = x == y
   EdhIntrpr x                 == EdhIntrpr y                 = x == y
@@ -850,29 +867,30 @@ instance Eq EdhValue where
   _                           == _                           = False
 
 instance Hashable EdhValue where
-  hashWithSalt s (EdhType x)       = hashWithSalt s $ 1 + fromEnum x
-  hashWithSalt s EdhNil            = hashWithSalt s (0 :: Int)
-  hashWithSalt s (EdhDecimal x   ) = hashWithSalt s x
-  hashWithSalt s (EdhBool    x   ) = hashWithSalt s x
-  hashWithSalt s (EdhString  x   ) = hashWithSalt s x
-  hashWithSalt s (EdhSymbol  x   ) = hashWithSalt s x
-  hashWithSalt s (EdhObject  x   ) = hashWithSalt s x
+  hashWithSalt s (EdhType x) = hashWithSalt s $ 1 + fromEnum x
+  hashWithSalt s EdhNil = hashWithSalt s (0 :: Int)
+  hashWithSalt s (EdhDecimal x                      ) = hashWithSalt s x
+  hashWithSalt s (EdhBool    x                      ) = hashWithSalt s x
+  hashWithSalt s (EdhString  x                      ) = hashWithSalt s x
+  hashWithSalt s (EdhSymbol  x                      ) = hashWithSalt s x
+  hashWithSalt s (EdhObject  x                      ) = hashWithSalt s x
 
-  hashWithSalt s (EdhDict    x   ) = hashWithSalt s x
-  hashWithSalt s (EdhList    x   ) = hashWithSalt s x
-  hashWithSalt s (EdhPair k v    ) = s `hashWithSalt` k `hashWithSalt` v
-  hashWithSalt s (EdhTuple    x  ) = foldl' hashWithSalt s x
-  hashWithSalt s (EdhArgsPack x  ) = hashWithSalt s x
+  hashWithSalt s (EdhDict    x                      ) = hashWithSalt s x
+  hashWithSalt s (EdhList    x                      ) = hashWithSalt s x
+  hashWithSalt s (EdhPair k v) = s `hashWithSalt` k `hashWithSalt` v
+  hashWithSalt s (EdhTuple    x                     ) = foldl' hashWithSalt s x
+  hashWithSalt s (EdhArgsPack x                     ) = hashWithSalt s x
 
-  hashWithSalt s (EdhClass    x  ) = hashWithSalt s x
-  hashWithSalt s (EdhMethod   x  ) = hashWithSalt s x
-  hashWithSalt s (EdhOprtor _ _ x) = hashWithSalt s x
-  hashWithSalt s (EdhGnrtor x    ) = hashWithSalt s x
-  hashWithSalt s (EdhIntrpr x    ) = hashWithSalt s x
-  hashWithSalt s (EdhPrducr x    ) = hashWithSalt s x
+  hashWithSalt s (EdhIntrOp _ (IntrinOpDefi x'u _ _)) = hashWithSalt s x'u
+  hashWithSalt s (EdhClass  x                       ) = hashWithSalt s x
+  hashWithSalt s (EdhMethod x                       ) = hashWithSalt s x
+  hashWithSalt s (EdhOprtor _ _ x                   ) = hashWithSalt s x
+  hashWithSalt s (EdhGnrtor x                       ) = hashWithSalt s x
+  hashWithSalt s (EdhIntrpr x                       ) = hashWithSalt s x
+  hashWithSalt s (EdhPrducr x                       ) = hashWithSalt s x
 
-  hashWithSalt s EdhBreak          = hashWithSalt s (-1 :: Int)
-  hashWithSalt s EdhContinue       = hashWithSalt s (-2 :: Int)
+  hashWithSalt s EdhBreak = hashWithSalt s (-1 :: Int)
+  hashWithSalt s EdhContinue = hashWithSalt s (-2 :: Int)
   hashWithSalt s (EdhCaseClose v) =
     s `hashWithSalt` (-3 :: Int) `hashWithSalt` v
   hashWithSalt s EdhFallthrough            = hashWithSalt s (-4 :: Int)
@@ -902,7 +920,7 @@ edhExpr x = do
 nil :: EdhValue
 nil = EdhNil
 
--- | Resembles `None` as in Python.
+-- | Resembles `None` as in Python
 --
 -- assigning to `nil` in Edh is roughly the same of `delete` as
 -- in JavaScript, and `del` as in Python. Assigning to `None`
@@ -911,7 +929,7 @@ nil = EdhNil
 edhNone :: EdhValue
 edhNone = EdhNamedValue "None" EdhNil
 
--- | Similar to `None`, `Nothing` is idiomatic in VisualBasic.
+-- | Similar to `None`
 --
 -- though we don't have `Maybe` monad in Edh, having a `Nothing`
 -- carrying null semantic may be useful in some cases.
@@ -1192,6 +1210,7 @@ data EdhTypeValue = TypeType
     | HostMethodType
     | HostOperType
     | HostGenrType
+    | IntrinsicType
     | ClassType
     | MethodType
     | OperatorType
@@ -1235,6 +1254,7 @@ edhTypeOf EdhPair{}                                   = PairType
 edhTypeOf EdhTuple{}                                  = TupleType
 edhTypeOf EdhArgsPack{}                               = ArgsPackType
 
+edhTypeOf EdhIntrOp{}                                 = IntrinsicType
 edhTypeOf (EdhClass (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> ClassType
   Right _ -> HostClassType

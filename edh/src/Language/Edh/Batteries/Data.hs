@@ -19,8 +19,8 @@ import           Language.Edh.Runtime
 
 
 -- | operator ($) - dereferencing attribute addressor
-attrDerefAddrProc :: EdhProcedure
-attrDerefAddrProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
+attrDerefAddrProc :: EdhIntrinsicOp
+attrDerefAddrProc !lhExpr !rhExpr !exit =
   evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
     EdhString !attrName -> getEdhAttr
       lhExpr
@@ -43,52 +43,48 @@ attrDerefAddrProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
       exit
     _ -> throwEdh EvalError $ "Invalid attribute reference type - " <> T.pack
       (show $ edhTypeOf rhVal)
-attrDerefAddrProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | operator (:=) - value definition
-defProc :: EdhProcedure
-defProc [SendPosArg (AttrExpr (DirectRef (NamedAttr !valName))), SendPosArg !rhExpr] !exit
-  = do
-    pgs <- ask
-    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> contEdhSTM $ do
-      let !ent = scopeEntity $ contextScope $ edh'context pgs
-          nv   = EdhNamedValue valName rhVal
-      lookupEntityAttr pgs ent (AttrByName valName) >>= \case
-        EdhNil -> do
-          changeEntityAttr pgs ent (AttrByName valName) nv
+defProc :: EdhIntrinsicOp
+defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
+  pgs <- ask
+  evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> contEdhSTM $ do
+    let !ent = scopeEntity $ contextScope $ edh'context pgs
+        nv   = EdhNamedValue valName rhVal
+    lookupEntityAttr pgs ent (AttrByName valName) >>= \case
+      EdhNil -> do
+        changeEntityAttr pgs ent (AttrByName valName) nv
+        exitEdhSTM pgs exit nv
+      oldDef@(EdhNamedValue n v) -> if v /= rhVal
+        then runEdhProg pgs $ edhValueRepr rhVal $ \(OriginalValue newR _ _) ->
+          edhValueRepr oldDef $ \(OriginalValue oldR _ _) -> case newR of
+            EdhString !newRepr -> case oldR of
+              EdhString oldRepr ->
+                throwEdh EvalError
+                  $  "Can not redefine "
+                  <> valName
+                  <> " from { "
+                  <> oldRepr
+                  <> " } to { "
+                  <> newRepr
+                  <> " }"
+              _ -> error "bug: edhValueRepr returned non-string"
+            _ -> error "bug: edhValueRepr returned non-string"
+        else do
+          unless (n == valName) -- avoid writing the entity if all same
+            $ changeEntityAttr pgs ent (AttrByName valName) nv
           exitEdhSTM pgs exit nv
-        oldDef@(EdhNamedValue n v) -> if v /= rhVal
-          then
-            runEdhProg pgs $ edhValueRepr rhVal $ \(OriginalValue newR _ _) ->
-              edhValueRepr oldDef $ \(OriginalValue oldR _ _) -> case newR of
-                EdhString !newRepr -> case oldR of
-                  EdhString oldRepr ->
-                    throwEdh EvalError
-                      $  "Can not redefine "
-                      <> valName
-                      <> " from { "
-                      <> oldRepr
-                      <> " } to { "
-                      <> newRepr
-                      <> " }"
-                  _ -> error "bug: edhValueRepr returned non-string"
-                _ -> error "bug: edhValueRepr returned non-string"
-          else do
-            unless (n == valName) -- avoid writing the entity if all same
-              $ changeEntityAttr pgs ent (AttrByName valName) nv
-            exitEdhSTM pgs exit nv
-        _ -> do
-          changeEntityAttr pgs ent (AttrByName valName) nv
-          exitEdhSTM pgs exit nv
-defProc !argsSender _ =
-  throwEdh EvalError $ "Invalid value definition: " <> T.pack (show argsSender)
+      _ -> do
+        changeEntityAttr pgs ent (AttrByName valName) nv
+        exitEdhSTM pgs exit nv
+defProc !lhExpr _ _ =
+  throwEdh EvalError $ "Invalid value definition: " <> T.pack (show lhExpr)
 
 
 -- | operator (:) - pair constructor
-consProc :: EdhProcedure
-consProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+consProc :: EdhIntrinsicOp
+consProc !lhExpr !rhExpr !exit = do
   pgs <- ask
   -- make sure left hand and right hand values are evaluated in same tx
   local (const pgs { edh'in'tx = True })
@@ -96,14 +92,12 @@ consProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
     $ \(OriginalValue !lhVal _ _) ->
         evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
           contEdhSTM $ exitEdhSTM pgs exit (EdhPair lhVal rhVal)
-consProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | operator (?) - attribute tempter, 
 -- address an attribute off an object if possible, nil otherwise
-attrTemptProc :: EdhProcedure
-attrTemptProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+attrTemptProc :: EdhIntrinsicOp
+attrTemptProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   case rhExpr of
     AttrExpr (DirectRef !addr) -> contEdhSTM $ do
@@ -111,13 +105,11 @@ attrTemptProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       runEdhProg pgs $ getEdhAttr lhExpr key (const $ exitEdhProc exit nil) exit
     _ -> throwEdh EvalError $ "Invalid attribute expression: " <> T.pack
       (show rhExpr)
-attrTemptProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 -- | operator (?$) - attribute dereferencing tempter, 
 -- address an attribute off an object if possible, nil otherwise
-attrDerefTemptProc :: EdhProcedure
-attrDerefTemptProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
+attrDerefTemptProc :: EdhIntrinsicOp
+attrDerefTemptProc !lhExpr !rhExpr !exit =
   evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
     EdhString !attrName -> getEdhAttr lhExpr
                                       (AttrByName attrName)
@@ -127,15 +119,13 @@ attrDerefTemptProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
       getEdhAttr lhExpr (AttrBySym sym) (const $ exitEdhProc exit nil) exit
     _ -> throwEdh EvalError $ "Invalid attribute reference type - " <> T.pack
       (show $ edhTypeOf rhVal)
-attrDerefTemptProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | the Symbol(description) constructor
 symbolCtorProc :: EdhProcedure
-symbolCtorProc !argsSender !exit = do
+symbolCtorProc (ArgsPack !args _) !exit = do
   !pgs <- ask
-  packEdhArgs argsSender $ \(ArgsPack !args _) -> contEdhSTM $ case args of
+  contEdhSTM $ case args of
     [EdhString description] -> do
       sym <- mkSymbol description
       exitEdhSTM pgs exit $ EdhSymbol sym
@@ -144,13 +134,12 @@ symbolCtorProc !argsSender !exit = do
 
 -- | utility pkargs(*args,**kwargs,***packed) - arguments packer
 pkargsProc :: EdhProcedure
-pkargsProc !argsSender !exit =
-  packEdhArgs argsSender $ \apk -> exitEdhProc exit (EdhArgsPack apk)
+pkargsProc !apk !exit = exitEdhProc exit (EdhArgsPack apk)
 
 
 -- | utility repr(*args,**kwargs) - repr extractor
 reprProc :: EdhProcedure
-reprProc !argsSender !exit = do
+reprProc (ArgsPack !args !kwargs) !exit = do
   pgs <- ask
   let go
         :: [EdhValue]
@@ -170,13 +159,12 @@ reprProc !argsSender !exit = do
       go reprs kwReprs [] ((k, v) : rest) =
         runEdhProg pgs $ edhValueRepr v $ \(OriginalValue r _ _) ->
           contEdhSTM $ go reprs ((k, r) : kwReprs) [] rest
-  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) ->
-    contEdhSTM $ go [] [] args (Map.toList kwargs)
+  contEdhSTM $ go [] [] args (Map.toList kwargs)
 
 
 -- | operator (++) - string coercing concatenator
-concatProc :: EdhProcedure
-concatProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
+concatProc :: EdhIntrinsicOp
+concatProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     edhValueStr lhVal $ \(OriginalValue lhStr _ _) -> case lhStr of
       EdhString !lhs -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
@@ -188,23 +176,21 @@ concatProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit =
   edhValueStr :: EdhValue -> EdhProcExit -> EdhProg (STM ())
   edhValueStr s@EdhString{} !exit' = exitEdhProc exit' s
   edhValueStr !v            !exit' = edhValueRepr v exit'
-concatProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | utility null(*args,**kwargs) - null tester
 isNullProc :: EdhProcedure
-isNullProc !argsSender !exit = do
+isNullProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
-  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) -> if null kwargs
+  contEdhSTM $ if null kwargs
     then case args of
-      [v] -> contEdhSTM $ do
+      [v] -> do
         isNull <- EdhBool <$> edhValueNull v
         exitEdhSTM pgs exit isNull
-      _ -> contEdhSTM $ do
+      _ -> do
         argsNulls <- sequence $ ((EdhBool <$>) . edhValueNull) <$> args
         exitEdhSTM pgs exit (EdhTuple argsNulls)
-    else contEdhSTM $ do
+    else do
       argsNulls   <- sequence $ ((EdhBool <$>) . edhValueNull) <$> args
       kwargsNulls <- sequence $ Map.map ((EdhBool <$>) . edhValueNull) kwargs
       exitEdhSTM pgs exit (EdhArgsPack $ ArgsPack argsNulls kwargsNulls)
@@ -212,39 +198,34 @@ isNullProc !argsSender !exit = do
 
 -- | utility type(*args,**kwargs) - value type introspector
 typeProc :: EdhProcedure
-typeProc !argsSender !exit =
-  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) ->
-    let !argsType = edhTypeValOf <$> args
-    in  if null kwargs
-          then case argsType of
-            [t] -> exitEdhProc exit t
-            _   -> exitEdhProc exit (EdhTuple argsType)
-          else exitEdhProc
-            exit
-            (EdhArgsPack $ ArgsPack argsType $ Map.map edhTypeValOf kwargs)
+typeProc (ArgsPack !args !kwargs) !exit =
+  let !argsType = edhTypeValOf <$> args
+  in  if null kwargs
+        then case argsType of
+          [t] -> exitEdhProc exit t
+          _   -> exitEdhProc exit (EdhTuple argsType)
+        else exitEdhProc
+          exit
+          (EdhArgsPack $ ArgsPack argsType $ Map.map edhTypeValOf kwargs)
  where
   edhTypeValOf :: EdhValue -> EdhValue
   edhTypeValOf EdhNil              = EdhNil
   edhTypeValOf (EdhNamedValue _ v) = edhTypeValOf v
   edhTypeValOf v                   = EdhType $ edhTypeOf v
 
+
 -- | utility dict(***pkargs,**kwargs,*args) - dict constructor by arguments
 -- can be used to convert arguments pack into dict
 dictProc :: EdhProcedure
-dictProc !argsSender !exit = do
+dictProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
-  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) ->
-    let !kwDict =
-            Map.fromList $ (<$> Map.toList kwargs) $ \(attrName, val) ->
-              (EdhString attrName, val)
-    in  contEdhSTM $ do
-          u <- unsafeIOToSTM newUnique
-          d <- newTVar $ Map.union kwDict $ Map.fromList
-            [ (EdhDecimal (fromIntegral i), t)
-            | (i, t) <- zip [(0 :: Int) ..] args
-            ]
-          exitEdhSTM pgs exit (EdhDict (Dict u d))
-
+  contEdhSTM $ do
+    let !kwDict = Map.fromList $ (<$> Map.toList kwargs) $ \(attrName, val) ->
+          (EdhString attrName, val)
+    u <- unsafeIOToSTM newUnique
+    d <- newTVar $ Map.union kwDict $ Map.fromList
+      [ (EdhDecimal (fromIntegral i), t) | (i, t) <- zip [(0 :: Int) ..] args ]
+    exitEdhSTM pgs exit (EdhDict (Dict u d))
 
 val2DictEntry :: EdhProgState -> EdhValue -> STM (ItemKey, EdhValue)
 val2DictEntry _ (EdhPair !k !v    ) = return (k, v)
@@ -260,8 +241,8 @@ val2DictEntry !pgs !val =
 
 
 -- | operator (?<=) - element-of tester
-elemProc :: EdhProcedure
-elemProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+elemProc :: EdhIntrinsicOp
+elemProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
@@ -280,12 +261,11 @@ elemProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
           <> T.pack (edhTypeNameOf rhVal)
           <> ": "
           <> T.pack (show rhVal)
-elemProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
+
 
 -- | operator (=>) - prepender
-prpdProc :: EdhProcedure
-prpdProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+prpdProc :: EdhIntrinsicOp
+prpdProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
@@ -303,8 +283,7 @@ prpdProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
           <> T.pack (edhTypeNameOf rhVal)
           <> ": "
           <> T.pack (show rhVal)
-prpdProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
+
 
 -- | operator (=<) - comprehension maker, appender
 --  * list comprehension:
@@ -319,8 +298,8 @@ prpdProc !argsSender _ =
 --      {} =< (...) / [...] / {...}
 --  * tuple append
 --      (,) =< (...) / [...] / {...}
-cprhProc :: EdhProcedure
-cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+cprhProc :: EdhIntrinsicOp
+cprhProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   let pvlToDict :: [EdhValue] -> STM DictStore
       pvlToDict ps = Map.fromList <$> sequence (val2DictEntry pgs <$> ps)
@@ -432,13 +411,11 @@ cprhProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
             <> T.pack (edhTypeNameOf lhVal)
             <> ": "
             <> T.pack (show lhVal)
-cprhProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | operator (<-) - event publisher
-evtPubProc :: EdhProcedure
-evtPubProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+evtPubProc :: EdhIntrinsicOp
+evtPubProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
     EdhSink es -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
@@ -451,6 +428,4 @@ evtPubProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
         <> T.pack (edhTypeNameOf lhVal)
         <> ": "
         <> T.pack (show lhVal)
-evtPubProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 

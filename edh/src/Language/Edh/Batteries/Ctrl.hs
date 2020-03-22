@@ -21,25 +21,25 @@ import           Language.Edh.Runtime
 
 -- | utility error(*args,**kwargs) - eval error reporter
 errorProc :: EdhProcedure
-errorProc !argsSender _ =
-  packEdhArgs argsSender $ \(ArgsPack !args !kwargs) -> case args of
-    [v] | null kwargs -> throwEdh EvalError $ logString v
-    _ ->
-      throwEdh EvalError
-        $  T.intercalate "\n"
-        $  (logString <$> args)
-        ++ [ k <> ": " <> logString v | (k, v) <- Map.toList kwargs ]
+errorProc (ArgsPack !args !kwargs) _ = case args of
+  [v] | null kwargs -> throwEdh EvalError $ logString v
+  _ ->
+    throwEdh EvalError
+      $  T.intercalate "\n"
+      $  (logString <$> args)
+      ++ [ k <> ": " <> logString v | (k, v) <- Map.toList kwargs ]
  where
   logString :: EdhValue -> Text
   logString (EdhString s) = s
   logString v             = T.pack $ show v
 
+
 -- | operator (->) - the brancher, if its left-hand matches, early stop its
 -- enclosing code block (commonly a case-of block, but other blocks as well),
 -- with eval-ed result of its right-hand, unless the right-hand result is
 -- `fallthrough`
-branchProc :: EdhProcedure
-branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+branchProc :: EdhIntrinsicOp
+branchProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   let !callerCtx   = edh'context pgs
       !callerScope = contextScope callerCtx
@@ -213,9 +213,6 @@ branchProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
       in  if not $ namelyMatch lhVal ctxMatch
             then exitEdhProc exit EdhFallthrough
             else contEdhSTM $ branchMatched []
-
-branchProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 -- | `Nothing` means invalid pattern, `[]` means no match, non-empty list is

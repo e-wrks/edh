@@ -24,8 +24,8 @@ import           Language.Edh.Runtime
 
 
 -- | operator (<|)
-loggingProc :: EdhProcedure
-loggingProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
+loggingProc :: EdhIntrinsicOp
+loggingProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   let !ctx                  = edh'context pgs
       (StmtSrc (srcPos, _)) = contextStmt ctx
@@ -78,8 +78,6 @@ loggingProc [SendPosArg !lhExpr, SendPosArg !rhExpr] !exit = do
                       logger logLevel srcLoc $ ArgsPack [rhVal] Map.empty
                       exitEdhSTM pgs exit nil
     _ -> throwEdh EvalError $ "Invalid log level: " <> T.pack (show lhVal)
-loggingProc !argsSender _ =
-  throwEdh EvalError $ "Unexpected operator args: " <> T.pack (show argsSender)
 
 
 timelyNotify :: Int -> EdhGenrCaller -> STM ()
@@ -93,48 +91,36 @@ timelyNotify !delayMicros genr'caller@(!pgs', !iter'cb) = do
 
 -- | host generator runtime.everyMicros(n) - with fixed interval
 rtEveryMicrosProc :: EdhProcedure
-rtEveryMicrosProc !argsSender _ = ask >>= \pgs ->
+rtEveryMicrosProc (ArgsPack !args !kwargs) _ = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of
     Nothing          -> throwEdh EvalError "Can only be called as generator"
-    Just genr'caller -> case argsSender of
-      [SendPosArg !nExpr] -> evalExpr nExpr $ \(OriginalValue nVal _ _) ->
-        case nVal of
-          (EdhDecimal d) ->
-            let n = fromInteger $ castDecimalToInteger d
-            in  contEdhSTM $ timelyNotify n genr'caller
-          _ -> throwEdh EvalError $ "Invalid argument: " <> T.pack (show nVal)
-      _ ->
-        throwEdh EvalError $ "Invalid argument: " <> T.pack (show argsSender)
+    Just genr'caller -> case args of
+      [EdhDecimal d] | Map.null kwargs ->
+        let n = fromInteger $ castDecimalToInteger d
+        in  contEdhSTM $ timelyNotify n genr'caller
+      _ -> throwEdh EvalError "Invalid argument to runtime.everyMicros(n)"
 
 
 -- | host generator runtime.everyMillis(n) - with fixed interval
 rtEveryMillisProc :: EdhProcedure
-rtEveryMillisProc !argsSender _ = ask >>= \pgs ->
+rtEveryMillisProc (ArgsPack !args !kwargs) _ = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of
     Nothing          -> throwEdh EvalError "Can only be called as generator"
-    Just genr'caller -> case argsSender of
-      [SendPosArg !nExpr] -> evalExpr nExpr $ \(OriginalValue nVal _ _) ->
-        case nVal of
-          (EdhDecimal d) ->
-            let n = 1000 * fromInteger (castDecimalToInteger d)
-            in  contEdhSTM $ timelyNotify n genr'caller
-          _ -> throwEdh EvalError $ "Invalid argument: " <> T.pack (show nVal)
-      _ ->
-        throwEdh EvalError $ "Invalid argument: " <> T.pack (show argsSender)
+    Just genr'caller -> case args of
+      [EdhDecimal d] | Map.null kwargs ->
+        let n = 1000 * fromInteger (castDecimalToInteger d)
+        in  contEdhSTM $ timelyNotify n genr'caller
+      _ -> throwEdh EvalError "Invalid argument to runtime.everyMillis(n)"
 
 
 -- | host generator runtime.everySeconds(n) - with fixed interval
 rtEverySecondsProc :: EdhProcedure
-rtEverySecondsProc !argsSender _ = ask >>= \pgs ->
+rtEverySecondsProc (ArgsPack !args !kwargs) _ = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of
     Nothing          -> throwEdh EvalError "Can only be called as generator"
-    Just genr'caller -> case argsSender of
-      [SendPosArg !nExpr] -> evalExpr nExpr $ \(OriginalValue nVal _ _) ->
-        case nVal of
-          (EdhDecimal d) ->
-            let n = 1000000 * fromInteger (castDecimalToInteger d)
-            in  contEdhSTM $ timelyNotify n genr'caller
-          _ -> throwEdh EvalError $ "Invalid argument: " <> T.pack (show nVal)
-      _ ->
-        throwEdh EvalError $ "Invalid argument: " <> T.pack (show argsSender)
+    Just genr'caller -> case args of
+      [EdhDecimal d] | Map.null kwargs ->
+        let n = 1000000 * fromInteger (castDecimalToInteger d)
+        in  contEdhSTM $ timelyNotify n genr'caller
+      _ -> throwEdh EvalError "Invalid argument to runtime.everySeconds(n)"
 

@@ -10,7 +10,7 @@ module Language.Edh.Runtime
   , declareEdhOperators
   , mkHostProc
   , mkHostClass
-  , mkHostOper
+  , mkIntrinsicOp
   , module CL
   , module RT
   , module TX
@@ -324,7 +324,7 @@ mkHostClass
   -> Text  -- ^ class name
   -> Bool  -- ^ write protect the out-of-band attribute store
   -> (  EdhProgState
-     -> ArgsSender
+     -> ArgsPack
      -> TVar (Map.HashMap AttrKey EdhValue)  -- out-of-band attr store 
      -> STM ()
      )
@@ -341,7 +341,7 @@ mkHostClass !scope !nm !writeProtected !hc = do
                                   }
       }
     ctor :: EdhProcedure
-    ctor !argsSndr !exit = do
+    ctor !apk !exit = do
       -- note: cross check logic here with `createEdhObject`
       pgs <- ask
       contEdhSTM $ do
@@ -356,12 +356,12 @@ mkHostClass !scope !nm !writeProtected !hc = do
                               , scopeProc   = cls
                               , scopeCaller = contextStmt ctx
                               }
-        hc pgsCtor argsSndr obs
+        hc pgsCtor apk obs
         exitEdhSTM pgs exit $ EdhObject newThis
   return $ EdhClass cls
 
-mkHostOper :: EdhWorld -> Scope -> OpSymbol -> EdhProcedure -> STM EdhValue
-mkHostOper !world !scope !opSym !hp = do
+mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
+mkIntrinsicOp !world !opSym !iop = do
   u <- unsafeIOToSTM newUnique
   Map.lookup opSym <$> readTMVar (worldOperators world) >>= \case
     Nothing ->
@@ -369,17 +369,5 @@ mkHostOper !world !scope !opSym !hp = do
         $  UsageError
         $  "No precedence declared in the world for operator: "
         <> opSym
-    Just (preced, _) -> return $ EdhOprtor
-      preced
-      Nothing
-      ProcDefi
-        { procedure'uniq = u
-        , procedure'lexi = Just scope
-        , procedure'decl = ProcDecl
-          { procedure'name = opSym
-          , procedure'args = PackReceiver
-            [RecvArg "lhv" Nothing Nothing, RecvArg "rhv" Nothing Nothing]
-          , procedure'body = Right hp
-          }
-        }
+    Just (preced, _) -> return $ EdhIntrOp preced $ IntrinOpDefi u opSym iop
 
