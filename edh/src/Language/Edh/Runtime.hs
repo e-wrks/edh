@@ -96,9 +96,7 @@ defaultEdhRuntime = do
           Left  _           -> 0
           Right (ln :: Int) -> ln
       flushLogs :: IO ()
-      flushLogs = atomically (tryPeekTQueue logQueue) >>= \case
-        Nothing -> return ()
-        _       -> atomically $ readTMVar logIdle
+      flushLogs = atomically $ readTMVar logIdle
       logPrinter :: IO ()
       logPrinter = do
         lr <- atomically (tryReadTQueue logQueue) >>= \case
@@ -113,11 +111,13 @@ defaultEdhRuntime = do
         hPutStrLn stderr lr
         logPrinter
       logger :: EdhLogger
-      logger !level !srcLoc !pkargs = case pkargs of
-        ArgsPack [!argVal] !kwargs | Map.null kwargs ->
-          writeTQueue logQueue $! T.pack logPrefix <> logString argVal
-        -- todo: format structured log record with log parser in mind
-        _ -> writeTQueue logQueue $! T.pack $ logPrefix ++ show pkargs
+      logger !level !srcLoc !pkargs = do
+        void $ tryTakeTMVar logIdle
+        case pkargs of
+          ArgsPack [!argVal] !kwargs | Map.null kwargs ->
+            writeTQueue logQueue $! T.pack logPrefix <> logString argVal
+          -- todo: format structured log record with log parser in mind
+          _ -> writeTQueue logQueue $! T.pack $ logPrefix ++ show pkargs
        where
         logString :: EdhValue -> Text
         logString (EdhString s) = s
