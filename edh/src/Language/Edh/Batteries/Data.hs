@@ -15,7 +15,9 @@ import qualified Data.HashMap.Strict           as Map
 
 import           Language.Edh.Control
 import           Language.Edh.Event
-import           Language.Edh.Runtime
+import           Language.Edh.Details.RtTypes
+import           Language.Edh.Details.Evaluate
+import           Language.Edh.Details.CoreLang
 
 
 -- | operator ($) - dereferencing attribute addressor

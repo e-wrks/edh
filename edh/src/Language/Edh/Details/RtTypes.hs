@@ -426,8 +426,9 @@ worldContext !world = Context
 {-# INLINE worldContext #-}
 
 data EdhRuntime = EdhRuntime {
-    runtimeLogger :: !EdhLogger
+    consoleIO :: !(TMVar (Maybe (TMVar Text)))
   , runtimeLogLevel :: !LogLevel
+  , runtimeLogger :: !EdhLogger
   , flushRuntimeLogs :: IO ()
   }
 type EdhLogger = LogLevel -> Maybe String -> ArgsPack -> STM ()
@@ -623,6 +624,12 @@ throwEdhSTM
   -> Text
   -> STM a
 throwEdhSTM pgs !excCtor !msg = throwSTM (excCtor msg $ getEdhCallContext pgs)
+
+withEdhErrContext :: EdhProgState -> IO a -> IO a
+withEdhErrContext pgs !act = catch act $ \(e :: SomeException) ->
+  case fromException e :: Maybe EdhError of
+    Just (PackageError !msg) -> throwIO $ EvalError msg $ getEdhCallContext pgs
+    _                        -> throwIO e
 
 
 -- | A pack of evaluated argument values with positional/keyword origin,

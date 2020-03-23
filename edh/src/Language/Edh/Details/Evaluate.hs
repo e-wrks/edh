@@ -35,6 +35,28 @@ import           Language.Edh.Details.PkgMan
 import           Language.Edh.Details.Utils
 
 
+parseEdh :: EdhWorld -> String -> Text -> STM (Either ParserError [StmtSrc])
+parseEdh !world !srcName !srcCode = do
+  pd <- takeTMVar wops -- update 'worldOperators' atomically wrt parsing
+  let (pr, pd') = runState (runParserT parseProgram srcName srcCode) pd
+  case pr of
+    -- update operator precedence dict on success of parsing
+    Right _ -> putTMVar wops pd'
+    _       -> pure ()
+  return pr
+  where !wops = worldOperators world
+
+
+evalEdh :: String -> Text -> EdhProcExit -> EdhProg (STM ())
+evalEdh !srcName !srcCode !exit = do
+  pgs <- ask
+  let ctx   = edh'context pgs
+      world = contextWorld ctx
+  contEdhSTM $ parseEdh world srcName srcCode >>= \case
+    Left  !err   -> throwSTM $ ParseError err $ getEdhCallContext pgs
+    Right !stmts -> runEdhProg pgs $ evalBlock stmts exit
+
+
 deParen :: Expr -> Expr
 deParen x = case x of
   ParenExpr x' -> deParen x'
@@ -469,10 +491,10 @@ importEdhModule !impSpec !exit = do
     importFromFS :: STM ()
     importFromFS = lookupEdhCtxAttr pgs scope (AttrByName "__file__") >>= \case
       EdhString !fromModuPath -> do
-        (nomPath, moduFile) <- locateEdhModule
-          pgs
-          (edhPkgPathFrom $ T.unpack fromModuPath)
-          (T.unpack impSpec)
+        (nomPath, moduFile) <-
+          unsafeIOToSTM $ withEdhErrContext pgs $ locateEdhModule
+            (edhPkgPathFrom $ T.unpack fromModuPath)
+            (T.unpack impSpec)
         let !moduId = T.pack nomPath
         moduMap' <- takeTMVar (worldModules world)
         case Map.lookup moduId moduMap' of
@@ -492,18 +514,18 @@ importEdhModule !impSpec !exit = do
             moduSlot <- newEmptyTMVar
             -- put it for global visibility
             putTMVar (worldModules world) $ Map.insert moduId moduSlot moduMap'
-            catchSTM
+            catchSTM -- TODO impl. Edh error handling
                 ( loadModule pgs moduSlot moduId moduFile
                 $ \(OriginalValue !result _ _) -> case result of
                     -- successfully loaded
                     modu@EdhObject{} -> exitEdhProc exit modu
                     _                -> error "bug"
                 )
+            -- TODO catchSTM does NOT work across Edh transactions,
+            --      need to impl. a catchEdh or sth. to be used here.
               $ \(e :: SomeException) -> do
                   -- cleanup on loading error
                   let errStr = T.pack $ show e
-                  -- TODO catchSTM does NOT work across Edh transactions,
-                  --      need to impl. a catchEdh or sth. to be used here.                  let errStr = T.pack (show e)
                   void $ tryPutTMVar moduSlot $ EdhString errStr
                   moduMap'' <- takeTMVar (worldModules world)
                   case Map.lookup moduId moduMap'' of
@@ -538,67 +560,51 @@ loadModule !pgs !moduSlot !moduId !moduFile !exit = if edh'in'tx pgs
                    EvalError
                    "You don't load a module from within a transaction"
   else do
-    (moduUniq, fileContent) <- unsafeIOToSTM $ do
-      dr <- streamDecodeUtf8With lenientDecode <$> B.readFile moduFile
-      mu <- newUnique
-      return (mu, dr)
+    fileContent <-
+      unsafeIOToSTM $ streamDecodeUtf8With lenientDecode <$> B.readFile moduFile
     case fileContent of
-      Some moduSource _ _ -> do
-        let !ctx   = edh'context pgs
-            !world = contextWorld ctx
-            !wops  = worldOperators world
-        -- serialize parsing against 'worldOperators'
-        opPD <- takeTMVar wops
-        flip -- TODO catchSTM does NOT work across Edh transactions,
-             --      need to impl. a catchEdh or sth. to be used here.
-             catchSTM
-             (\(e :: SomeException) -> tryPutTMVar wops opPD >> throwSTM e)
-          $ do
-              -- parse module source
-              let (pr, opPD') =
-                    runState (runParserT parseProgram moduFile moduSource) opPD
-              case pr of
-                Left  !err   -> throwSTM $ EdhParseError err
-                Right !stmts -> do
-                  -- release world lock as soon as parsing done successfuly
-                  putTMVar wops opPD'
-                  -- prepare the module meta data
-                  !moduEnt <- createHashEntity $ Map.fromList
-                    [ (AttrByName "__name__", EdhString moduId)
-                    , (AttrByName "__file__", EdhString $ T.pack moduFile)
-                    , (AttrByName "__repr__", EdhString $ "module:" <> moduId)
-                    ]
-                  !moduSupers <- newTVar []
-                  let !moduClass = ProcDefi
-                        { procedure'uniq = moduUniq
-                        , procedure'lexi = Just $ worldScope world
-                        , procedure'decl = ProcDecl
-                          { procedure'name = "module:" <> moduId
-                          , procedure'args = PackReceiver []
-                          , procedure'body = Left $ StmtSrc
-                                               ( SourcePos
-                                                 { sourceName   = moduFile
-                                                 , sourceLine   = mkPos 1
-                                                 , sourceColumn = mkPos 1
-                                                 }
-                                               , VoidStmt
-                                               )
-                          }
-                        }
-                      !modu = Object { objEntity = moduEnt
-                                     , objClass  = moduClass
-                                     , objSupers = moduSupers
-                                     }
-                      !moduCtx = moduleContext world modu
-                  -- run statements from the module with its own context
-                  runEdhProg pgs { edh'context = moduCtx }
-                    $ evalBlock stmts
-                    $ \_ -> contEdhSTM $ do
-                        -- arm the successfully loaded module
-                        putTMVar moduSlot $ EdhObject modu
-                        -- switch back to module importer's scope and continue
-                        exitEdhSTM pgs exit (EdhObject modu)
+      Some !moduSource _ _ -> do
+        modu <- createEdhModule' world moduId moduFile
+        runEdhProg pgs { edh'context = moduleContext world modu }
+          $ evalEdh moduFile moduSource
+          $ \_ -> contEdhSTM $ do
+              -- arm the successfully loaded module
+              putTMVar moduSlot $ EdhObject modu
+              -- switch back to module importer's scope and continue
+              exitEdhSTM pgs exit (EdhObject modu)
+ where
+  ctx   = edh'context pgs
+  world = contextWorld ctx
 
+createEdhModule' :: EdhWorld -> ModuleId -> String -> STM Object
+createEdhModule' !world !moduId !srcName = do
+  -- prepare the module meta data
+  !moduEntity <- createHashEntity $ Map.fromList
+    [ (AttrByName "__name__", EdhString moduId)
+    , (AttrByName "__file__", EdhString $ T.pack srcName)
+    , (AttrByName "__repr__", EdhString $ "module:" <> moduId)
+    ]
+  !moduSupers    <- newTVar []
+  !moduClassUniq <- unsafeIOToSTM newUnique
+  return Object
+    { objEntity = moduEntity
+    , objClass  = ProcDefi
+                    { procedure'uniq = moduClassUniq
+                    , procedure'lexi = Just $ worldScope world
+                    , procedure'decl = ProcDecl
+                      { procedure'name = "module:" <> moduId
+                      , procedure'args = PackReceiver []
+                      , procedure'body = Left $ StmtSrc
+                                           ( SourcePos { sourceName   = srcName
+                                                       , sourceLine   = mkPos 1
+                                                       , sourceColumn = mkPos 1
+                                                       }
+                                           , VoidStmt
+                                           )
+                      }
+                    }
+    , objSupers = moduSupers
+    }
 
 moduleContext :: EdhWorld -> Object -> Context
 moduleContext !world !modu = worldCtx

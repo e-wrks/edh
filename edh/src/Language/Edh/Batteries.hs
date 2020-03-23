@@ -19,12 +19,14 @@ import           Language.Edh.Batteries.Assign
 import           Language.Edh.Batteries.Reflect
 import           Language.Edh.Batteries.Ctrl
 import           Language.Edh.Batteries.Runtime
+import           Language.Edh.Details.RtTypes
+import           Language.Edh.Details.Evaluate
 
 
 installEdhBatteries :: MonadIO m => EdhWorld -> m ()
 installEdhBatteries world = liftIO $ do
   rtClassUniq <- newUnique
-  runEdhProgram' (worldContext world) $ do
+  void $ runEdhProgram' (worldContext world) $ do
     pgs <- ask
     contEdhSTM $ do
 
@@ -218,7 +220,7 @@ installEdhBatteries world = liftIO $ do
             { objEntity = rtEntity
             , objClass  = ProcDefi
                             { procedure'uniq = rtClassUniq
-                            , procedure'lexi = Just $ rootScope
+                            , procedure'lexi = Just rootScope
                             , procedure'decl = ProcDecl
                                                  { procedure'name = "<runtime>"
                                                  , procedure'args = PackReceiver
@@ -229,17 +231,20 @@ installEdhBatteries world = liftIO $ do
             , objSupers = rtSupers
             }
           !rtScope = objectScope (edh'context pgs) runtime
-      !rtGenrs <- sequence
+
+      !rtMethods <- sequence
         [ (AttrByName nm, ) <$> mkHostProc
             rtScope
-            EdhGnrtor
+            vc
             nm
             hp
             (PackReceiver [RecvArg "interval" Nothing Nothing])
-        | (nm, hp) <-
-          [ ("everyMicros" , rtEveryMicrosProc)
-          , ("everyMillis" , rtEveryMillisProc)
-          , ("everySeconds", rtEverySecondsProc)
+        | (vc, nm, hp) <-
+          [ (EdhGnrtor, "readCommands", rtReadCommandsProc)
+          , (EdhMethod, "print"       , rtPrintProc)
+          , (EdhGnrtor, "everyMicros" , rtEveryMicrosProc)
+          , (EdhGnrtor, "everyMillis" , rtEveryMillisProc)
+          , (EdhGnrtor, "everySeconds", rtEverySecondsProc)
           ]
         ]
       updateEntityAttrs pgs rtEntity
@@ -249,7 +254,7 @@ installEdhBatteries world = liftIO $ do
            , (AttrByName "error", EdhDecimal 40)
            , (AttrByName "fatal", EdhDecimal 50)
            ]
-        ++ rtGenrs
+        ++ rtMethods
 
       updateEntityAttrs pgs rootEntity
         $  rootOperators

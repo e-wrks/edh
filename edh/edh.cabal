@@ -45,7 +45,6 @@ library
 library edh-internal
     exposed-modules:
         Language.Edh.Control
-        Language.Edh.Interpreter
         Language.Edh.Batteries
         Language.Edh.Batteries.Data
         Language.Edh.Batteries.Math

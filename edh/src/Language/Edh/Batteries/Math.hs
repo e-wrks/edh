@@ -10,10 +10,11 @@ import           Control.Concurrent.STM
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
 
-import           Language.Edh.Control
-import           Language.Edh.Runtime
-
 import           Data.Lossless.Decimal
+
+import           Language.Edh.Control
+import           Language.Edh.Details.RtTypes
+import           Language.Edh.Details.Evaluate
 
 
 -- | operator (+)

@@ -1,0 +1,7 @@
+
+for cmd from runtime.readCommands() do case type(cmd) of {
+  nil -> { continue }
+  # TODO runtime.print() not working right now
+  # runtime.print( cmd )
+  ;-1<| ' got ' ++ cmd
+}

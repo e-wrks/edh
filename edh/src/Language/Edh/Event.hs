@@ -154,7 +154,9 @@ forkEventConsumer !consumingAct = do
       $ consumingAct sink
   atomically
     $        (readTMVar consumerDone >> throwSTM
-               (UsageError "event consumer quit without subscribing to sink")
+               ( UsageError "event consumer quit without subscribing to sink"
+               $ EdhCallContext "<edh>" []
+               )
              )
     `orElse` do
                subcNow <- readTVar $ evs'subc sink

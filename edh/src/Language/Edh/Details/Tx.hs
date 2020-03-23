@@ -32,8 +32,10 @@ driveEdhProgram !haltResult !progCtx !prog = do
   -- check async exception mask state
   getMaskingState >>= \case
     Unmasked -> return ()
-    _        -> throwIO
-      $ UsageError "Edh program should not run with async exceptions masked"
+    _ ->
+      throwIO
+        $ UsageError "Edh program should not run with async exceptions masked"
+        $ EdhCallContext "<edh>" []
 
   -- prepare program environment
   !mainThId <- myThreadId

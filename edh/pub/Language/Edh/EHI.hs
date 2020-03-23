@@ -15,8 +15,6 @@ module Language.Edh.EHI
   , ParserError
   , EdhCallFrame(..)
   , EdhCallContext(..)
-  , EvalError(..)
-  , UsageError(..)
   , edhKnownError
 
     -- * Event processing
@@ -43,15 +41,16 @@ module Language.Edh.EHI
   , declareEdhOperators
 
     -- ** Spliced execution
+  , runEdhModule
+  , runEdhModule'
   , bootEdhModule
   , createEdhModule
   , installEdhModule
   , importEdhModule
   , moduleContext
   , contextScope
-  , parseEdhSource
-  , evalEdhSource
-  , evalEdhSource'
+  , parseEdh
+  , evalEdh
   , runEdhProgram
   , runEdhProgram'
   , viewAsEdhObject
@@ -182,10 +181,13 @@ import           Text.Megaparsec
 import qualified Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
-import           Language.Edh.Interpreter
 import           Language.Edh.Batteries
 import           Language.Edh.Runtime
 import           Language.Edh.Event
+import           Language.Edh.Details.RtTypes
+import           Language.Edh.Details.PkgMan
+import           Language.Edh.Details.CoreLang
+import           Language.Edh.Details.Evaluate
 
 
 data ArgsPackParser a = ArgsPackParser {

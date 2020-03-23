@@ -14,7 +14,8 @@ import qualified Data.HashMap.Strict           as Map
 import           Text.Megaparsec
 
 import           Language.Edh.Control
-import           Language.Edh.Runtime
+import           Language.Edh.Details.RtTypes
+import           Language.Edh.Details.Evaluate
 
 
 -- | utility constructor(*args,**kwargs)

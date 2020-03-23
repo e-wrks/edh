@@ -20,7 +20,8 @@ import           Text.Megaparsec
 import           Data.Lossless.Decimal          ( castDecimalToInteger )
 
 import           Language.Edh.Control
-import           Language.Edh.Runtime
+import           Language.Edh.Details.RtTypes
+import           Language.Edh.Details.Evaluate
 
 
 -- | operator (<|)
@@ -54,8 +55,9 @@ loggingProc !lhExpr !rhExpr !exit = do
                   _ ->
                     trace (tracePrefix ++ show rhRepr) $ exitEdhProc exit nil
         else contEdhSTM $ do
-          let (EdhRuntime logger rtLogLevel _) =
-                worldRuntime $ contextWorld ctx
+          let runtime     = worldRuntime $ contextWorld ctx
+              !rtLogLevel = runtimeLogLevel runtime
+              !logger     = runtimeLogger runtime
           if logLevel < rtLogLevel
             then -- drop log msg without even eval it
                  exitEdhSTM pgs exit nil
@@ -80,6 +82,58 @@ loggingProc !lhExpr !rhExpr !exit = do
     _ -> throwEdh EvalError $ "Invalid log level: " <> T.pack (show lhVal)
 
 
+rtReadCommandsProc :: EdhProcedure
+rtReadCommandsProc _ _ = ask >>= \pgs ->
+  case generatorCaller $ edh'context pgs of
+    Nothing -> throwEdh EvalError "Can only be called as generator"
+    Just (!pgs', !iter'cb) -> do
+      let !cioChan = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
+          readCmds :: STM ()
+          readCmds = do
+            cmdIn <- newEmptyTMVar
+            putTMVar cioChan $ Just cmdIn
+            waitEdhSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
+              EdhString !cmdCode ->
+                runEdhProg pgs' -- eval console code in caller's context
+                  $ evalEdh "<console>" cmdCode
+                  $ \(OriginalValue !cmdVal _ _) ->
+                      contEdhSTM $ runEdhProg pgs' $ iter'cb cmdVal $ const
+                        readCmds
+              _ -> error "impossible"
+      contEdhSTM readCmds
+
+
+rtPrintProc :: EdhProcedure
+rtPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
+  let !cioChan = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
+      consoleOutput !txt = do
+        co <- newTMVar txt
+        putTMVar cioChan $ Just co
+        return nil
+      printVS :: [EdhValue] -> [(AttrName, EdhValue)] -> STM ()
+      printVS [] []              = exitEdhSTM pgs exit nil
+      printVS [] ((k, v) : rest) = case v of
+        EdhString !s ->
+          waitEdhSTM pgs (consoleOutput $ k <> "=" <> s) $ \_ -> printVS [] rest
+        _ -> runEdhProg pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
+          case vr of
+            EdhString !s ->
+              contEdhSTM
+                $ waitEdhSTM pgs (consoleOutput $ k <> "=" <> s)
+                $ \_ -> printVS [] rest
+            _ -> error "bug"
+      printVS (v : rest) !kvs = case v of
+        EdhString !s ->
+          waitEdhSTM pgs (consoleOutput s) $ \_ -> printVS rest kvs
+        _ -> runEdhProg pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
+          case vr of
+            EdhString !s ->
+              contEdhSTM $ waitEdhSTM pgs (consoleOutput s) $ \_ ->
+                printVS rest kvs
+            _ -> error "bug"
+  printVS args $ Map.toList kwargs
+
+
 timelyNotify :: Int -> EdhGenrCaller -> STM ()
 timelyNotify !delayMicros genr'caller@(!pgs', !iter'cb) = do
   nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ do
@@ -100,7 +154,6 @@ rtEveryMicrosProc (ArgsPack !args !kwargs) _ = ask >>= \pgs ->
         in  contEdhSTM $ timelyNotify n genr'caller
       _ -> throwEdh EvalError "Invalid argument to runtime.everyMicros(n)"
 
-
 -- | host generator runtime.everyMillis(n) - with fixed interval
 rtEveryMillisProc :: EdhProcedure
 rtEveryMillisProc (ArgsPack !args !kwargs) _ = ask >>= \pgs ->
@@ -111,7 +164,6 @@ rtEveryMillisProc (ArgsPack !args !kwargs) _ = ask >>= \pgs ->
         let n = 1000 * fromInteger (castDecimalToInteger d)
         in  contEdhSTM $ timelyNotify n genr'caller
       _ -> throwEdh EvalError "Invalid argument to runtime.everyMillis(n)"
-
 
 -- | host generator runtime.everySeconds(n) - with fixed interval
 rtEverySecondsProc :: EdhProcedure

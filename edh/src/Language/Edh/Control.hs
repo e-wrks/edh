@@ -52,35 +52,25 @@ dispEdhCallContext (EdhCallContext !tip !frames) =
   T.unlines $ (dispEdhCallFrame <$> frames) ++ ["👉 " <> tip]
 
 
-data EvalError = EvalError !Text !EdhCallContext
+data EdhError =
+      PackageError !Text
+    | ParseError !ParserError !EdhCallContext
+    | EvalError !Text !EdhCallContext
+    | UsageError !Text !EdhCallContext
   deriving (Eq, Typeable)
-instance Show EvalError where
-  show (EvalError msg _) = T.unpack msg
-instance Exception EvalError
-
-
-newtype UsageError = UsageError Text
-  deriving (Eq, Typeable, Show)
-instance Exception UsageError
-
-
-data EdhError = EdhParseError ParserError | EdhEvalError EvalError | EdhUsageError UsageError
-    deriving (Eq, Typeable)
 instance Show EdhError where
-  show (EdhParseError !err) = "⛔ " ++ errorBundlePretty err
-  show (EdhEvalError (EvalError !msg !ctx)) =
-    "💔\n" <> show ctx <> "💣 " <> T.unpack msg
-  show (EdhUsageError (UsageError msg)) = "🐒 " ++ T.unpack msg
+  show (PackageError !msg) = "📦 " <> T.unpack msg
+  show (ParseError !err !ctx) =
+    "💔\n" <> show ctx <> "⛔ " <> errorBundlePretty err
+  show (EvalError  !msg !ctx) = "💔\n" <> show ctx <> "💣 " <> T.unpack msg
+  show (UsageError !msg !ctx) = "💔\n" <> show ctx <> "🙈 " <> T.unpack msg
 instance Exception EdhError
 
 
 edhKnownError :: SomeException -> Maybe EdhError
 edhKnownError err = case fromException err :: Maybe EdhError of
   Just e  -> Just e
-  Nothing -> case fromException err :: Maybe EvalError of
-    Just e  -> Just $ EdhEvalError e
-    Nothing -> case fromException err :: Maybe ParserError of
-      Just e  -> Just $ EdhParseError e
-      Nothing -> case fromException err :: Maybe UsageError of
-        Just e  -> Just $ EdhUsageError e
-        Nothing -> Nothing
+  Nothing -> case fromException err :: Maybe ParserError of
+    Just e  -> Just $ ParseError e $ EdhCallContext "<parsing>" []
+    Nothing -> Nothing
+

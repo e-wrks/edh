@@ -3,9 +3,15 @@ module Repl where
 
 import           Prelude
 -- import           Debug.Trace
+
 import           Text.Printf
 
 import           Control.Monad
+
+import           Control.Monad.Reader
+
+import           Control.Concurrent
+import           Control.Concurrent.STM
 
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
@@ -15,9 +21,24 @@ import           System.Console.Haskeline
 import           Language.Edh.EHI
 
 
-doRead :: [Text] -> InputT IO (Maybe Text)
-doRead pendingLines =
-  handleInterrupt (return $ Just "")
+ioLoop :: TMVar (Maybe (TMVar Text)) -> InputT IO ()
+ioLoop !ioChan = liftIO (atomically $ takeTMVar ioChan) >>= \case
+  Nothing -> return () -- gracefully stop the io loop
+  Just io -> liftIO (atomically $ tryReadTMVar io) >>= \case
+    -- a full TMVar means out putting
+    Just !txtOut -> outputStrLn $ T.unpack txtOut
+    -- an empty TMVar means in taking
+    Nothing      -> readInput [] >>= \case
+      Nothing -> -- reached EOF (end-of-feed)
+        liftIO $ atomically $ putTMVar io ""
+      Just !code -> do -- got one piece of code
+        liftIO $ atomically $ putTMVar io code
+        ioLoop ioChan
+
+
+readInput :: [Text] -> InputT IO (Maybe Text)
+readInput pendingLines =
+  handleInterrupt (outputStrLn "" >> readInput [])
     $   withInterrupt
     $   getInputLine
           (case pendingLines of
@@ -34,45 +55,15 @@ doRead pendingLines =
             in  case pendingLines of
                   [] -> case T.stripEnd code of
                     "{" -> -- an unindented `{` marks start of multi-line input
-                      doRead [""]
+                      readInput [""]
                     _ -> case T.strip code of
                       "" -> -- got an empty line in single-line input mode
-                        doRead [] -- start over in single-line input mode
+                        readInput [] -- start over in single-line input mode
                       _ -> -- got a single line input
                         return $ Just code
                   _ -> case T.stripEnd code of
                     "}" -> -- an unindented `}` marks end of multi-line input
                       return $ Just $ (T.unlines . reverse) $ init pendingLines
                     _ -> -- got a line in multi-line input mode
-                      doRead $ code : pendingLines
-
-
-doEval :: EdhWorld -> Object -> Text -> InputT IO (Either EdhError Text)
-doEval !world !modu !edhSrc = evalEdhSource' world modu "<adhoc>" edhSrc
-
-
-doPrint :: Either EdhError Text -> InputT IO ()
-doPrint = \case
-  Left err -> case err of
-    EdhParseError _ -> do
-      outputStrLn "* 😓 *"
-      outputStrLn $ show err
-    EdhEvalError _ -> do
-      outputStrLn "* 😱 *"
-      outputStrLn $ show err
-    EdhUsageError _ -> do
-      outputStrLn "* 🙈 *"
-      outputStrLn $ show err
-  Right repr -> unless (T.null repr) $ outputStrLn $ T.unpack repr
-
-
-doLoop :: EdhWorld -> Object -> InputT IO ()
-doLoop world modu = doRead [] >>= \case
-  Nothing   -> return () -- reached EOF (end-of-feed)
-  Just code -> if code == ""
-    then doLoop world modu  -- ignore empty code
-    else do -- got one piece of code
-      r <- doEval world modu code
-      doPrint r
-      doLoop world modu
+                      readInput $ code : pendingLines
 

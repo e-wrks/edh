@@ -1,22 +1,5 @@
 
-module Language.Edh.Runtime
-  ( createEdhWorld
-  , defaultEdhRuntime
-  , bootEdhModule
-  , runEdhProgram
-  , runEdhProgram'
-  , createEdhModule
-  , installEdhModule
-  , declareEdhOperators
-  , mkHostProc
-  , mkHostClass
-  , mkIntrinsicOp
-  , module CL
-  , module RT
-  , module TX
-  , module EV
-  )
-where
+module Language.Edh.Runtime where
 
 import           Prelude
 -- import           Debug.Trace
@@ -37,51 +20,35 @@ import           Control.Concurrent.STM
 import           Data.Unique
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
+import qualified Data.ByteString               as B
 import           Data.Text.IO
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
+import           Data.Text.Encoding
+import           Data.Text.Encoding.Error
 import qualified Data.HashMap.Strict           as Map
 
 import           Text.Megaparsec
 
 import           Language.Edh.Control
-import           Language.Edh.Details.CoreLang as CL
-import           Language.Edh.Details.RtTypes  as RT
-import           Language.Edh.Details.Tx       as TX
-import           Language.Edh.Details.Evaluate as EV
-
-
-bootEdhModule :: MonadIO m => EdhWorld -> Text -> m (Either EdhError Object)
-bootEdhModule !world impSpec = liftIO $ tryJust edhKnownError $ do
-  !final <- newEmptyTMVarIO
-  runEdhProgram' (worldContext world)
-    $ importEdhModule impSpec
-    $ \(OriginalValue !val _ _) -> case val of
-        EdhObject !modu -> contEdhSTM $ putTMVar final modu
-        _               -> error "bug: importEdhModule returns non-object?"
-  atomically $ readTMVar final
-
-
-runEdhProgram
-  :: MonadIO m => Context -> EdhProg (STM ()) -> m (Either EdhError ())
-runEdhProgram !ctx !prog =
-  liftIO $ tryJust edhKnownError $ runEdhProgram' ctx prog
-
-runEdhProgram' :: MonadIO m => Context -> EdhProg (STM ()) -> m ()
-runEdhProgram' !ctx !prog = liftIO $ do
-  haltResult <- atomically newEmptyTMVar
-  driveEdhProgram haltResult ctx prog
+import           Language.Edh.Details.RtTypes
+import           Language.Edh.Details.Tx
+import           Language.Edh.Details.PkgMan
+import           Language.Edh.Details.Evaluate
 
 
 -- | This runtime serializes all log messages to 'stderr' through a 'TQueue',
 -- this is crucial under heavy concurrency.
 --
+-- `ioChan` is used to facilitate command input/output via 'stdin'/'stdout',
+-- an io loop run by main thread using a library like `haskeline` is assumed.
+--
 -- known issues:
 --  *) can mess up with others writing to 'stderr'
 --  *) if all others use 'trace' only, there're minimum messups but emojis 
 --     seem to be break points
-defaultEdhRuntime :: IO EdhRuntime
-defaultEdhRuntime = do
+defaultEdhRuntime :: TMVar (Maybe (TMVar Text)) -> IO EdhRuntime
+defaultEdhRuntime !ioChan = do
   envLogLevel <- lookupEnv "EDH_LOG_LEVEL"
   logIdle     <- newEmptyTMVarIO
   logQueue    <- newTQueueIO
@@ -137,8 +104,9 @@ defaultEdhRuntime = do
                 _               -> "😥 "
   void $ mask_ $ forkIOWithUnmask $ \unmask ->
     finally (unmask logPrinter) $ atomically $ tryPutTMVar logIdle ()
-  return EdhRuntime { runtimeLogger    = logger
+  return EdhRuntime { consoleIO        = ioChan
                     , runtimeLogLevel  = logLevel
+                    , runtimeLogger    = logger
                     , flushRuntimeLogs = flushLogs
                     }
 
@@ -230,58 +198,38 @@ declareEdhOperators world declLoc opps = do
     if newPrec < 0 || newPrec >= 10
       then
         throwSTM
-        $  UsageError
-        $  "Invalidate precedence "
-        <> T.pack (show newPrec)
-        <> " (declared "
-        <> T.pack (show newDeclLoc)
-        <> ") for operator: "
-        <> op
+        $ UsageError
+            (  "Invalidate precedence "
+            <> T.pack (show newPrec)
+            <> " (declared "
+            <> T.pack (show newDeclLoc)
+            <> ") for operator: "
+            <> op
+            )
+        $ EdhCallContext "<edh>" []
       else if prevPrec /= newPrec
-        then throwSTM $ UsageError
-          (  "precedence change from "
-          <> T.pack (show prevPrec)
-          <> " (declared "
-          <> prevDeclLoc
-          <> ") to "
-          <> T.pack (show newPrec)
-          <> " (declared "
-          <> T.pack (show newDeclLoc)
-          <> ") for operator: "
-          <> op
-          )
+        then
+          throwSTM
+          $ UsageError
+              (  "precedence change from "
+              <> T.pack (show prevPrec)
+              <> " (declared "
+              <> prevDeclLoc
+              <> ") to "
+              <> T.pack (show newPrec)
+              <> " (declared "
+              <> T.pack (show newDeclLoc)
+              <> ") for operator: "
+              <> op
+              )
+          $ EdhCallContext "<edh>" []
         else return (prevPrec, prevDeclLoc)
 
 
 createEdhModule :: MonadIO m => EdhWorld -> ModuleId -> String -> m Object
-createEdhModule !world !moduId !moduSrc = liftIO $ do
-  -- prepare the module meta data
-  !moduEntity <- atomically $ createHashEntity $ Map.fromList
-    [ (AttrByName "__name__", EdhString moduId)
-    , (AttrByName "__file__", EdhString $ T.pack moduSrc)
-    , (AttrByName "__repr__", EdhString $ "module:" <> moduId)
-    ]
-  !moduSupers    <- newTVarIO []
-  !moduClassUniq <- newUnique
-  return Object
-    { objEntity = moduEntity
-    , objClass  = ProcDefi
-                    { procedure'uniq = moduClassUniq
-                    , procedure'lexi = Just $ worldScope world
-                    , procedure'decl = ProcDecl
-                      { procedure'name = "module:" <> moduId
-                      , procedure'args = PackReceiver []
-                      , procedure'body = Left $ StmtSrc
-                                           ( SourcePos { sourceName   = moduSrc
-                                                       , sourceLine   = mkPos 1
-                                                       , sourceColumn = mkPos 1
-                                                       }
-                                           , VoidStmt
-                                           )
-                      }
-                    }
-    , objSupers = moduSupers
-    }
+createEdhModule !world !moduId !srcName =
+  liftIO $ atomically $ createEdhModule' world moduId srcName
+
 
 installEdhModule
   :: MonadIO m
@@ -291,7 +239,7 @@ installEdhModule
   -> m Object
 installEdhModule !world !moduId !preInstall = liftIO $ do
   modu <- createEdhModule world moduId "<host-code>"
-  runEdhProgram' (worldContext world) $ do
+  void $ runEdhProgram' (worldContext world) $ do
     pgs <- ask
     contEdhSTM $ do
       preInstall pgs modu
@@ -300,6 +248,17 @@ installEdhModule !world !moduId !preInstall = liftIO $ do
       putTMVar (worldModules world) $ Map.insert moduId moduSlot moduMap
   return modu
 
+
+mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
+mkIntrinsicOp !world !opSym !iop = do
+  u <- unsafeIOToSTM newUnique
+  Map.lookup opSym <$> readTMVar (worldOperators world) >>= \case
+    Nothing ->
+      throwSTM
+        $ UsageError
+            ("No precedence declared in the world for operator: " <> opSym)
+        $ EdhCallContext "<edh>" []
+    Just (preced, _) -> return $ EdhIntrOp preced $ IntrinOpDefi u opSym iop
 
 mkHostProc
   :: Scope
@@ -360,14 +319,51 @@ mkHostClass !scope !nm !writeProtected !hc = do
         exitEdhSTM pgs exit $ EdhObject newThis
   return $ EdhClass cls
 
-mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
-mkIntrinsicOp !world !opSym !iop = do
-  u <- unsafeIOToSTM newUnique
-  Map.lookup opSym <$> readTMVar (worldOperators world) >>= \case
+
+runEdhProgram
+  :: MonadIO m => Context -> EdhProg (STM ()) -> m (Either EdhError EdhValue)
+runEdhProgram !ctx !prog =
+  liftIO $ tryJust edhKnownError $ runEdhProgram' ctx prog
+
+runEdhProgram' :: MonadIO m => Context -> EdhProg (STM ()) -> m EdhValue
+runEdhProgram' !ctx !prog = liftIO $ do
+  haltResult <- atomically newEmptyTMVar
+  driveEdhProgram haltResult ctx prog
+  liftIO (atomically $ tryReadTMVar haltResult) >>= \case
+    Nothing        -> return nil
+    Just (Right v) -> return v
+    Just (Left  e) -> throwIO e
+
+
+runEdhModule :: MonadIO m => EdhWorld -> FilePath -> m (Either EdhError ())
+runEdhModule !world !impPath =
+  liftIO $ tryJust edhKnownError $ runEdhModule' world impPath
+
+runEdhModule' :: MonadIO m => EdhWorld -> FilePath -> m ()
+runEdhModule' !world !impPath = liftIO $ do
+  (nomPath, moduFile) <- locateEdhMainModule impPath
+  fileContent <- streamDecodeUtf8With lenientDecode <$> B.readFile moduFile
+  case fileContent of
+    Some !moduSource _ _ -> void $ runEdhProgram' (worldContext world) $ do
+      pgs <- ask
+      contEdhSTM $ do
+        let !moduId = T.pack nomPath
+        modu <- createEdhModule' world moduId moduFile
+        runEdhProg pgs { edh'context = moduleContext world modu }
+          $ evalEdh moduFile moduSource edhEndOfProc
+
+
+bootEdhModule :: MonadIO m => EdhWorld -> Text -> m (Either EdhError Object)
+bootEdhModule !world !impSpec = liftIO $ tryJust edhKnownError $ do
+  !final <- newEmptyTMVarIO
+  void
+    $ runEdhProgram' (worldContext world)
+    $ importEdhModule impSpec
+    $ \(OriginalValue !val _ _) -> case val of
+        EdhObject !modu -> contEdhSTM $ putTMVar final modu
+        _               -> error "bug: importEdhModule returns non-object?"
+  atomically (tryReadTMVar final) >>= \case
+    Just modu -> return modu -- a bit more informative than stm deadlock
     Nothing ->
-      throwSTM
-        $  UsageError
-        $  "No precedence declared in the world for operator: "
-        <> opSym
-    Just (preced, _) -> return $ EdhIntrOp preced $ IntrinOpDefi u opSym iop
+      throwIO $ UsageError "Module not loaded." $ EdhCallContext "<edh>" []
 

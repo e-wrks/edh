@@ -4,13 +4,18 @@ module Main where
 import           Prelude
 -- import           Debug.Trace
 
+import           Control.Exception
 import           Control.Concurrent
+import           Control.Concurrent.STM
 
-import           System.Console.Haskeline
+import           System.Console.Haskeline       ( runInputT
+                                                , Settings(..)
+                                                , outputStrLn
+                                                )
 
 import           Language.Edh.EHI
 
-import           Repl                           ( doLoop )
+import           Repl
 
 
 inputSettings :: Settings IO
@@ -23,8 +28,17 @@ inputSettings = Settings { complete       = \(_left, _right) -> return ("", [])
 main :: IO ()
 main = do
 
-  -- todo create a runtime with logger coop'ing with haskeline specifically ?
-  runtime <- defaultEdhRuntime
+  mainThId <- myThreadId
+
+  ioChan   <- newEmptyTMVarIO
+  runtime  <- defaultEdhRuntime ioChan
+
+  world    <- createEdhWorld runtime
+  installEdhBatteries world
+
+  forkFinally (runEdhModule' world "repl") $ \case
+    Left  (e :: SomeException) -> throwTo mainThId e
+    Right _                    -> atomically $ putTMVar ioChan Nothing
 
   runInputT inputSettings $ do
 
@@ -33,10 +47,6 @@ main = do
       "* Blank Screen Syndrome ? Take the Tour as your companion, checkout:"
     outputStrLn "  https://github.com/e-wrks/edh/tree/master/Tour"
 
-    world <- createEdhWorld runtime
-    installEdhBatteries world
-
-    modu <- createEdhModule world "<interactive>" "<adhoc>"
-    doLoop world modu
+    ioLoop ioChan
 
   flushRuntimeLogs runtime
