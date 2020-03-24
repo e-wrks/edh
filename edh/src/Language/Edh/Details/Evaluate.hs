@@ -2096,7 +2096,7 @@ _edhCSR reprs (v : rest) !exit = edhValueRepr v $ \(OriginalValue r _ _) ->
 _edhKwArgsCSR
   :: [(Text, Text)] -> [(Text, EdhValue)] -> EdhProcExit -> EdhProg (STM ())
 _edhKwArgsCSR entries [] !exit' = exitEdhProc exit' $ EdhString $ T.concat
-  [ k <> "=" <> v <> ", " | (k, v) <- reverse entries ]
+  [ k <> "=" <> v <> ", " | (k, v) <- entries ]
 _edhKwArgsCSR entries ((k, v) : rest) exit' =
   edhValueRepr v $ \(OriginalValue r _ _) -> case r of
     EdhString repr -> _edhKwArgsCSR ((k, repr) : entries) rest exit'
@@ -2105,18 +2105,24 @@ _edhKwArgsCSR entries ((k, v) : rest) exit' =
 _edhDictCSR
   :: [(Text, Text)] -> [(EdhValue, EdhValue)] -> EdhProcExit -> EdhProg (STM ())
 _edhDictCSR entries [] !exit' = exitEdhProc exit' $ EdhString $ T.concat
-  [ k <> ":" <> v <> ", " | (k, v) <- reverse entries ]
+  [ k <> ":" <> v <> ", " | (k, v) <- entries ]
 _edhDictCSR entries ((k, v) : rest) exit' =
   edhValueRepr k $ \(OriginalValue kr _ _) -> case kr of
     EdhString !kRepr -> do
-      let vrDecor :: Text -> Text
+      let krDecor :: Text -> Text
+          krDecor = case k of
+            -- quote the key repr in the entry if it's a term
+            -- bcoz (:=) precedence is 1, less than (:)'s 2
+            EdhNamedValue{} -> \r -> "(" <> r <> ")"
+            _               -> id
+          vrDecor :: Text -> Text
           vrDecor = case v of
             -- quote the value repr in the entry if it's a pair
             EdhPair{} -> \r -> "(" <> r <> ")"
             _         -> id
       edhValueRepr v $ \(OriginalValue vr _ _) -> case vr of
         EdhString !vRepr ->
-          _edhDictCSR ((kRepr, vrDecor vRepr) : entries) rest exit'
+          _edhDictCSR ((krDecor kRepr, vrDecor vRepr) : entries) rest exit'
         _ -> error "bug: edhValueRepr returned non-string in CPS"
     _ -> error "bug: edhValueRepr returned non-string in CPS"
 
