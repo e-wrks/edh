@@ -23,7 +23,20 @@ import           Language.Edh.Details.CoreLang
 -- | operator ($) - dereferencing attribute addressor
 attrDerefAddrProc :: EdhIntrinsicOp
 attrDerefAddrProc !lhExpr !rhExpr !exit =
-  evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
+  evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate rhVal of
+    EdhExpr _ (AttrExpr (DirectRef !addr)) _ -> ask >>= \pgs ->
+      contEdhSTM $ resolveEdhAttrAddr pgs addr >>= \key ->
+        runEdhProg pgs $ getEdhAttr
+          lhExpr
+          key
+          (\lhVal ->
+            throwEdh EvalError
+              $  "No such attribute "
+              <> T.pack (show key)
+              <> " from "
+              <> T.pack (show lhVal)
+          )
+          exit
     EdhString !attrName -> getEdhAttr
       lhExpr
       (AttrByName attrName)
@@ -112,7 +125,11 @@ attrTemptProc !lhExpr !rhExpr !exit = do
 -- address an attribute off an object if possible, nil otherwise
 attrDerefTemptProc :: EdhIntrinsicOp
 attrDerefTemptProc !lhExpr !rhExpr !exit =
-  evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
+  evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate rhVal of
+    EdhExpr _ (AttrExpr (DirectRef !addr)) _ -> ask >>= \pgs ->
+      contEdhSTM $ resolveEdhAttrAddr pgs addr >>= \key ->
+        runEdhProg pgs
+          $ getEdhAttr lhExpr key (const $ exitEdhProc exit nil) exit
     EdhString !attrName -> getEdhAttr lhExpr
                                       (AttrByName attrName)
                                       (const $ exitEdhProc exit nil)

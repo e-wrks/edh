@@ -1775,14 +1775,18 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
       SuperRef -> throwEdh EvalError "Can not assign to super"
     -- dereferencing attribute assignment
     InfixExpr "$" !tgtExpr !addrRef ->
-      evalExpr addrRef $ \(OriginalValue !addrVal _ _) -> case addrVal of
-        EdhString !attrName ->
-          setEdhAttr pgsAfter tgtExpr (AttrByName attrName) rhVal exit
-        EdhSymbol !sym ->
-          setEdhAttr pgsAfter tgtExpr (AttrBySym sym) rhVal exit
-        _ ->
-          throwEdh EvalError $ "Invalid attribute reference type - " <> T.pack
-            (show $ edhTypeOf addrVal)
+      evalExpr addrRef $ \(OriginalValue !addrVal _ _) ->
+        case edhUltimate addrVal of
+          EdhExpr _ (AttrExpr (DirectRef !addr)) _ ->
+            contEdhSTM $ resolveEdhAttrAddr pgs addr >>= \key ->
+              runEdhProg pgs $ setEdhAttr pgsAfter tgtExpr key rhVal exit
+          EdhString !attrName ->
+            setEdhAttr pgsAfter tgtExpr (AttrByName attrName) rhVal exit
+          EdhSymbol !sym ->
+            setEdhAttr pgsAfter tgtExpr (AttrBySym sym) rhVal exit
+          _ ->
+            throwEdh EvalError $ "Invalid attribute reference type - " <> T.pack
+              (show $ edhTypeOf addrVal)
     x ->
       throwEdh EvalError
         $  "Invalid left hand expression for assignment: "
