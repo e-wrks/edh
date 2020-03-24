@@ -104,6 +104,10 @@ rtReadCommandsProc !apk _ = ask >>= \pgs ->
               waitEdhSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
                 EdhString !cmdCode ->
                   runEdhProg pgs' -- eval console code in for-loop's context
+                    -- TODO don't let ParseError or other non-critical problem
+                    --      crash the program, ultimantely after CPS exception
+                    --      handling is implemented, we then enable Edh code to
+                    --      catch exceptions and handle accordingly.
                     $ evalEdh "<console>" cmdCode
                     $ \(OriginalValue !cmdVal _ _) ->
                         contEdhSTM
