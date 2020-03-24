@@ -25,40 +25,25 @@ attrDerefAddrProc :: EdhIntrinsicOp
 attrDerefAddrProc !lhExpr !rhExpr !exit =
   evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate rhVal of
     EdhExpr _ (AttrExpr (DirectRef !addr)) _ -> ask >>= \pgs ->
-      contEdhSTM $ resolveEdhAttrAddr pgs addr >>= \key ->
-        runEdhProg pgs $ getEdhAttr
-          lhExpr
-          key
-          (\lhVal ->
-            throwEdh EvalError
-              $  "No such attribute "
-              <> T.pack (show key)
-              <> " from "
-              <> T.pack (show lhVal)
-          )
-          exit
-    EdhString !attrName -> getEdhAttr
-      lhExpr
-      (AttrByName attrName)
-      (\lhVal ->
-        throwEdh EvalError
-          $  "No such attribute "
-          <> attrName
-          <> " from "
-          <> T.pack (show lhVal)
-      )
-      exit
-    EdhSymbol sym@(Symbol _ desc) -> getEdhAttr
-      lhExpr
-      (AttrBySym sym)
-      (\lhVal ->
-        throwEdh EvalError $ "No such attribute @" <> desc <> " from " <> T.pack
-          (show lhVal)
-      )
-      exit
+      contEdhSTM
+        $   resolveEdhAttrAddr pgs addr
+        >>= \key -> runEdhProg pgs
+              $ getEdhAttr lhExpr key (noAttr $ T.pack $ show key) exit
+    EdhString !attrName ->
+      getEdhAttr lhExpr (AttrByName attrName) (noAttr attrName) exit
+    EdhSymbol sym@(Symbol _ desc) ->
+      getEdhAttr lhExpr (AttrBySym sym) (noAttr $ "@" <> desc) exit
     _ -> throwEdh EvalError $ "Invalid attribute reference type - " <> T.pack
       (show $ edhTypeOf rhVal)
-
+ where
+  noAttr key lhVal =
+    throwEdh EvalError
+      $  "No such attribute "
+      <> key
+      <> " from a "
+      <> T.pack (edhTypeNameOf lhVal)
+      <> ": "
+      <> T.pack (show lhVal)
 
 -- | operator (:=) - value definition
 defProc :: EdhIntrinsicOp

@@ -775,7 +775,9 @@ evalExpr expr exit = do
             throwEdh EvalError
               $  "No such attribute "
               <> T.pack (show key)
-              <> " from "
+              <> " from a "
+              <> T.pack (edhTypeNameOf tgtVal)
+              <> ": "
               <> T.pack (show tgtVal)
           )
           exit
