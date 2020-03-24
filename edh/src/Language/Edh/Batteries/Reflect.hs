@@ -8,6 +8,7 @@ import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
 import           Data.List.NonEmpty             ( (<|) )
+import qualified Data.List.NonEmpty            as NE
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
 
@@ -74,9 +75,12 @@ supersProc (ArgsPack !args !kwargs) !exit = do
 scopeObtainProc :: EdhProcedure
 scopeObtainProc _ !exit = do
   !pgs <- ask
-  let !ctx = edh'context pgs
+  let !ctx         = edh'context pgs
+      !callerScope = case NE.tail $ callStack ctx of
+        cs : _ -> cs -- unwind one level, give head if already at bottom
+        _      -> NE.head $ callStack ctx
   contEdhSTM $ do
-    wrapperObj <- mkScopeWrapper ctx $ contextScope ctx
+    wrapperObj <- mkScopeWrapper ctx callerScope
     exitEdhSTM pgs exit $ EdhObject wrapperObj
 
 
