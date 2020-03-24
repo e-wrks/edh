@@ -1721,24 +1721,10 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
 --      be needed in the future
 mkScopeWrapper :: Context -> Scope -> STM Object
 mkScopeWrapper !ctx !scope = do
-  -- use an object to wrap the scope entity
-  entWrapper <- viewAsEdhObject (scopeEntity scope) wrapperClass []
-  -- a scope wrapper object is itself a mao object, no attr can be put into it
+  -- a scope wrapper object is itself a mao object, no attr at all
   wrapperEnt <- createMaoEntity
-  viewAsEdhObject
-    wrapperEnt
-    wrapperClass
-    [
-  -- put the 'scopeSuper' object as the top super, from it the builtin
-  -- scope manipulation methods are resolved
-      scopeSuper world
-  -- put the object wrapping the entity as the bottom super object, so attrs
-  -- not shadowed by those manually assigned ones to 'wrapperEnt', or scope
-  -- manipulation methods, can be read off directly from the wrapper object,
-  -- caveat: use scope.get() to access scope attrs programmatically, this is
-  -- only for convenience of interactive human usage.
-    , entWrapper
-    ]
+  -- 'scopeSuper' provides the builtin scope manipulation methods
+  viewAsEdhObject wrapperEnt wrapperClass [scopeSuper world]
  where
   !world        = contextWorld ctx
   !wrapperClass = (objClass $ scopeSuper world)
