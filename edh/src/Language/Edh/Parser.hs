@@ -330,25 +330,6 @@ parseOpDeclOvrdStmt = do
       put $ Map.insert opSym (opPrec, T.pack $ sourcePosPretty srcPos) opPD
       return $ OpDeclStmt opSym opPrec procDecl
 
-parseTryStmt :: Parser Stmt
-parseTryStmt = do
-  void $ keyword "try"
-  trunk   <- parseStmt
-  catches <- many parseCatch
-  final   <- optional $ do
-    void $ keyword "finally"
-    parseStmt
-  return $ TryStmt trunk catches final
- where
-  parseCatch = do
-    void $ keyword "catch"
-    excClass <- parseExpr
-    an       <- optional $ do
-      void $ keyword "as"
-      parseAttrName
-    recov <- parseStmt
-    return (excClass, an, recov)
-
 parseReturnStmt :: Parser Stmt
 parseReturnStmt = do
   void $ keyword "return"
@@ -385,7 +366,6 @@ parseStmt = optionalSemicolon *> do
           -- TODO validate fallthrough must within a branch block
           , FallthroughStmt <$ keyword "fallthrough"
           , parseOpDeclOvrdStmt
-          , parseTryStmt
           -- TODO validate yield must within a generator procedure
           , parseReturnStmt
           , parseThrowStmt
@@ -627,7 +607,7 @@ illegalExprStart =
           , keyword "fallthrough"
           , keyword "operator"
           , keyword "try"
-          , keyword "except"
+          , keyword "catch"
           , keyword "finally"
           , keyword "return"
           , keyword "throw"

@@ -1031,12 +1031,9 @@ data Stmt =
     | OpDeclStmt !OpSymbol !Precedence !ProcDecl
       -- | operator override
     | OpOvrdStmt !OpSymbol !ProcDecl !Precedence
-      -- | similar to exception mechanism in JavaScript
-    | ThrowStmt !Expr | TryStmt {
-        try'trunk :: !StmtSrc
-        , try'catches :: ![(Expr, Maybe AttrName, StmtSrc)]
-        , try'finally :: !(Maybe StmtSrc)
-        }
+      -- | any value can be thrown as exception, handling will rely on the
+      --   ($=>) as `catch` and (@=>) as `finally` operators
+    | ThrowStmt !Expr
       -- | early stop from a procedure
     | ReturnStmt !Expr
       -- | expression with precedence
@@ -1252,8 +1249,8 @@ edhTypeNameOf v      = show $ edhTypeOf v
 -- Passing in a `nil` value will hit bottom (crash the process) here,
 -- use `edhTypeNameOf` if all you want is a type name shown to user.
 edhTypeOf :: EdhValue -> EdhTypeValue
-edhTypeOf EdhNil = -- this is a tamboo
-  undefined
+edhTypeOf EdhNil = --
+  undefined        -- this is a taboo
 
 edhTypeOf EdhType{}                                   = TypeType
 

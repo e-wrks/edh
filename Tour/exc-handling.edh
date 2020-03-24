@@ -1,0 +1,39 @@
+
+{
+
+  # ($=>) reads `catch`, the right-hand-expr will only be eval'ed 
+  #       when an exception occurred in its left-hand-expr;
+  #       the exception value is the context match target during eval of
+  #       the right-hand-expr;
+  #       the exceptin is assused to have been recovered, if the rhe evals
+  #       as matched (i.e. not to a value of <fallthrough>), or the
+  #       exception will keep propagating - as if re-thrown.
+
+  # (@=>) reads `finally`, the right-hand-expr will always be
+  #       eval'ed whether the left-hand-expr has caused exeption
+  #       or not;
+  #       the exception value (or nil if none occurred) is the context
+  #       match target during eval of the right-hand-expr;
+  #       an exception if occurred, will never be assumed as recovered
+  #       by the right-hand-expr.
+
+  {
+    throw 3*7
+  } $=> {
+
+    { n } -> {
+      runtime.print( 'a ' ++ n ++ ' is thrown!' )
+      fallthrough
+    }
+
+    21 -> {
+      runtime.print( "That's what I'm afraid of, but it's okay then." )
+    }
+
+  } @=> {
+
+    runtime.print( 'I always do cleanup anyway.' )
+
+  }
+
+}
