@@ -606,9 +606,6 @@ illegalExprStart =
           , keyword "continue"
           , keyword "fallthrough"
           , keyword "operator"
-          , keyword "try"
-          , keyword "catch"
-          , keyword "finally"
           , keyword "return"
           , keyword "throw"
           , keyword "pass"
@@ -632,7 +629,7 @@ parseExprPrec prec = lookAhead illegalExprStart >>= \case
           -- environment to be able to introspect it programmatically, as
           -- well to get syntax-highlighting and other authoring convenience.
           keyword "expr" >> uncurry (flip ExprWithSrc) <$> match
-          (parseExprPrec (-1))
+          (parseExprPrec (-20))
 
           -- more normal/routine exprs
         , parsePrefixExpr
@@ -682,4 +679,4 @@ parseExprPrec prec = lookAhead illegalExprStart >>= \case
 
 
 parseExpr :: Parser Expr
-parseExpr = parseExprPrec (-1)
+parseExpr = parseExprPrec (-10)

@@ -93,20 +93,16 @@ createEdhWorld !runtime = liftIO $ do
 
 declareEdhOperators :: EdhWorld -> Text -> [(OpSymbol, Precedence)] -> STM ()
 declareEdhOperators world declLoc opps = do
-  opPD <- takeTMVar wops
-  catchSTM (declarePrecedence opPD)
-    $ \(e :: SomeException) -> tryPutTMVar wops opPD >> throwSTM e
+  opPD  <- takeTMVar wops
+  opPD' <-
+    sequence
+    $ Map.unionWithKey chkCompatible (return <$> opPD)
+    $ Map.fromList
+    $ (<$> opps)
+    $ \(op, p) -> (op, return (p, declLoc))
+  putTMVar wops opPD'
  where
   !wops = worldOperators world
-  declarePrecedence :: OpPrecDict -> STM ()
-  declarePrecedence opPD = do
-    opPD' <-
-      sequence
-      $ Map.unionWithKey chkCompatible (return <$> opPD)
-      $ Map.fromList
-      $ (<$> opps)
-      $ \(op, p) -> (op, return (p, declLoc))
-    putTMVar wops opPD'
   chkCompatible
     :: OpSymbol
     -> STM (Precedence, Text)
@@ -115,11 +111,15 @@ declareEdhOperators world declLoc opps = do
   chkCompatible op prev newly = do
     (prevPrec, prevDeclLoc) <- prev
     (newPrec , newDeclLoc ) <- newly
-    if newPrec < 0 || newPrec >= 10
+    if prevPrec /= newPrec
       then
         throwSTM
         $ UsageError
-            (  "Invalidate precedence "
+            (  "precedence change from "
+            <> T.pack (show prevPrec)
+            <> " (declared "
+            <> prevDeclLoc
+            <> ") to "
             <> T.pack (show newPrec)
             <> " (declared "
             <> T.pack (show newDeclLoc)
@@ -127,23 +127,7 @@ declareEdhOperators world declLoc opps = do
             <> op
             )
         $ EdhCallContext "<edh>" []
-      else if prevPrec /= newPrec
-        then
-          throwSTM
-          $ UsageError
-              (  "precedence change from "
-              <> T.pack (show prevPrec)
-              <> " (declared "
-              <> prevDeclLoc
-              <> ") to "
-              <> T.pack (show newPrec)
-              <> " (declared "
-              <> T.pack (show newDeclLoc)
-              <> ") for operator: "
-              <> op
-              )
-          $ EdhCallContext "<edh>" []
-        else return (prevPrec, prevDeclLoc)
+      else return (prevPrec, prevDeclLoc)
 
 
 createEdhModule :: MonadIO m => EdhWorld -> ModuleId -> String -> m Object

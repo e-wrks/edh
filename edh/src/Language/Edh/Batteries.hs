@@ -36,8 +36,8 @@ import           Language.Edh.Details.Evaluate
 -- | This runtime serializes all log messages to 'stderr' through a 'TQueue',
 -- this is crucial under heavy concurrency.
 --
--- `ioChan` is used to facilitate command input/output via 'stdin'/'stdout',
--- an io loop run by main thread using a library like `haskeline` is assumed.
+-- `ioQ` is used to facilitate command input/output via 'stdin'/'stdout', you
+-- should run an io loop with main thread, using a library like `haskeline`.
 --
 -- known issues:
 --  *) can mess up with others writing to 'stderr'
@@ -222,6 +222,14 @@ installEdhBatteries world = liftIO $ do
           -- branch
         , ( "->"
           , 0
+          )
+          -- catch
+        , ( "$=>"
+          , -1
+          )
+          -- finally
+        , ( "@=>"
+          , -1
           )
 
           -- string coercing concatenation

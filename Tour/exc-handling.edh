@@ -10,16 +10,23 @@
   #       exception will keep propagating - as if re-thrown.
 
   # (@=>) reads `finally`, the right-hand-expr will always be
-  #       eval'ed whether the left-hand-expr has caused exeption
-  #       or not;
+  #       eval'ed whether the left-hand-expr has caused exeption or not;
   #       the exception value (or nil if none occurred) is the context
   #       match target during eval of the right-hand-expr;
   #       an exception if occurred, will never be assumed as recovered
   #       by the right-hand-expr.
 
-  {
-    throw 3*7
-  } $=> {
+  { # there is no `try` keyword in Edh, just use a block (or single
+    # expression) as the left-hand-expr of ($=>) or (@=>)
+
+    throw 3*7  # any value can be thrown
+
+  } $=> {{ ParseError: _ }} -> {
+    # (->) binds tighter than ($=>) so a single branch catch can be used
+
+    runtime.warn <| 'Obviously you have given the wrong input'
+
+  } $=> {  # multiple `catch` can be chained
 
     { n } -> {
       runtime.print( 'a ' ++ n ++ ' is thrown!' )
@@ -30,7 +37,13 @@
       runtime.print( "That's what I'm afraid of, but it's okay then." )
     }
 
-  } @=> {
+  } @=> {  # the (@=>) `finally` operator
+
+    # you can check whether an exception has occurred in a finally block,
+    # although this won't recover anyway
+    { _ } -> runtime.print( "I know I'm cleaning up after some err!" )
+    # note the pattern used above is `non-nil-capture`, and underscore
+    # attr name used to discard the value
 
     runtime.print( 'I always do cleanup anyway.' )
 
