@@ -425,12 +425,19 @@ worldContext !world = Context
   }
 {-# INLINE worldContext #-}
 
+
 data EdhRuntime = EdhRuntime {
-    consoleIO :: !(TMVar (Maybe (TMVar Text)))
+    consoleIO :: !(TQueue EdhConsoleIO)
   , runtimeLogLevel :: !LogLevel
   , runtimeLogger :: !EdhLogger
   , flushRuntimeLogs :: IO ()
   }
+data EdhConsoleIO = ConsoleShutdown
+    | ConsoleOut !Text
+    -- ^ output line
+    | ConsoleIn !(TMVar Text) !Text !Text
+    -- ^ result-receiver ps1 ps2
+  deriving (Eq)
 type EdhLogger = LogLevel -> Maybe String -> ArgsPack -> STM ()
 type LogLevel = Int
 

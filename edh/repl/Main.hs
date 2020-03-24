@@ -8,6 +8,8 @@ import           Control.Exception
 import           Control.Concurrent
 import           Control.Concurrent.STM
 
+import qualified Data.Text                     as T
+
 import           System.Console.Haskeline       ( runInputT
                                                 , Settings(..)
                                                 , outputStrLn
@@ -30,15 +32,18 @@ main = do
 
   mainThId <- myThreadId
 
-  ioChan   <- newEmptyTMVarIO
-  runtime  <- defaultEdhRuntime ioChan
+  ioQ      <- newTQueueIO
+  runtime  <- defaultEdhRuntime ioQ
 
   world    <- createEdhWorld runtime
   installEdhBatteries world
 
-  forkFinally (runEdhModule' world "repl") $ \case
-    Left  (e :: SomeException) -> throwTo mainThId e
-    Right _                    -> atomically $ putTMVar ioChan Nothing
+  forkFinally (edhProgLoop ioQ world) $ \result -> do
+    case result of
+      Left (e :: SomeException) ->
+        atomically $ writeTQueue ioQ $ ConsoleOut $ "💥 " <> T.pack (show e)
+      Right _ -> atomically $ writeTQueue ioQ $ ConsoleOut "Bye."
+    atomically $ writeTQueue ioQ ConsoleShutdown
 
   runInputT inputSettings $ do
 
@@ -47,6 +52,6 @@ main = do
       "* Blank Screen Syndrome ? Take the Tour as your companion, checkout:"
     outputStrLn "  https://github.com/e-wrks/edh/tree/master/Tour"
 
-    ioLoop ioChan
+    ioLoop ioQ
 
   flushRuntimeLogs runtime

@@ -82,54 +82,85 @@ loggingProc !lhExpr !rhExpr !exit = do
     _ -> throwEdh EvalError $ "Invalid log level: " <> T.pack (show lhVal)
 
 
+rtExitProc :: EdhProcedure
+rtExitProc _ _ = ask >>= \pgs -> do
+  let !ioQ = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
+  contEdhSTM $ writeTQueue ioQ ConsoleShutdown
+  -- no CPS exit call, there's no return from `runtime.exit()`
+
+
 rtReadCommandsProc :: EdhProcedure
-rtReadCommandsProc _ _ = ask >>= \pgs ->
-  case generatorCaller $ edh'context pgs of
-    Nothing -> throwEdh EvalError "Can only be called as generator"
-    Just (!pgs', !iter'cb) -> do
-      let !cioChan = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
-          readCmds :: STM ()
-          readCmds = do
-            cmdIn <- newEmptyTMVar
-            putTMVar cioChan $ Just cmdIn
-            waitEdhSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
-              EdhString !cmdCode ->
-                runEdhProg pgs' -- eval console code in caller's context
-                  $ evalEdh "<console>" cmdCode
-                  $ \(OriginalValue !cmdVal _ _) ->
-                      contEdhSTM $ runEdhProg pgs' $ iter'cb cmdVal $ const
-                        readCmds
-              _ -> error "impossible"
-      contEdhSTM readCmds
+rtReadCommandsProc !apk _ = ask >>= \pgs ->
+  case parseArgsPack ("Đ: ", "Đ| ") argsParser apk of
+    Left  err        -> throwEdh EvalError err
+    Right (ps1, ps2) -> case generatorCaller $ edh'context pgs of
+      Nothing -> throwEdh EvalError "Can only be called as generator"
+      Just (!pgs', !iter'cb) -> do
+        let !ioQ = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
+            readCmds :: STM ()
+            readCmds = do
+              cmdIn <- newEmptyTMVar
+              writeTQueue ioQ $ ConsoleIn cmdIn ps1 ps2
+              waitEdhSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
+                EdhString !cmdCode ->
+                  runEdhProg pgs' -- eval console code in for-loop's context
+                    $ evalEdh "<console>" cmdCode
+                    $ \(OriginalValue !cmdVal _ _) ->
+                        contEdhSTM
+                          $ runEdhProg pgs'
+                          -- don't yield nil, or the loop stops
+                          $ iter'cb (noneNil cmdVal)
+                          $ const readCmds
+                _ -> error "impossible"
+        contEdhSTM readCmds
+ where
+  argsParser =
+    ArgsPackParser
+        [ \arg (_, ps2') -> case arg of
+          EdhString ps1s -> Right (ps1s, ps2')
+          _              -> Left "Invalid ps1"
+        , \arg (ps1', _) -> case arg of
+          EdhString ps2s -> Right (ps1', ps2s)
+          _              -> Left "Invalid ps2"
+        ]
+      $ Map.fromList
+          [ ( "ps1"
+            , \arg (_, ps2') -> case arg of
+              EdhString ps1s -> Right (ps1s, ps2')
+              _              -> Left "Invalid ps1"
+            )
+          , ( "ps2"
+            , \arg (ps1', _) -> case arg of
+              EdhString ps2s -> Right (ps1', ps2s)
+              _              -> Left "Invalid ps2"
+            )
+          ]
 
 
 rtPrintProc :: EdhProcedure
 rtPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
-  let !cioChan = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
-      consoleOutput !txt = do
-        co <- newTMVar txt
-        putTMVar cioChan $ Just co
-        return nil
+  let !ioQ = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
       printVS :: [EdhValue] -> [(AttrName, EdhValue)] -> STM ()
       printVS [] []              = exitEdhSTM pgs exit nil
       printVS [] ((k, v) : rest) = case v of
-        EdhString !s ->
-          waitEdhSTM pgs (consoleOutput $ k <> "=" <> s) $ \_ -> printVS [] rest
+        EdhString !s -> do
+          writeTQueue ioQ $ ConsoleOut $ k <> "=" <> s
+          printVS [] rest
         _ -> runEdhProg pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
           case vr of
-            EdhString !s ->
-              contEdhSTM
-                $ waitEdhSTM pgs (consoleOutput $ k <> "=" <> s)
-                $ \_ -> printVS [] rest
+            EdhString !s -> contEdhSTM $ do
+              writeTQueue ioQ $ ConsoleOut $ k <> "=" <> s
+              printVS [] rest
             _ -> error "bug"
       printVS (v : rest) !kvs = case v of
-        EdhString !s ->
-          waitEdhSTM pgs (consoleOutput s) $ \_ -> printVS rest kvs
+        EdhString !s -> do
+          writeTQueue ioQ $ ConsoleOut s
+          printVS rest kvs
         _ -> runEdhProg pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
           case vr of
-            EdhString !s ->
-              contEdhSTM $ waitEdhSTM pgs (consoleOutput s) $ \_ ->
-                printVS rest kvs
+            EdhString !s -> contEdhSTM $ do
+              writeTQueue ioQ $ ConsoleOut s
+              printVS rest kvs
             _ -> error "bug"
   printVS args $ Map.toList kwargs
 

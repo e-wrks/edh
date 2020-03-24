@@ -1,7 +1,6 @@
 
-for cmd from runtime.readCommands() do case type(cmd) of {
+for cmd from runtime.readCommands(ps1="Đ: ", ps2="Đ| ")
+ do case type(cmd) of {
   nil -> { continue }
-  # TODO runtime.print() not working right now
-  # runtime.print( cmd )
-  ;-1<| ' got ' ++ cmd
+  runtime.print( cmd )
 }

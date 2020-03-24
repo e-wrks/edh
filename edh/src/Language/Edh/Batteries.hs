@@ -233,18 +233,33 @@ installEdhBatteries world = liftIO $ do
           !rtScope = objectScope (edh'context pgs) runtime
 
       !rtMethods <- sequence
-        [ (AttrByName nm, ) <$> mkHostProc
-            rtScope
-            vc
-            nm
-            hp
-            (PackReceiver [RecvArg "interval" Nothing Nothing])
-        | (vc, nm, hp) <-
-          [ (EdhGnrtor, "readCommands", rtReadCommandsProc)
-          , (EdhMethod, "print"       , rtPrintProc)
-          , (EdhGnrtor, "everyMicros" , rtEveryMicrosProc)
-          , (EdhGnrtor, "everyMillis" , rtEveryMillisProc)
-          , (EdhGnrtor, "everySeconds", rtEverySecondsProc)
+        [ (AttrByName nm, ) <$> mkHostProc rtScope vc nm hp args
+        | (vc, nm, hp, args) <-
+          [ (EdhMethod, "exit", rtExitProc, PackReceiver [])
+          , ( EdhGnrtor
+            , "readCommands"
+            , rtReadCommandsProc
+            , PackReceiver
+              [ RecvArg "ps1" Nothing (Just (LitExpr (StringLiteral "Đ: ")))
+              , RecvArg "ps2" Nothing (Just (LitExpr (StringLiteral "Đ| ")))
+              ]
+            )
+          , (EdhMethod, "print", rtPrintProc, WildReceiver)
+          , ( EdhGnrtor
+            , "everyMicros"
+            , rtEveryMicrosProc
+            , PackReceiver [RecvArg "interval" Nothing Nothing]
+            )
+          , ( EdhGnrtor
+            , "everyMillis"
+            , rtEveryMillisProc
+            , PackReceiver [RecvArg "interval" Nothing Nothing]
+            )
+          , ( EdhGnrtor
+            , "everySeconds"
+            , rtEverySecondsProc
+            , PackReceiver [RecvArg "interval" Nothing Nothing]
+            )
           ]
         ]
       updateEntityAttrs pgs rtEntity

@@ -47,8 +47,8 @@ import           Language.Edh.Details.Evaluate
 --  *) can mess up with others writing to 'stderr'
 --  *) if all others use 'trace' only, there're minimum messups but emojis 
 --     seem to be break points
-defaultEdhRuntime :: TMVar (Maybe (TMVar Text)) -> IO EdhRuntime
-defaultEdhRuntime !ioChan = do
+defaultEdhRuntime :: TQueue EdhConsoleIO -> IO EdhRuntime
+defaultEdhRuntime !ioQ = do
   envLogLevel <- lookupEnv "EDH_LOG_LEVEL"
   logIdle     <- newEmptyTMVarIO
   logQueue    <- newTQueueIO
@@ -104,7 +104,7 @@ defaultEdhRuntime !ioChan = do
                 _               -> "😥 "
   void $ mask_ $ forkIOWithUnmask $ \unmask ->
     finally (unmask logPrinter) $ atomically $ tryPutTMVar logIdle ()
-  return EdhRuntime { consoleIO        = ioChan
+  return EdhRuntime { consoleIO        = ioQ
                     , runtimeLogLevel  = logLevel
                     , runtimeLogger    = logger
                     , flushRuntimeLogs = flushLogs
