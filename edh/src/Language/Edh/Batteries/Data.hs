@@ -136,7 +136,7 @@ symbolCtorProc (ArgsPack !args _) !exit = do
     _ -> throwEdhSTM pgs EvalError "Invalid arg to Symbol()"
 
 
--- | utility pkargs(*args,**kwargs,***packed) - arguments packer
+-- | utility pkargs(***apk) - arguments packer
 pkargsProc :: EdhProcedure
 pkargsProc !apk !exit = exitEdhProc exit (EdhArgsPack apk)
 
