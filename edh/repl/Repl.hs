@@ -31,16 +31,32 @@ defaultPS2 = "Đ| "
 
 
 -- | Manage lifecycle of Edh programs during the repl session
-edhProgLoop :: TQueue EdhConsoleIO -> EdhWorld -> IO ()
-edhProgLoop !ioQ !world = loop
- where
-  loop = do
-    runEdhModule world "repl" >>= \case
-      Left  err -> atomically $ writeTQueue ioQ $ ConsoleOut $ T.pack $ show err
-      Right ()  -> pure ()
-    atomically $ writeTQueue ioQ $ ConsoleOut "🐴🐴🐯🐯"
-    loop
+edhProgLoop :: EdhRuntime -> IO ()
+edhProgLoop !runtime = do
 
+  -- create only one world, always this world not matter how many times
+  -- the Edh programs crash
+  world <- createEdhWorld runtime
+  installEdhBatteries world
+  -- install more host modules and/or other artifacts to be available
+
+  let loop = do
+        -- to run a module is to seek its `__main__.edh` and execute the
+        -- code there in a volatile module context, it can import itself
+        -- (i.e. `__init__.edh`) during the run. the imported module can
+        -- survive program crashes as all imported modules do.
+        runEdhModule world "repl" >>= \case
+          Left err ->
+            atomically $ writeTQueue ioQ $ ConsoleOut $ T.pack $ show err
+          Right () -> pure ()
+        -- obviously the program has crashed now, but the world with all
+        -- modules ever imported, are still safe and sound.
+        -- we assume what the user has left in the volatile module is
+        -- dispensable, just so so.
+        atomically $ writeTQueue ioQ $ ConsoleOut "🐴🐴🐯🐯"
+        loop
+  loop
+  where ioQ = consoleIO runtime
 
 -- | Serialize output to `stdout` from Edh programs, and give them command
 -- line input when requested

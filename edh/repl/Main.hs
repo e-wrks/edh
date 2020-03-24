@@ -34,10 +34,7 @@ main = do
   ioQ     <- newTQueueIO
   runtime <- defaultEdhRuntime ioQ
 
-  world   <- createEdhWorld runtime
-  installEdhBatteries world
-
-  void $ forkFinally (edhProgLoop ioQ world) $ \result -> do
+  void $ forkFinally (edhProgLoop runtime) $ \result -> do
     case result of
       Left (e :: SomeException) ->
         atomically $ writeTQueue ioQ $ ConsoleOut $ "💥 " <> T.pack (show e)

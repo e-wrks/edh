@@ -3,10 +3,20 @@ module Language.Edh.Batteries where
 
 import           Prelude
 
+import           System.IO                      ( stderr )
+import           System.Environment
+import           Text.Read
+
+import           Control.Exception
+
 import           Control.Monad.Reader
+import           Control.Concurrent
 import           Control.Concurrent.STM
 
 import           Data.Unique
+import           Data.Text                      ( Text )
+import qualified Data.Text                     as T
+import           Data.Text.IO
 import qualified Data.HashMap.Strict           as Map
 
 import           Data.Lossless.Decimal         as D
@@ -21,6 +31,80 @@ import           Language.Edh.Batteries.Ctrl
 import           Language.Edh.Batteries.Runtime
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
+
+
+-- | This runtime serializes all log messages to 'stderr' through a 'TQueue',
+-- this is crucial under heavy concurrency.
+--
+-- `ioChan` is used to facilitate command input/output via 'stdin'/'stdout',
+-- an io loop run by main thread using a library like `haskeline` is assumed.
+--
+-- known issues:
+--  *) can mess up with others writing to 'stderr'
+--  *) if all others use 'trace' only, there're minimum messups but emojis 
+--     seem to be break points
+defaultEdhRuntime :: TQueue EdhConsoleIO -> IO EdhRuntime
+defaultEdhRuntime !ioQ = do
+  envLogLevel <- lookupEnv "EDH_LOG_LEVEL"
+  logIdle     <- newEmptyTMVarIO
+  logQueue    <- newTQueueIO
+  let logLevel = case envLogLevel of
+        Nothing      -> 20
+        Just "DEBUG" -> 10
+        Just "INFO"  -> 20
+        Just "WARN"  -> 30
+        Just "ERROR" -> 40
+        Just "FATAL" -> 50
+        Just ns      -> case readEither ns of
+          Left  _           -> 0
+          Right (ln :: Int) -> ln
+      flushLogs :: IO ()
+      flushLogs = atomically $ readTMVar logIdle
+      logPrinter :: IO ()
+      logPrinter = do
+        lr <- atomically (tryReadTQueue logQueue) >>= \case
+          Just !lr -> do
+            void $ atomically $ tryTakeTMVar logIdle
+            return lr
+          Nothing -> do
+            void $ atomically $ tryPutTMVar logIdle ()
+            lr <- atomically $ readTQueue logQueue
+            void $ atomically $ tryTakeTMVar logIdle
+            return lr
+        hPutStrLn stderr lr
+        logPrinter
+      logger :: EdhLogger
+      logger !level !srcLoc !pkargs = do
+        void $ tryTakeTMVar logIdle
+        case pkargs of
+          ArgsPack [!argVal] !kwargs | Map.null kwargs ->
+            writeTQueue logQueue $! T.pack logPrefix <> logString argVal
+          -- todo: format structured log record with log parser in mind
+          _ -> writeTQueue logQueue $! T.pack $ logPrefix ++ show pkargs
+       where
+        logString :: EdhValue -> Text
+        logString (EdhString s) = s
+        logString v             = T.pack $ show v
+        logPrefix :: String
+        logPrefix =
+          (case srcLoc of
+              Nothing -> id
+              Just sl -> (++ sl ++ "\n")
+            )
+            $ case level of
+                _ | level >= 50 -> "🔥 "
+                _ | level >= 40 -> "❗ "
+                _ | level >= 30 -> "⚠️ "
+                _ | level >= 20 -> "ℹ️ "
+                _ | level >= 10 -> "🐞 "
+                _               -> "😥 "
+  void $ mask_ $ forkIOWithUnmask $ \unmask ->
+    finally (unmask logPrinter) $ atomically $ tryPutTMVar logIdle ()
+  return EdhRuntime { consoleIO        = ioQ
+                    , runtimeLogLevel  = logLevel
+                    , runtimeLogger    = logger
+                    , flushRuntimeLogs = flushLogs
+                    }
 
 
 installEdhBatteries :: MonadIO m => EdhWorld -> m ()
