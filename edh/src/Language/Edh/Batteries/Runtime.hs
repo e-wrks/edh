@@ -82,6 +82,7 @@ loggingProc !lhExpr !rhExpr !exit = do
     _ -> throwEdh EvalError $ "Invalid log level: " <> T.pack (show lhVal)
 
 
+-- | host method runtime.exit()
 rtExitProc :: EdhProcedure
 rtExitProc _ _ = ask >>= \pgs -> do
   let !ioQ = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
@@ -89,6 +90,7 @@ rtExitProc _ _ = ask >>= \pgs -> do
   -- no CPS exit call, there's no return from `runtime.exit()`
 
 
+-- | host method runtime.readCommands(ps1="(db)Đ: ", ps2="(db)Đ| ")
 rtReadCommandsProc :: EdhProcedure
 rtReadCommandsProc !apk _ = ask >>= \pgs ->
   case parseArgsPack ("Đ: ", "Đ| ") argsParser apk of
@@ -141,6 +143,7 @@ rtReadCommandsProc !apk _ = ask >>= \pgs ->
           ]
 
 
+-- | host method runtime.print(*args, **kwargs)
 rtPrintProc :: EdhProcedure
 rtPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
   let !ioQ = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs

@@ -6,11 +6,8 @@ import           Prelude
 
 import           Text.Printf
 
-import           Control.Monad
-
 import           Control.Monad.Reader
 
-import           Control.Concurrent
 import           Control.Concurrent.STM
 
 import           Data.Text                      ( Text )
@@ -21,6 +18,19 @@ import           System.Console.Haskeline
 import           Language.Edh.EHI
 
 
+-- | The default Edh command prompts
+--
+-- ps1 is for single line, ps2 for multi-line
+-- 
+-- note the defaults here are technically in no effect, just advice
+-- see implementation of:
+--   runtime.readCommands(ps1="Đ: ", ps2="Đ| ")
+defaultPS1, defaultPS2 :: Text
+defaultPS1 = "Đ: "
+defaultPS2 = "Đ| "
+
+
+-- | Manage lifecycle of Edh programs during the repl session
 edhProgLoop :: TQueue EdhConsoleIO -> EdhWorld -> IO ()
 edhProgLoop !ioQ !world = loop
  where
@@ -32,6 +42,8 @@ edhProgLoop !ioQ !world = loop
     loop
 
 
+-- | Serialize output to `stdout` from Edh programs, and give them command
+-- line input when requested
 ioLoop :: TQueue EdhConsoleIO -> InputT IO ()
 ioLoop !ioQ = liftIO (atomically $ readTQueue ioQ) >>= \case
   ConsoleShutdown    -> return () -- gracefully stop the io loop
@@ -46,10 +58,7 @@ ioLoop !ioQ = liftIO (atomically $ readTQueue ioQ) >>= \case
       ioLoop ioQ
 
 
-defaultPS1, defaultPS2 :: Text
-defaultPS1 = "Đ: "
-defaultPS2 = "Đ| "
-
+-- | The repl line reader
 readInput :: Text -> Text -> [Text] -> InputT IO (Maybe Text)
 readInput !ps1 !ps2 !initialLines =
   handleInterrupt ( -- start over on Ctrl^C

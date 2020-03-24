@@ -4,6 +4,7 @@ module Main where
 import           Prelude
 -- import           Debug.Trace
 
+import           Control.Monad
 import           Control.Exception
 import           Control.Concurrent
 import           Control.Concurrent.STM
@@ -30,15 +31,13 @@ inputSettings = Settings { complete       = \(_left, _right) -> return ("", [])
 main :: IO ()
 main = do
 
-  mainThId <- myThreadId
+  ioQ     <- newTQueueIO
+  runtime <- defaultEdhRuntime ioQ
 
-  ioQ      <- newTQueueIO
-  runtime  <- defaultEdhRuntime ioQ
-
-  world    <- createEdhWorld runtime
+  world   <- createEdhWorld runtime
   installEdhBatteries world
 
-  forkFinally (edhProgLoop ioQ world) $ \result -> do
+  void $ forkFinally (edhProgLoop ioQ world) $ \result -> do
     case result of
       Left (e :: SomeException) ->
         atomically $ writeTQueue ioQ $ ConsoleOut $ "💥 " <> T.pack (show e)
@@ -46,12 +45,10 @@ main = do
     atomically $ writeTQueue ioQ ConsoleShutdown
 
   runInputT inputSettings $ do
-
     outputStrLn ">> Bare Đ (Edh) Interpreter <<"
     outputStrLn
       "* Blank Screen Syndrome ? Take the Tour as your companion, checkout:"
     outputStrLn "  https://github.com/e-wrks/edh/tree/master/Tour"
-
     ioLoop ioQ
 
   flushRuntimeLogs runtime
