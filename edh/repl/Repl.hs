@@ -34,8 +34,8 @@ defaultPS2 = "Đ| "
 edhProgLoop :: EdhRuntime -> IO ()
 edhProgLoop !runtime = do
 
-  -- create only one world, always this world not matter how many times
-  -- the Edh programs crash
+  -- create the world, we always work with this world no matter how
+  -- many times the Edh programs crash
   world <- createEdhWorld runtime
   installEdhBatteries world
   -- install more host modules and/or other artifacts to be available
