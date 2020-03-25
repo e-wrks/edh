@@ -14,6 +14,7 @@ import           Control.Concurrent.STM
 
 import           Data.Unique
 import           Data.Maybe
+import           Data.Either
 import qualified Data.ByteString               as B
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
@@ -63,8 +64,7 @@ evalEdh !srcName !srcCode !exit = do
       world = contextWorld ctx
   contEdhSTM $ parseEdh world srcName srcCode >>= \case
     Left !err ->
-      throwSTM $ ParseError (T.pack $ errorBundlePretty err) $
-       getEdhCallContext
+      throwSTM $ ParseError (T.pack $ errorBundlePretty err) $ getEdhCallContext
         0
         pgs
     Right !stmts -> runEdhProg pgs $ evalBlock stmts exit
@@ -1207,13 +1207,17 @@ constructEdhObject !cls apk@(ArgsPack !args !kwargs) !exit = do
       contEdhSTM
         $   lookupEntityAttr pgsCtor thisEnt (AttrByName "__init__")
         >>= \case
-              EdhNil -> if null args && Map.null kwargs
-                then exitEdhSTM pgsCaller exit thisVal
-                else
-                  throwEdhSTM pgsCaller EvalError
-                  $  "No __init__() defined by class "
-                  <> procedure'name (procedure'decl cls)
-                  <> " to receive argument(s)"
+              EdhNil ->
+                if (null args && Map.null kwargs) -- no ctor arg at all
+                     || -- it's okay for a host class to omit __init__()
+                        -- while processes ctor args by the host class proc
+                        isRight (procedure'body $ procedure'decl cls)
+                  then exitEdhSTM pgsCaller exit thisVal
+                  else
+                    throwEdhSTM pgsCaller EvalError
+                    $  "No __init__() defined by class "
+                    <> procedure'name (procedure'decl cls)
+                    <> " to receive argument(s)"
               EdhMethod !initMth ->
                 case procedure'body $ procedure'decl initMth of
                   Right !hp ->

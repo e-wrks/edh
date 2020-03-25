@@ -138,23 +138,13 @@ createEdhWorld !runtime = liftIO $ do
         !this  = thisObject scope
         !cc    = getEdhCallContext 1 pgs
         !he    = hec apk cc
-        __init__ :: EdhProcedure
-        __init__ _ !exit =
-          ask -- need to do nothing but return `this`
-            >>= exitEdhProc exit
-            .   EdhObject
-            .   thisObject
-            .   contextScope
-            .   edh'context
         __repr__ :: EdhProcedure
         __repr__ _ !exit = exitEdhProc exit $ EdhString $ T.pack $ show he
     writeTVar (entity'store $ objEntity this) $ toDyn he
     methods <- sequence
       [ (AttrByName nm, ) <$> mkHostProc scope vc nm hp args
       | (nm, vc, hp, args) <-
-        [ ("__init__", EdhMethod, __init__, WildReceiver)
-        , ("__repr__", EdhMethod, __repr__, PackReceiver [])
-        ]
+        [("__repr__", EdhMethod, __repr__, PackReceiver [])]
       ]
     writeTVar obs $ Map.fromList methods
 
