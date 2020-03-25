@@ -36,6 +36,37 @@ errorProc (ArgsPack !args !kwargs) _ = case args of
   logString v             = T.pack $ show v
 
 
+-- | operator ($=>) - the `catch`
+--
+-- the right-hand-expr will only be eval'ed  when an exception occurred
+-- in its left-hand-expr;
+-- the exception value is the context match target during eval of the
+-- right-hand-expr;
+-- the exceptin is assused to have been recovered, if the rhe evals as
+-- matched (i.e. not to a value of <fallthrough>), or the exception will
+-- keep propagating, i.e. re-thrown.
+catchProc :: EdhIntrinsicOp
+catchProc !_tryExpr !_catchExpr !exit = do
+  !_pgs <- ask
+
+  exitEdhProc exit nil
+
+
+-- | operator (@=>) - the `finally`
+--
+-- the right-hand-expr will always be eval'ed whether the left-hand-expr
+-- has caused exeption or not;
+-- the exception value (or nil if none occurred) is the context match
+-- target during eval of the right-hand-expr;
+-- an exception if occurred, will never be assumed as recovered by the
+-- right-hand-expr.
+finallyProc :: EdhIntrinsicOp
+finallyProc !_tryExpr !_finallyExpr !exit = do
+  !_pgs <- ask
+
+  exitEdhProc exit nil
+
+
 -- | operator (->) - the brancher, if its left-hand matches, early stop its
 -- enclosing code block (commonly a case-of block, but other blocks as well),
 -- with eval-ed result of its right-hand, unless the right-hand result is

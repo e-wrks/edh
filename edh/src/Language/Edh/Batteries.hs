@@ -271,6 +271,8 @@ installEdhBatteries world = liftIO $ do
           , ("<=" , isLeProc)
           , ("="  , assignProc)
           , ("->" , branchProc)
+          , ("$=>", catchProc)
+          , ("@=>", finallyProc)
           , ("<|" , loggingProc)
           ]
         ]

@@ -224,12 +224,11 @@ mkHostClass !scope !nm !writeProtected !hc = do
   return $ EdhClass cls
 
 
-runEdhProgram
-  :: MonadIO m => Context -> EdhProg (STM ()) -> m (Either EdhError EdhValue)
+runEdhProgram :: MonadIO m => Context -> EdhProg -> m (Either EdhError EdhValue)
 runEdhProgram !ctx !prog =
   liftIO $ tryJust edhKnownError $ runEdhProgram' ctx prog
 
-runEdhProgram' :: MonadIO m => Context -> EdhProg (STM ()) -> m EdhValue
+runEdhProgram' :: MonadIO m => Context -> EdhProg -> m EdhValue
 runEdhProgram' !ctx !prog = liftIO $ do
   haltResult <- atomically newEmptyTMVar
   driveEdhProgram haltResult ctx prog

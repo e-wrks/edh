@@ -279,7 +279,22 @@ contextScope :: Context -> Scope
 contextScope = NE.head . callStack
 
 type EdhGenrCaller
-  = (EdhProgState, EdhValue -> (EdhValue -> STM ()) -> EdhProg (STM ()))
+  = ( -- the caller's state
+       EdhProgState
+      -- the yield receiver, a.k.a. the caller's continuation
+    ,  EdhValue -- one value yielded from the generator
+    -> ( -- continuation of the genrator
+          EdhValue -- value given to the `yield` expr in generator
+       -> STM ()
+       )
+    -> EdhProg
+    )
+
+type EdhExcptHndlr
+  =  EdhValue -- ^ the exception value thrown
+  -> (EdhValue -> EdhProg) -- ^ the continuation to re-throw
+  -> EdhProg -- ^ the continuation after recovery
+  -> EdhProg
 
 
 -- | An Edh value with the origin where it came from
@@ -340,7 +355,6 @@ instance Show Scope where
     defLoc = case procBody of
       Right _                   -> "<host-code>"
       Left  (StmtSrc (dPos, _)) -> sourcePosPretty dPos
-
 
 outerScopeOf :: Scope -> Maybe Scope
 outerScopeOf = procedure'lexi . scopeProc
@@ -450,7 +464,8 @@ wuji !pgs = OriginalValue nil rootScope $ thisObject rootScope
 
 
 -- | The monad for running of an Edh program
-type EdhProg = ReaderT EdhProgState STM
+type EdhMonad = ReaderT EdhProgState STM
+type EdhProg = EdhMonad (STM ())
 
 -- | The states of a program
 data EdhProgState = EdhProgState {
@@ -463,14 +478,14 @@ data EdhProgState = EdhProgState {
   }
 
 type ReactorRecord = (TChan EdhValue, EdhProgState, ArgsReceiver, Expr)
-type DeferRecord = (EdhProgState, EdhProg (STM ()))
+type DeferRecord = (EdhProgState, EdhProg)
 
 -- | Run an Edh program from within STM monad
-runEdhProg :: EdhProgState -> EdhProg (STM ()) -> STM ()
+runEdhProg :: EdhProgState -> EdhProg -> STM ()
 runEdhProg !pgs !prog = join $ runReaderT prog pgs
 {-# INLINE runEdhProg #-}
 
-forkEdh :: EdhProcExit -> EdhProg (STM ()) -> EdhProg (STM ())
+forkEdh :: EdhProcExit -> EdhProg -> EdhProg
 forkEdh !exit !prog = ask >>= \pgs -> if edh'in'tx pgs
   then throwEdh EvalError "You don't fork within a transaction"
   else contEdhSTM $ do
@@ -485,17 +500,17 @@ forkEdh !exit !prog = ask >>= \pgs -> if edh'in'tx pgs
 --
 -- Note: this is just `return`, but procedures writen in the host language
 -- (i.e. Haskell) with this instead of `return` will be more readable.
-contEdhSTM :: STM () -> EdhProg (STM ())
+contEdhSTM :: STM () -> EdhProg
 contEdhSTM = return
 {-# INLINE contEdhSTM #-}
 
 -- | Convenient function to be used as short-hand to return from an Edh
 -- procedure (or functions with similar signature), this sets transaction
 -- boundaries wrt tx stated in the program's current state.
-exitEdhProc :: EdhProcExit -> EdhValue -> EdhProg (STM ())
+exitEdhProc :: EdhProcExit -> EdhValue -> EdhProg
 exitEdhProc !exit !val = ask >>= \pgs -> contEdhSTM $ exitEdhSTM pgs exit val
 {-# INLINE exitEdhProc #-}
-exitEdhProc' :: EdhProcExit -> OriginalValue -> EdhProg (STM ())
+exitEdhProc' :: EdhProcExit -> OriginalValue -> EdhProg
 exitEdhProc' !exit !result =
   ask >>= \pgs -> contEdhSTM $ exitEdhSTM' pgs exit result
 {-# INLINE exitEdhProc' #-}
@@ -521,7 +536,7 @@ data EdhTxTask = EdhTxTask {
     edh'task'pgs :: !EdhProgState
     , edh'task'wait :: !Bool
     , edh'task'input :: !OriginalValue
-    , edh'task'job :: !(OriginalValue -> EdhProg (STM ()))
+    , edh'task'job :: !(OriginalValue -> EdhProg)
   }
 
 -- | Instruct the Edh program driver to not auto retry the specified stm
@@ -545,7 +560,7 @@ waitEdhSTM !pgs !act !exit = if edh'in'tx pgs
       }
 
 -- | Blocking wait an asynchronous IO action from current Edh thread
-edhWaitIO :: EdhProcExit -> IO EdhValue -> EdhProg (STM ())
+edhWaitIO :: EdhProcExit -> IO EdhValue -> EdhProg
 edhWaitIO !exit !act = ask >>= \pgs -> if edh'in'tx pgs
   then throwEdh EvalError "You don't wait IO within a transaction"
   else contEdhSTM $ do
@@ -562,7 +577,7 @@ edhWaitIO !exit !act = ask >>= \pgs -> if edh'in'tx pgs
 -- | Type of an intrinsic infix operator in host language.
 --
 -- Note no stack frame is created/pushed when an intrinsic operator is called.
-type EdhIntrinsicOp = Expr -> Expr -> EdhProcExit -> EdhProg (STM ())
+type EdhIntrinsicOp = Expr -> Expr -> EdhProcExit -> EdhProg
 
 data IntrinOpDefi = IntrinOpDefi {
       intrinsic'op'uniq :: !Unique
@@ -578,10 +593,10 @@ data IntrinOpDefi = IntrinOpDefi {
 type EdhProcedure -- such a procedure servs as the callee
   =  ArgsPack    -- ^ the pack of arguments
   -> EdhProcExit -- ^ the CPS exit to return a value from this procedure
-  -> EdhProg (STM ())
+  -> EdhProg
 
 -- | The type for an Edh procedure's return, in continuation passing style.
-type EdhProcExit = OriginalValue -> EdhProg (STM ())
+type EdhProcExit = OriginalValue -> EdhProg
 
 -- | A no-operation as an Edh procedure, ignoring any arg
 edhNop :: EdhProcedure
@@ -617,8 +632,7 @@ getEdhCallContext !pgs = EdhCallContext (T.pack $ sourcePosPretty tip) frames
 
 -- | Throw from an Edh program, be cautious NOT to have any monadic action
 -- following such a throw, or it'll silently fail to work out.
-throwEdh
-  :: Exception e => (Text -> EdhCallContext -> e) -> Text -> EdhProg (STM ())
+throwEdh :: Exception e => (Text -> EdhCallContext -> e) -> Text -> EdhProg
 throwEdh !excCtor !msg = do
   !pgs <- ask
   return $ throwSTM (excCtor msg $ getEdhCallContext pgs)

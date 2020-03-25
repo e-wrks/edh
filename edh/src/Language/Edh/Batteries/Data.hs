@@ -177,7 +177,7 @@ concatProc !lhExpr !rhExpr !exit =
           _              -> error "bug: edhValueStr returned non-string"
       _ -> error "bug: edhValueStr returned non-string"
  where
-  edhValueStr :: EdhValue -> EdhProcExit -> EdhProg (STM ())
+  edhValueStr :: EdhValue -> EdhProcExit -> EdhProg
   edhValueStr s@EdhString{} !exit' = exitEdhProc exit' s
   edhValueStr !v            !exit' = edhValueRepr v exit'
 

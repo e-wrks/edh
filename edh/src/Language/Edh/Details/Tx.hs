@@ -24,10 +24,7 @@ import           Language.Edh.Details.Evaluate
 -- description at:
 --   https://github.com/e-wrks/edh/tree/master/Tour#program--threading-model
 driveEdhProgram
-  :: TMVar (Either SomeException EdhValue)
-  -> Context
-  -> EdhProg (STM ())
-  -> IO ()
+  :: TMVar (Either SomeException EdhValue) -> Context -> EdhProg -> IO ()
 driveEdhProgram !haltResult !progCtx !prog = do
   -- check async exception mask state
   getMaskingState >>= \case

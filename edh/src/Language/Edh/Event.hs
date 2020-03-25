@@ -65,8 +65,7 @@ subscribeEvents (EventSink _ !seqn !mrv !bcc !subc) = do
 -- | Fork a new Edh thread to run the specified event producer, but hold the 
 -- production until current thread has later started consuming events from the
 -- sink returned here.
-launchEventProducer
-  :: EdhProcExit -> EventSink -> EdhProg (STM ()) -> EdhProg (STM ())
+launchEventProducer :: EdhProcExit -> EventSink -> EdhProg -> EdhProg
 launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerProg = do
   pgsConsumer <- ask
   let !pgsLaunch = pgsConsumer { edh'in'tx = False }

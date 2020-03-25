@@ -234,7 +234,7 @@ scopeEvalProc (ArgsPack !args !kwargs) !exit = do
       -> Map.HashMap AttrName EdhValue
       -> [EdhValue]
       -> [(AttrName, EdhValue)]
-      -> EdhProg (STM ())
+      -> EdhProg
     evalThePack !argsValues !kwargsValues [] [] =
       contEdhSTM
         -- restore original program state and return the eval-ed values
