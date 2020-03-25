@@ -11,10 +11,18 @@ import           System.Directory
 import           Control.Exception
 
 
+import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import           Data.List
 
 import           Language.Edh.Control
+
+
+-- package loading mechanism is kept as simple as possible by far, not Edh
+-- program context trips into it, the `PackageError` thrown may be augmented
+-- later when appropriate.
+throwPkgError :: Text -> IO a
+throwPkgError !msg = throwIO $ PackageError msg $ EdhCallContext "<os>" []
 
 
 edhPkgPathFrom :: FilePath -> FilePath
@@ -31,12 +39,11 @@ edhPkgPathFrom !fromPath = if "<" `isPrefixOf` fromPath
 locateEdhModule :: FilePath -> FilePath -> IO (FilePath, FilePath)
 locateEdhModule !pkgPath !importPath = case splitExtension importPath of
   (_, ".edh") ->
-    throwIO
-      $  PackageError
+    throwPkgError
       $  "You don't include the `.edh` file extension in the import: "
       <> T.pack importPath
   _ -> doesPathExist pkgPath >>= \case
-    False -> throwIO $ PackageError $ "Path does not exist: " <> T.pack pkgPath
+    False -> throwPkgError $ "Path does not exist: " <> T.pack pkgPath
     True  -> case stripPrefix "./" importPath of
       Just !relImp -> resolveRelImport relImp
       Nothing      -> canonicalizePath pkgPath >>= resolveAbsImport
@@ -56,7 +63,7 @@ locateEdhModule !pkgPath !importPath = case splitExtension importPath of
           False ->
             -- do
             --   trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $  return ()
-            throwIO $ PackageError $ "No such module: " <> T.pack importPath
+            throwPkgError $ "No such module: " <> T.pack importPath
 
   resolveAbsImport :: FilePath -> IO (FilePath, FilePath)
   resolveAbsImport !caniPkgPath = do
@@ -74,8 +81,7 @@ locateEdhModule !pkgPath !importPath = case splitExtension importPath of
             -- trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $ return ()
             let !parentPkgPath = takeDirectory caniPkgPath
             if equalFilePath parentPkgPath caniPkgPath
-              then
-                throwIO $ PackageError $ "No such module: " <> T.pack importPath
+              then throwPkgError $ "No such module: " <> T.pack importPath
               else resolveAbsImport parentPkgPath
 
 
@@ -91,10 +97,6 @@ locateEdhMainModule !importPath = canonicalizePath "." >>= resolveMainImport
       False -> do
         let !parentPkgPath = takeDirectory caniPkgPath
         if equalFilePath parentPkgPath caniPkgPath
-          then
-            throwIO
-            $  PackageError
-            $  "No such main module: "
-            <> T.pack importPath
+          then throwPkgError $ "No such main module: " <> T.pack importPath
           else resolveMainImport parentPkgPath
 

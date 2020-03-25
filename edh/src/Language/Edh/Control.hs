@@ -11,6 +11,7 @@ import           Data.Typeable
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
+import           Data.Dynamic
 
 import           Text.Megaparsec         hiding ( State )
 
@@ -52,18 +53,22 @@ dispEdhCallContext (EdhCallContext !tip !frames) =
   T.unlines $ (dispEdhCallFrame <$> frames) ++ ["👉 " <> tip]
 
 
-data EdhError =
-      PackageError !Text
-    | ParseError !ParserError !EdhCallContext
+-- halt result in the dynamic is either an 'EdhValue' or an exception
+-- we are not importing 'EdhValue' into this module, for trivial
+-- avoiding of cyclic imports
+
+data EdhError = ProgramHalt !Dynamic
+    | PackageError !Text !EdhCallContext
+    | ParseError !Text !EdhCallContext
     | EvalError !Text !EdhCallContext
     | UsageError !Text !EdhCallContext
-  deriving (Eq, Typeable)
+  deriving (Typeable)
 instance Show EdhError where
-  show (PackageError !msg) = "📦 " <> T.unpack msg
-  show (ParseError !err !ctx) =
-    "💔\n" <> show ctx <> "⛔ " <> errorBundlePretty err
-  show (EvalError  !msg !ctx) = "💔\n" <> show ctx <> "💣 " <> T.unpack msg
-  show (UsageError !msg !ctx) = "💔\n" <> show ctx <> "🙈 " <> T.unpack msg
+  show (ProgramHalt _        ) = "Edh⏹️Halt"
+  show (PackageError !msg !cc) = "💔\n" <> show cc <> "📦 " <> T.unpack msg
+  show (ParseError   !msg !cc) = "💔\n" <> show cc <> "⛔ " <> T.unpack msg
+  show (EvalError    !msg !cc) = "💔\n" <> show cc <> "💣 " <> T.unpack msg
+  show (UsageError   !msg !cc) = "💔\n" <> show cc <> "🙈 " <> T.unpack msg
 instance Exception EdhError
 
 
@@ -71,6 +76,8 @@ edhKnownError :: SomeException -> Maybe EdhError
 edhKnownError err = case fromException err :: Maybe EdhError of
   Just e  -> Just e
   Nothing -> case fromException err :: Maybe ParserError of
-    Just e  -> Just $ ParseError e $ EdhCallContext "<parsing>" []
+    Just e -> Just $ ParseError (T.pack $ errorBundlePretty e) $ EdhCallContext
+      "<parsing>"
+      []
     Nothing -> Nothing
 

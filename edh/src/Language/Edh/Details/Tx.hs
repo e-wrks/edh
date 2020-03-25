@@ -196,7 +196,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
          doSTM 0
 
    where
-    callCtx = getEdhCallContext pgsTask
+    callCtx = getEdhCallContext 0 pgsTask
 
     waitSTM :: IO Bool
     waitSTM = atomically stmJob >>= \case

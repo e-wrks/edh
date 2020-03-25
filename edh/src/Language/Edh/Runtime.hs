@@ -21,6 +21,7 @@ import qualified Data.Text                     as T
 import           Data.Text.Encoding
 import           Data.Text.Encoding.Error
 import qualified Data.HashMap.Strict           as Map
+import           Data.Dynamic
 
 import           Text.Megaparsec
 
@@ -33,7 +34,8 @@ import           Language.Edh.Details.Evaluate
 
 createEdhWorld :: MonadIO m => EdhRuntime -> m EdhWorld
 createEdhWorld !runtime = liftIO $ do
-  -- ultimate default methods/operators/values go into this
+
+  -- ultimate global artifacts go into this
   rootEntity <- atomically $ createHashEntity $ Map.fromList
     [ (AttrByName "__name__", EdhString "<root>")
     , (AttrByName "__file__", EdhString "<genesis>")
@@ -41,8 +43,11 @@ createEdhWorld !runtime = liftIO $ do
     , (AttrByName "None"    , edhNone)
     , (AttrByName "Nothing" , edhNothing)
     ]
+
   -- methods supporting reflected scope manipulation go into this
   scopeManiMethods <- atomically $ createHashEntity Map.empty
+
+  -- prepare various pieces of the world
   rootSupers       <- newTVarIO []
   rootClassUniq    <- newUnique
   scopeClassUniq   <- newUnique
@@ -58,7 +63,7 @@ createEdhWorld !runtime = liftIO $ do
                      , objClass  = rootClass
                      , objSupers = rootSupers
                      }
-      !rootScope = Scope rootEntity root root rootClass $ StmtSrc
+      !rootScope = Scope rootEntity root root [] rootClass $ StmtSrc
         ( SourcePos { sourceName   = "<world-root>"
                     , sourceLine   = mkPos 1
                     , sourceColumn = mkPos 1
@@ -73,22 +78,83 @@ createEdhWorld !runtime = liftIO $ do
                                     , procedure'body = Right edhNop
                                     }
         }
+  -- operator precedence dict
   opPD <- newTMVarIO $ Map.fromList
     [ ( "$" -- dereferencing attribute addressor
       , (10, "<Intrinsic>")
       )
     ]
+  -- the container of loaded modules
   modus <- newTMVarIO Map.empty
-  return $ EdhWorld
-    { worldScope     = rootScope
-    , scopeSuper     = Object { objEntity = scopeManiMethods
-                              , objClass  = scopeClass
-                              , objSupers = rootSupers
-                              }
-    , worldOperators = opPD
-    , worldModules   = modus
-    , worldRuntime   = runtime
-    }
+
+  -- assembly the world with pieces prepared above
+  let world = EdhWorld
+        { worldScope     = rootScope
+        , scopeSuper     = Object { objEntity = scopeManiMethods
+                                  , objClass  = scopeClass
+                                  , objSupers = rootSupers
+                                  }
+        , worldOperators = opPD
+        , worldModules   = modus
+        , worldRuntime   = runtime
+        }
+
+  -- install host error classes
+  void $ runEdhProgram' (worldContext world) $ do
+    pgs <- ask
+    contEdhSTM $ do
+      errClasses <- sequence
+        [ (AttrByName nm, ) <$> mkHostClass rootScope nm False hc
+        | (nm, hc) <-
+          [ ("ProgramHalt" , edhErrorCtor edhProgramHaltCtor)
+          , ("PackageError", edhErrorCtor $ edhCommonErrCtor PackageError)
+          , ("ParseError"  , edhErrorCtor $ edhCommonErrCtor ParseError)
+          , ("EvalError"   , edhErrorCtor $ edhCommonErrCtor EvalError)
+          , ("UsageError"  , edhErrorCtor $ edhCommonErrCtor UsageError)
+          ]
+        ]
+      updateEntityAttrs pgs rootEntity errClasses
+
+  return world
+ where
+  edhProgramHaltCtor :: ArgsPack -> EdhCallContext -> EdhError
+  edhProgramHaltCtor (ArgsPack [v] !kwargs) _ | Map.null kwargs =
+    ProgramHalt $ toDyn v
+  edhProgramHaltCtor !apk _ = ProgramHalt $ toDyn apk
+  edhCommonErrCtor
+    :: (Text -> EdhCallContext -> EdhError)
+    -> ArgsPack
+    -> EdhCallContext
+    -> EdhError
+  edhCommonErrCtor !ec (ArgsPack []      _) !cc = ec "" cc
+  edhCommonErrCtor !ec (ArgsPack (v : _) _) !cc = ec (T.pack $ show v) cc
+  -- wrap a Haskell error data constructor as a host error object contstructor,
+  -- used to define an error class in Edh 
+  edhErrorCtor :: (ArgsPack -> EdhCallContext -> EdhError) -> EdhHostCtor
+  edhErrorCtor !hec !pgs !apk !obs = do
+    let !scope = contextScope $ edh'context pgs
+        !this  = thisObject scope
+        !cc    = getEdhCallContext 1 pgs
+        !he    = hec apk cc
+        __init__ :: EdhProcedure
+        __init__ _ !exit =
+          ask -- need to do nothing but return `this`
+            >>= exitEdhProc exit
+            .   EdhObject
+            .   thisObject
+            .   contextScope
+            .   edh'context
+        __repr__ :: EdhProcedure
+        __repr__ _ !exit = exitEdhProc exit $ EdhString $ T.pack $ show he
+    writeTVar (entity'store $ objEntity this) $ toDyn he
+    methods <- sequence
+      [ (AttrByName nm, ) <$> mkHostProc scope vc nm hp args
+      | (nm, vc, hp, args) <-
+        [ ("__init__", EdhMethod, __init__, WildReceiver)
+        , ("__repr__", EdhMethod, __repr__, PackReceiver [])
+        ]
+      ]
+    writeTVar obs $ Map.fromList methods
 
 
 declareEdhOperators :: EdhWorld -> Text -> [(OpSymbol, Precedence)] -> STM ()
@@ -164,6 +230,7 @@ mkIntrinsicOp !world !opSym !iop = do
         $ EdhCallContext "<edh>" []
     Just (preced, _) -> return $ EdhIntrOp preced $ IntrinOpDefi u opSym iop
 
+
 mkHostProc
   :: Scope
   -> (ProcDefi -> EdhValue)
@@ -182,15 +249,18 @@ mkHostProc !scope !vc !nm !p !args = do
                                 }
     }
 
+
+type EdhHostCtor
+  =  EdhProgState
+  -> ArgsPack -- ctor args, if __init__() is provided, will go there too
+  -> TVar (Map.HashMap AttrKey EdhValue)  -- out-of-band attr store
+  -> STM ()
+
 mkHostClass
   :: Scope -- ^ outer lexical scope
   -> Text  -- ^ class name
   -> Bool  -- ^ write protect the out-of-band attribute store
-  -> (  EdhProgState
-     -> ArgsPack
-     -> TVar (Map.HashMap AttrKey EdhValue)  -- out-of-band attr store 
-     -> STM ()
-     )
+  -> EdhHostCtor
   -> STM EdhValue
 mkHostClass !scope !nm !writeProtected !hc = do
   classUniq <- unsafeIOToSTM newUnique
@@ -213,11 +283,12 @@ mkHostClass !scope !nm !writeProtected !hc = do
         let ctx       = edh'context pgs
             pgsCtor   = pgs { edh'context = ctorCtx }
             ctorCtx   = ctx { callStack = ctorScope :| NE.tail (callStack ctx) }
-            ctorScope = Scope { scopeEntity = ent
-                              , thisObject  = newThis
-                              , thatObject  = newThis
-                              , scopeProc   = cls
-                              , scopeCaller = contextStmt ctx
+            ctorScope = Scope { scopeEntity       = ent
+                              , thisObject        = newThis
+                              , thatObject        = newThis
+                              , scopeProc         = cls
+                              , scopeCaller       = contextStmt ctx
+                              , exceptionHandlers = []
                               }
         hc pgsCtor apk obs
         exitEdhSTM pgs exit $ EdhObject newThis

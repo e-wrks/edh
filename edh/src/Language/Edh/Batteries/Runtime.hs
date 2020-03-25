@@ -82,9 +82,10 @@ loggingProc !lhExpr !rhExpr !exit = do
     _ -> throwEdh EvalError $ "Invalid log level: " <> T.pack (show lhVal)
 
 
--- | host method runtime.exit()
+-- | host method runtime.exit(***apk)
 rtExitProc :: EdhProcedure
-rtExitProc _ _ = ask >>= \pgs -> do
+rtExitProc _apk _ = ask >>= \pgs -> do
+  -- TODO throw a `ProgramHalt` exception conveying the apk to program's halt result
   let !ioQ = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
   contEdhSTM $ writeTQueue ioQ ConsoleShutdown
   -- no CPS exit call, there's no return from `runtime.exit()`

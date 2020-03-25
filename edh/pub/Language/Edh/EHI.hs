@@ -113,6 +113,8 @@ module Language.Edh.EHI
     -- ** Object system
   , Object(..)
   , Class
+  , EdhHostCtor
+  , mkHostClass
   , Entity(..)
   , EntityManipulater(..)
   , lookupEntityAttr
@@ -160,7 +162,6 @@ module Language.Edh.EHI
   , EdhGenrCaller
   , mkSymbol
   , mkHostProc
-  , mkHostClass
   , mkIntrinsicOp
 
     -- * args pack parsing

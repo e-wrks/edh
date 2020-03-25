@@ -290,21 +290,26 @@ type EdhGenrCaller
     -> EdhProg
     )
 
+
 type EdhExcptHndlr
   =  EdhValue -- ^ the exception value thrown
-  -> (EdhValue -> EdhProg) -- ^ the continuation to re-throw
   -> EdhProg -- ^ the continuation after recovery
+  -> (EdhValue -> EdhProg) -- ^ the continuation to re-throw
   -> EdhProg
 
+edhThrow :: EdhValue -> EdhProg -> EdhProg
+edhThrow !exc !recovered = do
+  pgs <- ask
+  let ctx   = edh'context pgs
+      scope = contextScope ctx
+      playCatch :: EdhValue -> [EdhExcptHndlr] -> EdhProg
+      playCatch !x [] = contEdhSTM $ case x of
+        EdhObject _eo -> undefined -- TODO handle encapsulated exc object
+        EdhString msg -> throwSTM $ EvalError msg $ getEdhCallContext 0 pgs
+        _ -> throwSTM $ EvalError (T.pack $ show x) $ getEdhCallContext 0 pgs
+      playCatch !x (hdlr : rest) = hdlr x recovered $ \x' -> playCatch x' rest
+  playCatch exc $ exceptionHandlers scope
 
--- | An Edh value with the origin where it came from
-data OriginalValue = OriginalValue {
-    valueFromOrigin :: !EdhValue
-    -- | the scope from which this value is addressed off
-    , originScope :: !Scope
-    -- | the attribute resolution target object in obtaining this value
-    , originObject :: !Object
-  }
 
 
 -- Especially note that Edh has no block scope as in C
@@ -313,21 +318,6 @@ data OriginalValue = OriginalValue {
 --
 -- There is only `procedure scope` in Edh
 -- also see https://github.com/e-wrks/edh/Tour/#procedure
---
--- Every non-host procedure call will create a new scope, with a new
--- entity created for it, that:
---
---  * if it is a constructor procedure call, a new object of the called
---    class, or the `<module>` class defined by the world, is allocated
---    viewing the entity, serving `this` object of the scope;
---
---  * if it is a methd procedure call, no new object is created, and the
---    scope inherits `this` object from the lexical outer scope, and the
---    original object from which the method was obtained, becomes `that`
---    object in this scope. `that` either contains the method in its 
---    entity as an attribute, or inherits the method from one of its
---    supers.
---
 data Scope = Scope {
     -- | the entity of this scope, it's unique in a method procedure,
     -- and is the underlying entity of 'thisObject' in a class procedure.
@@ -335,21 +325,22 @@ data Scope = Scope {
     -- | `this` object in this scope
     , thisObject :: !Object
     -- | `that` object in this scope
-    -- `that` is the same as `this` unless in a scope of super-method call
     , thatObject :: !Object
+    -- | the exception handlers
+    , exceptionHandlers :: ![EdhExcptHndlr]
     -- | the Edh procedure holding this scope
     , scopeProc :: !ProcDefi
     -- | the Edh stmt caused creation of this scope
     , scopeCaller :: !StmtSrc
   }
 instance Eq Scope where
-  Scope x'e _ _ _ _ == Scope y'e _ _ _ _ = x'e == y'e
+  x == y = scopeEntity x == scopeEntity y
 instance Ord Scope where
-  compare (Scope x'u _ _ _ _) (Scope y'u _ _ _ _) = compare x'u y'u
+  compare x y = compare (scopeEntity x) (scopeEntity y)
 instance Hashable Scope where
-  hashWithSalt s (Scope u _ _ _ _) = hashWithSalt s u
+  hashWithSalt s x = hashWithSalt s (scopeEntity x)
 instance Show Scope where
-  show (Scope _ _ _ (ProcDefi _ _ (ProcDecl pName _ procBody)) (StmtSrc (cPos, _)))
+  show (Scope _ _ _ _ (ProcDefi _ _ (ProcDecl pName _ procBody)) (StmtSrc (cPos, _)))
     = "📜 " ++ T.unpack pName ++ " 🔎 " ++ defLoc ++ " 👈 " ++ sourcePosPretty cPos
    where
     defLoc = case procBody of
@@ -360,11 +351,12 @@ outerScopeOf :: Scope -> Maybe Scope
 outerScopeOf = procedure'lexi . scopeProc
 
 objectScope :: Context -> Object -> Scope
-objectScope ctx obj = Scope { scopeEntity = objEntity obj
-                            , thisObject  = obj
-                            , thatObject  = obj
-                            , scopeProc   = objClass obj
-                            , scopeCaller = contextStmt ctx
+objectScope ctx obj = Scope { scopeEntity       = objEntity obj
+                            , thisObject        = obj
+                            , thatObject        = obj
+                            , scopeProc         = objClass obj
+                            , scopeCaller       = contextStmt ctx
+                            , exceptionHandlers = []
                             }
 
 -- | An object views an entity, with inheritance relationship 
@@ -598,6 +590,16 @@ type EdhProcedure -- such a procedure servs as the callee
 -- | The type for an Edh procedure's return, in continuation passing style.
 type EdhProcExit = OriginalValue -> EdhProg
 
+-- | An Edh value with the origin where it came from
+data OriginalValue = OriginalValue {
+    valueFromOrigin :: !EdhValue
+    -- | the scope from which this value is addressed off
+    , originScope :: !Scope
+    -- | the attribute resolution target object in obtaining this value
+    , originObject :: !Object
+  }
+
+
 -- | A no-operation as an Edh procedure, ignoring any arg
 edhNop :: EdhProcedure
 edhNop _ !exit = do
@@ -610,47 +612,50 @@ edhEndOfProc :: EdhProcExit
 edhEndOfProc _ = return $ return ()
 
 -- | Construct an call context from program state
-getEdhCallContext :: EdhProgState -> EdhCallContext
-getEdhCallContext !pgs = EdhCallContext (T.pack $ sourcePosPretty tip) frames
+getEdhCallContext :: Int -> EdhProgState -> EdhCallContext
+getEdhCallContext !unwind !pgs = EdhCallContext
+  (T.pack $ sourcePosPretty tip)
+  frames
  where
+  unwindStack :: Int -> [Scope] -> [Scope]
+  unwindStack c s | c <= 0 = s
+  unwindStack _ []         = []
+  unwindStack _ [f    ]    = [f]
+  unwindStack c (_ : s)    = unwindStack (c - 1) s
   !ctx                = edh'context pgs
   (StmtSrc (!tip, _)) = contextStmt ctx
   !frames =
     foldl'
-        (\sfs (Scope _ _ _ (ProcDefi _ _ (ProcDecl procName _ procBody)) (StmtSrc (callerPos, _))) ->
+        (\sfs (Scope _ _ _ _ (ProcDefi _ _ (ProcDecl procName _ procBody)) (StmtSrc (callerPos, _))) ->
           EdhCallFrame procName
                        (procSrcLoc procBody)
                        (T.pack $ sourcePosPretty callerPos)
             : sfs
         )
         []
+      $ unwindStack unwind
       $ NE.init (callStack ctx)
   procSrcLoc :: Either StmtSrc EdhProcedure -> Text
   procSrcLoc !procBody = case procBody of
     Left  (StmtSrc (spos, _)) -> T.pack (sourcePosPretty spos)
     Right _                   -> "<host-code>"
 
--- | Throw from an Edh program, be cautious NOT to have any monadic action
+-- | Throw from an Edh proc, be cautious NOT to have any monadic action
 -- following such a throw, or it'll silently fail to work out.
 throwEdh :: Exception e => (Text -> EdhCallContext -> e) -> Text -> EdhProg
 throwEdh !excCtor !msg = do
   !pgs <- ask
-  return $ throwSTM (excCtor msg $ getEdhCallContext pgs)
+  return $ throwSTM (excCtor msg $ getEdhCallContext 0 pgs)
 
--- | Throw from the stm operation of an Edh program.
+-- | Throw from the stm operation of an Edh proc.
 throwEdhSTM
   :: Exception e
   => EdhProgState
   -> (Text -> EdhCallContext -> e)
   -> Text
   -> STM a
-throwEdhSTM pgs !excCtor !msg = throwSTM (excCtor msg $ getEdhCallContext pgs)
-
-withEdhErrContext :: EdhProgState -> IO a -> IO a
-withEdhErrContext pgs !act = catch act $ \(e :: SomeException) ->
-  case fromException e :: Maybe EdhError of
-    Just (PackageError !msg) -> throwIO $ EvalError msg $ getEdhCallContext pgs
-    _                        -> throwIO e
+throwEdhSTM pgs !excCtor !msg =
+  throwSTM (excCtor msg $ getEdhCallContext 0 pgs)
 
 
 -- | A pack of evaluated argument values with positional/keyword origin,

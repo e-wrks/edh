@@ -35,6 +35,15 @@ import           Language.Edh.Details.PkgMan
 import           Language.Edh.Details.Utils
 
 
+-- TODO ultimately this should not exist
+withEdhErrContext :: EdhProgState -> IO a -> IO a
+withEdhErrContext pgs !act = catch act $ \(e :: SomeException) ->
+  case fromException e :: Maybe EdhError of
+    Just (PackageError !msg _) ->
+      throwIO $ PackageError msg $ getEdhCallContext 0 pgs
+    _ -> throwIO e
+
+
 parseEdh :: EdhWorld -> String -> Text -> STM (Either ParserError [StmtSrc])
 parseEdh !world !srcName !srcCode = do
   pd <- takeTMVar wops -- update 'worldOperators' atomically wrt parsing
@@ -53,7 +62,11 @@ evalEdh !srcName !srcCode !exit = do
   let ctx   = edh'context pgs
       world = contextWorld ctx
   contEdhSTM $ parseEdh world srcName srcCode >>= \case
-    Left  !err   -> throwSTM $ ParseError err $ getEdhCallContext pgs
+    Left !err ->
+      throwSTM $ ParseError (T.pack $ errorBundlePretty err) $
+       getEdhCallContext
+        0
+        pgs
     Right !stmts -> runEdhProg pgs $ evalBlock stmts exit
 
 
@@ -1052,7 +1065,9 @@ setEdhAttr
   :: EdhProgState -> Expr -> AttrKey -> EdhValue -> EdhProcExit -> EdhProg
 setEdhAttr !pgsAfter !tgtExpr !key !val !exit = do
   !pgs <- ask
-  let !(Scope _ !this !that _ _) = contextScope $ edh'context pgs
+  let !scope = contextScope $ edh'context pgs
+      !this  = thisObject scope
+      !that  = thatObject scope
   case tgtExpr of
     -- give super objects the magical power to intercept
     -- attribute assignment to descendant objects, via `this` ref
