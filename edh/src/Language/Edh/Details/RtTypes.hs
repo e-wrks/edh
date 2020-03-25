@@ -291,25 +291,32 @@ type EdhGenrCaller
     )
 
 
-type EdhExcptHndlr
-  =  EdhValue -- ^ the exception value thrown
-  -> EdhProg -- ^ the continuation after recovery
-  -> (EdhValue -> EdhProg) -- ^ the continuation to re-throw
-  -> EdhProg
+type EdhExcptHndlr = EdhValue -> (EdhValue -> EdhProg) -> EdhProg
 
-edhThrow :: EdhValue -> EdhProg -> EdhProg
-edhThrow !exc !recovered = do
+defaultEdhExceptionHandler :: EdhExcptHndlr
+defaultEdhExceptionHandler !exv !rethrow = rethrow exv
+
+-- | This has to be at the tail of a do block to work
+edhThrow :: EdhValue -> EdhProg
+edhThrow !exv = do
   pgs <- ask
-  let ctx   = edh'context pgs
-      scope = contextScope ctx
-      playCatch :: EdhValue -> [EdhExcptHndlr] -> EdhProg
-      playCatch !x [] = contEdhSTM $ case x of
-        EdhObject _eo -> undefined -- TODO handle encapsulated exc object
-        EdhString msg -> throwSTM $ EvalError msg $ getEdhCallContext 0 pgs
-        _ -> throwSTM $ EvalError (T.pack $ show x) $ getEdhCallContext 0 pgs
-      playCatch !x (hdlr : rest) = hdlr x recovered $ \x' -> playCatch x' rest
-  playCatch exc $ exceptionHandlers scope
-
+  let
+    handleExc :: EdhValue -> [Scope] -> EdhProg
+    -- no more Edh handler, throw to host (Haskell) runtime
+    handleExc exv' [] = contEdhSTM $ case exv' of
+      EdhObject exo -> do
+        esd <- readTVar $ entity'store $ objEntity exo
+        case fromDynamic esd :: Maybe EdhError of
+          Just !edhErr -> -- TODO replace cc in err if is empty here ?
+            throwSTM edhErr
+          Nothing -> -- TODO support magic method to coerce as exception ?
+            throwSTM $ EvalError (T.pack $ show exv) $ getEdhCallContext 0 pgs
+      _ -> -- coerce arbitrary value to EdhError
+        throwSTM $ EvalError (T.pack $ show exv) $ getEdhCallContext 0 pgs
+    -- trigger next handler in Edh
+    handleExc exv' (frame : stack) =
+      exceptionHandler frame exv' $ \exv'' -> handleExc exv'' stack
+  handleExc exv $ NE.toList $ callStack $ edh'context pgs
 
 
 -- Especially note that Edh has no block scope as in C
@@ -327,7 +334,7 @@ data Scope = Scope {
     -- | `that` object in this scope
     , thatObject :: !Object
     -- | the exception handlers
-    , exceptionHandlers :: ![EdhExcptHndlr]
+    , exceptionHandler :: !EdhExcptHndlr
     -- | the Edh procedure holding this scope
     , scopeProc :: !ProcDefi
     -- | the Edh stmt caused creation of this scope
@@ -351,12 +358,12 @@ outerScopeOf :: Scope -> Maybe Scope
 outerScopeOf = procedure'lexi . scopeProc
 
 objectScope :: Context -> Object -> Scope
-objectScope ctx obj = Scope { scopeEntity       = objEntity obj
-                            , thisObject        = obj
-                            , thatObject        = obj
-                            , scopeProc         = objClass obj
-                            , scopeCaller       = contextStmt ctx
-                            , exceptionHandlers = []
+objectScope ctx obj = Scope { scopeEntity      = objEntity obj
+                            , thisObject       = obj
+                            , thatObject       = obj
+                            , scopeProc        = objClass obj
+                            , scopeCaller      = contextStmt ctx
+                            , exceptionHandler = defaultEdhExceptionHandler
                             }
 
 -- | An object views an entity, with inheritance relationship 
