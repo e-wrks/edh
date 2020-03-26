@@ -85,7 +85,7 @@ branchProc !lhExpr !rhExpr !exit = do
       branchMatched :: [(AttrName, EdhValue)] -> STM ()
       branchMatched !ps = do
         updAttrs [ (AttrByName n, noneNil v) | (n, v) <- ps, n /= "_" ]
-        runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+        runEdhProc pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
           exitEdhProc
             exit
             (case rhVal of
@@ -176,11 +176,15 @@ branchProc !lhExpr !rhExpr !exit = do
           _ -> exitEdhSTM pgs exit EdhFallthrough
         else do
           attrNames <- sequence $ (<$> vExprs) $ \case
-            (AttrExpr (DirectRef (NamedAttr vAttr))) -> return $ vAttr
+            (AttrExpr (DirectRef (NamedAttr vAttr))) -> return vAttr
             vPattern ->
-              throwEdhSTM pgs EvalError
-                $  "Invalid element in tuple pattern: "
-                <> T.pack (show vPattern)
+              throwSTM -- todo make this catchable by Edh code ?
+                $ EdhError
+                    UsageError
+                    (  "Invalid element in tuple pattern: "
+                    <> T.pack (show vPattern)
+                    )
+                $ getEdhCallContext 0 pgs
           case ctxMatch of
             EdhTuple vs | length vs == length vExprs ->
               branchMatched $ zip attrNames vs

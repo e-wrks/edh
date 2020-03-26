@@ -62,7 +62,7 @@ loggingProc !lhExpr !rhExpr !exit = do
             then -- drop log msg without even eval it
                  exitEdhSTM pgs exit nil
             else
-              runEdhProg pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+              runEdhProc pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
                 do
                   let !srcLoc = if rtLogLevel <= 20
                         then -- with source location info
@@ -107,7 +107,7 @@ rtReadCommandsProc !apk _ = ask >>= \pgs ->
             writeTQueue ioQ $ ConsoleIn cmdIn ps1 ps2
             waitEdhSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
               EdhString !cmdCode ->
-                runEdhProg pgs' -- eval console code in for-loop's context
+                runEdhProc pgs' -- eval console code in for-loop's context
                   -- TODO don't let ParseError or other non-critical problem
                   --      crash the program, ultimantely after CPS exception
                   --      handling is implemented, we then enable Edh code to
@@ -115,7 +115,7 @@ rtReadCommandsProc !apk _ = ask >>= \pgs ->
                   $ evalEdh "<console>" cmdCode
                   $ \(OriginalValue !cmdVal _ _) ->
                       contEdhSTM
-                        $ runEdhProg pgs'
+                        $ runEdhProc pgs'
                         $ iter'cb
                             (EdhArgsPack $ ArgsPack [noneNil cmdVal] Map.empty)
                         $ const readCmds
@@ -155,7 +155,7 @@ rtPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
         EdhString !s -> do
           writeTQueue ioQ $ ConsoleOut $ k <> "=" <> s
           printVS [] rest
-        _ -> runEdhProg pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
+        _ -> runEdhProc pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
           case vr of
             EdhString !s -> contEdhSTM $ do
               writeTQueue ioQ $ ConsoleOut $ k <> "=" <> s
@@ -165,7 +165,7 @@ rtPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
         EdhString !s -> do
           writeTQueue ioQ $ ConsoleOut s
           printVS rest kvs
-        _ -> runEdhProg pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
+        _ -> runEdhProc pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
           case vr of
             EdhString !s -> contEdhSTM $ do
               writeTQueue ioQ $ ConsoleOut s
@@ -180,7 +180,7 @@ timelyNotify !delayMicros genr'caller@(!pgs', !iter'cb) = do
     threadDelay delayMicros
     getTime Realtime
   -- yield the nanosecond timestamp to iterator
-  runEdhProg pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \_ ->
+  runEdhProc pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \_ ->
     timelyNotify delayMicros genr'caller
 
 -- | host generator runtime.everyMicros(n) - with fixed interval

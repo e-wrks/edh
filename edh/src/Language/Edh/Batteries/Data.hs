@@ -17,7 +17,6 @@ import           Language.Edh.Control
 import           Language.Edh.Event
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
-import           Language.Edh.Details.CoreLang
 
 
 -- | operator ($) - dereferencing attribute addressor
@@ -26,9 +25,9 @@ attrDerefAddrProc !lhExpr !rhExpr !exit =
   evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate rhVal of
     EdhExpr _ (AttrExpr (DirectRef !addr)) _ -> ask >>= \pgs ->
       contEdhSTM
-        $   resolveEdhAttrAddr pgs addr
-        >>= \key -> runEdhProg pgs
-              $ getEdhAttr lhExpr key (noAttr $ T.pack $ show key) exit
+        $ resolveEdhAttrAddr pgs addr
+        $ \key -> runEdhProc pgs
+            $ getEdhAttr lhExpr key (noAttr $ T.pack $ show key) exit
     EdhString !attrName ->
       getEdhAttr lhExpr (AttrByName attrName) (noAttr attrName) exit
     EdhSymbol sym@(Symbol _ desc) ->
@@ -57,7 +56,7 @@ defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
         changeEntityAttr pgs ent (AttrByName valName) nv
         exitEdhSTM pgs exit nv
       oldDef@(EdhNamedValue n v) -> if v /= rhVal
-        then runEdhProg pgs $ edhValueRepr rhVal $ \(OriginalValue newR _ _) ->
+        then runEdhProc pgs $ edhValueRepr rhVal $ \(OriginalValue newR _ _) ->
           edhValueRepr oldDef $ \(OriginalValue oldR _ _) -> case newR of
             EdhString !newRepr -> case oldR of
               EdhString oldRepr ->
@@ -100,9 +99,10 @@ attrTemptProc :: EdhIntrinsicOp
 attrTemptProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   case rhExpr of
-    AttrExpr (DirectRef !addr) -> contEdhSTM $ do
-      key <- resolveEdhAttrAddr pgs addr
-      runEdhProg pgs $ getEdhAttr lhExpr key (const $ exitEdhProc exit nil) exit
+    AttrExpr (DirectRef !addr) ->
+      contEdhSTM $ resolveEdhAttrAddr pgs addr $ \key ->
+        runEdhProc pgs
+          $ getEdhAttr lhExpr key (const $ exitEdhProc exit nil) exit
     _ -> throwEdh EvalError $ "Invalid attribute expression: " <> T.pack
       (show rhExpr)
 
@@ -112,8 +112,8 @@ attrDerefTemptProc :: EdhIntrinsicOp
 attrDerefTemptProc !lhExpr !rhExpr !exit =
   evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate rhVal of
     EdhExpr _ (AttrExpr (DirectRef !addr)) _ -> ask >>= \pgs ->
-      contEdhSTM $ resolveEdhAttrAddr pgs addr >>= \key ->
-        runEdhProg pgs
+      contEdhSTM $ resolveEdhAttrAddr pgs addr $ \key ->
+        runEdhProc pgs
           $ getEdhAttr lhExpr key (const $ exitEdhProc exit nil) exit
     EdhString !attrName -> getEdhAttr lhExpr
                                       (AttrByName attrName)
@@ -158,10 +158,10 @@ reprProc (ArgsPack !args !kwargs) !exit = do
           $ ArgsPack (reverse reprs)
           $ Map.fromList kwReprs
       go reprs kwReprs (v : rest) kwps =
-        runEdhProg pgs $ edhValueRepr v $ \(OriginalValue r _ _) ->
+        runEdhProc pgs $ edhValueRepr v $ \(OriginalValue r _ _) ->
           contEdhSTM $ go (r : reprs) kwReprs rest kwps
       go reprs kwReprs [] ((k, v) : rest) =
-        runEdhProg pgs $ edhValueRepr v $ \(OriginalValue r _ _) ->
+        runEdhProc pgs $ edhValueRepr v $ \(OriginalValue r _ _) ->
           contEdhSTM $ go reprs ((k, r) : kwReprs) [] rest
   contEdhSTM $ go [] [] args (Map.toList kwargs)
 
@@ -177,7 +177,7 @@ concatProc !lhExpr !rhExpr !exit =
           _              -> error "bug: edhValueStr returned non-string"
       _ -> error "bug: edhValueStr returned non-string"
  where
-  edhValueStr :: EdhValue -> EdhProcExit -> EdhProg
+  edhValueStr :: EdhValue -> EdhProcExit -> EdhProc
   edhValueStr s@EdhString{} !exit' = exitEdhProc exit' s
   edhValueStr !v            !exit' = edhValueRepr v exit'
 
@@ -237,11 +237,15 @@ val2DictEntry _ (EdhTuple [!k, !v]) = return (k, v)
 val2DictEntry _ (EdhArgsPack (ArgsPack [!k, !v] !kwargs)) | Map.null kwargs =
   return (k, v)
 val2DictEntry !pgs !val =
-  throwEdhSTM pgs EvalError
-    $  "Invalid entry for dict "
-    <> T.pack (edhTypeNameOf val)
-    <> ": "
-    <> T.pack (show val)
+  throwSTM
+    $ EdhError
+        UsageError
+        (  "Invalid entry for dict "
+        <> T.pack (edhTypeNameOf val)
+        <> ": "
+        <> T.pack (show val)
+        )
+    $ getEdhCallContext 0 pgs
 
 
 -- | operator (?<=) - element-of tester
@@ -320,14 +324,14 @@ cprhProc !lhExpr !rhExpr !exit = do
           iterExpr
           doExpr
           (\val -> modifyTVar' l (++ [val]))
-          (\mkLoop -> runEdhProg pgs $ mkLoop $ \_ -> exitEdhProc exit lhVal)
+          (\mkLoop -> runEdhProc pgs $ mkLoop $ \_ -> exitEdhProc exit lhVal)
         EdhDict (Dict _ !d) -> contEdhSTM $ edhForLoop
           pgs
           argsRcvr
           iterExpr
           doExpr
           (\val -> insertToDict val d)
-          (\mkLoop -> runEdhProg pgs $ mkLoop $ \_ -> exitEdhProc exit lhVal)
+          (\mkLoop -> runEdhProc pgs $ mkLoop $ \_ -> exitEdhProc exit lhVal)
         EdhTuple vs -> contEdhSTM $ do
           l <- newTVar []
           edhForLoop pgs
@@ -335,7 +339,7 @@ cprhProc !lhExpr !rhExpr !exit = do
                      iterExpr
                      doExpr
                      (\val -> modifyTVar' l (val :))
-            $ \mkLoop -> runEdhProg pgs $ mkLoop $ \_ -> contEdhSTM $ do
+            $ \mkLoop -> runEdhProc pgs $ mkLoop $ \_ -> contEdhSTM $ do
                 vs' <- readTVar l
                 exitEdhSTM pgs exit (EdhTuple $ vs ++ reverse vs')
         _ ->

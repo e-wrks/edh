@@ -69,14 +69,14 @@ module Language.Edh.EHI
   , packEdhExprs
   , packEdhArgs
   , OriginalValue(..)
-  , EdhProg
+  , EdhProc
   , EdhProgState(..)
   , EdhTxTask(..)
   , Context(..)
   , Scope(..)
   , EdhProcedure
   , EdhProcExit
-  , runEdhProg
+  , runEdhProc
   , forkEdh
     -- ** Edh Runtime error
   , getEdhCallContext

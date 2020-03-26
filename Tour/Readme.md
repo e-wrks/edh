@@ -1086,7 +1086,7 @@ timelyNotify !delayMicros genr'caller@(!pgs', !iter'cb) = do
     threadDelay delayMicros
     getTime Realtime
   -- yield the nanosecond timestamp to iterator
-  runEdhProg pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \_ ->
+  runEdhProc pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \_ ->
     timelyNotify delayMicros genr'caller
 
 -- | host generator runtime.everyMicros(n) - with fixed interval
@@ -2475,7 +2475,7 @@ timelyNotify !delayMicros genr'caller@(!pgs', !iter'cb) = do
     threadDelay delayMicros
     getTime Realtime
   -- yield the nanosecond timestamp to iterator
-  runEdhProg pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \_ ->
+  runEdhProc pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \_ ->
     timelyNotify delayMicros genr'caller
 
 -- | host generator runtime.everyMicros(n) - with fixed interval

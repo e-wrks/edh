@@ -7,7 +7,6 @@ import           Prelude
 import           GHC.Conc                       ( unsafeIOToSTM )
 import           System.IO.Unsafe
 
-import           Control.Exception
 import           Control.Monad.Except
 import           Control.Monad.Reader
 
@@ -200,12 +199,18 @@ createSideEntity !writeProtected = do
         fromMaybe EdhNil . Map.lookup k <$> readTVar obs
       the'all'entity'attrs _ _ = Map.toList <$> readTVar obs
       the'change'entity'attr pgs !k !v inband = if writeProtected
-        then throwEdhSTM pgs EvalError "Writing a protected entity"
+        then
+          throwSTM -- make this catchable from Edh code ?
+          $ EdhError EvalError "Writing a protected entity"
+          $ getEdhCallContext 0 pgs
         else do
           modifyTVar' obs $ Map.insert k v
           return inband
       the'update'entity'attrs pgs !ps inband = if writeProtected
-        then throwEdhSTM pgs EvalError "Writing a protected entity"
+        then
+          throwSTM -- make this catchable from Edh code ?
+          $ EdhError EvalError "Writing a protected entity"
+          $ getEdhCallContext 0 pgs
         else do
           modifyTVar' obs $ Map.union (Map.fromList ps)
           return inband
@@ -287,16 +292,25 @@ type EdhGenrCaller
           EdhValue -- value given to the `yield` expr in generator
        -> STM ()
        )
-    -> EdhProg
+    -> EdhProc
     )
 
 
-type EdhExcptHndlr = EdhValue -> (EdhValue -> EdhProg) -> EdhProg
+-- | Throw from an Edh proc, be cautious NOT to have any monadic action
+-- following such a throw, or it'll silently fail to work out.
+edhThrow :: EdhValue -> (EdhValue -> EdhProc) -> EdhProc
+edhThrow !exv uncaught = do
+  pgs <- ask
+  let propagateExc :: EdhValue -> [Scope] -> EdhProc
+      propagateExc exv' [] = uncaught exv'
+      propagateExc exv' (frame : stack) =
+        exceptionHandler frame exv' $ \exv'' -> propagateExc exv'' stack
+  propagateExc exv $ NE.toList $ callStack $ edh'context pgs
 
 defaultEdhExceptionHandler :: EdhExcptHndlr
 defaultEdhExceptionHandler !exv !rethrow = rethrow exv
 
-edhErrorUncaught :: EdhValue -> EdhProg
+edhErrorUncaught :: EdhValue -> EdhProc
 edhErrorUncaught !exv = ask >>= \pgs -> contEdhSTM $ case exv of
   EdhObject exo -> do
     esd <- readTVar $ entity'store $ objEntity exo
@@ -310,16 +324,10 @@ edhErrorUncaught !exv = ask >>= \pgs -> contEdhSTM $ case exv of
   _ -> -- coerce arbitrary value to EdhError
     throwSTM $ EdhError EvalError (T.pack $ show exv) $ getEdhCallContext 0 pgs
 
--- | Throw from an Edh proc, be cautious NOT to have any monadic action
--- following such a throw, or it'll silently fail to work out.
-edhThrow :: EdhValue -> (EdhValue -> EdhProg) -> EdhProg
-edhThrow !exv uncaught = do
-  pgs <- ask
-  let propagateExc :: EdhValue -> [Scope] -> EdhProg
-      propagateExc exv' [] = uncaught exv'
-      propagateExc exv' (frame : stack) =
-        exceptionHandler frame exv' $ \exv'' -> propagateExc exv'' stack
-  propagateExc exv $ NE.toList $ callStack $ edh'context pgs
+type EdhExcptHndlr
+  =  EdhValue -- ^ the error value to handle
+  -> (EdhValue -> EdhProc) -- ^ action to re-throw if not recovered
+  -> EdhProc
 
 
 -- Especially note that Edh has no block scope as in C
@@ -336,7 +344,10 @@ data Scope = Scope {
     , thisObject :: !Object
     -- | `that` object in this scope
     , thatObject :: !Object
-    -- | the exception handlers
+    -- | the exception handler, `catch`/`finally` should capture the
+    -- outer scope, and run its *tried* block with a new stack whose
+    -- top frame is a scope all same but the `exceptionHandler` field,
+    -- which executes its handling logics appropriately.
     , exceptionHandler :: !EdhExcptHndlr
     -- | the Edh procedure holding this scope
     , scopeProc :: !ProcDefi
@@ -467,7 +478,7 @@ wuji !pgs = OriginalValue nil rootScope $ thisObject rootScope
 
 -- | The monad for running of an Edh program
 type EdhMonad = ReaderT EdhProgState STM
-type EdhProg = EdhMonad (STM ())
+type EdhProc = EdhMonad (STM ())
 
 -- | The states of a program
 data EdhProgState = EdhProgState {
@@ -480,39 +491,43 @@ data EdhProgState = EdhProgState {
   }
 
 type ReactorRecord = (TChan EdhValue, EdhProgState, ArgsReceiver, Expr)
-type DeferRecord = (EdhProgState, EdhProg)
+type DeferRecord = (EdhProgState, EdhProc)
 
--- | Run an Edh program from within STM monad
-runEdhProg :: EdhProgState -> EdhProg -> STM ()
-runEdhProg !pgs !prog = join $ runReaderT prog pgs
-{-# INLINE runEdhProg #-}
+-- | Run an Edh proc from within STM monad
+runEdhProc :: EdhProgState -> EdhProc -> STM ()
+runEdhProc !pgs !p = join $ runReaderT p pgs
+{-# INLINE runEdhProc #-}
 
-forkEdh :: EdhProcExit -> EdhProg -> EdhProg
-forkEdh !exit !prog = ask >>= \pgs -> if edh'in'tx pgs
-  then throwEdh EvalError "You don't fork within a transaction"
-  else contEdhSTM $ do
+-- | Fork a GHC thread to run the specified Edh proc concurrently
+forkEdh :: EdhProcExit -> EdhProc -> EdhProc
+forkEdh !exit !p = ask >>= \pgs -> contEdhSTM $ if edh'in'tx pgs
+  then
+    throwSTM
+    $ EdhError UsageError "You don't fork within a transaction"
+    $ getEdhCallContext 0 pgs
+  else do
     writeTQueue (edh'fork'queue pgs) $ Right $ EdhTxTask pgs
                                                          False
                                                          (wuji pgs)
-                                                         (const prog)
+                                                         (const p)
     exitEdhSTM pgs exit nil
 
--- | Continue an Edh program with stm computation, there must be NO further
+-- | Continue an Edh proc with stm computation, there must be NO further
 -- action following this statement, or the stm computation is just lost.
 --
 -- Note: this is just `return`, but procedures writen in the host language
 -- (i.e. Haskell) with this instead of `return` will be more readable.
-contEdhSTM :: STM () -> EdhProg
+contEdhSTM :: STM () -> EdhProc
 contEdhSTM = return
 {-# INLINE contEdhSTM #-}
 
 -- | Convenient function to be used as short-hand to return from an Edh
 -- procedure (or functions with similar signature), this sets transaction
 -- boundaries wrt tx stated in the program's current state.
-exitEdhProc :: EdhProcExit -> EdhValue -> EdhProg
+exitEdhProc :: EdhProcExit -> EdhValue -> EdhProc
 exitEdhProc !exit !val = ask >>= \pgs -> contEdhSTM $ exitEdhSTM pgs exit val
 {-# INLINE exitEdhProc #-}
-exitEdhProc' :: EdhProcExit -> OriginalValue -> EdhProg
+exitEdhProc' :: EdhProcExit -> OriginalValue -> EdhProc
 exitEdhProc' !exit !result =
   ask >>= \pgs -> contEdhSTM $ exitEdhSTM' pgs exit result
 {-# INLINE exitEdhProc' #-}
@@ -538,48 +553,13 @@ data EdhTxTask = EdhTxTask {
     edh'task'pgs :: !EdhProgState
     , edh'task'wait :: !Bool
     , edh'task'input :: !OriginalValue
-    , edh'task'job :: !(OriginalValue -> EdhProg)
+    , edh'task'job :: !(OriginalValue -> EdhProc)
   }
-
--- | Instruct the Edh program driver to not auto retry the specified stm
--- action, i.e. let stm retry it automatically (e.g. to blocking read a 'TChan')
-waitEdhSTM :: EdhProgState -> STM EdhValue -> (EdhValue -> STM ()) -> STM ()
-waitEdhSTM !pgs !act !exit = if edh'in'tx pgs
-  then throwEdhSTM pgs EvalError "You don't wait stm from within a transaction"
-  else writeTQueue
-    (edh'task'queue pgs)
-    EdhTxTask
-      { edh'task'pgs   = pgs
-      , edh'task'wait  = True
-      , edh'task'input = wuji pgs
-      , edh'task'job   = \_ -> contEdhSTM $ act >>= \val -> writeTQueue
-                           (edh'task'queue pgs)
-                           EdhTxTask { edh'task'pgs   = pgs
-                                     , edh'task'wait  = False
-                                     , edh'task'input = wuji pgs
-                                     , edh'task'job = \_ -> contEdhSTM $ exit val
-                                     }
-      }
-
--- | Blocking wait an asynchronous IO action from current Edh thread
-edhWaitIO :: EdhProcExit -> IO EdhValue -> EdhProg
-edhWaitIO !exit !act = ask >>= \pgs -> if edh'in'tx pgs
-  then throwEdh EvalError "You don't wait IO within a transaction"
-  else contEdhSTM $ do
-    !ioResult <- newEmptyTMVar
-    writeTQueue (edh'fork'queue pgs)
-      $ Left
-      $ catch (act >>= atomically . void . tryPutTMVar ioResult . Right)
-      $ \(e :: SomeException) -> atomically $ putTMVar ioResult (Left e)
-    writeTQueue (edh'task'queue pgs) $ EdhTxTask pgs True (wuji pgs) $ \_ ->
-      contEdhSTM $ readTMVar ioResult >>= \case
-        Right v -> exitEdhSTM pgs exit v
-        Left  e -> throwEdhSTM pgs EvalError $ T.pack $ displayException e
 
 -- | Type of an intrinsic infix operator in host language.
 --
 -- Note no stack frame is created/pushed when an intrinsic operator is called.
-type EdhIntrinsicOp = Expr -> Expr -> EdhProcExit -> EdhProg
+type EdhIntrinsicOp = Expr -> Expr -> EdhProcExit -> EdhProc
 
 data IntrinOpDefi = IntrinOpDefi {
       intrinsic'op'uniq :: !Unique
@@ -595,10 +575,10 @@ data IntrinOpDefi = IntrinOpDefi {
 type EdhProcedure -- such a procedure servs as the callee
   =  ArgsPack    -- ^ the pack of arguments
   -> EdhProcExit -- ^ the CPS exit to return a value from this procedure
-  -> EdhProg
+  -> EdhProc
 
 -- | The type for an Edh procedure's return, in continuation passing style.
-type EdhProcExit = OriginalValue -> EdhProg
+type EdhProcExit = OriginalValue -> EdhProc
 
 -- | An Edh value with the origin where it came from
 data OriginalValue = OriginalValue {
@@ -649,20 +629,6 @@ getEdhCallContext !unwind !pgs = EdhCallContext
   procSrcLoc !procBody = case procBody of
     Left  (StmtSrc (spos, _)) -> T.pack (sourcePosPretty spos)
     Right _                   -> "<host-code>"
-
--- | Throw from an Edh proc, be cautious NOT to have any monadic action
--- following such a throw, or it'll silently fail to work out.
-throwEdh :: EdhErrorTag -> Text -> EdhProg
-throwEdh !et !msg = do
-  !pgs <- ask
-  -- TODO go through Edh propagation instead
-  return $ throwSTM (EdhError et msg $ getEdhCallContext 0 pgs)
-
--- | Throw from the stm operation of an Edh proc.
-throwEdhSTM :: EdhProgState -> EdhErrorTag -> Text -> STM a
-throwEdhSTM pgs !et !msg =
-  -- TODO go through Edh propagation instead
-  throwSTM (EdhError et msg $ getEdhCallContext 0 pgs)
 
 
 -- | A pack of evaluated argument values with positional/keyword origin,

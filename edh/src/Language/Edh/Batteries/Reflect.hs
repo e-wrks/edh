@@ -181,8 +181,13 @@ scopeGetProc (ArgsPack !args !kwargs) !exit = do
   attrKeyFrom _ (EdhString attrName) = return $ AttrByName attrName
   attrKeyFrom _ (EdhSymbol sym     ) = return $ AttrBySym sym
   attrKeyFrom pgs badVal =
-    throwEdhSTM pgs EvalError $ "Invalid attribute reference type - " <> T.pack
-      (show $ edhTypeOf badVal)
+    throwSTM -- todo make this catchable by Edh code ?
+      $ EdhError
+          UsageError
+          (  "Invalid attribute reference type - "
+          <> T.pack (show $ edhTypeOf badVal)
+          )
+      $ getEdhCallContext 0 pgs
 
 
 -- | utility scope.put(k1:v1, k2:v2, n3=v3, n4=v4, ...)
@@ -212,9 +217,13 @@ scopePutProc (ArgsPack !args !kwargs) !exit = do
     EdhTuple [EdhString !k, v] -> putAttrs pgs rest ((AttrByName k, v) : cumu)
     EdhTuple [EdhSymbol !k, v] -> putAttrs pgs rest ((AttrBySym k, v) : cumu)
     _ ->
-      throwEdhSTM pgs EvalError
-        $  "Invalid key/value type to put into a scope - "
-        <> T.pack (edhTypeNameOf arg)
+      throwSTM -- todo make this catchable by Edh code ?
+        $ EdhError
+            UsageError
+            (  "Invalid key/value type to put into a scope - "
+            <> T.pack (edhTypeNameOf arg)
+            )
+        $ getEdhCallContext 0 pgs
 
 
 -- | utility scope.eval(expr1, expr2, kw3=expr3, kw4=expr4, ...)
@@ -234,7 +243,7 @@ scopeEvalProc (ArgsPack !args !kwargs) !exit = do
       -> Map.HashMap AttrName EdhValue
       -> [EdhValue]
       -> [(AttrName, EdhValue)]
-      -> EdhProg
+      -> EdhProc
     evalThePack !argsValues !kwargsValues [] [] =
       contEdhSTM
         -- restore original program state and return the eval-ed values
@@ -260,7 +269,7 @@ scopeEvalProc (ArgsPack !args !kwargs) !exit = do
     then exitEdhProc exit nil
     else
       contEdhSTM
-      $ runEdhProg pgs
+      $ runEdhProc pgs
           { edh'context = callerCtx
                             { callStack       = scopeCallStack
                             , generatorCaller = Nothing

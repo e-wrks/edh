@@ -7,37 +7,7 @@ import           Prelude
 
 import           Control.Concurrent.STM
 
-import qualified Data.Text                     as T
-
-import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
-
-
--- * Edh context attribute resolution
-
-
--- | resolve an attribute addressor, either alphanumeric named or symbolic
-resolveEdhAttrAddr :: EdhProgState -> AttrAddressor -> STM AttrKey
-resolveEdhAttrAddr _ (NamedAttr !attrName) = return (AttrByName attrName)
-resolveEdhAttrAddr !pgs (SymbolicAttr !symName) =
-  let scope = contextScope $ edh'context pgs
-  in  resolveEdhCtxAttr pgs scope (AttrByName symName) >>= \case
-        Just (!val, _) -> case val of
-          (EdhSymbol !symVal) -> return (AttrBySym symVal)
-          _ ->
-            throwEdhSTM pgs EvalError
-              $  "Not a symbol as "
-              <> symName
-              <> ", it is a "
-              <> T.pack (edhTypeNameOf val)
-              <> ": "
-              <> T.pack (show val)
-        Nothing ->
-          throwEdhSTM pgs EvalError
-            $  "No symbol named "
-            <> T.pack (show symName)
-            <> " available"
-{-# INLINE resolveEdhAttrAddr #-}
 
 
 lookupEdhCtxAttr :: EdhProgState -> Scope -> AttrKey -> STM EdhValue

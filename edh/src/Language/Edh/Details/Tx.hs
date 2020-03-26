@@ -24,7 +24,7 @@ import           Language.Edh.Details.Evaluate
 -- description at:
 --   https://github.com/e-wrks/edh/tree/master/Tour#program--threading-model
 driveEdhProgram
-  :: TMVar (Either SomeException EdhValue) -> Context -> EdhProg -> IO ()
+  :: TMVar (Either SomeException EdhValue) -> Context -> EdhProc -> IO ()
 driveEdhProgram !haltResult !progCtx !prog = do
   -- check async exception mask state
   getMaskingState >>= \case
@@ -153,7 +153,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
         recvEdhArgs ctxReactor argsRcvr apk $ \em -> contEdhSTM $ do
           updateEntityAttrs pgsReactor (scopeEntity scopeAtReactor)
             $ Map.toList em
-          runEdhProg pgsReactor
+          runEdhProc pgsReactor
             $ evalExpr expr
             $ \(OriginalValue !reactorRtn _ _) -> do
                 let doBreak = case reactorRtn of

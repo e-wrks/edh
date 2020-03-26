@@ -110,8 +110,9 @@ createEdhWorld !runtime = liftIO $ do
         -- leave the out-of-band entity store open so Edh code can
         -- assign arbitrary attrs to exceptions for informative
         [ (AttrByName nm, ) <$> mkHostClass rootScope nm False hc
-        | (nm, hc) <-
+        | (nm, hc) <- -- cross check with 'throwEdhSTM' for type safety
           [ ("ProgramHalt" , edhErrorCtor edhProgramHalt)
+          , ("EdhIOError"  , notFromEdhCtor)
           , ("Exception"   , edhErrorCtor $ edhSomeErr EdhException)
           , ("PackageError", edhErrorCtor $ edhSomeErr PackageError)
           , ("ParseError"  , edhErrorCtor $ edhSomeErr ParseError)
@@ -128,10 +129,13 @@ createEdhWorld !runtime = liftIO $ do
     ProgramHalt $ toDyn v
   edhProgramHalt !apk _ = ProgramHalt $ toDyn apk
   edhSomeErr :: EdhErrorTag -> ArgsPack -> EdhCallContext -> EdhError
-  edhSomeErr !et (ArgsPack []      _) !cc = EdhError et "❌" cc
+  edhSomeErr !et (ArgsPack [] _) !cc = EdhError et "❌" cc
+  edhSomeErr !et (ArgsPack (EdhString msg : _) _) !cc = EdhError et msg cc
   edhSomeErr !et (ArgsPack (v : _) _) !cc = EdhError et (T.pack $ show v) cc
+  notFromEdhCtor :: EdhHostCtor
+  notFromEdhCtor _ _ _ = pure ()
   -- wrap a Haskell error data constructor as a host error object contstructor,
-  -- used to define an error class in Edh 
+  -- used to define an error class in Edh
   edhErrorCtor :: (ArgsPack -> EdhCallContext -> EdhError) -> EdhHostCtor
   edhErrorCtor !hec !pgs !apk !obs = do
     let !scope = contextScope $ edh'context pgs
@@ -292,11 +296,11 @@ mkHostClass !scope !nm !writeProtected !hc = do
   return $ EdhClass cls
 
 
-runEdhProgram :: MonadIO m => Context -> EdhProg -> m (Either EdhError EdhValue)
+runEdhProgram :: MonadIO m => Context -> EdhProc -> m (Either EdhError EdhValue)
 runEdhProgram !ctx !prog =
   liftIO $ tryJust edhKnownError $ runEdhProgram' ctx prog
 
-runEdhProgram' :: MonadIO m => Context -> EdhProg -> m EdhValue
+runEdhProgram' :: MonadIO m => Context -> EdhProc -> m EdhValue
 runEdhProgram' !ctx !prog = liftIO $ do
   haltResult <- atomically newEmptyTMVar
   driveEdhProgram haltResult ctx prog
@@ -320,7 +324,7 @@ runEdhModule' !world !impPath = liftIO $ do
       contEdhSTM $ do
         let !moduId = T.pack nomPath
         modu <- createEdhModule' world moduId moduFile
-        runEdhProg pgs { edh'context = moduleContext world modu }
+        runEdhProc pgs { edh'context = moduleContext world modu }
           $ evalEdh moduFile moduSource edhEndOfProc
 
 

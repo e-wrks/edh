@@ -41,7 +41,7 @@ assignProc !lhExpr !rhExpr !exit = do
                 EdhNil ->
                   throwEdhSTM pgs EvalError $ "No ([=]) method from: " <> T.pack
                     (show obj)
-                EdhMethod !mth'proc -> runEdhProg pgs $ callEdhMethod
+                EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
                   obj
                   mth'proc
                   (ArgsPack [ixVal, rhVal] Map.empty)

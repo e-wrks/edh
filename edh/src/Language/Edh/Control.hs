@@ -53,7 +53,6 @@ dispEdhCallContext (EdhCallContext !tip !frames) =
   T.unlines $ (dispEdhCallFrame <$> frames) ++ ["👉 " <> tip]
 
 
-
 data EdhErrorTag = EdhException -- for root class of Edh exceptions
     | PackageError
     | ParseError
@@ -61,16 +60,21 @@ data EdhErrorTag = EdhException -- for root class of Edh exceptions
     | UsageError
   deriving (Eq,Show,Typeable)
 
-data EdhError = ProgramHalt !Dynamic
-    -- halt result in the dynamic is either an 'EdhValue' or an exception
-    -- we are not importing 'EdhValue' into this module, for trivial
-    -- avoiding of cyclic imports
+data EdhError =
+    -- | halt result in the dynamic is either an 'EdhValue' or an
+    -- arbitrary exception.
+    ProgramHalt !Dynamic
 
-    -- tagged error with msg and ctx
+    -- | arbitrary realworld error happened in IO monad, propagated
+    -- into the Edh world
+    | EdhIOError !Dynamic
+
+    -- | tagged error with msg and ctx
     | EdhError !EdhErrorTag !Text !EdhCallContext
   deriving (Typeable)
 instance Show EdhError where
-  show (ProgramHalt _) = "Edh⏹️Halt"
+  show (ProgramHalt _  ) = "Edh⏹️Halt"
+  show (EdhIOError  ioe) = show ioe
   show (EdhError EdhException !msg !cc) = --
     "💔\n" <> show cc <> "Đ: " <> T.unpack msg
   show (EdhError PackageError !msg !cc) = --
