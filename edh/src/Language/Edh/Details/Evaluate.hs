@@ -37,6 +37,18 @@ import           Language.Edh.Details.PkgMan
 import           Language.Edh.Details.Utils
 
 
+-- | Fork a GHC thread to run the specified Edh proc concurrently
+forkEdh :: EdhProcExit -> EdhProc -> EdhProc
+forkEdh !exit !p = ask >>= \pgs -> contEdhSTM $ if edh'in'tx pgs
+  then throwEdhSTM pgs UsageError "You don't fork within a transaction"
+  else do
+    writeTQueue (edh'fork'queue pgs) $ Right $ EdhTxTask pgs
+                                                         False
+                                                         (wuji pgs)
+                                                         (const p)
+    exitEdhSTM pgs exit nil
+
+
 parseEdh :: EdhWorld -> String -> Text -> STM (Either ParserError [StmtSrc])
 parseEdh !world !srcName !srcCode = do
   pd <- takeTMVar wops -- update 'worldOperators' atomically wrt parsing
@@ -384,16 +396,12 @@ evalStmt' !stmt !exit = do
                                  origOp
                 exitEdhSTM pgs exit origOp
               val ->
-                throwSTM
-                  $ EdhError
-                      EvalError
-                      (  "Can not re-declare a "
-                      <> T.pack (edhTypeNameOf val)
-                      <> ": "
-                      <> T.pack (show val)
-                      <> " as an operator"
-                      )
-                  $ getEdhCallContext 0 pgs
+                throwEdhSTM pgs EvalError
+                  $  "Can not re-declare a "
+                  <> T.pack (edhTypeNameOf val)
+                  <> ": "
+                  <> T.pack (show val)
+                  <> " as an operator"
       _ -> contEdhSTM $ do
         validateOperDecl pgs opProc
         u <- unsafeIOToSTM newUnique
@@ -702,21 +710,9 @@ evalExpr expr exit = do
       local (\s -> s { edh'in'tx = True })
         $ evalExprs xs
         $ \(OriginalValue !tv _ _) -> case tv of
-            EdhTuple l -> contEdhSTM $ do
-              dpl <- forM l $ \case
-                EdhPair kVal vVal -> return (kVal, vVal)
-                pv ->
-                  throwSTM
-                    $ EdhError
-                        EvalError
-                        (  "Invalid dict entry "
-                        <> T.pack (edhTypeNameOf pv)
-                        <> ": "
-                        <> T.pack (show pv)
-                        )
-                    $ getEdhCallContext 0 pgs
-              ds <- newTVar $ Map.fromList dpl
+            EdhTuple l -> contEdhSTM $ pvlToDict pgs l $ \d -> do
               u  <- unsafeIOToSTM newUnique
+              ds <- newTVar d
               exitEdhSTM pgs exit (EdhDict (Dict u ds))
             _ -> error "bug"
 
@@ -1159,28 +1155,32 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
       Left !pb ->
         runEdhProc pgsCaller
           $ packEdhArgs argsSndr
-          $ \(ArgsPack !args !kwargs) -> contEdhSTM $ do
-              (outlet, kwargs') <- case Map.lookup "outlet" kwargs of
+          $ \(ArgsPack !args !kwargs) ->
+              contEdhSTM $ case Map.lookup "outlet" kwargs of
                 Nothing -> do
-                  sink <- newEventSink
-                  return (sink, Map.insert "outlet" (EdhSink sink) kwargs)
-                Just (EdhSink !sink) -> return (sink, kwargs)
+                  outlet <- newEventSink
+                  callMaker $ \exit ->
+                    launchEventProducer exit outlet $ callEdhMethod'
+                      Nothing
+                      callee'that
+                      mth'proc
+                      pb
+                      (ArgsPack args
+                                (Map.insert "outlet" (EdhSink outlet) kwargs)
+                      )
+                      edhEndOfProc
+                Just (EdhSink !outlet) -> callMaker $ \exit ->
+                  launchEventProducer exit outlet $ callEdhMethod'
+                    Nothing
+                    callee'that
+                    mth'proc
+                    pb
+                    (ArgsPack args kwargs)
+                    edhEndOfProc
                 Just !badVal ->
-                  throwSTM
-                    $ EdhError
-                        EvalError
-                        ("The value passed to a producer as `outlet` found to be a "
-                        <> T.pack (edhTypeNameOf badVal)
-                        )
-                    $ getEdhCallContext 0 pgsCaller
-              callMaker $ \exit ->
-                launchEventProducer exit outlet $ callEdhMethod'
-                  Nothing
-                  callee'that
-                  mth'proc
-                  pb
-                  (ArgsPack args kwargs')
-                  edhEndOfProc
+                  throwEdhSTM pgsCaller UsageError
+                    $ "The value passed to a producer as `outlet` found to be a "
+                    <> T.pack (edhTypeNameOf badVal)
 
     -- calling a generator
     (EdhGnrtor _) -> throwEdhSTM
@@ -1225,10 +1225,7 @@ resolveEdhAttrAddr !pgs (SymbolicAttr !symName) !exit =
 -- action, i.e. let stm retry it automatically (e.g. to blocking read a 'TChan')
 waitEdhSTM :: EdhProgState -> STM EdhValue -> (EdhValue -> STM ()) -> STM ()
 waitEdhSTM !pgs !act !exit = if edh'in'tx pgs
-  then
-    throwSTM
-    $ EdhError UsageError "You don't wait stm from within a transaction"
-    $ getEdhCallContext 0 pgs
+  then throwEdhSTM pgs UsageError "You don't wait stm from within a transaction"
   else writeTQueue
     (edh'task'queue pgs)
     EdhTxTask
@@ -1247,10 +1244,7 @@ waitEdhSTM !pgs !act !exit = if edh'in'tx pgs
 -- | Blocking wait an asynchronous IO action from current Edh thread
 edhWaitIO :: EdhProcExit -> IO EdhValue -> EdhProc
 edhWaitIO !exit !act = ask >>= \pgs -> contEdhSTM $ if edh'in'tx pgs
-  then
-    throwSTM
-    $ EdhError EvalError "You don't wait IO within a transaction"
-    $ getEdhCallContext 0 pgs
+  then throwEdhSTM pgs UsageError "You don't wait IO within a transaction"
   else do
     !ioResult <- newEmptyTMVar
     writeTQueue (edh'fork'queue pgs)
@@ -1971,145 +1965,142 @@ recvEdhArgs
 recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
   !pgsCaller <- ask
   let -- args receive always done in callee's context with tx on
-      !pgsRecv = pgsCaller { edh'in'tx = True, edh'context = recvCtx }
-      recvFromPack
-        :: (ArgsPack, Map.HashMap AttrKey EdhValue)
-        -> ArgReceiver
-        -> STM (ArgsPack, Map.HashMap AttrKey EdhValue)
-      recvFromPack (pk@(ArgsPack posArgs' kwArgs'), em) argRcvr =
-        case argRcvr of
-          RecvRestPosArgs "_" ->
-            -- silently drop the value to single underscore, while consume the args
-            -- from incoming pack
-            return (ArgsPack [] kwArgs', em)
-          RecvRestPosArgs restPosArgAttr -> return
-            ( ArgsPack [] kwArgs'
-            , Map.insert (AttrByName restPosArgAttr)
-                         (EdhArgsPack $ ArgsPack posArgs' Map.empty)
-                         em
-            )
-          RecvRestKwArgs "_" ->
-            -- silently drop the value to single underscore, while consume the args
-            -- from incoming pack
-            return (ArgsPack posArgs' Map.empty, em)
-          RecvRestKwArgs restKwArgAttr -> return
-            ( ArgsPack posArgs' Map.empty
-            , Map.insert (AttrByName restKwArgAttr)
-                         (EdhArgsPack $ ArgsPack [] kwArgs')
-                         em
-            )
-          RecvRestPkArgs "_" ->
-            -- silently drop the value to single underscore, while consume the args
-            -- from incoming pack
-            return (ArgsPack [] Map.empty, em)
-          RecvRestPkArgs restPkArgAttr -> return
-            ( ArgsPack [] Map.empty
-            , Map.insert (AttrByName restPkArgAttr) (EdhArgsPack pk) em
-            )
-          RecvArg "_" _ _ -> do
-            -- silently drop the value to single underscore, while consume the arg
-            -- from incoming pack
-            (_, posArgs'', kwArgs'') <- resolveArgValue "_" Nothing
-            return (ArgsPack posArgs'' kwArgs'', em)
-          RecvArg argName argTgtAddr argDefault -> do
-            (argVal, posArgs'', kwArgs'') <- resolveArgValue argName argDefault
-            case argTgtAddr of
-              Nothing ->
-                return
-                  ( ArgsPack posArgs'' kwArgs''
-                  , Map.insert (AttrByName argName) argVal em
-                  )
-              Just (DirectRef addr) -> case addr of
-                NamedAttr attrName -> -- simple rename
-                  return
+    !pgsRecv = pgsCaller { edh'in'tx = True, edh'context = recvCtx }
+    recvFromPack
+      :: (ArgsPack, Map.HashMap AttrKey EdhValue)
+      -> ArgReceiver
+      -> ((ArgsPack, Map.HashMap AttrKey EdhValue) -> STM ())
+      -> STM ()
+    recvFromPack (pk@(ArgsPack posArgs' kwArgs'), em) argRcvr !exit' =
+      case argRcvr of
+        RecvRestPosArgs "_" ->
+          -- silently drop the value to single underscore, while consume the args
+          -- from incoming pack
+          exit' (ArgsPack [] kwArgs', em)
+        RecvRestPosArgs restPosArgAttr -> exit'
+          ( ArgsPack [] kwArgs'
+          , Map.insert (AttrByName restPosArgAttr)
+                       (EdhArgsPack $ ArgsPack posArgs' Map.empty)
+                       em
+          )
+        RecvRestKwArgs "_" ->
+          -- silently drop the value to single underscore, while consume the args
+          -- from incoming pack
+          exit' (ArgsPack posArgs' Map.empty, em)
+        RecvRestKwArgs restKwArgAttr -> exit'
+          ( ArgsPack posArgs' Map.empty
+          , Map.insert (AttrByName restKwArgAttr)
+                       (EdhArgsPack $ ArgsPack [] kwArgs')
+                       em
+          )
+        RecvRestPkArgs "_" ->
+          -- silently drop the value to single underscore, while consume the args
+          -- from incoming pack
+          exit' (ArgsPack [] Map.empty, em)
+        RecvRestPkArgs restPkArgAttr -> exit'
+          ( ArgsPack [] Map.empty
+          , Map.insert (AttrByName restPkArgAttr) (EdhArgsPack pk) em
+          )
+        RecvArg "_" _ _ ->
+          -- silently drop the value to single underscore, while consume the arg
+          -- from incoming pack
+          resolveArgValue "_" Nothing $ \(_, posArgs'', kwArgs'') ->
+            exit' (ArgsPack posArgs'' kwArgs'', em)
+        RecvArg argName argTgtAddr argDefault ->
+          resolveArgValue argName argDefault
+            $ \(argVal, posArgs'', kwArgs'') -> case argTgtAddr of
+                Nothing ->
+                  exit'
                     ( ArgsPack posArgs'' kwArgs''
-                    , Map.insert (AttrByName attrName) argVal em
+                    , Map.insert (AttrByName argName) argVal em
                     )
-                SymbolicAttr symName -> -- todo support this ?
-                  throwSTM -- todo make this catchable by Edh code ?
-                    $ EdhError
-                        UsageError
-                        ("Do you mean `this.@" <> symName <> "` instead ?")
-                    $ getEdhCallContext 0 pgsRecv
-              Just addr@(IndirectRef _ _) -> do
-                -- do assignment in callee's context, and return to caller's afterwards
-                runEdhProc pgsRecv $ assignEdhTarget pgsCaller
-                                                     (AttrExpr addr)
-                                                     edhEndOfProc
-                                                     argVal
-                return (ArgsPack posArgs'' kwArgs'', em)
-              tgt ->
-                throwSTM -- todo make this catchable by Edh code ?
-                  $ EdhError
-                      UsageError
-                      ("Invalid argument retarget: " <> T.pack (show tgt))
-                  $ getEdhCallContext 0 pgsRecv
-       where
-        resolveArgValue
-          :: AttrName
-          -> Maybe Expr
-          -> STM (EdhValue, [EdhValue], Map.HashMap AttrName EdhValue)
-        resolveArgValue argName argDefault = do
-          let (inKwArgs, kwArgs'') = takeOutFromMap argName kwArgs'
-          case inKwArgs of
-            Just argVal -> return (argVal, posArgs', kwArgs'')
-            _           -> case posArgs' of
-              (posArg : posArgs'') -> return (posArg, posArgs'', kwArgs'')
-              []                   -> case argDefault of
-                Just defaultExpr -> do
-                  defaultVar <- newEmptyTMVar
-                  -- always eval the default value atomically in callee's contex
-                  runEdhProc pgsRecv $ evalExpr
-                    defaultExpr
-                    (\(OriginalValue !val _ _) ->
-                      contEdhSTM (putTMVar defaultVar val)
-                    )
-                  defaultVal <- readTMVar defaultVar
-                  return (defaultVal, posArgs', kwArgs'')
-                _ ->
-                  throwSTM -- todo make this catchable by Edh code ?
-                    $ EdhError UsageError ("Missing argument: " <> argName)
-                    $ getEdhCallContext 0 pgsCaller
-      woResidual
-        :: ArgsPack
-        -> Map.HashMap AttrKey EdhValue
-        -> STM (Map.HashMap AttrKey EdhValue)
-      woResidual (ArgsPack !posResidual !kwResidual) em
-        | not (null posResidual)
-        = throwSTM -- todo make this catchable by Edh code ?
-          $ EdhError
-              UsageError
-              (  "Extraneous "
-              <> T.pack (show $ length posResidual)
-              <> " positional argument(s)"
-              )
-          $ getEdhCallContext 0 pgsCaller
-        | not (Map.null kwResidual)
-        = throwSTM -- todo make this catchable by Edh code ?
-          $ EdhError
-              UsageError
-              (  "Extraneous keyword arguments: "
-              <> T.unwords (Map.keys kwResidual)
-              )
-          $ getEdhCallContext 0 pgsCaller
-        | otherwise
-        = return em
-      doReturn :: Map.HashMap AttrKey EdhValue -> STM ()
-      doReturn !es =
-        -- insert a cycle tick here, so if no tx required for the call
-        -- overall, the args receiving tx stops here then the callee
-        -- runs in next stm transaction
-        exitEdhSTM' pgsCaller (\_ -> exit es) (wuji pgsCaller)
+                Just (DirectRef addr) -> case addr of
+                  NamedAttr attrName -> -- simple rename
+                    exit'
+                      ( ArgsPack posArgs'' kwArgs''
+                      , Map.insert (AttrByName attrName) argVal em
+                      )
+                    -- todo support this ?
+                  SymbolicAttr symName ->
+                    throwEdhSTM pgsRecv UsageError
+                      $  "Do you mean `this.@"
+                      <> symName
+                      <> "` instead ?"
+                Just addr@(IndirectRef _ _) -> do
+                  -- do assignment in callee's context, and return to caller's afterwards
+                  runEdhProc pgsRecv $ assignEdhTarget pgsCaller
+                                                       (AttrExpr addr)
+                                                       edhEndOfProc
+                                                       argVal
+                  exit' (ArgsPack posArgs'' kwArgs'', em)
+                tgt ->
+                  throwEdhSTM pgsRecv UsageError
+                    $  "Invalid argument retarget: "
+                    <> T.pack (show tgt)
+     where
+      resolveArgValue
+        :: AttrName
+        -> Maybe Expr
+        -> (  (EdhValue, [EdhValue], Map.HashMap AttrName EdhValue)
+           -> STM ()
+           )
+        -> STM ()
+      resolveArgValue !argName !argDefault !exit'' = do
+        let (inKwArgs, kwArgs'') = takeOutFromMap argName kwArgs'
+        case inKwArgs of
+          Just argVal -> exit'' (argVal, posArgs', kwArgs'')
+          _           -> case posArgs' of
+            (posArg : posArgs'') -> exit'' (posArg, posArgs'', kwArgs'')
+            []                   -> case argDefault of
+              Just defaultExpr -> do
+                defaultVar <- newEmptyTMVar
+                -- always eval the default value atomically in callee's contex
+                runEdhProc pgsRecv $ evalExpr
+                  defaultExpr
+                  (\(OriginalValue !val _ _) ->
+                    contEdhSTM (putTMVar defaultVar val)
+                  )
+                defaultVal <- readTMVar defaultVar
+                exit'' (defaultVal, posArgs', kwArgs'')
+              _ ->
+                throwEdhSTM pgsCaller UsageError
+                  $  "Missing argument: "
+                  <> argName
+    woResidual
+      :: ArgsPack
+      -> Map.HashMap AttrKey EdhValue
+      -> (Map.HashMap AttrKey EdhValue -> STM ())
+      -> STM ()
+    woResidual (ArgsPack !posResidual !kwResidual) !em !exit'
+      | not (null posResidual)
+      = throwEdhSTM pgsCaller UsageError
+        $  "Extraneous "
+        <> T.pack (show $ length posResidual)
+        <> " positional argument(s)"
+      | not (Map.null kwResidual)
+      = throwEdhSTM pgsCaller UsageError
+        $  "Extraneous keyword arguments: "
+        <> T.unwords (Map.keys kwResidual)
+      | otherwise
+      = exit' em
+    doReturn :: Map.HashMap AttrKey EdhValue -> STM ()
+    doReturn !es =
+      -- insert a cycle tick here, so if no tx required for the call
+      -- overall, the args receiving tx stops here then the callee
+      -- runs in next stm transaction
+      exitEdhSTM' pgsCaller (\_ -> exit es) (wuji pgsCaller)
 
   -- execution of the args receiving always in a tx for atomicity, and
   -- in the specified receiving (should be callee's outer) context
   local (const pgsRecv) $ case argsRcvr of
-    PackReceiver argRcvrs -> contEdhSTM $ do
-      (apk', em) <- foldM recvFromPack (apk, Map.empty) argRcvrs
-      woResidual apk' em >>= doReturn
-    SingleReceiver argRcvr -> contEdhSTM $ do
-      (apk', em) <- recvFromPack (apk, Map.empty) argRcvr
-      woResidual apk' em >>= doReturn
+    PackReceiver argRcvrs -> contEdhSTM $ go argRcvrs apk Map.empty     where
+      go :: [ArgReceiver] -> ArgsPack -> Map.HashMap AttrKey EdhValue -> STM ()
+      go [] !apk' !em = woResidual apk' em doReturn
+      go (r : rest) !apk' !em =
+        recvFromPack (apk', em) r $ \(apk'', em') -> go rest apk'' em'
+    SingleReceiver argRcvr ->
+      contEdhSTM $ recvFromPack (apk, Map.empty) argRcvr $ \(apk', em) ->
+        woResidual apk' em doReturn
     WildReceiver -> contEdhSTM $ if null posArgs
       then doReturn
         (Map.fromList [ (AttrByName k, v) | (k, v) <- Map.toList kwArgs ])
@@ -2155,25 +2146,22 @@ packEdhArgs !argsSender !pkExit = do
   pkArgs []       !exit = exit (ArgsPack [] Map.empty)
   pkArgs (x : xs) !exit = do
     !pgs <- ask
-    let edhVal2Kw :: EdhValue -> STM AttrName
-        edhVal2Kw = \case
-          EdhString s -> return s
-          k ->
-            throwSTM -- todo make this catchable by Edh code ?
-              $ EdhError
-                  UsageError
-                  ("Invalid argument keyword from value: " <> T.pack (show k))
-              $ getEdhCallContext 0 pgs
-        dictKey2Kw :: ItemKey -> STM AttrName
-        dictKey2Kw = \case
-          EdhString !name -> return name
-          k ->
-            throwSTM -- todo make this catchable by Edh code ?
-              $ EdhError
-                  UsageError
-                  ("Invalid argument keyword from dict key: " <> T.pack (show k)
-                  )
-              $ getEdhCallContext 0 pgs
+    let
+      edhVal2Kw :: EdhValue -> (AttrName -> STM ()) -> STM ()
+      edhVal2Kw !k !exit' = case k of
+        EdhString s -> exit' s
+        _ ->
+          throwEdhSTM pgs UsageError
+            $  "Invalid argument keyword from a "
+            <> T.pack (edhTypeNameOf k)
+            <> ": "
+            <> T.pack (show k)
+      dictKvs2Kwl
+        :: [(ItemKey, EdhValue)] -> ([(AttrName, EdhValue)] -> STM ()) -> STM ()
+      dictKvs2Kwl !ps !exit' = go ps []       where
+        go :: [(ItemKey, EdhValue)] -> [(AttrName, EdhValue)] -> STM ()
+        go []              !kvl = exit' kvl
+        go ((k, v) : rest) !kvl = edhVal2Kw k $ \k' -> go rest ((k', v) : kvl)
     case x of
       UnpackPosArgs !posExpr ->
         evalExpr posExpr $ \(OriginalValue !val _ _) -> case val of
@@ -2201,16 +2189,15 @@ packEdhArgs !argsSender !pkExit = do
             pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
               exit (ArgsPack posArgs (Map.union kwArgs kwArgs'))
           (EdhPair !k !v) -> pkArgs xs $ \case
-            (ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
-              kw <- edhVal2Kw k
+            (ArgsPack !posArgs !kwArgs) -> contEdhSTM $ edhVal2Kw k $ \kw ->
               runEdhProc pgs
                 $ exit (ArgsPack posArgs $ Map.insert kw (noneNil v) kwArgs)
           (EdhDict (Dict _ !ds)) -> pkArgs xs $ \case
             (ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
-              dm  <- readTVar ds
-              kvl <- forM (Map.toList dm) $ \(k, v) -> (, v) <$> dictKey2Kw k
-              runEdhProc pgs $ exit
-                (ArgsPack posArgs $ Map.union kwArgs $ Map.fromList kvl)
+              dm <- readTVar ds
+              dictKvs2Kwl (Map.toList dm) $ \kvl ->
+                runEdhProc pgs $ exit
+                  (ArgsPack posArgs $ Map.union kwArgs $ Map.fromList kvl)
           _ ->
             throwEdh EvalError
               $  "Can not unpack kwargs from a "
@@ -2245,6 +2232,27 @@ packEdhArgs !argsSender !pkExit = do
                 kw
                 kwArgs
               )
+
+
+val2DictEntry
+  :: EdhProgState -> EdhValue -> ((ItemKey, EdhValue) -> STM ()) -> STM ()
+val2DictEntry _ (EdhPair !k !v    ) !exit = exit (k, v)
+val2DictEntry _ (EdhTuple [!k, !v]) !exit = exit (k, v)
+val2DictEntry _ (EdhArgsPack (ArgsPack [!k, !v] !kwargs)) !exit
+  | Map.null kwargs = exit (k, v)
+val2DictEntry !pgs !val _ = throwEdhSTM
+  pgs
+  UsageError
+  ("Invalid entry for dict " <> T.pack (edhTypeNameOf val) <> ": " <> T.pack
+    (show val)
+  )
+
+pvlToDict :: EdhProgState -> [EdhValue] -> (DictStore -> STM ()) -> STM ()
+pvlToDict !pgs !pvl !x = go pvl []
+ where
+  go :: [EdhValue] -> [(ItemKey, EdhValue)] -> STM ()
+  go []         !ps = x $ Map.fromList ps
+  go (p : rest) ps  = val2DictEntry pgs p $ \t -> go rest (t : ps)
 
 
 -- comma separated repr string

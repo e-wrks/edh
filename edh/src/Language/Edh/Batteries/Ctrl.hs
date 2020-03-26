@@ -10,6 +10,7 @@ import           Control.Monad.Reader
 
 import           Control.Concurrent.STM
 
+import           Data.Maybe
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
 import           Data.Unique
@@ -194,20 +195,18 @@ branchProc !lhExpr !rhExpr !exit = do
                     else exitEdhSTM pgs exit EdhFallthrough
           _ -> exitEdhSTM pgs exit EdhFallthrough
         else do
-          attrNames <- sequence $ (<$> vExprs) $ \case
-            (AttrExpr (DirectRef (NamedAttr vAttr))) -> return vAttr
-            vPattern ->
-              throwSTM -- todo make this catchable by Edh code ?
-                $ EdhError
-                    UsageError
-                    (  "Invalid element in tuple pattern: "
-                    <> T.pack (show vPattern)
-                    )
-                $ getEdhCallContext 0 pgs
-          case ctxMatch of
-            EdhTuple vs | length vs == length vExprs ->
-              branchMatched $ zip attrNames vs
-            _ -> exitEdhSTM pgs exit EdhFallthrough
+          attrNames <- fmap catMaybes $ sequence $ (<$> vExprs) $ \case
+            (AttrExpr (DirectRef (NamedAttr vAttr))) -> return $ Just vAttr
+            _ -> return Nothing
+          if length attrNames /= length vExprs
+            then throwEdhSTM
+              pgs
+              UsageError
+              ("Invalid element in tuple pattern: " <> T.pack (show vExprs))
+            else case ctxMatch of
+              EdhTuple vs | length vs == length vExprs ->
+                branchMatched $ zip attrNames vs
+              _ -> exitEdhSTM pgs exit EdhFallthrough
 
       -- {{ class:inst }} -- instance resolving pattern
       [StmtSrc (_, ExprStmt (DictExpr [InfixExpr ":" (AttrExpr (DirectRef (NamedAttr classAttr))) (AttrExpr (DirectRef (NamedAttr instAttr)))]))]

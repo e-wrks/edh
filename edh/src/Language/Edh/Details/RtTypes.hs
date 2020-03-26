@@ -200,16 +200,16 @@ createSideEntity !writeProtected = do
       the'all'entity'attrs _ _ = Map.toList <$> readTVar obs
       the'change'entity'attr pgs !k !v inband = if writeProtected
         then
-          throwSTM -- make this catchable from Edh code ?
-          $ EdhError EvalError "Writing a protected entity"
+          throwSTM
+          $ EdhError UsageError "Writing a protected entity"
           $ getEdhCallContext 0 pgs
         else do
           modifyTVar' obs $ Map.insert k v
           return inband
       the'update'entity'attrs pgs !ps inband = if writeProtected
         then
-          throwSTM -- make this catchable from Edh code ?
-          $ EdhError EvalError "Writing a protected entity"
+          throwSTM
+          $ EdhError UsageError "Writing a protected entity"
           $ getEdhCallContext 0 pgs
         else do
           modifyTVar' obs $ Map.union (Map.fromList ps)
@@ -485,20 +485,6 @@ type DeferRecord = (EdhProgState, EdhProc)
 runEdhProc :: EdhProgState -> EdhProc -> STM ()
 runEdhProc !pgs !p = join $ runReaderT p pgs
 {-# INLINE runEdhProc #-}
-
--- | Fork a GHC thread to run the specified Edh proc concurrently
-forkEdh :: EdhProcExit -> EdhProc -> EdhProc
-forkEdh !exit !p = ask >>= \pgs -> contEdhSTM $ if edh'in'tx pgs
-  then
-    throwSTM
-    $ EdhError UsageError "You don't fork within a transaction"
-    $ getEdhCallContext 0 pgs
-  else do
-    writeTQueue (edh'fork'queue pgs) $ Right $ EdhTxTask pgs
-                                                         False
-                                                         (wuji pgs)
-                                                         (const p)
-    exitEdhSTM pgs exit nil
 
 -- | Continue an Edh proc with stm computation, there must be NO further
 -- action following this statement, or the stm computation is just lost.

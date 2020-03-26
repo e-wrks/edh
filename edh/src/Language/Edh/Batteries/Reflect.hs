@@ -161,33 +161,30 @@ scopeGetProc (ArgsPack !args !kwargs) !exit = do
         -> [(AttrName, EdhValue)]
         -> [EdhValue]
         -> [(AttrName, EdhValue)]
-        -> STM ([EdhValue], [(AttrName, EdhValue)])
-      lookupAttrs rtnArgs rtnKwArgs [] [] = return (rtnArgs, rtnKwArgs)
-      lookupAttrs rtnArgs rtnKwArgs [] ((n, v) : restKwArgs) = do
-        k       <- attrKeyFrom pgs v
-        attrVal <- lookupEntityAttr pgs ent k
-        lookupAttrs rtnArgs ((n, attrVal) : rtnKwArgs) [] restKwArgs
-      lookupAttrs rtnArgs rtnKwArgs (v : restArgs) kwargs' = do
-        k       <- attrKeyFrom pgs v
-        attrVal <- lookupEntityAttr pgs ent k
-        lookupAttrs (attrVal : rtnArgs) rtnKwArgs restArgs kwargs'
-  contEdhSTM $ lookupAttrs [] [] args (Map.toList kwargs) >>= \case
+        -> (([EdhValue], [(AttrName, EdhValue)]) -> STM ())
+        -> STM ()
+      lookupAttrs rtnArgs rtnKwArgs [] [] !exit' = exit' (rtnArgs, rtnKwArgs)
+      lookupAttrs rtnArgs rtnKwArgs [] ((n, v) : restKwArgs) !exit' =
+        attrKeyFrom pgs v $ \k -> do
+          attrVal <- lookupEntityAttr pgs ent k
+          lookupAttrs rtnArgs ((n, attrVal) : rtnKwArgs) [] restKwArgs exit'
+      lookupAttrs rtnArgs rtnKwArgs (v : restArgs) kwargs' !exit' =
+        attrKeyFrom pgs v $ \k -> do
+          attrVal <- lookupEntityAttr pgs ent k
+          lookupAttrs (attrVal : rtnArgs) rtnKwArgs restArgs kwargs' exit'
+  contEdhSTM $ lookupAttrs [] [] args (Map.toList kwargs) $ \case
     ([v]    , []       ) -> exitEdhSTM pgs exit v
     (rtnArgs, rtnKwArgs) -> exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack
       (reverse rtnArgs)
       (Map.fromList rtnKwArgs)
  where
-  attrKeyFrom :: EdhProgState -> EdhValue -> STM AttrKey
-  attrKeyFrom _ (EdhString attrName) = return $ AttrByName attrName
-  attrKeyFrom _ (EdhSymbol sym     ) = return $ AttrBySym sym
-  attrKeyFrom pgs badVal =
-    throwSTM -- todo make this catchable by Edh code ?
-      $ EdhError
-          UsageError
-          (  "Invalid attribute reference type - "
-          <> T.pack (show $ edhTypeOf badVal)
-          )
-      $ getEdhCallContext 0 pgs
+  attrKeyFrom :: EdhProgState -> EdhValue -> (AttrKey -> STM ()) -> STM ()
+  attrKeyFrom _   (EdhString attrName) !exit' = exit' $ AttrByName attrName
+  attrKeyFrom _   (EdhSymbol sym     ) !exit' = exit' $ AttrBySym sym
+  attrKeyFrom pgs badVal               _      = throwEdhSTM
+    pgs
+    UsageError
+    ("Invalid attribute reference type - " <> T.pack (show $ edhTypeOf badVal))
 
 
 -- | utility scope.put(k1:v1, k2:v2, n3=v3, n4=v4, ...)
@@ -198,8 +195,7 @@ scopePutProc (ArgsPack !args !kwargs) !exit = do
   let !callerCtx = edh'context pgs
       !that      = thatObject $ contextScope callerCtx
       !ent       = scopeEntity $ wrappedScopeOf that
-  contEdhSTM $ do
-    attrs <- putAttrs pgs args []
+  contEdhSTM $ putAttrs pgs args [] $ \attrs -> do
     updateEntityAttrs pgs ent
       $  attrs
       ++ [ (AttrByName k, v) | (k, v) <- Map.toList kwargs ]
@@ -209,21 +205,22 @@ scopePutProc (ArgsPack !args !kwargs) !exit = do
     :: EdhProgState
     -> [EdhValue]
     -> [(AttrKey, EdhValue)]
-    -> STM [(AttrKey, EdhValue)]
-  putAttrs _   []           cumu = return cumu
-  putAttrs pgs (arg : rest) cumu = case arg of
-    EdhPair (EdhString !k) !v  -> putAttrs pgs rest ((AttrByName k, v) : cumu)
-    EdhPair (EdhSymbol !k) !v  -> putAttrs pgs rest ((AttrBySym k, v) : cumu)
-    EdhTuple [EdhString !k, v] -> putAttrs pgs rest ((AttrByName k, v) : cumu)
-    EdhTuple [EdhSymbol !k, v] -> putAttrs pgs rest ((AttrBySym k, v) : cumu)
+    -> ([(AttrKey, EdhValue)] -> STM ())
+    -> STM ()
+  putAttrs _   []           cumu !exit' = exit' cumu
+  putAttrs pgs (arg : rest) cumu !exit' = case arg of
+    EdhPair (EdhString !k) !v ->
+      putAttrs pgs rest ((AttrByName k, v) : cumu) exit'
+    EdhPair (EdhSymbol !k) !v ->
+      putAttrs pgs rest ((AttrBySym k, v) : cumu) exit'
+    EdhTuple [EdhString !k, v] ->
+      putAttrs pgs rest ((AttrByName k, v) : cumu) exit'
+    EdhTuple [EdhSymbol !k, v] ->
+      putAttrs pgs rest ((AttrBySym k, v) : cumu) exit'
     _ ->
-      throwSTM -- todo make this catchable by Edh code ?
-        $ EdhError
-            UsageError
-            (  "Invalid key/value type to put into a scope - "
-            <> T.pack (edhTypeNameOf arg)
-            )
-        $ getEdhCallContext 0 pgs
+      throwEdhSTM pgs UsageError
+        $  "Invalid key/value type to put into a scope - "
+        <> T.pack (edhTypeNameOf arg)
 
 
 -- | utility scope.eval(expr1, expr2, kw3=expr3, kw4=expr4, ...)
