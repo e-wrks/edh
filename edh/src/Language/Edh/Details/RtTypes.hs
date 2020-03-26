@@ -296,27 +296,30 @@ type EdhExcptHndlr = EdhValue -> (EdhValue -> EdhProg) -> EdhProg
 defaultEdhExceptionHandler :: EdhExcptHndlr
 defaultEdhExceptionHandler !exv !rethrow = rethrow exv
 
--- | This has to be at the tail of a do block to work
-edhThrow :: EdhValue -> EdhProg
-edhThrow !exv = do
+edhErrorUncaught :: EdhValue -> EdhProg
+edhErrorUncaught !exv = ask >>= \pgs -> contEdhSTM $ case exv of
+  EdhObject exo -> do
+    esd <- readTVar $ entity'store $ objEntity exo
+    case fromDynamic esd :: Maybe EdhError of
+      Just !edhErr -> -- TODO replace cc in err if is empty here ?
+        throwSTM edhErr
+      Nothing -> -- TODO support magic method to coerce as exception ?
+        throwSTM $ EdhError EvalError (T.pack $ show exv) $ getEdhCallContext
+          0
+          pgs
+  _ -> -- coerce arbitrary value to EdhError
+    throwSTM $ EdhError EvalError (T.pack $ show exv) $ getEdhCallContext 0 pgs
+
+-- | Throw from an Edh proc, be cautious NOT to have any monadic action
+-- following such a throw, or it'll silently fail to work out.
+edhThrow :: EdhValue -> (EdhValue -> EdhProg) -> EdhProg
+edhThrow !exv uncaught = do
   pgs <- ask
-  let
-    handleExc :: EdhValue -> [Scope] -> EdhProg
-    -- no more Edh handler, throw to host (Haskell) runtime
-    handleExc exv' [] = contEdhSTM $ case exv' of
-      EdhObject exo -> do
-        esd <- readTVar $ entity'store $ objEntity exo
-        case fromDynamic esd :: Maybe EdhError of
-          Just !edhErr -> -- TODO replace cc in err if is empty here ?
-            throwSTM edhErr
-          Nothing -> -- TODO support magic method to coerce as exception ?
-            throwSTM $ EvalError (T.pack $ show exv) $ getEdhCallContext 0 pgs
-      _ -> -- coerce arbitrary value to EdhError
-        throwSTM $ EvalError (T.pack $ show exv) $ getEdhCallContext 0 pgs
-    -- trigger next handler in Edh
-    handleExc exv' (frame : stack) =
-      exceptionHandler frame exv' $ \exv'' -> handleExc exv'' stack
-  handleExc exv $ NE.toList $ callStack $ edh'context pgs
+  let propagateExc :: EdhValue -> [Scope] -> EdhProg
+      propagateExc exv' [] = uncaught exv'
+      propagateExc exv' (frame : stack) =
+        exceptionHandler frame exv' $ \exv'' -> propagateExc exv'' stack
+  propagateExc exv $ NE.toList $ callStack $ edh'context pgs
 
 
 -- Especially note that Edh has no block scope as in C
@@ -649,20 +652,17 @@ getEdhCallContext !unwind !pgs = EdhCallContext
 
 -- | Throw from an Edh proc, be cautious NOT to have any monadic action
 -- following such a throw, or it'll silently fail to work out.
-throwEdh :: Exception e => (Text -> EdhCallContext -> e) -> Text -> EdhProg
-throwEdh !excCtor !msg = do
+throwEdh :: EdhErrorTag -> Text -> EdhProg
+throwEdh !et !msg = do
   !pgs <- ask
-  return $ throwSTM (excCtor msg $ getEdhCallContext 0 pgs)
+  -- TODO go through Edh propagation instead
+  return $ throwSTM (EdhError et msg $ getEdhCallContext 0 pgs)
 
 -- | Throw from the stm operation of an Edh proc.
-throwEdhSTM
-  :: Exception e
-  => EdhProgState
-  -> (Text -> EdhCallContext -> e)
-  -> Text
-  -> STM a
-throwEdhSTM pgs !excCtor !msg =
-  throwSTM (excCtor msg $ getEdhCallContext 0 pgs)
+throwEdhSTM :: EdhProgState -> EdhErrorTag -> Text -> STM a
+throwEdhSTM pgs !et !msg =
+  -- TODO go through Edh propagation instead
+  throwSTM (EdhError et msg $ getEdhCallContext 0 pgs)
 
 
 -- | A pack of evaluated argument values with positional/keyword origin,

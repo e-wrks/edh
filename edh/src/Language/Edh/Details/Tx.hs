@@ -31,7 +31,8 @@ driveEdhProgram !haltResult !progCtx !prog = do
     Unmasked -> return ()
     _ ->
       throwIO
-        $ UsageError "Edh program should not run with async exceptions masked"
+        $ EdhError UsageError
+                   "Edh program should not run with async exceptions masked"
         $ EdhCallContext "<edh>" []
 
   -- prepare program environment

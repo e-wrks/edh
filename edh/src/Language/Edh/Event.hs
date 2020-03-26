@@ -153,7 +153,7 @@ forkEventConsumer !consumingAct = do
       $ consumingAct sink
   atomically
     $        (readTMVar consumerDone >> throwSTM
-               ( UsageError "event consumer quit without subscribing to sink"
+               (EdhError UsageError "event consumer quit without subscribing to sink"
                $ EdhCallContext "<edh>" []
                )
              )

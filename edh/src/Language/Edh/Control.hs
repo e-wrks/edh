@@ -53,22 +53,34 @@ dispEdhCallContext (EdhCallContext !tip !frames) =
   T.unlines $ (dispEdhCallFrame <$> frames) ++ ["👉 " <> tip]
 
 
--- halt result in the dynamic is either an 'EdhValue' or an exception
--- we are not importing 'EdhValue' into this module, for trivial
--- avoiding of cyclic imports
+
+data EdhErrorTag = EdhException -- for root class of Edh exceptions
+    | PackageError
+    | ParseError
+    | EvalError
+    | UsageError
+  deriving (Eq,Show,Typeable)
 
 data EdhError = ProgramHalt !Dynamic
-    | PackageError !Text !EdhCallContext
-    | ParseError !Text !EdhCallContext
-    | EvalError !Text !EdhCallContext
-    | UsageError !Text !EdhCallContext
+    -- halt result in the dynamic is either an 'EdhValue' or an exception
+    -- we are not importing 'EdhValue' into this module, for trivial
+    -- avoiding of cyclic imports
+
+    -- tagged error with msg and ctx
+    | EdhError !EdhErrorTag !Text !EdhCallContext
   deriving (Typeable)
 instance Show EdhError where
-  show (ProgramHalt _        ) = "Edh⏹️Halt"
-  show (PackageError !msg !cc) = "💔\n" <> show cc <> "📦 " <> T.unpack msg
-  show (ParseError   !msg !cc) = "💔\n" <> show cc <> "⛔ " <> T.unpack msg
-  show (EvalError    !msg !cc) = "💔\n" <> show cc <> "💣 " <> T.unpack msg
-  show (UsageError   !msg !cc) = "💔\n" <> show cc <> "🙈 " <> T.unpack msg
+  show (ProgramHalt _) = "Edh⏹️Halt"
+  show (EdhError EdhException !msg !cc) = --
+    "💔\n" <> show cc <> "Đ: " <> T.unpack msg
+  show (EdhError PackageError !msg !cc) = --
+    "💔\n" <> show cc <> "📦 " <> T.unpack msg
+  show (EdhError ParseError !msg !cc) = --
+    "💔\n" <> show cc <> "⛔ " <> T.unpack msg
+  show (EdhError EvalError !msg !cc) = --
+    "💔\n" <> show cc <> "💣 " <> T.unpack msg
+  show (EdhError UsageError !msg !cc) = --
+    "💔\n" <> show cc <> "🙈 " <> T.unpack msg
 instance Exception EdhError
 
 
@@ -76,8 +88,9 @@ edhKnownError :: SomeException -> Maybe EdhError
 edhKnownError err = case fromException err :: Maybe EdhError of
   Just e  -> Just e
   Nothing -> case fromException err :: Maybe ParserError of
-    Just e -> Just $ ParseError (T.pack $ errorBundlePretty e) $ EdhCallContext
-      "<parsing>"
-      []
+    Just e ->
+      Just $ EdhError ParseError (T.pack $ errorBundlePretty e) $ EdhCallContext
+        "<parsing>"
+        []
     Nothing -> Nothing
 

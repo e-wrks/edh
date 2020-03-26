@@ -36,15 +36,6 @@ import           Language.Edh.Details.PkgMan
 import           Language.Edh.Details.Utils
 
 
--- TODO ultimately this should not exist
-withEdhErrContext :: EdhProgState -> IO a -> IO a
-withEdhErrContext pgs !act = catch act $ \(e :: SomeException) ->
-  case fromException e :: Maybe EdhError of
-    Just (PackageError !msg _) ->
-      throwIO $ PackageError msg $ getEdhCallContext 0 pgs
-    _ -> throwIO e
-
-
 parseEdh :: EdhWorld -> String -> Text -> STM (Either ParserError [StmtSrc])
 parseEdh !world !srcName !srcCode = do
   pd <- takeTMVar wops -- update 'worldOperators' atomically wrt parsing
@@ -63,10 +54,10 @@ evalEdh !srcName !srcCode !exit = do
   let ctx   = edh'context pgs
       world = contextWorld ctx
   contEdhSTM $ parseEdh world srcName srcCode >>= \case
-    Left !err ->
-      throwSTM $ ParseError (T.pack $ errorBundlePretty err) $ getEdhCallContext
-        0
-        pgs
+    Left !err -> -- TODO go through Edh propagation instead
+      throwSTM
+        $ EdhError ParseError (T.pack $ errorBundlePretty err)
+        $ getEdhCallContext 0 pgs
     Right !stmts -> runEdhProg pgs $ evalBlock stmts exit
 
 
@@ -503,11 +494,11 @@ importEdhModule !impSpec !exit = do
     !scope = contextScope ctx
     importFromFS :: STM ()
     importFromFS = lookupEdhCtxAttr pgs scope (AttrByName "__file__") >>= \case
-      EdhString !fromModuPath -> do
-        (nomPath, moduFile) <-
-          unsafeIOToSTM $ withEdhErrContext pgs $ locateEdhModule
-            (edhPkgPathFrom $ T.unpack fromModuPath)
-            (T.unpack impSpec)
+      EdhString !fromModuPath -> do -- TODO here catch Haskell exceptions,
+                                    -- propagate as Edh error as appropriate
+        (nomPath, moduFile) <- unsafeIOToSTM $ locateEdhModule
+          (edhPkgPathFrom $ T.unpack fromModuPath)
+          (T.unpack impSpec)
         let !moduId = T.pack nomPath
         moduMap' <- takeTMVar (worldModules world)
         case Map.lookup moduId moduMap' of

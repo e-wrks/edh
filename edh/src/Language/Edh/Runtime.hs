@@ -108,28 +108,25 @@ createEdhWorld !runtime = liftIO $ do
       errClasses <- sequence
         [ (AttrByName nm, ) <$> mkHostClass rootScope nm False hc
         | (nm, hc) <-
-          [ ("ProgramHalt" , edhErrorCtor edhProgramHaltCtor)
-          , ("PackageError", edhErrorCtor $ edhCommonErrCtor PackageError)
-          , ("ParseError"  , edhErrorCtor $ edhCommonErrCtor ParseError)
-          , ("EvalError"   , edhErrorCtor $ edhCommonErrCtor EvalError)
-          , ("UsageError"  , edhErrorCtor $ edhCommonErrCtor UsageError)
+          [ ("ProgramHalt" , edhErrorCtor edhProgramHalt)
+          , ("Exception"   , edhErrorCtor $ edhSomeErr EdhException)
+          , ("PackageError", edhErrorCtor $ edhSomeErr PackageError)
+          , ("ParseError"  , edhErrorCtor $ edhSomeErr ParseError)
+          , ("EvalError"   , edhErrorCtor $ edhSomeErr EvalError)
+          , ("UsageError"  , edhErrorCtor $ edhSomeErr UsageError)
           ]
         ]
       updateEntityAttrs pgs rootEntity errClasses
 
   return world
  where
-  edhProgramHaltCtor :: ArgsPack -> EdhCallContext -> EdhError
-  edhProgramHaltCtor (ArgsPack [v] !kwargs) _ | Map.null kwargs =
+  edhProgramHalt :: ArgsPack -> EdhCallContext -> EdhError
+  edhProgramHalt (ArgsPack [v] !kwargs) _ | Map.null kwargs =
     ProgramHalt $ toDyn v
-  edhProgramHaltCtor !apk _ = ProgramHalt $ toDyn apk
-  edhCommonErrCtor
-    :: (Text -> EdhCallContext -> EdhError)
-    -> ArgsPack
-    -> EdhCallContext
-    -> EdhError
-  edhCommonErrCtor !ec (ArgsPack []      _) !cc = ec "" cc
-  edhCommonErrCtor !ec (ArgsPack (v : _) _) !cc = ec (T.pack $ show v) cc
+  edhProgramHalt !apk _ = ProgramHalt $ toDyn apk
+  edhSomeErr :: EdhErrorTag -> ArgsPack -> EdhCallContext -> EdhError
+  edhSomeErr !et (ArgsPack []      _) !cc = EdhError et "❌" cc
+  edhSomeErr !et (ArgsPack (v : _) _) !cc = EdhError et (T.pack $ show v) cc
   -- wrap a Haskell error data constructor as a host error object contstructor,
   -- used to define an error class in Edh 
   edhErrorCtor :: (ArgsPack -> EdhCallContext -> EdhError) -> EdhHostCtor
@@ -172,7 +169,8 @@ declareEdhOperators world declLoc opps = do
     if prevPrec /= newPrec
       then
         throwSTM
-        $ UsageError
+        $ EdhError
+            UsageError
             (  "precedence change from "
             <> T.pack (show prevPrec)
             <> " (declared "
@@ -217,7 +215,8 @@ mkIntrinsicOp !world !opSym !iop = do
   Map.lookup opSym <$> readTMVar (worldOperators world) >>= \case
     Nothing ->
       throwSTM
-        $ UsageError
+        $ EdhError
+            UsageError
             ("No precedence declared in the world for operator: " <> opSym)
         $ EdhCallContext "<edh>" []
     Just (preced, _) -> return $ EdhIntrOp preced $ IntrinOpDefi u opSym iop
@@ -331,5 +330,7 @@ bootEdhModule !world !impSpec = liftIO $ tryJust edhKnownError $ do
   atomically (tryReadTMVar final) >>= \case
     Just modu -> return modu -- a bit more informative than stm deadlock
     Nothing ->
-      throwIO $ UsageError "Module not loaded." $ EdhCallContext "<edh>" []
+      throwIO $ EdhError UsageError "Module not loaded." $ EdhCallContext
+        "<edh>"
+        []
 

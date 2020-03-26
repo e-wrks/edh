@@ -22,7 +22,8 @@ import           Language.Edh.Control
 -- program context trips into it, the `PackageError` thrown may be augmented
 -- later when appropriate.
 throwPkgError :: Text -> IO a
-throwPkgError !msg = throwIO $ PackageError msg $ EdhCallContext "<os>" []
+throwPkgError !msg =
+  throwIO $ EdhError PackageError msg $ EdhCallContext "<os>" []
 
 
 edhPkgPathFrom :: FilePath -> FilePath
