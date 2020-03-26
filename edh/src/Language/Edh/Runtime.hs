@@ -101,11 +101,14 @@ createEdhWorld !runtime = liftIO $ do
         , worldRuntime   = runtime
         }
 
-  -- install host error classes
+  -- install host error classes, among which is "Exception" for Edh
+  -- exception root class
   void $ runEdhProgram' (worldContext world) $ do
     pgs <- ask
     contEdhSTM $ do
       errClasses <- sequence
+        -- leave the out-of-band entity store open so Edh code can
+        -- assign arbitrary attrs to exceptions for informative
         [ (AttrByName nm, ) <$> mkHostClass rootScope nm False hc
         | (nm, hc) <-
           [ ("ProgramHalt" , edhErrorCtor edhProgramHalt)
@@ -143,7 +146,10 @@ createEdhWorld !runtime = liftIO $ do
       | (nm, vc, hp, args) <-
         [("__repr__", EdhMethod, __repr__, PackReceiver [])]
       ]
-    writeTVar obs $ Map.fromList methods
+    writeTVar obs
+      $  Map.fromList
+      $  methods -- todo expose more attrs to aid handling
+      ++ [(AttrByName "details", EdhArgsPack apk)]
 
 
 declareEdhOperators :: EdhWorld -> Text -> [(OpSymbol, Precedence)] -> STM ()
