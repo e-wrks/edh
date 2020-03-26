@@ -12,6 +12,7 @@ import           Control.Concurrent
 import           Control.Concurrent.STM
 
 import qualified Data.HashMap.Strict           as Map
+import           Data.Dynamic
 
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
@@ -86,17 +87,29 @@ driveEdhProgram !haltResult !progCtx !prog = do
   -- start forker thread
   void $ mask_ $ forkIOWithUnmask $ \unmask ->
     catch (unmask forkDescendants) onDescendantExc
-  -- set halt result after the main thread done, anyway if not already, so all
-  -- descendant threads will terminate. 
-  -- hanging STM jobs may cause the whole process killed by GHC deadlock detector.
-  flip finally (atomically $ void $ tryPutTMVar haltResult (Right nil))
+  flip finally
+       (
+        -- set halt result after the main thread done, anyway if not already,
+        -- so all descendant threads will terminate. or else hanging STM jobs
+        -- may cause the whole process killed by GHC deadlock detector.
+        atomically $ void $ tryPutTMVar haltResult (Right nil)
+        -- TODO let all live Edh threads go through ProgramHalt propagation,
+        --      providing the chance for them to do cleanup.
+                                                              )
     $ handle
-        (\(e :: SomeException) -> do
-          atomically $ void $ tryPutTMVar haltResult (Left e)
-          throwIO e
+        (\(e :: SomeException) -> case fromException e :: Maybe EdhError of
+          Just (ProgramHalt phd) -> case fromDynamic phd :: Maybe EdhValue of
+            Just phv -> atomically $ void $ tryPutTMVar haltResult $ Right phv
+            _        -> case fromDynamic phd :: Maybe SomeException of
+              Just phe -> atomically $ void $ tryPutTMVar haltResult (Left phe)
+              _        -> atomically $ void $ tryPutTMVar haltResult (Left e)
+          Just _  -> atomically $ void $ tryPutTMVar haltResult (Left e)
+          Nothing -> do
+            atomically $ void $ tryPutTMVar haltResult (Left e)
+            throwIO e -- re-throw if the exception is unknown
         )
     $ do
-    -- prepare program state for main thread
+        -- prepare program state for main Edh thread
         !(mainQueue :: TQueue EdhTxTask) <- newTQueueIO
         !reactors                        <- newTVarIO []
         !defers                          <- newTVarIO []
@@ -107,11 +120,11 @@ driveEdhProgram !haltResult !progCtx !prog = do
                                       , edh'in'tx      = False
                                       , edh'context    = progCtx
                                       }
-        -- bootstrap the program on main thread
+        -- bootstrap the program on main Edh thread
         atomically $ writeTQueue
           mainQueue
           (EdhTxTask pgsAtBoot False (wuji pgsAtBoot) (const prog))
-        -- drive the program from main thread
+        -- drive the main Edh thread
         driveEdhThread defers mainQueue
 
  where

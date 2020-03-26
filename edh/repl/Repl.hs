@@ -12,6 +12,7 @@ import           Control.Concurrent.STM
 
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
+import qualified Data.HashMap.Strict           as Map
 
 import           System.Console.Haskeline
 
@@ -40,21 +41,32 @@ edhProgLoop !runtime = do
   installEdhBatteries world
   -- install more host modules and/or other artifacts to be available
 
-  let loop = do
-        -- to run a module is to seek its `__main__.edh` and execute the
-        -- code there in a volatile module context, it can import itself
-        -- (i.e. `__init__.edh`) during the run. the imported module can
-        -- survive program crashes as all imported modules do.
-        runEdhModule world "repl" >>= \case
-          Left err ->
-            atomically $ writeTQueue ioQ $ ConsoleOut $ T.pack $ show err
-          Right () -> pure ()
-        -- obviously the program has crashed now, but the world with all
-        -- modules ever imported, are still safe and sound.
-        -- we assume what the user has left in the volatile module is
-        -- dispensable, just so so.
-        atomically $ writeTQueue ioQ $ ConsoleOut "🐴🐴🐯🐯"
-        loop
+  -- to run a module is to seek its `__main__.edh` and execute the
+  -- code there in a volatile module context, it can import itself
+  -- (i.e. `__init__.edh`) during the run. the imported module can
+  -- survive program crashes as all imported modules do.
+  let loop = runEdhModule world "repl" >>= \case
+        Left err -> do -- program crash on error
+          atomically $ writeTQueue ioQ $ ConsoleOut $ T.pack $ show err
+          -- the world with all modules ever imported, are still there,
+          atomically $ writeTQueue ioQ $ ConsoleOut "🐴🐴🐯🐯"
+          -- repeat another repl session with this world.
+          -- it may not be a good idea, but just so so ...
+          loop
+        Right phv -> case edhUltimate phv of
+          EdhNil -> do -- clean program halt, all done
+            atomically $ writeTQueue ioQ $ ConsoleOut
+              "Your work committed, bye."
+            atomically $ writeTQueue ioQ ConsoleShutdown
+          _ -> do -- unclean program exit
+            atomically $ writeTQueue ioQ $ ConsoleOut $ case phv of
+              EdhString msg -> msg
+              _             -> T.pack $ show phv
+            -- the world with all modules ever imported, are still there,
+            atomically $ writeTQueue ioQ $ ConsoleOut "🐴🐴🐯🐯"
+            -- repeat another repl session with this world.
+            -- it may not be a good idea, but just so so ...
+            loop
   loop
   where ioQ = consoleIO runtime
 
@@ -68,7 +80,7 @@ ioLoop !ioQ = liftIO (atomically $ readTQueue ioQ) >>= \case
     ioLoop ioQ
   ConsoleIn !cmdIn !ps1 !ps2 -> readInput ps1 ps2 [] >>= \case
     Nothing -> -- reached EOF (end-of-feed)
-      return ()
+      outputStrLn "Your work may have lost, sorry."
     Just !cmd -> do -- got one piece of code
       liftIO $ atomically $ putTMVar cmdIn cmd
       ioLoop ioQ

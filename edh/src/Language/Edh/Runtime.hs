@@ -129,7 +129,9 @@ createEdhWorld !runtime = liftIO $ do
   edhProgramHalt :: ArgsPack -> EdhCallContext -> EdhError
   edhProgramHalt (ArgsPack [v] !kwargs) _ | Map.null kwargs =
     ProgramHalt $ toDyn v
-  edhProgramHalt !apk _ = ProgramHalt $ toDyn apk
+  edhProgramHalt (ArgsPack [] !kwargs) _ | Map.null kwargs =
+    ProgramHalt $ toDyn nil
+  edhProgramHalt !apk _ = ProgramHalt $ toDyn $ EdhArgsPack apk
   edhSomeErr :: EdhErrorTag -> ArgsPack -> EdhCallContext -> EdhError
   edhSomeErr !et (ArgsPack [] _) !cc = EdhError et "❌" cc
   edhSomeErr !et (ArgsPack (EdhString msg : _) _) !cc = EdhError et msg cc
@@ -315,16 +317,17 @@ runEdhProgram' !ctx !prog = liftIO $ do
     Just (Left  e) -> throwIO e
 
 
-runEdhModule :: MonadIO m => EdhWorld -> FilePath -> m (Either EdhError ())
+runEdhModule
+  :: MonadIO m => EdhWorld -> FilePath -> m (Either EdhError EdhValue)
 runEdhModule !world !impPath =
   liftIO $ tryJust edhKnownError $ runEdhModule' world impPath
 
-runEdhModule' :: MonadIO m => EdhWorld -> FilePath -> m ()
+runEdhModule' :: MonadIO m => EdhWorld -> FilePath -> m EdhValue
 runEdhModule' !world !impPath = liftIO $ do
   (nomPath, moduFile) <- locateEdhMainModule impPath
   fileContent <- streamDecodeUtf8With lenientDecode <$> B.readFile moduFile
   case fileContent of
-    Some !moduSource _ _ -> void $ runEdhProgram' (worldContext world) $ do
+    Some !moduSource _ _ -> runEdhProgram' (worldContext world) $ do
       pgs <- ask
       contEdhSTM $ do
         let !moduId = T.pack nomPath

@@ -84,14 +84,13 @@ loggingProc !lhExpr !rhExpr !exit = do
 
 -- | host method runtime.exit(***apk)
 --
--- this explicitly throws a 'ProgramHalt', and cut runtime console IO
--- after no one (godforbid) recover from it.
+-- this just throws a 'ProgramHalt', godforbid no one recover from it.
 rtExitProc :: EdhProcedure
 rtExitProc !apk _ = ask >>= \pgs -> -- cross check with 'createEdhWorld'
   contEdhSTM $ _getEdhErrClass pgs (AttrByName "ProgramHalt") >>= \ec ->
     runEdhProc pgs $ createEdhObject ec apk $ \(OriginalValue !exv _ _) ->
-      let ioQ = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
-      in  edhThrow exv $ const $ contEdhSTM $ writeTQueue ioQ ConsoleShutdown
+      -- double `return` here actually means no return from runtime.exit()
+      edhThrow exv edhErrorUncaught
 
 
 -- | host method runtime.readCommands(ps1="(db)Đ: ", ps2="(db)Đ| ")

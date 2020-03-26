@@ -38,7 +38,8 @@ main = do
     case result of
       Left (e :: SomeException) ->
         atomically $ writeTQueue ioQ $ ConsoleOut $ "💥 " <> T.pack (show e)
-      Right _ -> atomically $ writeTQueue ioQ $ ConsoleOut "Bye."
+      Right _ -> pure ()
+    -- shutdown console IO anyway
     atomically $ writeTQueue ioQ ConsoleShutdown
 
   runInputT inputSettings $ do
