@@ -83,12 +83,15 @@ loggingProc !lhExpr !rhExpr !exit = do
 
 
 -- | host method runtime.exit(***apk)
+--
+-- this explicitly throws a 'ProgramHalt', and cut runtime console IO
+-- after no one (godforbid) recover from it.
 rtExitProc :: EdhProcedure
-rtExitProc _apk _ = ask >>= \pgs -> do
-  -- TODO throw a `ProgramHalt` exception conveying the apk to program's halt result
-  let !ioQ = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
-  contEdhSTM $ writeTQueue ioQ ConsoleShutdown
-  -- no CPS exit call, there's no return from `runtime.exit()`
+rtExitProc !apk _ = ask >>= \pgs -> -- cross check with 'createEdhWorld'
+  contEdhSTM $ _getEdhErrClass pgs (AttrByName "ProgramHalt") >>= \ec ->
+    runEdhProc pgs $ createEdhObject ec apk $ \(OriginalValue !exv _ _) ->
+      let ioQ = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
+      in  edhThrow exv $ const $ contEdhSTM $ writeTQueue ioQ ConsoleShutdown
 
 
 -- | host method runtime.readCommands(ps1="(db)Đ: ", ps2="(db)Đ| ")
