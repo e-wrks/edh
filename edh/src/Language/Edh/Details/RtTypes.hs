@@ -304,7 +304,7 @@ edhThrow :: EdhValue -> (EdhValue -> EdhProc) -> EdhProc
 edhThrow !exv uncaught = do
   pgs <- ask
   let propagateExc :: EdhValue -> [Scope] -> EdhProc
-      propagateExc exv' [] = uncaught exv'
+      propagateExc exv' [] = local (const pgs) $ uncaught exv'
       propagateExc exv' (frame : stack) =
         exceptionHandler frame exv' $ \exv'' -> propagateExc exv'' stack
   propagateExc exv $ NE.toList $ callStack $ edh'context pgs

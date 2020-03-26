@@ -10,6 +10,8 @@ import           Control.Monad.Reader
 
 import           Control.Concurrent.STM
 
+import           Data.List.NonEmpty             ( NonEmpty(..) )
+import qualified Data.List.NonEmpty            as NE
 import           Data.Unique
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
@@ -19,6 +21,43 @@ import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
 
+
+-- | generalized exception handling procedure, take a recover value receiver
+-- function for different recovery logics
+excHandlingProc
+  :: Bool -> (EdhValue -> EdhProc -> EdhProcExit -> EdhProc) -> EdhIntrinsicOp
+excHandlingProc !alwaysHandle !hdlExit !tryExpr !handlingExpr !exit =
+  ask >>= \pgsOuter -> do
+    let
+      !ctxOuter   = edh'context pgsOuter
+      !scopeOuter = contextScope ctxOuter
+      !tryScope   = scopeOuter { exceptionHandler = hdlr }
+      !tryCtx =
+        ctxOuter { callStack = tryScope :| NE.tail (callStack ctxOuter) }
+      !pgsTry = pgsOuter { edh'context = tryCtx }
+      runHndl :: Expr -> EdhProcExit -> EdhProc
+      -- special case for a block as handling expression:
+      --   don't let `evalExpr` to apply `true` as its contextMatch
+      runHndl (BlockExpr !stmts) !exit' = evalBlock stmts exit'
+      runHndl !expr              !exit' = evalExpr expr exit'
+      hdlr :: EdhExcptHndlr
+      hdlr !exv !rethrow = do
+        let ctxHndl = ctxOuter { contextMatch = exv }
+            pgsHndl = pgsOuter { edh'context = ctxHndl }
+        local (const pgsHndl)
+          $ runHndl handlingExpr
+          $ \(OriginalValue !recoverVal _ _) -> local (const pgsOuter) $ hdlExit
+              recoverVal
+              (exceptionHandler scopeOuter exv rethrow)
+              exit
+    local (const pgsTry) $ evalExpr tryExpr $ \(OriginalValue !tryVal _ _) ->
+      if alwaysHandle
+        then do
+          let ctxHndl = ctxOuter { contextMatch = nil }
+              pgsHndl = pgsOuter { edh'context = ctxHndl }
+          local (const pgsHndl) $ runHndl handlingExpr $ \_ ->
+            local (const pgsOuter) $ exitEdhProc exit tryVal
+        else local (const pgsOuter) $ exitEdhProc exit tryVal
 
 -- | operator ($=>) - the `catch`
 --
@@ -30,11 +69,10 @@ import           Language.Edh.Details.Evaluate
 -- matched (i.e. not to a value of <fallthrough>), or the exception will
 -- keep propagating, i.e. re-thrown.
 catchProc :: EdhIntrinsicOp
-catchProc !_tryExpr !_catchExpr !exit = do
-  !_pgs <- ask
-
-  exitEdhProc exit nil
-
+catchProc = excHandlingProc False $ \recoverVal rethrow exit ->
+  case recoverVal of
+    EdhFallthrough -> rethrow
+    _              -> exitEdhProc exit recoverVal
 
 -- | operator (@=>) - the `finally`
 --
@@ -45,10 +83,7 @@ catchProc !_tryExpr !_catchExpr !exit = do
 -- an exception if occurred, will never be assumed as recovered by the
 -- right-hand-expr.
 finallyProc :: EdhIntrinsicOp
-finallyProc !_tryExpr !_finallyExpr !exit = do
-  !_pgs <- ask
-
-  exitEdhProc exit nil
+finallyProc = excHandlingProc True $ \_ rethrow _ -> rethrow
 
 
 -- | operator (->) - the brancher, if its left-hand matches, early stop its

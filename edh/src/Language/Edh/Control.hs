@@ -76,7 +76,7 @@ instance Show EdhError where
   show (ProgramHalt _  ) = "Edh⏹️Halt"
   show (EdhIOError  ioe) = show ioe
   show (EdhError EdhException !msg !cc) = --
-    "💔\n" <> show cc <> "Đ: " <> T.unpack msg
+    "Đ\n" <> show cc <> T.unpack msg
   show (EdhError PackageError !msg !cc) = --
     "💔\n" <> show cc <> "📦 " <> T.unpack msg
   show (EdhError ParseError !msg !cc) = --

@@ -5,37 +5,69 @@
 
   # (@=>) reads `finally`
 
-  { # there is no `try` keyword in Edh, just use a block (or single
-    # expression) as the left-hand-expr of ($=>) or (@=>)
+  # there is no `try` keyword in Edh, just use a block (or single
+  # expression) as the left-hand-expr of ($=>) or (@=>)
+  # 
+  # pattern/value matching can be used in the right-hand-expr of
+  # catch/finally. you may never want to match the exception in 
+  # a finally block, but you probably always do in a catch block
+
+  {
 
     throw 3*7  # any value can be thrown
 
-  } $=> {{ ParseError: _ }} -> {
-    # (->) binds tighter than ($=>) so a single branch catch can be used
+  } $=> {{ UsageError: exc }} -> {
+    # (->) binds tighter than ($=>) and (@=>) so can be single branch catch
 
-    runtime.warn <| 'Obviously you have given the wrong input'
+    runtime.warn <| "Obviously it's your fault by not doing the right thing! "
+      ++ exc # it's bad smell to swallow error information in your code
 
-  } $=> {  # multiple `catch` can be chained
+  } $=> {{ IOError: exc }} -> {
+    # multiple `catch`es can be chained, same intuition as in other languages
+
+    runtime.fatal <| 'The realworld is insane sometimes ... '
+
+    fallthrough  # this way to re-throw the original exception
+
+  } $=> {  # and catches can be grouped in a block too, 
+    # with the exception value as pattern/value match target throughout
 
     { n } -> {
-      runtime.print( 'a ' ++ n ++ ' is thrown!' )
-      fallthrough
+      runtime.print( 'a ' ++ type(n) ++ ' exception is thrown!' )
+      fallthrough  # or it'll be recovered right from here
     }
 
     21 -> {
       runtime.print( "That's what I'm afraid of, but it's okay then." )
+      # in case any branch with pattern/value matched successfuly, the
+      # exception is considered to have been recovered
     }
 
-  } @=> {  # the (@=>) `finally` operator
-
-    # you can check whether an exception has occurred in a finally block,
-    # although this won't recover anyway
-    { _ } -> runtime.print( "I know I'm cleaning up after some err!" )
-    # note the pattern used above is `non-nil-capture`, and underscore
-    # attr name used to discard the value
-
+  } @=> {  # (@=>) is the `finally` operator
     runtime.print( 'I always do cleanup anyway.' )
-
+  } @=> {{ ProgramHalt:_ }} -> {
+    # `finally`s can be chained and matched too in Edh, surprise!
+    # but if you are fond of this fact, maybe you've unfortunately
+    # been trapped often.
+    runtime.print( "There're never short of cleanup jobs to do.")
   }
 
 }
+
+
+{
+  # Exceptions can be used to obtain backtracing information,
+  # when not meant to be thrown
+
+  method f() {
+    runtime.print( "I suspect why I'm called anyway ...",
+      backtrace = Exception("See I'm so called.") )
+  }
+
+  method g() {
+    f ()
+  }
+
+  g()
+}
+
