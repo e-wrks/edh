@@ -99,26 +99,27 @@ rtReadCommandsProc !apk _ = ask >>= \pgs ->
     Right (ps1, ps2) -> case generatorCaller $ edh'context pgs of
       Nothing -> throwEdh EvalError "Can only be called as generator"
       Just (!pgs', !iter'cb) -> do
-        let !ioQ = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
-            readCmds :: STM ()
-            readCmds = do
-              cmdIn <- newEmptyTMVar
-              writeTQueue ioQ $ ConsoleIn cmdIn ps1 ps2
-              waitEdhSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
-                EdhString !cmdCode ->
-                  runEdhProg pgs' -- eval console code in for-loop's context
-                    -- TODO don't let ParseError or other non-critical problem
-                    --      crash the program, ultimantely after CPS exception
-                    --      handling is implemented, we then enable Edh code to
-                    --      catch exceptions and handle accordingly.
-                    $ evalEdh "<console>" cmdCode
-                    $ \(OriginalValue !cmdVal _ _) ->
-                        contEdhSTM
-                          $ runEdhProg pgs'
-                          -- don't yield nil, or the loop stops
-                          $ iter'cb (noneNil cmdVal)
-                          $ const readCmds
-                _ -> error "impossible"
+        let
+          !ioQ = consoleIO $ worldRuntime $ contextWorld $ edh'context pgs
+          readCmds :: STM ()
+          readCmds = do
+            cmdIn <- newEmptyTMVar
+            writeTQueue ioQ $ ConsoleIn cmdIn ps1 ps2
+            waitEdhSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
+              EdhString !cmdCode ->
+                runEdhProg pgs' -- eval console code in for-loop's context
+                  -- TODO don't let ParseError or other non-critical problem
+                  --      crash the program, ultimantely after CPS exception
+                  --      handling is implemented, we then enable Edh code to
+                  --      catch exceptions and handle accordingly.
+                  $ evalEdh "<console>" cmdCode
+                  $ \(OriginalValue !cmdVal _ _) ->
+                      contEdhSTM
+                        $ runEdhProg pgs'
+                        $ iter'cb
+                            (EdhArgsPack $ ArgsPack [noneNil cmdVal] Map.empty)
+                        $ const readCmds
+              _ -> error "impossible"
         contEdhSTM readCmds
  where
   argsParser =

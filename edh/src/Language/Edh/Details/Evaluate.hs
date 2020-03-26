@@ -2012,13 +2012,14 @@ packEdhArgs !argsSender !pkExit = do
             pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
               exit (ArgsPack (posArgs ++ posArgs') kwArgs)
           (EdhPair !k !v) -> pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
-            exit (ArgsPack (posArgs ++ [k, v]) kwArgs)
+            exit (ArgsPack (posArgs ++ [k, noneNil v]) kwArgs)
           (EdhTuple !l) -> pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
-            exit (ArgsPack (posArgs ++ l) kwArgs)
+            exit (ArgsPack (posArgs ++ (noneNil <$> l)) kwArgs)
           (EdhList (List _ !l)) -> pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
             contEdhSTM $ do
               ll <- readTVar l
-              runEdhProg pgs $ exit (ArgsPack (posArgs ++ ll) kwArgs)
+              runEdhProg pgs
+                $ exit (ArgsPack (posArgs ++ (noneNil <$> ll)) kwArgs)
           _ ->
             throwEdh EvalError
               $  "Can not unpack args from a "
@@ -2033,7 +2034,8 @@ packEdhArgs !argsSender !pkExit = do
           (EdhPair !k !v) -> pkArgs xs $ \case
             (ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
               kw <- edhVal2Kw k
-              runEdhProg pgs $ exit (ArgsPack posArgs $ Map.insert kw v kwArgs)
+              runEdhProg pgs
+                $ exit (ArgsPack posArgs $ Map.insert kw (noneNil v) kwArgs)
           (EdhDict (Dict _ !ds)) -> pkArgs xs $ \case
             (ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
               dm  <- readTVar ds
@@ -2059,7 +2061,7 @@ packEdhArgs !argsSender !pkExit = do
               <> T.pack (show val)
       SendPosArg !argExpr -> evalExpr argExpr $ \(OriginalValue !val _ _) ->
         pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
-          exit (ArgsPack (val : posArgs) kwArgs)
+          exit (ArgsPack (noneNil val : posArgs) kwArgs)
       SendKwArg !kw !argExpr ->
         evalExpr argExpr $ \(OriginalValue !val _ _) ->
           pkArgs xs $ \pk@(ArgsPack !posArgs !kwArgs) -> case kw of
@@ -2068,7 +2070,7 @@ packEdhArgs !argsSender !pkExit = do
             _ -> exit
               (ArgsPack posArgs $ Map.alter
                 (\case -- make sure latest value with same kw take effect
-                  Nothing        -> Just val
+                  Nothing        -> Just $ noneNil val
                   Just !laterVal -> Just laterVal
                 )
                 kw
