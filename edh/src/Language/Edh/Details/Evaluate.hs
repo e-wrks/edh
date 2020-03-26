@@ -1308,6 +1308,24 @@ throwEdhSTM !pgs !et !msg = _getEdhErrClass pgs (ecKey et) >>= \ec ->
     EvalError    -> AttrByName "EvalError"
     UsageError   -> AttrByName "UsageError"
 
+edhErrorUncaught :: EdhValue -> EdhProc
+edhErrorUncaught !exv = ask >>= \pgs -> contEdhSTM $ case exv of
+  EdhObject exo -> do
+    esd <- readTVar $ entity'store $ objEntity exo
+    case fromDynamic esd :: Maybe EdhError of
+      Just !edhErr -> -- TODO replace cc in err if is empty here ?
+        throwSTM edhErr
+      Nothing -> -- TODO support magic method to coerce as exception ?
+        throwSTM $ EdhError EvalError (T.pack $ show exv) $ getEdhCallContext
+          0
+          pgs
+  EdhString !msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 pgs
+  _ -> -- coerce arbitrary value to EdhError
+    runEdhProc pgs $ edhValueRepr exv $ \(OriginalValue r _ _) -> case r of 
+      EdhString !msg -> contEdhSTM $ 
+          throwSTM $ EdhError EvalError msg  $ getEdhCallContext 0 pgs
+      _ -> error "bug: edhValueRepr returned non-string"
+
 
 -- | Construct an Edh object from a class
 constructEdhObject :: Class -> ArgsPack -> EdhProcExit -> EdhProc

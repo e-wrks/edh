@@ -296,8 +296,10 @@ type EdhGenrCaller
     )
 
 
--- | Throw from an Edh proc, be cautious NOT to have any monadic action
--- following such a throw, or it'll silently fail to work out.
+-- | Throw from an Edh proc
+--
+-- a bit similar to `return` in Haskell, this doesn't cease the execution
+-- of subsequent `EdhProc` actions following it, be cautious.
 edhThrow :: EdhValue -> (EdhValue -> EdhProc) -> EdhProc
 edhThrow !exv uncaught = do
   pgs <- ask
@@ -307,27 +309,13 @@ edhThrow !exv uncaught = do
         exceptionHandler frame exv' $ \exv'' -> propagateExc exv'' stack
   propagateExc exv $ NE.toList $ callStack $ edh'context pgs
 
-defaultEdhExceptionHandler :: EdhExcptHndlr
-defaultEdhExceptionHandler !exv !rethrow = rethrow exv
-
-edhErrorUncaught :: EdhValue -> EdhProc
-edhErrorUncaught !exv = ask >>= \pgs -> contEdhSTM $ case exv of
-  EdhObject exo -> do
-    esd <- readTVar $ entity'store $ objEntity exo
-    case fromDynamic esd :: Maybe EdhError of
-      Just !edhErr -> -- TODO replace cc in err if is empty here ?
-        throwSTM edhErr
-      Nothing -> -- TODO support magic method to coerce as exception ?
-        throwSTM $ EdhError EvalError (T.pack $ show exv) $ getEdhCallContext
-          0
-          pgs
-  _ -> -- coerce arbitrary value to EdhError
-    throwSTM $ EdhError EvalError (T.pack $ show exv) $ getEdhCallContext 0 pgs
-
 type EdhExcptHndlr
   =  EdhValue -- ^ the error value to handle
   -> (EdhValue -> EdhProc) -- ^ action to re-throw if not recovered
   -> EdhProc
+
+defaultEdhExceptionHandler :: EdhExcptHndlr
+defaultEdhExceptionHandler !exv !rethrow = rethrow exv
 
 
 -- Especially note that Edh has no block scope as in C
