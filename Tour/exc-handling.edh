@@ -56,6 +56,35 @@
 
 
 {
+
+  # custom exception classes can be defined and caught accordingly
+  # wrt class hierarchy
+
+  class MyException extends Exception("My bad!")
+
+  class AppException method __init__ (***apk) extends Exception(***apk)
+
+  class RuleViolated method __init__ (***apk) extends AppException(***apk)
+
+  method doBusiness () {
+    throw RuleViolated( "warning ignored", reason='unknown', degree='perphaps!' )
+  }
+
+  {
+    doBusiness()
+  } $=> {{ RuleViolated:exc }} -> {
+    runtime.print( 'or maybe the rule is wrong ...' )
+    fallthrough
+  } $=> {{ AppException:exc }} -> {
+    runtime.info <| 'app error recorded - ' ++ exc.details
+  } @=> {
+    runtime.info <| 'looking forward for more business to do'
+  }
+
+}
+
+
+{
   # Exceptions can be used to obtain backtracing information,
   # when not meant to be thrown
 

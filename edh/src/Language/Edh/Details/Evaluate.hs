@@ -44,7 +44,8 @@ parseEdh !world !srcName !srcCode = do
   case pr of
     -- update operator precedence dict on success of parsing
     Right _ -> putTMVar wops pd'
-    _       -> pure ()
+    -- restore original precedence dict on failure of parsing
+    _       -> putTMVar wops pd
   return pr
   where !wops = worldOperators world
 
@@ -55,10 +56,12 @@ evalEdh !srcName !srcCode !exit = do
   let ctx   = edh'context pgs
       world = contextWorld ctx
   contEdhSTM $ parseEdh world srcName srcCode >>= \case
-    Left !err -> -- TODO go through Edh propagation instead
-      throwSTM
-        $ EdhError ParseError (T.pack $ errorBundlePretty err)
-        $ getEdhCallContext 0 pgs
+    Left !err -> _getEdhErrClass pgs (AttrByName "ParseError") >>= \ec ->
+      runEdhProc pgs
+        $ createEdhObject
+            ec
+            (ArgsPack [EdhString $ T.pack $ errorBundlePretty err] Map.empty)
+        $ \(OriginalValue !exv _ _) -> edhThrow exv edhErrorUncaught
     Right !stmts -> runEdhProc pgs $ evalBlock stmts exit
 
 

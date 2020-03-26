@@ -1,6 +1,29 @@
 
-for cmd from runtime.readCommands(ps1="Đ: ", ps2="Đ| ")
- do case type(cmd) of {
-  nil -> { continue }
-  runtime.print( cmd )
+while true {
+
+  {
+
+    for cmd from runtime.readCommands(ps1="Đ: ", ps2="Đ| ")
+      do case type(cmd) of {
+        nil -> { continue }
+        runtime.print( cmd )
+    }
+
+  } $=> {  # catch exceptions
+
+    {{ ProgramHalt:_ }} -> {
+      break
+    }
+
+    {{ IOError:exc }} -> {
+      runtime.fatal <| 'IO error - ' ++ exc
+      return exc  # halt the program with error
+    }
+
+    { exc } -> {
+      runtime.print( 'Recovered from error', exception=exc )
+    }
+
+  }
+
 }

@@ -89,7 +89,6 @@ rtExitProc :: EdhProcedure
 rtExitProc !apk _ = ask >>= \pgs -> -- cross check with 'createEdhWorld'
   contEdhSTM $ _getEdhErrClass pgs (AttrByName "ProgramHalt") >>= \ec ->
     runEdhProc pgs $ createEdhObject ec apk $ \(OriginalValue !exv _ _) ->
-      -- double `return` here actually means no return from runtime.exit()
       edhThrow exv edhErrorUncaught
 
 
@@ -109,11 +108,9 @@ rtReadCommandsProc !apk _ = ask >>= \pgs ->
             writeTQueue ioQ $ ConsoleIn cmdIn ps1 ps2
             waitEdhSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
               EdhString !cmdCode ->
-                runEdhProc pgs' -- eval console code in for-loop's context
-                  -- TODO don't let ParseError or other non-critical problem
-                  --      crash the program, ultimantely after CPS exception
-                  --      handling is implemented, we then enable Edh code to
-                  --      catch exceptions and handle accordingly.
+                runEdhProc pgs -- should run in this host generator's state here,
+                               -- or exception handling can go wrong.
+                               -- viewing the for-loop's scope entity anyway.
                   $ evalEdh "<console>" cmdCode
                   $ \(OriginalValue !cmdVal _ _) ->
                       contEdhSTM
