@@ -25,6 +25,8 @@ import           Data.Dynamic
 
 import           Text.Megaparsec
 
+import           Data.Lossless.Decimal          ( castDecimalToInteger )
+
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Tx
@@ -137,10 +139,13 @@ createEdhWorld !runtime = liftIO $ do
   -- wrap a Haskell error data constructor as a host error object contstructor,
   -- used to define an error class in Edh
   edhErrorCtor :: (ArgsPack -> EdhCallContext -> EdhError) -> EdhHostCtor
-  edhErrorCtor !hec !pgs !apk !obs = do
-    let !scope = contextScope $ edh'context pgs
+  edhErrorCtor !hec !pgs apk@(ArgsPack _ !kwargs) !obs = do
+    let !unwind = case Map.lookup "unwind" kwargs of
+          Just (EdhDecimal d) -> fromIntegral $ castDecimalToInteger d
+          _                   -> 1 :: Int
+        !scope = contextScope $ edh'context pgs
         !this  = thisObject scope
-        !cc    = getEdhCallContext 1 pgs
+        !cc    = getEdhCallContext unwind pgs
         !he    = hec apk cc
         __repr__ :: EdhProcedure
         __repr__ _ !exit = exitEdhProc exit $ EdhString $ T.pack $ show he

@@ -11,7 +11,6 @@ import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
 import           Data.Unique
-import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
 
@@ -19,21 +18,6 @@ import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
-
-
--- | utility error(*args,**kwargs) - eval error reporter
-errorProc :: EdhProcedure
-errorProc (ArgsPack !args !kwargs) _ = case args of
-  [v] | null kwargs -> throwEdh EvalError $ logString v
-  _ ->
-    throwEdh EvalError
-      $  T.intercalate "\n"
-      $  (logString <$> args)
-      ++ [ k <> ": " <> logString v | (k, v) <- Map.toList kwargs ]
- where
-  logString :: EdhValue -> Text
-  logString (EdhString s) = s
-  logString v             = T.pack $ show v
 
 
 -- | operator ($=>) - the `catch`

@@ -240,9 +240,8 @@ evalStmt' !stmt !exit = do
             <> T.pack (show val)
 
 
-    -- TODO impl. this
-    -- TryStmt trunkStmt catchesList finallyStmt -> undefined
-    -- ThrowStmt excExpr                         -> undefined
+    ThrowStmt excExpr -> evalExpr excExpr
+      $ \(OriginalValue !exv _ _) -> edhThrow exv edhErrorUncaught
 
 
     WhileStmt cndExpr bodyExpr -> do
@@ -462,7 +461,7 @@ evalStmt' !stmt !exit = do
 
     VoidStmt -> exitEdhProc exit nil
 
-    _ -> throwEdh EvalError $ "Eval not yet impl for: " <> T.pack (show stmt)
+    -- _ -> throwEdh EvalError $ "Eval not yet impl for: " <> T.pack (show stmt)
 
 
 importFromObject :: ArgsReceiver -> Object -> EdhProcExit -> EdhProc
@@ -1321,10 +1320,10 @@ edhErrorUncaught !exv = ask >>= \pgs -> contEdhSTM $ case exv of
           pgs
   EdhString !msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 pgs
   _ -> -- coerce arbitrary value to EdhError
-    runEdhProc pgs $ edhValueRepr exv $ \(OriginalValue r _ _) -> case r of 
-      EdhString !msg -> contEdhSTM $ 
-          throwSTM $ EdhError EvalError msg  $ getEdhCallContext 0 pgs
-      _ -> error "bug: edhValueRepr returned non-string"
+       runEdhProc pgs $ edhValueRepr exv $ \(OriginalValue r _ _) -> case r of
+    EdhString !msg ->
+      contEdhSTM $ throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 pgs
+    _ -> error "bug: edhValueRepr returned non-string"
 
 
 -- | Construct an Edh object from a class

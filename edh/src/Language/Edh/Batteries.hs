@@ -291,7 +291,6 @@ installEdhBatteries world = liftIO $ do
           , (EdhMethod, "dict"       , dictProc       , WildReceiver)
           , (EdhMethod, "null"       , isNullProc     , WildReceiver)
           , (EdhMethod, "type"       , typeProc       , WildReceiver)
-          , (EdhMethod, "error"      , errorProc      , WildReceiver)
           , (EdhMethod, "constructor", ctorProc       , WildReceiver)
           , (EdhMethod, "supers"     , supersProc     , WildReceiver)
           , (EdhMethod, "scope"      , scopeObtainProc, PackReceiver [])
