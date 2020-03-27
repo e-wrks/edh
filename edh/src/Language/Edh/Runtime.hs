@@ -334,20 +334,3 @@ runEdhModule' !world !impPath = liftIO $ do
         runEdhProc pgs { edh'context = moduleContext world modu }
           $ evalEdh moduFile moduSource edhEndOfProc
 
-
-bootEdhModule :: MonadIO m => EdhWorld -> Text -> m (Either EdhError Object)
-bootEdhModule !world !impSpec = liftIO $ tryJust edhKnownError $ do
-  !final <- newEmptyTMVarIO
-  void
-    $ runEdhProgram' (worldContext world)
-    $ importEdhModule impSpec
-    $ \(OriginalValue !val _ _) -> case val of
-        EdhObject !modu -> contEdhSTM $ putTMVar final modu
-        _               -> error "bug: importEdhModule returns non-object?"
-  atomically (tryReadTMVar final) >>= \case
-    Just modu -> return modu -- a bit more informative than stm deadlock
-    Nothing ->
-      throwIO $ EdhError UsageError "Module not loaded." $ EdhCallContext
-        "<edh>"
-        []
-
