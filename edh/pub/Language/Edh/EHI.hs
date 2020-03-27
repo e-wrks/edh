@@ -77,18 +77,21 @@ module Language.Edh.EHI
   , Scope(..)
   , EdhProcedure
   , EdhProcExit
-  , runEdhProc
-  , forkEdh
     -- ** Edh Runtime error
   , getEdhCallContext
+  , edhThrow
+  , edhCatch
   , throwEdh
   , throwEdhSTM
     -- ** CPS helpers
+  , runEdhProc
   , contEdhSTM
   , exitEdhSTM
   , exitEdhSTM'
   , exitEdhProc
   , exitEdhProc'
+    -- ** Sync utilities
+  , forkEdh
   , waitEdhSTM
   , edhWaitIO
   , edhNop

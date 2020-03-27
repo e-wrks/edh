@@ -296,26 +296,13 @@ type EdhGenrCaller
     )
 
 
--- | Throw from an Edh proc
---
--- a bit similar to `return` in Haskell, this doesn't cease the execution
--- of subsequent `EdhProc` actions following it, be cautious.
-edhThrow :: EdhValue -> (EdhValue -> EdhProc) -> EdhProc
-edhThrow !exv uncaught = do
-  pgs <- ask
-  let propagateExc :: EdhValue -> [Scope] -> EdhProc
-      propagateExc exv' [] = local (const pgs) $ uncaught exv'
-      propagateExc exv' (frame : stack) =
-        exceptionHandler frame exv' $ \exv'' -> propagateExc exv'' stack
-  propagateExc exv $ NE.toList $ callStack $ edh'context pgs
-
 type EdhExcptHndlr
   =  EdhValue -- ^ the error value to handle
   -> (EdhValue -> EdhProc) -- ^ action to re-throw if not recovered
   -> EdhProc
 
-defaultEdhExceptionHandler :: EdhExcptHndlr
-defaultEdhExceptionHandler !exv !rethrow = rethrow exv
+defaultEdhExcptHndlr :: EdhExcptHndlr
+defaultEdhExcptHndlr !exv !rethrow = rethrow exv
 
 
 -- Especially note that Edh has no block scope as in C
@@ -365,7 +352,7 @@ objectScope ctx obj = Scope { scopeEntity      = objEntity obj
                             , thatObject       = obj
                             , scopeProc        = objClass obj
                             , scopeCaller      = contextStmt ctx
-                            , exceptionHandler = defaultEdhExceptionHandler
+                            , exceptionHandler = defaultEdhExcptHndlr
                             }
 
 -- | An object views an entity, with inheritance relationship 
@@ -412,9 +399,9 @@ data EdhWorld = EdhWorld {
     -- _world lock_ in parsing source code to be executed in this world
     , worldOperators :: !(TMVar OpPrecDict)
     -- | all modules loaded or being loaded into this world, for each
-    -- entry, will be a transient entry containing an error value if
-    -- failed loading, or a permanent entry containing the module object
-    -- if successfully loaded
+    -- entry, will be a transient entry containing an error value (that
+    -- appears as an EdhNamedValue) if failed loading, or a permanent
+    -- entry containing the module object if successfully loaded
     , worldModules :: !(TMVar (Map.HashMap ModuleId (TMVar EdhValue)))
     -- | interface to the embedding host runtime
     , worldRuntime :: !EdhRuntime

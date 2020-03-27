@@ -18,7 +18,8 @@ while true {
 
     {{ IOError:exc }} -> {
       runtime.fatal <| 'IO error - ' ++ exc
-      return exc  # halt the program with error
+      throw exc  # escalate it to the program loop of the
+      # host interpreter, let it decide what to do.
     }
 
     { exc } -> {

@@ -24,6 +24,7 @@ import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..)
                                                 , (<|)
                                                 )
+import qualified Data.List.NonEmpty            as NE
 import           Data.Dynamic
 
 import           Text.Megaparsec
@@ -73,7 +74,7 @@ evalEdh !srcName !srcCode !exit = do
         $ createEdhObject
             ec
             (ArgsPack [EdhString $ T.pack $ errorBundlePretty err] Map.empty)
-        $ \(OriginalValue !exv _ _) -> edhThrow exv edhErrorUncaught
+        $ \(OriginalValue !exv _ _) -> edhThrow exv
     Right !stmts -> runEdhProc pgs $ evalBlock stmts exit
 
 
@@ -255,8 +256,8 @@ evalStmt' !stmt !exit = do
             <> T.pack (show val)
 
 
-    ThrowStmt excExpr -> evalExpr excExpr
-      $ \(OriginalValue !exv _ _) -> edhThrow exv edhErrorUncaught
+    ThrowStmt excExpr ->
+      evalExpr excExpr $ \(OriginalValue !exv _ _) -> edhThrow exv
 
 
     WhileStmt cndExpr bodyExpr -> do
@@ -511,93 +512,104 @@ importEdhModule !impSpec !exit = do
     !ctx   = edh'context pgs
     !world = contextWorld ctx
     !scope = contextScope ctx
+    locateModuInFS :: ((FilePath, FilePath) -> STM ()) -> STM ()
+    locateModuInFS !exit' =
+      lookupEdhCtxAttr pgs scope (AttrByName "__file__") >>= \case
+        EdhString !fromModuPath -> do
+          (nomPath, moduFile) <- unsafeIOToSTM $ locateEdhModule
+            (edhPkgPathFrom $ T.unpack fromModuPath)
+            (T.unpack impSpec)
+          exit' (nomPath, moduFile)
+        _ -> error "bug: no valid `__file__` in context"
     importFromFS :: STM ()
-    importFromFS = lookupEdhCtxAttr pgs scope (AttrByName "__file__") >>= \case
-      EdhString !fromModuPath -> do -- TODO here catch Haskell exceptions,
-                                    -- propagate as Edh error as appropriate
-        (nomPath, moduFile) <- unsafeIOToSTM $ locateEdhModule
-          (edhPkgPathFrom $ T.unpack fromModuPath)
-          (T.unpack impSpec)
-        let !moduId = T.pack nomPath
-        moduMap' <- takeTMVar (worldModules world)
-        case Map.lookup moduId moduMap' of
-          Just !moduSlot -> do
-            -- put back immediately
-            putTMVar (worldModules world) moduMap'
-            -- blocking wait the target module loaded
-            waitEdhSTM pgs (readTMVar moduSlot) $ \case
-              -- TODO GHC should be able to detect cyclic imports as 
-              --      deadlock, find ways to report that more friendly
-              modu@EdhObject{} -> exitEdhSTM pgs exit modu
-              importError -> -- the first importer failed loading it,
-                -- replicate the error in this thread
-                throwEdhSTM pgs EvalError $ T.pack $ show importError
-          Nothing -> do -- we are the first importer
-            -- allocate an empty slot
-            moduSlot <- newEmptyTMVar
-            -- put it for global visibility
-            putTMVar (worldModules world) $ Map.insert moduId moduSlot moduMap'
-            catchSTM -- TODO impl. Edh error handling
-                ( loadModule pgs moduSlot moduId moduFile
-                $ \(OriginalValue !result _ _) -> case result of
-                    -- successfully loaded
-                    modu@EdhObject{} -> exitEdhProc exit modu
-                    _                -> error "bug"
-                )
-            -- TODO catchSTM does NOT work across Edh transactions,
-            --      need to impl. a catchEdh or sth. to be used here.
-              $ \(e :: SomeException) -> do
-                  -- cleanup on loading error
-                  let errStr = T.pack $ show e
-                  void $ tryPutTMVar moduSlot $ EdhString errStr
-                  moduMap'' <- takeTMVar (worldModules world)
-                  case Map.lookup moduId moduMap'' of
-                    Nothing        -> putTMVar (worldModules world) moduMap''
-                    Just moduSlot' -> if moduSlot' == moduSlot
-                      then putTMVar (worldModules world)
-                        $ Map.delete moduId moduMap''
-                      else putTMVar (worldModules world) moduMap''
-                  throwSTM e
-      _ -> error "bug: no valid `__file__` in context"
+    importFromFS =
+      flip
+          catchSTM
+          (\(e :: EdhError) -> case e of
+            EdhError !et !msg _ -> throwEdhSTM pgs et msg
+            _                   -> throwSTM e
+          )
+        $ locateModuInFS
+        $ \(nomPath, moduFile) -> do
+            let !moduId = T.pack nomPath
+            moduMap' <- takeTMVar (worldModules world)
+            case Map.lookup moduId moduMap' of
+              Just !moduSlot -> do
+                -- put back immediately
+                putTMVar (worldModules world) moduMap'
+                -- blocking wait the target module loaded
+                waitEdhSTM pgs (readTMVar moduSlot) $ \case
+                  -- TODO GHC should be able to detect cyclic imports as 
+                  --      deadlock, better to report that more friendly,
+                  --      and more importantly, to prevent the crash.
+                  EdhNamedValue _ !importError ->
+                    -- the first importer failed loading it,
+                    -- replicate the error in this thread
+                    runEdhProc pgs $ edhThrow importError
+                  !modu -> exitEdhSTM pgs exit modu
+              Nothing -> do -- we are the first importer
+                -- allocate an empty slot
+                moduSlot <- newEmptyTMVar
+                -- put it for global visibility
+                putTMVar (worldModules world)
+                  $ Map.insert moduId moduSlot moduMap'
+                -- try load the module
+                runEdhProc pgs
+                  $ edhCatch (loadModule moduSlot moduId moduFile) exit
+                  $ \_ !nocatch -> ask >>= \pgsPassOn ->
+                      case contextMatch $ edh'context pgsPassOn of
+                        EdhNil      -> nocatch -- no error
+                        importError -> contEdhSTM $ do
+                          void $ tryPutTMVar moduSlot $ EdhNamedValue
+                            "importError"
+                            importError
+                          -- cleanup on loading error
+                          moduMap'' <- takeTMVar (worldModules world)
+                          case Map.lookup moduId moduMap'' of
+                            Nothing -> putTMVar (worldModules world) moduMap''
+                            Just moduSlot' -> if moduSlot' == moduSlot
+                              then putTMVar (worldModules world)
+                                $ Map.delete moduId moduMap''
+                              else putTMVar (worldModules world) moduMap''
+                          runEdhProc pgsPassOn nocatch
   if edh'in'tx pgs
-    then throwEdh EvalError "You don't import from within a transaction"
+    then throwEdh UsageError "You don't import from within a transaction"
     else contEdhSTM $ do
       moduMap <- readTMVar (worldModules world)
       case Map.lookup impSpec moduMap of
         -- attempt the import specification as direct module id first
         Just !moduSlot -> readTMVar moduSlot >>= \case
-          modu@EdhObject{} -> exitEdhSTM pgs exit modu
-          importError -> throwEdhSTM pgs EvalError $ T.pack $ show importError
+          -- import error has been encountered, propagate the error
+          EdhNamedValue _ !importError -> runEdhProc pgs $ edhThrow importError
+          -- module already imported, got it as is
+          !modu                        -> exitEdhSTM pgs exit modu
         -- resolving to `.edh` source files from local filesystem
         Nothing -> importFromFS
 
-loadModule
-  :: EdhProgState
-  -> TMVar EdhValue
-  -> ModuleId
-  -> FilePath
-  -> EdhProcExit
-  -> STM ()
-loadModule !pgs !moduSlot !moduId !moduFile !exit = if edh'in'tx pgs
-  then throwEdhSTM pgs
-                   EvalError
-                   "You don't load a module from within a transaction"
-  else do
-    fileContent <-
-      unsafeIOToSTM $ streamDecodeUtf8With lenientDecode <$> B.readFile moduFile
-    case fileContent of
-      Some !moduSource _ _ -> do
-        modu <- createEdhModule' world moduId moduFile
-        runEdhProc pgs { edh'context = moduleContext world modu }
-          $ evalEdh moduFile moduSource
-          $ \_ -> contEdhSTM $ do
+loadModule :: TMVar EdhValue -> ModuleId -> FilePath -> EdhProcExit -> EdhProc
+loadModule !moduSlot !moduId !moduFile !exit = ask >>= \pgsImporter ->
+  if edh'in'tx pgsImporter
+    then throwEdh UsageError "You don't load a module from within a transaction"
+    else contEdhSTM $ do
+      let !importerCtx = edh'context pgsImporter
+          !world       = contextWorld importerCtx
+      fileContent <-
+        unsafeIOToSTM
+        $   streamDecodeUtf8With lenientDecode
+        <$> B.readFile moduFile
+      case fileContent of
+        Some !moduSource _ _ -> do
+          modu <- createEdhModule' world moduId moduFile
+          let !loadScope = objectScope importerCtx modu
+              !loadCtx =
+                importerCtx { callStack = loadScope <| callStack importerCtx }
+              !pgsLoad = pgsImporter { edh'context = loadCtx }
+          runEdhProc pgsLoad $ evalEdh moduFile moduSource $ \_ ->
+            contEdhSTM $ do
               -- arm the successfully loaded module
-              putTMVar moduSlot $ EdhObject modu
+              void $ tryPutTMVar moduSlot $ EdhObject modu
               -- switch back to module importer's scope and continue
-              exitEdhSTM pgs exit (EdhObject modu)
- where
-  ctx   = edh'context pgs
-  world = contextWorld ctx
+              exitEdhSTM pgsImporter exit $ EdhObject modu
 
 createEdhModule' :: EdhWorld -> ModuleId -> String -> STM Object
 createEdhModule' !world !moduId !srcName = do
@@ -1260,7 +1272,7 @@ edhWaitIO !exit !act = ask >>= \pgs -> contEdhSTM $ if edh'in'tx pgs
             $ \(OriginalValue !exv _ _) -> case exv of
                 EdhObject !exo -> contEdhSTM $ do
                   writeTVar (entity'store $ objEntity exo) $ toDyn e
-                  runEdhProc pgs $ edhThrow exv edhErrorUncaught
+                  runEdhProc pgs $ edhThrow exv
                 _ -> error "bug: createEdhObject returned non-object"
 
 
@@ -1282,19 +1294,19 @@ _getEdhErrClass !pgs !eck =
                   )
               $ getEdhCallContext 0 pgs
 
--- | Throw from an Edh proc
+-- | Throw a tagged error from an Edh proc
 --
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent `EdhProc` actions following it, be cautious.
 throwEdh :: EdhErrorTag -> Text -> EdhProc
 throwEdh !et !msg = ask >>= \pgs -> contEdhSTM $ throwEdhSTM pgs et msg
 
--- | Throw from the stm operation of an Edh proc.
+-- | Throw a tagged error from the stm operation of an Edh proc
 throwEdhSTM :: EdhProgState -> EdhErrorTag -> Text -> STM ()
 throwEdhSTM !pgs !et !msg = _getEdhErrClass pgs (ecKey et) >>= \ec ->
   runEdhProc pgs
     $ constructEdhObject ec (ArgsPack [EdhString msg] Map.empty)
-    $ \(OriginalValue !exo _ _) -> edhThrow exo edhErrorUncaught
+    $ \(OriginalValue !exo _ _) -> edhThrow exo
  where
   ecKey :: EdhErrorTag -> AttrKey
   ecKey = \case -- cross check with 'createEdhWorld' for type safety
@@ -1304,23 +1316,69 @@ throwEdhSTM !pgs !et !msg = _getEdhErrClass pgs (ecKey et) >>= \ec ->
     EvalError    -> AttrByName "EvalError"
     UsageError   -> AttrByName "UsageError"
 
-edhErrorUncaught :: EdhValue -> EdhProc
-edhErrorUncaught !exv = ask >>= \pgs -> contEdhSTM $ case exv of
-  EdhObject exo -> do
-    esd <- readTVar $ entity'store $ objEntity exo
-    case fromDynamic esd :: Maybe EdhError of
-      Just !edhErr -> -- TODO replace cc in err if is empty here ?
-        throwSTM edhErr
-      Nothing -> -- TODO support magic method to coerce as exception ?
-        throwSTM $ EdhError EvalError (T.pack $ show exv) $ getEdhCallContext
-          0
-          pgs
-  EdhString !msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 pgs
-  _ -> -- coerce arbitrary value to EdhError
-       runEdhProc pgs $ edhValueRepr exv $ \(OriginalValue r _ _) -> case r of
+-- | Throw arbitrary value from an Edh proc
+--
+-- a bit similar to `return` in Haskell, this doesn't cease the execution
+-- of subsequent `EdhProc` actions following it, be cautious.
+edhThrow :: EdhValue -> EdhProc
+edhThrow !exv = do
+  pgs <- ask
+  let propagateExc :: EdhValue -> [Scope] -> EdhProc
+      propagateExc exv' [] = local (const pgs) $ edhErrorUncaught exv'
+      propagateExc exv' (frame : stack) =
+        exceptionHandler frame exv' $ \exv'' -> propagateExc exv'' stack
+  propagateExc exv $ NE.toList $ callStack $ edh'context pgs
+ where
+  edhErrorUncaught :: EdhValue -> EdhProc
+  edhErrorUncaught !exv' = ask >>= \pgs -> contEdhSTM $ case exv' of
+    EdhObject exo -> do
+      esd <- readTVar $ entity'store $ objEntity exo
+      case fromDynamic esd :: Maybe EdhError of
+        Just !edhErr -> -- TODO replace cc in err if is empty here ?
+          throwSTM edhErr
+        Nothing -> -- TODO support magic method to coerce as exception ?
+          throwSTM $ EdhError EvalError (T.pack $ show exv') $ getEdhCallContext
+            0
+            pgs
     EdhString !msg ->
-      contEdhSTM $ throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 pgs
-    _ -> error "bug: edhValueRepr returned non-string"
+      throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 pgs
+    _ -> -- coerce arbitrary value to EdhError
+         runEdhProc pgs $ edhValueRepr exv' $ \(OriginalValue r _ _) ->
+      case r of
+        EdhString !msg ->
+          contEdhSTM $ throwSTM $ EdhError EvalError msg $ getEdhCallContext
+            0
+            pgs
+        _ -> error "bug: edhValueRepr returned non-string"
+
+-- | Catch possible throw of an Edh value
+edhCatch :: (EdhProcExit -> EdhProc) -> EdhProcExit -> EdhErrorPassOn -> EdhProc
+edhCatch !tryAct !exit !passOn = ask >>= \pgsOuter -> do
+  let
+    !ctxOuter   = edh'context pgsOuter
+    !scopeOuter = contextScope ctxOuter
+    !tryScope   = scopeOuter { exceptionHandler = hdlr }
+    !tryCtx = ctxOuter { callStack = tryScope :| NE.tail (callStack ctxOuter) }
+    !pgsTry     = pgsOuter { edh'context = tryCtx }
+    recover :: EdhProcExit
+    recover = local (const pgsOuter) . exit
+    hdlr :: EdhExcptHndlr
+    hdlr !exv !rethrow = do
+      let ctxHndl = ctxOuter { contextMatch = exv }
+          pgsHndl = pgsOuter { edh'context = ctxHndl }
+      local (const pgsHndl) $ passOn recover $ exceptionHandler scopeOuter
+                                                                exv
+                                                                rethrow
+  local (const pgsTry) $ tryAct $ \tryResult -> do
+    let ctxHndl = ctxOuter { contextMatch = nil }
+        pgsHndl = pgsOuter { edh'context = ctxHndl }
+    local (const pgsHndl) $ passOn recover $ recover tryResult
+
+-- | the 'contextMatch' is the error value thrown, or nil if no error occurred
+type EdhErrorPassOn
+  =  EdhProcExit  -- ^ recover exit
+  -> EdhProc      -- ^ nocatch exit
+  -> EdhProc
 
 
 -- | Construct an Edh object from a class

@@ -66,14 +66,13 @@ createEdhWorld !runtime = liftIO $ do
                      , objSupers = rootSupers
                      }
       !rootScope =
-        Scope rootEntity root root defaultEdhExceptionHandler rootClass
-          $ StmtSrc
-              ( SourcePos { sourceName   = "<world-root>"
-                          , sourceLine   = mkPos 1
-                          , sourceColumn = mkPos 1
-                          }
-              , VoidStmt
-              )
+        Scope rootEntity root root defaultEdhExcptHndlr rootClass $ StmtSrc
+          ( SourcePos { sourceName   = "<world-root>"
+                      , sourceLine   = mkPos 1
+                      , sourceColumn = mkPos 1
+                      }
+          , VoidStmt
+          )
       !scopeClass = ProcDefi
         { procedure'uniq = scopeClassUniq
         , procedure'lexi = Just rootScope
@@ -296,7 +295,7 @@ mkHostClass !scope !nm !writeProtected !hc = do
                               , thatObject       = newThis
                               , scopeProc        = cls
                               , scopeCaller      = contextStmt ctx
-                              , exceptionHandler = defaultEdhExceptionHandler
+                              , exceptionHandler = defaultEdhExcptHndlr
                               }
         hc pgsCtor apk obs
         exitEdhSTM pgs exit $ EdhObject newThis

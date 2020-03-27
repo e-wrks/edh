@@ -1,0 +1,10 @@
+
+import * 'bad-modu'  # this is cyclic import
+
+ ; # semi-colon is necessary at times, to disambiguate
+
+*  # here has a syntax error
+
+ ; # another semi-colon as statement delimiter
+
+xxx := 'the bad guys can win!'

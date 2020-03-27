@@ -89,7 +89,7 @@ rtExitProc :: EdhProcedure
 rtExitProc !apk _ = ask >>= \pgs -> -- cross check with 'createEdhWorld'
   contEdhSTM $ _getEdhErrClass pgs (AttrByName "ProgramHalt") >>= \ec ->
     runEdhProc pgs $ createEdhObject ec apk $ \(OriginalValue !exv _ _) ->
-      edhThrow exv edhErrorUncaught
+      edhThrow exv
 
 
 -- | host method runtime.readCommands(ps1="(db)Đ: ", ps2="(db)Đ| ")
