@@ -12,6 +12,7 @@ module Language.Edh.EHI
   (
     -- * Exceptions
     EdhError(..)
+  , EdhErrorTag(..)
   , ParserError
   , EdhCallFrame(..)
   , EdhCallContext(..)
@@ -90,6 +91,8 @@ module Language.Edh.EHI
   , exitEdhSTM'
   , exitEdhProc
   , exitEdhProc'
+  , seqcontSTM
+  , mapcontSTM
     -- ** Sync utilities
   , forkEdh
   , waitEdhSTM
@@ -176,11 +179,7 @@ where
 
 import           Prelude
 
-import           Control.Exception
-import           Control.Monad.Reader
-
-import           Data.Text                     as T
-import qualified Data.HashMap.Strict           as Map
+import           Control.Concurrent.STM
 
 import           Text.Megaparsec
 
@@ -195,3 +194,24 @@ import           Language.Edh.Details.PkgMan
 import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
 
+
+seqcontSTM :: forall a . [(a -> STM ()) -> STM ()] -> ([a] -> STM ()) -> STM ()
+seqcontSTM !xs !exit = go xs []
+ where
+  go :: [(a -> STM ()) -> STM ()] -> [a] -> STM ()
+  go []         ys = exit $! reverse $! ys
+  go (x : rest) ys = x $ \y -> go rest (y : ys)
+
+mapcontSTM
+  :: forall a b
+   . (a -> b)
+  -> [(a -> STM ()) -> STM ()]
+  -> [(b -> STM ()) -> STM ()]
+mapcontSTM !f !xs = go xs []
+ where
+  go
+    :: [(a -> STM ()) -> STM ()]
+    -> [(b -> STM ()) -> STM ()]
+    -> [(b -> STM ()) -> STM ()]
+  go []         ys = reverse $! ys
+  go (x : rest) ys = go rest (y : ys) where y b = x (\a -> b (f a))
