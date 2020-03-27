@@ -274,13 +274,13 @@ installEdhBatteries world = liftIO $ do
           --  * tuple comprehension:
           --     (,) =< for x from range(100) do x*x
         , ( "=<"
-          , 1
+          , 2
           ) -- why brittany insists on formatting it like this ?.?
           -- prepand to list
           --     l = [3,7,5]
           --     [2,9] => l
         , ( "=>"
-          , 1
+          , 2
           )
           -- element-of test
         , ( "?<="
