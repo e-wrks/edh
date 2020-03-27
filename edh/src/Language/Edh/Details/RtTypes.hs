@@ -441,6 +441,8 @@ worldContext !world = Context
 {-# INLINE worldContext #-}
 
 
+-- | Checkout 'defaultEdhRuntime' and 'defaultEdhIOLoop' from the
+-- default batteries for implementation details, or just use that.
 data EdhRuntime = EdhRuntime {
     consoleIO :: !(TQueue EdhConsoleIO)
   , runtimeLogLevel :: !LogLevel
@@ -448,10 +450,10 @@ data EdhRuntime = EdhRuntime {
   , flushRuntimeLogs :: IO ()
   }
 data EdhConsoleIO = ConsoleShutdown
-    | ConsoleOut !Text
-    -- ^ output line
+    | ConsoleOut !Text -- ^ output a line
     | ConsoleIn !(TMVar Text) !Text !Text
-    -- ^ result-receiver ps1 ps2
+    -- ^ read input into the var, with ps1 ps2
+    --   ps1 is single line prompt, ps2 for multil-line
   deriving (Eq)
 type EdhLogger = LogLevel -> Maybe String -> ArgsPack -> STM ()
 type LogLevel = Int

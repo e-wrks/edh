@@ -71,6 +71,7 @@ library edh-internal
         base >=4.12 && <5,
         stm >=2.5,
         megaparsec >7.0,
+        haskeline -any,
         lossless-decimal -any,
         scientific -any,
         filepath -any,
@@ -96,13 +97,13 @@ executable edhi
                         BangPatterns TupleSections ScopedTypeVariables
     build-depends:
         edh -any,
-        haskeline -any,
         -- same dependencies as edh-internal, so you can:
         -- cabal v2-repl edhi --repl-options=-isrc
         ghc >=8.6.5,
         base >=4.12 && <5,
         stm >=2.5,
         megaparsec >7.0,
+        haskeline -any,
         lossless-decimal -any,
         scientific -any,
         filepath -any,

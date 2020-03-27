@@ -31,8 +31,8 @@ inputSettings = Settings { complete       = \(_left, _right) -> return ("", [])
 main :: IO ()
 main = do
 
-  ioQ     <- newTQueueIO
-  runtime <- defaultEdhRuntime ioQ
+  runtime <- defaultEdhRuntime
+  let ioQ = consoleIO runtime
 
   void $ forkFinally (edhProgLoop runtime) $ \result -> do
     case result of
@@ -47,6 +47,6 @@ main = do
     outputStrLn
       "* Blank Screen Syndrome ? Take the Tour as your companion, checkout:"
     outputStrLn "  https://github.com/e-wrks/edh/tree/master/Tour"
-    ioLoop ioQ
+    defaultEdhIOLoop runtime
 
   flushRuntimeLogs runtime

@@ -32,6 +32,7 @@ module Language.Edh.EHI
   , EdhLogger
   , LogLevel
   , defaultEdhRuntime
+  , defaultEdhIOLoop
 
     -- ** Booting up
   , EdhWorld(..)

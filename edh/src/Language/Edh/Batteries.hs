@@ -3,6 +3,8 @@ module Language.Edh.Batteries where
 
 import           Prelude
 
+import           Text.Printf
+
 import           System.IO                      ( stderr )
 import           System.Environment
 import           Text.Read
@@ -19,6 +21,13 @@ import qualified Data.Text                     as T
 import           Data.Text.IO
 import qualified Data.HashMap.Strict           as Map
 
+import           System.Console.Haskeline       ( InputT
+                                                , outputStrLn
+                                                , getInputLine
+                                                , handleInterrupt
+                                                , withInterrupt
+                                                )
+
 import           Data.Lossless.Decimal         as D
 
 import           Language.Edh.Runtime
@@ -33,18 +42,83 @@ import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
 
 
+-- | The default Edh command prompts
+--
+-- ps1 is for single line, ps2 for multi-line
+-- 
+-- note the defaults here are technically in no effect, just advice
+-- see implementation of:
+--   runtime.readCommands(ps1="Đ: ", ps2="Đ| ")
+defaultEdhPS1, defaultEdhPS2 :: Text
+defaultEdhPS1 = "Đ: "
+defaultEdhPS2 = "Đ| "
+
+-- | Serialize output to `stdout` from Edh programs, and give them command
+-- line input when requested
+defaultEdhIOLoop :: EdhRuntime -> InputT IO ()
+defaultEdhIOLoop !runtime = liftIO (atomically $ readTQueue ioQ) >>= \case
+  ConsoleShutdown    -> return () -- gracefully stop the io loop
+  ConsoleOut !txtOut -> do
+    outputStrLn $ T.unpack txtOut
+    defaultEdhIOLoop runtime
+  ConsoleIn !cmdIn !ps1 !ps2 -> do
+    liftIO flushLogs
+    readInput ps1 ps2 [] >>= \case
+      Nothing -> -- reached EOF (end-of-feed) before clean shutdown
+        outputStrLn "Your work may have lost, sorry."
+      Just !cmd -> do -- got one piece of code
+        liftIO $ atomically $ putTMVar cmdIn cmd
+        defaultEdhIOLoop runtime
+ where
+  !ioQ      = consoleIO runtime
+  flushLogs = flushRuntimeLogs runtime
+
+  -- | The repl line reader
+  readInput :: Text -> Text -> [Text] -> InputT IO (Maybe Text)
+  readInput !ps1 !ps2 !initialLines =
+    handleInterrupt ( -- start over on Ctrl^C
+                     outputStrLn "" >> readLines [])
+      $ withInterrupt
+      $ readLines initialLines
+   where
+    readLines pendingLines = getInputLine prompt >>= \case
+      Nothing -> case pendingLines of
+        [] -> return Nothing
+        _ -> -- TODO warn about premature EOF ?
+          return Nothing
+      Just text ->
+        let code = T.pack text
+        in  case pendingLines of
+              [] -> case T.stripEnd code of
+                "{" -> -- an unindented `{` marks start of multi-line input
+                  readLines [""]
+                _ -> case T.strip code of
+                  "" -> -- got an empty line in single-line input mode
+                    readLines [] -- start over in single-line input mode
+                  _ -> -- got a single line input
+                    return $ Just code
+              _ -> case T.stripEnd code of
+                "}" -> -- an unindented `}` marks end of multi-line input
+                  return $ Just $ (T.unlines . reverse) $ init pendingLines
+                _ -> -- got a line in multi-line input mode
+                  readLines $ code : pendingLines
+     where
+      prompt :: String
+      prompt = case pendingLines of
+        [] -> T.unpack ps1
+        _  -> T.unpack ps2 <> printf "%2d" (length pendingLines) <> ": "
+
+
 -- | This runtime serializes all log messages to 'stderr' through a 'TQueue',
 -- this is crucial under heavy concurrency.
---
--- `ioQ` is used to facilitate command input/output via 'stdin'/'stdout', you
--- should run an io loop with main thread, using a library like `haskeline`.
 --
 -- known issues:
 --  *) can mess up with others writing to 'stderr'
 --  *) if all others use 'trace' only, there're minimum messups but emojis 
 --     seem to be break points
-defaultEdhRuntime :: TQueue EdhConsoleIO -> IO EdhRuntime
-defaultEdhRuntime !ioQ = do
+defaultEdhRuntime :: IO EdhRuntime
+defaultEdhRuntime = do
+  ioQ         <- newTQueueIO
   envLogLevel <- lookupEnv "EDH_LOG_LEVEL"
   logIdle     <- newEmptyTMVarIO
   logQueue    <- newTQueueIO

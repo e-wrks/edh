@@ -38,9 +38,4 @@
 
   evs <- '  ☎️  ling.ling..ling...'
 
-  # all descendant threads (go routines) will be terminated when
-  # main thread terminates, need wait here to see any event above
-  # being processed.
-  for _ from runtime.everySeconds(1) do { break }
-  # runtime.info <| 'main program terminating ...'
 }
