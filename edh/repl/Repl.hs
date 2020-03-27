@@ -41,6 +41,8 @@ edhProgLoop !runtime = do
               "Your work committed, bye."
             atomically $ writeTQueue ioQ ConsoleShutdown
           _ -> do -- unclean program exit
+            atomically $ writeTQueue ioQ $ ConsoleOut
+              "Your program halted with a result:"
             atomically $ writeTQueue ioQ $ ConsoleOut $ case phv of
               EdhString msg -> msg
               _             -> T.pack $ show phv

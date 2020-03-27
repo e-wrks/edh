@@ -11,8 +11,9 @@ while true {
 
   } $=> {  # catch exceptions
 
-    {{ ProgramHalt:_ }} -> {
-      break
+    {{ ProgramHalt: ph }} -> {
+      throw ph  # escalate a halt to the program loop of the
+      # host interpreter, let it decide what to do.
     }
 
     {{ IOError:exc }} -> {
