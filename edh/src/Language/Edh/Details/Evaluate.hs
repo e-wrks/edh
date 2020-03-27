@@ -556,9 +556,9 @@ importEdhModule !impSpec !exit = do
                 -- try load the module
                 runEdhProc pgs
                   $ edhCatch (loadModule moduSlot moduId moduFile) exit
-                  $ \_ !nocatch -> ask >>= \pgsPassOn ->
+                  $ \_ !rethrow -> ask >>= \pgsPassOn ->
                       case contextMatch $ edh'context pgsPassOn of
-                        EdhNil      -> nocatch -- no error
+                        EdhNil      -> rethrow -- no error occurred
                         importError -> contEdhSTM $ do
                           void $ tryPutTMVar moduSlot $ EdhNamedValue
                             "importError"
@@ -571,7 +571,7 @@ importEdhModule !impSpec !exit = do
                               then putTMVar (worldModules world)
                                 $ Map.delete moduId moduMap''
                               else putTMVar (worldModules world) moduMap''
-                          runEdhProc pgsPassOn nocatch
+                          runEdhProc pgsPassOn rethrow
   if edh'in'tx pgs
     then throwEdh UsageError "You don't import from within a transaction"
     else contEdhSTM $ do
@@ -1377,7 +1377,7 @@ edhCatch !tryAct !exit !passOn = ask >>= \pgsOuter -> do
 -- | the 'contextMatch' is the error value thrown, or nil if no error occurred
 type EdhErrorPassOn
   =  EdhProcExit  -- ^ recover exit
-  -> EdhProc      -- ^ nocatch exit
+  -> EdhProc      -- ^ rethrow exit
   -> EdhProc
 
 
