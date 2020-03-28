@@ -274,13 +274,9 @@ evalStmt' !stmt !exit = do
                 evalExpr bodyExpr $ \(OriginalValue !blkVal _ _) ->
                   case blkVal of
                   -- early stop of procedure
-                    EdhReturn rtnVal   -> exitEdhProc exit rtnVal
+                    rtnVal@EdhReturn{} -> exitEdhProc exit rtnVal
                     -- break while loop
                     EdhBreak           -> exitEdhProc exit nil
-                    -- treat as break here, TODO judge this decision
-                    EdhFallthrough     -> exitEdhProc exit nil
-                    -- treat as continue here, TODO judge this decision
-                    EdhCaseClose ccVal -> exitEdhProc exit ccVal
                     -- continue while loop
                     _                  -> doWhile
               (EdhBool False) -> exitEdhProc exit nil
@@ -857,7 +853,7 @@ evalExpr expr exit = do
               <> T.pack (show ixVal)
 
 
-    CallExpr procExpr argsSndr ->
+    CallExpr !procExpr !argsSndr ->
       evalExpr procExpr $ \(OriginalValue callee'val _ callee'that) ->
         contEdhSTM
           $ edhMakeCall pgs callee'val callee'that argsSndr
