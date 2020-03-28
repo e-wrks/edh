@@ -1,31 +1,28 @@
 
-while true {
+while true {  # this is the *Loop* in so-called REPL
+  # Read+Eval (console.readCommand) -> Print (console.print) -> Loop
 
-  {
+  case console.readCommand(ps1="Đ: ", ps2="Đ| ")
+    of { cmd } -> {  # note a nil will fallthrough here
+    console.print( cmd )
+    cmd = nil  # clear it
+  }
 
-    case console.readCommand(ps1="Đ: ", ps2="Đ| ")
-      of { cmd } -> {  # note a nil will fallthrough here
-      console.print( cmd )
-      cmd = nil  # clear it
-    }
+} $=> {  # catch exceptions
 
-  } $=> {  # catch exceptions
+  {{ ProgramHalt: ph }} -> {
+    throw ph  # escalate a halt to the program loop of the
+    # host interpreter, let it decide what to do.
+  }
 
-    {{ ProgramHalt: ph }} -> {
-      throw ph  # escalate a halt to the program loop of the
-      # host interpreter, let it decide what to do.
-    }
+  {{ IOError:exc }} -> {
+    console.fatal <| 'IO error - ' ++ exc
+    throw exc  # escalate it to the program loop of the
+    # host interpreter, let it decide what to do.
+  }
 
-    {{ IOError:exc }} -> {
-      console.fatal <| 'IO error - ' ++ exc
-      throw exc  # escalate it to the program loop of the
-      # host interpreter, let it decide what to do.
-    }
-
-    { exc } -> {
-      console.print( 'Recovered from error', exception=exc )
-    }
-
+  { exc } -> {
+    console.print( 'Recovered from error', exception=exc )
   }
 
 }
