@@ -21,12 +21,6 @@ import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
 
 
-runHandlerExpr :: Expr -> EdhProcExit -> EdhProc
--- special case for a block as handling expression:
---   don't let `evalExpr` to apply `true` as its contextMatch
-runHandlerExpr (BlockExpr !stmts) !exit' = evalBlock stmts exit'
-runHandlerExpr !expr              !exit' = evalExpr expr exit'
-
 -- | operator ($=>) - the `catch`
 --
 -- the right-hand-expr will only be eval'ed  when an exception occurred
@@ -42,7 +36,7 @@ catchProc !tryExpr !catchExpr !exit =
     case contextMatch $ edh'context pgs of
       EdhNil -> rethrow -- no error occurred, no catch
       _ -> -- try recover by catch expression
-        runHandlerExpr catchExpr
+        evalMatchingExpr catchExpr
           $ \recoverResult@(OriginalValue recoverVal _ _) -> case recoverVal of
               EdhFallthrough -> rethrow -- not to recover
               _              -> exitEdhProc' recover recoverResult
@@ -57,7 +51,7 @@ catchProc !tryExpr !catchExpr !exit =
 -- right-hand-expr.
 finallyProc :: EdhIntrinsicOp
 finallyProc !tryExpr !finallyExpr !exit = edhCatch (evalExpr tryExpr) exit
-  $ \_ rethrow -> runHandlerExpr finallyExpr $ const rethrow
+  $ \_ rethrow -> evalMatchingExpr finallyExpr $ const rethrow
 
 
 -- | operator (->) - the brancher, if its left-hand matches, early stop its

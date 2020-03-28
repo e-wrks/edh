@@ -90,6 +90,12 @@ evalStmt ss@(StmtSrc (_sp, !stmt)) !exit = ask >>= \pgs ->
     $ \rtn -> local (const pgs) $ exitEdhProc' exit rtn
 
 
+evalMatchingExpr :: Expr -> EdhProcExit -> EdhProc
+-- special case for a block as matching expression:
+--   don't let `evalExpr` to apply `true` as its contextMatch
+evalMatchingExpr (BlockExpr !stmts) !exit' = evalBlock stmts exit'
+evalMatchingExpr !expr              !exit' = evalExpr expr exit'
+
 evalCaseBlock :: Expr -> EdhProcExit -> EdhProc
 evalCaseBlock !expr !exit = case expr of
   -- case-of with a block is normal
@@ -241,13 +247,12 @@ evalStmt' !stmt !exit = do
         _ -> contEdhSTM $ schedDefered pgs $ evalExpr expr edhEndOfProc
 
 
-    ReactorStmt sinkAddr argsRcvr reactionStmt ->
+    ReactorStmt sinkAddr reactExpr ->
       evalExpr (AttrExpr sinkAddr) $ \(OriginalValue !val _ _) ->
         case edhUltimate val of
           (EdhSink sink) -> contEdhSTM $ do
             (reactorChan, _) <- subscribeEvents sink
-            modifyTVar' (edh'reactors pgs)
-                        ((reactorChan, pgs, argsRcvr, reactionStmt) :)
+            modifyTVar' (edh'reactors pgs) ((reactorChan, pgs, reactExpr) :)
             exitEdhSTM pgs exit nil
           _ ->
             throwEdh EvalError
@@ -1848,7 +1853,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
             EdhArgsPack apk -> do1 apk $ iterEvt subChan
             v               -> do1 (ArgsPack [v] Map.empty) $ iterEvt subChan
 
-      case edhUltimate  iterVal of
+      case edhUltimate iterVal of
 
         -- loop from an event sink
         (EdhSink sink) -> subscribeEvents sink >>= \(subChan, mrv) ->

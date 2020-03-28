@@ -468,7 +468,7 @@ data EdhProgState = EdhProgState {
     , edh'context :: !Context
   }
 
-type ReactorRecord = (TChan EdhValue, EdhProgState, ArgsReceiver, Expr)
+type ReactorRecord = (TChan EdhValue, EdhProgState, Expr)
 type DeferRecord = (EdhProgState, EdhProc)
 
 -- | Run an Edh proc from within STM monad
@@ -964,10 +964,15 @@ data Stmt =
       -- get run from the thread where it's declared, after the currernt
       -- transaction finishes, a reactor procedure can `break` to terminate
       -- the thread, or the thread will continue to process next reactor, or
-      -- next transactional task normally
+      -- next transactional task normally.
+      --
+      -- the reacting expression uses a value/pattern matching branch, or a
+      -- group of branches (as a block expr) to perceive the happened event
+      -- data, including `nil` as end-of-stream indicator.
+      --
       -- the reactor mechanism is somewhat similar to traditional signal
       -- handling mechanism in OS process management
-    | ReactorStmt !AttrAddr !ArgsReceiver !Expr
+    | ReactorStmt !AttrAddr !Expr
       -- | interpreter declaration, an interpreter procedure is not otherwise
       -- different from a method procedure, except it receives arguments
       -- in expression form rather than values, in addition to the reflective

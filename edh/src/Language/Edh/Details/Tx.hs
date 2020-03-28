@@ -11,7 +11,6 @@ import           Control.Monad.Reader
 import           Control.Concurrent
 import           Control.Concurrent.STM
 
-import qualified Data.HashMap.Strict           as Map
 import           Data.Dynamic
 
 import           Language.Edh.Control
@@ -154,25 +153,20 @@ driveEdhProgram !haltResult !progCtx !prog = do
     driveDefers restDefers
 
   driveReactor :: EdhValue -> ReactorRecord -> IO Bool
-  driveReactor !ev (_, pgsOrigin, argsRcvr, expr) = do
+  driveReactor !ev (_, pgsOrigin, reactExpr) = do
     !breakThread <- newEmptyTMVarIO
     let
-      !ctxReactor = edh'context pgsOrigin
-      !apk        = case ev of
-        EdhArgsPack apk_ -> apk_
-        _                -> ArgsPack [ev] Map.empty
-      !scopeAtReactor = contextScope ctxReactor
-      !reactorProg    = ask >>= \pgsReactor ->
-        recvEdhArgs ctxReactor argsRcvr apk $ \em -> contEdhSTM $ do
-          updateEntityAttrs pgsReactor (scopeEntity scopeAtReactor)
-            $ Map.toList em
-          runEdhProc pgsReactor
-            $ evalExpr expr
-            $ \(OriginalValue !reactorRtn _ _) -> do
-                let doBreak = case reactorRtn of
-                      EdhBreak -> True -- terminate this thread
-                      _        -> False
-                contEdhSTM $ putTMVar breakThread doBreak
+      !reactorProg =
+        local
+            (\pgs ->
+              pgs { edh'context = (edh'context pgs) { contextMatch = ev } }
+            )
+          $ evalMatchingExpr reactExpr
+          $ \(OriginalValue !reactorRtn _ _) -> do
+              let doBreak = case reactorRtn of
+                    EdhBreak -> True -- terminate this thread
+                    _        -> False
+              contEdhSTM $ putTMVar breakThread doBreak
     !reactReactors                        <- newTVarIO []
     !reactDefers                          <- newTVarIO []
     !(reactTaskQueue :: TQueue EdhTxTask) <- newTQueueIO
@@ -274,7 +268,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
       :: [(EdhValue, ReactorRecord)]
       -> [ReactorRecord]
       -> STM [(EdhValue, ReactorRecord)]
-    reactorChk !gotevl []                        = return gotevl
-    reactorChk !gotevl (r@(evc, _, _, _) : rest) = tryReadTChan evc >>= \case
+    reactorChk !gotevl []                     = return gotevl
+    reactorChk !gotevl (r@(evc, _, _) : rest) = tryReadTChan evc >>= \case
       Just !ev -> reactorChk ((ev, r) : gotevl) rest
       Nothing  -> reactorChk gotevl rest

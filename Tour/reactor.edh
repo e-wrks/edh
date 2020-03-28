@@ -8,9 +8,15 @@
       console.info <| "I'm really done."
     }
 
-    reactor stopSig ev {
-      console.info <| '  🎬  stopping because: ' ++ ev
-      break  # break from a reactor terminates the thread
+    reactor stopSig {
+      { ev } -> {
+        console.info <| '  🎬  stopping because: ' ++ ev
+        break  # break from a reactor terminates the thread
+      }
+      # the wild capture pattern above won't match a nil,
+      # which is used to mark end-of-stream about a sink
+      console.warn <| '  🎬  stopping because end-of-stream'
+      break
     }
 
     for ev from evs do {

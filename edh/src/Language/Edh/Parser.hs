@@ -261,8 +261,7 @@ parseGeneratorStmt = GeneratorStmt <$> (keyword "generator" >> parseProcDecl)
 
 parseReactorStmt :: Parser Stmt
 parseReactorStmt =
-  keyword "reactor"
-    >> liftA3 ReactorStmt parseAttrAddr parseArgsReceiver parseExpr
+  keyword "reactor" >> liftA2 ReactorStmt parseAttrAddr parseExpr
 
 parseInterpreterStmt :: Parser Stmt
 parseInterpreterStmt =
