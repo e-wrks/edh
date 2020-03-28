@@ -302,6 +302,10 @@ mkHostClass !scope !nm !writeProtected !hc = do
   return $ EdhClass cls
 
 
+haltEdhProgram :: EdhValue -> STM ()
+haltEdhProgram !hv = throwSTM $ ProgramHalt $ toDyn hv
+
+
 runEdhProgram :: MonadIO m => Context -> EdhProc -> m (Either EdhError EdhValue)
 runEdhProgram !ctx !prog =
   liftIO $ tryJust edhKnownError $ runEdhProgram' ctx prog

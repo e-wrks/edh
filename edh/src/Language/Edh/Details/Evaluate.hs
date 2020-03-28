@@ -241,19 +241,20 @@ evalStmt' !stmt !exit = do
         _ -> contEdhSTM $ schedDefered pgs $ evalExpr expr edhEndOfProc
 
 
-    ReactorStmt sinkExpr argsRcvr reactionStmt ->
-      evalExpr sinkExpr $ \(OriginalValue !val _ _) -> case val of
-        (EdhSink sink) -> contEdhSTM $ do
-          (reactorChan, _) <- subscribeEvents sink
-          modifyTVar' (edh'reactors pgs)
-                      ((reactorChan, pgs, argsRcvr, reactionStmt) :)
-          exitEdhSTM pgs exit nil
-        _ ->
-          throwEdh EvalError
-            $  "Can only reacting to an event sink, not a "
-            <> T.pack (edhTypeNameOf val)
-            <> ": "
-            <> T.pack (show val)
+    ReactorStmt sinkAddr argsRcvr reactionStmt ->
+      evalExpr (AttrExpr sinkAddr) $ \(OriginalValue !val _ _) ->
+        case edhUltimate val of
+          (EdhSink sink) -> contEdhSTM $ do
+            (reactorChan, _) <- subscribeEvents sink
+            modifyTVar' (edh'reactors pgs)
+                        ((reactorChan, pgs, argsRcvr, reactionStmt) :)
+            exitEdhSTM pgs exit nil
+          _ ->
+            throwEdh EvalError
+              $  "Can only reacting to an event sink, not a "
+              <> T.pack (edhTypeNameOf val)
+              <> ": "
+              <> T.pack (show val)
 
 
     ThrowStmt excExpr ->
@@ -967,15 +968,16 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
             .   getFromSupers
     -- give super objects the magical power to intercept
     -- attribute access on descendant objects, via obj ref
-    _ -> evalExpr fromExpr $ \(OriginalValue !fromVal _ _) -> case fromVal of
-      (EdhObject !obj) -> do
-        let fromScope = objectScope ctx obj
-            noMagic :: EdhProc
-            noMagic = contEdhSTM $ lookupEdhObjAttr pgs obj key >>= \case
-              EdhNil -> runEdhProc pgs $ exitNoAttr fromVal
-              !val   -> exitEdhSTM' pgs exit $ OriginalValue val fromScope obj
-        getEdhAttrWithMagic (AttrByName "@<-*") obj key noMagic exit
-      _ -> contEdhSTM $ runEdhProc pgs $ exitNoAttr fromVal
+    _ -> evalExpr fromExpr $ \(OriginalValue !fromVal _ _) ->
+      case edhUltimate fromVal of
+        (EdhObject !obj) -> do
+          let fromScope = objectScope ctx obj
+              noMagic :: EdhProc
+              noMagic = contEdhSTM $ lookupEdhObjAttr pgs obj key >>= \case
+                EdhNil -> runEdhProc pgs $ exitNoAttr fromVal
+                !val   -> exitEdhSTM' pgs exit $ OriginalValue val fromScope obj
+          getEdhAttrWithMagic (AttrByName "@<-*") obj key noMagic exit
+        _ -> contEdhSTM $ runEdhProc pgs $ exitNoAttr fromVal
 
 
 -- There're 2 tiers of magic happen during object attribute resolution in Edh.
@@ -1168,7 +1170,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
         runEdhProc pgsCaller
           $ packEdhArgs argsSndr
           $ \(ArgsPack !args !kwargs) ->
-              contEdhSTM $ case Map.lookup "outlet" kwargs of
+              contEdhSTM $ case edhUltimate <$> Map.lookup "outlet" kwargs of
                 Nothing -> do
                   outlet <- newEventSink
                   callMaker $ \exit ->
@@ -1846,7 +1848,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
             EdhArgsPack apk -> do1 apk $ iterEvt subChan
             v               -> do1 (ArgsPack [v] Map.empty) $ iterEvt subChan
 
-      case iterVal of
+      case edhUltimate  iterVal of
 
         -- loop from an event sink
         (EdhSink sink) -> subscribeEvents sink >>= \(subChan, mrv) ->
@@ -2222,7 +2224,7 @@ packEdhArgs !argsSender !pkExit = do
         go ((k, v) : rest) !kvl = edhVal2Kw k $ \k' -> go rest ((k', v) : kvl)
     case x of
       UnpackPosArgs !posExpr ->
-        evalExpr posExpr $ \(OriginalValue !val _ _) -> case val of
+        evalExpr posExpr $ \(OriginalValue !val _ _) -> case edhUltimate val of
           (EdhArgsPack (ArgsPack !posArgs' _kwArgs')) ->
             pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
               exit (ArgsPack (posArgs ++ posArgs') kwArgs)
@@ -2242,7 +2244,7 @@ packEdhArgs !argsSender !pkExit = do
               <> ": "
               <> T.pack (show val)
       UnpackKwArgs !kwExpr -> evalExpr kwExpr $ \(OriginalValue !val _ _) ->
-        case val of
+        case edhUltimate val of
           EdhArgsPack (ArgsPack _posArgs' !kwArgs') ->
             pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
               exit (ArgsPack posArgs (Map.union kwArgs kwArgs'))
@@ -2263,7 +2265,7 @@ packEdhArgs !argsSender !pkExit = do
               <> ": "
               <> T.pack (show val)
       UnpackPkArgs !pkExpr -> evalExpr pkExpr $ \(OriginalValue !val _ _) ->
-        case val of
+        case edhUltimate val of
           (EdhArgsPack (ArgsPack !posArgs' !kwArgs')) -> pkArgs xs $ \case
             (ArgsPack !posArgs !kwArgs) ->
               exit (ArgsPack (posArgs ++ posArgs') (Map.union kwArgs kwArgs'))

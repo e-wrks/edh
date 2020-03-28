@@ -967,7 +967,7 @@ data Stmt =
       -- next transactional task normally
       -- the reactor mechanism is somewhat similar to traditional signal
       -- handling mechanism in OS process management
-    | ReactorStmt !Expr !ArgsReceiver !Expr
+    | ReactorStmt !AttrAddr !ArgsReceiver !Expr
       -- | interpreter declaration, an interpreter procedure is not otherwise
       -- different from a method procedure, except it receives arguments
       -- in expression form rather than values, in addition to the reflective
@@ -1197,8 +1197,10 @@ instance Hashable EdhTypeValue where
   hashWithSalt s t = hashWithSalt s $ fromEnum t
 
 edhTypeNameOf :: EdhValue -> String
-edhTypeNameOf EdhNil = "nil"
-edhTypeNameOf v      = show $ edhTypeOf v
+edhTypeNameOf EdhNil                   = "nil"
+edhTypeNameOf (EdhNamedValue n EdhNil) = T.unpack n
+edhTypeNameOf (EdhNamedValue n v) = T.unpack n <> " := " <> show (edhTypeOf v)
+edhTypeNameOf v                        = show $ edhTypeOf v
 
 -- | Get the type tag of an value
 --

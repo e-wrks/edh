@@ -40,6 +40,7 @@ module Language.Edh.EHI
     -- ** World bootstraping
   , EdhWorld(..)
   , createEdhWorld
+  , worldContext
   , installEdhBatteries
   , declareEdhOperators
 
@@ -53,6 +54,7 @@ module Language.Edh.EHI
   , contextScope
   , parseEdh
   , evalEdh
+  , haltEdhProgram
   , runEdhProgram
   , runEdhProgram'
   , viewAsEdhObject

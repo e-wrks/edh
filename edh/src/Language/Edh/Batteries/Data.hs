@@ -237,7 +237,7 @@ elemProc :: EdhIntrinsicOp
 elemProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
-    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
+    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate rhVal of
       EdhTuple vs          -> exitEdhProc exit (EdhBool $ lhVal `elem` vs)
       EdhList  (List _ !l) -> contEdhSTM $ do
         ll <- readTVar l
@@ -260,7 +260,7 @@ prpdProc :: EdhIntrinsicOp
 prpdProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
-    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
+    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate rhVal of
       EdhTuple vs          -> exitEdhProc exit (EdhTuple $ lhVal : vs)
       EdhList  (List _ !l) -> contEdhSTM $ do
         modifyTVar' l (lhVal :)
@@ -298,7 +298,7 @@ cprhProc !lhExpr !rhExpr !exit = do
         val2DictEntry pgs p $ \(k, v) -> modifyTVar' d $ setDictItem k v
   case rhExpr of
     ForExpr argsRcvr iterExpr doExpr ->
-      evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
+      evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
         EdhList (List _ !l) -> contEdhSTM $ edhForLoop
           pgs
           argsRcvr
@@ -330,8 +330,8 @@ cprhProc !lhExpr !rhExpr !exit = do
             <> ": "
             <> T.pack (show lhVal)
     _ -> evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
-      evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case lhVal of
-        EdhTuple vs -> case rhVal of
+      evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate lhVal of
+        EdhTuple vs -> case edhUltimate rhVal of
           EdhArgsPack (ArgsPack !args !kwargs) | Map.null kwargs ->
             exitEdhProc exit (EdhTuple $ vs ++ args)
           EdhTuple vs'         -> exitEdhProc exit (EdhTuple $ vs ++ vs')
@@ -347,7 +347,7 @@ cprhProc !lhExpr !rhExpr !exit = do
               <> T.pack (edhTypeNameOf rhVal)
               <> ": "
               <> T.pack (show rhVal)
-        EdhList (List _ !l) -> case rhVal of
+        EdhList (List _ !l) -> case edhUltimate rhVal of
           EdhArgsPack (ArgsPack !args !kwargs) | Map.null kwargs ->
             contEdhSTM $ do
               modifyTVar' l (++ args)
@@ -369,7 +369,7 @@ cprhProc !lhExpr !rhExpr !exit = do
               <> T.pack (edhTypeNameOf rhVal)
               <> ": "
               <> T.pack (show rhVal)
-        EdhDict (Dict _ !d) -> case rhVal of
+        EdhDict (Dict _ !d) -> case edhUltimate rhVal of
           EdhArgsPack (ArgsPack !args !kwargs) | Map.null kwargs ->
             contEdhSTM $ pvlToDict pgs args $ \d' -> do
               modifyTVar d $ Map.union d'
@@ -404,7 +404,7 @@ cprhProc !lhExpr !rhExpr !exit = do
 evtPubProc :: EdhIntrinsicOp
 evtPubProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhSink es -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       contEdhSTM $ do
         publishEvent es rhVal
