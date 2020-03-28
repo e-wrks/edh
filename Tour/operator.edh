@@ -7,11 +7,11 @@
 
 {
   operator 📣 5 (lhv, rhv) {
-    runtime.info <| rhv ++ ' is telling ' ++ lhv
+    console.info <| rhv ++ ' is telling ' ++ lhv
   }
 
   operator 🆚 1 (lhv, rhv) {
-    runtime.info <| "🌀 What's the difference?\n     "
+    console.info <| "🌀 What's the difference?\n     "
       ++ lhv ++ '\n  🆚\n     ' ++ rhv
   }
 }

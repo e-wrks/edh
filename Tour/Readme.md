@@ -158,11 +158,11 @@ copy-and-paste-able to the **REPL**, e.g. pasting:
 ```c++
 {
   operator 📣 5 (lhv, rhv) {
-    runtime.info <| rhv ++ ' is telling ' ++ lhv
+    console.info <| rhv ++ ' is telling ' ++ lhv
   }
 
   operator 🆚 1 (lhv, rhv) {
-    runtime.info <| "🌀 What's the difference?\n     "
+    console.info <| "🌀 What's the difference?\n     "
       ++ lhv ++ '\n  🆚\n     ' ++ rhv
   }
 }
@@ -178,11 +178,11 @@ You'll see:
 ```bash
 Đ: {
 Đ|  1:   operator 📣 5 (lhv, rhv) {
-Đ|  2:     runtime.info <| rhv ++ ' is telling ' ++ lhv
+Đ|  2:     console.info <| rhv ++ ' is telling ' ++ lhv
 Đ|  3:   }
 Đ|  4:
 Đ|  5:   operator 🆚 1 (lhv, rhv) {
-Đ|  6:     runtime.info <| "🌀 What's the difference?\n     "
+Đ|  6:     console.info <| "🌀 What's the difference?\n     "
 Đ|  7:       ++ lhv ++ '\n  🆚\n     ' ++ rhv
 Đ|  8:   }
 Đ|  9: }
@@ -498,15 +498,15 @@ f
 #### for-from-do loop does args
 
 ```bash
-Đ: for (x, y, z, a, b) from [apk] do runtime.info <| [x, y, z, a, b]
+Đ: for (x, y, z, a, b) from [apk] do console.info <| [x, y, z, a, b]
 Đ: ℹ️ <adhoc>:1:1
 [ 3, 11, 9, 7, 5, ]
 
-Đ: for (*args, **kwargs) from [apk] do runtime.info <| [args, kwargs]
+Đ: for (*args, **kwargs) from [apk] do console.info <| [args, kwargs]
 Đ: ℹ️ <adhoc>:1:1
 [ pkargs( 3, 7, 5, ), pkargs( y=11, z=9, ), ]
 
-Đ: for (***argspk) from [apk] do runtime.info <| { 'full args': argspk }
+Đ: for (***argspk) from [apk] do console.info <| { 'full args': argspk }
 Đ: ℹ️ <adhoc>:1:1
 { "full args":pkargs( 3, 7, 5, y=11, z=9, ), }
 
@@ -539,7 +539,7 @@ Checkout [argspk.edh](./argspk.edh)
 Đ|  8:   # arguments receiver syntax in for expression,
 Đ|  9:   # you'd feel it like defining a callback
 Đ| 10:   for (x, y, desc="the result") from g(5) do
-Đ| 11:     runtime.info <| (x ++ ": " ++ desc ++ " is " ++ y)
+Đ| 11:     console.info <| (x ++ ": " ++ desc ++ " is " ++ y)
 Đ| 12: }
 Đ: ℹ️ <adhoc>:10:3
 0: square of 0 is 0
@@ -752,7 +752,7 @@ still got meal - Nothing
 
 Logging is done by an operator (**<|**) too, surprise!
 
-`runtime.xxx` are just number values to specify the target level of
+`console.xxx` are just number values to specify the target level of
 a log record, and the process environment variable `EDH_LOG_LEVEL`
 if set, will cause log records with lower target levels be dropped
 (not eval'ed at all in fact).
@@ -763,18 +763,18 @@ $ edhi
 >> Bare Đ (Edh) Interpreter <<
 * Blank Screen Syndrome ? Take the Tour as your companion, checkout:
   https://github.com/e-wrks/edh/tree/master/Tour
-Đ: runtime.debug
+Đ: console.debug
 10
-Đ: runtime.info
+Đ: console.info
 20
-Đ: runtime.warn
+Đ: console.warn
 30
-Đ: runtime.error
+Đ: console.error
 40
-Đ: runtime.fatal
+Đ: console.fatal
 50
 Đ:
-Đ: runtime.warn <| "You won't see source location info in log if the level is WARN or higher"
+Đ: console.warn <| "You won't see source location info in log if the level is WARN or higher"
 Đ: ⚠️ You won't see source location info in log if the level is WARN or higher
 Đ:
 $ export EDH_LOG_LEVEL=DEBUG
@@ -782,10 +782,10 @@ $ edhi
 >> Bare Đ (Edh) Interpreter <<
 * Blank Screen Syndrome ? Take the Tour as your companion, checkout:
   https://github.com/e-wrks/edh/tree/master/Tour
-Đ: runtime.info <| "Source location is informative most of the time, right?"
+Đ: console.info <| "Source location is informative most of the time, right?"
 Đ: ℹ️ <adhoc>:1:1
 Source location is informative most of the time, right?
-Đ: runtime.debug <| "Especially when trouble shooting some unexpected results."
+Đ: console.debug <| "Especially when trouble shooting some unexpected results."
 Đ: 🐞 <adhoc>:1:1
 Especially when trouble shooting some unexpected results.
 Đ: 50<|'use a number works the same way!'
@@ -979,24 +979,24 @@ to be evaluated sequentially.
 Đ|  2:
 Đ|  3:     DecimalType -> {
 Đ|  4:
-Đ|  5:       n < 1 -> runtime.info <| '  🎉 instantly !!'
+Đ|  5:       n < 1 -> console.info <| '  🎉 instantly !!'
 Đ|  6:
 Đ|  7:       n > 5 -> {
-Đ|  8:         runtime.warn <| "  😓 that's too many to count, doing my most ..."
+Đ|  8:         console.warn <| "  😓 that's too many to count, doing my most ..."
 Đ|  9:         n = 5
 Đ| 10:         fallthrough # similar to `fallthrough` in Go
 Đ| 11:       }
 Đ| 12:
 Đ| 13:       # (:-) will be parsed as another operator, sep (1 space used below) needed here
-Đ| 14:       for i from range(n : 0 : -1) do runtime.info <| '  ⏲️  ' ++ i
-Đ| 15:       runtime.info <| '  🎉 !!'
+Đ| 14:       for i from range(n : 0 : -1) do console.info <| '  ⏲️  ' ++ i
+Đ| 15:       console.info <| '  🎉 !!'
 Đ| 16:
 Đ| 17:     }
 Đ| 18:
 Đ| 19:     _ -> # the underscore condition always matches, similar to underscore in Haskell
-Đ| 20:       runtime.error <| "I don't know what you want from a " ++ type(n) ++ ': ' ++ n
+Đ| 20:       console.error <| "I don't know what you want from a " ++ type(n) ++ ': ' ++ n
 Đ| 21:
-Đ| 22:     runtime.fatal <| "don't worry, this will never happen."
+Đ| 22:     console.fatal <| "don't worry, this will never happen."
 Đ| 23:   }
 Đ| 24: }
 countdown
@@ -1089,7 +1089,7 @@ timelyNotify !delayMicros genr'caller@(!pgs', !iter'cb) = do
   runEdhProc pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \_ ->
     timelyNotify delayMicros genr'caller
 
--- | host generator runtime.everyMicros(n) - with fixed interval
+-- | host generator console.everyMicros(n) - with fixed interval
 rtEveryMicrosProc :: EdhProcedure
 rtEveryMicrosProc !argsSender _ = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of
@@ -1148,7 +1148,7 @@ Checkout how the `range()` clone from **Python** is
       if None == step
         then step = 1
         else if step <= 0 then {
-          runtime.warn <| 'step of ' ++ step ++ ' for range [' ++
+          console.warn <| 'step of ' ++ step ++ ' for range [' ++
                           start ++ ', ' ++ stop ++ ") won't converge"
           return nil
         }
@@ -1162,7 +1162,7 @@ Checkout how the `range()` clone from **Python** is
       if None == step
         then step = -1
         else if step >= 0 then {
-          runtime.warn <| 'step of ' ++ step ++ ' for range [' ++
+          console.warn <| 'step of ' ++ step ++ ' for range [' ++
                           start ++ ', ' ++ stop ++ ") won't converge"
           return nil
         }
@@ -1179,22 +1179,22 @@ This is pasteable to the REPL:
 ```python
 {
   # Python style `range` (range is a generator procedure in Edh)
-  for n from range(5) do runtime.info <| ' ** iter # ' ++ n
-  for n from range(3, 7) do runtime.info <| ' ** iter # ' ++ n
-  for n from range(7, 3) do runtime.info <| ' ** iter # ' ++ n
-  for n from range(5, 10, 2) do runtime.info <| ' ** iter # ' ++ n
-  for n from range(10, 5, -2) do runtime.info <| ' ** iter # ' ++ n
+  for n from range(5) do console.info <| ' ** iter # ' ++ n
+  for n from range(3, 7) do console.info <| ' ** iter # ' ++ n
+  for n from range(7, 3) do console.info <| ' ** iter # ' ++ n
+  for n from range(5, 10, 2) do console.info <| ' ** iter # ' ++ n
+  for n from range(10, 5, -2) do console.info <| ' ** iter # ' ++ n
 
   # non-converging ranges won't loop
-  for n from range(5, 10, -2) do runtime.info <| ' ** iter # ' ++ n
-  for n from range(10, 5, 2) do runtime.info <| ' ** iter # ' ++ n
+  for n from range(5, 10, -2) do console.info <| ' ** iter # ' ++ n
+  for n from range(10, 5, 2) do console.info <| ' ** iter # ' ++ n
 
   # using pairs
-  for n from range(5:10:2) do runtime.info <| ' ** iter # ' ++ n
-  for n from range(7:3) do runtime.info <| ' ** iter # ' ++ n
+  for n from range(5:10:2) do console.info <| ' ** iter # ' ++ n
+  for n from range(7:3) do console.info <| ' ** iter # ' ++ n
 
   # Python style `enumerate`
-  for (i, n) from enumerate(range, 5) do runtime.info <| ' # ' ++ i ++ ' >> ' ++ n
+  for (i, n) from enumerate(range, 5) do console.info <| ' # ' ++ i ++ ' >> ' ++ n
 }
 ```
 
@@ -1203,7 +1203,7 @@ Also values can be exchanged between the generator and the `do` expr
 ```bash
 Đ: generator ss n while true n = yield n*n
 ss
-Đ: for n from ss(3) do { runtime.info<|n; if n > 100 then break else n }
+Đ: for n from ss(3) do { console.info<|n; if n > 100 then break else n }
 Đ: ℹ️ <adhoc>:1:23
 9
 ℹ️ <adhoc>:1:23
@@ -1227,9 +1227,9 @@ return value of the generator procedure as invoked:
 Đ|  5:     return 3
 Đ|  6:   }
 Đ|  7:
-Đ|  8:   result = for n from g() do runtime.info <| 'got ' ++ n
+Đ|  8:   result = for n from g() do console.info <| 'got ' ++ n
 Đ|  9:
-Đ| 10:   runtime.info <| 'Result is: ' ++ result
+Đ| 10:   console.info <| 'Result is: ' ++ result
 Đ| 11: }
 Đ: ℹ️ <adhoc>:8:3
 got 1
@@ -1255,10 +1255,10 @@ Check out [interpreter.edh](./interpreter.edh)
 Đ|  6:   a = 5; b = 3
 Đ|  7:   sum = lazy(a + b)
 Đ|  8:
-Đ|  9:   runtime.info <| " once upon a time it's " ++ sum()
+Đ|  9:   console.info <| " once upon a time it's " ++ sum()
 Đ| 10:
 Đ| 11:   a = 7
-Đ| 12:   runtime.info <| " then later it's " ++ sum()
+Đ| 12:   console.info <| " then later it's " ++ sum()
 Đ| 13:
 Đ| 14: }
 Đ: ℹ️ <adhoc>:9:3
@@ -1353,7 +1353,7 @@ Checkout [inheritance.edh](./inheritance.edh)
 Đ|  3:       method __init__ (name as this.name) pass
 Đ|  4:
 Đ|  5:       method greeting(guest) {
-Đ|  6:           runtime.info <| ("Hello "++guest++", I am "++name++', your guide.')
+Đ|  6:           console.info <| ("Hello "++guest++", I am "++name++', your guide.')
 Đ|  7:       }
 Đ|  8:   }
 Đ|  9:
@@ -1365,7 +1365,7 @@ Checkout [inheritance.edh](./inheritance.edh)
 Đ| 15:       extends B('Farmer')
 Đ| 16:
 Đ| 17:       method hello() {
-Đ| 18:           runtime.info <| (`Hello there!`)
+Đ| 18:           console.info <| (`Hello there!`)
 Đ| 19:       }
 Đ| 20:   }
 Đ| 21:
@@ -1470,13 +1470,13 @@ See [Producer Procedure](#producer-procedure)
 Đ| 14:     outlet=sink
 Đ| 15:     # have it a default value to fool the lint/IDE tooling to believe
 Đ| 16:     # it's an optional argument for the caller. this is not necessary
-Đ| 17:     # for correct runtime behavior though.
+Đ| 17:     # for correct behavior though.
 Đ| 18:   ) {
 Đ| 19:     # no event will be missing for the first consumer (via for-from-do
 Đ| 20:     # loop), as this procedure will only get actually running *after*
 Đ| 21:     # the first consumer started receiving events from `outlet`.
 Đ| 22:     outlet <- 'start alerting you every ' ++ interval ++ ' second(s) ...'
-Đ| 23:     for ts from runtime.everySeconds(interval) do
+Đ| 23:     for ts from console.everySeconds(interval) do
 Đ| 24:       outlet <- '⏰ alarm @@ ' ++ ts
 Đ| 25:   }
 Đ| 26:
@@ -1487,7 +1487,7 @@ timelyAlert
 Đ|  1:
 Đ|  2:   n = 1
 Đ|  3:   for notif from timelyAlert(1) do {
-Đ|  4:     runtime.info<| ' ALARM #' ++ n ++ ' - ' ++ notif
+Đ|  4:     console.info<| ' ALARM #' ++ n ++ ' - ' ++ notif
 Đ|  5:     if (n+=1) > 3 then { break }
 Đ|  6:   }
 Đ|  7:
@@ -1510,12 +1510,12 @@ Checkout [goroutine.edh](./goroutine.edh)
 Đ: {
 Đ|  1:
 Đ|  2:   n = 0
-Đ|  3:   go for nanos from runtime.everySeconds(1) do runtime.info
+Đ|  3:   go for nanos from console.everySeconds(1) do console.info
 Đ|  4:         <| '  ⏰ tick#' ++ (n+=1) ++ ' ⏲️  ' ++ nanos ++ 'ns'
 Đ|  5:
 Đ|  6:   # after main thread terminated, all forked descendant threads
 Đ|  7:   # will be terminated along with the Edh program too
-Đ|  8:   for _ from runtime.everySeconds(5) do { break }
+Đ|  8:   for _ from console.everySeconds(5) do { break }
 Đ|  9:
 Đ| 10: }
 ℹ️ <adhoc>:3:3
@@ -1562,15 +1562,15 @@ logics in similar ways.
 Đ|  6:     method longthyWork(job'num, seconds2take) {
 Đ|  7:       # this anonymous nullary proc defines the task in form of niladic computation
 Đ|  8:       method _ () {
-Đ|  9:         runtime.info <| '  🏎️  #' ++ job'num ++ ' started'
+Đ|  9:         console.info <| '  🏎️  #' ++ job'num ++ ' started'
 Đ| 10:         n = 0
-Đ| 11:         for nanos from runtime.everySeconds(1) do if (n+=1) >= seconds2take
+Đ| 11:         for nanos from console.everySeconds(1) do if (n+=1) >= seconds2take
 Đ| 12:           then {
-Đ| 13:             runtime.info <| '  🏁  #' ++ job'num ++ ' done'
+Đ| 13:             console.info <| '  🏁  #' ++ job'num ++ ' done'
 Đ| 14:             break
 Đ| 15:           } else {
 Đ| 16:             # uncomment line below to see even more verbose log
-Đ| 17:             runtime.info <| '  📝  #' ++ job'num ++ ' tick ' ++ nanos
+Đ| 17:             console.info <| '  📝  #' ++ job'num ++ ' tick ' ++ nanos
 Đ| 18:           }
 Đ| 19:       }
 Đ| 20:     }
@@ -1586,7 +1586,7 @@ allWorksToDo
 Đ|  2: {#
 Đ|  3:   # `concur()` is the sorta primitive for concurrency scheduling,
 Đ|  4:   # it's a plain Edh method procedure defined in `batteries/root`
-Đ|  5:   # module so automically available in a Edh runtime, its signature
+Đ|  5:   # module so automically available in a Edh world, its signature
 Đ|  6:   # looks like following:
 Đ|  7:
 Đ|  8:   method concur(*tasks, c=6, dbgLogger=0) {
@@ -1601,7 +1601,7 @@ allWorksToDo
 Đ| 17: #      |--+------tuple comprehension target/tag
 Đ| 18: #         |------comprehension operator in Edh
 Đ| 19:
-Đ| 20:     c=5, dbgLogger=runtime.info,
+Đ| 20:     c=5, dbgLogger=console.info,
 Đ| 21: #    ^------------^---------------keyword arguments
 Đ| 22:
 Đ| 23:   )
@@ -1691,34 +1691,34 @@ Checkout [reactor.edh](./reactor.edh)
 Đ|  4:   go {
 Đ|  5:
 Đ|  6:     defer {
-Đ|  7:       runtime.info <| "I'm really done."
+Đ|  7:       console.info <| "I'm really done."
 Đ|  8:     }
 Đ|  9:
 Đ| 10:     reactor stopSig ev {
-Đ| 11:       runtime.info <| '  🎬  stopping because: ' ++ ev
+Đ| 11:       console.info <| '  🎬  stopping because: ' ++ ev
 Đ| 12:       break  # break from a reactor terminates the thread
 Đ| 13:     }
 Đ| 14:
 Đ| 15:     for ev from evs do {
-Đ| 16:       runtime.info <| '  🎐  sth happening: ' ++ ev
+Đ| 16:       console.info <| '  🎐  sth happening: ' ++ ev
 Đ| 17:     }
 Đ| 18:
 Đ| 19:   }
 Đ| 20:
 Đ| 21:   # wait a second
-Đ| 22:   for _ from runtime.everySeconds(1) do { break }
+Đ| 22:   for _ from console.everySeconds(1) do { break }
 Đ| 23:
 Đ| 24:   evs <- '  🛎️  ding.ding..'
 Đ| 25:
 Đ| 26:   # wait a second
-Đ| 27:   for _ from runtime.everySeconds(1) do { break }
+Đ| 27:   for _ from console.everySeconds(1) do { break }
 Đ| 28:
 Đ| 29:   # stopSig <- "don't do that!"
 Đ| 30:
 Đ| 31:   evs <- '  🍃  chill..chill...'
 Đ| 32:
 Đ| 33:   # wait a second
-Đ| 34:   for _ from runtime.everySeconds(1) do { break }
+Đ| 34:   for _ from console.everySeconds(1) do { break }
 Đ| 35:
 Đ| 36:   stopSig <- "that's enough!"
 Đ| 37:
@@ -1727,8 +1727,8 @@ Checkout [reactor.edh](./reactor.edh)
 Đ| 40:   # all descendant threads (go routines) will be terminated when
 Đ| 41:   # main thread terminates, need wait here to see any event above
 Đ| 42:   # being processed.
-Đ| 43:   for _ from runtime.everySeconds(1) do { break }
-Đ| 44:   # runtime.info <| 'main program terminating ...'
+Đ| 43:   for _ from console.everySeconds(1) do { break }
+Đ| 44:   # console.info <| 'main program terminating ...'
 Đ| 45: }
 ℹ️ <adhoc>:16:7
   🎐  sth happening:   🛎️  ding.ding..
@@ -1757,32 +1757,32 @@ This is meant to attract people to port **Pandas** and **Numpy** to
 Đ|  5:     # magic method responding to read with an index
 Đ|  6:     method ([]) (ix) {
 Đ|  7:
-Đ|  8:       # runtime.info <| 'Indexing with ' ++ type(ix) ++ ': ' ++ ix
+Đ|  8:       # console.info <| 'Indexing with ' ++ type(ix) ++ ': ' ++ ix
 Đ|  9:
 Đ| 10:       case ix of {
 Đ| 11:
 Đ| 12:         {(start:stop:step)} -> {
-Đ| 13:           runtime.info <| 'Indexing interleaved 1d range: ' ++ ix
+Đ| 13:           console.info <| 'Indexing interleaved 1d range: ' ++ ix
 Đ| 14:           break # no way to be success on a dict
 Đ| 15:         }
 Đ| 16:
 Đ| 17:         {(start:stop)} -> {
-Đ| 18:           runtime.info <| 'Indexing contiguous 1d range: ' ++ ix
+Đ| 18:           console.info <| 'Indexing contiguous 1d range: ' ++ ix
 Đ| 19:           break # no way to be success on a dict
 Đ| 20:         }
 Đ| 21:
 Đ| 22:         {(dim'1, dim'2)} -> {
 Đ| 23:
-Đ| 24:           runtime.info <| 'Indexing 2d space with: ' ++ ix
+Đ| 24:           console.info <| 'Indexing 2d space with: ' ++ ix
 Đ| 25:
 Đ| 26:           case dim'1 of {
 Đ| 27:             {(start:stop:step)} -> {
-Đ| 28:               runtime.info <| 'Indexing interleaved 1st dimension range: ' ++ dim'1
+Đ| 28:               console.info <| 'Indexing interleaved 1st dimension range: ' ++ dim'1
 Đ| 29:               break # no way to be success on a dict
 Đ| 30:             }
 Đ| 31:
 Đ| 32:             {(start:stop)} -> {
-Đ| 33:               runtime.info <| 'Indexing contiguous 1st dimension range: ' ++ dim'1
+Đ| 33:               console.info <| 'Indexing contiguous 1st dimension range: ' ++ dim'1
 Đ| 34:               break # no way to be success on a dict
 Đ| 35:             }
 Đ| 36:           }
@@ -1796,13 +1796,13 @@ This is meant to attract people to port **Pandas** and **Numpy** to
 Đ| 44:
 Đ| 45:       case type(ix) of {
 Đ| 46:         DecimalType -> {
-Đ| 47:           runtime.info <| 'Indexing 1d element: ' ++ ix
+Đ| 47:           console.info <| 'Indexing 1d element: ' ++ ix
 Đ| 48:         }
 Đ| 49:         StringType -> {
-Đ| 50:           runtime.info <| 'Indexing column by name: ' ++ ix
+Đ| 50:           console.info <| 'Indexing column by name: ' ++ ix
 Đ| 51:         }
 Đ| 52:         _ -> {
-Đ| 53:           runtime.info <| 'Suspicious index ' ++ type(ix) ++ ': ' ++ ix
+Đ| 53:           console.info <| 'Suspicious index ' ++ type(ix) ++ ': ' ++ ix
 Đ| 54:           break # avoid actually doing indexing with this ix
 Đ| 55:         }
 Đ| 56:       }
@@ -2478,7 +2478,7 @@ timelyNotify !delayMicros genr'caller@(!pgs', !iter'cb) = do
   runEdhProc pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \_ ->
     timelyNotify delayMicros genr'caller
 
--- | host generator runtime.everyMicros(n) - with fixed interval
+-- | host generator console.everyMicros(n) - with fixed interval
 rtEveryMicrosProc :: EdhProcedure
 rtEveryMicrosProc !argsSender _ = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of

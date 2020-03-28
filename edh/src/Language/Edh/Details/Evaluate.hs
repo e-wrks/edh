@@ -423,7 +423,7 @@ evalStmt' !stmt !exit = do
         findPredecessor =
           lookupEdhCtxAttr pgs scope (AttrByName opSym) >>= \case
             EdhNil -> -- do
-              -- (EdhRuntime logger _) <- readTMVar $ worldRuntime world
+              -- (EdhConsole logger _) <- readTMVar $ worldConsole world
               -- logger 30 (Just $ sourcePosPretty srcPos)
               --   $ ArgsPack
               --       [EdhString "overriding an unavailable operator"]
@@ -431,7 +431,7 @@ evalStmt' !stmt !exit = do
               return Nothing
             op@EdhOprtor{} -> return $ Just op
             opVal          -> do
-              (runtimeLogger $ worldRuntime world)
+              (consoleLogger $ worldConsole world)
                   30
                   (Just $ sourcePosPretty srcPos)
                 $ ArgsPack
@@ -695,7 +695,7 @@ evalExpr expr exit = do
             <> T.pack (show val)
             <> " ❌"
       Guard -> contEdhSTM $ do
-        (runtimeLogger $ worldRuntime world)
+        (consoleLogger $ worldConsole world)
           30
           (Just $ sourcePosPretty srcPos)
           (ArgsPack [EdhString "Standalone guard treated as plain value."]

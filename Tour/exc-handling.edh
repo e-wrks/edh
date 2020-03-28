@@ -19,13 +19,13 @@
   } $=> {{ UsageError: exc }} -> {
     # (->) binds tighter than ($=>) and (@=>) so can be single branch catch
 
-    runtime.warn <| "Obviously it's your fault by not doing the right thing! "
+    console.warn <| "Obviously it's your fault by not doing the right thing! "
       ++ exc # it's bad smell to swallow error information in your code
 
   } $=> {{ IOError: exc }} -> {
     # multiple `catch`es can be chained, same intuition as in other languages
 
-    runtime.fatal <| 'The realworld is insane sometimes ... '
+    console.fatal <| 'The realworld is insane sometimes ... '
 
     fallthrough  # this way to re-throw the original exception
 
@@ -33,23 +33,23 @@
     # with the exception value as pattern/value match target throughout
 
     { n } -> {
-      runtime.print( 'a ' ++ type(n) ++ ' exception is thrown!' )
+      console.print( 'a ' ++ type(n) ++ ' exception is thrown!' )
       fallthrough  # or it'll be recovered right from here
     }
 
     21 -> {
-      runtime.print( "That's what I'm afraid of, but it's okay then." )
+      console.print( "That's what I'm afraid of, but it's okay then." )
       # in case any branch with pattern/value matched successfuly, the
       # exception is considered to have been recovered
     }
 
   } @=> {  # (@=>) is the `finally` operator
-    runtime.print( 'I always do cleanup anyway.' )
+    console.print( 'I always do cleanup anyway.' )
   } @=> {{ ProgramHalt:_ }} -> {
     # `finally`s can be chained and matched too in Edh, surprise!
     # but if you are fond of this fact, maybe you've unfortunately
     # been trapped often.
-    runtime.print( "There're never short of cleanup jobs to do.")
+    console.print( "There're never short of cleanup jobs to do.")
   }
 
 }
@@ -73,12 +73,12 @@
   {
     doBusiness()
   } $=> {{ RuleViolated:exc }} -> {
-    runtime.print( 'or maybe the rule is wrong ...' )
+    console.print( 'or maybe the rule is wrong ...' )
     fallthrough
   } $=> {{ AppException:exc }} -> {
-    runtime.info <| 'app error recorded - ' ++ exc.details
+    console.info <| 'app error recorded - ' ++ exc.details
   } @=> {
-    runtime.info <| 'looking forward for more business to do'
+    console.info <| 'looking forward for more business to do'
   }
 
 }
@@ -89,7 +89,7 @@
   # when not meant to be thrown
 
   method f() {
-    runtime.print( "I suspect why I'm called anyway ...",
+    console.print( "I suspect why I'm called anyway ...",
       backtrace = Exception("See I'm so called.") )
   }
 

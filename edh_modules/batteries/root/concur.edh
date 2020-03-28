@@ -6,7 +6,7 @@
  each task must be a nullary procedure (i.e. a niladic 
  computation)
 
- pass 'runtime.debug' or even 'runtime.info' as 'dbgLogger'
+ pass 'console.debug' or even 'console.info' as 'dbgLogger'
  to see verbose log of the finishing up
 #}
 method concur(*tasks, c=6, dbgLogger=0) {

@@ -3,10 +3,10 @@ while true {
 
   {
 
-    for cmd from runtime.readCommands(ps1="Đ: ", ps2="Đ| ")
-      do case type(cmd) of {
-        nil -> { continue }
-        runtime.print( cmd )
+    case console.readCommand(ps1="Đ: ", ps2="Đ| ")
+      of { cmd } -> {  # note a nil will fallthrough here
+      console.print( cmd )
+      cmd = nil  # clear it
     }
 
   } $=> {  # catch exceptions
@@ -17,13 +17,13 @@ while true {
     }
 
     {{ IOError:exc }} -> {
-      runtime.fatal <| 'IO error - ' ++ exc
+      console.fatal <| 'IO error - ' ++ exc
       throw exc  # escalate it to the program loop of the
       # host interpreter, let it decide what to do.
     }
 
     { exc } -> {
-      runtime.print( 'Recovered from error', exception=exc )
+      console.print( 'Recovered from error', exception=exc )
     }
 
   }

@@ -34,8 +34,8 @@ import           Language.Edh.Details.PkgMan
 import           Language.Edh.Details.Evaluate
 
 
-createEdhWorld :: MonadIO m => EdhRuntime -> m EdhWorld
-createEdhWorld !runtime = liftIO $ do
+createEdhWorld :: MonadIO m => EdhConsole -> m EdhWorld
+createEdhWorld !console = liftIO $ do
 
   -- ultimate global artifacts go into this
   rootEntity <- atomically $ createHashEntity $ Map.fromList
@@ -99,7 +99,7 @@ createEdhWorld !runtime = liftIO $ do
                                   }
         , worldOperators = opPD
         , worldModules   = modus
-        , worldRuntime   = runtime
+        , worldConsole   = console
         }
 
   -- install host error classes, among which is "Exception" for Edh

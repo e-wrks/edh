@@ -16,13 +16,13 @@
     outlet=sink
     # have it a default value to fool the lint/IDE tooling to believe
     # it's an optional argument for the caller. this is not necessary
-    # for correct runtime behavior though.
+    # for correct behavior though.
   ) {
     # no event will be missing for the first consumer (via for-from-do
     # loop), as this procedure will only get actually running *after*
     # the first consumer started receiving events from `outlet`.
     outlet <- 'start alerting you every ' ++ interval ++ ' second(s) ...'
-    for ts from runtime.everySeconds(interval) do
+    for ts from console.everySeconds(interval) do
       outlet <- '⏰ alarm @@ ' ++ ts
   }
 
@@ -32,7 +32,7 @@
 
   n = 1
   for notif from timelyAlert(1) do {
-    runtime.info<| ' ALARM #' ++ n ++ ' - ' ++ notif
+    console.info<| ' ALARM #' ++ n ++ ' - ' ++ notif
     if (n+=1) > 3 then { break }
   }
 

@@ -1,20 +1,20 @@
 
 {
   # Python style `range` (range is a generator procedure in Edh)
-  for n from range(5) do runtime.info <| ' ** iter # ' ++ n
-  for n from range(3, 7) do runtime.info <| ' ** iter # ' ++ n
-  for n from range(7, 3) do runtime.info <| ' ** iter # ' ++ n
-  for n from range(5, 10, 2) do runtime.info <| ' ** iter # ' ++ n
-  for n from range(10, 5, -2) do runtime.info <| ' ** iter # ' ++ n
+  for n from range(5) do console.info <| ' ** iter # ' ++ n
+  for n from range(3, 7) do console.info <| ' ** iter # ' ++ n
+  for n from range(7, 3) do console.info <| ' ** iter # ' ++ n
+  for n from range(5, 10, 2) do console.info <| ' ** iter # ' ++ n
+  for n from range(10, 5, -2) do console.info <| ' ** iter # ' ++ n
 
   # non-converging ranges won't loop
-  for n from range(5, 10, -2) do runtime.info <| ' ** iter # ' ++ n
-  for n from range(10, 5, 2) do runtime.info <| ' ** iter # ' ++ n
+  for n from range(5, 10, -2) do console.info <| ' ** iter # ' ++ n
+  for n from range(10, 5, 2) do console.info <| ' ** iter # ' ++ n
 
   # using pairs
-  for n from range(5:10:2) do runtime.info <| ' ** iter # ' ++ n
-  for n from range(7:3) do runtime.info <| ' ** iter # ' ++ n
+  for n from range(5:10:2) do console.info <| ' ** iter # ' ++ n
+  for n from range(7:3) do console.info <| ' ** iter # ' ++ n
 
   # Python style `enumerate`
-  for (i, n) from enumerate(range, 5) do runtime.info <| ' # ' ++ i ++ ' >> ' ++ n
+  for (i, n) from enumerate(range, 5) do console.info <| ' # ' ++ i ++ ' >> ' ++ n
 }

@@ -14,12 +14,12 @@ import           Language.Edh.EHI
 
 
 -- | Manage lifecycle of Edh programs during the repl session
-edhProgLoop :: EdhRuntime -> IO ()
-edhProgLoop !runtime = do
+edhProgLoop :: EdhConsole -> IO ()
+edhProgLoop !console = do
 
   -- create the world, we always work with this world no matter how
   -- many times the Edh programs crash
-  world <- createEdhWorld runtime
+  world <- createEdhWorld console
   installEdhBatteries world
   -- install more host modules and/or other artifacts to be available
 
@@ -52,5 +52,5 @@ edhProgLoop !runtime = do
             -- it may not be a good idea, but just so so ...
             loop
   loop
-  where ioQ = consoleIO runtime
+  where ioQ = consoleIO console
 

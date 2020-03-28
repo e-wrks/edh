@@ -7,32 +7,32 @@
     # magic method responding to read with an index
     method ([]) (ix) {
 
-      # runtime.info <| 'Indexing with ' ++ type(ix) ++ ': ' ++ ix
+      # console.info <| 'Indexing with ' ++ type(ix) ++ ': ' ++ ix
 
       case ix of {
 
         {(start:stop:step)} -> {
-          runtime.info <| 'Indexing interleaved 1d range: ' ++ ix
+          console.info <| 'Indexing interleaved 1d range: ' ++ ix
           break # no way to be success on a dict
         }
 
         {(start:stop)} -> {
-          runtime.info <| 'Indexing contiguous 1d range: ' ++ ix
+          console.info <| 'Indexing contiguous 1d range: ' ++ ix
           break # no way to be success on a dict
         }
 
         {(dim'1, dim'2)} -> {
 
-          runtime.info <| 'Indexing 2d space with: ' ++ ix
+          console.info <| 'Indexing 2d space with: ' ++ ix
 
           case dim'1 of {
             {(start:stop:step)} -> {
-              runtime.info <| 'Indexing interleaved 1st dimension range: ' ++ dim'1
+              console.info <| 'Indexing interleaved 1st dimension range: ' ++ dim'1
               break # no way to be success on a dict
             }
 
             {(start:stop)} -> {
-              runtime.info <| 'Indexing contiguous 1st dimension range: ' ++ dim'1
+              console.info <| 'Indexing contiguous 1st dimension range: ' ++ dim'1
               break # no way to be success on a dict
             }
           }
@@ -46,13 +46,13 @@
 
       case type(ix) of {
         DecimalType -> {
-          runtime.info <| 'Indexing 1d element: ' ++ ix
+          console.info <| 'Indexing 1d element: ' ++ ix
         }
         StringType -> {
-          runtime.info <| 'Indexing column by name: ' ++ ix
+          console.info <| 'Indexing column by name: ' ++ ix
         }
         _ -> {
-          runtime.info <| 'Suspicious index ' ++ type(ix) ++ ': ' ++ ix
+          console.info <| 'Suspicious index ' ++ type(ix) ++ ': ' ++ ix
           break # avoid actually doing indexing with this ix
         }
       }

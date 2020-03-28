@@ -4,10 +4,10 @@
   evs = sink
 
   n = 0
-  go for ev from evs do runtime.info
+  go for ev from evs do console.info
      <| '  📆 event#' ++ (n+=1) ++ ' 🎉  ' ++ ev
 
-  go for nanos from runtime.everySeconds(1) do {
+  go for nanos from console.everySeconds(1) do {
     evs <- 'time now (in nanos) is ' ++ nanos
     if n > 5 then { break }
   }

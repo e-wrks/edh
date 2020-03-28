@@ -8,9 +8,9 @@
   a = 5; b = 3
   sum = lazy(a + b)
 
-  runtime.info <| " once upon a time it's " ++ sum()
+  console.info <| " once upon a time it's " ++ sum()
 
   a = 7
-  runtime.info <| " then later it's " ++ sum()
+  console.info <| " then later it's " ++ sum()
 
 }

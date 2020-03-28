@@ -18,10 +18,13 @@ import           Control.Concurrent.STM
 import           Data.Unique
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
-import           Data.Text.IO
+import qualified Data.Text.IO                  as TIO
 import qualified Data.HashMap.Strict           as Map
 
 import           System.Console.Haskeline       ( InputT
+                                                , Settings(..)
+                                                , runInputT
+                                                , outputStr
                                                 , outputStrLn
                                                 , getInputLine
                                                 , handleInterrupt
@@ -37,90 +40,34 @@ import           Language.Edh.Batteries.Math
 import           Language.Edh.Batteries.Assign
 import           Language.Edh.Batteries.Reflect
 import           Language.Edh.Batteries.Ctrl
-import           Language.Edh.Batteries.Runtime
+import           Language.Edh.Batteries.Console
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
 
 
--- | The default Edh command prompts
+defaultEdhConsoleSettings :: Settings IO
+defaultEdhConsoleSettings = Settings
+  { complete       = \(_left, _right) -> return ("", [])
+  , historyFile    = Nothing
+  , autoAddHistory = True
+  }
+
+-- | This console serializes all out messages to 'stdout', all log messages
+-- to 'stderr', through a 'TQueue', so they don't mess up under concurrency.
 --
--- ps1 is for single line, ps2 for multi-line
--- 
--- note the defaults here are technically in no effect, just advice
--- see implementation of:
---   runtime.readCommands(ps1="Đ: ", ps2="Đ| ")
-defaultEdhPS1, defaultEdhPS2 :: Text
-defaultEdhPS1 = "Đ: "
-defaultEdhPS2 = "Đ| "
-
--- | Serialize output to `stdout` from Edh programs, and give them command
--- line input when requested
-defaultEdhIOLoop :: EdhRuntime -> InputT IO ()
-defaultEdhIOLoop !runtime = liftIO (atomically $ readTQueue ioQ) >>= \case
-  ConsoleShutdown    -> return () -- gracefully stop the io loop
-  ConsoleOut !txtOut -> do
-    outputStrLn $ T.unpack txtOut
-    defaultEdhIOLoop runtime
-  ConsoleIn !cmdIn !ps1 !ps2 -> do
-    liftIO flushLogs
-    readInput ps1 ps2 [] >>= \case
-      Nothing -> -- reached EOF (end-of-feed) before clean shutdown
-        outputStrLn "Your work may have lost, sorry."
-      Just !cmd -> do -- got one piece of code
-        liftIO $ atomically $ putTMVar cmdIn cmd
-        defaultEdhIOLoop runtime
- where
-  !ioQ      = consoleIO runtime
-  flushLogs = flushRuntimeLogs runtime
-
-  -- | The repl line reader
-  readInput :: Text -> Text -> [Text] -> InputT IO (Maybe Text)
-  readInput !ps1 !ps2 !initialLines =
-    handleInterrupt ( -- start over on Ctrl^C
-                     outputStrLn "" >> readLines [])
-      $ withInterrupt
-      $ readLines initialLines
-   where
-    readLines pendingLines = getInputLine prompt >>= \case
-      Nothing -> case pendingLines of
-        [] -> return Nothing
-        _ -> -- TODO warn about premature EOF ?
-          return Nothing
-      Just text ->
-        let code = T.pack text
-        in  case pendingLines of
-              [] -> case T.stripEnd code of
-                "{" -> -- an unindented `{` marks start of multi-line input
-                  readLines [""]
-                _ -> case T.strip code of
-                  "" -> -- got an empty line in single-line input mode
-                    readLines [] -- start over in single-line input mode
-                  _ -> -- got a single line input
-                    return $ Just code
-              _ -> case T.stripEnd code of
-                "}" -> -- an unindented `}` marks end of multi-line input
-                  return $ Just $ (T.unlines . reverse) $ init pendingLines
-                _ -> -- got a line in multi-line input mode
-                  readLines $ code : pendingLines
-     where
-      prompt :: String
-      prompt = case pendingLines of
-        [] -> T.unpack ps1
-        _  -> T.unpack ps2 <> printf "%2d" (length pendingLines) <> ": "
-
-
--- | This runtime serializes all log messages to 'stderr' through a 'TQueue',
--- this is crucial under heavy concurrency.
+-- Console input will wait the out queue being idle before prompting, this
+-- is not perfect but better than otherwise more naive implementations.
 --
--- known issues:
---  *) can mess up with others writing to 'stderr'
+-- Known issues:
+--  *) still can mess up with others writing directly to 'stdout/stderr'
 --  *) if all others use 'trace' only, there're minimum messups but emojis 
 --     seem to be break points
-defaultEdhRuntime :: IO EdhRuntime
-defaultEdhRuntime = do
-  ioQ         <- newTQueueIO
+defaultEdhConsole :: Settings IO -> IO EdhConsole
+defaultEdhConsole !inputSettings = do
   envLogLevel <- lookupEnv "EDH_LOG_LEVEL"
   logIdle     <- newEmptyTMVarIO
+  outIdle     <- newEmptyTMVarIO
+  ioQ         <- newTQueueIO
   logQueue    <- newTQueueIO
   let logLevel = case envLogLevel of
         Nothing      -> 20
@@ -145,16 +92,17 @@ defaultEdhRuntime = do
             lr <- atomically $ readTQueue logQueue
             void $ atomically $ tryTakeTMVar logIdle
             return lr
-        hPutStrLn stderr lr
+        TIO.hPutStr stderr lr
         logPrinter
       logger :: EdhLogger
       logger !level !srcLoc !pkargs = do
         void $ tryTakeTMVar logIdle
         case pkargs of
           ArgsPack [!argVal] !kwargs | Map.null kwargs ->
-            writeTQueue logQueue $! T.pack logPrefix <> logString argVal
-          -- todo: format structured log record with log parser in mind
-          _ -> writeTQueue logQueue $! T.pack $ logPrefix ++ show pkargs
+            writeTQueue logQueue $! T.pack logPrefix <> logString argVal <> "\n"
+          _ -> -- todo: format structured log record,
+               -- with some log parsers in mind
+            writeTQueue logQueue $! T.pack (logPrefix ++ show pkargs) <> "\n"
        where
         logString :: EdhValue -> Text
         logString (EdhString s) = s
@@ -172,18 +120,81 @@ defaultEdhRuntime = do
                 _ | level >= 20 -> "ℹ️ "
                 _ | level >= 10 -> "🐞 "
                 _               -> "😥 "
+      ioLoop :: InputT IO ()
+      ioLoop = do
+        ior <- liftIO $ atomically (tryReadTQueue ioQ) >>= \case
+          Just !ior -> do
+            void $ atomically $ tryTakeTMVar outIdle
+            return ior
+          Nothing -> do
+            void $ atomically $ tryPutTMVar outIdle ()
+            ior <- atomically $ readTQueue ioQ
+            void $ atomically $ tryTakeTMVar outIdle
+            return ior
+        case ior of
+          ConsoleShutdown -> return () -- gracefully stop the io loop
+          ConsoleOut !txt -> do
+            outputStr $ T.unpack txt
+            ioLoop
+          ConsoleIn !cmdIn !ps1 !ps2 -> readInput ps1 ps2 [] >>= \case
+            Nothing -> -- reached EOF (end-of-feed) before clean shutdown
+              liftIO $ TIO.hPutStrLn stderr "Your work may have lost, sorry."
+            Just !cmd -> do -- got one piece of code
+              liftIO $ atomically $ putTMVar cmdIn cmd
+              ioLoop
+       where
+          -- | The repl line reader
+        readInput :: Text -> Text -> [Text] -> InputT IO (Maybe Text)
+        readInput !ps1 !ps2 !initialLines =
+          handleInterrupt ( -- start over on Ctrl^C
+                           outputStrLn "" >> readLines [])
+            $ withInterrupt
+            $ readLines initialLines
+         where
+          readLines pendingLines =
+            liftIO flushLogs >> getInputLine prompt >>= \case
+              Nothing -> case pendingLines of
+                [] -> return Nothing
+                _ -> -- TODO warn about premature EOF ?
+                  return Nothing
+              Just text ->
+                let code = T.pack text
+                in  case pendingLines of
+                      [] -> case T.stripEnd code of
+                        "{" -> -- an unindented `{` marks start of multi-line input
+                          readLines [""]
+                        _ -> case T.strip code of
+                          "" -> -- got an empty line in single-line input mode
+                            readLines [] -- start over in single-line input mode
+                          _ -> -- got a single line input
+                            return $ Just code
+                      _ -> case T.stripEnd code of
+                        "}" -> -- an unindented `}` marks end of multi-line input
+                               return $ Just $ (T.unlines . reverse) $ init
+                          pendingLines
+                        _ -> -- got a line in multi-line input mode
+                          readLines $ code : pendingLines
+           where
+            prompt :: String
+            prompt = case pendingLines of
+              [] -> T.unpack ps1
+              _  -> T.unpack ps2 <> printf "%2d" (length pendingLines) <> ": "
   void $ mask_ $ forkIOWithUnmask $ \unmask ->
-    finally (unmask logPrinter) $ atomically $ tryPutTMVar logIdle ()
-  return EdhRuntime { consoleIO        = ioQ
-                    , runtimeLogLevel  = logLevel
-                    , runtimeLogger    = logger
-                    , flushRuntimeLogs = flushLogs
-                    }
+    finally (unmask logPrinter) $ atomically $ do
+      void $ tryPutTMVar logIdle ()
+      void $ tryPutTMVar outIdle ()
+  return EdhConsole
+    { consoleIO       = ioQ
+    , consoleIOLoop   = flip finally flushLogs $ runInputT inputSettings ioLoop
+    , consoleLogLevel = logLevel
+    , consoleLogger   = logger
+    , consoleFlush = atomically $ void (readTMVar outIdle >> readTMVar logIdle)
+    }
 
 
 installEdhBatteries :: MonadIO m => EdhWorld -> m ()
 installEdhBatteries world = liftIO $ do
-  rtClassUniq <- newUnique
+  conClassUniq <- newUnique
   void $ runEdhProgram' (worldContext world) $ do
     pgs <- ask
     contEdhSTM $ do
@@ -381,71 +392,75 @@ installEdhBatteries world = liftIO $ do
           ]
         ]
 
-      !rtEntity <- createHashEntity Map.empty
-      !rtSupers <- newTVar []
-      let !runtime = Object
-            { objEntity = rtEntity
+      !conEntity <- createHashEntity $ Map.fromList
+        [ (AttrByName "__repr__", EdhString "<console>")
+        , (AttrByName "debug"   , EdhDecimal 10)
+        , (AttrByName "info"    , EdhDecimal 20)
+        , (AttrByName "warn"    , EdhDecimal 30)
+        , (AttrByName "error"   , EdhDecimal 40)
+        , (AttrByName "fatal"   , EdhDecimal 50)
+        ]
+      !conSupers <- newTVar []
+      let !console = Object
+            { objEntity = conEntity
             , objClass  = ProcDefi
-                            { procedure'uniq = rtClassUniq
+                            { procedure'uniq = conClassUniq
                             , procedure'lexi = Just rootScope
                             , procedure'decl = ProcDecl
-                                                 { procedure'name = "<runtime>"
+                                                 { procedure'name = "<console>"
                                                  , procedure'args = PackReceiver
                                                                       []
                                                  , procedure'body = Right edhNop
                                                  }
                             }
-            , objSupers = rtSupers
+            , objSupers = conSupers
             }
-          !rtScope = objectScope (edh'context pgs) runtime
+          !conScope = objectScope (edh'context pgs) console
 
-      !rtMethods <- sequence
-        [ (AttrByName nm, ) <$> mkHostProc rtScope vc nm hp args
+      !conArts <- sequence
+        [ (AttrByName nm, ) <$> mkHostProc conScope vc nm hp args
         | (vc, nm, hp, args) <-
-          [ (EdhMethod, "exit", rtExitProc, PackReceiver [])
-          , ( EdhGnrtor
-            , "readCommands"
-            , rtReadCommandsProc
+          [ (EdhMethod, "exit", conExitProc, PackReceiver [])
+          , ( EdhMethod
+            , "readCommand"
+            , conReadCommandProc
             , PackReceiver
-              [ RecvArg "ps1" Nothing (Just (LitExpr (StringLiteral "Đ: ")))
-              , RecvArg "ps2" Nothing (Just (LitExpr (StringLiteral "Đ| ")))
+              [ RecvArg "ps1"
+                        Nothing
+                        (Just (LitExpr (StringLiteral defaultEdhPS1)))
+              , RecvArg "ps2"
+                        Nothing
+                        (Just (LitExpr (StringLiteral defaultEdhPS2)))
               ]
             )
-          , (EdhMethod, "print", rtPrintProc, WildReceiver)
+          , (EdhMethod, "print", conPrintProc, WildReceiver)
           , ( EdhGnrtor
             , "everyMicros"
-            , rtEveryMicrosProc
+            , conEveryMicrosProc
             , PackReceiver [RecvArg "interval" Nothing Nothing]
             )
           , ( EdhGnrtor
             , "everyMillis"
-            , rtEveryMillisProc
+            , conEveryMillisProc
             , PackReceiver [RecvArg "interval" Nothing Nothing]
             )
           , ( EdhGnrtor
             , "everySeconds"
-            , rtEverySecondsProc
+            , conEverySecondsProc
             , PackReceiver [RecvArg "interval" Nothing Nothing]
             )
           ]
         ]
-      updateEntityAttrs pgs rtEntity
-        $  [ (AttrByName "debug", EdhDecimal 10)
-           , (AttrByName "info" , EdhDecimal 20)
-           , (AttrByName "warn" , EdhDecimal 30)
-           , (AttrByName "error", EdhDecimal 40)
-           , (AttrByName "fatal", EdhDecimal 50)
-           ]
-        ++ rtMethods
+      updateEntityAttrs pgs conEntity conArts
 
       updateEntityAttrs pgs rootEntity
         $  rootOperators
         ++ rootProcs
         ++ [
 
-            -- runtime module
-             ( AttrByName "runtime"
-             , EdhObject runtime
+            -- console module
+             ( AttrByName "console"
+             , EdhObject console
              )
 
             -- math constants

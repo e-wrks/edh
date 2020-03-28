@@ -29,16 +29,16 @@ module Language.Edh.EHI
 
     -- * STM/IO API for spliced interpreter
 
-    -- ** Logging interface
+    -- ** Console interface w/ a default implementation
+  , EdhConsole(..)
+  , EdhConsoleIO(..)
   , EdhLogger
   , LogLevel
-  , defaultEdhRuntime
-  , defaultEdhIOLoop
+  , defaultEdhConsole
+  , defaultEdhConsoleSettings
 
-    -- ** Booting up
+    -- ** World bootstraping
   , EdhWorld(..)
-  , EdhRuntime(..)
-  , EdhConsoleIO(..)
   , createEdhWorld
   , installEdhBatteries
   , declareEdhOperators

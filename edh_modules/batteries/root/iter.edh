@@ -16,7 +16,7 @@
       if None == step
         then step = 1
         else if step <= 0 then {
-          runtime.warn <| 'step of ' ++ step ++ ' for range [' ++
+          console.warn <| 'step of ' ++ step ++ ' for range [' ++
                           start ++ ', ' ++ stop ++ ") won't converge"
           return nil
         }
@@ -30,7 +30,7 @@
       if None == step
         then step = -1
         else if step >= 0 then {
-          runtime.warn <| 'step of ' ++ step ++ ' for range [' ++
+          console.warn <| 'step of ' ++ step ++ ' for range [' ++
                           start ++ ', ' ++ stop ++ ") won't converge"
           return nil
         }
@@ -59,7 +59,7 @@
       }
 
       if not null(gargs) then
-        runtime.warn <| '`enumerate` can hanle one series only'
+        console.warn <| '`enumerate` can hanle one series only'
 
       _ -> for i from g do {
         yield pkargs(n, i)

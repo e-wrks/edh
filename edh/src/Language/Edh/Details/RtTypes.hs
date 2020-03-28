@@ -403,8 +403,8 @@ data EdhWorld = EdhWorld {
     -- appears as an EdhNamedValue) if failed loading, or a permanent
     -- entry containing the module object if successfully loaded
     , worldModules :: !(TMVar (Map.HashMap ModuleId (TMVar EdhValue)))
-    -- | interface to the embedding host runtime
-    , worldRuntime :: !EdhRuntime
+    -- | for console logging, input and output
+    , worldConsole :: !EdhConsole
   }
 instance Eq EdhWorld where
   EdhWorld x'root _ _ _ _ == EdhWorld y'root _ _ _ _ = x'root == y'root
@@ -428,13 +428,14 @@ worldContext !world = Context
 {-# INLINE worldContext #-}
 
 
--- | Checkout 'defaultEdhRuntime' and 'defaultEdhIOLoop' from the
+-- | Checkout 'defaultEdhConsole' and 'defaultEdhIOLoop' from the
 -- default batteries for implementation details, or just use that.
-data EdhRuntime = EdhRuntime {
+data EdhConsole = EdhConsole {
     consoleIO :: !(TQueue EdhConsoleIO)
-  , runtimeLogLevel :: !LogLevel
-  , runtimeLogger :: !EdhLogger
-  , flushRuntimeLogs :: IO ()
+  , consoleIOLoop :: IO ()
+  , consoleLogLevel :: !LogLevel
+  , consoleLogger :: !EdhLogger
+  , consoleFlush :: IO ()
   }
 data EdhConsoleIO = ConsoleShutdown
     | ConsoleOut !Text -- ^ output a line

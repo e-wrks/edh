@@ -5,34 +5,34 @@
   go {
 
     defer {
-      runtime.info <| "I'm really done."
+      console.info <| "I'm really done."
     }
 
     reactor stopSig ev {
-      runtime.info <| '  🎬  stopping because: ' ++ ev
+      console.info <| '  🎬  stopping because: ' ++ ev
       break  # break from a reactor terminates the thread
     }
 
     for ev from evs do {
-      runtime.info <| '  🎐  sth happening: ' ++ ev
+      console.info <| '  🎐  sth happening: ' ++ ev
     }
 
   }
 
   # wait a second
-  for _ from runtime.everySeconds(1) do { break }
+  for _ from console.everySeconds(1) do { break }
 
   evs <- '  🛎️  ding.ding..'
 
   # wait a second
-  for _ from runtime.everySeconds(1) do { break }
+  for _ from console.everySeconds(1) do { break }
 
   # stopSig <- "don't do that!"
 
   evs <- '  🍃  chill..chill...'
 
   # wait a second
-  for _ from runtime.everySeconds(1) do { break }
+  for _ from console.everySeconds(1) do { break }
 
   stopSig <- "that's enough!"
 

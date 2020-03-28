@@ -10,5 +10,5 @@
   # arguments receiver syntax in for expression,
   # you'd feel it like defining a callback
   for (x, y, desc="the result") from g(5) do
-    runtime.info <| (x ++ ": " ++ desc ++ " is " ++ y)
+    console.info <| (x ++ ": " ++ desc ++ " is " ++ y)
 }

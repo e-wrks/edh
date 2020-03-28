@@ -2,8 +2,8 @@
 {
 
   n = 0
-  go for nanos from runtime.everySeconds(1) do {
-    runtime.info <| '  ⏰ tick#' ++ (n+=1) ++ ' ⏲️  ' ++ nanos ++ 'ns'
+  go for nanos from console.everySeconds(1) do {
+    console.info <| '  ⏰ tick#' ++ (n+=1) ++ ' ⏲️  ' ++ nanos ++ 'ns'
     if n > 5 then { break }
   }
 

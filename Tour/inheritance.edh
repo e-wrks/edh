@@ -5,7 +5,7 @@
       method __init__ (name as this.name) pass
 
       method greeting(guest) {
-          runtime.info <| ("Hello "++guest++", I am "++name++', your guide.')
+          console.info <| ("Hello "++guest++", I am "++name++', your guide.')
       }
   }
 
@@ -17,7 +17,7 @@
       extends B('Farmer')
 
       method hello() {
-          runtime.info <| (`Hello there!`)
+          console.info <| (`Hello there!`)
       }
   }
 
