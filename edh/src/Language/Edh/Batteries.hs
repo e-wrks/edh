@@ -41,6 +41,7 @@ import           Language.Edh.Batteries.Assign
 import           Language.Edh.Batteries.Reflect
 import           Language.Edh.Batteries.Ctrl
 import           Language.Edh.Batteries.Console
+import           Language.Edh.Batteries.Evt
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
 
@@ -389,6 +390,11 @@ installEdhBatteries world = liftIO $ do
               ]
             )
           , (EdhMethod, "makeExpr", makeExprProc, WildReceiver)
+          , ( EdhMethod
+            , "mre"
+            , mreProc
+            , PackReceiver [RecvArg "evs" Nothing Nothing]
+            )
           ]
         ]
 

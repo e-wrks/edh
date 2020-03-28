@@ -52,6 +52,7 @@ library edh-internal
         Language.Edh.Batteries.Reflect
         Language.Edh.Batteries.Ctrl
         Language.Edh.Batteries.Console
+        Language.Edh.Batteries.Evt
         Language.Edh.Runtime
         Language.Edh.Event
         Language.Edh.Parser
