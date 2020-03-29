@@ -214,7 +214,7 @@ typeProc (ArgsPack !args !kwargs) !exit =
  where
   edhTypeValOf :: EdhValue -> EdhValue
   edhTypeValOf EdhNil              = EdhNil
-  edhTypeValOf (EdhNamedValue _ v) = edhTypeValOf v
+  edhTypeValOf (EdhNamedValue n v) = EdhNamedValue n $ edhTypeValOf v
   edhTypeValOf v                   = EdhType $ edhTypeOf v
 
 
