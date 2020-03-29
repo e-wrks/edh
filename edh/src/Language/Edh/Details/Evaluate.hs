@@ -247,12 +247,12 @@ evalStmt' !stmt !exit = do
         _ -> contEdhSTM $ schedDefered pgs $ evalExpr expr edhEndOfProc
 
 
-    ReactorStmt sinkAddr reactExpr ->
+    PerceiveStmt sinkAddr reactExpr ->
       evalExpr (AttrExpr sinkAddr) $ \(OriginalValue !val _ _) ->
         case edhUltimate val of
           (EdhSink sink) -> contEdhSTM $ do
-            (reactorChan, _) <- subscribeEvents sink
-            modifyTVar' (edh'reactors pgs) ((reactorChan, pgs, reactExpr) :)
+            (perceiverChan, _) <- subscribeEvents sink
+            modifyTVar' (edh'perceivers pgs) ((perceiverChan, pgs, reactExpr) :)
             exitEdhSTM pgs exit nil
           _ ->
             throwEdh EvalError

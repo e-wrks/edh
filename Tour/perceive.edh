@@ -8,7 +8,7 @@
       console.info <| "I'm really done."
     }
 
-    reactor stopSig {
+    perceive stopSig {
       nil -> {
         console.warn <| '  🎬  stopping because end-of-stream'
         fallthrough
@@ -17,7 +17,7 @@
         console.info <| '  🎬  stopping because: ' ++ ev
         fallthrough
       }
-      break  # break from a reactor terminates the thread
+      break  # break from a perceiver terminates the thread
     }
 
     for ev from evs do {

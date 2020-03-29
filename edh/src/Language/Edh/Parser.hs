@@ -259,9 +259,9 @@ parseMethodStmt = MethodStmt <$> (keyword "method" >> parseProcDecl)
 parseGeneratorStmt :: Parser Stmt
 parseGeneratorStmt = GeneratorStmt <$> (keyword "generator" >> parseProcDecl)
 
-parseReactorStmt :: Parser Stmt
-parseReactorStmt =
-  keyword "reactor" >> liftA2 ReactorStmt parseAttrAddr parseExpr
+parsePerceiveStmt :: Parser Stmt
+parsePerceiveStmt =
+  keyword "perceive" >> liftA2 PerceiveStmt parseAttrAddr parseExpr
 
 parseInterpreterStmt :: Parser Stmt
 parseInterpreterStmt =
@@ -356,7 +356,7 @@ parseStmt = optionalSemicolon *> do
           , parseExtendsStmt
           , parseMethodStmt
           , parseGeneratorStmt
-          , parseReactorStmt
+          , parsePerceiveStmt
           , parseInterpreterStmt
           , parseProducerStmt
           , parseWhileStmt
@@ -598,7 +598,7 @@ illegalExprStart =
           , keyword "extends"
           , keyword "method"
           , keyword "generator"
-          , keyword "reactor"
+          , keyword "perceive"
           , keyword "interpreter"
           , keyword "producer"
           , keyword "while"

@@ -62,11 +62,11 @@ driveEdhProgram !haltResult !progCtx !prog = do
                   Right !edhTask -> do
                     -- prepare state for the descendant thread
                     !(descQueue :: TQueue EdhTxTask) <- newTQueueIO
-                    !reactors                        <- newTVarIO []
+                    !perceivers                      <- newTVarIO []
                     !defers                          <- newTVarIO []
                     let !pgsDescendant = (edh'task'pgs edhTask)
                           { edh'task'queue = descQueue
-                          , edh'reactors   = reactors
+                          , edh'perceivers = perceivers
                           , edh'defers     = defers
                         -- the forker should have checked not in tx, enforce here
                           , edh'in'tx      = False
@@ -110,11 +110,11 @@ driveEdhProgram !haltResult !progCtx !prog = do
     $ do
         -- prepare program state for main Edh thread
         !(mainQueue :: TQueue EdhTxTask) <- newTQueueIO
-        !reactors                        <- newTVarIO []
+        !perceivers                      <- newTVarIO []
         !defers                          <- newTVarIO []
         let !pgsAtBoot = EdhProgState { edh'fork'queue = forkQueue
                                       , edh'task'queue = mainQueue
-                                      , edh'reactors   = reactors
+                                      , edh'perceivers = perceivers
                                       , edh'defers     = defers
                                       , edh'in'tx      = False
                                       , edh'context    = progCtx
@@ -134,14 +134,14 @@ driveEdhProgram !haltResult !progCtx !prog = do
   driveDefers :: [DeferRecord] -> IO ()
   driveDefers [] = return ()
   driveDefers ((!pgsDefer, !deferedProg) : restDefers) = do
-    !deferReactors                        <- newTVarIO []
+    !deferPerceivers                      <- newTVarIO []
     !deferDefers                          <- newTVarIO []
     !(deferTaskQueue :: TQueue EdhTxTask) <- newTQueueIO
     atomically $ writeTQueue
       deferTaskQueue
       (EdhTxTask
         pgsDefer { edh'task'queue = deferTaskQueue
-                 , edh'reactors   = deferReactors
+                 , edh'perceivers = deferPerceivers
                  , edh'defers     = deferDefers
                  , edh'in'tx      = False
                  }
@@ -152,39 +152,39 @@ driveEdhProgram !haltResult !progCtx !prog = do
     driveEdhThread deferDefers deferTaskQueue
     driveDefers restDefers
 
-  driveReactor :: EdhValue -> ReactorRecord -> IO Bool
-  driveReactor !ev (_, pgsOrigin, reactExpr) = do
+  drivePerceiver :: EdhValue -> PerceiveRecord -> IO Bool
+  drivePerceiver !ev (_, pgsOrigin, reactExpr) = do
     !breakThread <- newEmptyTMVarIO
     let
-      !reactorProg =
+      !perceiverProg =
         local
             (\pgs ->
               pgs { edh'context = (edh'context pgs) { contextMatch = ev } }
             )
           $ evalMatchingExpr reactExpr
-          $ \(OriginalValue !reactorRtn _ _) -> do
-              let doBreak = case reactorRtn of
+          $ \(OriginalValue !perceiverRtn _ _) -> do
+              let doBreak = case perceiverRtn of
                     EdhBreak -> True -- terminate this thread
                     _        -> False
               contEdhSTM $ putTMVar breakThread doBreak
-    !reactReactors                        <- newTVarIO []
+    !reactPerceivers                      <- newTVarIO []
     !reactDefers                          <- newTVarIO []
     !(reactTaskQueue :: TQueue EdhTxTask) <- newTQueueIO
-    let !pgsReactor = pgsOrigin { edh'task'queue = reactTaskQueue
-                                , edh'reactors   = reactReactors
-                                , edh'defers     = reactDefers
-                                , edh'in'tx      = False
-                                }
+    let !pgsPerceiver = pgsOrigin { edh'task'queue = reactTaskQueue
+                                  , edh'perceivers = reactPerceivers
+                                  , edh'defers     = reactDefers
+                                  , edh'in'tx      = False
+                                  }
     atomically $ writeTQueue
       reactTaskQueue
-      (EdhTxTask pgsReactor False (wuji pgsReactor) (const reactorProg))
+      (EdhTxTask pgsPerceiver False (wuji pgsPerceiver) (const perceiverProg))
     driveEdhThread reactDefers reactTaskQueue
     atomically $ readTMVar breakThread
-  driveReactors :: [(EdhValue, ReactorRecord)] -> IO Bool
-  driveReactors []               = return False
-  driveReactors ((ev, r) : rest) = driveReactor ev r >>= \case
+  drivePerceivers :: [(EdhValue, PerceiveRecord)] -> IO Bool
+  drivePerceivers []               = return False
+  drivePerceivers ((ev, r) : rest) = drivePerceiver ev r >>= \case
     True  -> return True
-    False -> driveReactors rest
+    False -> drivePerceivers rest
 
   driveEdhThread :: TVar [DeferRecord] -> TQueue EdhTxTask -> IO ()
   driveEdhThread !defers !tq = atomically (nextTaskFromQueue tq) >>= \case
@@ -209,14 +209,14 @@ driveEdhProgram !haltResult !progCtx !prog = do
     waitSTM :: IO Bool
     waitSTM = atomically stmJob >>= \case
       Nothing -> return True -- to terminate as program halted
-      Just [] -> -- no reactor fires, the tx job has been executed
+      Just [] -> -- no perceiver fires, the tx job has been executed
         return False
-      Just gotevl -> driveReactors gotevl >>= \case
-        True -> -- a reactor is terminating this thread
+      Just gotevl -> drivePerceivers gotevl >>= \case
+        True -> -- a perceiver is terminating this thread
           return True
         False ->
-          -- there've been one or more reactors fired, the tx job have
-          -- been skipped, as no reactor is terminating the thread,
+          -- there've been one or more perceivers fired, the tx job have
+          -- been skipped, as no perceiver is terminating the thread,
           -- continue with this tx job
           waitSTM
 
@@ -242,33 +242,33 @@ driveEdhProgram !haltResult !progCtx !prog = do
         Nothing -> -- stm failed, do a tracked retry
           doSTM (rtc + 1)
         Just (Just []) ->
-          -- no reactor has fired, the tx job has already been executed
+          -- no perceiver has fired, the tx job has already been executed
           return False
-        Just (Just !gotevl) -> driveReactors gotevl >>= \case
-          True -> -- a reactor is terminating this thread
+        Just (Just !gotevl) -> drivePerceivers gotevl >>= \case
+          True -> -- a perceiver is terminating this thread
             return True
           False ->
-            -- there've been one or more reactors fired, the tx job have
-            -- been skipped, as no reactor is terminating the thread,
+            -- there've been one or more perceivers fired, the tx job have
+            -- been skipped, as no perceiver is terminating the thread,
             -- continue with this tx job
             doSTM rtc
 
-    stmJob :: STM (Maybe [(EdhValue, ReactorRecord)])
+    stmJob :: STM (Maybe [(EdhValue, PerceiveRecord)])
     stmJob = tryReadTMVar haltResult >>= \case
       Just _ -> return Nothing -- program halted
       Nothing -> -- program still running
-        (readTVar (edh'reactors pgsTask) >>= reactorChk []) >>= \gotevl ->
+        (readTVar (edh'perceivers pgsTask) >>= perceiverChk []) >>= \gotevl ->
           if null gotevl
-            then -- no reactor fires, execute the tx job
+            then -- no perceiver fires, execute the tx job
                  join (runReaderT (task input) pgsTask) >> return (Just [])
-            else -- skip the tx job if at least one reactor fires
+            else -- skip the tx job if at least one perceiver fires
                  return (Just gotevl)
 
-    reactorChk
-      :: [(EdhValue, ReactorRecord)]
-      -> [ReactorRecord]
-      -> STM [(EdhValue, ReactorRecord)]
-    reactorChk !gotevl []                     = return gotevl
-    reactorChk !gotevl (r@(evc, _, _) : rest) = tryReadTChan evc >>= \case
-      Just !ev -> reactorChk ((ev, r) : gotevl) rest
-      Nothing  -> reactorChk gotevl rest
+    perceiverChk
+      :: [(EdhValue, PerceiveRecord)]
+      -> [PerceiveRecord]
+      -> STM [(EdhValue, PerceiveRecord)]
+    perceiverChk !gotevl []                     = return gotevl
+    perceiverChk !gotevl (r@(evc, _, _) : rest) = tryReadTChan evc >>= \case
+      Just !ev -> perceiverChk ((ev, r) : gotevl) rest
+      Nothing  -> perceiverChk gotevl rest

@@ -52,7 +52,7 @@ method concur(*tasks, c=6, dbgLogger=0) {
         # use `defer` to always run upon thread termination,
         # this is necessary as code after `task2do()` may not
         # get actually executed in case this thread is broken by
-        # an event reactor registered during `task2do()`
+        # an event perceiver registered during `task2do()`
         defer {
           this.cntRunning -= 1 # this is atomic in Edh
 

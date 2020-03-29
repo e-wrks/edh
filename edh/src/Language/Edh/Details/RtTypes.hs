@@ -462,13 +462,13 @@ type EdhProc = EdhMonad (STM ())
 data EdhProgState = EdhProgState {
     edh'fork'queue :: !(TQueue (Either (IO ()) EdhTxTask))
     , edh'task'queue :: !(TQueue EdhTxTask)
-    , edh'reactors :: !(TVar [ReactorRecord])
+    , edh'perceivers :: !(TVar [PerceiveRecord])
     , edh'defers :: !(TVar [DeferRecord])
     , edh'in'tx :: !Bool
     , edh'context :: !Context
   }
 
-type ReactorRecord = (TChan EdhValue, EdhProgState, Expr)
+type PerceiveRecord = (TChan EdhValue, EdhProgState, Expr)
 type DeferRecord = (EdhProgState, EdhProc)
 
 -- | Run an Edh proc from within STM monad
@@ -958,21 +958,22 @@ data Stmt =
     | MethodStmt !ProcDecl
       -- | generator procedure definition
     | GeneratorStmt !ProcDecl
-      -- | reactor declaration, a reactor procedure is not bound to a name,
-      -- it's bound to an event `sink` with the calling thread as context,
-      -- when an event fires from that event `sink`, the bound reactor will
-      -- get run from the thread where it's declared, after the currernt
-      -- transaction finishes, a reactor procedure can `break` to terminate
-      -- the thread, or the thread will continue to process next reactor, or
-      -- next transactional task normally.
+      -- | perceiption declaration, a perceiver is bound to an event `sink`
+      -- with the calling thread as context, when an event fires from that
+      -- event `sink`, the bound perceiver body will be executed from the
+      -- thread where it's declared, after the currernt transaction on that
+      -- thread finishes, a perceiver body can `break` to terminate that
+      -- particular thread, or the thread will continue to process next
+      -- perceiver, if no perceiver does `break`, next transactional task
+      -- is carried on as normally.
       --
-      -- the reacting expression uses a value/pattern matching branch, or a
-      -- group of branches (as a block expr) to perceive the happened event
+      -- the perceiver body uses a value/pattern matching branch, or a
+      -- group of branches (as a block expr) to handle the happened event
       -- data, including `nil` as end-of-stream indicator.
       --
-      -- the reactor mechanism is somewhat similar to traditional signal
+      -- the perceiption construct is somewhat similar to traditional signal
       -- handling mechanism in OS process management
-    | ReactorStmt !AttrAddr !Expr
+    | PerceiveStmt !AttrAddr !Expr
       -- | interpreter declaration, an interpreter procedure is not otherwise
       -- different from a method procedure, except it receives arguments
       -- in expression form rather than values, in addition to the reflective
@@ -982,7 +983,7 @@ data Stmt =
       -- | while loop
     | WhileStmt !Expr !Expr
       -- | break from a while/for loop, or terminate the Edh thread if given
-      -- from a reactor
+      -- from a perceiver
     | BreakStmt
       -- | continue a while/for loop
     | ContinueStmt

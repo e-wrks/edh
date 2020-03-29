@@ -1,5 +1,19 @@
 # Revision history for edh
 
+## 0.3.0.0
+
+- exception throwing and handling work now, but using operators instead of
+  keyword based syntax
+  - `throw` keyword /w syntax unchanged
+  - use (`$=>`) as `catch` and (`@=>`) as `finally`
+  - originally planned `try`/`catch`/`finally` keywords and syntax dropped
+- reactor procedure dropped, changed to `perceive` construct, same feature
+  but different syntax that breaks old code
+- the `runtime` module and its host artifacts from default batteries are
+  refactored to be `console` module with an implementation in default
+  batteries
+- bugfixes and improvements
+
 ## 0.2.0.0
 
 - class procedure syntax change (breaking old code)
