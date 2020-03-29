@@ -405,6 +405,9 @@ installEdhBatteries world = liftIO $ do
         , (AttrByName "warn"    , EdhDecimal 30)
         , (AttrByName "error"   , EdhDecimal 40)
         , (AttrByName "fatal"   , EdhDecimal 50)
+        , ( AttrByName "logLevel"
+          , EdhDecimal (fromIntegral $ consoleLogLevel $ worldConsole world)
+          )
         ]
       !conSupers <- newTVar []
       let !console = Object
