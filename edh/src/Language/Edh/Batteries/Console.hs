@@ -183,12 +183,12 @@ conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
       printVS [] []              = exitEdhSTM pgs exit nil
       printVS [] ((k, v) : rest) = case v of
         EdhString !s -> do
-          writeTQueue ioQ $ ConsoleOut $ k <> "=" <> s <> "\n"
+          writeTQueue ioQ $ ConsoleOut $ "  " <> k <> "=" <> s <> "\n"
           printVS [] rest
         _ -> runEdhProc pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
           case vr of
             EdhString !s -> contEdhSTM $ do
-              writeTQueue ioQ $ ConsoleOut $ k <> "=" <> s <> "\n"
+              writeTQueue ioQ $ ConsoleOut $ "  " <> k <> "=" <> s <> "\n"
               printVS [] rest
             _ -> error "bug"
       printVS (v : rest) !kvs = case v of
