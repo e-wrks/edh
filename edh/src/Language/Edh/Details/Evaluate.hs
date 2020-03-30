@@ -431,6 +431,7 @@ evalStmt' !stmt !exit = do
               --       [EdhString "overriding an unavailable operator"]
               --       Map.empty
               return Nothing
+            op@EdhIntrOp{} -> return $ Just op
             op@EdhOprtor{} -> return $ Just op
             opVal          -> do
               (consoleLogger $ worldConsole world)
