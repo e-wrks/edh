@@ -2426,15 +2426,15 @@ edhValueRepr (EdhDict (Dict _ dsv)) !exit = do
 edhValueRepr (EdhObject !o) !exit = do
   pgs <- ask
   contEdhSTM $ lookupEdhObjAttr pgs o (AttrByName "__repr__") >>= \case
-    EdhNil -> exitEdhSTM pgs exit $ EdhString $ T.pack $ show o
+    EdhNil           -> exitEdhSTM pgs exit $ EdhString $ T.pack $ show o
+    repr@EdhString{} -> exitEdhSTM pgs exit repr
     EdhMethod !reprMth ->
       runEdhProc pgs
         $ callEdhMethod o reprMth (ArgsPack [] Map.empty)
         $ \(OriginalValue reprVal _ _) -> case reprVal of
             s@EdhString{} -> exitEdhProc exit s
             _             -> edhValueRepr reprVal exit
-    repr@EdhString{} -> exitEdhSTM pgs exit repr
-    reprVal          -> runEdhProc pgs $ edhValueRepr reprVal exit
+    reprVal -> runEdhProc pgs $ edhValueRepr reprVal exit
 
 -- repr of named value
 edhValueRepr (EdhNamedValue !n v@EdhNamedValue{}) !exit =
