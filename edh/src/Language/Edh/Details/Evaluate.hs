@@ -1310,7 +1310,7 @@ throwEdhSTM :: EdhProgState -> EdhErrorTag -> Text -> STM ()
 throwEdhSTM !pgs !et !msg = _getEdhErrClass pgs (ecKey et) >>= \ec ->
   runEdhProc pgs
     $ constructEdhObject ec (ArgsPack [EdhString msg] Map.empty)
-    $ \(OriginalValue !exo _ _) -> edhThrow exo
+    $ \(OriginalValue !exo _ _) -> ask >>= contEdhSTM . edhThrowSTM exo
  where
   ecKey :: EdhErrorTag -> AttrKey
   ecKey = \case -- cross check with 'createEdhWorld' for type safety
@@ -1320,21 +1320,24 @@ throwEdhSTM !pgs !et !msg = _getEdhErrClass pgs (ecKey et) >>= \ec ->
     EvalError    -> AttrByName "EvalError"
     UsageError   -> AttrByName "UsageError"
 
+
 -- | Throw arbitrary value from an Edh proc
 --
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent `EdhProc` actions following it, be cautious.
 edhThrow :: EdhValue -> EdhProc
-edhThrow !exv = do
-  pgs <- ask
-  let propagateExc :: EdhValue -> [Scope] -> EdhProc
-      propagateExc exv' [] = local (const pgs) $ edhErrorUncaught exv'
+edhThrow !exv = ask >>= contEdhSTM . edhThrowSTM exv
+edhThrowSTM :: EdhValue -> EdhProgState -> STM ()
+edhThrowSTM !exv !pgs = do
+  let propagateExc :: EdhValue -> [Scope] -> STM ()
+      propagateExc exv' [] = edhErrorUncaught exv'
       propagateExc exv' (frame : stack) =
-        exceptionHandler frame exv' $ \exv'' -> propagateExc exv'' stack
+        runEdhProc pgs $ exceptionHandler frame exv' $ \exv'' ->
+          contEdhSTM $ propagateExc exv'' stack
   propagateExc exv $ NE.toList $ callStack $ edh'context pgs
  where
-  edhErrorUncaught :: EdhValue -> EdhProc
-  edhErrorUncaught !exv' = ask >>= \pgs -> contEdhSTM $ case exv' of
+  edhErrorUncaught :: EdhValue -> STM ()
+  edhErrorUncaught !exv' = case exv' of
     EdhObject exo -> do
       esd <- readTVar $ entity'store $ objEntity exo
       case fromDynamic esd :: Maybe EdhError of
@@ -1355,9 +1358,38 @@ edhThrow !exv = do
             pgs
         _ -> error "bug: edhValueRepr returned non-string"
 
--- | Catch possible throw of an Edh value
-edhCatch :: (EdhProcExit -> EdhProc) -> EdhProcExit -> EdhErrorPassOn -> EdhProc
-edhCatch !tryAct !exit !passOn = ask >>= \pgsOuter -> do
+
+-- | Catch possible throw from the specified try action
+edhCatch
+  :: (EdhProcExit -> EdhProc)
+  -> EdhProcExit
+  -> (  -- contextMatch of this proc will the thrown value or nil
+        EdhProcExit  -- ^ recover exit
+     -> EdhProc     -- ^ rethrow exit
+     -> EdhProc
+     )
+  -> EdhProc
+edhCatch !tryAct !exit !passOn = ask >>= \pgsOuter ->
+  contEdhSTM
+    $ edhCatchSTM pgsOuter
+                  (\pgsTry exit' -> runEdhProc pgsTry (tryAct exit'))
+                  exit
+    $ \exv recover rethrow -> do
+        let !ctxOuter = edh'context pgsOuter
+            !ctxHndl  = ctxOuter { contextMatch = exv }
+            !pgsHndl  = pgsOuter { edh'context = ctxHndl }
+        runEdhProc pgsHndl $ passOn recover $ contEdhSTM rethrow
+edhCatchSTM
+  :: EdhProgState
+  -> (EdhProgState -> EdhProcExit -> STM ())  -- ^ tryAct
+  -> EdhProcExit
+  -> (  EdhValue     -- ^ exception value or nil
+     -> EdhProcExit  -- ^ recover exit
+     -> STM ()       -- ^ rethrow exit
+     -> STM ()
+     )
+  -> STM ()
+edhCatchSTM !pgsOuter !tryAct !exit !passOn = do
   let
     !ctxOuter   = edh'context pgsOuter
     !scopeOuter = contextScope ctxOuter
@@ -1367,22 +1399,13 @@ edhCatch !tryAct !exit !passOn = ask >>= \pgsOuter -> do
     recover :: EdhProcExit
     recover = local (const pgsOuter) . exit
     hdlr :: EdhExcptHndlr
-    hdlr !exv !rethrow = do
-      let ctxHndl = ctxOuter { contextMatch = exv }
-          pgsHndl = pgsOuter { edh'context = ctxHndl }
-      local (const pgsHndl) $ passOn recover $ exceptionHandler scopeOuter
-                                                                exv
-                                                                rethrow
-  local (const pgsTry) $ tryAct $ \tryResult -> do
-    let ctxHndl = ctxOuter { contextMatch = nil }
-        pgsHndl = pgsOuter { edh'context = ctxHndl }
-    local (const pgsHndl) $ passOn recover $ recover tryResult
-
--- | the 'contextMatch' is the error value thrown, or nil if no error occurred
-type EdhErrorPassOn
-  =  EdhProcExit  -- ^ recover exit
-  -> EdhProc      -- ^ rethrow exit
-  -> EdhProc
+    hdlr !exv !rethrow =
+      contEdhSTM $ passOn exv recover $ runEdhProc pgsOuter $ exceptionHandler
+        scopeOuter
+        exv
+        rethrow
+  tryAct pgsTry $ \tryResult ->
+    contEdhSTM $ passOn nil recover $ exitEdhSTM' pgsOuter exit tryResult
 
 
 -- | Construct an Edh object from a class

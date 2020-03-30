@@ -84,6 +84,8 @@ module Language.Edh.EHI
   , edhThrow
   , edhCatch
   , throwEdh
+  , edhThrowSTM
+  , edhCatchSTM
   , throwEdhSTM
     -- ** CPS helpers
   , runEdhProc
