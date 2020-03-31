@@ -1,10 +1,13 @@
 
-# alias this module
-debug = this
+# the indicator whether this world is under debugging
+debug = if console.logLevel <= console.debug
+  then this   # alias to this module when debugging
+  else false  # not debugging
 
 # used to create unique command objects
 class Command { __repr__ = 'Command()' }
 
+# the basic implementation of the `dir` command
 method printDir( ofScope ) {
   console.print( ofScope.lexiLoc(), **ofScope.attrs() )
 }

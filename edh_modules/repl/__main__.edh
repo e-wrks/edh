@@ -3,8 +3,8 @@ while true {  # this is the *Loop* in so-called REPL
   # Read+Eval (console.readCommand) -> Print (console.print) -> Loop
 
   case console.readCommand(ps1="Đ: ", ps2="Đ| ") of {
-    debug.quit -> { break }
-    debug.dir -> printDir( scope() )
+    batteries.quit -> { break }
+    batteries.dir -> printDir( scope() )
     { cmdVal } -> {
       console.print( cmdVal )
       cmdVal = nil  # clear it

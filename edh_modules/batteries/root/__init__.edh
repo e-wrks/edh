@@ -1,4 +1,7 @@
 
+# alias this module
+batteries = this
+
 import * './ctrl'
 import * './ops'
 import * './iter'
