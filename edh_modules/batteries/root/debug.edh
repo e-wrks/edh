@@ -1,4 +1,7 @@
 
+# alias this module
+debug = this
+
 # used to create unique command objects
 class Command { __repr__ = 'Command()' }
 

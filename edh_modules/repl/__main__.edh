@@ -3,11 +3,11 @@ while true {  # this is the *Loop* in so-called REPL
   # Read+Eval (console.readCommand) -> Print (console.print) -> Loop
 
   case console.readCommand(ps1="Đ: ", ps2="Đ| ") of {
-    quit -> { break }
-    dir -> printDir( scope() )
-    { cmd } -> {
-      console.print( cmd )
-      cmd = nil  # clear it
+    debug.quit -> { break }
+    debug.dir -> printDir( scope() )
+    { cmdVal } -> {
+      console.print( cmdVal )
+      cmdVal = nil  # clear it
     }
   }
 
@@ -24,8 +24,8 @@ while true {  # this is the *Loop* in so-called REPL
     # host interpreter, let it decide what to do.
   }
 
-  { exc } -> {
-    console.print( 'Recovered from error', exception=exc )
+  { cmdExc } -> {
+    console.print( 'Recovered from error', exception=cmdExc )
   }
 
 }
