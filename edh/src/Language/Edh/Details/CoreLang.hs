@@ -64,6 +64,9 @@ lookupEdhObjAttr' pgs !addr (obj : rest) =
 -- * Edh inheritance resolution
 
 
+resolveEdhInstance :: EdhProgState -> Class -> Object -> STM (Maybe Object)
+resolveEdhInstance pgs !class_ !this = resolveEdhInstance' pgs class_ [this]
+{-# INLINE resolveEdhInstance #-}
 resolveEdhInstance' :: EdhProgState -> Class -> [Object] -> STM (Maybe Object)
 resolveEdhInstance' _ _ [] = return Nothing
 resolveEdhInstance' pgs !class_ (obj : rest)
@@ -71,6 +74,3 @@ resolveEdhInstance' pgs !class_ (obj : rest)
   | otherwise = resolveEdhInstance' pgs class_ . (rest ++) =<< readTVar
     (objSupers obj)
 {-# INLINE resolveEdhInstance' #-}
-resolveEdhInstance :: EdhProgState -> Class -> Object -> STM (Maybe Object)
-resolveEdhInstance pgs !class_ !this = resolveEdhInstance' pgs class_ [this]
-{-# INLINE resolveEdhInstance #-}

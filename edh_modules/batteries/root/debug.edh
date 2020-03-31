@@ -1,0 +1,99 @@
+
+# used to create unique command objects
+class Command { __repr__ = 'Command()' }
+
+method printDir( ofScope ) {
+  console.print( ofScope.lexiLoc(), **ofScope.attrs() )
+}
+
+# common shell commands
+quit := Command()
+dir := Command()
+
+interpreter shellHere( callerScope, prompt=None ) {
+  prompt = prompt |> repr(callerScope)
+
+  console.print(
+    ' * entering a shell at ' ++ callerScope.lexiLoc(),
+    ' * which is called from ' ++ callerScope.callerLoc() )
+  console.print(
+    ' * key in `quit` or `continue` to leave the shell and continue.' )
+
+  cmdArgs = pkargs( ps1=''++prompt++' Đ: ', ps2="Đ| ", inScopeOf=callerScope )
+  while true {
+
+    case console.readCommand(***cmdArgs) of {
+      quit -> { break }
+      { continue } -> { break }
+      dir -> printDir( callerScope )
+      { cmdVal } -> {
+        console.print( cmdVal )
+        cmdVal = nil  # clear it
+      }
+    }
+
+  } $=> {  # catch exceptions
+
+    {{ ProgramHalt: ph }} -> {
+      throw ph  # escalate a halt to the program loop of the
+      # host interpreter, let it decide what to do.
+    }
+
+    {{ IOError:exc }} -> {
+      console.fatal <| 'IO error - ' ++ exc
+      throw exc  # escalate it to the program loop of the
+      # host interpreter, let it decide what to do.
+    }
+
+    { cmdExc } -> {
+      console.print( 'Recovered from error', exception=cmdExc )
+    }
+
+  }
+
+}
+
+{#
+ # run a shell within an object's (probably a module) scope, e.g.
+```edh
+case { import (**_) 'batteries/magic' } of { m } -> shellWith(m)
+```
+ #}
+method shellWith( obj=this ) {
+
+  console.print(' * entering a shell within ' ++ obj )
+  console.print(' * key in `quit` to leave the shell.' )
+
+  # use scope obj's repr for ps1
+  cmdArgs = pkargs( ps1=repr(obj)++' Đ: ', ps2="Đ| ", inScopeOf=obj )
+  while true {
+
+    case console.readCommand(***cmdArgs) of {
+      quit -> { break }
+      dir -> printDir( scope( ofObj=obj ) )
+      { cmdVal } -> {
+        console.print( cmdVal )
+        cmdVal = nil  # clear it
+      }
+    }
+
+  } $=> {  # catch exceptions
+
+    {{ ProgramHalt: ph }} -> {
+      throw ph  # escalate a halt to the program loop of the
+      # host interpreter, let it decide what to do.
+    }
+
+    {{ IOError:exc }} -> {
+      console.fatal <| 'IO error - ' ++ exc
+      throw exc  # escalate it to the program loop of the
+      # host interpreter, let it decide what to do.
+    }
+
+    { cmdExc } -> {
+      console.print( 'Recovered from error', exception=cmdExc )
+    }
+
+  }
+
+}

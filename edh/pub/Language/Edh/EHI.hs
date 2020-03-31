@@ -143,6 +143,7 @@ module Language.Edh.EHI
   , resolveEdhInstance
   , objectScope
   , mkScopeWrapper
+  , isScopeWrapper
   , wrappedScopeOf
 
     -- ** Value system

@@ -106,35 +106,40 @@ conReadCommandProc !apk !exit = ask >>= \pgs ->
   case parseArgsPack (defaultEdhPS1, defaultEdhPS2, Nothing) argsParser apk of
     Left  err                   -> throwEdh UsageError err
     Right (ps1, ps2, inScopeOf) -> contEdhSTM $ do
-      let !ioQ     = consoleIO $ worldConsole $ contextWorld $ edh'context pgs
-          ctx      = edh'context pgs
-          cmdScope = case inScopeOf of
-            Just !so -> (contextScope ctx)
-              -- eval cmd source in the specified object's (probably a module)
-              -- context, while inherit this host proc's exception handler
-              { scopeEntity = objEntity so
-              , thisObject  = so
-              , thatObject  = so
-              , scopeProc   = objClass so
-              , scopeCaller = StmtSrc
-                                ( SourcePos { sourceName   = "<cmd-in>"
-                                            , sourceLine   = mkPos 1
-                                            , sourceColumn = mkPos 1
-                                            }
-                                , VoidStmt
-                                )
-              }
-            _ -> case NE.tail $ callStack ctx of
-              -- eval cmd source with caller's this/that, and lexical context,
-              -- while the entity is already the same as caller's
-              callerScope : _ -> (contextScope ctx)
-                { thisObject  = thisObject callerScope
-                , thatObject  = thatObject callerScope
-                , scopeProc   = scopeProc callerScope
-                , scopeCaller = scopeCaller callerScope
-                }
-              _ -> contextScope ctx
-          !pgsCmd = pgs
+      let !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context pgs
+          ctx  = edh'context pgs
+      -- mind to inherit this host proc's exception handler anyway
+      cmdScope <- case inScopeOf of
+        Just !so -> isScopeWrapper ctx so >>= \case
+          True -> return $ (wrappedScopeOf so)
+            { exceptionHandler = exceptionHandler $ contextScope ctx
+            }
+          False -> return $ (contextScope ctx)
+           -- eval cmd source in the specified object's (probably a module)
+           -- context scope
+            { scopeEntity = objEntity so
+            , thisObject  = so
+            , thatObject  = so
+            , scopeProc   = objClass so
+            , scopeCaller = StmtSrc
+                              ( SourcePos { sourceName   = "<cmd-in>"
+                                          , sourceLine   = mkPos 1
+                                          , sourceColumn = mkPos 1
+                                          }
+                              , VoidStmt
+                              )
+            }
+        _ -> case NE.tail $ callStack ctx of
+          -- eval cmd source with caller's this/that, and lexical context,
+          -- while the entity is already the same as caller's
+          callerScope : _ -> return $ (contextScope ctx)
+            { thisObject  = thisObject callerScope
+            , thatObject  = thatObject callerScope
+            , scopeProc   = scopeProc callerScope
+            , scopeCaller = scopeCaller callerScope
+            }
+          _ -> return $ contextScope ctx
+      let !pgsCmd = pgs
             { edh'context = ctx
                               { callStack = cmdScope
                                               NE.:| NE.tail (callStack ctx)

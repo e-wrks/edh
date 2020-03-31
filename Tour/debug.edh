@@ -1,0 +1,18 @@
+
+{
+  method f () {
+    n = 5
+
+    console.logLevel<=console.debug &> shellHere()
+
+    console.debug <| 'now n is: ' ++ n
+  }
+
+  method g() {
+    f()
+  }
+
+}
+
+g()
+

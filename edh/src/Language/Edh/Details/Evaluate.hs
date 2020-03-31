@@ -1953,11 +1953,14 @@ mkScopeWrapper !ctx !scope = do
   !world        = contextWorld ctx
   !wrapperClass = (objClass $ scopeSuper world)
     { procedure'lexi = Just scope
-    , procedure'decl = ProcDecl { procedure'name = "<captured-scope>"
-                                , procedure'args = PackReceiver []
-                                , procedure'body = Left $ contextStmt ctx
-                                }
+    , procedure'decl = procedure'decl $ scopeProc scope
     }
+
+isScopeWrapper :: Context -> Object -> STM Bool
+isScopeWrapper !ctx !o = do
+  supers <- readTVar (objSupers o)
+  return $ elem (scopeSuper world) supers
+  where !world = contextWorld ctx
 
 -- | Get the wrapped scope from a wrapper object
 wrappedScopeOf :: Object -> Scope

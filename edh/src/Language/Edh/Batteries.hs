@@ -489,12 +489,14 @@ installEdhBatteries world = liftIO $ do
                            hp
                            args
         | (mc, nm, hp, args) <-
-          [ (EdhMethod, "eval"   , scopeEvalProc   , WildReceiver)
-          , (EdhMethod, "get"    , scopeGetProc    , WildReceiver)
-          , (EdhMethod, "put"    , scopePutProc    , WildReceiver)
-          , (EdhMethod, "attrs"  , scopeAttrsProc  , PackReceiver [])
-          , (EdhMethod, "lexiLoc", scopeLexiLocProc, PackReceiver [])
-          , (EdhMethod, "outer"  , scopeOuterProc  , PackReceiver [])
+          [ (EdhMethod, "__repr__" , scopeReprProc     , PackReceiver [])
+          , (EdhMethod, "eval"     , scopeEvalProc     , WildReceiver)
+          , (EdhMethod, "get"      , scopeGetProc      , WildReceiver)
+          , (EdhMethod, "put"      , scopePutProc      , WildReceiver)
+          , (EdhMethod, "attrs"    , scopeAttrsProc    , PackReceiver [])
+          , (EdhMethod, "callerLoc", scopeCallerLocProc, PackReceiver [])
+          , (EdhMethod, "lexiLoc"  , scopeLexiLocProc  , PackReceiver [])
+          , (EdhMethod, "outer"    , scopeOuterProc    , PackReceiver [])
           ]
         ]
       updateEntityAttrs pgs (objEntity scopeSuperObj) scopeSuperMethods
