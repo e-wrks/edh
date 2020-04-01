@@ -712,25 +712,6 @@ data EdhValue =
   -- | reflective expr, with source (or not, if empty)
     | EdhExpr !Unique !Expr !Text
 
-edhValueNull :: EdhValue -> STM Bool
-edhValueNull EdhNil                  = return True
-edhValueNull (EdhDecimal d         ) = return $ D.decimalIsNaN d || d == 0
-edhValueNull (EdhBool    b         ) = return $ not b
-edhValueNull (EdhString  s         ) = return $ T.null s
-edhValueNull (EdhSymbol  _         ) = return False
-edhValueNull (EdhDict    (Dict _ d)) = Map.null <$> readTVar d
-edhValueNull (EdhList    (List _ l)) = null <$> readTVar l
-edhValueNull (EdhTuple   l         ) = return $ null l
-edhValueNull (EdhArgsPack (ArgsPack args kwargs)) =
-  return $ null args && Map.null kwargs
-edhValueNull (EdhExpr _ (LitExpr NilLiteral) _) = return True
-edhValueNull (EdhExpr _ (LitExpr (DecLiteral d)) _) =
-  return $ D.decimalIsNaN d || d == 0
-edhValueNull (EdhExpr _ (LitExpr (BoolLiteral b)) _) = return b
-edhValueNull (EdhExpr _ (LitExpr (StringLiteral s)) _) = return $ T.null s
-edhValueNull (EdhNamedValue _ v) = edhValueNull v
-edhValueNull _ = return False
-
 instance Show EdhValue where
   show (EdhType t)    = show t
   show EdhNil         = "nil"

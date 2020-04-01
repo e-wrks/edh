@@ -197,25 +197,5 @@ import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.PkgMan
 import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
+import           Language.Edh.Details.Utils
 
-
-seqcontSTM :: forall a . [(a -> STM ()) -> STM ()] -> ([a] -> STM ()) -> STM ()
-seqcontSTM !xs !exit = go xs []
- where
-  go :: [(a -> STM ()) -> STM ()] -> [a] -> STM ()
-  go []         ys = exit $! reverse $! ys
-  go (x : rest) ys = x $ \y -> go rest (y : ys)
-
-mapcontSTM
-  :: forall a b
-   . (a -> b)
-  -> [(a -> STM ()) -> STM ()]
-  -> [(b -> STM ()) -> STM ()]
-mapcontSTM !f !xs = go xs []
- where
-  go
-    :: [(a -> STM ()) -> STM ()]
-    -> [(b -> STM ()) -> STM ()]
-    -> [(b -> STM ()) -> STM ()]
-  go []         ys = reverse $! ys
-  go (x : rest) ys = go rest (y : ys) where y b = x (\a -> b (f a))

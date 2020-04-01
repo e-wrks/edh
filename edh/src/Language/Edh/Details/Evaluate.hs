@@ -29,6 +29,8 @@ import           Data.Dynamic
 
 import           Text.Megaparsec
 
+import           Data.Lossless.Decimal         as D
+
 import           Language.Edh.Control
 import           Language.Edh.Parser
 import           Language.Edh.Event
@@ -2341,6 +2343,37 @@ pvlToDict !pgs !pvl !x = go pvl []
   go :: [EdhValue] -> [(ItemKey, EdhValue)] -> STM ()
   go []         !ps = x $ Map.fromList ps
   go (p : rest) ps  = val2DictEntry pgs p $ \t -> go rest (t : ps)
+
+
+edhValueNull :: EdhProgState -> EdhValue -> (Bool -> STM ()) -> STM ()
+edhValueNull _    EdhNil                  !exit = exit True
+edhValueNull !pgs (EdhNamedValue _ v    ) !exit = edhValueNull pgs v exit
+edhValueNull _ (EdhDecimal d) !exit = exit $ D.decimalIsNaN d || d == 0
+edhValueNull _    (EdhBool    b         ) !exit = exit $ not b
+edhValueNull _    (EdhString  s         ) !exit = exit $ T.null s
+edhValueNull _    (EdhSymbol  _         ) !exit = exit False
+edhValueNull _ (EdhDict (Dict _ d)) !exit = Map.null <$> readTVar d >>= exit
+edhValueNull _    (EdhList    (List _ l)) !exit = null <$> readTVar l >>= exit
+edhValueNull _    (EdhTuple   l         ) !exit = exit $ null l
+edhValueNull _ (EdhArgsPack (ArgsPack args kwargs)) !exit =
+  exit $ null args && Map.null kwargs
+edhValueNull _ (EdhExpr _ (LitExpr NilLiteral) _) !exit = exit True
+edhValueNull _ (EdhExpr _ (LitExpr (DecLiteral d)) _) !exit =
+  exit $ D.decimalIsNaN d || d == 0
+edhValueNull _ (EdhExpr _ (LitExpr (BoolLiteral b)) _) !exit = exit b
+edhValueNull _ (EdhExpr _ (LitExpr (StringLiteral s)) _) !exit =
+  exit $ T.null s
+edhValueNull !pgs (EdhObject !o) !exit =
+  lookupEdhObjAttr pgs o (AttrByName "__null__") >>= \case
+    EdhNil -> exit False
+    EdhMethod !nulMth ->
+      runEdhProc pgs
+        $ callEdhMethod o nulMth (ArgsPack [] Map.empty)
+        $ \(OriginalValue nulVal _ _) -> contEdhSTM $ case nulVal of
+            EdhBool isNull -> exit isNull
+            _              -> edhValueNull pgs nulVal exit
+    nulVal -> edhValueNull pgs nulVal exit
+edhValueNull _ _ !exit = exit False
 
 
 -- comma separated repr string

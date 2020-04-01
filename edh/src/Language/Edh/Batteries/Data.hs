@@ -17,6 +17,7 @@ import           Language.Edh.Control
 import           Language.Edh.Event
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
+import           Language.Edh.Details.Utils
 
 
 -- | operator ($) - dereferencing attribute addressor
@@ -188,16 +189,22 @@ isNullProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   contEdhSTM $ if null kwargs
     then case args of
-      [v] -> do
-        isNull <- EdhBool <$> edhValueNull v
-        exitEdhSTM pgs exit isNull
-      _ -> do
-        argsNulls <- sequence $ ((EdhBool <$>) . edhValueNull) <$> args
-        exitEdhSTM pgs exit (EdhTuple argsNulls)
-    else do
-      argsNulls   <- sequence $ ((EdhBool <$>) . edhValueNull) <$> args
-      kwargsNulls <- sequence $ Map.map ((EdhBool <$>) . edhValueNull) kwargs
-      exitEdhSTM pgs exit (EdhArgsPack $ ArgsPack argsNulls kwargsNulls)
+      [v] ->
+        edhValueNull pgs v $ \isNull -> exitEdhSTM pgs exit $ EdhBool isNull
+      _ -> seqcontSTM (edhValueNull pgs <$> args)
+        $ \argsNulls -> exitEdhSTM pgs exit (EdhTuple $ EdhBool <$> argsNulls)
+    else seqcontSTM (edhValueNull pgs <$> args) $ \argsNulls ->
+      seqcontSTM
+          [ \exit' -> edhValueNull pgs v (\isNull -> exit' (k, isNull))
+          | (k, v) <- Map.toList kwargs
+          ]
+        $ \kwargsNulls -> exitEdhSTM
+            pgs
+            exit
+            (EdhArgsPack $ ArgsPack
+              (EdhBool <$> argsNulls)
+              (Map.map EdhBool $ Map.fromList kwargsNulls)
+            )
 
 
 -- | utility type(*args,**kwargs) - value type introspector
