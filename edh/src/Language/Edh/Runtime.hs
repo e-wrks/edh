@@ -25,7 +25,7 @@ import           Data.Dynamic
 
 import           Text.Megaparsec
 
-import           Data.Lossless.Decimal          ( castDecimalToInteger )
+import           Data.Lossless.Decimal          ( decimalToInteger )
 
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
@@ -142,8 +142,10 @@ createEdhWorld !console = liftIO $ do
   edhErrorCtor :: (ArgsPack -> EdhCallContext -> EdhError) -> EdhHostCtor
   edhErrorCtor !hec !pgs apk@(ArgsPack _ !kwargs) !obs = do
     let !unwind = case Map.lookup "unwind" kwargs of
-          Just (EdhDecimal d) -> fromIntegral $ castDecimalToInteger d
-          _                   -> 1 :: Int
+          Just (EdhDecimal d) -> case decimalToInteger d of
+            Just n -> fromIntegral n
+            _      -> 1
+          _ -> 1
         !scope = contextScope $ edh'context pgs
         !this  = thisObject scope
         !cc    = getEdhCallContext unwind pgs

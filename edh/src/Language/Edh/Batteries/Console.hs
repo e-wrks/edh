@@ -6,6 +6,7 @@ import           Debug.Trace
 
 import           GHC.Conc                       ( unsafeIOToSTM )
 
+import           Control.Applicative
 import           Control.Monad.Reader
 import           Control.Concurrent
 import           Control.Concurrent.STM
@@ -19,7 +20,7 @@ import qualified Data.HashMap.Strict           as Map
 
 import           Text.Megaparsec
 
-import           Data.Lossless.Decimal          ( castDecimalToInteger )
+import           Data.Lossless.Decimal          ( decimalToInteger )
 
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
@@ -30,58 +31,60 @@ import           Language.Edh.Details.Evaluate
 loggingProc :: EdhIntrinsicOp
 loggingProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
-  let !ctx                  = edh'context pgs
-      (StmtSrc (srcPos, _)) = contextStmt ctx
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case lhVal of
-    -- TODO interpret a pair of decimals at left-hand to be
-    --        logging-level : stack-rewind-count
-    --      and use source position at the stack frame after specified rewinding
-    EdhDecimal d -> do
-      let !logLevel = fromInteger $ castDecimalToInteger d
+  let !ctx = edh'context pgs
+      parseSpec :: EdhValue -> Maybe (Int, StmtSrc)
+      parseSpec = \case
+        EdhDecimal !level ->
+          (, contextStmt ctx) . fromInteger <$> decimalToInteger level
+        EdhPair (EdhDecimal !level) (EdhDecimal !unwind) ->
+          liftA2 (,) (fromInteger <$> decimalToInteger level)
+            $   scopeCaller
+            .   contextFrame ctx
+            .   fromInteger
+            <$> decimalToInteger unwind
+        _ -> Nothing
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case parseSpec lhVal of
+    Just (logLevel, StmtSrc (srcPos, _)) -> if logLevel < 0
       -- as the log queue is a TQueue per se, log msgs from a failing STM
       -- transaction has no way to go into the queue then get logged, but the
       -- failing cases are especially in need of diagnostics, so negative log
       -- level number is used to instruct a debug trace.
-      if logLevel < 0
-        then
-          let tracePrefix = " 🐞 " ++ sourcePosPretty srcPos ++ " ❗ "
-          in
-            evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
-              EdhString !logStr ->
-                trace (tracePrefix ++ T.unpack logStr) $ exitEdhProc exit nil
-              _ -> edhValueRepr rhVal $ \(OriginalValue !rhRepr _ _) ->
-                case rhRepr of
-                  EdhString !logStr ->
-                    trace (tracePrefix ++ T.unpack logStr)
-                      $ exitEdhProc exit nil
-                  _ ->
-                    trace (tracePrefix ++ show rhRepr) $ exitEdhProc exit nil
-        else contEdhSTM $ do
-          let console      = worldConsole $ contextWorld ctx
-              !conLogLevel = consoleLogLevel console
-              !logger      = consoleLogger console
-          if logLevel < conLogLevel
-            then -- drop log msg without even eval it
-                 exitEdhSTM pgs exit nil
-            else
-              runEdhProc pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-                do
-                  let !srcLoc = if conLogLevel <= 20
-                        then -- with source location info
-                             Just $ sourcePosPretty srcPos
-                        else -- no source location info
-                             Nothing
-                  contEdhSTM $ case rhVal of
-                    EdhArgsPack pkargs -> do
-                      logger logLevel srcLoc pkargs
-                      exitEdhSTM pgs exit nil
-                    EdhTuple vals -> do
-                      logger logLevel srcLoc $ ArgsPack vals Map.empty
-                      exitEdhSTM pgs exit nil
-                    _ -> do
-                      logger logLevel srcLoc $ ArgsPack [rhVal] Map.empty
-                      exitEdhSTM pgs exit nil
-    _ -> throwEdh EvalError $ "Invalid log level: " <> T.pack (show lhVal)
+      then
+        let tracePrefix = " 🐞 " ++ sourcePosPretty srcPos ++ " ❗ "
+        in
+          evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
+            EdhString !logStr ->
+              trace (tracePrefix ++ T.unpack logStr) $ exitEdhProc exit nil
+            _ -> edhValueRepr rhVal $ \(OriginalValue !rhRepr _ _) ->
+              case rhRepr of
+                EdhString !logStr ->
+                  trace (tracePrefix ++ T.unpack logStr) $ exitEdhProc exit nil
+                _ -> trace (tracePrefix ++ show rhRepr) $ exitEdhProc exit nil
+      else contEdhSTM $ do
+        let console      = worldConsole $ contextWorld ctx
+            !conLogLevel = consoleLogLevel console
+            !logger      = consoleLogger console
+        if logLevel < conLogLevel
+          then -- drop log msg without even eval it
+               exitEdhSTM pgs exit nil
+          else
+            runEdhProc pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> do
+              let !srcLoc = if conLogLevel <= 20
+                    then -- with source location info
+                         Just $ sourcePosPretty srcPos
+                    else -- no source location info
+                         Nothing
+              contEdhSTM $ case rhVal of
+                EdhArgsPack pkargs -> do
+                  logger logLevel srcLoc pkargs
+                  exitEdhSTM pgs exit nil
+                EdhTuple vals -> do
+                  logger logLevel srcLoc $ ArgsPack vals Map.empty
+                  exitEdhSTM pgs exit nil
+                _ -> do
+                  logger logLevel srcLoc $ ArgsPack [rhVal] Map.empty
+                  exitEdhSTM pgs exit nil
+    _ -> throwEdh EvalError $ "Invalid log target: " <> T.pack (show lhVal)
 
 
 -- | host method console.exit(***apk)
@@ -220,34 +223,34 @@ timelyNotify !delayMicros genr'caller@(!pgs', !iter'cb) = do
 
 -- | host generator console.everyMicros(n) - with fixed interval
 conEveryMicrosProc :: EdhProcedure
-conEveryMicrosProc (ArgsPack !args !kwargs) _ = ask >>= \pgs ->
+conEveryMicrosProc !apk _ = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of
     Nothing          -> throwEdh EvalError "Can only be called as generator"
-    Just genr'caller -> case args of
-      [EdhDecimal d] | Map.null kwargs ->
-        let n = fromInteger $ castDecimalToInteger d
-        in  contEdhSTM $ timelyNotify n genr'caller
-      _ -> throwEdh EvalError "Invalid argument to console.everyMicros(n)"
+    Just genr'caller -> case _parseInterval apk of
+      Just !n -> contEdhSTM $ timelyNotify n genr'caller
+      _       -> throwEdh EvalError "Invalid argument to console.everyMicros(n)"
 
 -- | host generator console.everyMillis(n) - with fixed interval
 conEveryMillisProc :: EdhProcedure
-conEveryMillisProc (ArgsPack !args !kwargs) _ = ask >>= \pgs ->
+conEveryMillisProc !apk _ = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of
     Nothing          -> throwEdh EvalError "Can only be called as generator"
-    Just genr'caller -> case args of
-      [EdhDecimal d] | Map.null kwargs ->
-        let n = 1000 * fromInteger (castDecimalToInteger d)
-        in  contEdhSTM $ timelyNotify n genr'caller
-      _ -> throwEdh EvalError "Invalid argument to console.everyMillis(n)"
+    Just genr'caller -> case _parseInterval apk of
+      Just !n -> contEdhSTM $ timelyNotify (1000 * n) genr'caller
+      _       -> throwEdh EvalError "Invalid argument to console.everyMillis(n)"
 
 -- | host generator console.everySeconds(n) - with fixed interval
 conEverySecondsProc :: EdhProcedure
-conEverySecondsProc (ArgsPack !args !kwargs) _ = ask >>= \pgs ->
+conEverySecondsProc !apk _ = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of
     Nothing          -> throwEdh EvalError "Can only be called as generator"
-    Just genr'caller -> case args of
-      [EdhDecimal d] | Map.null kwargs ->
-        let n = 1000000 * fromInteger (castDecimalToInteger d)
-        in  contEdhSTM $ timelyNotify n genr'caller
+    Just genr'caller -> case _parseInterval apk of
+      Just !n -> contEdhSTM $ timelyNotify (1000000 * n) genr'caller
       _ -> throwEdh EvalError "Invalid argument to console.everySeconds(n)"
 
+_parseInterval :: ArgsPack -> Maybe Int
+_parseInterval (ArgsPack !args !kwargs) = do
+  unless (Map.null kwargs) Nothing
+  case args of
+    [EdhDecimal d] | d > 0 -> fromIntegral <$> decimalToInteger d
+    _                      -> Nothing

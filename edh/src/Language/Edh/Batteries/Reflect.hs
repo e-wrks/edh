@@ -14,7 +14,7 @@ import qualified Data.HashMap.Strict           as Map
 
 import           Text.Megaparsec
 
-import           Data.Lossless.Decimal          ( castDecimalToInteger )
+import           Data.Lossless.Decimal          ( decimalToInteger )
 
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
@@ -85,8 +85,10 @@ scopeObtainProc (ArgsPack _args !kwargs) !exit = do
     _ -> do
       let unwind :: Int
           !unwind = case Map.lookup "unwind" kwargs of
-            Just (EdhDecimal d) -> fromIntegral $ castDecimalToInteger d
-            _                   -> 0
+            Just (EdhDecimal d) -> case decimalToInteger d of
+              Just n  -> fromIntegral n
+              Nothing -> 0
+            _ -> 0
           scopeFromStack :: Int -> [Scope] -> (Scope -> STM ()) -> STM ()
           scopeFromStack _ [] _ = throwEdhSTM pgs UsageError "stack underflow"
           scopeFromStack c (f : _) !exit' | c <= 0 = exit' f

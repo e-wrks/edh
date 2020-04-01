@@ -282,6 +282,14 @@ data Context = Context {
   }
 contextScope :: Context -> Scope
 contextScope = NE.head . callStack
+contextFrame :: Context -> Int -> Scope
+contextFrame !ctx !unwind = unwindStack (NE.head stack) (NE.tail stack) unwind
+ where
+  !stack = callStack ctx
+  unwindStack :: Scope -> [Scope] -> Int -> Scope
+  unwindStack !s _ !c | c <= 0 = s
+  unwindStack !s []         _  = s
+  unwindStack _  (s : rest) !c = unwindStack s rest (c - 1)
 
 type EdhGenrCaller
   = ( -- the caller's state
