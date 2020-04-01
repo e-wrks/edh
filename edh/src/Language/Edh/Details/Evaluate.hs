@@ -2372,7 +2372,11 @@ edhValueNull !pgs (EdhObject !o) !exit =
         $ \(OriginalValue nulVal _ _) -> contEdhSTM $ case nulVal of
             EdhBool isNull -> exit isNull
             _              -> edhValueNull pgs nulVal exit
-    nulVal -> edhValueNull pgs nulVal exit
+    EdhBool !b -> exit b
+    badVal ->
+      throwEdhSTM pgs UsageError
+        $  "Invalid value type from __null__: "
+        <> T.pack (edhTypeNameOf badVal)
 edhValueNull _ _ !exit = exit False
 
 
