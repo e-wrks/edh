@@ -2423,6 +2423,12 @@ _edhDictCSR entries ((k, v) : rest) exit' =
         _ -> error "bug: edhValueRepr returned non-string in CPS"
     _ -> error "bug: edhValueRepr returned non-string in CPS"
 
+edhValueReprSTM :: EdhProgState -> EdhValue -> (Text -> STM ()) -> STM ()
+edhValueReprSTM !pgs !val !exit =
+  runEdhProc pgs $ edhValueRepr val $ \(OriginalValue vr _ _) -> case vr of
+    EdhString !r -> contEdhSTM $ exit r
+    _            -> error "bug: edhValueRepr returned non-string"
+
 edhValueRepr :: EdhValue -> EdhProcExit -> EdhProc
 
 -- pair repr

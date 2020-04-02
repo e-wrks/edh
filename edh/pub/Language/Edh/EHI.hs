@@ -152,6 +152,7 @@ module Language.Edh.EHI
   , edhTypeOf
   , edhValueNull
   , edhValueRepr
+  , edhValueReprSTM
   , EdhValue(..)
   , EdhTypeValue(..)
   , edhUltimate
