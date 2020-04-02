@@ -1261,7 +1261,9 @@ waitEdhSTM !pgs !act !exit = if edh'in'tx pgs
 
 -- | Blocking wait an asynchronous IO action from current Edh thread
 edhWaitIO :: EdhProcExit -> IO EdhValue -> EdhProc
-edhWaitIO !exit !act = ask >>= \pgs -> contEdhSTM $ if edh'in'tx pgs
+edhWaitIO !exit !act = ask >>= \pgs -> contEdhSTM $ edhWaitIOSTM pgs exit act
+edhWaitIOSTM :: EdhProgState -> EdhProcExit -> IO EdhValue -> STM ()
+edhWaitIOSTM !pgs !exit !act = if edh'in'tx pgs
   then throwEdhSTM pgs UsageError "You don't wait IO within a transaction"
   else do
     !ioResult <- newEmptyTMVar

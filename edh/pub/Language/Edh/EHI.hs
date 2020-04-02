@@ -100,6 +100,7 @@ module Language.Edh.EHI
   , forkEdh
   , waitEdhSTM
   , edhWaitIO
+  , edhWaitIOSTM
   , edhNop
   , edhEndOfProc
     -- ** Reflective manipulation
