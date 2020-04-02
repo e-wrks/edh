@@ -136,23 +136,21 @@ createEdhWorld !console = liftIO $ do
   edhSomeErr !et (ArgsPack (EdhString msg : _) _) !cc = EdhError et msg cc
   edhSomeErr !et (ArgsPack (v : _) _) !cc = EdhError et (T.pack $ show v) cc
   notFromEdhCtor :: EdhHostCtor
-  notFromEdhCtor _ _ _ = pure ()
+  notFromEdhCtor _ _ _ !exit = exit $ toDyn nil
   -- wrap a Haskell error data constructor as a host error object contstructor,
   -- used to define an error class in Edh
   edhErrorCtor :: (ArgsPack -> EdhCallContext -> EdhError) -> EdhHostCtor
-  edhErrorCtor !hec !pgs apk@(ArgsPack _ !kwargs) !obs = do
+  edhErrorCtor !hec !pgs apk@(ArgsPack _ !kwargs) !obs !ctorExit = do
     let !unwind = case Map.lookup "unwind" kwargs of
           Just (EdhDecimal d) -> case decimalToInteger d of
             Just n -> fromIntegral n
             _      -> 1
           _ -> 1
         !scope = contextScope $ edh'context pgs
-        !this  = thisObject scope
         !cc    = getEdhCallContext unwind pgs
         !he    = hec apk cc
         __repr__ :: EdhProcedure
         __repr__ _ !exit = exitEdhProc exit $ EdhString $ T.pack $ show he
-    writeTVar (entity'store $ objEntity this) $ toDyn he
     methods <- sequence
       [ (AttrByName nm, ) <$> mkHostProc scope vc nm hp args
       | (nm, vc, hp, args) <-
@@ -162,6 +160,7 @@ createEdhWorld !console = liftIO $ do
       $  Map.fromList
       $  methods -- todo expose more attrs to aid handling
       ++ [(AttrByName "details", EdhArgsPack apk)]
+    ctorExit $ toDyn he
 
 
 declareEdhOperators :: EdhWorld -> Text -> [(OpSymbol, Precedence)] -> STM ()
@@ -263,6 +262,7 @@ type EdhHostCtor
   =  EdhProgState
   -> ArgsPack -- ctor args, if __init__() is provided, will go there too
   -> TVar (Map.HashMap AttrKey EdhValue)  -- out-of-band attr store
+  -> (Dynamic -> STM ())  -- in-band data to be written to entity store
   -> STM ()
 
 mkHostClass
@@ -299,8 +299,9 @@ mkHostClass !scope !nm !writeProtected !hc = do
                               , scopeCaller      = contextStmt ctx
                               , exceptionHandler = defaultEdhExcptHndlr
                               }
-        hc pgsCtor apk obs
-        exitEdhSTM pgs exit $ EdhObject newThis
+        hc pgsCtor apk obs $ \esd -> do
+          writeTVar (entity'store ent) esd
+          exitEdhSTM pgs exit $ EdhObject newThis
   return $ EdhClass cls
 
 
