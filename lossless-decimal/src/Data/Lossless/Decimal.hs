@@ -1,3 +1,4 @@
+
 -- | a numeric type for lossless decimal arithmetic
 module Data.Lossless.Decimal where
 
@@ -6,6 +7,8 @@ import           Prelude
 import           Data.Char
 import           Data.Ratio
 import           Data.Hashable
+
+import           Data.Scientific               as Scientific
 
 data Decimal = Decimal {
     denominator'10 :: !Integer
@@ -26,6 +29,12 @@ castDecimalToInteger x@(Decimal d e n)
   | otherwise       = n * 10 ^ e
 {-# INLINE castDecimalToInteger #-}
 
+decimalFromScientific :: Scientific.Scientific -> Decimal
+decimalFromScientific sn = Decimal 1
+                                   (fromIntegral $ base10Exponent sn')
+                                   (coefficient sn')
+  where sn' = Scientific.normalize sn
+
 nan :: Decimal
 nan = Decimal 0 0 0
 
@@ -41,13 +50,17 @@ decimalIsInf (Decimal d _e n) = d == 0 && n /= 0
 normalizeDecimal :: Decimal -> Decimal
 normalizeDecimal (Decimal d e n)
   | d == 0    = Decimal 0 0 $ if n == 0 then 0 else if n < 0 then (-1) else 1
-  | d'' < 0   = Decimal (-d'') (ne - de) (-n'')
-  | otherwise = Decimal d'' (ne - de) n''
+  | n == 0    = Decimal 1 0 0
+  | otherwise = Decimal d'' e' $ if neg then -n' else n'
  where
-  (n', d') | e < 0     = simplify n (d * 10 ^ (-e))
-           | otherwise = simplify (n * 10 ^ e) d
-  (ne, n'') = decodeRadix'10 0 n'
-  (de, d'') = decodeRadix'10 0 d'
+  neg = if n < 0 then d > 0 else d < 0
+  pn  = abs n
+  pd  = abs d
+  nsd = -- normalized scientific denominator
+    Scientific.normalize $ Scientific.scientific (pd * pn) $ fromInteger (-e)
+  d'        = Scientific.coefficient nsd
+  e'        = fromIntegral $ -(Scientific.base10Exponent nsd)
+  (n', d'') = simplify (pn * pn) d'
 
   simplify :: Integer -> Integer -> (Integer, Integer)
   simplify x y | x == 0 || y == 0 = (x, y)
@@ -103,7 +116,7 @@ instance Real Decimal where
     if e < 0 then n % (d * 10 ^ (-e)) else (n * 10 ^ e) % d
 
 instance Fractional Decimal where
-  fromRational x = Decimal (denominator x) 0 (numerator x)
+  fromRational x = normalizeDecimal $ Decimal (denominator x) 0 (numerator x)
   (/) = divDecimal
 
 decimalGreater :: Decimal -> Decimal -> Bool
