@@ -100,7 +100,7 @@ instance Num Decimal where
 
 instance Real Decimal where
   toRational (Decimal d e n) =
-    if e < 0 then n % d * 10 ^ (-e) else n * 10 ^ e % d
+    if e < 0 then n % (d * 10 ^ (-e)) else (n * 10 ^ e) % d
 
 instance Fractional Decimal where
   fromRational x = Decimal (denominator x) 0 (numerator x)
