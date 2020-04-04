@@ -17,11 +17,15 @@ data Decimal = Decimal {
 }
 
 decimalToInteger :: Decimal -> Maybe Integer
-decimalToInteger (Decimal d e n) | d /= 1 || e < 0 = Nothing
-                                 | e == 0          = Just n
-                                 | otherwise       = Just $ n * 10 ^ e
+decimalToInteger v | d /= 1 || e < 0 = Nothing
+                   | e == 0          = Just n
+                   | otherwise       = Just $ n * 10 ^ e
+  where Decimal d e n = normalizeDecimal v
 {-# INLINE decimalToInteger #-}
 
+-- | Use this with great sure, this even do NO normalization,
+-- and will crash your process by throwing error if the cast
+-- fails.
 castDecimalToInteger :: Decimal -> Integer
 castDecimalToInteger x@(Decimal d e n)
   | d /= 1 || e < 0 = error $ "not an integer: " ++ show x
@@ -52,16 +56,20 @@ normalizeDecimal :: Decimal -> Decimal
 normalizeDecimal (Decimal d e n)
   | d == 0    = Decimal 0 0 $ if n == 0 then 0 else if n < 0 then (-1) else 1
   | n == 0    = Decimal 1 0 0
-  | otherwise = Decimal d'' e' $ if neg then -n' else n'
+  | otherwise = Decimal d'' e' $ if neg then -n'' else n''
  where
   neg = if n < 0 then d > 0 else d < 0
   pn  = abs n
   pd  = abs d
+  nsn = -- normalized scientific numerator
+    Scientific.normalize $ Scientific.scientific (pn * pn) 0
+  n' = Scientific.coefficient nsn
   nsd = -- normalized scientific denominator
     Scientific.normalize $ Scientific.scientific (pd * pn) $ fromInteger (-e)
-  d'        = Scientific.coefficient nsd
-  e'        = fromIntegral $ -(Scientific.base10Exponent nsd)
-  (n', d'') = simplify (pn * pn) d'
+  d' = Scientific.coefficient nsd
+  e' =
+    fromIntegral $ Scientific.base10Exponent nsn - Scientific.base10Exponent nsd
+  (n'', d'') = simplify n' d'
 
   simplify :: Integer -> Integer -> (Integer, Integer)
   simplify x y | x == 0 || y == 0 = (x, y)
