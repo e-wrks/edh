@@ -1261,9 +1261,10 @@ waitEdhSTM !pgs !act !exit = if edh'in'tx pgs
 
 -- | Blocking wait an asynchronous IO action from current Edh thread
 edhWaitIO :: EdhProcExit -> IO EdhValue -> EdhProc
-edhWaitIO !exit !act = ask >>= \pgs -> contEdhSTM $ edhWaitIOSTM pgs exit act
-edhWaitIOSTM :: EdhProgState -> EdhProcExit -> IO EdhValue -> STM ()
-edhWaitIOSTM !pgs !exit !act = if edh'in'tx pgs
+edhWaitIO !exit !act =
+  ask >>= \pgs -> contEdhSTM $ edhWaitIOSTM pgs act $ exitEdhSTM pgs exit
+edhWaitIOSTM :: EdhProgState -> IO a -> (a -> STM ()) -> STM ()
+edhWaitIOSTM !pgs !act !exit = if edh'in'tx pgs
   then throwEdhSTM pgs UsageError "You don't wait IO within a transaction"
   else do
     !ioResult <- newEmptyTMVar
@@ -1273,7 +1274,7 @@ edhWaitIOSTM !pgs !exit !act = if edh'in'tx pgs
       $ \(e :: SomeException) -> atomically $ putTMVar ioResult (Left e)
     writeTQueue (edh'task'queue pgs) $ EdhTxTask pgs True (wuji pgs) $ \_ ->
       contEdhSTM $ readTMVar ioResult >>= \case
-        Right v -> exitEdhSTM pgs exit v
+        Right v -> exit v
         Left  e -> case fromException e of
           Just ex@EdhError{} -> throwSTM ex
           _ -> _getEdhErrClass pgs (AttrByName "IOError") >>= \ec ->
