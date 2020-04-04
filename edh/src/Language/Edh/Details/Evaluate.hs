@@ -1274,14 +1274,16 @@ edhWaitIOSTM !pgs !exit !act = if edh'in'tx pgs
     writeTQueue (edh'task'queue pgs) $ EdhTxTask pgs True (wuji pgs) $ \_ ->
       contEdhSTM $ readTMVar ioResult >>= \case
         Right v -> exitEdhSTM pgs exit v
-        Left  e -> _getEdhErrClass pgs (AttrByName "EdhIOError") >>= \ec ->
-          runEdhProc pgs
-            $ createEdhObject ec (ArgsPack [] Map.empty)
-            $ \(OriginalValue !exv _ _) -> case exv of
-                EdhObject !exo -> contEdhSTM $ do
-                  writeTVar (entity'store $ objEntity exo) $ toDyn e
-                  runEdhProc pgs $ edhThrow exv
-                _ -> error "bug: createEdhObject returned non-object"
+        Left  e -> case fromException e of
+          Just ex@EdhError{} -> throwSTM ex
+          _ -> _getEdhErrClass pgs (AttrByName "IOError") >>= \ec ->
+            runEdhProc pgs
+              $ createEdhObject ec (ArgsPack [] Map.empty)
+              $ \(OriginalValue !exv _ _) -> case exv of
+                  EdhObject !exo -> contEdhSTM $ do
+                    writeTVar (entity'store $ objEntity exo) $ toDyn e
+                    runEdhProc pgs $ edhThrow exv
+                  _ -> error "bug: createEdhObject returned non-object"
 
 
 _getEdhErrClass :: EdhProgState -> AttrKey -> STM Class

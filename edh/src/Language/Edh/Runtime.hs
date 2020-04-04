@@ -113,7 +113,7 @@ createEdhWorld !console = liftIO $ do
         [ (AttrByName nm, ) <$> mkHostClass rootScope nm False hc
         | (nm, hc) <- -- cross check with 'throwEdhSTM' for type safety
           [ ("ProgramHalt" , edhErrorCtor edhProgramHalt)
-          , ("EdhIOError"  , notFromEdhCtor)
+          , ("IOError"  , notFromEdhCtor)
           , ("Exception"   , edhErrorCtor $ edhSomeErr EdhException)
           , ("PackageError", edhErrorCtor $ edhSomeErr PackageError)
           , ("ParseError"  , edhErrorCtor $ edhSomeErr ParseError)
