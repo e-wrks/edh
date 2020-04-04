@@ -8,7 +8,7 @@ import           Data.Char
 import           Data.Ratio
 import           Data.Hashable
 
-import           Data.Scientific               as Scientific
+import qualified Data.Scientific               as Scientific
 
 data Decimal = Decimal {
     denominator'10 :: !Integer
@@ -30,9 +30,10 @@ castDecimalToInteger x@(Decimal d e n)
 {-# INLINE castDecimalToInteger #-}
 
 decimalFromScientific :: Scientific.Scientific -> Decimal
-decimalFromScientific sn = Decimal 1
-                                   (fromIntegral $ base10Exponent sn')
-                                   (coefficient sn')
+decimalFromScientific sn = Decimal
+  1
+  (fromIntegral $ Scientific.base10Exponent sn')
+  (Scientific.coefficient sn')
   where sn' = Scientific.normalize sn
 
 nan :: Decimal
@@ -164,13 +165,14 @@ divDecimal (Decimal x'd x'e x'n) (Decimal y'd y'e y'n) =
   mulDecimal (Decimal x'd x'e x'n) (Decimal y'n (-y'e) y'd)
 
 showDecimal :: Decimal -> String
-showDecimal (Decimal d e n)
+showDecimal v
   | d == 0    = if n == 0 then "nan" else if n < 0 then "-inf" else "inf"
   | d == 1    = showDecInt n e
   | d == (-1) = showDecInt (-n) e
   | e < 0     = showDecInt n 0 ++ "/" ++ showDecInt d (-e)
   | otherwise = showDecInt n e ++ "/" ++ showDecInt d 0
  where
+  Decimal d e n = normalizeDecimal v
   showDecInt :: Integer -> Integer -> String
   showDecInt n_ e_ =
     if n_ < 0 then '-' : positiveInt (-n_) e_ else positiveInt n_ e_
