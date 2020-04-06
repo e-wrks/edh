@@ -1270,12 +1270,45 @@ edhPerformIO !pgs !act !exit = if edh'in'tx pgs
     $ Left
     $ catch (act >>= atomically . exit)
     $ \(e :: SomeException) ->
-        atomically $ edhErrorFrom pgs e $ \exv -> edhThrowSTM pgs exv
+        atomically $ toEdhError pgs e $ \exv -> edhThrowSTM pgs exv
 
+
+-- | Create an Edh error as both an Edh exception value and a host exception
+createEdhError
+  :: EdhProgState
+  -> EdhErrorTag
+  -> Text
+  -> (EdhValue -> SomeException -> STM ())
+  -> STM ()
+createEdhError !pgs !et !msg !exit = getEdhErrClass pgs et >>= \ec ->
+  runEdhProc pgs
+    $ constructEdhObject ec (ArgsPack [EdhString msg] Map.empty)
+    $ \(OriginalValue !exv _ _) -> case exv of
+        EdhObject !exo -> contEdhSTM $ do
+          esd <- readTVar $ entity'store $ objEntity exo
+          exit exv $ toException esd
+        _ -> error "bug: constructEdhObject returned non-object"
+
+-- | Convert an arbitrary Edh error to exception
+fromEdhError :: EdhProgState -> EdhValue -> (SomeException -> STM ()) -> STM ()
+fromEdhError !pgs !exv !exit = case exv of
+  EdhNil ->
+    throwSTM
+      $ EdhError UsageError "false Edh error to fromEdhError"
+      $ getEdhCallContext 0 pgs
+  EdhObject !exo -> do
+    esd <- readTVar $ entity'store $ objEntity exo
+    case fromDynamic esd :: Maybe SomeException of
+      Just e -> exit e
+      _      -> ioErr
+  _ -> ioErr
+ where
+  ioErr = edhValueReprSTM pgs exv $ \exr ->
+    exit $ toException $ EdhError EvalError exr $ getEdhCallContext 0 pgs
 
 -- | Convert an arbitrary exception to Edh error
-edhErrorFrom :: EdhProgState -> SomeException -> (EdhValue -> STM ()) -> STM ()
-edhErrorFrom !pgs !e !exit = case fromException e :: Maybe EdhError of
+toEdhError :: EdhProgState -> SomeException -> (EdhValue -> STM ()) -> STM ()
+toEdhError !pgs !e !exit = case fromException e :: Maybe EdhError of
   Just err -> case err of
     EdhError et _ _ -> getEdhErrClass pgs et >>= withErrCls
     EdhPeerError{} ->
@@ -1292,7 +1325,6 @@ edhErrorFrom !pgs !e !exit = case fromException e :: Maybe EdhError of
     edhErrorCtor e pgs (ArgsPack [] Map.empty) obs $ \esd -> do
       writeTVar (entity'store ent) esd
       exit $ EdhObject exo
-
 
 -- | Get Edh class for an error tag
 getEdhErrClass :: EdhProgState -> EdhErrorTag -> STM Class
@@ -1338,22 +1370,6 @@ throwEdhSTM !pgs !et !msg = getEdhErrClass pgs et >>= \ec ->
   runEdhProc pgs
     $ constructEdhObject ec (ArgsPack [EdhString msg] Map.empty)
     $ \(OriginalValue !exo _ _) -> ask >>= contEdhSTM . flip edhThrowSTM exo
-
--- | Create an Edh error as both an Edh exception value and a host exception
-createEdhError
-  :: EdhProgState
-  -> EdhErrorTag
-  -> Text
-  -> (EdhValue -> SomeException -> STM ())
-  -> STM ()
-createEdhError !pgs !et !msg !exit = getEdhErrClass pgs et >>= \ec ->
-  runEdhProc pgs
-    $ constructEdhObject ec (ArgsPack [EdhString msg] Map.empty)
-    $ \(OriginalValue !exv _ _) -> case exv of
-        EdhObject !exo -> contEdhSTM $ do
-          esd <- readTVar $ entity'store $ objEntity exo
-          exit exv $ toException esd
-        _ -> error "bug: constructEdhObject returned non-object"
 
 
 -- | Throw arbitrary value from an Edh proc

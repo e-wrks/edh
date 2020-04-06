@@ -213,7 +213,7 @@ installEdhModule !world !moduId !preInstall = liftIO $ do
 
 haltEdhProgram :: EdhProgState -> EdhValue -> STM ()
 haltEdhProgram !pgs !hv =
-  edhErrorFrom pgs (toException $ ProgramHalt $ toDyn hv)
+  toEdhError pgs (toException $ ProgramHalt $ toDyn hv)
     $ \exv -> edhThrowSTM pgs exv
 
 

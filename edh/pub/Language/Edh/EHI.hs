@@ -88,7 +88,8 @@ module Language.Edh.EHI
   , edhCatchSTM
   , throwEdhSTM
   , createEdhError
-  , edhErrorFrom
+  , toEdhError
+  , fromEdhError
   , getEdhErrClass
     -- ** CPS helpers
   , runEdhProc
