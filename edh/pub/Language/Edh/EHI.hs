@@ -87,6 +87,7 @@ module Language.Edh.EHI
   , edhThrowSTM
   , edhCatchSTM
   , throwEdhSTM
+  , createEdhError
   , edhErrorFrom
   , getEdhErrClass
     -- ** CPS helpers

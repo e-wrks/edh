@@ -1339,6 +1339,22 @@ throwEdhSTM !pgs !et !msg = getEdhErrClass pgs et >>= \ec ->
     $ constructEdhObject ec (ArgsPack [EdhString msg] Map.empty)
     $ \(OriginalValue !exo _ _) -> ask >>= contEdhSTM . flip edhThrowSTM exo
 
+-- | Create an Edh error as both an Edh exception value and a host exception
+createEdhError
+  :: EdhProgState
+  -> EdhErrorTag
+  -> Text
+  -> (EdhValue -> SomeException -> STM ())
+  -> STM ()
+createEdhError !pgs !et !msg !exit = getEdhErrClass pgs et >>= \ec ->
+  runEdhProc pgs
+    $ constructEdhObject ec (ArgsPack [EdhString msg] Map.empty)
+    $ \(OriginalValue !exv _ _) -> case exv of
+        EdhObject !exo -> contEdhSTM $ do
+          esd <- readTVar $ entity'store $ objEntity exo
+          exit exv $ toException esd
+        _ -> error "bug: constructEdhObject returned non-object"
+
 
 -- | Throw arbitrary value from an Edh proc
 --
