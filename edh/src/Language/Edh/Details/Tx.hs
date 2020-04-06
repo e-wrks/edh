@@ -43,7 +43,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
           -- todo special handling here ?
           throwTo mainThId asyncExc
         _ -> throwTo mainThId e
-  !(forkQueue :: TQueue (Either (IO ()) EdhTxTask)) <- newTQueueIO
+  !forkQueue <- newTQueueIO
   let
     forkDescendants :: IO ()
     forkDescendants =
@@ -52,35 +52,29 @@ driveEdhProgram !haltResult !progCtx !prog = do
           `orElse` (Just <$> readTQueue forkQueue)
           )
         >>= \case
-              Nothing        -> return () -- Edh program halted, done
-              Just !asyncJob -> do
-                case asyncJob of
-                  -- got an async IO task to fork
-                  Left !ioAct -> void $ mask_ $ forkIOWithUnmask $ \unmask ->
-                    catch (unmask ioAct) onDescendantExc
-                  -- got an Edh go routine to fork
-                  Right !edhTask -> do
-                    -- prepare state for the descendant thread
-                    !(descQueue :: TQueue EdhTxTask) <- newTQueueIO
-                    !perceivers                      <- newTVarIO []
-                    !defers                          <- newTVarIO []
-                    let !pgsDescendant = (edh'task'pgs edhTask)
-                          { edh'task'queue = descQueue
-                          , edh'perceivers = perceivers
-                          , edh'defers     = defers
-                        -- the forker should have checked not in tx, enforce here
-                          , edh'in'tx      = False
-                          }
-                    -- bootstrap on the descendant thread
-                    atomically $ writeTQueue
-                      descQueue
-                      edhTask { edh'task'pgs = pgsDescendant }
-                    void
-                      $ mask_
-                      $ forkIOWithUnmask
-                      $ \unmask -> catch
-                          (unmask $ driveEdhThread defers descQueue)
-                          onDescendantExc
+              Nothing       -> return () -- Edh program halted, done
+              Just !edhTask -> do
+                -- prepare state for the descendant thread
+                !descQueue  <- newTQueueIO
+                !perceivers <- newTVarIO []
+                !defers     <- newTVarIO []
+                let !pgsDescendant = (edh'task'pgs edhTask)
+                      { edh'task'queue = descQueue
+                      , edh'perceivers = perceivers
+                      , edh'defers     = defers
+                    -- the forker should have checked not in tx, enforce here
+                      , edh'in'tx      = False
+                      }
+                -- bootstrap on the descendant thread
+                atomically $ writeTQueue descQueue $ Right edhTask
+                  { edh'task'pgs = pgsDescendant
+                  }
+                void
+                  $ mask_
+                  $ forkIOWithUnmask
+                  $ \unmask -> catch
+                      (unmask $ driveEdhThread defers descQueue)
+                      onDescendantExc
                 -- keep the forker running
                 forkDescendants
   -- start forker thread
@@ -109,9 +103,9 @@ driveEdhProgram !haltResult !progCtx !prog = do
         )
     $ do
         -- prepare program state for main Edh thread
-        !(mainQueue :: TQueue EdhTxTask) <- newTQueueIO
-        !perceivers                      <- newTVarIO []
-        !defers                          <- newTVarIO []
+        !mainQueue  <- newTQueueIO
+        !perceivers <- newTVarIO []
+        !defers     <- newTVarIO []
         let !pgsAtBoot = EdhProgState { edh'fork'queue = forkQueue
                                       , edh'task'queue = mainQueue
                                       , edh'perceivers = perceivers
@@ -120,35 +114,32 @@ driveEdhProgram !haltResult !progCtx !prog = do
                                       , edh'context    = progCtx
                                       }
         -- bootstrap the program on main Edh thread
-        atomically $ writeTQueue
-          mainQueue
-          (EdhTxTask pgsAtBoot False (wuji pgsAtBoot) (const prog))
+        atomically $ writeTQueue mainQueue $ Right
+          (EdhTxTask pgsAtBoot (wuji pgsAtBoot) (const prog))
         -- drive the main Edh thread
         driveEdhThread defers mainQueue
 
  where
 
-  nextTaskFromQueue :: TQueue EdhTxTask -> STM (Maybe EdhTxTask)
+  nextTaskFromQueue
+    :: TQueue (Either (IO ()) EdhTxTask)
+    -> STM (Maybe (Either (IO ()) EdhTxTask))
   nextTaskFromQueue = orElse (Nothing <$ readTMVar haltResult) . tryReadTQueue
 
   driveDefers :: [DeferRecord] -> IO ()
   driveDefers [] = return ()
   driveDefers ((!pgsDefer, !deferedProg) : restDefers) = do
-    !deferPerceivers                      <- newTVarIO []
-    !deferDefers                          <- newTVarIO []
-    !(deferTaskQueue :: TQueue EdhTxTask) <- newTQueueIO
-    atomically $ writeTQueue
-      deferTaskQueue
-      (EdhTxTask
-        pgsDefer { edh'task'queue = deferTaskQueue
-                 , edh'perceivers = deferPerceivers
-                 , edh'defers     = deferDefers
-                 , edh'in'tx      = False
-                 }
-        False
-        (wuji pgsDefer)
-        (const deferedProg)
-      )
+    !deferPerceivers <- newTVarIO []
+    !deferDefers     <- newTVarIO []
+    !deferTaskQueue  <- newTQueueIO
+    atomically $ writeTQueue deferTaskQueue $ Right $ EdhTxTask
+      pgsDefer { edh'task'queue = deferTaskQueue
+               , edh'perceivers = deferPerceivers
+               , edh'defers     = deferDefers
+               , edh'in'tx      = False
+               }
+      (wuji pgsDefer)
+      (const deferedProg)
     driveEdhThread deferDefers deferTaskQueue
     driveDefers restDefers
 
@@ -167,17 +158,18 @@ driveEdhProgram !haltResult !progCtx !prog = do
                     EdhBreak -> True -- terminate this thread
                     _        -> False
               contEdhSTM $ putTMVar breakThread doBreak
-    !reactPerceivers                      <- newTVarIO []
-    !reactDefers                          <- newTVarIO []
-    !(reactTaskQueue :: TQueue EdhTxTask) <- newTQueueIO
+    !reactPerceivers <- newTVarIO []
+    !reactDefers     <- newTVarIO []
+    !reactTaskQueue  <- newTQueueIO
     let !pgsPerceiver = pgsOrigin { edh'task'queue = reactTaskQueue
                                   , edh'perceivers = reactPerceivers
                                   , edh'defers     = reactDefers
                                   , edh'in'tx      = False
                                   }
-    atomically $ writeTQueue
-      reactTaskQueue
-      (EdhTxTask pgsPerceiver False (wuji pgsPerceiver) (const perceiverProg))
+    atomically $ writeTQueue reactTaskQueue $ Right $ EdhTxTask
+      pgsPerceiver
+      (wuji pgsPerceiver)
+      (const perceiverProg)
     driveEdhThread reactDefers reactTaskQueue
     atomically $ readTMVar breakThread
   drivePerceivers :: [(EdhValue, PerceiveRecord)] -> IO Bool
@@ -186,40 +178,25 @@ driveEdhProgram !haltResult !progCtx !prog = do
     True  -> return True
     False -> drivePerceivers rest
 
-  driveEdhThread :: TVar [DeferRecord] -> TQueue EdhTxTask -> IO ()
+  driveEdhThread
+    :: TVar [DeferRecord] -> TQueue (Either (IO ()) EdhTxTask) -> IO ()
   driveEdhThread !defers !tq = atomically (nextTaskFromQueue tq) >>= \case
     Nothing -> -- this thread is done, run defers lastly
       readTVarIO defers >>= driveDefers
-    Just txTask -> goSTM txTask >>= \case -- run this task
+    Just (Left !ioTask) -> do
+      ioTask
+      driveEdhThread defers tq -- loop another iteration for the thread
+    Just (Right !txTask) -> goSTM txTask >>= \case -- run this task
       True -> -- terminate this thread, after running defers lastly
         readTVarIO defers >>= driveDefers
       False -> -- loop another iteration for the thread
         driveEdhThread defers tq
 
+  -- blocking wait not expected, track stm retries explicitly
   goSTM :: EdhTxTask -> IO Bool
-  goSTM (EdhTxTask !pgsTask !wait !input !task) = if wait
-    then -- let stm do the retry, for blocking read of a 'TChan' etc.
-         waitSTM
-    else -- blocking wait not expected, track stm retries explicitly
-         doSTM 0
-
+  goSTM (EdhTxTask !pgsTask !input !task) = doSTM 0
    where
     callCtx = getEdhCallContext 0 pgsTask
-
-    waitSTM :: IO Bool
-    waitSTM = atomically stmJob >>= \case
-      Nothing -> return True -- to terminate as program halted
-      Just [] -> -- no perceiver fires, the tx job has been executed
-        return False
-      Just gotevl -> drivePerceivers gotevl >>= \case
-        True -> -- a perceiver is terminating this thread
-          return True
-        False ->
-          -- there've been one or more perceivers fired, the tx job have
-          -- been skipped, as no perceiver is terminating the thread,
-          -- continue with this tx job
-          waitSTM
-
     doSTM :: Int -> IO Bool
     doSTM !rtc = do
 

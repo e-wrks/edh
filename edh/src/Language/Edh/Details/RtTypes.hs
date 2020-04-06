@@ -469,8 +469,8 @@ type EdhProc = EdhMonad (STM ())
 
 -- | The states of a program
 data EdhProgState = EdhProgState {
-    edh'fork'queue :: !(TQueue (Either (IO ()) EdhTxTask))
-    , edh'task'queue :: !(TQueue EdhTxTask)
+      edh'fork'queue :: !(TQueue EdhTxTask)
+    , edh'task'queue :: !(TQueue (Either (IO ()) EdhTxTask))
     , edh'perceivers :: !(TVar [PerceiveRecord])
     , edh'defers :: !(TVar [DeferRecord])
     , edh'in'tx :: !Bool
@@ -518,13 +518,12 @@ exitEdhSTM !pgs !exit !val =
 exitEdhSTM' :: EdhProgState -> EdhProcExit -> OriginalValue -> STM ()
 exitEdhSTM' !pgs !exit !result = if edh'in'tx pgs
   then join $ runReaderT (exit result) pgs
-  else writeTQueue (edh'task'queue pgs) $ EdhTxTask pgs False result exit
+  else writeTQueue (edh'task'queue pgs) $ Right $ EdhTxTask pgs result exit
 {-# INLINE exitEdhSTM' #-}
 
 -- | An atomic task, an Edh program is composed of many this kind of tasks.
 data EdhTxTask = EdhTxTask {
     edh'task'pgs :: !EdhProgState
-    , edh'task'wait :: !Bool
     , edh'task'input :: !OriginalValue
     , edh'task'job :: !(OriginalValue -> EdhProc)
   }

@@ -62,35 +62,6 @@ subscribeEvents (EventSink _ !seqn !mrv !bcc !subc) = do
           return (subChan, Just lv)
 
 
--- | Fork a new Edh thread to run the specified event producer, but hold the 
--- production until current thread has later started consuming events from the
--- sink returned here.
-launchEventProducer :: EdhProcExit -> EventSink -> EdhProc -> EdhProc
-launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerProg = do
-  pgsConsumer <- ask
-  let !pgsLaunch = pgsConsumer { edh'in'tx = False }
-  contEdhSTM $ do
-    subcBefore <- readTVar subc
-    writeTQueue (edh'fork'queue pgsLaunch) $ Right EdhTxTask
-      { edh'task'pgs   = pgsLaunch
-      , edh'task'wait  = True
-      , edh'task'input = wuji pgsLaunch
-      , edh'task'job   = const $ do
-                           pgsProducer <- ask
-                           contEdhSTM $ do
-                             subcNow <- readTVar subc
-                             when (subcNow == subcBefore) retry
-                             writeTQueue
-                               (edh'task'queue pgsProducer)
-                               EdhTxTask { edh'task'pgs   = pgsProducer
-                                         , edh'task'wait  = False
-                                         , edh'task'input = wuji pgsProducer
-                                         , edh'task'job   = const producerProg
-                                         }
-      }
-    exitEdhSTM pgsConsumer exit $ EdhSink sink
-
-
 -- | Publish (post) an event to a sink
 publishEvent :: EventSink -> EdhValue -> STM ()
 publishEvent (EventSink _ !seqn !mrv !chan _) val = do

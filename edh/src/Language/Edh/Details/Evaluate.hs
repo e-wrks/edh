@@ -41,15 +41,32 @@ import           Language.Edh.Details.Utils
 
 
 -- | Fork a GHC thread to run the specified Edh proc concurrently
-forkEdh :: EdhProcExit -> EdhProc -> EdhProc
-forkEdh !exit !p = ask >>= \pgs -> contEdhSTM $ if edh'in'tx pgs
+forkEdh :: EdhProgState -> EdhProc -> STM ()
+forkEdh !pgs !p = if edh'in'tx pgs
   then throwEdhSTM pgs UsageError "You don't fork within a transaction"
-  else do
-    writeTQueue (edh'fork'queue pgs) $ Right $ EdhTxTask pgs
-                                                         False
-                                                         (wuji pgs)
-                                                         (const p)
-    exitEdhSTM pgs exit nil
+  else writeTQueue (edh'fork'queue pgs) $ EdhTxTask pgs (wuji pgs) (const p)
+
+
+-- | Fork a new Edh thread to run the specified event producer, but hold the 
+-- production until current thread has later started consuming events from the
+-- sink returned here.
+launchEventProducer :: EdhProcExit -> EventSink -> EdhProc -> EdhProc
+launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerProg = do
+  pgsConsumer <- ask
+  let !pgsLaunch = pgsConsumer { edh'in'tx = False }
+  contEdhSTM $ do
+    subcBefore <- readTVar subc
+    void $ forkEdh pgsLaunch $ do
+      pgsProducer <- ask
+      contEdhSTM
+        $ edhPerformIO
+            pgsProducer
+            (atomically $ do
+              subcNow <- readTVar subc
+              when (subcNow == subcBefore) retry
+            )
+        $ \_ -> runEdhProc pgsProducer producerProg
+    exitEdhSTM pgsConsumer exit $ EdhSink sink
 
 
 parseEdh :: EdhWorld -> String -> Text -> STM (Either ParserError [StmtSrc])
@@ -202,24 +219,23 @@ evalStmt' !stmt !exit = do
 
       CaseExpr tgtExpr branchesExpr ->
         evalExpr tgtExpr $ \(OriginalValue !val _ _) ->
-          forkEdh exit
-            $ contEdhSTM
-            $ runEdhProc pgs { edh'context = ctx { contextMatch = val } }
-             -- eval the branch(es) expr with the case target being the 'contextMatch'
+          contEdhSTM
+            $ forkEdh pgs { edh'context = ctx { contextMatch = val } }
+            -- eval the branch(es) expr with the case target being the 'contextMatch'
             $ evalCaseBlock branchesExpr edhEndOfProc
 
       (CallExpr procExpr argsSndr) ->
         evalExpr procExpr $ \(OriginalValue !callee'val _ !callee'that) ->
           contEdhSTM
             $ edhMakeCall pgs callee'val callee'that argsSndr
-            $ \mkCall -> runEdhProc pgs $ forkEdh exit (mkCall edhEndOfProc)
+            $ \mkCall -> forkEdh pgs (mkCall edhEndOfProc)
 
       (ForExpr argsRcvr iterExpr doExpr) ->
         contEdhSTM
           $ edhForLoop pgs argsRcvr iterExpr doExpr (const $ return ())
-          $ \runLoop -> runEdhProc pgs $ forkEdh exit (runLoop edhEndOfProc)
+          $ \runLoop -> forkEdh pgs (runLoop edhEndOfProc)
 
-      _ -> forkEdh exit $ evalExpr expr edhEndOfProc
+      _ -> contEdhSTM $ forkEdh pgs $ evalExpr expr edhEndOfProc
 
     DeferStmt expr -> do
       let schedDefered :: EdhProgState -> EdhProc -> STM ()
@@ -1239,41 +1255,22 @@ resolveEdhAttrAddr !pgs (SymbolicAttr !symName) !exit =
 {-# INLINE resolveEdhAttrAddr #-}
 
 
--- | Instruct the Edh thread driver to not auto retry the specified stm
--- action, i.e. let stm retry it automatically (e.g. to blocking read a 'TChan')
+-- | Wait an stm action without tracking the retries
 waitEdhSTM :: EdhProgState -> STM EdhValue -> (EdhValue -> STM ()) -> STM ()
 waitEdhSTM !pgs !act !exit = if edh'in'tx pgs
   then throwEdhSTM pgs UsageError "You don't wait stm from within a transaction"
-  else writeTQueue
-    (edh'task'queue pgs)
-    EdhTxTask
-      { edh'task'pgs   = pgs
-      , edh'task'wait  = True
-      , edh'task'input = wuji pgs
-      , edh'task'job   = \_ -> contEdhSTM $ act >>= \val -> writeTQueue
-                           (edh'task'queue pgs)
-                           EdhTxTask { edh'task'pgs   = pgs
-                                     , edh'task'wait  = False
-                                     , edh'task'input = wuji pgs
-                                     , edh'task'job = \_ -> contEdhSTM $ exit val
-                                     }
-      }
-
+  else edhPerformIO pgs (atomically act) exit
 
 -- | Perform a synchronous IO action from an Edh thread
 edhPerformIO :: EdhProgState -> IO a -> (a -> STM ()) -> STM ()
 edhPerformIO !pgs !act !exit = if edh'in'tx pgs
-  then throwEdhSTM pgs UsageError "You don't wait IO within a transaction"
-  else do
-    !ioResult <- newEmptyTMVar
-    writeTQueue (edh'fork'queue pgs)
-      $ Left
-      $ catch (act >>= atomically . void . tryPutTMVar ioResult . Right)
-      $ \(e :: SomeException) -> atomically $ putTMVar ioResult (Left e)
-    writeTQueue (edh'task'queue pgs) $ EdhTxTask pgs True (wuji pgs) $ \_ ->
-      contEdhSTM $ readTMVar ioResult >>= \case
-        Right v -> exit v
-        Left  e -> edhErrorFrom pgs e $ \exv -> edhThrowSTM pgs exv
+  then throwEdhSTM pgs UsageError "You don't perform IO within a transaction"
+  else
+    writeTQueue (edh'task'queue pgs)
+    $ Left
+    $ catch (act >>= atomically . exit)
+    $ \(e :: SomeException) ->
+        atomically $ edhErrorFrom pgs e $ \exv -> edhThrowSTM pgs exv
 
 
 -- | Convert an arbitrary exception to Edh error
@@ -1281,7 +1278,8 @@ edhErrorFrom :: EdhProgState -> SomeException -> (EdhValue -> STM ()) -> STM ()
 edhErrorFrom !pgs !e !exit = case fromException e :: Maybe EdhError of
   Just err -> case err of
     EdhError et _ _ -> getEdhErrClass pgs et >>= withErrCls
-    EdhPeerError{}  -> _getEdhErrClass pgs (AttrByName "PeerError") >>= withErrCls
+    EdhPeerError{} ->
+      _getEdhErrClass pgs (AttrByName "PeerError") >>= withErrCls
     EdhIOError{} -> _getEdhErrClass pgs (AttrByName "IOError") >>= withErrCls
     ProgramHalt{} ->
       _getEdhErrClass pgs (AttrByName "ProgramHalt") >>= withErrCls
