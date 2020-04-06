@@ -4,8 +4,6 @@ module Language.Edh.Runtime where
 import           Prelude
 -- import           Debug.Trace
 
-import           GHC.Conc                       ( unsafeIOToSTM )
-
 import           Control.Exception
 import           Control.Monad.Except
 import           Control.Monad.Reader
@@ -13,8 +11,6 @@ import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
 import           Data.Unique
-import           Data.List.NonEmpty             ( NonEmpty(..) )
-import qualified Data.List.NonEmpty            as NE
 import qualified Data.ByteString               as B
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
@@ -112,13 +108,13 @@ createEdhWorld !console = liftIO $ do
         -- assign arbitrary attrs to exceptions for informative
         [ (AttrByName nm, ) <$> mkHostClass rootScope nm False hc
         | (nm, hc) <- -- cross check with 'throwEdhSTM' for type safety
-          [ ("ProgramHalt" , edhErrorCtor edhProgramHalt)
-          , ("IOError"  , notFromEdhCtor)
-          , ("Exception"   , edhErrorCtor $ edhSomeErr EdhException)
-          , ("PackageError", edhErrorCtor $ edhSomeErr PackageError)
-          , ("ParseError"  , edhErrorCtor $ edhSomeErr ParseError)
-          , ("EvalError"   , edhErrorCtor $ edhSomeErr EvalError)
-          , ("UsageError"  , edhErrorCtor $ edhSomeErr UsageError)
+          [ ("ProgramHalt" , errCtor edhProgramHalt)
+          , ("IOError"     , notFromEdhCtor)
+          , ("Exception"   , errCtor $ edhSomeErr EdhException)
+          , ("PackageError", errCtor $ edhSomeErr PackageError)
+          , ("ParseError"  , errCtor $ edhSomeErr ParseError)
+          , ("EvalError"   , errCtor $ edhSomeErr EvalError)
+          , ("UsageError"  , errCtor $ edhSomeErr UsageError)
           ]
         ]
       updateEntityAttrs pgs rootEntity errClasses
@@ -139,28 +135,16 @@ createEdhWorld !console = liftIO $ do
   notFromEdhCtor _ _ _ !exit = exit $ toDyn nil
   -- wrap a Haskell error data constructor as a host error object contstructor,
   -- used to define an error class in Edh
-  edhErrorCtor :: (ArgsPack -> EdhCallContext -> EdhError) -> EdhHostCtor
-  edhErrorCtor !hec !pgs apk@(ArgsPack _ !kwargs) !obs !ctorExit = do
+  errCtor :: (ArgsPack -> EdhCallContext -> EdhError) -> EdhHostCtor
+  errCtor !hec !pgs apk@(ArgsPack _ !kwargs) !obs !ctorExit = do
     let !unwind = case Map.lookup "unwind" kwargs of
           Just (EdhDecimal d) -> case decimalToInteger d of
             Just n -> fromIntegral n
             _      -> 1
           _ -> 1
-        !scope = contextScope $ edh'context pgs
-        !cc    = getEdhCallContext unwind pgs
-        !he    = hec apk cc
-        __repr__ :: EdhProcedure
-        __repr__ _ !exit = exitEdhProc exit $ EdhString $ T.pack $ show he
-    methods <- sequence
-      [ (AttrByName nm, ) <$> mkHostProc scope vc nm hp args
-      | (nm, vc, hp, args) <-
-        [("__repr__", EdhMethod, __repr__, PackReceiver [])]
-      ]
-    writeTVar obs
-      $  Map.fromList
-      $  methods -- todo expose more attrs to aid handling
-      ++ [(AttrByName "details", EdhArgsPack apk)]
-    ctorExit $ toDyn he
+        !cc = getEdhCallContext unwind pgs
+        !he = hec apk cc
+    edhErrorCtor (toException he) pgs apk obs ctorExit
 
 
 declareEdhOperators :: EdhWorld -> Text -> [(OpSymbol, Precedence)] -> STM ()
@@ -226,87 +210,10 @@ installEdhModule !world !moduId !preInstall = liftIO $ do
   return modu
 
 
-mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
-mkIntrinsicOp !world !opSym !iop = do
-  u <- unsafeIOToSTM newUnique
-  Map.lookup opSym <$> readTMVar (worldOperators world) >>= \case
-    Nothing ->
-      throwSTM
-        $ EdhError
-            UsageError
-            ("No precedence declared in the world for operator: " <> opSym)
-        $ EdhCallContext "<edh>" []
-    Just (preced, _) -> return $ EdhIntrOp preced $ IntrinOpDefi u opSym iop
-
-
-mkHostProc
-  :: Scope
-  -> (ProcDefi -> EdhValue)
-  -> Text
-  -> EdhProcedure
-  -> ArgsReceiver
-  -> STM EdhValue
-mkHostProc !scope !vc !nm !p !args = do
-  u <- unsafeIOToSTM newUnique
-  return $ vc ProcDefi
-    { procedure'uniq = u
-    , procedure'lexi = Just scope
-    , procedure'decl = ProcDecl { procedure'name = nm
-                                , procedure'args = args
-                                , procedure'body = Right p
-                                }
-    }
-
-
-type EdhHostCtor
-  =  EdhProgState
-  -> ArgsPack -- ctor args, if __init__() is provided, will go there too
-  -> TVar (Map.HashMap AttrKey EdhValue)  -- out-of-band attr store
-  -> (Dynamic -> STM ())  -- in-band data to be written to entity store
-  -> STM ()
-
-mkHostClass
-  :: Scope -- ^ outer lexical scope
-  -> Text  -- ^ class name
-  -> Bool  -- ^ write protect the out-of-band attribute store
-  -> EdhHostCtor
-  -> STM EdhValue
-mkHostClass !scope !nm !writeProtected !hc = do
-  classUniq <- unsafeIOToSTM newUnique
-  let
-    !cls = ProcDefi
-      { procedure'uniq = classUniq
-      , procedure'lexi = Just scope
-      , procedure'decl = ProcDecl { procedure'name = nm
-                                  , procedure'args = PackReceiver []
-                                  , procedure'body = Right ctor
-                                  }
-      }
-    ctor :: EdhProcedure
-    ctor !apk !exit = do
-      -- note: cross check logic here with `createEdhObject`
-      pgs <- ask
-      contEdhSTM $ do
-        (ent, obs) <- createSideEntity writeProtected
-        !newThis   <- viewAsEdhObject ent cls []
-        let ctx       = edh'context pgs
-            pgsCtor   = pgs { edh'context = ctorCtx }
-            ctorCtx   = ctx { callStack = ctorScope :| NE.tail (callStack ctx) }
-            ctorScope = Scope { scopeEntity      = ent
-                              , thisObject       = newThis
-                              , thatObject       = newThis
-                              , scopeProc        = cls
-                              , scopeCaller      = contextStmt ctx
-                              , exceptionHandler = defaultEdhExcptHndlr
-                              }
-        hc pgsCtor apk obs $ \esd -> do
-          writeTVar (entity'store ent) esd
-          exitEdhSTM pgs exit $ EdhObject newThis
-  return $ EdhClass cls
-
-
-haltEdhProgram :: EdhValue -> STM ()
-haltEdhProgram !hv = throwSTM $ ProgramHalt $ toDyn hv
+haltEdhProgram :: EdhProgState -> EdhValue -> STM ()
+haltEdhProgram !pgs !hv =
+  edhErrorFrom pgs (toException $ ProgramHalt $ toDyn hv)
+    $ \exv -> edhThrowSTM pgs exv
 
 
 runEdhProgram :: MonadIO m => Context -> EdhProc -> m (Either EdhError EdhValue)

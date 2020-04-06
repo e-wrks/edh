@@ -7,6 +7,7 @@ import           Prelude
 import           GHC.Conc                       ( unsafeIOToSTM )
 import           System.IO.Unsafe
 
+import           Control.Exception
 import           Control.Monad.Except
 import           Control.Monad.Reader
 
@@ -1243,3 +1244,100 @@ edhTypeOf EdhReturn{}         = ReturnType
 edhTypeOf EdhSink{}           = SinkType
 edhTypeOf (EdhNamedValue _ v) = edhTypeOf v
 edhTypeOf EdhExpr{}           = ExprType
+
+
+mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
+mkIntrinsicOp !world !opSym !iop = do
+  u <- unsafeIOToSTM newUnique
+  Map.lookup opSym <$> readTMVar (worldOperators world) >>= \case
+    Nothing ->
+      throwSTM
+        $ EdhError
+            UsageError
+            ("No precedence declared in the world for operator: " <> opSym)
+        $ EdhCallContext "<edh>" []
+    Just (preced, _) -> return $ EdhIntrOp preced $ IntrinOpDefi u opSym iop
+
+
+mkHostProc
+  :: Scope
+  -> (ProcDefi -> EdhValue)
+  -> Text
+  -> EdhProcedure
+  -> ArgsReceiver
+  -> STM EdhValue
+mkHostProc !scope !vc !nm !p !args = do
+  u <- unsafeIOToSTM newUnique
+  return $ vc ProcDefi
+    { procedure'uniq = u
+    , procedure'lexi = Just scope
+    , procedure'decl = ProcDecl { procedure'name = nm
+                                , procedure'args = args
+                                , procedure'body = Right p
+                                }
+    }
+
+
+type EdhHostCtor
+  =  EdhProgState
+  -> ArgsPack -- ctor args, if __init__() is provided, will go there too
+  -> TVar (Map.HashMap AttrKey EdhValue)  -- out-of-band attr store
+  -> (Dynamic -> STM ())  -- in-band data to be written to entity store
+  -> STM ()
+
+mkHostClass
+  :: Scope -- ^ outer lexical scope
+  -> Text  -- ^ class name
+  -> Bool  -- ^ write protect the out-of-band attribute store
+  -> EdhHostCtor
+  -> STM EdhValue
+mkHostClass !scope !nm !writeProtected !hc = do
+  classUniq <- unsafeIOToSTM newUnique
+  let
+    !cls = ProcDefi
+      { procedure'uniq = classUniq
+      , procedure'lexi = Just scope
+      , procedure'decl = ProcDecl { procedure'name = nm
+                                  , procedure'args = PackReceiver []
+                                  , procedure'body = Right ctor
+                                  }
+      }
+    ctor :: EdhProcedure
+    ctor !apk !exit = do
+      -- note: cross check logic here with `createEdhObject`
+      pgs <- ask
+      contEdhSTM $ do
+        (ent, obs) <- createSideEntity writeProtected
+        !newThis   <- viewAsEdhObject ent cls []
+        let ctx       = edh'context pgs
+            pgsCtor   = pgs { edh'context = ctorCtx }
+            ctorCtx   = ctx { callStack = ctorScope :| NE.tail (callStack ctx) }
+            ctorScope = Scope { scopeEntity      = ent
+                              , thisObject       = newThis
+                              , thatObject       = newThis
+                              , scopeProc        = cls
+                              , scopeCaller      = contextStmt ctx
+                              , exceptionHandler = defaultEdhExcptHndlr
+                              }
+        hc pgsCtor apk obs $ \esd -> do
+          writeTVar (entity'store ent) esd
+          exitEdhSTM pgs exit $ EdhObject newThis
+  return $ EdhClass cls
+
+
+edhErrorCtor :: SomeException -> EdhHostCtor
+edhErrorCtor !e !pgs !apk !obs !ctorExit = do
+  let __repr__ :: EdhProcedure
+      __repr__ _ !exit = exitEdhProc exit $ EdhString $ T.pack $ show e
+  methods <- sequence
+    [ (AttrByName nm, ) <$> mkHostProc scope vc nm hp args
+    | (nm, vc, hp, args) <- [("__repr__", EdhMethod, __repr__, PackReceiver [])]
+    ]
+  modifyTVar' obs
+    $  Map.union
+    $  Map.fromList
+    $  methods -- todo expose more attrs to aid handling
+    ++ [(AttrByName "details", EdhArgsPack apk)]
+  ctorExit $ toDyn e
+  where !scope = contextScope $ edh'context pgs
+

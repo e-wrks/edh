@@ -87,6 +87,8 @@ module Language.Edh.EHI
   , edhThrowSTM
   , edhCatchSTM
   , throwEdhSTM
+  , edhErrorFrom
+  , getEdhErrClass
     -- ** CPS helpers
   , runEdhProc
   , contEdhSTM
@@ -97,10 +99,9 @@ module Language.Edh.EHI
   , seqcontSTM
   , mapcontSTM
     -- ** Sync utilities
+  , edhPerformIO
   , forkEdh
   , waitEdhSTM
-  , edhWaitIO
-  , edhWaitIOSTM
   , edhNop
   , edhEndOfProc
     -- ** Reflective manipulation

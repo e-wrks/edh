@@ -71,7 +71,7 @@ evalEdh !srcName !srcCode !exit = do
   let ctx   = edh'context pgs
       world = contextWorld ctx
   contEdhSTM $ parseEdh world srcName srcCode >>= \case
-    Left !err -> _getEdhErrClass pgs (AttrByName "ParseError") >>= \ec ->
+    Left !err -> getEdhErrClass pgs ParseError >>= \ec ->
       runEdhProc pgs
         $ createEdhObject
             ec
@@ -1259,12 +1259,10 @@ waitEdhSTM !pgs !act !exit = if edh'in'tx pgs
                                      }
       }
 
--- | Blocking wait an asynchronous IO action from current Edh thread
-edhWaitIO :: EdhProcExit -> IO EdhValue -> EdhProc
-edhWaitIO !exit !act =
-  ask >>= \pgs -> contEdhSTM $ edhWaitIOSTM pgs act $ exitEdhSTM pgs exit
-edhWaitIOSTM :: EdhProgState -> IO a -> (a -> STM ()) -> STM ()
-edhWaitIOSTM !pgs !act !exit = if edh'in'tx pgs
+
+-- | Perform a synchronous IO action from an Edh thread
+edhPerformIO :: EdhProgState -> IO a -> (a -> STM ()) -> STM ()
+edhPerformIO !pgs !act !exit = if edh'in'tx pgs
   then throwEdhSTM pgs UsageError "You don't wait IO within a transaction"
   else do
     !ioResult <- newEmptyTMVar
@@ -1275,18 +1273,40 @@ edhWaitIOSTM !pgs !act !exit = if edh'in'tx pgs
     writeTQueue (edh'task'queue pgs) $ EdhTxTask pgs True (wuji pgs) $ \_ ->
       contEdhSTM $ readTMVar ioResult >>= \case
         Right v -> exit v
-        Left  e -> case fromException e of
-          Just ex@EdhError{} -> throwSTM ex
-          _ -> _getEdhErrClass pgs (AttrByName "IOError") >>= \ec ->
-            runEdhProc pgs
-              $ createEdhObject ec (ArgsPack [] Map.empty)
-              $ \(OriginalValue !exv _ _) -> case exv of
-                  EdhObject !exo -> contEdhSTM $ do
-                    writeTVar (entity'store $ objEntity exo) $ toDyn e
-                    runEdhProc pgs $ edhThrow exv
-                  _ -> error "bug: createEdhObject returned non-object"
+        Left  e -> edhErrorFrom pgs e $ \exv -> edhThrowSTM pgs exv
 
 
+-- | Convert an arbitrary exception to Edh error
+edhErrorFrom :: EdhProgState -> SomeException -> (EdhValue -> STM ()) -> STM ()
+edhErrorFrom !pgs !e !exit = case fromException e of
+  Just (err :: EdhError) -> case err of
+    EdhError et _ _ -> getEdhErrClass pgs et >>= withErrCls
+    ProgramHalt{} ->
+      _getEdhErrClass pgs (AttrByName "ProgramHalt") >>= withErrCls
+    EdhIOError{} -> _getEdhErrClass pgs (AttrByName "IOError") >>= withErrCls
+  _ -> _getEdhErrClass pgs (AttrByName "IOError") >>= withErrCls
+ where
+  withErrCls :: Class -> STM ()
+  withErrCls !ec = do
+    (ent, obs) <- createSideEntity False
+    !exo       <- viewAsEdhObject ent ec []
+    edhErrorCtor e pgs (ArgsPack [] Map.empty) obs $ \esd -> do
+      writeTVar (entity'store ent) esd
+      exit $ EdhObject exo
+
+
+-- | Get Edh class for an error tag
+getEdhErrClass :: EdhProgState -> EdhErrorTag -> STM Class
+getEdhErrClass !pgs !et = _getEdhErrClass pgs eck
+ where
+  eck = AttrByName $ ecn et
+  ecn :: EdhErrorTag -> Text
+  ecn = \case -- cross check with 'createEdhWorld' for type safety
+    EdhException -> "Exception"
+    PackageError -> "PackageError"
+    ParseError   -> "ParseError"
+    EvalError    -> "EvalError"
+    UsageError   -> "UsageError"
 _getEdhErrClass :: EdhProgState -> AttrKey -> STM Class
 _getEdhErrClass !pgs !eck =
   lookupEntityAttr pgs
@@ -1305,6 +1325,7 @@ _getEdhErrClass !pgs !eck =
                   )
               $ getEdhCallContext 0 pgs
 
+
 -- | Throw a tagged error from an Edh proc
 --
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
@@ -1314,18 +1335,10 @@ throwEdh !et !msg = ask >>= \pgs -> contEdhSTM $ throwEdhSTM pgs et msg
 
 -- | Throw a tagged error from the stm operation of an Edh proc
 throwEdhSTM :: EdhProgState -> EdhErrorTag -> Text -> STM ()
-throwEdhSTM !pgs !et !msg = _getEdhErrClass pgs (ecKey et) >>= \ec ->
+throwEdhSTM !pgs !et !msg = getEdhErrClass pgs et >>= \ec ->
   runEdhProc pgs
     $ constructEdhObject ec (ArgsPack [EdhString msg] Map.empty)
-    $ \(OriginalValue !exo _ _) -> ask >>= contEdhSTM . edhThrowSTM exo
- where
-  ecKey :: EdhErrorTag -> AttrKey
-  ecKey = \case -- cross check with 'createEdhWorld' for type safety
-    EdhException -> AttrByName "Exception"
-    PackageError -> AttrByName "PackageError"
-    ParseError   -> AttrByName "ParseError"
-    EvalError    -> AttrByName "EvalError"
-    UsageError   -> AttrByName "UsageError"
+    $ \(OriginalValue !exo _ _) -> ask >>= contEdhSTM . flip edhThrowSTM exo
 
 
 -- | Throw arbitrary value from an Edh proc
@@ -1333,9 +1346,9 @@ throwEdhSTM !pgs !et !msg = _getEdhErrClass pgs (ecKey et) >>= \ec ->
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent `EdhProc` actions following it, be cautious.
 edhThrow :: EdhValue -> EdhProc
-edhThrow !exv = ask >>= contEdhSTM . edhThrowSTM exv
-edhThrowSTM :: EdhValue -> EdhProgState -> STM ()
-edhThrowSTM !exv !pgs = do
+edhThrow !exv = ask >>= contEdhSTM . flip edhThrowSTM exv
+edhThrowSTM :: EdhProgState -> EdhValue -> STM ()
+edhThrowSTM !pgs !exv = do
   let propagateExc :: EdhValue -> [Scope] -> STM ()
       propagateExc exv' [] = edhErrorUncaught exv'
       propagateExc exv' (frame : stack) =
