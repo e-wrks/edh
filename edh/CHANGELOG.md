@@ -7,6 +7,7 @@
   - `throw` keyword /w syntax unchanged
   - use (`$=>`) as `catch` and (`@=>`) as `finally`
   - originally planned `try`/`catch`/`finally` keywords and syntax dropped
+  - exception classes refactored for Edh code to easily handle host errors
 - reactor procedure dropped, changed to `perceive` construct, same feature
   but different syntax that breaks old code
 - the `runtime` module and its host artifacts from default batteries are
