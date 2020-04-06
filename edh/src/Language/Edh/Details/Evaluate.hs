@@ -1375,9 +1375,9 @@ edhThrowSTM !pgs !exv = do
   edhErrorUncaught !exv' = case exv' of
     EdhObject exo -> do
       esd <- readTVar $ entity'store $ objEntity exo
-      case fromDynamic esd :: Maybe EdhError of
-        Just !edhErr -> -- TODO replace cc in err if is empty here ?
-          throwSTM edhErr
+      case fromDynamic esd :: Maybe SomeException of
+        Just !e -> -- TODO replace cc in err if is empty here ?
+          throwSTM e
         Nothing -> -- TODO support magic method to coerce as exception ?
           throwSTM $ EdhError EvalError (T.pack $ show exv') $ getEdhCallContext
             0
