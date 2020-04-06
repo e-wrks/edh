@@ -110,6 +110,7 @@ createEdhWorld !console = liftIO $ do
         | (nm, hc) <- -- cross check with 'throwEdhSTM' for type safety
           [ ("ProgramHalt" , errCtor edhProgramHalt)
           , ("IOError"     , notFromEdhCtor)
+          , ("PeerError"   , notFromEdhCtor)
           , ("Exception"   , errCtor $ edhSomeErr EdhException)
           , ("PackageError", errCtor $ edhSomeErr PackageError)
           , ("ParseError"  , errCtor $ edhSomeErr ParseError)

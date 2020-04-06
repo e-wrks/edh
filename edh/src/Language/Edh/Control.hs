@@ -69,12 +69,18 @@ data EdhError =
     -- into the Edh world
     | EdhIOError !Dynamic
 
+    -- | error occurred remotely, detailed text captured for display
+    -- on local site
+    | EdhPeerError !Text !Text
+
     -- | tagged error with msg and ctx
     | EdhError !EdhErrorTag !Text !EdhCallContext
   deriving (Typeable)
 instance Show EdhError where
   show (ProgramHalt _  ) = "Edh⏹️Halt"
   show (EdhIOError  ioe) = show ioe
+  show (EdhPeerError peerSite details) = --
+    "🏗️ " <> T.unpack peerSite <> "\n" <> T.unpack details
   show (EdhError EdhException !msg !cc) = --
     "Đ\n" <> show cc <> T.unpack msg
   show (EdhError PackageError !msg !cc) = --

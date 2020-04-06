@@ -1278,13 +1278,14 @@ edhPerformIO !pgs !act !exit = if edh'in'tx pgs
 
 -- | Convert an arbitrary exception to Edh error
 edhErrorFrom :: EdhProgState -> SomeException -> (EdhValue -> STM ()) -> STM ()
-edhErrorFrom !pgs !e !exit = case fromException e of
-  Just (err :: EdhError) -> case err of
+edhErrorFrom !pgs !e !exit = case fromException e :: Maybe EdhError of
+  Just err -> case err of
     EdhError et _ _ -> getEdhErrClass pgs et >>= withErrCls
+    EdhPeerError{}  -> _getEdhErrClass pgs (AttrByName "PeerError") >>= withErrCls
+    EdhIOError{} -> _getEdhErrClass pgs (AttrByName "IOError") >>= withErrCls
     ProgramHalt{} ->
       _getEdhErrClass pgs (AttrByName "ProgramHalt") >>= withErrCls
-    EdhIOError{} -> _getEdhErrClass pgs (AttrByName "IOError") >>= withErrCls
-  _ -> _getEdhErrClass pgs (AttrByName "IOError") >>= withErrCls
+  Nothing -> _getEdhErrClass pgs (AttrByName "IOError") >>= withErrCls
  where
   withErrCls :: Class -> STM ()
   withErrCls !ec = do
