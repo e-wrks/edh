@@ -2569,27 +2569,3 @@ edhValueRepr (EdhNamedValue !n !v) !exit =
 -- repr of other values simply as to show itself
 edhValueRepr !v !exit = exitEdhProc exit $ EdhString $ T.pack $ show v
 
-
-data ArgsPackParser a = ArgsPackParser {
-    pos'parsers :: [EdhValue -> a -> Either Text a]
-    , kw'parsers :: Map.HashMap AttrName (EdhValue ->  a -> Either Text a)
-  }
-parseArgsPack :: a -> ArgsPackParser a -> ArgsPack -> Either Text a
-parseArgsPack defVal (ArgsPackParser posParsers kwParsers) (ArgsPack posArgs kwArgs)
-  = go posParsers kwParsers posArgs (Map.toList kwArgs) defVal
- where
-  go
-    :: [EdhValue -> a -> Either Text a]
-    -> Map.HashMap AttrName (EdhValue -> a -> Either Text a)
-    -> [EdhValue]
-    -> [(AttrName, EdhValue)]
-    -> a
-    -> Either Text a
-  go _  _    []      []                     result = Right result
-  go [] _    (_ : _) _                      _      = Left "too many args"
-  go _  kwps []      ((kwn, kwv) : kwargs') result = case Map.lookup kwn kwps of
-    Nothing  -> Left $ "unknown arg: " <> kwn
-    Just kwp -> kwp kwv result >>= go [] kwps [] kwargs'
-  go (p : posParsers') kwps (arg : args') kwargs result =
-    p arg result >>= go posParsers' kwps args' kwargs
-

@@ -25,6 +25,7 @@ import           Data.Lossless.Decimal          ( decimalToInteger )
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
+import           Language.Edh.Details.Utils
 
 
 -- | operator (<|)
