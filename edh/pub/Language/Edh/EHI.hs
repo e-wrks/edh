@@ -174,6 +174,8 @@ module Language.Edh.EHI
   , Symbol(..)
   , Dict(..)
   , ItemKey
+  , showEdhDict
+  , setDictItem
   , List(..)
   , ArgsPack(..)
   , ProcDefi(..)
