@@ -218,24 +218,28 @@ evalStmt' !stmt !exit = do
     GoStmt expr -> case expr of
 
       CaseExpr tgtExpr branchesExpr ->
-        evalExpr tgtExpr $ \(OriginalValue !val _ _) ->
-          contEdhSTM
-            $ forkEdh pgs { edh'context = ctx { contextMatch = val } }
-            -- eval the branch(es) expr with the case target being the 'contextMatch'
+        evalExpr tgtExpr $ \(OriginalValue !val _ _) -> contEdhSTM $ do
+          forkEdh pgs { edh'context = ctx { contextMatch = val } }
+            -- eval the branch(es) expr with the case target being the
+            -- 'contextMatch'
             $ evalCaseBlock branchesExpr edhEndOfProc
+          exitEdhSTM pgs exit nil
 
       (CallExpr procExpr argsSndr) ->
         evalExpr procExpr $ \(OriginalValue !callee'val _ !callee'that) ->
-          contEdhSTM
-            $ edhMakeCall pgs callee'val callee'that argsSndr
-            $ \mkCall -> forkEdh pgs (mkCall edhEndOfProc)
+          contEdhSTM $ do
+            edhMakeCall pgs callee'val callee'that argsSndr
+              $ \mkCall -> forkEdh pgs (mkCall edhEndOfProc)
+            exitEdhSTM pgs exit nil
 
-      (ForExpr argsRcvr iterExpr doExpr) ->
-        contEdhSTM
-          $ edhForLoop pgs argsRcvr iterExpr doExpr (const $ return ())
+      (ForExpr argsRcvr iterExpr doExpr) -> contEdhSTM $ do
+        edhForLoop pgs argsRcvr iterExpr doExpr (const $ return ())
           $ \runLoop -> forkEdh pgs (runLoop edhEndOfProc)
+        exitEdhSTM pgs exit nil
 
-      _ -> contEdhSTM $ forkEdh pgs $ evalExpr expr edhEndOfProc
+      _ -> contEdhSTM $ do
+        forkEdh pgs $ evalExpr expr edhEndOfProc
+        exitEdhSTM pgs exit nil
 
     DeferStmt expr -> do
       let schedDefered :: EdhProgState -> EdhProc -> STM ()
