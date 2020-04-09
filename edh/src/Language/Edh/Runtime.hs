@@ -188,33 +188,9 @@ declareEdhOperators world declLoc opps = do
       else return (prevPrec, prevDeclLoc)
 
 
-createEdhModule :: MonadIO m => EdhWorld -> ModuleId -> String -> m Object
-createEdhModule !world !moduId !srcName =
-  liftIO $ atomically $ createEdhModule' world moduId srcName
-
-
-installEdhModule
-  :: MonadIO m
-  => EdhWorld
-  -> ModuleId
-  -> (EdhProgState -> Object -> STM ())
-  -> m Object
-installEdhModule !world !moduId !preInstall = liftIO $ do
-  modu <- createEdhModule world moduId "<host-code>"
-  void $ runEdhProgram' (worldContext world) $ do
-    pgs <- ask
-    contEdhSTM $ do
-      preInstall pgs modu
-      moduSlot <- newTMVar $ EdhObject modu
-      moduMap  <- takeTMVar (worldModules world)
-      putTMVar (worldModules world) $ Map.insert moduId moduSlot moduMap
-  return modu
-
-
 haltEdhProgram :: EdhProgState -> EdhValue -> STM ()
-haltEdhProgram !pgs !hv =
-  toEdhError pgs (toException $ ProgramHalt $ toDyn hv)
-    $ \exv -> edhThrowSTM pgs exv
+haltEdhProgram !pgs !hv = toEdhError pgs (toException $ ProgramHalt $ toDyn hv)
+  $ \exv -> edhThrowSTM pgs exv
 
 
 runEdhProgram :: MonadIO m => Context -> EdhProc -> m (Either EdhError EdhValue)
@@ -231,13 +207,43 @@ runEdhProgram' !ctx !prog = liftIO $ do
     Just (Left  e) -> throwIO e
 
 
-runEdhModule
-  :: MonadIO m => EdhWorld -> FilePath -> m (Either EdhError EdhValue)
-runEdhModule !world !impPath =
-  liftIO $ tryJust edhKnownError $ runEdhModule' world impPath
+createEdhModule :: MonadIO m => EdhWorld -> ModuleId -> String -> m Object
+createEdhModule !world !moduId !srcName =
+  liftIO $ atomically $ createEdhModule' world moduId srcName
 
-runEdhModule' :: MonadIO m => EdhWorld -> FilePath -> m EdhValue
-runEdhModule' !world !impPath = liftIO $ do
+
+type EdhModulePreparation = EdhProgState -> STM () -> STM ()
+edhModuleAsIs :: EdhModulePreparation
+edhModuleAsIs _pgs !exit = exit
+
+
+installEdhModule
+  :: MonadIO m => EdhWorld -> ModuleId -> EdhModulePreparation -> m Object
+installEdhModule !world !moduId !preInstall = liftIO $ do
+  modu <- createEdhModule world moduId "<host-code>"
+  void $ runEdhProgram' (worldContext world) $ do
+    pgs <- ask
+    let !moduCtx = moduleContext world modu
+        !pgsModu = pgs { edh'context = moduCtx }
+    contEdhSTM $ preInstall pgsModu $ do
+      moduSlot <- newTMVar $ EdhObject modu
+      moduMap  <- takeTMVar (worldModules world)
+      putTMVar (worldModules world) $ Map.insert moduId moduSlot moduMap
+  return modu
+
+
+runEdhModule
+  :: MonadIO m
+  => EdhWorld
+  -> FilePath
+  -> EdhModulePreparation
+  -> m (Either EdhError EdhValue)
+runEdhModule !world !impPath !preRun =
+  liftIO $ tryJust edhKnownError $ runEdhModule' world impPath preRun
+
+runEdhModule'
+  :: MonadIO m => EdhWorld -> FilePath -> EdhModulePreparation -> m EdhValue
+runEdhModule' !world !impPath !preRun = liftIO $ do
   (nomPath, moduFile) <- locateEdhMainModule impPath
   fileContent <- streamDecodeUtf8With lenientDecode <$> B.readFile moduFile
   case fileContent of
@@ -246,6 +252,9 @@ runEdhModule' !world !impPath = liftIO $ do
       contEdhSTM $ do
         let !moduId = T.pack nomPath
         modu <- createEdhModule' world moduId moduFile
-        runEdhProc pgs { edh'context = moduleContext world modu }
-          $ evalEdh moduFile moduSource edhEndOfProc
+        let !moduCtx = moduleContext world modu
+            !pgsModu = pgs { edh'context = moduCtx }
+        preRun pgsModu $ runEdhProc pgsModu $ evalEdh moduFile
+                                                      moduSource
+                                                      edhEndOfProc
 

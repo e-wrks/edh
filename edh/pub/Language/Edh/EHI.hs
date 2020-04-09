@@ -47,6 +47,8 @@ module Language.Edh.EHI
     -- ** Spliced execution
   , runEdhModule
   , runEdhModule'
+  , EdhModulePreparation
+  , edhModuleAsIs
   , createEdhModule
   , installEdhModule
   , importEdhModule
