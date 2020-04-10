@@ -109,8 +109,8 @@ createEdhWorld !console = liftIO $ do
         [ (AttrByName nm, ) <$> mkHostClass rootScope nm False hc
         | (nm, hc) <- -- cross check with 'throwEdhSTM' for type safety
           [ ("ProgramHalt" , errCtor edhProgramHalt)
-          , ("IOError"     , notFromEdhCtor)
-          , ("PeerError"   , notFromEdhCtor)
+          , ("IOError"     , fakableErr "IOError")
+          , ("PeerError"   , fakableErr "PeerError")
           , ("Exception"   , errCtor $ edhSomeErr EdhException)
           , ("PackageError", errCtor $ edhSomeErr PackageError)
           , ("ParseError"  , errCtor $ edhSomeErr ParseError)
@@ -132,8 +132,13 @@ createEdhWorld !console = liftIO $ do
   edhSomeErr !et (ArgsPack [] _) !cc = EdhError et "❌" cc
   edhSomeErr !et (ArgsPack (EdhString msg : _) _) !cc = EdhError et msg cc
   edhSomeErr !et (ArgsPack (v : _) _) !cc = EdhError et (T.pack $ show v) cc
-  notFromEdhCtor :: EdhHostCtor
-  notFromEdhCtor _ _ _ !exit = exit $ toDyn nil
+  fakableErr :: Text -> EdhHostCtor
+  fakableErr !ctorName _ !apk !obs !exit = do
+    modifyTVar' obs $ Map.union $ Map.fromList
+      [ (AttrByName "__repr__", EdhString $ ctorName <> T.pack (show apk))
+      , (AttrByName "details" , EdhArgsPack apk)
+      ]
+    exit $ toDyn nil
   -- wrap a Haskell error data constructor as a host error object contstructor,
   -- used to define an error class in Edh
   errCtor :: (ArgsPack -> EdhCallContext -> EdhError) -> EdhHostCtor
