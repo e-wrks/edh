@@ -52,6 +52,8 @@
     console.print( "There're never short of cleanup jobs to do.")
   }
 
+  console.print( "there're other stuffs beyond the dangerous zone." )
+
 }
 
 

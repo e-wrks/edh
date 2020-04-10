@@ -39,7 +39,10 @@ catchProc !tryExpr !catchExpr !exit =
         evalMatchingExpr catchExpr
           $ \recoverResult@(OriginalValue recoverVal _ _) -> case recoverVal of
               EdhFallthrough -> rethrow -- not to recover
-              _              -> exitEdhProc' recover recoverResult
+              EdhCaseClose val -> -- a single-branch catch leads to this,
+                -- don't bubble up the close-of-case, as `catch` is not a branch 
+                exitEdhProc' recover recoverResult { valueFromOrigin = val }
+              _ -> exitEdhProc' recover recoverResult
 
 -- | operator (@=>) - the `finally`
 --
