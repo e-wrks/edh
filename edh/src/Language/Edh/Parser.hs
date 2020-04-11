@@ -2,6 +2,7 @@
 module Language.Edh.Parser where
 
 import           Prelude
+-- import           Debug.Trace
 
 import           Control.Applicative     hiding ( many
                                                 , some
@@ -618,37 +619,62 @@ illegalExprStart =
 -- while they are left-assosciative only
 
 parseExprPrec :: Precedence -> Parser Expr
-parseExprPrec prec = lookAhead illegalExprStart >>= \case
-  True -> fail "Illegal expression"
-  False ->
-    choice
-        [ -- a reflective expr token parsed while carrying original source.
-          -- the source can be passed to a remote environment for eval/exec
-          -- after parsed again, in which case the local parsing serves 
-          -- some preliminary validation purpose, in addition for the local
-          -- environment to be able to introspect it programmatically, as
-          -- well to get syntax-highlighting and other authoring convenience.
-          keyword "expr" >> uncurry (flip ExprWithSrc) <$> match
-          (parseExprPrec (-20))
+parseExprPrec prec = do
+  o <- getOffset
+  fst <$> parseExprPrecWithSrc (o, []) prec
 
-          -- more normal/routine exprs
-        , parsePrefixExpr
-        , parseYieldExpr
-        , parseForExpr
-        , parseIfExpr
-        , parseCaseExpr
-        , parseListExpr
-        , parseBlockOrDict
-        , parseOpAddrOrTupleOrParen
-        , LitExpr <$> parseLitExpr
-        , AttrExpr <$> parseAttrAddr
-        ]
-      >>= parseMoreOps
+parseExprWithSrc :: Parser Expr
+parseExprWithSrc = do
+  void $ keyword "expr"
+  s              <- getInput
+  o              <- getOffset
+  (x, (o', sss)) <- parseExprPrecWithSrc (o, []) (-20)
+  o''            <- getOffset
+  sss'           <- if o'' <= o'
+    then return sss
+    else do
+      let src = maybe "" fst $ takeN_ (o'' - o') s
+      return $ SrcSeg src : sss
+  return $ ExprWithSrc x $ reverse sss'
+
+parseIntplExpr :: (Int, [SourceSeg]) -> Parser (Expr, (Int, [SourceSeg]))
+parseIntplExpr (o, sss) = do
+  o' <- getOffset
+  void $ symbol "{$"
+  x <- parseExprPrec (-30)
+  void $ symbol "$}"
+  o'' <- getOffset
+  s   <- getInput
+  return
+    ( IntplExpr x
+    , (o'', IntplSeg x : SrcSeg (maybe "" fst $ takeN_ (o' - o) s) : sss)
+    )
+
+parseExprPrecWithSrc
+  :: (Int, [SourceSeg]) -> Precedence -> Parser (Expr, (Int, [SourceSeg]))
+parseExprPrecWithSrc si prec = lookAhead illegalExprStart >>= \case
+  True  -> fail "Illegal expression"
+  False -> (, si) <$> parseExprWithSrc <|> parseIntplExpr si <|> do
+    x <- choice
+      [ parsePrefixExpr
+      , parseYieldExpr
+      , parseForExpr
+      , parseIfExpr
+      , parseCaseExpr
+      , parseListExpr
+      , parseBlockOrDict
+      , parseOpAddrOrTupleOrParen
+      , LitExpr <$> parseLitExpr
+      , AttrExpr <$> parseAttrAddr
+      ]
+    x' <- parseMoreOps x
+    return (x', si)
  where
   parseMoreOps :: Expr -> Parser Expr
   parseMoreOps expr = choice
     [ parseIndexer >>= parseMoreOps . flip IndexExpr expr
     , parsePackSender >>= parseMoreOps . CallExpr expr
+    , lookAhead (symbol "$}") >> return expr
     , parseMoreInfix expr
     ]
   parseMoreInfix :: Expr -> Parser Expr

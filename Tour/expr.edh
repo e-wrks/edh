@@ -1,0 +1,33 @@
+
+{
+
+  # tag class for countries
+  class Country { __repr__ = 'Country()' }
+  # some known countries
+  CN := Country()
+  US := Country()
+
+}
+
+{
+
+  # lookup of emergency call number for a country
+  method emergCallNumOf( c ) case c of {
+    CN -> 119
+    US -> 911
+    error( "I don't know your country: " ++ c )
+  }
+
+}
+
+{
+
+  # in some app's context
+  currentCountry = CN
+
+  evalRemotely(
+    expr callThePolice( telno = {$ emergCallNumOf(currentCountry) $} )
+  )
+
+}
+

@@ -767,7 +767,7 @@ instance Show EdhValue where
   show (EdhExpr _ x s    ) = if T.null s
     then -- source-less form
          "<expr: " ++ show x ++ ">"
-    else -- source form
+    else -- source-ful form
          T.unpack s
 
 -- Note:
@@ -868,13 +868,6 @@ edhUltimate :: EdhValue -> EdhValue
 edhUltimate (EdhNamedValue _ v) = edhUltimate v
 edhUltimate v                   = v
 
-edhExpr :: Expr -> STM EdhValue
-edhExpr (ExprWithSrc !xpr !xprSrc) = do
-  u <- unsafeIOToSTM newUnique
-  return $ EdhExpr u xpr xprSrc
-edhExpr x = do
-  u <- unsafeIOToSTM newUnique
-  return $ EdhExpr u x ""
 
 nil :: EdhValue
 nil = EdhNil
@@ -1142,12 +1135,14 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
 
     | InfixExpr !OpSymbol !Expr !Expr
 
-    | ExprWithSrc !Expr !Text
-
-     -- for host (Haskell) code to bake some cake in
-    | GodSendExpr !EdhValue
+    -- to support interpolation within expressions, with source form
+    | ExprWithSrc !Expr ![SourceSeg]
+    | IntplExpr !Expr
+    | IntplSubs !EdhValue
   deriving (Eq, Show)
 
+data SourceSeg = SrcSeg !Text | IntplSeg !Expr
+  deriving (Eq, Show)
 
 data Literal = SinkCtor
     | NilLiteral

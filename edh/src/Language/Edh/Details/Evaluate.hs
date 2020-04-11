@@ -673,6 +673,100 @@ moduleContext !world !modu = worldCtx
   where !worldCtx = worldContext world
 
 
+intplExpr :: EdhProgState -> Expr -> (Expr -> STM ()) -> STM ()
+intplExpr !pgs !x !exit = case x of
+  IntplExpr !x' -> runEdhProc pgs $ evalExpr x' $ \(OriginalValue !val _ _) ->
+    contEdhSTM $ exit $ IntplSubs val
+  PrefixExpr !pref !x' -> intplExpr pgs x' $ \x'' -> exit $ PrefixExpr pref x''
+  IfExpr !cond !cons !alt -> intplExpr pgs cond $ \cond' ->
+    intplExpr pgs cons $ \cons' -> case alt of
+      Nothing -> exit $ IfExpr cond' cons' Nothing
+      Just !altx ->
+        intplExpr pgs altx $ \altx' -> exit $ IfExpr cond' cons' $ Just altx'
+  CaseExpr !tgt !branches -> intplExpr pgs tgt $ \tgt' ->
+    intplExpr pgs branches $ \branches' -> exit $ CaseExpr tgt' branches'
+  DictExpr !entries -> seqcontSTM (intplExpr pgs <$> entries)
+    $ \entries' -> exit $ DictExpr entries'
+  ListExpr !es ->
+    seqcontSTM (intplExpr pgs <$> es) $ \es' -> exit $ ListExpr es'
+  TupleExpr !es ->
+    seqcontSTM (intplExpr pgs <$> es) $ \es' -> exit $ TupleExpr es'
+  ParenExpr !x' -> intplExpr pgs x' $ \x'' -> exit $ ParenExpr x''
+  BlockExpr !ss ->
+    seqcontSTM (intplStmtSrc <$> ss) $ \ss' -> exit $ BlockExpr ss'
+  YieldExpr !x'             -> intplExpr pgs x' $ \x'' -> exit $ YieldExpr x''
+  ForExpr !rcvs !fromX !doX -> intplExpr pgs fromX
+    $ \fromX' -> intplExpr pgs doX $ \doX' -> exit $ ForExpr rcvs fromX' doX'
+  AttrExpr !addr -> intplAttrAddr pgs addr $ \addr' -> exit $ AttrExpr addr'
+  IndexExpr !v !t ->
+    intplExpr pgs v $ \v' -> intplExpr pgs t $ \t' -> exit $ IndexExpr v' t'
+  CallExpr !v !args -> intplExpr pgs v $ \v' ->
+    seqcontSTM (intplArgSndr pgs <$> args) $ \args' -> exit $ CallExpr v' args'
+  InfixExpr !op !lhe !rhe -> intplExpr pgs lhe
+    $ \lhe' -> intplExpr pgs rhe $ \rhe' -> exit $ InfixExpr op lhe' rhe'
+  _ -> exit x
+ where
+  intplStmtSrc :: StmtSrc -> (StmtSrc -> STM ()) -> STM ()
+  intplStmtSrc (StmtSrc (!sp, !stmt)) !exit' =
+    intplStmt pgs stmt $ \stmt' -> exit' $ StmtSrc (sp, stmt')
+
+intplAttrAddr :: EdhProgState -> AttrAddr -> (AttrAddr -> STM ()) -> STM ()
+intplAttrAddr !pgs !addr !exit = case addr of
+  IndirectRef !x' !a -> intplExpr pgs x' $ \x'' -> exit $ IndirectRef x'' a
+  _                  -> exit addr
+
+intplArgsRcvr
+  :: EdhProgState -> ArgsReceiver -> (ArgsReceiver -> STM ()) -> STM ()
+intplArgsRcvr !pgs !a !exit = case a of
+  PackReceiver !rcvrs ->
+    seqcontSTM (intplArgRcvr <$> rcvrs) $ \rcvrs' -> exit $ PackReceiver rcvrs'
+  SingleReceiver !rcvr ->
+    intplArgRcvr rcvr $ \rcvr' -> exit $ SingleReceiver rcvr'
+  WildReceiver -> exit WildReceiver
+ where
+  intplArgRcvr :: ArgReceiver -> (ArgReceiver -> STM ()) -> STM ()
+  intplArgRcvr !a' !exit' = case a' of
+    RecvArg !attrName !maybeAddr !maybeDefault -> case maybeAddr of
+      Nothing -> case maybeDefault of
+        Nothing -> exit' $ RecvArg attrName Nothing Nothing
+        Just !x ->
+          intplExpr pgs x $ \x' -> exit' $ RecvArg attrName Nothing $ Just x'
+      Just !addr -> intplAttrAddr pgs addr $ \addr' -> case maybeDefault of
+        Nothing -> exit' $ RecvArg attrName (Just addr') Nothing
+        Just !x -> intplExpr pgs x
+          $ \x' -> exit' $ RecvArg attrName (Just addr') $ Just x'
+
+    _ -> exit' a'
+
+intplArgSndr :: EdhProgState -> ArgSender -> (ArgSender -> STM ()) -> STM ()
+intplArgSndr !pgs !a !exit' = case a of
+  UnpackPosArgs !v -> intplExpr pgs v $ \v' -> exit' $ UnpackPosArgs v'
+  UnpackKwArgs  !v -> intplExpr pgs v $ \v' -> exit' $ UnpackKwArgs v'
+  UnpackPkArgs  !v -> intplExpr pgs v $ \v' -> exit' $ UnpackPkArgs v'
+  SendPosArg    !v -> intplExpr pgs v $ \v' -> exit' $ SendPosArg v'
+  SendKwArg !n !v  -> intplExpr pgs v $ \v' -> exit' $ SendKwArg n v'
+
+intplStmt :: EdhProgState -> Stmt -> (Stmt -> STM ()) -> STM ()
+intplStmt !pgs !stmt !exit = case stmt of
+  AtoIsoStmt !x        -> intplExpr pgs x $ \x' -> exit $ AtoIsoStmt x'
+  GoStmt     !x        -> intplExpr pgs x $ \x' -> exit $ GoStmt x'
+  DeferStmt  !x        -> intplExpr pgs x $ \x' -> exit $ DeferStmt x'
+  ImportStmt !rcvrs !x -> intplArgsRcvr pgs rcvrs
+    $ \rcvrs' -> intplExpr pgs x $ \x' -> exit $ ImportStmt rcvrs' x'
+  LetStmt !rcvrs !sndrs -> intplArgsRcvr pgs rcvrs $ \rcvrs' ->
+    seqcontSTM (intplArgSndr pgs <$> sndrs)
+      $ \sndrs' -> exit $ LetStmt rcvrs' sndrs'
+  ExtendsStmt !x        -> intplExpr pgs x $ \x' -> exit $ ExtendsStmt x'
+  PerceiveStmt !addr !x -> intplAttrAddr pgs addr
+    $ \addr' -> intplExpr pgs x $ \x' -> exit $ PerceiveStmt addr' x'
+  WhileStmt !cond !act -> intplExpr pgs cond
+    $ \cond' -> intplExpr pgs act $ \act' -> exit $ WhileStmt cond' act'
+  ThrowStmt  !x -> intplExpr pgs x $ \x' -> exit $ ThrowStmt x'
+  ReturnStmt !x -> intplExpr pgs x $ \x' -> exit $ ReturnStmt x'
+  ExprStmt   !x -> intplExpr pgs x $ \x' -> exit $ ExprStmt x'
+  _             -> exit stmt
+
+
 evalExpr :: Expr -> EdhProcExit -> EdhProc
 evalExpr expr exit = do
   !pgs <- ask
@@ -683,10 +777,20 @@ evalExpr expr exit = do
       !scope                 = contextScope ctx
   case expr of
 
-    GodSendExpr !val    -> exitEdhProc exit val
-    ExprWithSrc !x !src -> contEdhSTM $ do
-      u <- unsafeIOToSTM newUnique
-      exitEdhSTM pgs exit $ EdhExpr u x src
+    IntplSubs !val -> exitEdhProc exit val
+    IntplExpr _ -> throwEdh UsageError "Interpolating out side of expr range."
+    ExprWithSrc !x !sss -> contEdhSTM $ intplExpr pgs x $ \x' -> do
+      let intplSrc :: SourceSeg -> (Text -> STM ()) -> STM ()
+          intplSrc !ss !exit' = case ss of
+            SrcSeg !s -> exit' s
+            IntplSeg !sx ->
+              runEdhProc pgs $ evalExpr sx $ \(OriginalValue !val _ _) ->
+                edhValueRepr val $ \(OriginalValue !rv _ _) -> case rv of
+                  EdhString !rs -> contEdhSTM $ exit' rs
+                  _             -> error "bug: edhValueRepr returned non-string"
+      seqcontSTM (intplSrc <$> sss) $ \ssl -> do
+        u <- unsafeIOToSTM newUnique
+        exitEdhSTM pgs exit $ EdhExpr u x' $ T.concat ssl
 
     LitExpr lit -> case lit of
       DecLiteral    v -> exitEdhProc exit (EdhDecimal v)
@@ -912,14 +1016,17 @@ evalExpr expr exit = do
                                         exit
               -- 3 pos-args - caller scope + lh/rh expr receiving operator
               (PackReceiver [RecvArg{}, RecvArg{}, RecvArg{}]) -> do
-                lhXV         <- edhExpr lhExpr
-                rhXV         <- edhExpr rhExpr
+                lhu          <- unsafeIOToSTM newUnique
+                rhu          <- unsafeIOToSTM newUnique
                 scopeWrapper <- mkScopeWrapper ctx scope
                 runEdhProc pgs $ callEdhOperator
                   (thatObject op'lexi)
                   op'proc
                   op'pred
-                  [EdhObject scopeWrapper, lhXV, rhXV]
+                  [ EdhObject scopeWrapper
+                  , (EdhExpr lhu lhExpr "")
+                  , (EdhExpr rhu rhExpr "")
+                  ]
                   exit
               _ ->
                 throwEdhSTM pgs EvalError
@@ -2265,14 +2372,14 @@ packEdhExprs (x : xs) !exit = case x of
   SendPosArg !argExpr -> packEdhExprs xs $ \(ArgsPack !posArgs !kwArgs) -> do
     pgs <- ask
     contEdhSTM $ do
-      xv <- edhExpr argExpr
-      runEdhProc pgs $ exit (ArgsPack (xv : posArgs) kwArgs)
+      xu <- unsafeIOToSTM newUnique
+      runEdhProc pgs $ exit (ArgsPack (EdhExpr xu argExpr "" : posArgs) kwArgs)
   SendKwArg !kw !argExpr -> do
     pgs <- ask
     contEdhSTM $ do
-      xv <- edhExpr argExpr
+      xu <- unsafeIOToSTM newUnique
       runEdhProc pgs $ packEdhExprs xs $ \(ArgsPack !posArgs !kwArgs) ->
-        exit (ArgsPack posArgs $ Map.insert kw xv kwArgs)
+        exit (ArgsPack posArgs $ Map.insert kw (EdhExpr xu argExpr "") kwArgs)
 
 
 -- | Pack args as caller, normally in preparation of calling another procedure

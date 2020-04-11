@@ -4,9 +4,12 @@ module Language.Edh.Batteries.Reflect where
 import           Prelude
 -- import           Debug.Trace
 
+import           GHC.Conc                       ( unsafeIOToSTM )
+
 import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
+import           Data.Unique
 import           Data.List.NonEmpty             ( (<|) )
 import qualified Data.List.NonEmpty            as NE
 import qualified Data.Text                     as T
@@ -300,8 +303,8 @@ makeOpProc (ArgsPack args kwargs) !exit = do
     then throwEdh EvalError "No kwargs accepted by makeOp"
     else case args of
       [(EdhExpr _ !lhe _), EdhString op, (EdhExpr _ !rhe _)] -> contEdhSTM $ do
-        expr <- edhExpr $ InfixExpr op lhe rhe
-        exitEdhSTM pgs exit expr
+        xu <- unsafeIOToSTM newUnique
+        exitEdhSTM pgs exit $ EdhExpr xu (InfixExpr op lhe rhe) ""
       _ -> throwEdh EvalError $ "Invalid arguments to makeOp: " <> T.pack
         (show args)
 
