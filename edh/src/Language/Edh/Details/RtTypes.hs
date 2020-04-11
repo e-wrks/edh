@@ -888,12 +888,23 @@ nil = EdhNil
 edhNone :: EdhValue
 edhNone = EdhNamedValue "None" EdhNil
 
+-- | None as an expression
+edhNoneExpr :: Expr
+edhNoneExpr =
+  InfixExpr ":=" (AttrExpr (DirectRef (NamedAttr "None"))) (LitExpr NilLiteral)
+
 -- | Similar to `None`
 --
 -- though we don't have `Maybe` monad in Edh, having a `Nothing`
 -- carrying null semantic may be useful in some cases.
 edhNothing :: EdhValue
 edhNothing = EdhNamedValue "Nothing" EdhNil
+
+-- | Nothing as an expression
+edhNothingExpr :: Expr
+edhNothingExpr = InfixExpr ":="
+                           (AttrExpr (DirectRef (NamedAttr "Nothing")))
+                           (LitExpr NilLiteral)
 
 -- | With `nil` converted to `None` so the result will never be `nil`.
 --

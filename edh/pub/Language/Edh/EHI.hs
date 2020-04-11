@@ -164,7 +164,9 @@ module Language.Edh.EHI
   , edhExpr
   , nil
   , edhNone
+  , edhNoneExpr
   , edhNothing
+  , edhNothingExpr
   , noneNil
   , true
   , false
