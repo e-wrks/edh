@@ -1,28 +1,47 @@
 
 {
+  # mockup some remote site environment
 
-  # tag class for countries
-  class Country { __repr__ = 'Country()' }
-  # some known countries
-  CN := Country()
-  US := Country()
+  method evalRemotely ( xpr ) {
+    mockupEnv = scope() # use the scope of this proc
+
+    # emulate procedures available at a remote site
+    method callThePolice ( telno ) {
+      console.warn<| 'Alerts ringing #' ++ telno ++ ' ...'
+    }
+
+    # simulate remote exec
+    mockupEnv.eval( xpr )
+  }
 
 }
 
-{
 
-  # lookup of emergency call number for a country
+{
+  # MWE of some lib/framework
+
+  # unique tag class for countries
+  class Country { __repr__ = 'Country()' }
+
+  # some known countries
+  CN := Country()
+  US := Country()
+  JP := Country()
+
+  # lookup the emergency call number for a country
   method emergCallNumOf( c ) case c of {
-    CN -> 119
+    CN -> 110
     US -> 911
+    JP -> 999
     error( "I don't know your country: " ++ c )
   }
 
 }
 
-{
 
-  # in some app's context
+{
+  # MWE of some app snippet
+
   currentCountry = CN
 
   evalRemotely(
@@ -31,3 +50,5 @@
 
 }
 
+
+quit
