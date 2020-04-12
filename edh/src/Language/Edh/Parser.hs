@@ -622,14 +622,14 @@ parseExprPrec :: Precedence -> Parser Expr
 parseExprPrec prec = do
   s <- getInput
   o <- getOffset
-  fst <$> parseExprPrecWithSrc (s, o, []) prec
+  fst <$> parseExprPrecWithSrc prec (s, o, [])
 
-parseExprWithSrc :: Parser Expr
-parseExprWithSrc = do
+parseExprLit :: Parser Expr
+parseExprLit = do
   void $ keyword "expr"
   s                  <- getInput
   o                  <- getOffset
-  (x, (s', o', sss)) <- parseExprPrecWithSrc (s, o, []) (-20)
+  (x, (s', o', sss)) <- parseExprPrecWithSrc (-20) (s, o, [])
   o''                <- getOffset
   sss'               <- if o'' <= o'
     then return sss
@@ -638,8 +638,7 @@ parseExprWithSrc = do
       return $ SrcSeg src : sss
   return $ ExprWithSrc x $ reverse sss'
 
-parseIntplExpr
-  :: (Text, Int, [SourceSeg]) -> Parser (Expr, (Text, Int, [SourceSeg]))
+parseIntplExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseIntplExpr (s, o, sss) = do
   o' <- getOffset
   void $ symbol "{$"
@@ -654,13 +653,13 @@ parseIntplExpr (s, o, sss) = do
   void $ optional sc -- but consume the optional spaces wrt parsing
   return (IntplExpr x, (s', o'', sss''))
 
+type IntplSrcInfo = (Text, Int, [SourceSeg])
+
 parseExprPrecWithSrc
-  :: (Text, Int, [SourceSeg])
-  -> Precedence
-  -> Parser (Expr, (Text, Int, [SourceSeg]))
-parseExprPrecWithSrc si prec = lookAhead illegalExprStart >>= \case
+  :: Precedence -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseExprPrecWithSrc prec si = lookAhead illegalExprStart >>= \case
   True  -> fail "Illegal expression"
-  False -> ((, si) <$> parseExprWithSrc) <|> parseIntplExpr si <|> do
+  False -> ((, si) <$> parseExprLit) <|> parseIntplExpr si <|> do
     x <- choice
       [ parsePrefixExpr
       , parseYieldExpr
@@ -675,22 +674,19 @@ parseExprPrecWithSrc si prec = lookAhead illegalExprStart >>= \case
       ]
     parseMoreOps x
  where
-  parseMoreOps :: Expr -> Parser (Expr, (Text, Int, [SourceSeg]))
+  parseMoreOps :: Expr -> Parser (Expr, IntplSrcInfo)
   parseMoreOps expr = choice
     [ parseIndexer >>= parseMoreOps . flip IndexExpr expr
     , parsePackSender >>= parseMoreOps . CallExpr expr
     , parseMoreInfix si expr
     ]
-  parseMoreInfix
-    :: (Text, Int, [SourceSeg])
-    -> Expr
-    -> Parser (Expr, (Text, Int, [SourceSeg]))
+  parseMoreInfix :: IntplSrcInfo -> Expr -> Parser (Expr, IntplSrcInfo)
   parseMoreInfix si' leftExpr = choice
     [ lookAhead (symbol "$}") >> return (leftExpr, si')
     , higherOp prec >>= \case
       Nothing              -> return (leftExpr, si')
       Just (opPrec, opSym) -> do
-        (rightExpr, si'') <- parseExprPrecWithSrc si' opPrec
+        (rightExpr, si'') <- parseExprPrecWithSrc opPrec si'
         parseMoreInfix si'' $ InfixExpr opSym leftExpr rightExpr
     ]
 
@@ -717,3 +713,6 @@ parseExprPrecWithSrc si prec = lookAhead illegalExprStart >>= \case
 
 parseExpr :: Parser Expr
 parseExpr = parseExprPrec (-10)
+
+parseExprWithSrc :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseExprWithSrc = parseExprPrecWithSrc (-10)
