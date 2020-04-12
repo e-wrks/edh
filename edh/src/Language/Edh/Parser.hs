@@ -61,19 +61,30 @@ isOperatorChar c = if c > toEnum 128
   else elem c ("=~!@#$%^&|:<>?+-*/" :: [Char])
 
 parseProgram :: Parser [StmtSrc]
-parseProgram = sc *> many parseStmt <* eof
+parseProgram = do
+  s <- getInput
+  void sc
+  (ss, _) <- parseStmts (s, 0, []) []
+  return ss
+
+parseStmts :: IntplSrcInfo -> [StmtSrc] -> Parser ([StmtSrc], IntplSrcInfo)
+parseStmts si ss = (eof >> return (reverse ss, si)) <|> do
+  optionalSemicolon
+  (s, si') <- parseStmt si
+  parseStmts si' (s : ss)
 
 parseVoidStmt :: Parser Stmt
 parseVoidStmt = VoidStmt <$ symbol "pass" -- same as Python
 
-parseAtoIsoStmt :: Parser Stmt
-parseAtoIsoStmt = AtoIsoStmt <$> (keyword "ai" >> parseExpr)
+parseAtoIsoStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseAtoIsoStmt si = keyword "ai" >> parseExprWithSrc si >>= \(x, si') ->
+  return (AtoIsoStmt x, si')
 
-parseGoStmt :: Parser Stmt
-parseGoStmt = do
+parseGoStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseGoStmt si = do
   void $ keyword "go"
-  errRptPos <- getOffset
-  expr      <- parseExpr
+  errRptPos   <- getOffset
+  (expr, si') <- parseExprWithSrc si
   case expr of
     BlockExpr{} -> return ()
     CaseExpr{}  -> return ()
@@ -82,13 +93,13 @@ parseGoStmt = do
     _           -> do
       setOffset errRptPos
       fail "A block, case, call or for loop should be here"
-  return $ GoStmt expr
+  return (GoStmt expr, si')
 
-parseDeferStmt :: Parser Stmt
-parseDeferStmt = do
+parseDeferStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseDeferStmt si = do
   void $ keyword "defer"
-  errRptPos <- getOffset
-  expr      <- parseExpr
+  errRptPos   <- getOffset
+  (expr, si') <- parseExprWithSrc si
   case expr of
     BlockExpr{} -> return ()
     CaseExpr{}  -> return ()
@@ -97,19 +108,23 @@ parseDeferStmt = do
     _           -> do
       setOffset errRptPos
       fail "A block, case, call or for loop should be here"
-  return $ DeferStmt expr
+  return (DeferStmt expr, si')
 
-parseImportStmt :: Parser Stmt
-parseImportStmt = do
+parseImportStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseImportStmt si = do
   void $ keyword "import"
-  liftA2 ImportStmt parseArgsReceiver parseExpr
+  ar        <- parseArgsReceiver
+  (se, si') <- parseExprWithSrc si
+  return (ImportStmt ar se, si')
 
-parseLetStmt :: Parser Stmt
-parseLetStmt = do
+parseLetStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseLetStmt si = do
   void $ keyword "let"
-  receiver <- parseArgsReceiver
+  ar <- parseArgsReceiver
   void $ symbol "="
-  LetStmt receiver <$> parseArgsSender
+  (argSender, si') <- parseArgsSender si
+  return (LetStmt ar argSender, si')
+
 
 parseArgsReceiver :: Parser ArgsReceiver
 parseArgsReceiver = (symbol "*" $> WildReceiver) <|> parsePackReceiver <|> do
@@ -153,16 +168,11 @@ parseRetarget = do
   void $ keyword "as"
   parseAttrAddr
 
-parseArgLetExpr :: Parser Expr
-parseArgLetExpr = do
-  void $ symbol "="
-  parseExpr
-
 parseKwRecv :: Bool -> Parser ArgReceiver
 parseKwRecv inPack = do
   aname   <- parseAttrName
   retgt   <- optional parseRetarget
-  defExpr <- if inPack then optional parseArgLetExpr else return Nothing
+  defExpr <- if inPack then optional parseDefaultExpr else return Nothing
   return $ RecvArg aname (validateTgt retgt) defExpr
  where
   validateTgt :: Maybe AttrAddr -> Maybe AttrAddr
@@ -171,6 +181,15 @@ parseKwRecv inPack = do
     Just ThisRef -> fail "Can not overwrite this"
     Just ThatRef -> fail "Can not overwrite that"
     _            -> tgt
+  parseDefaultExpr :: Parser Expr
+  parseDefaultExpr = do
+    void $ symbol "="
+    -- TODO carry on 'IntplSrcInfo' in the full call chain to here,
+    --      so the default value expr can be interpolated.
+    s         <- getInput
+    o         <- getOffset
+    (x, _si') <- parseExprWithSrc (s, o, [])
+    return x
 
 
 parseAttrAddr :: Parser AttrAddr
@@ -206,81 +225,109 @@ parseAttrAddr = do
             _                -> error "bug"
 
 
-parseArgsSender :: Parser ArgsSender
-parseArgsSender = parsePackSender <|> do
-  (: []) . SendPosArg <$> parseExpr
+parseArgsSender :: IntplSrcInfo -> Parser (ArgsSender, IntplSrcInfo)
+parseArgsSender si = parsePackSender si <|> do
+  (x, si') <- parseExprWithSrc si
+  return ([SendPosArg x], si')
 
-parsePackSender :: Parser ArgsSender
-parsePackSender =
-  between (symbol "(") (symbol ")") $ reverse <$> parseArgSends []
+parsePackSender :: IntplSrcInfo -> Parser (ArgsSender, IntplSrcInfo)
+parsePackSender si = between (symbol "(") (symbol ")") $ do
+  (ss, si') <- parseArgSends si []
+  return (reverse ss, si')
 
-parseArgSends :: [ArgSender] -> Parser [ArgSender]
-parseArgSends ss = (lookAhead (symbol ")") >> return ss) <|> do
-  arg <- nextArg <* trailingComma
-  parseArgSends $ arg : ss
+parseArgSends
+  :: IntplSrcInfo -> [ArgSender] -> Parser ([ArgSender], IntplSrcInfo)
+parseArgSends si ss = (lookAhead (symbol ")") >> return (ss, si)) <|> do
+  (arg, si') <- nextArg <* trailingComma
+  parseArgSends si' $ arg : ss
  where
-  nextArg, unpackPkArgs, unpackKwArgs, unpackPosArgs :: Parser ArgSender
+  nextArg, unpackPkArgs, unpackKwArgs, unpackPosArgs
+    :: Parser (ArgSender, IntplSrcInfo)
   nextArg      = unpackPkArgs <|> unpackKwArgs <|> unpackPosArgs <|> parseKwSend
   unpackPkArgs = do
     void $ symbol "***"
-    UnpackPkArgs <$> parseExpr
+    (x, si') <- parseExprWithSrc si
+    return (UnpackPkArgs x, si')
   unpackKwArgs = do
     void $ symbol "**"
-    UnpackKwArgs <$> parseExpr
+    (x, si') <- parseExprWithSrc si
+    return (UnpackKwArgs x, si')
   unpackPosArgs = do
     void $ symbol "*"
-    UnpackPosArgs <$> parseExpr
-  parseKwSend :: Parser ArgSender
+    (x, si') <- parseExprWithSrc si
+    return (UnpackPosArgs x, si')
+  parseKwSend :: Parser (ArgSender, IntplSrcInfo)
   parseKwSend = do
     errRptPos <- getOffset
-    parseExpr >>= \case
+    (x, si')  <- parseExprWithSrc si
+    case x of
       InfixExpr "=" nExpr vExpr -> case nExpr of
         AttrExpr (DirectRef (NamedAttr attrName)) ->
-          return $ SendKwArg attrName vExpr
+          return (SendKwArg attrName vExpr, si')
         _ -> do
           setOffset errRptPos
           fail $ "Invalid argument name: " <> show nExpr
-      vExpr -> return $ SendPosArg vExpr
+      vExpr -> return (SendPosArg vExpr, si')
 
 
-parseClassStmt :: Parser Stmt
-parseClassStmt = ClassStmt <$> (keyword "class" >> parseClassDecl)
- where
-  parseClassDecl = liftA3 ProcDecl
-                          parseAlphaName
-                          (return $ PackReceiver [])
-                          (Left <$> parseStmt)
+parseClassStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseClassStmt si = do
+  void $ keyword "class"
+  cn          <- parseAlphaName
+  (body, si') <- parseStmt si
+  return (ClassStmt $ ProcDecl cn (PackReceiver []) (Left body), si')
 
-parseExtendsStmt :: Parser Stmt
-parseExtendsStmt = ExtendsStmt <$> (keyword "extends" >> parseExpr)
+parseExtendsStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseExtendsStmt si = do
+  void $ keyword "extends"
+  (x, si') <- parseExprWithSrc si
+  return (ExtendsStmt x, si')
 
-parseMethodStmt :: Parser Stmt
-parseMethodStmt = MethodStmt <$> (keyword "method" >> parseProcDecl)
+parseMethodStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseMethodStmt si = do
+  void $ keyword "method"
+  (pd, si') <- parseProcDecl si
+  return (MethodStmt pd, si')
 
-parseGeneratorStmt :: Parser Stmt
-parseGeneratorStmt = GeneratorStmt <$> (keyword "generator" >> parseProcDecl)
+parseGeneratorStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseGeneratorStmt si = do
+  void $ keyword "generator"
+  (pd, si') <- parseProcDecl si
+  return (GeneratorStmt pd, si')
 
-parsePerceiveStmt :: Parser Stmt
-parsePerceiveStmt =
-  keyword "perceive" >> liftA2 PerceiveStmt parseAttrAddr parseExpr
 
-parseInterpreterStmt :: Parser Stmt
-parseInterpreterStmt =
-  InterpreterStmt <$> (keyword "interpreter" >> parseProcDecl)
+parsePerceiveStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parsePerceiveStmt si = do
+  void $ keyword "perceive"
+  addr     <- parseAttrAddr
+  (x, si') <- parseExprWithSrc si
+  return (PerceiveStmt addr x, si')
 
-parseProducerStmt :: Parser Stmt
-parseProducerStmt = ProducerStmt <$> (keyword "producer" >> parseProcDecl)
+parseInterpreterStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseInterpreterStmt si = do
+  void $ keyword "interpreter"
+  (pd, si') <- parseProcDecl si
+  return (InterpreterStmt pd, si')
 
-parseWhileStmt :: Parser Stmt
-parseWhileStmt = do
+parseProducerStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseProducerStmt si = do
+  void $ keyword "producer"
+  (pd, si') <- parseProcDecl si
+  return (ProducerStmt pd, si')
+
+parseWhileStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseWhileStmt si = do
   void $ keyword "while"
-  liftA2 WhileStmt parseExpr parseExpr
+  (cnd, si' ) <- parseExprWithSrc si
+  (act, si'') <- parseExprWithSrc si'
+  return (WhileStmt cnd act, si'')
 
-parseProcDecl :: Parser ProcDecl
-parseProcDecl = liftA3 ProcDecl
-                       (parseMagicProcName <|> parseAlphaName)
-                       parseArgsReceiver
-                       (Left <$> parseStmt)
+parseProcDecl :: IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)
+parseProcDecl si = do
+  pn          <- parseMagicProcName <|> parseAlphaName
+  ar          <- parseArgsReceiver
+  (body, si') <- parseStmt si
+  return (ProcDecl pn ar (Left body), si')
 
 parseMagicProcName :: Parser Text
 parseMagicProcName = between (symbol "(") (symbol ")") $ lexeme $ takeWhile1P
@@ -291,18 +338,18 @@ parseMagicProcName = between (symbol "(") (symbol ")") $ lexeme $ takeWhile1P
 isMagicProcChar :: Char -> Bool
 isMagicProcChar c = isOperatorChar c || elem c ("[]" :: [Char])
 
-parseOpDeclOvrdStmt :: Parser Stmt
-parseOpDeclOvrdStmt = do
+parseOpDeclOvrdStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseOpDeclOvrdStmt si = do
   void $ keyword "operator"
-  srcPos    <- getSourcePos
-  errRptPos <- getOffset
-  opSym     <- parseOpLit
-  precDecl  <- optional $ L.decimal <* sc
+  srcPos      <- getSourcePos
+  errRptPos   <- getOffset
+  opSym       <- parseOpLit
+  precDecl    <- optional $ L.decimal <* sc
   -- todo restrict forms of valid args receiver for operators, e.g. 
   --  * 2 pos-args - simple lh/rh value receiving operator
   --  * 3 pos-args - caller scope + lh/rh expr receiving operator
-  argRcvr   <- parseArgsReceiver
-  body      <- parseStmt
+  argRcvr     <- parseArgsReceiver
+  (body, si') <- parseStmt si
   let procDecl = ProcDecl opSym argRcvr (Left body)
   opPD <- get
   case precDecl of
@@ -313,7 +360,7 @@ parseOpDeclOvrdStmt = do
           $  "You forget to specify the precedence for operator: "
           <> T.unpack opSym
           <> " ?"
-      Just (opPrec, _) -> return $ OpOvrdStmt opSym procDecl opPrec
+      Just (opPrec, _) -> return (OpOvrdStmt opSym procDecl opPrec, si')
     Just opPrec -> do
       when (opPrec < 0 || opPrec >= 10) $ do
         setOffset errRptPos
@@ -329,91 +376,106 @@ parseOpDeclOvrdStmt = do
             <> T.unpack odl
             <> ", omit the precedence if you mean to override it."
       put $ Map.insert opSym (opPrec, T.pack $ sourcePosPretty srcPos) opPD
-      return $ OpDeclStmt opSym opPrec procDecl
+      return (OpDeclStmt opSym opPrec procDecl, si')
 
-parseReturnStmt :: Parser Stmt
-parseReturnStmt = do
+parseReturnStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseReturnStmt si = do
   void $ keyword "return"
-  ReturnStmt <$> parseExpr
+  (x, si') <- parseExprWithSrc si
+  return (ReturnStmt x, si')
 
-parseThrowStmt :: Parser Stmt
-parseThrowStmt = do
+parseThrowStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseThrowStmt si = do
   void $ keyword "throw"
-  ThrowStmt <$> parseExpr
+  (x, si') <- parseExprWithSrc si
+  return (ThrowStmt x, si')
 
 
-parseStmt :: Parser StmtSrc
-parseStmt = optionalSemicolon *> do
-  srcPos <- getSourcePos
-  StmtSrc
-    .   (srcPos, )
-    <$> choice
-          [ parseAtoIsoStmt
-          , parseGoStmt
-          , parseDeferStmt
-          , parseImportStmt
-          , parseLetStmt
-          , parseClassStmt
-          , parseExtendsStmt
-          , parseMethodStmt
-          , parseGeneratorStmt
-          , parsePerceiveStmt
-          , parseInterpreterStmt
-          , parseProducerStmt
-          , parseWhileStmt
-          -- TODO validate break/continue must within a loop construct
-          , BreakStmt <$ keyword "break"
-          , ContinueStmt <$ keyword "continue"
+parseStmt :: IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
+parseStmt si = do
+  srcPos      <- getSourcePos
+  (stmt, si') <-
+    choice
+        [ parseAtoIsoStmt si
+        , parseGoStmt si
+        , parseDeferStmt si
+        , parseImportStmt si
+        , parseLetStmt si
+        , parseClassStmt si
+        , parseExtendsStmt si
+        , parseMethodStmt si
+        , parseGeneratorStmt si
+        , parsePerceiveStmt si
+        , parseInterpreterStmt si
+        , parseProducerStmt si
+        , parseWhileStmt si
+          -- TODO validate <break> must within a loop construct
+        , (BreakStmt, si) <$ keyword "break"
+          -- note <continue> can be the eval'ed value of a proc,
+          --      carrying NotImplemented semantics as in Python
+        , (ContinueStmt, si) <$ keyword "continue"
           -- TODO validate fallthrough must within a branch block
-          , FallthroughStmt <$ keyword "fallthrough"
-          , parseOpDeclOvrdStmt
+        , (FallthroughStmt, si) <$ keyword "fallthrough"
+        , parseOpDeclOvrdStmt si
           -- TODO validate yield must within a generator procedure
-          , parseReturnStmt
-          , parseThrowStmt
-          , parseVoidStmt
+        , parseReturnStmt si
+        , parseThrowStmt si
+        , (, si) <$> parseVoidStmt
 
           -- NOTE: statements above should probably all be detected by
           -- `illegalExprStart` as invalid start for an expr
-          , ExprStmt <$> parseExpr
-          ]
-    <*  optionalSemicolon
+        , parseExprWithSrc si >>= \(x, si') -> return (ExprStmt x, si')
+        ]
+      <* optionalSemicolon
+  return (StmtSrc (srcPos, stmt), si')
 
 
-parseIfExpr :: Parser Expr
-parseIfExpr = do
+parseIfExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseIfExpr si = do
   void $ keyword "if"
-  cond <- parseExpr
+  (cond, si') <- parseExprWithSrc si
   void $ keyword "then"
-  cseq <- parseExpr
-  alt  <- optional $ do
-    void $ keyword "else"
-    parseExpr
-  return $ IfExpr cond cseq alt
+  (cseq, si2) <- parseExprWithSrc si'
+  (alt , si3) <-
+    fmap (maybe (Nothing, si2) (\(alt, si3) -> (Just alt, si3))) $ optional $ do
+      void $ keyword "else"
+      parseExprWithSrc si2
+  return (IfExpr cond cseq alt, si3)
 
-parseCaseExpr :: Parser Expr
-parseCaseExpr = do
+parseCaseExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseCaseExpr si = do
   void $ keyword "case"
-  tgt <- parseExpr
+  (tgt, si') <- parseExprWithSrc si
   void $ keyword "of"
-  CaseExpr tgt <$> parseExpr
+  (branches, si'') <- parseExprWithSrc si'
+  return (CaseExpr tgt branches, si'')
 
-parseYieldExpr :: Parser Expr
-parseYieldExpr = do
+parseYieldExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseYieldExpr si = do
   void $ keyword "yield"
-  YieldExpr <$> parseExpr
+  (x, si') <- parseExprWithSrc si
+  return (YieldExpr x, si')
 
-parseForExpr :: Parser Expr
-parseForExpr = do
+parseForExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseForExpr si = do
   void $ keyword "for"
   ar <- parseArgsReceiver
   void $ keyword "from"
-  iter <- parseExpr
+  (iter, si') <- parseExprWithSrc si
   void $ keyword "do"
-  ForExpr ar iter <$> parseExpr
+  (doX, si'') <- parseExprWithSrc si'
+  return (ForExpr ar iter doX, si'')
 
-parseListExpr :: Parser Expr
-parseListExpr = ListExpr
-  <$> between (symbol "[") (symbol "]") (many (parseExpr <* trailingComma))
+parseListExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseListExpr si = do
+  (es, si') <- between (symbol "[") (symbol "]") (parseElem si [])
+  return (ListExpr $ reverse es, si')
+ where
+  parseElem :: IntplSrcInfo -> [Expr] -> Parser ([Expr], IntplSrcInfo)
+  parseElem si' es = do
+    (x, si'') <- parseExprWithSrc si'
+    trailingComma
+    parseElem si'' (x : es)
 
 parseStringLit :: Parser Text
 parseStringLit = lexeme $ do
@@ -493,75 +555,79 @@ parseOpName = between (symbol "(") (symbol ")") parseOpLit
 parseOpLit :: Parser Text
 parseOpLit = lexeme $ takeWhile1P (Just "operator symbol") isOperatorChar
 
-parseBlockOrDict :: Parser Expr
-parseBlockOrDict = choice [try parseBlock, parseDict]
+parseBlockOrDict :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseBlockOrDict si = choice [try $ parseBlock si, parseDict si]
 
-parseBlock :: Parser Expr
-parseBlock =
-  symbol "{" *> notFollowedBy (symbol ",") *> parseBlockRest False []
+parseBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseBlock si =
+  symbol "{" *> notFollowedBy (symbol ",") *> parseBlockRest False [] si
  where
-  parseBlockRest :: Bool -> [StmtSrc] -> Parser Expr
-  parseBlockRest mustBlock t = do
+  parseBlockRest
+    :: Bool -> [StmtSrc] -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+  parseBlockRest mustBlock t si' = do
     mustBlock' <- optional (symbol ";") >>= \case
       Nothing -> return mustBlock
       _       -> return True
     choice
-      [ symbol "}"
-        $> (case t of
-             [] | mustBlock' -> BlockExpr []
-            -- let {} parse as empty dict instead of empty block
-             []              -> DictExpr []
-            -- single k:v pair without comma will reach here
-             [StmtSrc (_, ExprStmt pairExpr@(InfixExpr ":" _ _))]
-               | not mustBlock' -> DictExpr [pairExpr]
-             _ -> BlockExpr (reverse t)
-           )
+      [ symbol "}" $> (, si')
+        (case t of
+          [] | mustBlock' -> BlockExpr []
+         -- let {} parse as empty dict instead of empty block
+          []              -> DictExpr []
+         -- single k:v pair without comma will reach here
+          [StmtSrc (_, ExprStmt pairExpr@(InfixExpr ":" _ _))]
+            | not mustBlock' -> DictExpr [pairExpr]
+          _ -> BlockExpr (reverse t)
+        )
       , do
-        ss <- parseStmt
-        parseBlockRest mustBlock' $ ss : t
+        (ss, si'') <- parseStmt si'
+        parseBlockRest mustBlock' (ss : t) si''
       ]
 
-parseDict :: Parser Expr
-parseDict = symbol "{" *> parseDictRest []
+parseDict :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseDict si = symbol "{" *> parseDictRest [] si
  where
-  parseDictRest :: [Expr] -> Parser Expr
-  parseDictRest t = optional (symbol ",") *> choice
-    [ symbol "}" $> DictExpr (reverse t)
-    , parseKeyValPair >>= \p -> parseDictRest $ p : t
+  parseDictRest :: [Expr] -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+  parseDictRest t si' = optional (symbol ",") *> choice
+    [ symbol "}" $> (DictExpr (reverse t), si')
+    , parseKeyValPair si' >>= \(p, si'') -> parseDictRest (p : t) si''
     ]
-  parseKeyValPair :: Parser Expr
-  parseKeyValPair = do
-    pairExpr <- parseExpr
+  parseKeyValPair :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+  parseKeyValPair si' = do
+    (pairExpr, si'') <- parseExprWithSrc si'
     trailingComma
     case pairExpr of
-      InfixExpr ":" _ _ -> return pairExpr
+      InfixExpr ":" _ _ -> return (pairExpr, si'')
       _                 -> fail $ "Invalid dict entry: " <> show pairExpr
 
 
-parseOpAddrOrTupleOrParen :: Parser Expr
-parseOpAddrOrTupleOrParen =
+parseOpAddrOrTupleOrParen :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseOpAddrOrTupleOrParen si =
   symbol "("
-    *> (   (AttrExpr . DirectRef . NamedAttr <$> (parseOpLit <* symbol ")"))
-       <|> parseTupleRest ")" False []
+    *> (fmap (, si)
+             (AttrExpr . DirectRef . NamedAttr <$> (parseOpLit <* symbol ")"))
+       <|> parseTupleRest si ")" False []
        )
 
-parseTupleRest :: Text -> Bool -> [Expr] -> Parser Expr
-parseTupleRest closeSym mustTuple t = do
+parseTupleRest
+  :: IntplSrcInfo -> Text -> Bool -> [Expr] -> Parser (Expr, IntplSrcInfo)
+parseTupleRest si closeSym mustTuple t = do
   mustTuple' <- optional (symbol ",") >>= \case
     Nothing -> return mustTuple
     _       -> return True
   choice
-    [ symbol closeSym
-      $> (case t of
-           [singleExpr] | not mustTuple' ->
-             if closeSym == ")" then ParenExpr singleExpr else singleExpr
-           _ -> TupleExpr (reverse t)
-         )
-    , parseExpr >>= \e -> parseTupleRest closeSym mustTuple' $ e : t
+    [ symbol closeSym $> (, si)
+      (case t of
+        [singleExpr] | not mustTuple' ->
+          if closeSym == ")" then ParenExpr singleExpr else singleExpr
+        _ -> TupleExpr (reverse t)
+      )
+    , parseExprWithSrc si
+      >>= \(e, si') -> parseTupleRest si' closeSym mustTuple' $ e : t
     ]
 
-parseIndexer :: Parser Expr
-parseIndexer = symbol "[" *> parseTupleRest "]" False []
+parseIndexer :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseIndexer si = symbol "[" *> parseTupleRest si "]" False []
 
 
 -- Notes:
@@ -569,18 +635,20 @@ parseIndexer = symbol "[" *> parseTupleRest "]" False []
 --  * (not) should have a precedence slightly higher than (&&) (||)
 --  * guard (|) should have a precedence no smaller than the branch op (->)
 
-parsePrefixExpr :: Parser Expr
-parsePrefixExpr = choice
-  [ (symbol "+" >> notFollowedBy (satisfy isOperatorChar))
-  >>  PrefixExpr PrefixPlus
-  <$> parseExprPrec 9
-  , (symbol "-" >> notFollowedBy (satisfy isOperatorChar))
-  >>  PrefixExpr PrefixMinus
-  <$> parseExprPrec 9
-  , keyword "not" >> PrefixExpr Not <$> parseExprPrec 4
-  , (symbol "|" >> notFollowedBy (satisfy isOperatorChar))
-  >>  PrefixExpr Guard
-  <$> parseExprPrec 1
+parsePrefixExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parsePrefixExpr si = choice
+  [ (symbol "+" >> notFollowedBy (satisfy isOperatorChar)) >>= \_ -> do
+    (x, si') <- parseExprPrecWithSrc 9 si
+    return (PrefixExpr PrefixPlus x, si')
+  , (symbol "-" >> notFollowedBy (satisfy isOperatorChar)) >>= \_ -> do
+    (x, si') <- parseExprPrecWithSrc 9 si
+    return (PrefixExpr PrefixMinus x, si')
+  , keyword "not" >>= \_ -> do
+    (x, si') <- parseExprPrecWithSrc 4 si
+    return (PrefixExpr Not x, si')
+  , (symbol "|" >> notFollowedBy (satisfy isOperatorChar)) >>= \_ -> do
+    (x, si') <- parseExprPrecWithSrc 1 si
+    return (PrefixExpr Guard x, si')
   ]
 
 
@@ -618,12 +686,6 @@ illegalExprStart =
 -- operators, they can be declared and further overridden everywhere,
 -- while they are left-assosciative only
 
-parseExprPrec :: Precedence -> Parser Expr
-parseExprPrec prec = do
-  s <- getInput
-  o <- getOffset
-  fst <$> parseExprPrecWithSrc prec (s, o, [])
-
 parseExprLit :: Parser Expr
 parseExprLit = do
   void $ keyword "expr"
@@ -642,12 +704,20 @@ parseIntplExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseIntplExpr (s, o, sss) = do
   o' <- getOffset
   void $ symbol "{$"
-  x <- parseExprPrec (-30)
+  ie's                        <- getInput
+  ie'o                        <- getOffset
+  (x, (ie's', ie'o', ie'sss)) <- parseExprPrecWithSrc (-30) (ie's, ie'o, [])
   let !sss' = if o' > o
         then SrcSeg (maybe "" fst $ takeN_ (o' - o) s) : sss
         else sss
       !sss'' = IntplSeg x : sss'
-  void $ string "$}" -- reserve spaces following this in original source
+  -- todo anything to do with the interpolated expr src segs ?
+  let _ie'sss' = if ie'o' > ie'o
+        then SrcSeg (maybe "" fst $ takeN_ (ie'o' - ie'o) ie's') : ie'sss
+        else ie'sss
+  -- 'string' used here to reserve spaces following this, as in original
+  -- source of the outer expr
+  void $ string "$}"
   s'  <- getInput
   o'' <- getOffset
   void $ optional sc -- but consume the optional spaces wrt parsing
@@ -660,25 +730,27 @@ parseExprPrecWithSrc
 parseExprPrecWithSrc prec si = lookAhead illegalExprStart >>= \case
   True  -> fail "Illegal expression"
   False -> ((, si) <$> parseExprLit) <|> parseIntplExpr si <|> do
-    x <- choice
-      [ parsePrefixExpr
-      , parseYieldExpr
-      , parseForExpr
-      , parseIfExpr
-      , parseCaseExpr
-      , parseListExpr
-      , parseBlockOrDict
-      , parseOpAddrOrTupleOrParen
-      , LitExpr <$> parseLitExpr
-      , AttrExpr <$> parseAttrAddr
+    (x, si') <- choice
+      [ parsePrefixExpr si
+      , parseYieldExpr si
+      , parseForExpr si
+      , parseIfExpr si
+      , parseCaseExpr si
+      , parseListExpr si
+      , parseBlockOrDict si
+      , parseOpAddrOrTupleOrParen si
+      , (, si) . LitExpr <$> parseLitExpr
+      , (, si) . AttrExpr <$> parseAttrAddr
       ]
-    parseMoreOps x
+    parseMoreOps si' x
  where
-  parseMoreOps :: Expr -> Parser (Expr, IntplSrcInfo)
-  parseMoreOps expr = choice
-    [ parseIndexer >>= parseMoreOps . flip IndexExpr expr
-    , parsePackSender >>= parseMoreOps . CallExpr expr
-    , parseMoreInfix si expr
+  parseMoreOps :: IntplSrcInfo -> Expr -> Parser (Expr, IntplSrcInfo)
+  parseMoreOps si' expr = choice
+    [ parseIndexer si'
+      >>= \(idx, si'') -> parseMoreOps si'' $ IndexExpr idx expr
+    , parsePackSender si'
+      >>= \(aps, si'') -> parseMoreOps si'' $ CallExpr expr aps
+    , parseMoreInfix si' expr
     ]
   parseMoreInfix :: IntplSrcInfo -> Expr -> Parser (Expr, IntplSrcInfo)
   parseMoreInfix si' leftExpr = choice
@@ -710,9 +782,6 @@ parseExprPrecWithSrc prec si = lookAhead illegalExprStart >>= \case
               setParserState beforeOp
               return Nothing
 
-
-parseExpr :: Parser Expr
-parseExpr = parseExprPrec (-10)
 
 parseExprWithSrc :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseExprWithSrc = parseExprPrecWithSrc (-10)
