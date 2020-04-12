@@ -620,41 +620,47 @@ illegalExprStart =
 
 parseExprPrec :: Precedence -> Parser Expr
 parseExprPrec prec = do
+  s <- getInput
   o <- getOffset
-  fst <$> parseExprPrecWithSrc (o, []) prec
+  fst <$> parseExprPrecWithSrc (s, o, []) prec
 
 parseExprWithSrc :: Parser Expr
 parseExprWithSrc = do
   void $ keyword "expr"
-  s              <- getInput
-  o              <- getOffset
-  (x, (o', sss)) <- parseExprPrecWithSrc (o, []) (-20)
-  o''            <- getOffset
-  sss'           <- if o'' <= o'
+  s                  <- getInput
+  o                  <- getOffset
+  (x, (s', o', sss)) <- parseExprPrecWithSrc (s, o, []) (-20)
+  o''                <- getOffset
+  sss'               <- if o'' <= o'
     then return sss
     else do
-      let src = maybe "" fst $ takeN_ (o'' - o') s
+      let !src = maybe "" fst $ takeN_ (o'' - o') s'
       return $ SrcSeg src : sss
   return $ ExprWithSrc x $ reverse sss'
 
-parseIntplExpr :: (Int, [SourceSeg]) -> Parser (Expr, (Int, [SourceSeg]))
-parseIntplExpr (o, sss) = do
+parseIntplExpr
+  :: (Text, Int, [SourceSeg]) -> Parser (Expr, (Text, Int, [SourceSeg]))
+parseIntplExpr (s, o, sss) = do
   o' <- getOffset
   void $ symbol "{$"
   x <- parseExprPrec (-30)
-  void $ symbol "$}"
+  let !sss' = if o' > o
+        then SrcSeg (maybe "" fst $ takeN_ (o' - o) s) : sss
+        else sss
+      !sss'' = IntplSeg x : sss'
+  void $ string "$}" -- reserve spaces following this in original source
+  s'  <- getInput
   o'' <- getOffset
-  s   <- getInput
-  return
-    ( IntplExpr x
-    , (o'', IntplSeg x : SrcSeg (maybe "" fst $ takeN_ (o' - o) s) : sss)
-    )
+  void $ optional sc -- but consume the optional spaces wrt parsing
+  return (IntplExpr x, (s', o'', sss''))
 
 parseExprPrecWithSrc
-  :: (Int, [SourceSeg]) -> Precedence -> Parser (Expr, (Int, [SourceSeg]))
+  :: (Text, Int, [SourceSeg])
+  -> Precedence
+  -> Parser (Expr, (Text, Int, [SourceSeg]))
 parseExprPrecWithSrc si prec = lookAhead illegalExprStart >>= \case
   True  -> fail "Illegal expression"
-  False -> (, si) <$> parseExprWithSrc <|> parseIntplExpr si <|> do
+  False -> ((, si) <$> parseExprWithSrc) <|> parseIntplExpr si <|> do
     x <- choice
       [ parsePrefixExpr
       , parseYieldExpr
@@ -667,21 +673,26 @@ parseExprPrecWithSrc si prec = lookAhead illegalExprStart >>= \case
       , LitExpr <$> parseLitExpr
       , AttrExpr <$> parseAttrAddr
       ]
-    x' <- parseMoreOps x
-    return (x', si)
+    parseMoreOps x
  where
-  parseMoreOps :: Expr -> Parser Expr
+  parseMoreOps :: Expr -> Parser (Expr, (Text, Int, [SourceSeg]))
   parseMoreOps expr = choice
     [ parseIndexer >>= parseMoreOps . flip IndexExpr expr
     , parsePackSender >>= parseMoreOps . CallExpr expr
-    , lookAhead (symbol "$}") >> return expr
-    , parseMoreInfix expr
+    , parseMoreInfix si expr
     ]
-  parseMoreInfix :: Expr -> Parser Expr
-  parseMoreInfix leftExpr = higherOp prec >>= \case
-    Nothing -> return leftExpr
-    Just (opPrec, opSym) ->
-      parseExprPrec opPrec >>= parseMoreInfix . InfixExpr opSym leftExpr
+  parseMoreInfix
+    :: (Text, Int, [SourceSeg])
+    -> Expr
+    -> Parser (Expr, (Text, Int, [SourceSeg]))
+  parseMoreInfix si' leftExpr = choice
+    [ lookAhead (symbol "$}") >> return (leftExpr, si')
+    , higherOp prec >>= \case
+      Nothing              -> return (leftExpr, si')
+      Just (opPrec, opSym) -> do
+        (rightExpr, si'') <- parseExprPrecWithSrc si' opPrec
+        parseMoreInfix si'' $ InfixExpr opSym leftExpr rightExpr
+    ]
 
   higherOp :: Precedence -> Parser (Maybe (Precedence, OpSymbol))
   higherOp prec' = do
