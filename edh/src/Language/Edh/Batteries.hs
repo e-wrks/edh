@@ -307,15 +307,15 @@ installEdhBatteries world = liftIO $ do
 
           -- branch
         , ( "->"
-          , 0
+          , -1
           )
           -- catch
         , ( "$=>"
-          , -1
+          , -2
           )
           -- finally
         , ( "@=>"
-          , -1
+          , -2
           )
 
           -- string coercing concatenation
