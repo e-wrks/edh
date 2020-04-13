@@ -472,11 +472,12 @@ parseForExpr si = do
 
 parseListExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseListExpr si = do
-  (es, si') <- between (symbol "[") (symbol "]") (parseElem si [])
+  void $ symbol "["
+  (es, si') <- parseElem si []
   return (ListExpr $ reverse es, si')
  where
   parseElem :: IntplSrcInfo -> [Expr] -> Parser ([Expr], IntplSrcInfo)
-  parseElem si' es = do
+  parseElem si' es = (symbol "]" >> return (es, si')) <|> do
     (x, si'') <- parseExpr si'
     trailingComma
     parseElem si'' (x : es)
