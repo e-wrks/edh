@@ -7,7 +7,7 @@
 
     # emulate procedures available at a remote site
     method callThePolice ( telno ) {
-      console.warn<| 'Alerts ringing #' ++ telno ++ ' ...'
+      console.warn<| 'Alerts ringing #tel ' ++ telno ++ ' ...'
     }
 
     # simulate remote exec
