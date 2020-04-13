@@ -2237,12 +2237,20 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
           -- silently drop the value to single underscore, while consume the args
           -- from incoming pack
           exit' (ArgsPack posArgs' Map.empty, em)
-        RecvRestKwArgs restKwArgAttr -> exit'
-          ( ArgsPack posArgs' Map.empty
-          , Map.insert (AttrByName restKwArgAttr)
-                       (EdhArgsPack $ ArgsPack [] kwArgs')
-                       em
-          )
+        RecvRestKwArgs restKwArgAttr -> if T.null restKwArgAttr
+          then exit'
+            ( ArgsPack posArgs' Map.empty
+            , Map.union
+              (Map.fromList [ (AttrByName k, v) | (k, v) <- Map.toList kwArgs' ]
+              )
+              em
+            )
+          else exit'
+            ( ArgsPack posArgs' Map.empty
+            , Map.insert (AttrByName restKwArgAttr)
+                         (EdhArgsPack $ ArgsPack [] kwArgs')
+                         em
+            )
         RecvRestPkArgs "_" ->
           -- silently drop the value to single underscore, while consume the args
           -- from incoming pack

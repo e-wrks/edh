@@ -10,6 +10,7 @@ import           Control.Applicative     hiding ( many
 import           Control.Monad
 import           Control.Monad.State.Strict
 
+import           Data.Maybe
 import           Data.Functor
 import qualified Data.Char                     as Char
 import           Data.Text                      ( Text )
@@ -162,7 +163,7 @@ parseArgRecvs rs kwConsumed posConsumed =
     RecvRestPkArgs <$> parseAttrName
   restKwArgs = do
     void $ symbol "**"
-    RecvRestKwArgs <$> parseAttrName
+    RecvRestKwArgs . fromMaybe "" <$> optional parseAttrName
   restPosArgs = do
     void $ symbol "*"
     RecvRestPosArgs <$> parseAttrName
