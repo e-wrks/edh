@@ -1,4 +1,6 @@
 
+import * './str'
+
 # the indicator whether this world is under debugging
 debug = if console.logLevel <= console.debug
   then this   # alias to this module when debugging
@@ -7,10 +9,23 @@ debug = if console.logLevel <= console.debug
 # used to create unique command objects
 class Command { __repr__ = 'Command()' }
 
-# the basic implementation of the `dir` command
+# the default basic implementation for the `dir` command
 interpreter printDir( callerScope, ofScope=None, ) {
   ofScope = ofScope &> callerScope.eval(ofScope) |> callerScope
   console.print( ofScope.lexiLoc(), **ofScope.attrs() )
+}
+
+# basic implementation of a string form for `dir` command to
+# output to a remote console
+interpreter sprintDir( callerScope, ofScope=None, ) {
+  ofScope = ofScope &> callerScope.eval(ofScope) |> callerScope
+
+  return join(
+    ofScope.lexiLoc(), 
+    *()=< for (k,v) from ofScope.attrs() do 
+      '  ' ++ k ++ '=' ++ v,
+    sep='\n',
+  )
 }
 
 # common shell commands
