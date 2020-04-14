@@ -104,6 +104,41 @@ defaultEdhPS1, defaultEdhPS2 :: Text
 defaultEdhPS1 = "Đ: "
 defaultEdhPS2 = "Đ| "
 
+-- | host method console.readSource(ps1="(db)Đ: ", ps2="(db)Đ| ")
+conReadSourceProc :: EdhProcedure
+conReadSourceProc !apk !exit = ask >>= \pgs ->
+  case parseArgsPack (defaultEdhPS1, defaultEdhPS2) argsParser apk of
+    Left  err        -> throwEdh UsageError err
+    Right (ps1, ps2) -> contEdhSTM $ do
+      let !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context pgs
+      cmdIn <- newEmptyTMVar
+      writeTQueue ioQ $ ConsoleIn cmdIn ps1 ps2
+      waitEdhSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
+        src@EdhString{} -> exitEdhSTM pgs exit src
+        _               -> error "impossible"
+ where
+  argsParser =
+    ArgsPackParser
+        [ \arg (_, ps2') -> case arg of
+          EdhString ps1s -> Right (ps1s, ps2')
+          _              -> Left "Invalid ps1"
+        , \arg (ps1', _) -> case arg of
+          EdhString ps2s -> Right (ps1', ps2s)
+          _              -> Left "Invalid ps2"
+        ]
+      $ Map.fromList
+          [ ( "ps1"
+            , \arg (_, ps2') -> case arg of
+              EdhString ps1s -> Right (ps1s, ps2')
+              _              -> Left "Invalid ps1"
+            )
+          , ( "ps2"
+            , \arg (ps1', _) -> case arg of
+              EdhString ps2s -> Right (ps1', ps2s)
+              _              -> Left "Invalid ps2"
+            )
+          ]
+
 -- | host method console.readCommand(ps1="(db)Đ: ", ps2="(db)Đ| ", inScopeOf=None)
 conReadCommandProc :: EdhProcedure
 conReadCommandProc !apk !exit = ask >>= \pgs ->
@@ -126,7 +161,7 @@ conReadCommandProc !apk !exit = ask >>= \pgs ->
             , thatObject  = so
             , scopeProc   = objClass so
             , scopeCaller = StmtSrc
-                              ( SourcePos { sourceName   = "<cmd-in>"
+                              ( SourcePos { sourceName   = "<console-cmd>"
                                           , sourceLine   = mkPos 1
                                           , sourceColumn = mkPos 1
                                           }

@@ -4,7 +4,7 @@ while true {  # this is the *Loop* in so-called REPL
 
   case console.readCommand(ps1="Đ: ", ps2="Đ| ") of {
     batteries.quit -> { break }
-    batteries.dir -> printDir( scope() )
+    batteries.dir -> printDir()
     { cmdVal } -> {
       console.print( cmdVal )
       cmdVal = nil  # clear it

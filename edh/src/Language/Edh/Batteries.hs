@@ -431,6 +431,18 @@ installEdhBatteries world = liftIO $ do
         | (vc, nm, hp, args) <-
           [ (EdhMethod, "exit", conExitProc, PackReceiver [])
           , ( EdhMethod
+            , "readSource"
+            , conReadSourceProc
+            , PackReceiver
+              [ RecvArg "ps1"
+                        Nothing
+                        (Just (LitExpr (StringLiteral defaultEdhPS1)))
+              , RecvArg "ps2"
+                        Nothing
+                        (Just (LitExpr (StringLiteral defaultEdhPS2)))
+              ]
+            )
+          , ( EdhMethod
             , "readCommand"
             , conReadCommandProc
             , PackReceiver
@@ -440,6 +452,7 @@ installEdhBatteries world = liftIO $ do
               , RecvArg "ps2"
                         Nothing
                         (Just (LitExpr (StringLiteral defaultEdhPS2)))
+              , RecvArg "inScopeOf" Nothing (Just edhNoneExpr)
               ]
             )
           , (EdhMethod, "print", conPrintProc, WildReceiver)

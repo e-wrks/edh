@@ -123,6 +123,7 @@ module Language.Edh.EHI
   , ArgSender(..)
   , ProcDecl(..)
   , SourcePos(..)
+  , mkPos
   , sourcePosPretty
   , deParen
 
