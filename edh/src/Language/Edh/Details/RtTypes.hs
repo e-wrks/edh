@@ -966,7 +966,7 @@ data Stmt =
       --
       -- the perceiption construct is somewhat similar to traditional signal
       -- handling mechanism in OS process management
-    | PerceiveStmt !AttrAddr !Expr
+    | PerceiveStmt !Expr !Expr
       -- | interpreter declaration, an interpreter procedure is not otherwise
       -- different from a method procedure, except it receives arguments
       -- in expression form rather than values, in addition to the reflective

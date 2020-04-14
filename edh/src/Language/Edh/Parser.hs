@@ -304,9 +304,9 @@ parseGeneratorStmt si = do
 parsePerceiveStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parsePerceiveStmt si = do
   void $ keyword "perceive"
-  addr     <- parseAttrAddr
-  (x, si') <- parseExpr si
-  return (PerceiveStmt addr x, si')
+  (sink, si' ) <- parseExpr si
+  (body, si'') <- parseExpr si'
+  return (PerceiveStmt sink body, si'')
 
 parseInterpreterStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseInterpreterStmt si = do

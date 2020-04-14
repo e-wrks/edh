@@ -269,19 +269,19 @@ evalStmt' !stmt !exit = do
         _ -> contEdhSTM $ schedDefered pgs $ evalExpr expr edhEndOfProc
 
 
-    PerceiveStmt sinkAddr reactExpr ->
-      evalExpr (AttrExpr sinkAddr) $ \(OriginalValue !val _ _) ->
-        case edhUltimate val of
+    PerceiveStmt sinkExpr bodyExpr ->
+      evalExpr sinkExpr $ \(OriginalValue !sinkVal _ _) ->
+        case edhUltimate sinkVal of
           (EdhSink sink) -> contEdhSTM $ do
             (perceiverChan, _) <- subscribeEvents sink
-            modifyTVar' (edh'perceivers pgs) ((perceiverChan, pgs, reactExpr) :)
+            modifyTVar' (edh'perceivers pgs) ((perceiverChan, pgs, bodyExpr) :)
             exitEdhSTM pgs exit nil
           _ ->
             throwEdh EvalError
-              $  "Can only reacting to an event sink, not a "
-              <> T.pack (edhTypeNameOf val)
+              $  "Can only perceive from an event sink, not a "
+              <> T.pack (edhTypeNameOf sinkVal)
               <> ": "
-              <> T.pack (show val)
+              <> T.pack (show sinkVal)
 
 
     ThrowStmt excExpr ->
@@ -756,9 +756,9 @@ intplStmt !pgs !stmt !exit = case stmt of
   LetStmt !rcvrs !sndrs -> intplArgsRcvr pgs rcvrs $ \rcvrs' ->
     seqcontSTM (intplArgSndr pgs <$> sndrs)
       $ \sndrs' -> exit $ LetStmt rcvrs' sndrs'
-  ExtendsStmt !x        -> intplExpr pgs x $ \x' -> exit $ ExtendsStmt x'
-  PerceiveStmt !addr !x -> intplAttrAddr pgs addr
-    $ \addr' -> intplExpr pgs x $ \x' -> exit $ PerceiveStmt addr' x'
+  ExtendsStmt !x           -> intplExpr pgs x $ \x' -> exit $ ExtendsStmt x'
+  PerceiveStmt !sink !body -> intplExpr pgs sink
+    $ \sink' -> intplExpr pgs body $ \body' -> exit $ PerceiveStmt sink' body'
   WhileStmt !cond !act -> intplExpr pgs cond
     $ \cond' -> intplExpr pgs act $ \act' -> exit $ WhileStmt cond' act'
   ThrowStmt  !x -> intplExpr pgs x $ \x' -> exit $ ThrowStmt x'
