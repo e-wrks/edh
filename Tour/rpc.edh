@@ -1,4 +1,9 @@
 
+# here the language constructs for RPC support is demostrated,
+# for actual working examples of RPC over the network, checkout
+# the [nedh](https://github.com/e-wrks/nedh) project and its tour.
+
+
 {
   # mockup some remote site environment
 
