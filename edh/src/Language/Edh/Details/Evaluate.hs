@@ -2273,13 +2273,14 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
                     , Map.insert (AttrByName argName) argVal em
                     )
                 Just (DirectRef addr) -> case addr of
+                  NamedAttr "_" -> -- drop
+                    exit' (ArgsPack posArgs'' kwArgs'', em)
                   NamedAttr attrName -> -- simple rename
                     exit'
                       ( ArgsPack posArgs'' kwArgs''
                       , Map.insert (AttrByName attrName) argVal em
                       )
-                    -- todo support this ?
-                  SymbolicAttr symName ->
+                  SymbolicAttr symName -> -- todo support this ?
                     throwEdhSTM pgsRecv UsageError
                       $  "Do you mean `this.@"
                       <> symName
