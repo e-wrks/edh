@@ -28,10 +28,18 @@ addProc !lhExpr !rhExpr !exit =
           throwEdh EvalError
             $  "Invalid right-hand value for (+) operation: "
             <> T.pack (show rhVal)
+    EdhString lhs -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+      edhValueStr rhVal $ \(OriginalValue rhStr _ _) -> case rhStr of
+        EdhString !rhs -> exitEdhProc exit (EdhString $ lhs <> rhs)
+        _              -> error "bug: edhValueStr returned non-string"
     _ ->
       throwEdh EvalError
         $  "Invalid left-hand value for (+) operation: "
         <> T.pack (show lhVal)
+ where
+  edhValueStr :: EdhValue -> EdhProcExit -> EdhProc
+  edhValueStr s@EdhString{} !exit' = exitEdhProc exit' s
+  edhValueStr !v            !exit' = edhValueRepr v exit'
 
 
 -- | operator (-)
