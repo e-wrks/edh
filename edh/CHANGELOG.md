@@ -13,6 +13,9 @@
 - the `runtime` module and its host artifacts from default batteries are
   refactored to be `console` module with an implementation in default
   batteries
+- Python compatible syntax:
+  - (+) can do string concatenation when left-hand is a string
+  - triple quoted strings (backtick as well as single/double quotes)
 - bugfixes and improvements
 
 ## 0.2.0.0
