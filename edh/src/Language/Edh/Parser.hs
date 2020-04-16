@@ -485,8 +485,15 @@ parseListExpr si = do
 
 parseStringLit :: Parser Text
 parseStringLit = lexeme $ do
-  delim <- char '\"' <|> char '\'' <|> char '`'
-  T.pack <$> manyTill L.charLiteral (char delim)
+  delim <- choice
+    [ string "'''"
+    , string "'"
+    , string "```"
+    , string "`"
+    , string "\"\"\""
+    , string "\""
+    ]
+  T.pack <$> manyTill L.charLiteral (string delim)
 
 parseBoolLit :: Parser Bool
 parseBoolLit =
