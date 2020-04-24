@@ -1492,33 +1492,27 @@ edhThrow !exv = ask >>= contEdhSTM . flip edhThrowSTM exv
 edhThrowSTM :: EdhProgState -> EdhValue -> STM ()
 edhThrowSTM !pgs !exv = do
   let propagateExc :: EdhValue -> [Scope] -> STM ()
-      propagateExc exv' [] = edhErrorUncaught exv'
+      propagateExc exv' [] = edhErrorUncaught pgs exv'
       propagateExc exv' (frame : stack) =
         runEdhProc pgs $ exceptionHandler frame exv' $ \exv'' ->
           contEdhSTM $ propagateExc exv'' stack
   propagateExc exv $ NE.toList $ callStack $ edh'context pgs
- where
-  edhErrorUncaught :: EdhValue -> STM ()
-  edhErrorUncaught !exv' = case exv' of
-    EdhObject exo -> do
-      esd <- readTVar $ entity'store $ objEntity exo
-      case fromDynamic esd :: Maybe SomeException of
-        Just !e -> -- TODO replace cc in err if is empty here ?
-          throwSTM e
-        Nothing -> -- TODO support magic method to coerce as exception ?
-          throwSTM $ EdhError EvalError (T.pack $ show exv') $ getEdhCallContext
-            0
-            pgs
-    EdhString !msg ->
-      throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 pgs
-    _ -> -- coerce arbitrary value to EdhError
-         runEdhProc pgs $ edhValueRepr exv' $ \(OriginalValue r _ _) ->
-      case r of
-        EdhString !msg ->
-          contEdhSTM $ throwSTM $ EdhError EvalError msg $ getEdhCallContext
-            0
-            pgs
-        _ -> error "bug: edhValueRepr returned non-string"
+
+edhErrorUncaught :: EdhProgState -> EdhValue -> STM ()
+edhErrorUncaught !pgs !exv = case exv of
+  EdhObject exo -> do
+    esd <- readTVar $ entity'store $ objEntity exo
+    case fromDynamic esd :: Maybe SomeException of
+      Just !e -> -- TODO replace cc in err if is empty here ?
+        throwSTM e
+      Nothing -> edhValueReprSTM pgs exv
+        $ \msg ->
+        -- TODO support magic method to coerce as exception ?
+                  throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 pgs
+  EdhString !msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 pgs
+  _              -> edhValueReprSTM pgs exv
+    -- coerce arbitrary value to EdhError
+    $ \msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 pgs
 
 
 -- | Catch possible throw from the specified try action

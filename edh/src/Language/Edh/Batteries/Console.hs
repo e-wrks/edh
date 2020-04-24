@@ -139,14 +139,14 @@ conReadSourceProc !apk !exit = ask >>= \pgs ->
             )
           ]
 
--- | host method console.readCommand(ps1="(db)Đ: ", ps2="(db)Đ| ", inScopeOf=None)
+-- | host method console.readCommand(ps1="Đ: ", ps2="Đ| ", inScopeOf=None)
 conReadCommandProc :: EdhProcedure
 conReadCommandProc !apk !exit = ask >>= \pgs ->
   case parseArgsPack (defaultEdhPS1, defaultEdhPS2, Nothing) argsParser apk of
     Left  err                   -> throwEdh UsageError err
     Right (ps1, ps2, inScopeOf) -> contEdhSTM $ do
-      let !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context pgs
-          ctx  = edh'context pgs
+      let ctx  = edh'context pgs
+          !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context pgs
       -- mind to inherit this host proc's exception handler anyway
       cmdScope <- case inScopeOf of
         Just !so -> isScopeWrapper ctx so >>= \case

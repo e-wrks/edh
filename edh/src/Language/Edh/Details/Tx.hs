@@ -11,6 +11,7 @@ import           Control.Monad.Reader
 import           Control.Concurrent
 import           Control.Concurrent.STM
 
+import qualified Data.List.NonEmpty            as NE
 import           Data.Dynamic
 
 import           Language.Edh.Control
@@ -43,6 +44,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
           -- todo special handling here ?
           throwTo mainThId asyncExc
         _ -> throwTo mainThId e
+  -- prepare the go routine forker
   !forkQueue <- newTQueueIO
   let
     forkDescendants :: IO ()
@@ -54,32 +56,51 @@ driveEdhProgram !haltResult !progCtx !prog = do
         >>= \case
               Nothing       -> return () -- Edh program halted, done
               Just !edhTask -> do
-                -- prepare state for the descendant thread
-                !descQueue  <- newTQueueIO
-                !perceivers <- newTVarIO []
-                !defers     <- newTVarIO []
-                let !pgsDescendant = (edh'task'pgs edhTask)
-                      { edh'task'queue = descQueue
-                      , edh'perceivers = perceivers
-                      , edh'defers     = defers
-                    -- the forker should have checked not in tx, enforce here
-                      , edh'in'tx      = False
-                      }
+                pgsDesc <- deriveState $ edh'task'pgs edhTask
                 -- bootstrap on the descendant thread
-                atomically $ writeTQueue descQueue $ Right edhTask
-                  { edh'task'pgs = pgsDescendant
-                  }
-                void
-                  $ mask_
-                  $ forkIOWithUnmask
-                  $ \unmask -> catch
-                      (unmask $ driveEdhThread defers descQueue)
-                      onDescendantExc
+                atomically
+                  $ writeTQueue (edh'task'queue pgsDesc)
+                  $ Right edhTask { edh'task'pgs = pgsDesc }
+                void $ mask_ $ forkIOWithUnmask $ \unmask -> catch
+                  (unmask $ driveEdhThread (edh'defers pgsDesc)
+                                           (edh'task'queue pgsDesc)
+                  )
+                  onDescendantExc
                 -- keep the forker running
                 forkDescendants
+     where
+      -- if the forked go routine doesn't handle an exception itself, treat the
+      -- exception as uncaught immediately, it'll be throwTo the main thread then
+      handleAsyncExc :: EdhExcptHndlr
+      handleAsyncExc !exv _ =
+        ask >>= \pgs -> contEdhSTM $ edhErrorUncaught pgs exv
+      -- derive program state for the descendant thread
+      deriveState :: EdhProgState -> IO EdhProgState
+      deriveState !pgsFrom = do
+        !descQueue  <- newTQueueIO
+        !perceivers <- newTVarIO []
+        !defers     <- newTVarIO []
+        return pgsFrom
+          { edh'task'queue = descQueue
+          , edh'perceivers = perceivers
+          , edh'defers     = defers
+          -- the forker should have checked not in tx, enforce here
+          , edh'in'tx      = False
+          -- reset all exception handlers to the default for every frame
+          -- on call stack
+          , edh'context    = fromCtx
+            { callStack =
+              (NE.head fromStack) { exceptionHandler = handleAsyncExc }
+                NE.:| NE.tail fromStack
+            }
+          }
+       where
+        !fromCtx   = edh'context pgsFrom
+        !fromStack = callStack fromCtx
   -- start forker thread
   void $ mask_ $ forkIOWithUnmask $ \unmask ->
     catch (unmask forkDescendants) onDescendantExc
+  -- run the main thread
   flip finally
        (
         -- set halt result after the main thread done, anyway if not already,

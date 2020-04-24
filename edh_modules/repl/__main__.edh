@@ -25,7 +25,17 @@ while true {  # this is the *Loop* in so-called REPL
   }
 
   { cmdExc } -> {
-    console.print( 'Recovered from error', exception=cmdExc )
+    # the exception can have happened in a descendant goroutine/thread,
+    # and throwTo this main thread, console.print() won't show such an
+    # asynchronous exception timely, we use error log here.
+    console.error<| 'Recovered from error: ' ++ cmdExc
+
+    # TODO in case of asynchronous exception occurred, the last 
+    # console.readCommand() is interrupted, but the console IO loop is
+    # still reading stdin, and what ever read will subsequently be 
+    # discarded anyway. this behavior may be rather surprising to the
+    # user, need to optimize UX for such cases.
+    console.print('Your last input may have no effect due to the error.')
   }
 
 }
