@@ -711,7 +711,11 @@ parseExprLit = do
     else do
       let !src = maybe "" fst $ takeN_ (o'' - o') s'
       return $ SrcSeg src : sss
-  return $ ExprWithSrc x $ reverse sss'
+  -- remove trailing white spaces of the last src segment
+  let sss'' = case sss' of
+        SrcSeg src : prev -> SrcSeg (T.stripEnd src) : prev
+        _                 -> sss'
+  return $ ExprWithSrc x $ reverse sss''
 
 parseIntplExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseIntplExpr (s, o, sss) = do
