@@ -198,12 +198,11 @@ scopeGetProc (ArgsPack !args !kwargs) !exit = do
       (Map.fromList rtnKwArgs)
  where
   attrKeyFrom :: EdhProgState -> EdhValue -> (AttrKey -> STM ()) -> STM ()
-  attrKeyFrom _   (EdhString attrName) !exit' = exit' $ AttrByName attrName
-  attrKeyFrom _   (EdhSymbol sym     ) !exit' = exit' $ AttrBySym sym
-  attrKeyFrom pgs badVal               _      = throwEdhSTM
-    pgs
-    UsageError
-    ("Invalid attribute reference type - " <> T.pack (show $ edhTypeOf badVal))
+  attrKeyFrom _ (EdhString attrName) !exit' = exit' $ AttrByName attrName
+  attrKeyFrom _ (EdhSymbol sym     ) !exit' = exit' $ AttrBySym sym
+  attrKeyFrom pgs badVal _ =
+    throwEdhSTM pgs UsageError $ "Invalid attribute reference type - " <> T.pack
+      (edhTypeNameOf badVal)
 
 
 -- | utility scope.put(k1:v1, k2:v2, n3=v3, n4=v4, ...)

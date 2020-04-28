@@ -2168,7 +2168,7 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
             setEdhAttr pgsAfter tgtExpr (AttrBySym sym) rhVal exit
           _ ->
             throwEdh EvalError $ "Invalid attribute reference type - " <> T.pack
-              (show $ edhTypeOf addrVal)
+              (edhTypeNameOf addrVal)
     x ->
       throwEdh EvalError
         $  "Invalid left hand expression for assignment: "

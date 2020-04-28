@@ -123,9 +123,9 @@ logicalAndProc !lhExpr !rhExpr !exit =
       case edhUltimate rhVal of
         EdhBool rhBool -> exitEdhProc exit (EdhBool $ lhBool && rhBool)
         _ -> throwEdh EvalError $ "Invalid right-hand value type: " <> T.pack
-          (show $ edhTypeOf rhVal)
+          (edhTypeNameOf rhVal)
     _ -> throwEdh EvalError $ "Invalid left-hand value type: " <> T.pack
-      (show $ edhTypeOf lhVal)
+      (edhTypeNameOf lhVal)
 
 -- | operator (||)
 logicalOrProc :: EdhIntrinsicOp
@@ -135,9 +135,9 @@ logicalOrProc !lhExpr !rhExpr !exit =
       case edhUltimate rhVal of
         EdhBool rhBool -> exitEdhProc exit (EdhBool $ lhBool || rhBool)
         _ -> throwEdh EvalError $ "Invalid right-hand value type: " <> T.pack
-          (show $ edhTypeOf rhVal)
+          (edhTypeNameOf rhVal)
     _ -> throwEdh EvalError $ "Invalid left-hand value type: " <> T.pack
-      (show $ edhTypeOf lhVal)
+      (edhTypeNameOf lhVal)
 
 
 -- | operator (~=)

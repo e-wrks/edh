@@ -34,7 +34,7 @@ attrDerefAddrProc !lhExpr !rhExpr !exit =
     EdhSymbol sym@(Symbol _ desc) ->
       getEdhAttr lhExpr (AttrBySym sym) (noAttr $ "@" <> desc) exit
     _ -> throwEdh EvalError $ "Invalid attribute reference type - " <> T.pack
-      (show $ edhTypeOf rhVal)
+      (edhTypeNameOf rhVal)
  where
   noAttr key lhVal =
     throwEdh EvalError
@@ -123,7 +123,7 @@ attrDerefTemptProc !lhExpr !rhExpr !exit =
     EdhSymbol !sym ->
       getEdhAttr lhExpr (AttrBySym sym) (const $ exitEdhProc exit nil) exit
     _ -> throwEdh EvalError $ "Invalid attribute reference type - " <> T.pack
-      (show $ edhTypeOf rhVal)
+      (edhTypeNameOf rhVal)
 
 
 -- | the Symbol(description) constructor

@@ -1200,16 +1200,19 @@ instance Hashable EdhTypeValue where
 edhTypeNameOf :: EdhValue -> String
 edhTypeNameOf EdhNil                   = "nil"
 edhTypeNameOf (EdhNamedValue n EdhNil) = T.unpack n
-edhTypeNameOf (EdhNamedValue n v) = T.unpack n <> " := " <> show (edhTypeOf v)
-edhTypeNameOf v                        = show $ edhTypeOf v
+edhTypeNameOf (EdhNamedValue n v) =
+  T.unpack n <> " := " <> show (edhTypeNameOf v)
+edhTypeNameOf v = show $ edhTypeOf v
 
 -- | Get the type tag of an value
 --
 -- Passing in a `nil` value will hit bottom (crash the process) here,
 -- use `edhTypeNameOf` if all you want is a type name shown to user.
 edhTypeOf :: EdhValue -> EdhTypeValue
-edhTypeOf EdhNil = --
-  undefined        -- this is a taboo
+
+-- it's a taboo to get the type of a nil, either named or not
+edhTypeOf EdhNil =  undefined      
+edhTypeOf (EdhNamedValue _ EdhNil) = undefined
 
 edhTypeOf EdhType{}                                   = TypeType
 
@@ -1238,17 +1241,17 @@ edhTypeOf (EdhGnrtor (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> GeneratorType
   Right _ -> HostGenrType
 
-edhTypeOf EdhIntrpr{}         = InterpreterType
-edhTypeOf EdhPrducr{}         = ProducerType
-edhTypeOf EdhBreak            = BreakType
-edhTypeOf EdhContinue         = ContinueType
-edhTypeOf EdhCaseClose{}      = CaseCloseType
-edhTypeOf EdhFallthrough      = FallthroughType
-edhTypeOf EdhYield{}          = YieldType
-edhTypeOf EdhReturn{}         = ReturnType
-edhTypeOf EdhSink{}           = SinkType
-edhTypeOf (EdhNamedValue _ v) = edhTypeOf v
-edhTypeOf EdhExpr{}           = ExprType
+edhTypeOf EdhIntrpr{}              = InterpreterType
+edhTypeOf EdhPrducr{}              = ProducerType
+edhTypeOf EdhBreak                 = BreakType
+edhTypeOf EdhContinue              = ContinueType
+edhTypeOf EdhCaseClose{}           = CaseCloseType
+edhTypeOf EdhFallthrough           = FallthroughType
+edhTypeOf EdhYield{}               = YieldType
+edhTypeOf EdhReturn{}              = ReturnType
+edhTypeOf EdhSink{}                = SinkType
+edhTypeOf (EdhNamedValue _ v     ) = edhTypeOf v
+edhTypeOf EdhExpr{}                = ExprType
 
 
 mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
