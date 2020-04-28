@@ -1750,11 +1750,13 @@ callEdhOperator' !gnr'caller !callee'that !mth'proc !prede !mth'body !args !exit
   = do
     !pgsCaller <- ask
     let !callerCtx = edh'context pgsCaller
-        !recvCtx   = callerCtx { callStack       = lexicalScopeOf mth'proc :| []
-                               , generatorCaller = Nothing
-                               , contextMatch    = true
-                               , contextStmt     = mth'body
-                               }
+        !recvCtx   = callerCtx
+          { callStack = (lexicalScopeOf mth'proc) { thatObject = callee'that }
+                          :| []
+          , generatorCaller = Nothing
+          , contextMatch    = true
+          , contextStmt     = mth'body
+          }
     recvEdhArgs recvCtx
                 (procedure'args $ procedure'decl mth'proc)
                 (ArgsPack args Map.empty)
@@ -1845,11 +1847,13 @@ callEdhMethod'
 callEdhMethod' !gnr'caller !callee'that !mth'proc !mth'body !apk !exit = do
   !pgsCaller <- ask
   let !callerCtx = edh'context pgsCaller
-      !recvCtx   = callerCtx { callStack       = lexicalScopeOf mth'proc :| []
-                             , generatorCaller = Nothing
-                             , contextMatch    = true
-                             , contextStmt     = mth'body
-                             }
+      !recvCtx   = callerCtx
+        { callStack = (lexicalScopeOf mth'proc) { thatObject = callee'that }
+                        :| []
+        , generatorCaller = Nothing
+        , contextMatch    = true
+        , contextStmt     = mth'body
+        }
   recvEdhArgs recvCtx (procedure'args $ procedure'decl mth'proc) apk $ \ed ->
     contEdhSTM $ do
       ent <- createHashEntity ed
