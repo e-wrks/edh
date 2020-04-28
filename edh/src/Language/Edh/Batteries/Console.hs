@@ -248,6 +248,14 @@ conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
   printVS args $ Map.toList kwargs
 
 
+conNowProc :: EdhProcedure
+conNowProc _ !exit = do
+  pgs <- ask
+  contEdhSTM $ do
+    nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ getTime Realtime
+    exitEdhSTM pgs exit (EdhDecimal $ fromInteger nanos)
+
+
 timelyNotify :: Int -> EdhGenrCaller -> STM ()
 timelyNotify !delayMicros genr'caller@(!pgs', !iter'cb) = do
   nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ do

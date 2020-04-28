@@ -456,6 +456,7 @@ installEdhBatteries world = liftIO $ do
               ]
             )
           , (EdhMethod, "print", conPrintProc, WildReceiver)
+          , (EdhMethod, "now"  , conNowProc  , PackReceiver [])
           , ( EdhGnrtor
             , "everyMicros"
             , conEveryMicrosProc
