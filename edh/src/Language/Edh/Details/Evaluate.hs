@@ -1367,7 +1367,7 @@ resolveEdhAttrAddr !pgs (SymbolicAttr !symName) !exit =
 
 
 -- | Wait an stm action without tracking the retries
-waitEdhSTM :: EdhProgState -> STM EdhValue -> (EdhValue -> STM ()) -> STM ()
+waitEdhSTM :: EdhProgState -> STM a -> (a -> STM ()) -> STM ()
 waitEdhSTM !pgs !act !exit = if edh'in'tx pgs
   then throwEdhSTM pgs UsageError "You don't wait stm from within a transaction"
   else edhPerformIO pgs (atomically act) exit
