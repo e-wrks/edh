@@ -1974,9 +1974,19 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                                      gnr'proc
                                      pb
                                      apk
-                        $ \(OriginalValue !val _ _) ->
+                        $ \(OriginalValue !gnrRtn _ _) -> case gnrRtn of
                             -- return the result in CPS with looper pgs restored
-                            contEdhSTM $ exitEdhSTM pgsLooper exit val
+                            EdhContinue ->
+                              -- propagate the continue from generator return
+                              contEdhSTM $ exitEdhSTM pgsLooper exit EdhContinue
+                            EdhBreak ->
+                              -- todo what's the case a generator would break out?
+                              contEdhSTM $ exitEdhSTM pgsLooper exit nil
+                            EdhReturn !rtnVal ->
+                              -- unwrap the return, as result of this for-loop 
+                              contEdhSTM $ exitEdhSTM pgsLooper exit rtnVal
+                            -- otherwise passthrough
+                            _ -> contEdhSTM $ exitEdhSTM pgsLooper exit gnrRtn
 
                 -- calling other procedures, assume to loop over its return value
                 _ ->
