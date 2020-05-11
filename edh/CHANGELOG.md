@@ -16,6 +16,9 @@
 - Python compatible syntax:
   - (+) can do string concatenation when left-hand is a string
   - triple quoted strings (backtick as well as single/double quotes)
+- explicit exports, any artifact must be explicitly defined within an
+  export statement to be eligible for import. then neither name nor type
+  matters for exportability
 - bugfixes and improvements
 
 ## 0.2.0.0
