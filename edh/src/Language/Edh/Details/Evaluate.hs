@@ -629,44 +629,45 @@ exportsMagicName = "__exports__"
 importFromObject :: ArgsReceiver -> Object -> EdhProcExit -> EdhProc
 importFromObject !argsRcvr !fromObj !exit = do
   pgs <- ask
-  let !ctx  = edh'context pgs
-      !this = thisObject $ contextScope ctx
+  let
+    !ctx  = edh'context pgs
+    !this = thisObject $ contextScope ctx
+    withExps :: Map.HashMap AttrName EdhValue -> STM ()
+    withExps !exps = do
+      let !artsPk = ArgsPack [] exps
+      runEdhProc pgs $ recvEdhArgs ctx argsRcvr artsPk $ \em -> contEdhSTM $ do
+        updateEntityAttrs pgs (objEntity this) $ Map.toList em
+        -- add to exports as in an exporting stmt
+        when (contextExporting ctx) $ do
+          let !impd = Map.fromList $ catMaybes
+                [ case k of
+                    AttrByName attrName -> Just (EdhString attrName, v)
+                    _                   -> Nothing
+                | (k, v) <- Map.toList em
+                ]
+          lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
+            >>= \case
+                  EdhDict (Dict _ !thisExpDS) ->
+                    modifyTVar' thisExpDS $ Map.union impd
+                  _ -> do -- todo warn if of wrong type
+                    d <- createEdhDict impd
+                    changeEntityAttr pgs
+                                     (objEntity this)
+                                     (AttrByName exportsMagicName)
+                                     d
+        exitEdhSTM pgs exit (EdhObject fromObj)
   contEdhSTM
     $   lookupEntityAttr pgs (objEntity fromObj) (AttrByName exportsMagicName)
     >>= \case
           EdhNil -> -- nothing exported at all
-            exitEdhSTM pgs exit (EdhObject fromObj)
-          EdhDict (Dict _ !fromExpDS) -> readTVar fromExpDS >>= \expd -> do
-            let !artsPk = ArgsPack [] $ Map.fromList $ catMaybes
-                  [ case k of
-                      EdhString !expKey -> Just (expKey, v)
-                      _                 -> Nothing -- todo warn about this
-                  | (k, v) <- Map.toList expd
-                  ]
-            runEdhProc pgs $ recvEdhArgs ctx argsRcvr artsPk $ \em ->
-              contEdhSTM $ do
-                updateEntityAttrs pgs (objEntity this) $ Map.toList em
-                -- add to exports as in an exporting stmt
-                when (contextExporting ctx) $ do
-                  let !impd = Map.fromList $ catMaybes
-                        [ case k of
-                            AttrByName attrName -> Just (EdhString attrName, v)
-                            _                   -> Nothing
-                        | (k, v) <- Map.toList em
-                        ]
-                  lookupEntityAttr pgs
-                                   (objEntity this)
-                                   (AttrByName exportsMagicName)
-                    >>= \case
-                          EdhDict (Dict _ !thisExpDS) ->
-                            modifyTVar' thisExpDS $ Map.union impd
-                          _ -> do -- todo warn if of wrong type
-                            d <- createEdhDict impd
-                            changeEntityAttr pgs
-                                             (objEntity this)
-                                             (AttrByName exportsMagicName)
-                                             d
-                exitEdhSTM pgs exit (EdhObject fromObj)
+            withExps Map.empty
+          EdhDict (Dict _ !fromExpDS) -> readTVar fromExpDS >>= \expd ->
+            withExps $ Map.fromList $ catMaybes
+              [ case k of
+                  EdhString !expKey -> Just (expKey, v)
+                  _                 -> Nothing -- todo warn about this
+              | (k, v) <- Map.toList expd
+              ]
           badExplVal ->
             throwEdhSTM pgs UsageError $ "bad __exports__ type: " <> T.pack
               (edhTypeNameOf badExplVal)
