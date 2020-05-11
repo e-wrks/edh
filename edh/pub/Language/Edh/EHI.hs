@@ -154,6 +154,7 @@ module Language.Edh.EHI
   , wrappedScopeOf
 
     -- ** Value system
+  , createEdhDict
   , edhTypeNameOf
   , edhTypeOf
   , edhValueNull
