@@ -86,12 +86,14 @@ driveEdhProgram !haltResult !progCtx !prog = do
           , edh'defers     = defers
           -- the forker should have checked not in tx, enforce here
           , edh'in'tx      = False
-          -- reset all exception handlers to the default for every frame
-          -- on call stack
           , edh'context    = fromCtx
-            { callStack =
+            {
+              -- disable all exception handlers from parent thread's stack
+              callStack        =
               (NE.head fromStack) { exceptionHandler = handleAsyncExc }
                 NE.:| NE.tail fromStack
+              -- don't be exporting on a forked thread by default
+            , contextExporting = False
             }
           }
        where

@@ -284,10 +284,10 @@ scopeEvalProc (ArgsPack !args !kwargs) !exit = do
     else
       contEdhSTM
       $ runEdhProc pgs
-          { edh'context = callerCtx { callStack       = scopeCallStack
-                                    , generatorCaller = Nothing
-                                    , contextMatch    = true
-                                    , contextStmt     = contextStmt callerCtx
+          { edh'context = callerCtx { callStack        = scopeCallStack
+                                    , generatorCaller  = Nothing
+                                    , contextMatch     = true
+                                    , contextExporting = False
                                     }
           }
       $ evalThePack [] Map.empty args

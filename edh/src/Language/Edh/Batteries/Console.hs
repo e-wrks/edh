@@ -180,8 +180,9 @@ conReadCommandProc !apk !exit = ask >>= \pgs ->
           _ -> return $ contextScope ctx
       let !pgsCmd = pgs
             { edh'context = ctx
-                              { callStack = cmdScope
-                                              NE.:| NE.tail (callStack ctx)
+                              { callStack        = cmdScope
+                                                     NE.:| NE.tail (callStack ctx)
+                              , contextExporting = False
                               }
             }
       cmdIn <- newEmptyTMVar

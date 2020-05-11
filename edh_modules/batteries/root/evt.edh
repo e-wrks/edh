@@ -6,4 +6,4 @@
 # into the sink if no one has yet been posted, so if no
 # other live thread can reach this sink, GHC will detect
 # an stm deadlock and crash the process.
-method latestEvent ( s ) for e from s do { return e }
+export method latestEvent ( s ) for e from s do { return e }

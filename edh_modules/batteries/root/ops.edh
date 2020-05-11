@@ -1,4 +1,6 @@
 
+export {
+
   operator &> (callerScope, lhe, rhe) {
     case callerScope.eval(lhe) of {
       nil -> { return nil }
@@ -38,3 +40,5 @@
       lhe, "=", makeOp(lhe, "/", rhe)
     ))
   }
+
+}

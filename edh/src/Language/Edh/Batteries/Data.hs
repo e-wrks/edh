@@ -50,11 +50,28 @@ defProc :: EdhIntrinsicOp
 defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
   pgs <- ask
   evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> contEdhSTM $ do
-    let !ent = scopeEntity $ contextScope $ edh'context pgs
-        nv   = EdhNamedValue valName rhVal
-    lookupEntityAttr pgs ent (AttrByName valName) >>= \case
+    let !ctx     = edh'context pgs
+        !scope   = contextScope ctx
+        this     = thisObject scope
+        !nv      = EdhNamedValue valName rhVal
+        doAssign = do
+          changeEntityAttr pgs (scopeEntity scope) (AttrByName valName) nv
+          when (contextExporting ctx && objEntity this == scopeEntity scope)
+            $   lookupEntityAttr pgs
+                                 (objEntity this)
+                                 (AttrByName exportsMagicName)
+            >>= \case
+                  EdhDict (Dict _ !thisExpDS) ->
+                    modifyTVar' thisExpDS $ Map.insert (EdhString valName) nv
+                  _ -> do
+                    d <- createEdhDict $ Map.singleton (EdhString valName) nv
+                    changeEntityAttr pgs
+                                     (objEntity this)
+                                     (AttrByName exportsMagicName)
+                                     d
+    lookupEntityAttr pgs (scopeEntity scope) (AttrByName valName) >>= \case
       EdhNil -> do
-        changeEntityAttr pgs ent (AttrByName valName) nv
+        doAssign
         exitEdhSTM pgs exit nv
       oldDef@(EdhNamedValue n v) -> if v /= rhVal
         then runEdhProc pgs $ edhValueRepr rhVal $ \(OriginalValue newR _ _) ->
@@ -72,11 +89,11 @@ defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
               _ -> error "bug: edhValueRepr returned non-string"
             _ -> error "bug: edhValueRepr returned non-string"
         else do
-          unless (n == valName) -- avoid writing the entity if all same
-            $ changeEntityAttr pgs ent (AttrByName valName) nv
+          -- avoid writing the entity if all same
+          unless (n == valName) doAssign
           exitEdhSTM pgs exit nv
       _ -> do
-        changeEntityAttr pgs ent (AttrByName valName) nv
+        doAssign
         exitEdhSTM pgs exit nv
 defProc !lhExpr _ _ =
   throwEdh EvalError $ "Invalid value definition: " <> T.pack (show lhExpr)

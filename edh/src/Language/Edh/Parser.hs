@@ -115,6 +115,12 @@ parseDeferStmt si = do
       fail "A block, case, call or for loop should be here"
   return (DeferStmt expr, si')
 
+parseExportStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseExportStmt si = do
+  void $ keyword "export"
+  (s, si') <- parseStmt si
+  return (ExportStmt s, si')
+
 parseImportStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseImportStmt si = do
   void $ keyword "import"
@@ -404,6 +410,7 @@ parseStmt si = do
         [ parseAtoIsoStmt si
         , parseGoStmt si
         , parseDeferStmt si
+        , parseExportStmt si
         , parseImportStmt si
         , parseLetStmt si
         , parseClassStmt si

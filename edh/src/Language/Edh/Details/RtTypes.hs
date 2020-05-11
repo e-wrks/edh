@@ -54,6 +54,12 @@ showEdhDict ds = if Map.null ds
     ++ concat [ show k ++ ":" ++ show v ++ ", " | (k, v) <- Map.toList ds ]
     ++ "}"
 
+-- | create a new Edh dict from a properly typed hash map
+createEdhDict :: DictStore -> STM EdhValue
+createEdhDict !ds = do
+  u <- unsafeIOToSTM newUnique
+  EdhDict . Dict u <$> newTVar ds
+
 -- | setting to `nil` value means deleting the item by the specified key
 setDictItem :: ItemKey -> EdhValue -> DictStore -> DictStore
 setDictItem !k v !ds = case v of
@@ -280,6 +286,8 @@ data Context = Context {
     , contextMatch :: EdhValue
     -- | currently executing statement
     , contextStmt :: !StmtSrc
+    -- | whether running within an exporting stmt
+    , contextExporting :: !Bool
   }
 contextScope :: Context -> Scope
 contextScope = NE.head . callStack
@@ -422,17 +430,18 @@ type ModuleId = Text
 
 worldContext :: EdhWorld -> Context
 worldContext !world = Context
-  { contextWorld    = world
-  , callStack       = worldScope world :| []
-  , generatorCaller = Nothing
-  , contextMatch    = true
-  , contextStmt     = StmtSrc
-                        ( SourcePos { sourceName   = "<genesis>"
-                                    , sourceLine   = mkPos 1
-                                    , sourceColumn = mkPos 1
-                                    }
-                        , VoidStmt
-                        )
+  { contextWorld     = world
+  , callStack        = worldScope world :| []
+  , generatorCaller  = Nothing
+  , contextMatch     = true
+  , contextStmt      = StmtSrc
+                         ( SourcePos { sourceName   = "<genesis>"
+                                     , sourceLine   = mkPos 1
+                                     , sourceColumn = mkPos 1
+                                     }
+                         , VoidStmt
+                         )
+  , contextExporting = False
   }
 {-# INLINE worldContext #-}
 
@@ -941,6 +950,9 @@ data Stmt =
     | DeferStmt !Expr
       -- | import with args (re)pack receiving syntax
     | ImportStmt !ArgsReceiver !Expr
+      -- | only artifacts introduced within an `export` statement, into
+      -- `this` object in context, are eligible for importing by others
+    | ExportStmt !StmtSrc
       -- | assignment with args (un/re)pack sending/receiving syntax
     | LetStmt !ArgsReceiver !ArgsSender
       -- | super object declaration for a descendant object
@@ -1211,23 +1223,23 @@ edhTypeNameOf v = show $ edhTypeOf v
 edhTypeOf :: EdhValue -> EdhTypeValue
 
 -- it's a taboo to get the type of a nil, either named or not
-edhTypeOf EdhNil =  undefined      
+edhTypeOf EdhNil                   = undefined
 edhTypeOf (EdhNamedValue _ EdhNil) = undefined
 
-edhTypeOf EdhType{}                                   = TypeType
+edhTypeOf EdhType{}                = TypeType
 
-edhTypeOf EdhDecimal{}                                = DecimalType
-edhTypeOf EdhBool{}                                   = BoolType
-edhTypeOf EdhString{}                                 = StringType
-edhTypeOf EdhSymbol{}                                 = SymbolType
-edhTypeOf EdhObject{}                                 = ObjectType
-edhTypeOf EdhDict{}                                   = DictType
-edhTypeOf EdhList{}                                   = ListType
-edhTypeOf EdhPair{}                                   = PairType
-edhTypeOf EdhTuple{}                                  = TupleType
-edhTypeOf EdhArgsPack{}                               = ArgsPackType
+edhTypeOf EdhDecimal{}             = DecimalType
+edhTypeOf EdhBool{}                = BoolType
+edhTypeOf EdhString{}              = StringType
+edhTypeOf EdhSymbol{}              = SymbolType
+edhTypeOf EdhObject{}              = ObjectType
+edhTypeOf EdhDict{}                = DictType
+edhTypeOf EdhList{}                = ListType
+edhTypeOf EdhPair{}                = PairType
+edhTypeOf EdhTuple{}               = TupleType
+edhTypeOf EdhArgsPack{}            = ArgsPackType
 
-edhTypeOf EdhIntrOp{}                                 = IntrinsicType
+edhTypeOf EdhIntrOp{}              = IntrinsicType
 edhTypeOf (EdhClass (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> ClassType
   Right _ -> HostClassType
@@ -1241,17 +1253,17 @@ edhTypeOf (EdhGnrtor (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> GeneratorType
   Right _ -> HostGenrType
 
-edhTypeOf EdhIntrpr{}              = InterpreterType
-edhTypeOf EdhPrducr{}              = ProducerType
-edhTypeOf EdhBreak                 = BreakType
-edhTypeOf EdhContinue              = ContinueType
-edhTypeOf EdhCaseClose{}           = CaseCloseType
-edhTypeOf EdhFallthrough           = FallthroughType
-edhTypeOf EdhYield{}               = YieldType
-edhTypeOf EdhReturn{}              = ReturnType
-edhTypeOf EdhSink{}                = SinkType
-edhTypeOf (EdhNamedValue _ v     ) = edhTypeOf v
-edhTypeOf EdhExpr{}                = ExprType
+edhTypeOf EdhIntrpr{}         = InterpreterType
+edhTypeOf EdhPrducr{}         = ProducerType
+edhTypeOf EdhBreak            = BreakType
+edhTypeOf EdhContinue         = ContinueType
+edhTypeOf EdhCaseClose{}      = CaseCloseType
+edhTypeOf EdhFallthrough      = FallthroughType
+edhTypeOf EdhYield{}          = YieldType
+edhTypeOf EdhReturn{}         = ReturnType
+edhTypeOf EdhSink{}           = SinkType
+edhTypeOf (EdhNamedValue _ v) = edhTypeOf v
+edhTypeOf EdhExpr{}           = ExprType
 
 
 mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
@@ -1301,35 +1313,36 @@ mkHostClass
   -> STM EdhValue
 mkHostClass !scope !nm !writeProtected !hc = do
   classUniq <- unsafeIOToSTM newUnique
-  let
-    !cls = ProcDefi
-      { procedure'uniq = classUniq
-      , procedure'lexi = Just scope
-      , procedure'decl = ProcDecl { procedure'name = nm
-                                  , procedure'args = PackReceiver []
-                                  , procedure'body = Right ctor
-                                  }
-      }
-    ctor :: EdhProcedure
-    ctor !apk !exit = do
-      -- note: cross check logic here with `createEdhObject`
-      pgs <- ask
-      contEdhSTM $ do
-        (ent, obs) <- createSideEntity writeProtected
-        !newThis   <- viewAsEdhObject ent cls []
-        let ctx       = edh'context pgs
-            pgsCtor   = pgs { edh'context = ctorCtx }
-            ctorCtx   = ctx { callStack = ctorScope :| NE.tail (callStack ctx) }
-            ctorScope = Scope { scopeEntity      = ent
-                              , thisObject       = newThis
-                              , thatObject       = newThis
-                              , scopeProc        = cls
-                              , scopeCaller      = contextStmt ctx
-                              , exceptionHandler = defaultEdhExcptHndlr
-                              }
-        hc pgsCtor apk obs $ \esd -> do
-          writeTVar (entity'store ent) esd
-          exitEdhSTM pgs exit $ EdhObject newThis
+  let !cls = ProcDefi
+        { procedure'uniq = classUniq
+        , procedure'lexi = Just scope
+        , procedure'decl = ProcDecl { procedure'name = nm
+                                    , procedure'args = PackReceiver []
+                                    , procedure'body = Right ctor
+                                    }
+        }
+      ctor :: EdhProcedure
+      ctor !apk !exit = do
+        -- note: cross check logic here with `createEdhObject`
+        pgs <- ask
+        contEdhSTM $ do
+          (ent, obs) <- createSideEntity writeProtected
+          !newThis   <- viewAsEdhObject ent cls []
+          let ctx     = edh'context pgs
+              pgsCtor = pgs { edh'context = ctorCtx }
+              ctorCtx = ctx { callStack = ctorScope :| NE.tail (callStack ctx)
+                            , contextExporting = False
+                            }
+              ctorScope = Scope { scopeEntity      = ent
+                                , thisObject       = newThis
+                                , thatObject       = newThis
+                                , scopeProc        = cls
+                                , scopeCaller      = contextStmt ctx
+                                , exceptionHandler = defaultEdhExcptHndlr
+                                }
+          hc pgsCtor apk obs $ \esd -> do
+            writeTVar (entity'store ent) esd
+            exitEdhSTM pgs exit $ EdhObject newThis
   return $ EdhClass cls
 
 

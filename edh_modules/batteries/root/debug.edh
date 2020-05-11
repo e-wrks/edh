@@ -1,6 +1,8 @@
 
 import * './str'
 
+export {
+
 # the indicator whether this world is under debugging
 debug = if console.logLevel <= console.debug
   then this   # alias to this module when debugging
@@ -117,5 +119,7 @@ method shellWith( obj=this ) {
     }
 
   }
+
+}
 
 }

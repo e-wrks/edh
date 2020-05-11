@@ -1,4 +1,6 @@
 
+export {
+
 operator + (lhv, rhv) case type(lhv, rhv) of {
   (DecimalType, DecimalType) -> lhv + rhv
 
@@ -86,3 +88,4 @@ operator / (lhv, rhv) case type(lhv, rhv) of {
         ++ " and " ++ type(rhv) ++ ': ' ++ rhv)
 }
 
+}
