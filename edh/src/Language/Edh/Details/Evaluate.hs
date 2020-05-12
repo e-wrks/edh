@@ -2313,6 +2313,20 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
   let !ctx  = edh'context pgs
       scope = contextScope ctx
       this  = thisObject scope
+      chkExportTo :: Entity -> AttrName -> STM ()
+      chkExportTo !ent !attrName = do
+        when (contextExporting ctx)
+          $   lookupEntityAttr pgs ent (AttrByName exportsMagicName)
+          >>= \case
+                EdhDict (Dict _ !thisExpDS) ->
+                  modifyTVar' thisExpDS $ Map.insert (EdhString attrName) rhVal
+                _ -> do
+                  d <- createEdhDict $ Map.singleton (EdhString attrName) rhVal
+                  changeEntityAttr pgs
+                                   (objEntity this)
+                                   (AttrByName exportsMagicName)
+                                   d
+        runEdhProc pgsAfter $ exitEdhProc exit rhVal
   case lhExpr of
     AttrExpr !addr -> case addr of
       -- silently drop value assigned to single underscore
@@ -2322,25 +2336,20 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
       DirectRef !addr' -> contEdhSTM $ resolveEdhAttrAddr pgs addr' $ \key ->
         do
           changeEntityAttr pgs (scopeEntity scope) key rhVal
-          when (contextExporting ctx && objEntity this == scopeEntity scope)
-            $ case key of
-                AttrByName !attrName ->
-                  lookupEntityAttr pgs
-                                   (objEntity this)
-                                   (AttrByName exportsMagicName)
-                    >>= \case
-                          EdhDict (Dict _ !thisExpDS) ->
-                            modifyTVar' thisExpDS
-                              $ Map.insert (EdhString attrName) rhVal
-                          _ -> do
-                            d <- createEdhDict
-                              $ Map.singleton (EdhString attrName) rhVal
-                            changeEntityAttr pgs
-                                             (objEntity this)
-                                             (AttrByName exportsMagicName)
-                                             d
-                _ -> pure ()
-          runEdhProc pgsAfter $ exitEdhProc exit rhVal
+          if objEntity this == scopeEntity scope -- within a class proc
+            then case key of
+              AttrByName !attrName -> chkExportTo (objEntity this) attrName
+              _ -> -- todo deal with symbolic exports ?
+                runEdhProc pgsAfter $ exitEdhProc exit rhVal
+            else runEdhProc pgsAfter $ exitEdhProc exit rhVal
+      -- special case, assigning with `this.v=x` `that.v=y`, handle exports
+      IndirectRef (AttrExpr ThisRef) (NamedAttr !attrName) -> contEdhSTM $ do
+        changeEntityAttr pgs (objEntity this) (AttrByName attrName) rhVal
+        chkExportTo (objEntity this) attrName
+      IndirectRef (AttrExpr ThatRef) (NamedAttr !attrName) -> contEdhSTM $ do
+        let !thatEnt = objEntity $ thatObject scope
+        changeEntityAttr pgs thatEnt (AttrByName attrName) rhVal
+        chkExportTo thatEnt attrName
       -- assign to an addressed attribute
       IndirectRef !tgtExpr !addr' ->
         contEdhSTM $ resolveEdhAttrAddr pgs addr' $ \key ->
