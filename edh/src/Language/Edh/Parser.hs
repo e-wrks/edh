@@ -622,12 +622,11 @@ parseDict si = symbol "{" *> parseDictRest [] si
 
 
 parseOpAddrOrTupleOrParen :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
-parseOpAddrOrTupleOrParen si =
-  symbol "("
-    *> (fmap (, si)
-             (AttrExpr . DirectRef . NamedAttr <$> (parseOpLit <* symbol ")"))
-       <|> parseTupleRest si ")" False []
-       )
+parseOpAddrOrTupleOrParen si = symbol "(" *> choice
+  [ (, si)
+    <$> (AttrExpr . DirectRef . NamedAttr <$> (try $ parseOpLit <* symbol ")"))
+  , parseTupleRest si ")" False []
+  ]
 
 parseTupleRest
   :: IntplSrcInfo -> Text -> Bool -> [Expr] -> Parser (Expr, IntplSrcInfo)
