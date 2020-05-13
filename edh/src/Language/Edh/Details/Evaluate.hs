@@ -687,13 +687,27 @@ importEdhModule !impSpec !exit = do
     !scope = contextScope ctx
     locateModuInFS :: ((FilePath, FilePath) -> STM ()) -> STM ()
     locateModuInFS !exit' =
-      lookupEdhCtxAttr pgs scope (AttrByName "__file__") >>= \case
-        EdhString !fromModuPath -> do
-          (nomPath, moduFile) <- unsafeIOToSTM $ locateEdhModule
-            (edhPkgPathFrom $ T.unpack fromModuPath)
-            (T.unpack impSpec)
-          exit' (nomPath, moduFile)
-        _ -> error "bug: no valid `__file__` in context"
+      lookupEdhCtxAttr pgs scope (AttrByName "__name__") >>= \case
+        EdhString !moduName ->
+          lookupEdhCtxAttr pgs scope (AttrByName "__file__") >>= \case
+            EdhString !fromModuPath -> do
+              let !importPath = case normalizedSpec of
+      -- special case for `import * '.'`, 2 possible use cases:
+      --
+      --  *) from an entry module (i.e. __main__.edh), to import artifacts
+      --     from its respective persistent module
+      --
+      --  *) from a persistent module, to re-populate the module scope with
+      --     its own exports (i.e. the dict __exports__ in its scope), in
+      --     case the module scope possibly altered after initialization
+                    "." -> T.unpack moduName
+                    _   -> T.unpack normalizedSpec
+              (nomPath, moduFile) <- unsafeIOToSTM $ locateEdhModule
+                (edhPkgPathFrom $ T.unpack fromModuPath)
+                importPath
+              exit' (nomPath, moduFile)
+            _ -> error "bug: no valid `__file__` in context"
+        _ -> error "bug: no valid `__name__` in context"
     importFromFS :: STM ()
     importFromFS =
       flip
@@ -749,7 +763,7 @@ importEdhModule !impSpec !exit = do
     then throwEdh UsageError "You don't import from within a transaction"
     else contEdhSTM $ do
       moduMap <- readTMVar (worldModules world)
-      case Map.lookup impSpec moduMap of
+      case Map.lookup normalizedSpec moduMap of
         -- attempt the import specification as direct module id first
         Just !moduSlot -> readTMVar moduSlot >>= \case
           -- import error has been encountered, propagate the error
@@ -758,6 +772,12 @@ importEdhModule !impSpec !exit = do
           !modu                        -> exitEdhSTM pgs exit modu
         -- resolving to `.edh` source files from local filesystem
         Nothing -> importFromFS
+ where
+  normalizedSpec = normalizeImpSpec impSpec
+  normalizeImpSpec :: Text -> Text
+  normalizeImpSpec = withoutLeadingSlash . withoutTrailingSlash
+  withoutLeadingSlash spec = maybe spec id $ T.stripPrefix "/" spec
+  withoutTrailingSlash spec = maybe spec id $ T.stripSuffix "/" spec
 
 loadModule :: TMVar EdhValue -> ModuleId -> FilePath -> EdhProcExit -> EdhProc
 loadModule !moduSlot !moduId !moduFile !exit = ask >>= \pgsImporter ->
