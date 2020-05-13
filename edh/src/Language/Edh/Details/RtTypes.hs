@@ -933,7 +933,7 @@ newtype StmtSrc = StmtSrc (SourcePos, Stmt)
 instance Eq StmtSrc where
   StmtSrc (x'sp, _) == StmtSrc (y'sp, _) = x'sp == y'sp
 instance Show StmtSrc where
-  show (StmtSrc (sp, stmt)) = show stmt ++ "\n@ " ++ sourcePosPretty sp
+  show (StmtSrc (_sp, stmt)) = show stmt
 
 
 data Stmt =
