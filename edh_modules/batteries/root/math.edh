@@ -1,0 +1,2 @@
+
+export method abs(n) n<0 &> (-n) |> n
