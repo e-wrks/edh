@@ -1,5 +1,5 @@
 
-export interpreter makeExpr(_, one, *args, **kwargs)
-  if null(args) && null(kwargs)
-    then one
-    else pkargs(one, *args, **kwargs)
+export interpreter makeExpr(_, ***apk) case apk of {
+  {( singleArg )} -> singleArg
+  apk
+}

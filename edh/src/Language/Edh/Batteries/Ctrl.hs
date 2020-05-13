@@ -110,8 +110,15 @@ branchProc !lhExpr !rhExpr !exit = do
     -- other patterns matching
     BlockExpr patternExpr -> case patternExpr of
 
+      -- {( x )} -- single arg 
+      [StmtSrc (_, ExprStmt (ParenExpr (AttrExpr (DirectRef (NamedAttr attrName)))))]
+        -> case ctxMatch of
+          EdhArgsPack (ArgsPack [argVal] !kwargs) | Map.null kwargs ->
+            contEdhSTM $ branchMatched [(attrName, argVal)]
+          _ -> exitEdhProc exit EdhFallthrough
+
       -- {( x:y:z:... )} -- parenthesised pair pattern
-      [StmtSrc (_, ExprStmt (ParenExpr pairPattern))] ->
+      [StmtSrc (_, ExprStmt (ParenExpr pairPattern@(InfixExpr ":" _ _)))] ->
         handlePairPattern pairPattern
 
       -- { continue } -- match with continue
@@ -151,7 +158,7 @@ branchProc !lhExpr !rhExpr !exit = do
                    _ -> exitEdhSTM pgs exit EdhFallthrough
                  _ -> exitEdhSTM pgs exit EdhFallthrough
 
-      -- {( x,y,z,... )} -- tuple pattern
+      -- {( x,y,z,... )} -- positional args / tuple pattern
       [StmtSrc (_, ExprStmt (TupleExpr vExprs))] -> contEdhSTM $ if null vExprs
         then -- an empty tuple pattern matches any empty sequence
              case ctxMatch of
@@ -174,6 +181,9 @@ branchProc !lhExpr !rhExpr !exit = do
               UsageError
               ("Invalid element in tuple pattern: " <> T.pack (show vExprs))
             else case ctxMatch of
+              EdhArgsPack (ArgsPack args kwargs)
+                | length args == length vExprs && Map.null kwargs -> branchMatched
+                $ zip attrNames args
               EdhTuple vs | length vs == length vExprs ->
                 branchMatched $ zip attrNames vs
               _ -> exitEdhSTM pgs exit EdhFallthrough
