@@ -389,7 +389,6 @@ installEdhBatteries world = liftIO $ do
               , RecvArg "rhe"   Nothing Nothing
               ]
             )
-          , (EdhMethod, "makeExpr", makeExprProc, WildReceiver)
           , ( EdhMethod
             , "mre"
             , mreProc

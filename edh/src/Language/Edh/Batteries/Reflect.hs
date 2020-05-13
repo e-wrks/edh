@@ -307,10 +307,3 @@ makeOpProc (ArgsPack args kwargs) !exit = do
       _ -> throwEdh EvalError $ "Invalid arguments to makeOp: " <> T.pack
         (show args)
 
-
--- | utility makeExpr(*args,**kwargs)
-makeExprProc :: EdhProcedure
-makeExprProc !apk !exit = case apk of
-  ArgsPack [v] kwargs | Map.null kwargs -> exitEdhProc exit v
-  _ -> exitEdhProc exit $ EdhArgsPack apk
-
