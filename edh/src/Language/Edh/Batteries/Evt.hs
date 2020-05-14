@@ -33,3 +33,22 @@ mreProc (ArgsPack !args !kwargs) !exit = case args of
         (edhTypeNameOf v)
   _ -> throwEdh UsageError "Invalid arg to mre()"
 
+
+-- | utility eos()
+--
+-- check whether an event sink is already at end-of-stream, which is marked
+-- by a nil data
+eosProc :: EdhProcedure
+eosProc (ArgsPack !args !kwargs) !exit = case args of
+  [v] | Map.null kwargs -> case edhUltimate v of
+    EdhSink !sink -> ask >>= \pgs ->
+      contEdhSTM $ readTVar (evs'seqn sink) >>= \case
+        0 -> exitEdhSTM pgs exit $ EdhBool False
+        _ -> readTVar (evs'mrv sink) >>= \case
+          EdhNil -> exitEdhSTM pgs exit $ EdhBool True
+          _      -> exitEdhSTM pgs exit $ EdhBool False
+    _ ->
+      throwEdh EvalError $ "eos() expects an event sink but passed a " <> T.pack
+        (edhTypeNameOf v)
+  _ -> throwEdh UsageError "Invalid arg to eos()"
+

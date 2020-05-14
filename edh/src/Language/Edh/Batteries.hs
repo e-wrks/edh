@@ -394,6 +394,11 @@ installEdhBatteries world = liftIO $ do
             , mreProc
             , PackReceiver [RecvArg "evs" Nothing Nothing]
             )
+          , ( EdhMethod
+            , "eos"
+            , eosProc
+            , PackReceiver [RecvArg "evs" Nothing Nothing]
+            )
           ]
         ]
 
