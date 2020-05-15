@@ -607,6 +607,9 @@ evalStmt' !stmt !exit = do
         -- import from specified path
         importEdhModule' argsRcvr importSpec exit
       _ -> evalExpr srcExpr $ \(OriginalValue !srcVal _ _) -> case srcVal of
+        EdhString importSpec ->
+          -- import from dynamic path
+          importEdhModule' argsRcvr importSpec exit
         EdhObject fromObj ->
           -- import from an object
           importFromObject argsRcvr fromObj exit
