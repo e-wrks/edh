@@ -209,7 +209,8 @@ installEdhBatteries world = liftIO $ do
         [ -- format: (symbol, precedence)
 
         -- the definition operator, creates named value in Edh
-          ( ":="
+          (":=", 1)
+        , ( "?:="
           , 1
           )
 
@@ -226,7 +227,8 @@ installEdhBatteries world = liftIO $ do
           )
 
         -- assignments
-        , ( "="
+        , ("=", 0)
+        , ( "?="
           , 0
           ) -- make it lower than (++), so don't need to quote `a = b ++ c`
         , ("+=", 2)
@@ -298,6 +300,22 @@ installEdhBatteries world = liftIO $ do
         , ( "?<="
           , 3
           )
+          -- prefix test
+        , ( "|*"
+          , 3
+          )
+          -- suffix test
+        , ( "*|"
+          , 3
+          )
+          -- prefix cut (pattern only)
+        , ( ">@"
+          , 3
+          )
+          -- suffix cut (pattern only)
+        , ( "@<"
+          , 3
+          )
 
           -- publish to sink
           --     evsPub <- outEvent
@@ -333,12 +351,15 @@ installEdhBatteries world = liftIO $ do
         | (sym, iop) <-
           [ ("$"  , attrDerefAddrProc)
           , (":=" , defProc)
+          , ("?:=", defMissingProc)
           , (":"  , consProc)
           , ("?"  , attrTemptProc)
           , ("?$" , attrDerefTemptProc)
           , ("++" , concatProc)
           , ("=<" , cprhProc)
           , ("?<=", elemProc)
+          , ("|*" , isPrefixOfProc)
+          , ("*|" , hasSuffixProc)
           , ("=>" , prpdProc)
           , ("<-" , evtPubProc)
           , ("+"  , addProc)
@@ -356,6 +377,7 @@ installEdhBatteries world = liftIO $ do
           , ("<"  , isLtProc)
           , ("<=" , isLeProc)
           , ("="  , assignProc)
+          , ("?=" , assignMissingProc)
           , ("->" , branchProc)
           , ("$=>", catchProc)
           , ("@=>", finallyProc)

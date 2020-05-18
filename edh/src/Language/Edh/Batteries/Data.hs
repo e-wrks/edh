@@ -45,7 +45,7 @@ attrDerefAddrProc !lhExpr !rhExpr !exit =
       <> ": "
       <> T.pack (show lhVal)
 
--- | operator (:=) - value definition
+-- | operator (:=) - named value definition
 defProc :: EdhIntrinsicOp
 defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
   pgs <- ask
@@ -96,6 +96,25 @@ defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
         doAssign
         exitEdhSTM pgs exit nv
 defProc !lhExpr _ _ =
+  throwEdh EvalError $ "Invalid value definition: " <> T.pack (show lhExpr)
+
+
+-- | operator (?:=) - named value definition if missing
+defMissingProc :: EdhIntrinsicOp
+defMissingProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
+  pgs <- ask
+  let !ent   = scopeEntity $ contextScope $ edh'context pgs
+      !key   = AttrByName valName
+      !pgsTx = pgs { edh'in'tx = True } -- must within a tx
+  contEdhSTM $ lookupEntityAttr pgsTx ent key >>= \case
+    EdhNil ->
+      runEdhProc pgsTx $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+        contEdhSTM $ do
+          let !nv = EdhNamedValue valName rhVal
+          changeEntityAttr pgsTx ent key nv
+          exitEdhSTM pgs exit nv
+    !preVal -> exitEdhSTM pgs exit preVal
+defMissingProc !lhExpr _ _ =
   throwEdh EvalError $ "Invalid value definition: " <> T.pack (show lhExpr)
 
 
@@ -194,10 +213,6 @@ concatProc !lhExpr !rhExpr !exit =
           EdhString !rhs -> exitEdhProc exit (EdhString $ lhs <> rhs)
           _              -> error "bug: edhValueStr returned non-string"
       _ -> error "bug: edhValueStr returned non-string"
- where
-  edhValueStr :: EdhValue -> EdhProcExit -> EdhProc
-  edhValueStr s@EdhString{} !exit' = exitEdhProc exit' s
-  edhValueStr !v            !exit' = edhValueRepr v exit'
 
 
 -- | utility null(*args,**kwargs) - null tester
@@ -273,10 +288,39 @@ elemProc !lhExpr !rhExpr !exit = do
           Just _  -> True
       _ ->
         throwEdh EvalError
-          $  "Don't know how to prepend to a "
+          $  "Don't know how to check element of a "
           <> T.pack (edhTypeNameOf rhVal)
           <> ": "
           <> T.pack (show rhVal)
+
+
+-- | operator (|*) - prefix tester
+isPrefixOfProc :: EdhIntrinsicOp
+isPrefixOfProc !lhExpr !rhExpr !exit =
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
+    edhValueStr (edhUltimate lhVal) $ \(OriginalValue lhRepr _ _) ->
+      case lhRepr of
+        EdhString !lhStr -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+          edhValueStr (edhUltimate rhVal) $ \(OriginalValue !rhRepr _ _) ->
+            case rhRepr of
+              EdhString !rhStr ->
+                exitEdhProc exit $ EdhBool $ lhStr `T.isPrefixOf` rhStr
+              _ -> error "bug: edhValueStr returned non-string"
+        _ -> error "bug: edhValueStr returned non-string"
+
+-- | operator (*|) - suffix tester
+hasSuffixProc :: EdhIntrinsicOp
+hasSuffixProc !lhExpr !rhExpr !exit =
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
+    edhValueStr (edhUltimate lhVal) $ \(OriginalValue lhRepr _ _) ->
+      case lhRepr of
+        EdhString !lhStr -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+          edhValueStr (edhUltimate rhVal) $ \(OriginalValue !rhRepr _ _) ->
+            case rhRepr of
+              EdhString !rhStr ->
+                exitEdhProc exit $ EdhBool $ rhStr `T.isSuffixOf` lhStr
+              _ -> error "bug: edhValueStr returned non-string"
+        _ -> error "bug: edhValueStr returned non-string"
 
 
 -- | operator (=>) - prepender

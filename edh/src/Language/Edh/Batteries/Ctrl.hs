@@ -158,6 +158,58 @@ branchProc !lhExpr !rhExpr !exit = do
                    _ -> exitEdhSTM pgs exit EdhFallthrough
                  _ -> exitEdhSTM pgs exit EdhFallthrough
 
+      -- { prefix @< match >@ suffix } -- sub-string cut pattern
+      [StmtSrc (_, ExprStmt (InfixExpr ">@" (InfixExpr "@<" (AttrExpr (DirectRef (NamedAttr prefixName))) matchExpr) (AttrExpr (DirectRef (NamedAttr suffixName)))))]
+        -> case ctxMatch of
+          EdhString !fullStr ->
+            evalExpr matchExpr $ \(OriginalValue !mVal _ _) ->
+              edhValueStr mVal $ \(OriginalValue !mStrVal _ _) ->
+                case mStrVal of
+                  EdhString !mStr -> if T.null mStr
+                    then throwEdh UsageError
+                                  "You don't use empty string for match"
+                    else
+                      let (prefix, rest) = T.breakOn mStr fullStr
+                      in
+                        case T.stripPrefix mStr rest of
+                          Just !suffix ->
+                            contEdhSTM
+                              $ branchMatched
+                                  [ (prefixName, EdhString prefix)
+                                  , (suffixName, EdhString suffix)
+                                  ]
+                          _ -> exitEdhProc exit EdhFallthrough
+                  _ -> error "bug: edhValueStr returned non-string"
+          _ -> exitEdhProc exit EdhFallthrough
+
+      -- { match >@ suffix } -- prefix cut pattern
+      [StmtSrc (_, ExprStmt (InfixExpr ">@" prefixExpr (AttrExpr (DirectRef (NamedAttr suffixName)))))]
+        -> case ctxMatch of
+          EdhString !fullStr ->
+            evalExpr prefixExpr $ \(OriginalValue !lhVal _ _) ->
+              edhValueStr lhVal $ \(OriginalValue !lhStrVal _ _) ->
+                case lhStrVal of
+                  EdhString !lhStr -> case T.stripPrefix lhStr fullStr of
+                    Just !suffix -> contEdhSTM
+                      $ branchMatched [(suffixName, EdhString suffix)]
+                    _ -> exitEdhProc exit EdhFallthrough
+                  _ -> error "bug: edhValueStr returned non-string"
+          _ -> exitEdhProc exit EdhFallthrough
+
+      -- { prefix @< match } -- suffix cut pattern
+      [StmtSrc (_, ExprStmt (InfixExpr "@<" (AttrExpr (DirectRef (NamedAttr prefixName))) suffixExpr))]
+        -> case ctxMatch of
+          EdhString !fullStr ->
+            evalExpr suffixExpr $ \(OriginalValue !rhVal _ _) ->
+              edhValueStr rhVal $ \(OriginalValue !rhStrVal _ _) ->
+                case rhStrVal of
+                  EdhString !rhStr -> case T.stripSuffix rhStr fullStr of
+                    Just !prefix -> contEdhSTM
+                      $ branchMatched [(prefixName, EdhString prefix)]
+                    _ -> exitEdhProc exit EdhFallthrough
+                  _ -> error "bug: edhValueStr returned non-string"
+          _ -> exitEdhProc exit EdhFallthrough
+
       -- {( x,y,z,... )} -- positional args / tuple pattern
       [StmtSrc (_, ExprStmt (TupleExpr vExprs))] -> contEdhSTM $ if null vExprs
         then -- an empty tuple pattern matches any empty sequence

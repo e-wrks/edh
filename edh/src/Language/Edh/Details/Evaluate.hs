@@ -2909,3 +2909,8 @@ edhValueRepr (EdhNamedValue !n !v) !exit =
 -- repr of other values simply as to show itself
 edhValueRepr !v !exit = exitEdhProc exit $ EdhString $ T.pack $ show v
 
+
+edhValueStr :: EdhValue -> EdhProcExit -> EdhProc
+edhValueStr s@EdhString{} !exit' = exitEdhProc exit' s
+edhValueStr !v            !exit' = edhValueRepr v exit'
+
