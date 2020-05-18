@@ -681,6 +681,7 @@ illegalExprStart =
           , keyword "go"
           , keyword "defer"
           , keyword "import"
+          , keyword "export"
           , keyword "let"
           , keyword "class"
           , keyword "extends"
