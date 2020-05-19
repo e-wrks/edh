@@ -52,7 +52,7 @@ createEdhWorld !console = liftIO $ do
   let !rootClass = ProcDefi
         { procedure'uniq = rootClassUniq
         , procedure'lexi = Nothing
-        , procedure'decl = ProcDecl { procedure'name = "<root>"
+        , procedure'decl = ProcDecl { procedure'name = NamedAttr "<root>"
                                     , procedure'args = PackReceiver []
                                     , procedure'body = Right edhNop
                                     }
@@ -79,7 +79,7 @@ createEdhWorld !console = liftIO $ do
       !scopeClass = ProcDefi
         { procedure'uniq = scopeClassUniq
         , procedure'lexi = Just rootScope
-        , procedure'decl = ProcDecl { procedure'name = "<scope>"
+        , procedure'decl = ProcDecl { procedure'name = NamedAttr "<scope>"
                                     , procedure'args = PackReceiver []
                                     , procedure'body = Right edhNop
                                     }

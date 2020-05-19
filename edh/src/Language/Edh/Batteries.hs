@@ -442,7 +442,8 @@ installEdhBatteries world = liftIO $ do
                             { procedure'uniq = conClassUniq
                             , procedure'lexi = Just rootScope
                             , procedure'decl = ProcDecl
-                                                 { procedure'name = "<console>"
+                                                 { procedure'name = NamedAttr
+                                                                      "<console>"
                                                  , procedure'args = PackReceiver
                                                                       []
                                                  , procedure'body = Right edhNop

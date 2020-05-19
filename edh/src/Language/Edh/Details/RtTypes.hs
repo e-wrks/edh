@@ -357,8 +357,13 @@ instance Ord Scope where
 instance Hashable Scope where
   hashWithSalt s x = hashWithSalt s (scopeEntity x)
 instance Show Scope where
-  show (Scope _ _ _ _ (ProcDefi _ _ (ProcDecl pName _ procBody)) (StmtSrc (cPos, _)) _)
-    = "📜 " ++ T.unpack pName ++ " 🔎 " ++ defLoc ++ " 👈 " ++ sourcePosPretty cPos
+  show (Scope _ _ _ _ (ProcDefi _ _ pd@(ProcDecl _ _ procBody)) (StmtSrc (cPos, _)) _)
+    = "📜 "
+      ++ T.unpack (procName pd)
+      ++ " 🔎 "
+      ++ defLoc
+      ++ " 👈 "
+      ++ sourcePosPretty cPos
    where
     defLoc = case procBody of
       Right _                   -> "<host-code>"
@@ -397,8 +402,8 @@ instance Show Object where
   -- it's not right to call 'atomically' here to read 'objSupers' for
   -- the show, as 'show' may be called from an stm transaction, stm
   -- will fail hard on encountering of nested 'atomically' calls.
-  show (Object _ (ProcDefi _ _ (ProcDecl cn _ _)) _) =
-    "<object: " ++ T.unpack cn ++ ">"
+  show (Object _ (ProcDefi _ _ pd) _) =
+    "<object: " ++ T.unpack (procName pd) ++ ">"
 
 -- | View an entity as object of specified class with specified ancestors
 -- this is the black magic you want to avoid
@@ -602,8 +607,8 @@ getEdhCallContext !unwind !pgs = EdhCallContext
   (StmtSrc (!tip, _)) = contextStmt ctx
   !frames =
     foldl'
-        (\sfs (Scope _ _ _ _ (ProcDefi _ _ (ProcDecl procName _ procBody)) (StmtSrc (callerPos, _)) _) ->
-          EdhCallFrame procName
+        (\sfs (Scope _ _ _ _ (ProcDefi _ _ pd@(ProcDecl _ _ procBody)) (StmtSrc (callerPos, _)) _) ->
+          EdhCallFrame (procName pd)
                        (procSrcLoc procBody)
                        (T.pack $ sourcePosPretty callerPos)
             : sfs
@@ -756,22 +761,22 @@ instance Show EdhValue where
 
   show (EdhIntrOp preced (IntrinOpDefi _ opSym _)) =
     "<intrinsic: (" ++ T.unpack opSym ++ ") " ++ show preced ++ ">"
-  show (EdhClass  (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
-  show (EdhMethod (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
-  show (EdhOprtor preced _ (ProcDefi _ _ (ProcDecl pn _ _))) =
-    "<operator: (" ++ T.unpack pn ++ ") " ++ show preced ++ ">"
-  show (EdhGnrtor (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
-  show (EdhIntrpr (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
-  show (EdhPrducr (ProcDefi _ _ (ProcDecl pn _ _))) = T.unpack pn
+  show (EdhClass  (ProcDefi _ _ pd)) = T.unpack (procName pd)
+  show (EdhMethod (ProcDefi _ _ pd)) = T.unpack (procName pd)
+  show (EdhOprtor preced _ (ProcDefi _ _ pd)) =
+    "<operator: (" ++ T.unpack (procName pd) ++ ") " ++ show preced ++ ">"
+  show (EdhGnrtor (ProcDefi _ _ pd)) = T.unpack (procName pd)
+  show (EdhIntrpr (ProcDefi _ _ pd)) = T.unpack (procName pd)
+  show (EdhPrducr (ProcDefi _ _ pd)) = T.unpack (procName pd)
 
-  show EdhBreak         = "<break>"
-  show EdhContinue      = "<continue>"
-  show (EdhCaseClose v) = "<caseclose: " ++ show v ++ ">"
-  show EdhFallthrough   = "<fallthrough>"
-  show (EdhYield  v)    = "<yield: " ++ show v ++ ">"
-  show (EdhReturn v)    = "<return: " ++ show v ++ ">"
+  show EdhBreak                      = "<break>"
+  show EdhContinue                   = "<continue>"
+  show (EdhCaseClose v)              = "<caseclose: " ++ show v ++ ">"
+  show EdhFallthrough                = "<fallthrough>"
+  show (EdhYield  v)                 = "<yield: " ++ show v ++ ">"
+  show (EdhReturn v)                 = "<return: " ++ show v ++ ">"
 
-  show (EdhSink   v)    = show v
+  show (EdhSink   v)                 = show v
 
   show (EdhNamedValue n v@EdhNamedValue{}) =
     -- Edh operators are all left-associative, parenthesis needed
@@ -1070,14 +1075,19 @@ data ArgSender = UnpackPosArgs !Expr
 
 -- | Procedure declaration, result of parsing
 data ProcDecl = ProcDecl {
-      procedure'name :: !AttrName
+      procedure'name :: !AttrAddressor
     , procedure'args :: !ArgsReceiver
     , procedure'body :: !(Either StmtSrc EdhProcedure)
   }
 instance Show ProcDecl where
-  show (ProcDecl name _ pb) = case pb of
-    Left  _ -> "<edh-proc " <> T.unpack name <> ">"
-    Right _ -> "<host-proc " <> T.unpack name <> ">"
+  show pd@(ProcDecl _ _ pb) = case pb of
+    Left  _ -> "<edh-proc " <> T.unpack (procName pd) <> ">"
+    Right _ -> "<host-proc " <> T.unpack (procName pd) <> ">"
+
+procName :: ProcDecl -> Text
+procName (ProcDecl (NamedAttr    !pn) _ _) = pn
+procName (ProcDecl (SymbolicAttr !pn) _ _) = "@" <> pn
+
 
 -- | Procedure definition, result of execution of the declaration
 data ProcDefi = ProcDefi {
@@ -1296,7 +1306,7 @@ mkHostProc !scope !vc !nm !p !args = do
   return $ vc ProcDefi
     { procedure'uniq = u
     , procedure'lexi = Just scope
-    , procedure'decl = ProcDecl { procedure'name = nm
+    , procedure'decl = ProcDecl { procedure'name = NamedAttr nm
                                 , procedure'args = args
                                 , procedure'body = Right p
                                 }
@@ -1321,7 +1331,7 @@ mkHostClass !scope !nm !writeProtected !hc = do
   let !cls = ProcDefi
         { procedure'uniq = classUniq
         , procedure'lexi = Just scope
-        , procedure'decl = ProcDecl { procedure'name = nm
+        , procedure'decl = ProcDecl { procedure'name = NamedAttr nm
                                     , procedure'args = PackReceiver []
                                     , procedure'body = Right ctor
                                     }

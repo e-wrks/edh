@@ -286,7 +286,8 @@ parseClassStmt si = do
   void $ keyword "class"
   cn          <- parseAlphaName
   (body, si') <- parseStmt si
-  return (ClassStmt $ ProcDecl cn (PackReceiver []) (Left body), si')
+  return
+    (ClassStmt $ ProcDecl (NamedAttr cn) (PackReceiver []) (Left body), si')
 
 parseExtendsStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseExtendsStmt si = do
@@ -335,7 +336,11 @@ parseWhileStmt si = do
 
 parseProcDecl :: IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)
 parseProcDecl si = do
-  pn          <- parseMagicProcName <|> parseAlphaName
+  pn <- choice
+    [ symbol "@" *> (SymbolicAttr <$> parseAlphaName)
+    , NamedAttr <$> parseMagicProcName
+    , NamedAttr <$> parseAlphaName
+    ]
   ar          <- parseArgsReceiver
   (body, si') <- parseStmt si
   return (ProcDecl pn ar (Left body), si')
@@ -361,7 +366,7 @@ parseOpDeclOvrdStmt si = do
   --  * 3 pos-args - caller scope + lh/rh expr receiving operator
   argRcvr     <- parseArgsReceiver
   (body, si') <- parseStmt si
-  let procDecl = ProcDecl opSym argRcvr (Left body)
+  let procDecl = ProcDecl (NamedAttr opSym) argRcvr (Left body)
   opPD <- get
   case precDecl of
     Nothing -> case Map.lookup opSym opPD of

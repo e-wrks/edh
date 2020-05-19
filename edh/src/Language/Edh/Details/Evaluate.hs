@@ -388,15 +388,15 @@ evalStmt' !stmt !exit = do
                                    , procedure'lexi = Just scope
                                    , procedure'decl = pd
                                    }
-      when (name /= "_") $ do
-        changeEntityAttr pgs (scopeEntity scope) (AttrByName name) cls
+      when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
+        changeEntityAttr pgs (scopeEntity scope) artKey cls
         when (contextExporting ctx)
           $ lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
           >>= \case
                 EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS $ Map.insert (EdhString name) cls
+                  modifyTVar' thisExpDS $ Map.insert (attrKeyValue artKey) cls
                 _ -> do
-                  d <- createEdhDict $ Map.singleton (EdhString name) cls
+                  d <- createEdhDict $ Map.singleton (attrKeyValue artKey) cls
                   changeEntityAttr pgs
                                    (objEntity this)
                                    (AttrByName exportsMagicName)
@@ -409,15 +409,15 @@ evalStmt' !stmt !exit = do
                                    , procedure'lexi = Just scope
                                    , procedure'decl = pd
                                    }
-      when (name /= "_") $ do
-        changeEntityAttr pgs (scopeEntity scope) (AttrByName name) mth
+      when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
+        changeEntityAttr pgs (scopeEntity scope) artKey mth
         when (contextExporting ctx)
           $ lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
           >>= \case
                 EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS $ Map.insert (EdhString name) mth
+                  modifyTVar' thisExpDS $ Map.insert (attrKeyValue artKey) mth
                 _ -> do
-                  d <- createEdhDict $ Map.singleton (EdhString name) mth
+                  d <- createEdhDict $ Map.singleton (attrKeyValue artKey) mth
                   changeEntityAttr pgs
                                    (objEntity this)
                                    (AttrByName exportsMagicName)
@@ -430,15 +430,15 @@ evalStmt' !stmt !exit = do
                                    , procedure'lexi = Just scope
                                    , procedure'decl = pd
                                    }
-      when (name /= "_") $ do
-        changeEntityAttr pgs (scopeEntity scope) (AttrByName name) gdf
+      when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
+        changeEntityAttr pgs (scopeEntity scope) artKey gdf
         when (contextExporting ctx)
           $ lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
           >>= \case
                 EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS $ Map.insert (EdhString name) gdf
+                  modifyTVar' thisExpDS $ Map.insert (attrKeyValue artKey) gdf
                 _ -> do
-                  d <- createEdhDict $ Map.singleton (EdhString name) gdf
+                  d <- createEdhDict $ Map.singleton (attrKeyValue artKey) gdf
                   changeEntityAttr pgs
                                    (objEntity this)
                                    (AttrByName exportsMagicName)
@@ -451,15 +451,15 @@ evalStmt' !stmt !exit = do
                                    , procedure'lexi = Just scope
                                    , procedure'decl = pd
                                    }
-      when (name /= "_") $ do
-        changeEntityAttr pgs (scopeEntity scope) (AttrByName name) mth
+      when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
+        changeEntityAttr pgs (scopeEntity scope) artKey mth
         when (contextExporting ctx)
           $ lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
           >>= \case
                 EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS $ Map.insert (EdhString name) mth
+                  modifyTVar' thisExpDS $ Map.insert (attrKeyValue artKey) mth
                 _ -> do
-                  d <- createEdhDict $ Map.singleton (EdhString name) mth
+                  d <- createEdhDict $ Map.singleton (attrKeyValue artKey) mth
                   changeEntityAttr pgs
                                    (objEntity this)
                                    (AttrByName exportsMagicName)
@@ -476,15 +476,15 @@ evalStmt' !stmt !exit = do
         pgs
         EvalError
         "a producer procedure should receive a `outlet` keyword argument"
-      when (name /= "_") $ do
-        changeEntityAttr pgs (scopeEntity scope) (AttrByName name) mth
+      when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
+        changeEntityAttr pgs (scopeEntity scope) artKey mth
         when (contextExporting ctx)
           $ lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
           >>= \case
                 EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS $ Map.insert (EdhString name) mth
+                  modifyTVar' thisExpDS $ Map.insert (attrKeyValue artKey) mth
                 _ -> do
-                  d <- createEdhDict $ Map.singleton (EdhString name) mth
+                  d <- createEdhDict $ Map.singleton (attrKeyValue artKey) mth
                   changeEntityAttr pgs
                                    (objEntity this)
                                    (AttrByName exportsMagicName)
@@ -825,7 +825,7 @@ createEdhModule' !world !moduId !srcName = do
                     { procedure'uniq = moduClassUniq
                     , procedure'lexi = Just $ worldScope world
                     , procedure'decl = ProcDecl
-                      { procedure'name = "module:" <> moduId
+                      { procedure'name = NamedAttr $ "module:" <> moduId
                       , procedure'args = PackReceiver []
                       , procedure'body = Left $ StmtSrc
                                            ( SourcePos { sourceName   = srcName
@@ -1768,7 +1768,7 @@ constructEdhObject !cls apk@(ArgsPack !args !kwargs) !exit = do
                   else
                     throwEdhSTM pgsCaller EvalError
                     $  "No __init__() defined by class "
-                    <> procedure'name (procedure'decl cls)
+                    <> procName (procedure'decl cls)
                     <> " to receive argument(s)"
               EdhMethod !initMth ->
                 case procedure'body $ procedure'decl initMth of
@@ -1959,11 +1959,10 @@ callEdhOperator' !gnr'caller !callee'that !mth'proc !prede !mth'body !args !exit
             Nothing      -> pure ()
             -- put the overridden predecessor operator in scope of the overriding
             -- op proc's run ctx
-            Just !predOp -> changeEntityAttr
-              pgsMth
-              ent
-              (AttrByName $ procedure'name $ procedure'decl mth'proc)
-              predOp
+            Just !predOp -> case procedure'name $ procedure'decl mth'proc of
+              NamedAttr !opSym ->
+                changeEntityAttr pgsMth ent (AttrByName opSym) predOp
+              SymbolicAttr{} -> error "bug: op procedure of symbolic name"
           -- push stack for the Edh procedure
           runEdhProc pgsMth
             $ evalStmt mth'body
