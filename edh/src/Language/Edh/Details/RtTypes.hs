@@ -234,9 +234,9 @@ createSideEntity !writeProtected = do
 
 -- | A symbol can stand in place of an alphanumeric name, used to
 -- address an attribute from an object entity, but symbols are 
--- private to its owning scope, can not be imported from out side
--- of the scope, thus serves encapsulation purpose in object
--- structure designs.
+-- uniquely existing regardless however it is (alphanumerically)
+-- named, this can be leveraged to solve naming clashes among
+-- modules supplied by different parties.
 --
 -- And symbol values reside in a lexical outer scope are available
 -- to its lexical inner scopes, e.g. a symbol bound to a module is
