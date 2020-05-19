@@ -115,6 +115,12 @@ parseDeferStmt si = do
       fail "A block, case, call or for loop should be here"
   return (DeferStmt expr, si')
 
+parseEffectStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseEffectStmt si = do
+  void $ keyword "effect"
+  (s, si') <- parseStmt si
+  return (EffectStmt s, si')
+
 parseExportStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseExportStmt si = do
   void $ keyword "export"
@@ -415,6 +421,7 @@ parseStmt si = do
         [ parseAtoIsoStmt si
         , parseGoStmt si
         , parseDeferStmt si
+        , parseEffectStmt si
         , parseExportStmt si
         , parseImportStmt si
         , parseLetStmt si
@@ -687,6 +694,7 @@ illegalExprStart =
           , keyword "defer"
           , keyword "import"
           , keyword "export"
+          , keyword "effect"
           , keyword "let"
           , keyword "class"
           , keyword "extends"

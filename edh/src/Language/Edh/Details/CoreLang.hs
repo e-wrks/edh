@@ -43,14 +43,14 @@ resolveLexicalAttr pgs (Just !scope) !addr =
 -- * Edh effectful attribute resolution
 
 
-edhEffectsMagic :: Text
-edhEffectsMagic = "__effects__"
+edhEffectsMagicName :: Text
+edhEffectsMagicName = "__effects__"
 
 resolveEffectfulAttr
   :: EdhProgState -> [Scope] -> EdhValue -> STM (Maybe (EdhValue, [Scope]))
 resolveEffectfulAttr _ [] _ = return Nothing
 resolveEffectfulAttr pgs (scope : rest) !key =
-  lookupEntityAttr pgs (scopeEntity scope) (AttrByName edhEffectsMagic)
+  lookupEntityAttr pgs (scopeEntity scope) (AttrByName edhEffectsMagicName)
     >>= \case
           EdhNil               -> resolveEffectfulAttr pgs rest key
           EdhDict (Dict _ !ds) -> do

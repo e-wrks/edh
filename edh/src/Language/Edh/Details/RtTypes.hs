@@ -288,6 +288,8 @@ data Context = Context {
     , contextStmt :: !StmtSrc
     -- | whether running within an exporting stmt
     , contextExporting :: !Bool
+    -- | whether running within an effect stmt
+    , contextEffDefining :: !Bool
   }
 contextScope :: Context -> Scope
 contextScope = NE.head . callStack
@@ -440,18 +442,19 @@ type ModuleId = Text
 
 worldContext :: EdhWorld -> Context
 worldContext !world = Context
-  { contextWorld     = world
-  , callStack        = worldScope world :| []
-  , generatorCaller  = Nothing
-  , contextMatch     = true
-  , contextStmt      = StmtSrc
-                         ( SourcePos { sourceName   = "<genesis>"
-                                     , sourceLine   = mkPos 1
-                                     , sourceColumn = mkPos 1
-                                     }
-                         , VoidStmt
-                         )
-  , contextExporting = False
+  { contextWorld       = world
+  , callStack          = worldScope world :| []
+  , generatorCaller    = Nothing
+  , contextMatch       = true
+  , contextStmt        = StmtSrc
+                           ( SourcePos { sourceName   = "<genesis>"
+                                       , sourceLine   = mkPos 1
+                                       , sourceColumn = mkPos 1
+                                       }
+                           , VoidStmt
+                           )
+  , contextExporting   = False
+  , contextEffDefining = False
   }
 {-# INLINE worldContext #-}
 
@@ -963,6 +966,10 @@ data Stmt =
       -- | only artifacts introduced within an `export` statement, into
       -- `this` object in context, are eligible for importing by others
     | ExportStmt !StmtSrc
+      -- | artifacts introduced within an `effect` statement will be put
+      -- into effect namespace, which as currently implemented, a dict
+      -- resides in current scope entity addressed by name `__exports__`
+    | EffectStmt !StmtSrc
       -- | assignment with args (un/re)pack sending/receiving syntax
     | LetStmt !ArgsReceiver !ArgsSender
       -- | super object declaration for a descendant object
@@ -1347,6 +1354,7 @@ mkHostClass !scope !nm !writeProtected !hc = do
               pgsCtor = pgs { edh'context = ctorCtx }
               ctorCtx = ctx { callStack = ctorScope :| NE.tail (callStack ctx)
                             , contextExporting = False
+                            , contextEffDefining = False
                             }
               ctorScope = Scope { scopeEntity      = ent
                                 , thisObject       = newThis

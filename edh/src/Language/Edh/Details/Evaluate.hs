@@ -196,24 +196,46 @@ evalStmt' !stmt !exit = do
           -- overwrite current scope entity with attributes from the
           -- received entity
           updateEntityAttrs pgs (scopeEntity scope) $ Map.toList um
-          when (contextExporting ctx) $ do
-            -- add to exports as in an exporting stmt
-            let !impd = Map.fromList $ catMaybes
-                  [ case k of
-                      AttrByName attrName -> Just (EdhString attrName, v)
-                      _                   -> Nothing
-                  | (k, v) <- Map.toList um
-                  ]
-            lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
+          when (contextEffDefining ctx) $ do
+            let !effd =
+                  Map.fromList [ (attrKeyValue k, v) | (k, v) <- Map.toList um ]
+            -- define effectful artifacts by assignment
+            lookupEntityAttr pgs
+                             (scopeEntity scope)
+                             (AttrByName edhEffectsMagicName)
               >>= \case
-                    EdhDict (Dict _ !thisExpDS) ->
-                      modifyTVar' thisExpDS $ Map.union impd
-                    _ -> do -- todo warn if of wrong type
-                      d <- createEdhDict impd
+                    EdhDict (Dict _ !effDS) ->
+                      modifyTVar' effDS $ Map.union effd
+                    _ -> do
+                      d <- createEdhDict effd
                       changeEntityAttr pgs
                                        (objEntity this)
-                                       (AttrByName exportsMagicName)
+                                       (AttrByName edhEffectsMagicName)
                                        d
+          when (contextExporting ctx) $ if objEntity this /= scopeEntity scope
+            then throwEdhSTM pgs
+                             UsageError
+                             "You don't export from a method procedure"
+            else do
+            -- add to exports as in an exporting stmt
+              let !impd = Map.fromList $ catMaybes
+                    [ case k of
+                        AttrByName attrName -> Just (EdhString attrName, v)
+                        _                   -> Nothing
+                    | (k, v) <- Map.toList um
+                    ]
+              lookupEntityAttr pgs
+                               (objEntity this)
+                               (AttrByName edhExportsMagicName)
+                >>= \case
+                      EdhDict (Dict _ !thisExpDS) ->
+                        modifyTVar' thisExpDS $ Map.union impd
+                      _ -> do -- todo warn if of wrong type
+                        d <- createEdhDict impd
+                        changeEntityAttr pgs
+                                         (objEntity this)
+                                         (AttrByName edhExportsMagicName)
+                                         d
           -- let statement evaluates to nil always, with previous tx
           -- state restored
           exitEdhSTM pgs exit nil
@@ -269,7 +291,9 @@ evalStmt' !stmt !exit = do
             (( pgs'
                {
                  -- cease exporting in a defered stmt
-                 edh'context = (edh'context pgs') { contextExporting = False }
+                 edh'context = (edh'context pgs') { contextExporting   = False
+                                                  , contextEffDefining = False
+                                                  }
                }
              , prog
              ) :
@@ -306,7 +330,11 @@ evalStmt' !stmt !exit = do
             modifyTVar'
               (edh'perceivers pgs)
               (( perceiverChan
-               , pgs { edh'context = ctx { contextExporting = False } }
+               , pgs
+                 { edh'context = ctx { contextExporting   = False
+                                     , contextEffDefining = False
+                                     }
+                 }
                , bodyExpr
                ) :
               )
@@ -390,17 +418,38 @@ evalStmt' !stmt !exit = do
                                    }
       when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
         changeEntityAttr pgs (scopeEntity scope) artKey cls
-        when (contextExporting ctx)
-          $ lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
+        when (contextEffDefining ctx)
+          $   lookupEntityAttr pgs
+                               (scopeEntity scope)
+                               (AttrByName edhEffectsMagicName)
           >>= \case
-                EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS $ Map.insert (attrKeyValue artKey) cls
+                EdhDict (Dict _ !effDS) ->
+                  modifyTVar' effDS $ Map.insert (attrKeyValue artKey) cls
                 _ -> do
                   d <- createEdhDict $ Map.singleton (attrKeyValue artKey) cls
                   changeEntityAttr pgs
-                                   (objEntity this)
-                                   (AttrByName exportsMagicName)
+                                   (scopeEntity scope)
+                                   (AttrByName edhEffectsMagicName)
                                    d
+        when (contextExporting ctx) $ if objEntity this /= scopeEntity scope
+          then throwEdhSTM pgs
+                           UsageError
+                           "You don't export from a method procedure"
+          else
+            lookupEntityAttr pgs
+                             (objEntity this)
+                             (AttrByName edhExportsMagicName)
+              >>= \case
+                    EdhDict (Dict _ !thisExpDS) ->
+                      modifyTVar' thisExpDS
+                        $ Map.insert (attrKeyValue artKey) cls
+                    _ -> do
+                      d <- createEdhDict
+                        $ Map.singleton (attrKeyValue artKey) cls
+                      changeEntityAttr pgs
+                                       (objEntity this)
+                                       (AttrByName edhExportsMagicName)
+                                       d
       exitEdhSTM pgs exit cls
 
     MethodStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
@@ -411,17 +460,38 @@ evalStmt' !stmt !exit = do
                                    }
       when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
         changeEntityAttr pgs (scopeEntity scope) artKey mth
-        when (contextExporting ctx)
-          $ lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
+        when (contextEffDefining ctx)
+          $   lookupEntityAttr pgs
+                               (scopeEntity scope)
+                               (AttrByName edhEffectsMagicName)
           >>= \case
-                EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS $ Map.insert (attrKeyValue artKey) mth
+                EdhDict (Dict _ !effDS) ->
+                  modifyTVar' effDS $ Map.insert (attrKeyValue artKey) mth
                 _ -> do
                   d <- createEdhDict $ Map.singleton (attrKeyValue artKey) mth
                   changeEntityAttr pgs
-                                   (objEntity this)
-                                   (AttrByName exportsMagicName)
+                                   (scopeEntity scope)
+                                   (AttrByName edhEffectsMagicName)
                                    d
+        when (contextExporting ctx) $ if objEntity this /= scopeEntity scope
+          then throwEdhSTM pgs
+                           UsageError
+                           "You don't export from a method procedure"
+          else
+            lookupEntityAttr pgs
+                             (objEntity this)
+                             (AttrByName edhExportsMagicName)
+              >>= \case
+                    EdhDict (Dict _ !thisExpDS) ->
+                      modifyTVar' thisExpDS
+                        $ Map.insert (attrKeyValue artKey) mth
+                    _ -> do
+                      d <- createEdhDict
+                        $ Map.singleton (attrKeyValue artKey) mth
+                      changeEntityAttr pgs
+                                       (objEntity this)
+                                       (AttrByName edhExportsMagicName)
+                                       d
       exitEdhSTM pgs exit mth
 
     GeneratorStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
@@ -432,17 +502,38 @@ evalStmt' !stmt !exit = do
                                    }
       when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
         changeEntityAttr pgs (scopeEntity scope) artKey gdf
-        when (contextExporting ctx)
-          $ lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
+        when (contextEffDefining ctx)
+          $   lookupEntityAttr pgs
+                               (scopeEntity scope)
+                               (AttrByName edhEffectsMagicName)
           >>= \case
-                EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS $ Map.insert (attrKeyValue artKey) gdf
+                EdhDict (Dict _ !effDS) ->
+                  modifyTVar' effDS $ Map.insert (attrKeyValue artKey) gdf
                 _ -> do
                   d <- createEdhDict $ Map.singleton (attrKeyValue artKey) gdf
                   changeEntityAttr pgs
-                                   (objEntity this)
-                                   (AttrByName exportsMagicName)
+                                   (scopeEntity scope)
+                                   (AttrByName edhEffectsMagicName)
                                    d
+        when (contextExporting ctx) $ if objEntity this /= scopeEntity scope
+          then throwEdhSTM pgs
+                           UsageError
+                           "You don't export from a method procedure"
+          else
+            lookupEntityAttr pgs
+                             (objEntity this)
+                             (AttrByName edhExportsMagicName)
+              >>= \case
+                    EdhDict (Dict _ !thisExpDS) ->
+                      modifyTVar' thisExpDS
+                        $ Map.insert (attrKeyValue artKey) gdf
+                    _ -> do
+                      d <- createEdhDict
+                        $ Map.singleton (attrKeyValue artKey) gdf
+                      changeEntityAttr pgs
+                                       (objEntity this)
+                                       (AttrByName edhExportsMagicName)
+                                       d
       exitEdhSTM pgs exit gdf
 
     InterpreterStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
@@ -453,17 +544,38 @@ evalStmt' !stmt !exit = do
                                    }
       when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
         changeEntityAttr pgs (scopeEntity scope) artKey mth
-        when (contextExporting ctx)
-          $ lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
+        when (contextEffDefining ctx)
+          $   lookupEntityAttr pgs
+                               (scopeEntity scope)
+                               (AttrByName edhEffectsMagicName)
           >>= \case
-                EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS $ Map.insert (attrKeyValue artKey) mth
+                EdhDict (Dict _ !effDS) ->
+                  modifyTVar' effDS $ Map.insert (attrKeyValue artKey) mth
                 _ -> do
                   d <- createEdhDict $ Map.singleton (attrKeyValue artKey) mth
                   changeEntityAttr pgs
-                                   (objEntity this)
-                                   (AttrByName exportsMagicName)
+                                   (scopeEntity scope)
+                                   (AttrByName edhEffectsMagicName)
                                    d
+        when (contextExporting ctx) $ if objEntity this /= scopeEntity scope
+          then throwEdhSTM pgs
+                           UsageError
+                           "You don't export from a method procedure"
+          else
+            lookupEntityAttr pgs
+                             (objEntity this)
+                             (AttrByName edhExportsMagicName)
+              >>= \case
+                    EdhDict (Dict _ !thisExpDS) ->
+                      modifyTVar' thisExpDS
+                        $ Map.insert (attrKeyValue artKey) mth
+                    _ -> do
+                      d <- createEdhDict
+                        $ Map.singleton (attrKeyValue artKey) mth
+                      changeEntityAttr pgs
+                                       (objEntity this)
+                                       (AttrByName edhExportsMagicName)
+                                       d
       exitEdhSTM pgs exit mth
 
     ProducerStmt pd@(ProcDecl name args _) -> contEdhSTM $ do
@@ -478,17 +590,38 @@ evalStmt' !stmt !exit = do
         "a producer procedure should receive a `outlet` keyword argument"
       when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
         changeEntityAttr pgs (scopeEntity scope) artKey mth
-        when (contextExporting ctx)
-          $ lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
+        when (contextEffDefining ctx)
+          $   lookupEntityAttr pgs
+                               (scopeEntity scope)
+                               (AttrByName edhEffectsMagicName)
           >>= \case
-                EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS $ Map.insert (attrKeyValue artKey) mth
+                EdhDict (Dict _ !effDS) ->
+                  modifyTVar' effDS $ Map.insert (attrKeyValue artKey) mth
                 _ -> do
                   d <- createEdhDict $ Map.singleton (attrKeyValue artKey) mth
                   changeEntityAttr pgs
-                                   (objEntity this)
-                                   (AttrByName exportsMagicName)
+                                   (scopeEntity scope)
+                                   (AttrByName edhEffectsMagicName)
                                    d
+        when (contextExporting ctx) $ if objEntity this /= scopeEntity scope
+          then throwEdhSTM pgs
+                           UsageError
+                           "You don't export from a method procedure"
+          else
+            lookupEntityAttr pgs
+                             (objEntity this)
+                             (AttrByName edhExportsMagicName)
+              >>= \case
+                    EdhDict (Dict _ !thisExpDS) ->
+                      modifyTVar' thisExpDS
+                        $ Map.insert (attrKeyValue artKey) mth
+                    _ -> do
+                      d <- createEdhDict
+                        $ Map.singleton (attrKeyValue artKey) mth
+                      changeEntityAttr pgs
+                                       (objEntity this)
+                                       (AttrByName edhExportsMagicName)
+                                       d
       exitEdhSTM pgs exit mth
 
     OpDeclStmt opSym opPrec opProc@(ProcDecl _ _ !pb) -> case pb of
@@ -527,17 +660,23 @@ evalStmt' !stmt !exit = do
                        , procedure'decl = opProc
                        }
         changeEntityAttr pgs (scopeEntity scope) (AttrByName opSym) op
-        when (contextExporting ctx)
-          $ lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
-          >>= \case
-                EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS $ Map.insert (EdhString opSym) op
-                _ -> do
-                  d <- createEdhDict $ Map.singleton (EdhString opSym) op
-                  changeEntityAttr pgs
-                                   (objEntity this)
-                                   (AttrByName exportsMagicName)
-                                   d
+        when (contextExporting ctx) $ if objEntity this /= scopeEntity scope
+          then throwEdhSTM pgs
+                           UsageError
+                           "You don't export from a method procedure"
+          else
+            lookupEntityAttr pgs
+                             (objEntity this)
+                             (AttrByName edhExportsMagicName)
+              >>= \case
+                    EdhDict (Dict _ !thisExpDS) ->
+                      modifyTVar' thisExpDS $ Map.insert (EdhString opSym) op
+                    _ -> do
+                      d <- createEdhDict $ Map.singleton (EdhString opSym) op
+                      changeEntityAttr pgs
+                                       (objEntity this)
+                                       (AttrByName edhExportsMagicName)
+                                       d
         exitEdhSTM pgs exit op
 
     OpOvrdStmt opSym opProc opPrec -> contEdhSTM $ do
@@ -578,18 +717,33 @@ evalStmt' !stmt !exit = do
                      , procedure'decl = opProc
                      }
       changeEntityAttr pgs (scopeEntity scope) (AttrByName opSym) op
-      when (contextExporting ctx)
-        $   lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
-        >>= \case
-              EdhDict (Dict _ !thisExpDS) ->
-                modifyTVar' thisExpDS $ Map.insert (EdhString opSym) op
-              _ -> do
-                d <- createEdhDict $ Map.singleton (EdhString opSym) op
-                changeEntityAttr pgs
-                                 (objEntity this)
-                                 (AttrByName exportsMagicName)
-                                 d
+      when (contextExporting ctx) $ if objEntity this /= scopeEntity scope
+        then throwEdhSTM pgs
+                         UsageError
+                         "You don't export from a method procedure"
+        else
+          lookupEntityAttr pgs (objEntity this) (AttrByName edhExportsMagicName)
+            >>= \case
+                  EdhDict (Dict _ !thisExpDS) ->
+                    modifyTVar' thisExpDS $ Map.insert (EdhString opSym) op
+                  _ -> do
+                    d <- createEdhDict $ Map.singleton (EdhString opSym) op
+                    changeEntityAttr pgs
+                                     (objEntity this)
+                                     (AttrByName edhExportsMagicName)
+                                     d
       exitEdhSTM pgs exit op
+
+    EffectStmt ss@(StmtSrc (_sp, !effs)) ->
+      local
+          (const pgs
+            { edh'context = (edh'context pgs) { contextStmt        = ss
+                                              , contextEffDefining = True
+                                              }
+            }
+          )
+        $ evalStmt' effs
+        $ \rtn -> local (const pgs) $ exitEdhProc' exit rtn
 
     ExportStmt ss@(StmtSrc (_sp, !exps)) ->
       local
@@ -626,41 +780,63 @@ evalStmt' !stmt !exit = do
     -- _ -> throwEdh EvalError $ "Eval not yet impl for: " <> T.pack (show stmt)
 
 
-exportsMagicName :: Text
-exportsMagicName = "__exports__"
+edhExportsMagicName :: Text
+edhExportsMagicName = "__exports__"
 
 importFromObject :: ArgsReceiver -> Object -> EdhProcExit -> EdhProc
 importFromObject !argsRcvr !fromObj !exit = do
   pgs <- ask
   let
-    !ctx  = edh'context pgs
-    !this = thisObject $ contextScope ctx
+    !ctx   = edh'context pgs
+    !scope = contextScope ctx
+    !this  = thisObject scope
     withExps :: Map.HashMap AttrName EdhValue -> STM ()
     withExps !exps = do
       let !artsPk = ArgsPack [] exps
       runEdhProc pgs $ recvEdhArgs ctx argsRcvr artsPk $ \em -> contEdhSTM $ do
-        updateEntityAttrs pgs (objEntity this) $ Map.toList em
-        -- add to exports as in an exporting stmt
-        when (contextExporting ctx) $ do
-          let !impd = Map.fromList $ catMaybes
-                [ case k of
-                    AttrByName attrName -> Just (EdhString attrName, v)
-                    _                   -> Nothing
-                | (k, v) <- Map.toList em
-                ]
-          lookupEntityAttr pgs (objEntity this) (AttrByName exportsMagicName)
+        updateEntityAttrs pgs (scopeEntity scope) $ Map.toList em
+        -- add to effects as in an effect stmt
+        when (contextEffDefining ctx) $ do
+          let !effd =
+                Map.fromList [ (attrKeyValue k, v) | (k, v) <- Map.toList em ]
+          lookupEntityAttr pgs
+                           (scopeEntity scope)
+                           (AttrByName edhEffectsMagicName)
             >>= \case
-                  EdhDict (Dict _ !thisExpDS) ->
-                    modifyTVar' thisExpDS $ Map.union impd
-                  _ -> do -- todo warn if of wrong type
-                    d <- createEdhDict impd
+                  EdhDict (Dict _ !effDS) -> modifyTVar' effDS $ Map.union effd
+                  _                       -> do -- todo warn if of wrong type
+                    d <- createEdhDict effd
                     changeEntityAttr pgs
-                                     (objEntity this)
-                                     (AttrByName exportsMagicName)
+                                     (scopeEntity scope)
+                                     (AttrByName edhEffectsMagicName)
                                      d
+        -- add to exports as in an exporting stmt
+        when (contextExporting ctx) $ if objEntity this /= scopeEntity scope
+          then throwEdhSTM pgs
+                           UsageError
+                           "You don't export from a method procedure"
+          else do
+            let !impd = Map.fromList $ catMaybes
+                  [ case k of
+                      AttrByName attrName -> Just (EdhString attrName, v)
+                      _                   -> Nothing
+                  | (k, v) <- Map.toList em
+                  ]
+            lookupEntityAttr pgs
+                             (scopeEntity scope)
+                             (AttrByName edhExportsMagicName)
+              >>= \case
+                    EdhDict (Dict _ !thisExpDS) ->
+                      modifyTVar' thisExpDS $ Map.union impd
+                    _ -> do -- todo warn if of wrong type
+                      d <- createEdhDict impd
+                      changeEntityAttr pgs
+                                       (scopeEntity scope)
+                                       (AttrByName edhExportsMagicName)
+                                       d
         exitEdhSTM pgs exit (EdhObject fromObj)
   contEdhSTM
-    $   lookupEntityAttr pgs (objEntity fromObj) (AttrByName exportsMagicName)
+    $ lookupEntityAttr pgs (objEntity fromObj) (AttrByName edhExportsMagicName)
     >>= \case
           EdhNil -> -- nothing exported at all
             withExps Map.empty
@@ -779,8 +955,8 @@ importEdhModule !impSpec !exit = do
   normalizedSpec = normalizeImpSpec impSpec
   normalizeImpSpec :: Text -> Text
   normalizeImpSpec = withoutLeadingSlash . withoutTrailingSlash
-  withoutLeadingSlash spec = maybe spec id $ T.stripPrefix "/" spec
-  withoutTrailingSlash spec = maybe spec id $ T.stripSuffix "/" spec
+  withoutLeadingSlash spec = fromMaybe spec $ T.stripPrefix "/" spec
+  withoutTrailingSlash spec = fromMaybe spec $ T.stripSuffix "/" spec
 
 loadModule :: TMVar EdhValue -> ModuleId -> FilePath -> EdhProcExit -> EdhProc
 loadModule !moduSlot !moduId !moduFile !exit = ask >>= \pgsImporter ->
@@ -798,8 +974,9 @@ loadModule !moduSlot !moduId !moduFile !exit = ask >>= \pgsImporter ->
           modu <- createEdhModule' world moduId moduFile
           let !loadScope = objectScope importerCtx modu
               !loadCtx   = importerCtx
-                { callStack        = loadScope <| callStack importerCtx
-                , contextExporting = False
+                { callStack          = loadScope <| callStack importerCtx
+                , contextExporting   = False
+                , contextEffDefining = False
                 }
               !pgsLoad = pgsImporter { edh'context = loadCtx }
           runEdhProc pgsLoad $ evalEdh moduFile moduSource $ \_ ->
@@ -841,8 +1018,9 @@ createEdhModule' !world !moduId !srcName = do
 
 moduleContext :: EdhWorld -> Object -> Context
 moduleContext !world !modu = worldCtx
-  { callStack        = objectScope worldCtx modu <| callStack worldCtx
-  , contextExporting = False
+  { callStack          = objectScope worldCtx modu <| callStack worldCtx
+  , contextExporting   = False
+  , contextEffDefining = False
   }
   where !worldCtx = worldContext world
 
@@ -1754,6 +1932,7 @@ constructEdhObject !cls apk@(ArgsPack !args !kwargs) !exit = do
                                     }
           ctorCtx = callerCtx { callStack = initScope <| callStack callerCtx
                               , contextExporting = False
+                              , contextEffDefining = False
                               }
           pgsCtor = pgsCaller { edh'context = ctorCtx }
       contEdhSTM
@@ -1823,10 +2002,11 @@ createEdhObject !cls !apk !exit = do
       let !calleeScope =
             callerScope { scopeProc = cls, scopeCaller = contextStmt callerCtx }
           !calleeCtx = callerCtx
-            { callStack        = calleeScope <| callStack callerCtx
-            , generatorCaller  = Nothing
-            , contextMatch     = true
-            , contextExporting = False
+            { callStack          = calleeScope <| callStack callerCtx
+            , generatorCaller    = Nothing
+            , contextMatch       = true
+            , contextExporting   = False
+            , contextEffDefining = False
             }
           !pgsCallee = pgsCaller { edh'context = calleeCtx }
       runEdhProc pgsCallee $ hp apk $ \(OriginalValue !val _ _) ->
@@ -1838,10 +2018,11 @@ createEdhObject !cls !apk !exit = do
       newThis <- viewAsEdhObject newEnt cls []
       let !ctorScope = objectScope callerCtx newThis
           !ctorCtx   = callerCtx { callStack = ctorScope <| callStack callerCtx
-                                 , generatorCaller  = Nothing
-                                 , contextMatch     = true
-                                 , contextStmt      = pb
-                                 , contextExporting = False
+                                 , generatorCaller    = Nothing
+                                 , contextMatch       = true
+                                 , contextStmt        = pb
+                                 , contextExporting   = False
+                                 , contextEffDefining = False
                                  }
           !pgsCtor = pgsCaller { edh'context = ctorCtx }
       runEdhProc pgsCtor $ evalStmt pb $ \(OriginalValue !ctorRtn _ _) ->
@@ -1887,9 +2068,10 @@ callEdhOperator !mth'that !mth'proc !prede !args !exit = do
                                                   callerCtx
                                                 }
           !mthCtx = callerCtx { callStack = mthScope <| callStack callerCtx
-                              , generatorCaller  = Nothing
-                              , contextMatch     = true
-                              , contextExporting = False
+                              , generatorCaller    = Nothing
+                              , contextMatch       = true
+                              , contextExporting   = False
+                              , contextEffDefining = False
                               }
           !pgsMth = pgsCaller { edh'context = mthCtx }
       -- push stack for the host procedure
@@ -1932,10 +2114,11 @@ callEdhOperator' !gnr'caller !callee'that !mth'proc !prede !mth'body !args !exit
         !recvCtx   = callerCtx
           { callStack = (lexicalScopeOf mth'proc) { thatObject = callee'that }
                           :| []
-          , generatorCaller  = Nothing
-          , contextMatch     = true
-          , contextStmt      = mth'body
-          , contextExporting = False
+          , generatorCaller    = Nothing
+          , contextMatch       = true
+          , contextStmt        = mth'body
+          , contextExporting   = False
+          , contextEffDefining = False
           }
     recvEdhArgs recvCtx
                 (procedure'args $ procedure'decl mth'proc)
@@ -1949,10 +2132,11 @@ callEdhOperator' !gnr'caller !callee'that !mth'proc !prede !mth'body !args !exit
                                                       callerCtx
                                                     }
               !mthCtx = callerCtx { callStack = mthScope <| callStack callerCtx
-                                  , generatorCaller  = gnr'caller
-                                  , contextMatch     = true
-                                  , contextStmt      = mth'body
-                                  , contextExporting = False
+                                  , generatorCaller    = gnr'caller
+                                  , contextMatch       = true
+                                  , contextStmt        = mth'body
+                                  , contextExporting   = False
+                                  , contextEffDefining = False
                                   }
               !pgsMth = pgsCaller { edh'context = mthCtx }
           case prede of
@@ -1990,9 +2174,10 @@ callEdhMethod !mth'that !mth'proc !apk !exit = do
                                                   callerCtx
                                                 }
           !mthCtx = callerCtx { callStack = mthScope <| callStack callerCtx
-                              , generatorCaller  = Nothing
-                              , contextMatch     = true
-                              , contextExporting = False
+                              , generatorCaller    = Nothing
+                              , contextMatch       = true
+                              , contextExporting   = False
+                              , contextEffDefining = False
                               }
           !pgsMth = pgsCaller { edh'context = mthCtx }
       -- push stack for the host procedure
@@ -2031,10 +2216,11 @@ callEdhMethod' !gnr'caller !callee'that !mth'proc !mth'body !apk !exit = do
       !recvCtx   = callerCtx
         { callStack = (lexicalScopeOf mth'proc) { thatObject = callee'that }
                         :| []
-        , generatorCaller  = Nothing
-        , contextMatch     = true
-        , contextStmt      = mth'body
-        , contextExporting = False
+        , generatorCaller    = Nothing
+        , contextMatch       = true
+        , contextStmt        = mth'body
+        , contextExporting   = False
+        , contextEffDefining = False
         }
   recvEdhArgs recvCtx (procedure'args $ procedure'decl mth'proc) apk $ \ed ->
     contEdhSTM $ do
@@ -2046,10 +2232,11 @@ callEdhMethod' !gnr'caller !callee'that !mth'proc !mth'body !apk !exit = do
                                                   callerCtx
                                                 }
           !mthCtx = callerCtx { callStack = mthScope <| callStack callerCtx
-                              , generatorCaller  = gnr'caller
-                              , contextMatch     = true
-                              , contextStmt      = mth'body
-                              , contextExporting = False
+                              , generatorCaller    = gnr'caller
+                              , contextMatch       = true
+                              , contextStmt        = mth'body
+                              , contextExporting   = False
+                              , contextEffDefining = False
                               }
           !pgsMth = pgsCaller { edh'context = mthCtx }
       -- push stack for the Edh procedure
@@ -2136,10 +2323,11 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                               , scopeCaller = contextStmt ctx
                               }
                             !calleeCtx = ctx
-                              { callStack        = calleeScope <| callStack ctx
-                              , generatorCaller  = Just (pgs, recvYield exit)
-                              , contextMatch     = true
-                              , contextExporting = False
+                              { callStack = calleeScope <| callStack ctx
+                              , generatorCaller    = Just (pgs, recvYield exit)
+                              , contextMatch       = true
+                              , contextExporting   = False
+                              , contextEffDefining = False
                               }
                             !pgsCallee = pgs { edh'context = calleeCtx }
                         -- insert a cycle tick here, so if no tx required for the call
@@ -2335,18 +2523,18 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
   let !ctx  = edh'context pgs
       scope = contextScope ctx
       this  = thisObject scope
-      chkExportTo :: Entity -> AttrName -> STM ()
-      chkExportTo !ent !attrName = do
+      chkExportTo :: Entity -> AttrKey -> STM ()
+      chkExportTo !ent !artKey = do
         when (contextExporting ctx)
-          $   lookupEntityAttr pgs ent (AttrByName exportsMagicName)
+          $   lookupEntityAttr pgs ent (AttrByName edhExportsMagicName)
           >>= \case
                 EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS $ Map.insert (EdhString attrName) rhVal
+                  modifyTVar' thisExpDS $ Map.insert (attrKeyValue artKey) rhVal
                 _ -> do
-                  d <- createEdhDict $ Map.singleton (EdhString attrName) rhVal
+                  d <- createEdhDict $ Map.singleton (attrKeyValue artKey) rhVal
                   changeEntityAttr pgs
                                    (objEntity this)
-                                   (AttrByName exportsMagicName)
+                                   (AttrByName edhExportsMagicName)
                                    d
         runEdhProc pgsAfter $ exitEdhProc exit rhVal
   case lhExpr of
@@ -2358,20 +2546,37 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
       DirectRef !addr' -> contEdhSTM $ resolveEdhAttrAddr pgs addr' $ \key ->
         do
           changeEntityAttr pgs (scopeEntity scope) key rhVal
+          when (contextEffDefining ctx)
+            -- define an effectful artifact by assignment
+            $   lookupEntityAttr pgs
+                                 (scopeEntity scope)
+                                 (AttrByName edhEffectsMagicName)
+            >>= \case
+                  EdhDict (Dict _ !effDS) ->
+                    modifyTVar' effDS $ Map.insert (attrKeyValue key) rhVal
+                  _ -> do
+                    d <- createEdhDict $ Map.singleton (attrKeyValue key) rhVal
+                    changeEntityAttr pgs
+                                     (objEntity this)
+                                     (AttrByName edhEffectsMagicName)
+                                     d
           if objEntity this == scopeEntity scope -- within a class proc
-            then case key of
-              AttrByName !attrName -> chkExportTo (objEntity this) attrName
-              _ -> -- todo deal with symbolic exports ?
-                runEdhProc pgsAfter $ exitEdhProc exit rhVal
-            else runEdhProc pgsAfter $ exitEdhProc exit rhVal
+            then chkExportTo (objEntity this) key
+            else if contextExporting ctx
+              then throwEdhSTM pgs
+                               UsageError
+                               "You don't export from a method procedure"
+              else runEdhProc pgsAfter $ exitEdhProc exit rhVal
       -- special case, assigning with `this.v=x` `that.v=y`, handle exports
-      IndirectRef (AttrExpr ThisRef) (NamedAttr !attrName) -> contEdhSTM $ do
-        changeEntityAttr pgs (objEntity this) (AttrByName attrName) rhVal
-        chkExportTo (objEntity this) attrName
-      IndirectRef (AttrExpr ThatRef) (NamedAttr !attrName) -> contEdhSTM $ do
-        let !thatEnt = objEntity $ thatObject scope
-        changeEntityAttr pgs thatEnt (AttrByName attrName) rhVal
-        chkExportTo thatEnt attrName
+      IndirectRef (AttrExpr ThisRef) addr' ->
+        contEdhSTM $ resolveEdhAttrAddr pgs addr' $ \key -> do
+          changeEntityAttr pgs (objEntity this) key rhVal
+          chkExportTo (objEntity this) key
+      IndirectRef (AttrExpr ThatRef) addr' ->
+        contEdhSTM $ resolveEdhAttrAddr pgs addr' $ \key -> do
+          let !thatEnt = objEntity $ thatObject scope
+          changeEntityAttr pgs thatEnt key rhVal
+          chkExportTo thatEnt key
       -- assign to an addressed attribute
       IndirectRef !tgtExpr !addr' ->
         contEdhSTM $ resolveEdhAttrAddr pgs addr' $ \key ->
@@ -2625,21 +2830,17 @@ packEdhArgs !argsSender !pkExit = do
   pkArgs (x : xs) !exit = do
     !pgs <- ask
     let
-      edhVal2Kw :: EdhValue -> (AttrName -> STM ()) -> STM ()
-      edhVal2Kw !k !exit' = case k of
+      edhVal2Kw :: EdhValue  -> STM ()-> (AttrName -> STM ()) -> STM ()
+      edhVal2Kw !k !nopExit !exit' = case k of
         EdhString s -> exit' s
-        _ ->
-          throwEdhSTM pgs UsageError
-            $  "Invalid argument keyword from a "
-            <> T.pack (edhTypeNameOf k)
-            <> ": "
-            <> T.pack (show k)
+        _           -> nopExit
       dictKvs2Kwl
         :: [(ItemKey, EdhValue)] -> ([(AttrName, EdhValue)] -> STM ()) -> STM ()
       dictKvs2Kwl !ps !exit' = go ps []       where
         go :: [(ItemKey, EdhValue)] -> [(AttrName, EdhValue)] -> STM ()
-        go []              !kvl = exit' kvl
-        go ((k, v) : rest) !kvl = edhVal2Kw k $ \k' -> go rest ((k', v) : kvl)
+        go [] !kvl = exit' kvl
+        go ((k, v) : rest) !kvl =
+          edhVal2Kw k (go rest kvl) $ \k' -> go rest ((k', v) : kvl)
     case x of
       UnpackPosArgs !posExpr ->
         evalExpr posExpr $ \(OriginalValue !val _ _) -> case edhUltimate val of
@@ -2667,9 +2868,17 @@ packEdhArgs !argsSender !pkExit = do
             pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
               exit (ArgsPack posArgs (Map.union kwArgs kwArgs'))
           (EdhPair !k !v) -> pkArgs xs $ \case
-            (ArgsPack !posArgs !kwArgs) -> contEdhSTM $ edhVal2Kw k $ \kw ->
-              runEdhProc pgs
-                $ exit (ArgsPack posArgs $ Map.insert kw (noneNil v) kwArgs)
+            (ArgsPack !posArgs !kwArgs) ->
+              contEdhSTM
+                $ edhVal2Kw
+                    k
+                    (  throwEdhSTM pgs UsageError
+                    $  "Invalid keyword type: "
+                    <> T.pack (edhTypeNameOf k)
+                    )
+                $ \kw ->
+                    runEdhProc pgs $ exit
+                      (ArgsPack posArgs $ Map.insert kw (noneNil v) kwArgs)
           (EdhDict (Dict _ !ds)) -> pkArgs xs $ \case
             (ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
               dm <- readTVar ds

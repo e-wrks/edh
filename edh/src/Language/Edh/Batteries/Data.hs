@@ -59,7 +59,7 @@ defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
           when (contextExporting ctx && objEntity this == scopeEntity scope)
             $   lookupEntityAttr pgs
                                  (objEntity this)
-                                 (AttrByName exportsMagicName)
+                                 (AttrByName edhExportsMagicName)
             >>= \case
                   EdhDict (Dict _ !thisExpDS) ->
                     modifyTVar' thisExpDS $ Map.insert (EdhString valName) nv
@@ -67,7 +67,7 @@ defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
                     d <- createEdhDict $ Map.singleton (EdhString valName) nv
                     changeEntityAttr pgs
                                      (objEntity this)
-                                     (AttrByName exportsMagicName)
+                                     (AttrByName edhExportsMagicName)
                                      d
     lookupEntityAttr pgs (scopeEntity scope) (AttrByName valName) >>= \case
       EdhNil -> do
