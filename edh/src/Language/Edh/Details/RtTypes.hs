@@ -345,6 +345,10 @@ data Scope = Scope {
     , scopeProc :: !ProcDefi
     -- | the Edh stmt caused creation of this scope
     , scopeCaller :: !StmtSrc
+    -- | when this scope is of an effectful procedure as called, this is the
+    -- outer call stack from which (but not including the) scope the
+    -- procedure is addressed of
+    , effectsStack :: [Scope]
   }
 instance Eq Scope where
   x == y = scopeEntity x == scopeEntity y
@@ -353,7 +357,7 @@ instance Ord Scope where
 instance Hashable Scope where
   hashWithSalt s x = hashWithSalt s (scopeEntity x)
 instance Show Scope where
-  show (Scope _ _ _ _ (ProcDefi _ _ (ProcDecl pName _ procBody)) (StmtSrc (cPos, _)))
+  show (Scope _ _ _ _ (ProcDefi _ _ (ProcDecl pName _ procBody)) (StmtSrc (cPos, _)) _)
     = "📜 " ++ T.unpack pName ++ " 🔎 " ++ defLoc ++ " 👈 " ++ sourcePosPretty cPos
    where
     defLoc = case procBody of
@@ -367,9 +371,10 @@ objectScope :: Context -> Object -> Scope
 objectScope ctx obj = Scope { scopeEntity      = objEntity obj
                             , thisObject       = obj
                             , thatObject       = obj
+                            , exceptionHandler = defaultEdhExcptHndlr
                             , scopeProc        = objClass obj
                             , scopeCaller      = contextStmt ctx
-                            , exceptionHandler = defaultEdhExcptHndlr
+                            , effectsStack     = []
                             }
 
 -- | An object views an entity, with inheritance relationship 
@@ -597,7 +602,7 @@ getEdhCallContext !unwind !pgs = EdhCallContext
   (StmtSrc (!tip, _)) = contextStmt ctx
   !frames =
     foldl'
-        (\sfs (Scope _ _ _ _ (ProcDefi _ _ (ProcDecl procName _ procBody)) (StmtSrc (callerPos, _))) ->
+        (\sfs (Scope _ _ _ _ (ProcDefi _ _ (ProcDecl procName _ procBody)) (StmtSrc (callerPos, _)) _) ->
           EdhCallFrame procName
                        (procSrcLoc procBody)
                        (T.pack $ sourcePosPretty callerPos)
@@ -1339,6 +1344,7 @@ mkHostClass !scope !nm !writeProtected !hc = do
                                 , scopeProc        = cls
                                 , scopeCaller      = contextStmt ctx
                                 , exceptionHandler = defaultEdhExcptHndlr
+                                , effectsStack     = []
                                 }
           hc pgsCtor apk obs $ \esd -> do
             writeTVar (entity'store ent) esd

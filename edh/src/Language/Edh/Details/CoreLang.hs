@@ -7,11 +7,16 @@ import           Prelude
 
 import           Control.Concurrent.STM
 
+import           Data.Text                      ( Text )
+import qualified Data.HashMap.Strict           as Map
+
 import           Language.Edh.Details.RtTypes
 
 
+-- * Edh lexical attribute resolution
+
 lookupEdhCtxAttr :: EdhProgState -> Scope -> AttrKey -> STM EdhValue
-lookupEdhCtxAttr pgs fromScope addr =
+lookupEdhCtxAttr pgs !fromScope !addr =
   resolveEdhCtxAttr pgs fromScope addr >>= \case
     Nothing        -> return EdhNil
     Just (!val, _) -> return val
@@ -33,6 +38,29 @@ resolveLexicalAttr pgs (Just !scope) !addr =
     EdhNil -> resolveLexicalAttr pgs (outerScopeOf scope) addr
     !val   -> return $ Just (val, scope)
 {-# INLINE resolveLexicalAttr #-}
+
+
+-- * Edh effectful attribute resolution
+
+
+edhEffectsMagic :: Text
+edhEffectsMagic = "__effects__"
+
+resolveEffectfulAttr
+  :: EdhProgState -> [Scope] -> EdhValue -> STM (Maybe (EdhValue, [Scope]))
+resolveEffectfulAttr _ [] _ = return Nothing
+resolveEffectfulAttr pgs (scope : rest) !key =
+  lookupEntityAttr pgs (scopeEntity scope) (AttrByName edhEffectsMagic)
+    >>= \case
+          EdhNil               -> resolveEffectfulAttr pgs rest key
+          EdhDict (Dict _ !ds) -> do
+            d <- readTVar ds
+            case Map.lookup key d of
+              Just val -> return $ Just (val, rest)
+              Nothing  -> resolveEffectfulAttr pgs rest key
+  -- todo crash in this case? warning may be more proper but in what way?
+          _ -> resolveEffectfulAttr pgs rest key
+{-# INLINE resolveEffectfulAttr #-}
 
 
 -- * Edh object attribute resolution

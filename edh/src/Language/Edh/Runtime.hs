@@ -61,14 +61,21 @@ createEdhWorld !console = liftIO $ do
                      , objClass  = rootClass
                      , objSupers = rootSupers
                      }
-      !rootScope =
-        Scope rootEntity root root defaultEdhExcptHndlr rootClass $ StmtSrc
-          ( SourcePos { sourceName   = "<world-root>"
-                      , sourceLine   = mkPos 1
-                      , sourceColumn = mkPos 1
-                      }
-          , VoidStmt
-          )
+      !rootScope = Scope
+        { scopeEntity      = rootEntity
+        , thisObject       = root
+        , thatObject       = root
+        , exceptionHandler = defaultEdhExcptHndlr
+        , scopeProc        = rootClass
+        , scopeCaller      = StmtSrc
+                               ( SourcePos { sourceName   = "<world-root>"
+                                           , sourceLine   = mkPos 1
+                                           , sourceColumn = mkPos 1
+                                           }
+                               , VoidStmt
+                               )
+        , effectsStack     = []
+        }
       !scopeClass = ProcDefi
         { procedure'uniq = scopeClassUniq
         , procedure'lexi = Just rootScope
