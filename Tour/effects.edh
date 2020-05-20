@@ -1,0 +1,46 @@
+
+{
+
+  method effectsConsumer (data) {
+
+    # put 'dataType' into current procedure scope
+    dataType = type(data)
+
+    # put 'dataType' into effect namespace, 
+    # so a called effect method can pull it by `behave`,
+    # kinda like a callback mechanism but for effects
+    effect dataType = dataType
+
+    # `perform` pulls out an effect method from effect namespace
+    perform mattersLot
+      # then we call it from here with some args
+      ('the data is of ' ++ dataType)
+
+  }
+
+
+  method effectsStaker () {
+
+    # define an effect method
+    effect method mattersLot(msg) {
+      console.print( 'It matters a lot: ' ++ msg )
+
+      # `behave` can pull effects (either methods or other values) from
+      # the effect caller, while `perform` can only pull effects from 
+      # outer stack relative to where the effect method is defined
+      console.print( 'No doubt the data is of ' ++ behave dataType )
+    }
+
+    # now we do it:
+    effectsConsumer(3)
+    effectsConsumer(Symbol('awesome'))
+
+  }
+
+}
+
+
+effectsStaker()
+
+
+quit

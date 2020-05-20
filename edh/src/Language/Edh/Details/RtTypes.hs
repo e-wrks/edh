@@ -1030,15 +1030,18 @@ data AttrAddr = ThisRef | ThatRef | SuperRef
     | IndirectRef !Expr !AttrAddressor
   deriving (Eq, Show)
 
+-- | the key to address attributes against a left hand entity object or
+-- current scope
 data AttrAddressor =
-    -- | vanilla form in addressing attributes against
-    --   a left hand entity object
+    -- | vanilla form, by alphanumeric name
     NamedAttr !AttrName
-    -- | get the symbol value from current entity,
-    --   then use it to address attributes against
-    --   a left hand entity object
+    -- | get the symbol value from current scope,
+    -- then use it to address attributes
     | SymbolicAttr !AttrName
-  deriving (Eq, Show)
+  deriving (Eq)
+instance Show AttrAddressor where
+  show (NamedAttr    n) = T.unpack n
+  show (SymbolicAttr s) = "@" <> T.unpack s
 
 
 receivesNamedArg :: Text -> ArgsReceiver -> Bool
@@ -1160,6 +1163,12 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
     -- | a for-from-do loop is made an expression in Edh, so it can
     -- appear as the right-hand expr of the comprehension (=<) operator.
     | ForExpr !ArgsReceiver !Expr !Expr
+
+    -- | call out an effectful artifact, search only outer stack frames,
+    -- if from an effectful procedure run
+    | PerformExpr !AttrAddressor
+    -- | call out an effectful artifact, always search full stack frames
+    | BehaveExpr !AttrAddressor
 
     | AttrExpr !AttrAddr
     | IndexExpr { index'value :: !Expr

@@ -490,6 +490,18 @@ parseForExpr si = do
   (doX, si'') <- parseExpr si'
   return (ForExpr ar iter doX, si'')
 
+parsePerformExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parsePerformExpr si = do
+  void $ keyword "perform"
+  addr <- choice [SymbolicAttr <$> parseAttrSym, NamedAttr <$> parseAttrName]
+  return (PerformExpr addr, si)
+
+parseBehaveExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseBehaveExpr si = do
+  void $ keyword "behave"
+  addr <- choice [SymbolicAttr <$> parseAttrSym, NamedAttr <$> parseAttrName]
+  return (BehaveExpr addr, si)
+
 parseListExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseListExpr si = do
   void $ symbol "["
@@ -770,6 +782,8 @@ parseExprPrec prec si = lookAhead illegalExprStart >>= \case
       , parseForExpr si
       , parseIfExpr si
       , parseCaseExpr si
+      , parsePerformExpr si
+      , parseBehaveExpr si
       , parseListExpr si
       , parseBlockOrDict si
       , parseOpAddrOrTupleOrParen si

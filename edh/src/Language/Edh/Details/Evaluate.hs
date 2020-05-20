@@ -233,9 +233,9 @@ evalStmt' !stmt !exit = do
                                          (objEntity this)
                                          (AttrByName edhExportsMagicName)
                                          d
-                                                          -- let statement evaluates to nil always, with previous tx
-                                                          -- state restored
           exitEdhSTM pgs exit nil
+          -- let statement evaluates to nil always, with previous tx
+          -- state restored
 
     BreakStmt       -> exitEdhProc exit EdhBreak
     ContinueStmt    -> exitEdhProc exit EdhContinue
@@ -264,11 +264,12 @@ evalStmt' !stmt !exit = do
           exitEdhSTM pgs exit nil
 
       (CallExpr procExpr argsSndr) ->
-        evalExpr procExpr $ \(OriginalValue !callee'val _ !callee'that) ->
-          contEdhSTM $ do
-            edhMakeCall pgs callee'val callee'that argsSndr
-              $ \mkCall -> forkEdh pgs (mkCall edhEndOfProc)
-            exitEdhSTM pgs exit nil
+        contEdhSTM
+          $ resolveEdhCallee pgs procExpr
+          $ \(OriginalValue !callee'val _ !callee'that, scopeMod) -> do
+              edhMakeCall pgs callee'val callee'that argsSndr scopeMod
+                $ \mkCall -> forkEdh pgs (mkCall edhEndOfProc)
+              exitEdhSTM pgs exit nil
 
       (ForExpr argsRcvr iterExpr doExpr) -> contEdhSTM $ do
         edhForLoop pgs argsRcvr iterExpr doExpr (const $ return ())
@@ -306,10 +307,11 @@ evalStmt' !stmt !exit = do
               $ evalCaseBlock branchesExpr edhEndOfProc
 
         (CallExpr procExpr argsSndr) ->
-          evalExpr procExpr $ \(OriginalValue callee'val _ callee'that) ->
-            contEdhSTM
-              $ edhMakeCall pgs callee'val callee'that argsSndr
-              $ \mkCall -> schedDefered pgs (mkCall edhEndOfProc)
+          contEdhSTM
+            $ resolveEdhCallee pgs procExpr
+            $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
+                edhMakeCall pgs callee'val callee'that argsSndr scopeMod
+                  $ \mkCall -> schedDefered pgs (mkCall edhEndOfProc)
 
         (ForExpr argsRcvr iterExpr doExpr) ->
           contEdhSTM
@@ -390,6 +392,7 @@ evalStmt' !stmt !exit = do
                   $ callEdhMethod this
                                   mth'proc
                                   (ArgsPack [EdhObject scopeObj] Map.empty)
+                                  id
                   $ \_ -> contEdhSTM $ exitEdhSTM pgs exit nil
               _ ->
                 throwEdhSTM pgs EvalError
@@ -1275,6 +1278,23 @@ evalExpr expr exit = do
         $ edhForLoop pgs argsRcvr iterExpr doExpr (const $ return ())
         $ \runLoop -> runEdhProc pgs (runLoop exit)
 
+    PerformExpr effAddr ->
+      contEdhSTM $ resolveEdhAttrAddr pgs effAddr $ \key -> do
+        let !targetStack = case effectsStack scope of
+              []         -> NE.tail $ callStack ctx
+              outerStack -> outerStack
+        resolveEffectfulAttr pgs targetStack (attrKeyValue key) >>= \case
+          Just (effArt, _) -> exitEdhSTM pgs exit effArt
+          Nothing -> throwEdhSTM pgs UsageError $ "No such effect: " <> T.pack
+            (show effAddr)
+
+    BehaveExpr effAddr ->
+      contEdhSTM $ resolveEdhAttrAddr pgs effAddr $ \key -> do
+        let !targetStack = NE.tail $ callStack ctx
+        resolveEffectfulAttr pgs targetStack (attrKeyValue key) >>= \case
+          Just (effArt, _) -> exitEdhSTM pgs exit effArt
+          Nothing -> throwEdhSTM pgs UsageError $ "No such effect: " <> T.pack
+            (show effAddr)
 
     AttrExpr addr -> case addr of
       ThisRef          -> exitEdhProc exit (EdhObject $ thisObject scope)
@@ -1321,8 +1341,12 @@ evalExpr expr exit = do
                 throwEdhSTM pgs EvalError $ "No ([]) method from: " <> T.pack
                   (show obj)
 
-              EdhMethod !mth'proc -> runEdhProc pgs
-                $ callEdhMethod obj mth'proc (ArgsPack [ixVal] Map.empty) exit
+              EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
+                obj
+                mth'proc
+                (ArgsPack [ixVal] Map.empty)
+                id
+                exit
 
               !badIndexer ->
                 throwEdhSTM pgs EvalError
@@ -1346,10 +1370,11 @@ evalExpr expr exit = do
 
 
     CallExpr !procExpr !argsSndr ->
-      evalExpr procExpr $ \(OriginalValue callee'val _ callee'that) ->
-        contEdhSTM
-          $ edhMakeCall pgs callee'val callee'that argsSndr
-          $ \mkCall -> runEdhProc pgs (mkCall exit)
+      contEdhSTM
+        $ resolveEdhCallee pgs procExpr
+        $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
+            edhMakeCall pgs callee'val callee'that argsSndr scopeMod
+              $ \mkCall -> runEdhProc pgs (mkCall exit)
 
 
     InfixExpr !opSym !lhExpr !rhExpr ->
@@ -1518,7 +1543,10 @@ getEdhAttrWithMagic !magicSpell !obj !key !exitNoMagic !exit = do
       withMagicMethod :: Scope -> ProcDefi -> STM ()
       withMagicMethod !magicScope !magicMth =
         runEdhProc pgs
-          $ callEdhMethod obj magicMth (ArgsPack [attrKeyValue key] Map.empty)
+          $ callEdhMethod obj
+                          magicMth
+                          (ArgsPack [attrKeyValue key] Map.empty)
+                          id
           $ \(OriginalValue !magicRtn _ _) -> case magicRtn of
               EdhContinue -> getViaSupers restSupers
               _ -> exitEdhProc' exit $ OriginalValue magicRtn magicScope obj
@@ -1561,6 +1589,7 @@ setEdhAttrWithMagic !pgsAfter !magicSpell !obj !key !val !exitNoMagic !exit =
           $ callEdhMethod obj
                           magicMth
                           (ArgsPack [attrKeyValue key, val] Map.empty)
+                          id
           $ \(OriginalValue !magicRtn _ _) -> case magicRtn of
               EdhContinue -> setViaSupers restSupers
               _           -> local (const pgsAfter) $ exitEdhProc exit magicRtn
@@ -1628,10 +1657,11 @@ edhMakeCall
   -> EdhValue
   -> Object
   -> ArgsSender
+  -> (Scope -> Scope)
   -> ((EdhProcExit -> EdhProc) -> STM ())
   -> STM ()
-edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
-  case callee'val of
+edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !scopeMod !callMaker
+  = case callee'val of
 
     -- calling a class (constructor) procedure
     EdhClass !cls -> runEdhProc pgsCaller $ packEdhArgs argsSndr $ \apk ->
@@ -1641,7 +1671,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
     EdhMethod !mth'proc ->
       runEdhProc pgsCaller $ packEdhArgs argsSndr $ \apk ->
         contEdhSTM $ callMaker $ \exit ->
-          callEdhMethod callee'that mth'proc apk exit
+          callEdhMethod callee'that mth'proc apk scopeMod exit
 
     -- calling an interpreter procedure
     EdhIntrpr !mth'proc ->
@@ -1657,7 +1687,8 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
                 !argCallerScope <- mkScopeWrapper callerCtx
                   $ contextScope callerCtx
                 return $ ArgsPack (EdhObject argCallerScope : args) kwargs
-            callMaker $ \exit -> callEdhMethod callee'that mth'proc apk' exit
+            callMaker
+              $ \exit -> callEdhMethod callee'that mth'proc apk' scopeMod exit
 
     -- calling a producer procedure
     EdhPrducr !mth'proc -> case procedure'body $ procedure'decl mth'proc of
@@ -1678,6 +1709,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
                       (ArgsPack args
                                 (Map.insert "outlet" (EdhSink outlet) kwargs)
                       )
+                      scopeMod
                       edhEndOfProc
                 Just (EdhSink !outlet) -> callMaker $ \exit ->
                   launchEventProducer exit outlet $ callEdhMethod'
@@ -1686,6 +1718,7 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
                     mth'proc
                     pb
                     (ArgsPack args kwargs)
+                    scopeMod
                     edhEndOfProc
                 Just !badVal ->
                   throwEdhSTM pgsCaller UsageError
@@ -1706,6 +1739,9 @@ edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !callMaker =
         <> T.pack (show callee'val)
 
 
+-- todo this should really be in `CoreLang.hs`, but there has no access to 
+--      'throwEdhSTM' without cyclic imports, maybe some day we shall try
+--      `.hs-boot` files
 -- | resolve an attribute addressor, either alphanumeric named or symbolic
 resolveEdhAttrAddr
   :: EdhProgState -> AttrAddressor -> (AttrKey -> STM ()) -> STM ()
@@ -1974,7 +2010,7 @@ constructEdhObject !cls apk@(ArgsPack !args !kwargs) !exit = do
                   Left !pb ->
                     runEdhProc pgsCaller
                       $ local (const pgsCtor)
-                      $ callEdhMethod' Nothing this initMth pb apk
+                      $ callEdhMethod' Nothing this initMth pb apk id
                       $ \(OriginalValue !initRtn _ _) ->
                           local (const pgsCaller) $ case initRtn of
                               -- allow a __init__() procedure to explicitly return other
@@ -2168,8 +2204,14 @@ callEdhOperator' !gnr'caller !callee'that !mth'proc !prede !mth'body !args !exit
                 local (const pgsCaller) $ exitEdhProc exit mthRtn
 
 
-callEdhMethod :: Object -> ProcDefi -> ArgsPack -> EdhProcExit -> EdhProc
-callEdhMethod !mth'that !mth'proc !apk !exit = do
+callEdhMethod
+  :: Object
+  -> ProcDefi
+  -> ArgsPack
+  -> (Scope -> Scope)
+  -> EdhProcExit
+  -> EdhProc
+callEdhMethod !mth'that !mth'proc !apk !scopeMod !exit = do
   pgsCaller <- ask
   let callerCtx   = edh'context pgsCaller
       callerScope = contextScope callerCtx
@@ -2179,13 +2221,12 @@ callEdhMethod !mth'that !mth'proc !apk !exit = do
     Right !hp -> do
       -- a host procedure views the same scope entity as of the caller's
       -- call frame
-      let !mthScope = (lexicalScopeOf mth'proc) { scopeEntity = scopeEntity
-                                                  callerScope
-                                                , thatObject  = mth'that
-                                                , scopeProc   = mth'proc
-                                                , scopeCaller = contextStmt
-                                                  callerCtx
-                                                }
+      let !mthScope = scopeMod $ (lexicalScopeOf mth'proc)
+            { scopeEntity = scopeEntity callerScope
+            , thatObject  = mth'that
+            , scopeProc   = mth'proc
+            , scopeCaller = contextStmt callerCtx
+            }
           !mthCtx = callerCtx { callStack = mthScope <| callStack callerCtx
                               , generatorCaller    = Nothing
                               , contextMatch       = true
@@ -2201,7 +2242,7 @@ callEdhMethod !mth'that !mth'proc !apk !exit = do
 
     -- calling an Edh method procedure
     Left !pb ->
-      callEdhMethod' Nothing mth'that mth'proc pb apk
+      callEdhMethod' Nothing mth'that mth'proc pb apk scopeMod
         $ \(OriginalValue !mthRtn _ _) -> case mthRtn of
             -- allow continue to be return from a method proc,
             -- to carry similar semantics like `NotImplemented` in Python
@@ -2221,41 +2262,66 @@ callEdhMethod'
   -> ProcDefi
   -> StmtSrc
   -> ArgsPack
+  -> (Scope -> Scope)
   -> EdhProcExit
   -> EdhProc
-callEdhMethod' !gnr'caller !callee'that !mth'proc !mth'body !apk !exit = do
-  !pgsCaller <- ask
-  let !callerCtx = edh'context pgsCaller
-      !recvCtx   = callerCtx
-        { callStack = (lexicalScopeOf mth'proc) { thatObject = callee'that }
-                        :| []
-        , generatorCaller    = Nothing
-        , contextMatch       = true
-        , contextStmt        = mth'body
-        , contextExporting   = False
-        , contextEffDefining = False
-        }
-  recvEdhArgs recvCtx (procedure'args $ procedure'decl mth'proc) apk $ \ed ->
-    contEdhSTM $ do
-      ent <- createHashEntity ed
-      let !mthScope = (lexicalScopeOf mth'proc) { scopeEntity = ent
-                                                , thatObject  = callee'that
-                                                , scopeProc   = mth'proc
-                                                , scopeCaller = contextStmt
-                                                  callerCtx
-                                                }
-          !mthCtx = callerCtx { callStack = mthScope <| callStack callerCtx
-                              , generatorCaller    = gnr'caller
-                              , contextMatch       = true
-                              , contextStmt        = mth'body
-                              , contextExporting   = False
-                              , contextEffDefining = False
-                              }
-          !pgsMth = pgsCaller { edh'context = mthCtx }
-      -- push stack for the Edh procedure
-      runEdhProc pgsMth $ evalStmt mth'body $ \(OriginalValue !mthRtn _ _) ->
-        -- pop stack after Edh procedure returned
-        local (const pgsCaller) $ exitEdhProc exit mthRtn
+callEdhMethod' !gnr'caller !callee'that !mth'proc !mth'body !apk !scopeMod !exit
+  = do
+    !pgsCaller <- ask
+    let !callerCtx = edh'context pgsCaller
+        !recvCtx   = callerCtx
+          { callStack = (lexicalScopeOf mth'proc) { thatObject = callee'that }
+                          :| []
+          , generatorCaller    = Nothing
+          , contextMatch       = true
+          , contextStmt        = mth'body
+          , contextExporting   = False
+          , contextEffDefining = False
+          }
+    recvEdhArgs recvCtx (procedure'args $ procedure'decl mth'proc) apk $ \ed ->
+      contEdhSTM $ do
+        ent <- createHashEntity ed
+        let !mthScope = scopeMod $ (lexicalScopeOf mth'proc)
+              { scopeEntity = ent
+              , thatObject  = callee'that
+              , scopeProc   = mth'proc
+              , scopeCaller = contextStmt callerCtx
+              }
+            !mthCtx = callerCtx { callStack = mthScope <| callStack callerCtx
+                                , generatorCaller    = gnr'caller
+                                , contextMatch       = true
+                                , contextStmt        = mth'body
+                                , contextExporting   = False
+                                , contextEffDefining = False
+                                }
+            !pgsMth = pgsCaller { edh'context = mthCtx }
+        -- push stack for the Edh procedure
+        runEdhProc pgsMth $ evalStmt mth'body $ \(OriginalValue !mthRtn _ _) ->
+          -- pop stack after Edh procedure returned
+          local (const pgsCaller) $ exitEdhProc exit mthRtn
+
+resolveEdhCallee
+  :: EdhProgState
+  -> Expr
+  -> ((OriginalValue, Scope -> Scope) -> STM ())
+  -> STM ()
+resolveEdhCallee !pgs !expr !exit = case expr of
+  PerformExpr effAddr -> goEff effAddr $ case effectsStack scope of
+    []         -> NE.tail $ callStack ctx
+    outerStack -> outerStack
+  BehaveExpr effAddr -> goEff effAddr $ NE.tail $ callStack ctx
+  _ -> runEdhProc pgs $ evalExpr expr $ \ov -> contEdhSTM $ exit (ov, id)
+ where
+  !ctx   = edh'context pgs
+  !scope = contextScope ctx
+  goEff effAddr targetStack = resolveEdhAttrAddr pgs effAddr $ \key ->
+    resolveEffectfulAttr pgs targetStack (attrKeyValue key) >>= \case
+      Just (effArt, outerStack) -> exit
+        ( OriginalValue effArt scope $ thisObject scope
+        , \procScope -> procScope { effectsStack = outerStack }
+        )
+      Nothing -> throwEdhSTM pgs UsageError $ "No such effect: " <> T.pack
+        (show effAddr)
 
 
 edhForLoop
@@ -2313,9 +2379,10 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
 
     runEdhProc pgsLooper $ case deParen iterExpr of
       CallExpr !procExpr !argsSndr -> -- loop over a generator
-        evalExpr procExpr
-          $ \(OriginalValue !callee'val !_callee'scope !callee'that) ->
-              case callee'val of
+        contEdhSTM
+          $ resolveEdhCallee pgsLooper procExpr
+          $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
+              runEdhProc pgsLooper $ case callee'val of
 
                 -- calling a generator
                 (EdhGnrtor !gnr'proc) -> packEdhArgs argsSndr $ \apk ->
@@ -2359,6 +2426,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                                      gnr'proc
                                      pb
                                      apk
+                                     scopeMod
                         $ \(OriginalValue !gnrRtn _ _) -> case gnrRtn of
                             -- return the result in CPS with looper pgs restored
                             EdhContinue ->
@@ -2376,7 +2444,11 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                 -- calling other procedures, assume to loop over its return value
                 _ ->
                   contEdhSTM
-                    $ edhMakeCall pgsLooper callee'val callee'that argsSndr
+                    $ edhMakeCall pgsLooper
+                                  callee'val
+                                  callee'that
+                                  argsSndr
+                                  scopeMod
                     $ \mkCall ->
                         runEdhProc pgsLooper
                           $ mkCall
@@ -2980,7 +3052,7 @@ edhValueNull !pgs (EdhObject !o) !exit =
     EdhNil -> exit False
     EdhMethod !nulMth ->
       runEdhProc pgs
-        $ callEdhMethod o nulMth (ArgsPack [] Map.empty)
+        $ callEdhMethod o nulMth (ArgsPack [] Map.empty) id
         $ \(OriginalValue nulVal _ _) -> contEdhSTM $ case nulVal of
             EdhBool isNull -> exit isNull
             _              -> edhValueNull pgs nulVal exit
@@ -3111,7 +3183,7 @@ edhValueRepr (EdhObject !o) !exit = do
     repr@EdhString{} -> exitEdhSTM pgs exit repr
     EdhMethod !reprMth ->
       runEdhProc pgs
-        $ callEdhMethod o reprMth (ArgsPack [] Map.empty)
+        $ callEdhMethod o reprMth (ArgsPack [] Map.empty) id
         $ \(OriginalValue reprVal _ _) -> case reprVal of
             s@EdhString{} -> exitEdhProc exit s
             _             -> edhValueRepr reprVal exit

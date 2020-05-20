@@ -45,6 +45,7 @@ assignProc !lhExpr !rhExpr !exit = do
                   obj
                   mth'proc
                   (ArgsPack [ixVal, rhVal] Map.empty)
+                  id
                   exit
                 !badIndexer ->
                   throwEdhSTM pgs EvalError
