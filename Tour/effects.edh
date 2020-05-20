@@ -1,4 +1,6 @@
 
+export mattersLot = Symbol('mattersLot')
+
 {
 
   method effectsConsumer (data) {
@@ -13,7 +15,7 @@
 
     # `perform` pulls out an effect method (could be other values as well),
     # from effect namespace
-    perform mattersLot
+    perform @mattersLot
       # then we call it from here with some args
       ('the data is of ' ++ dataType)
 
@@ -23,7 +25,7 @@
   method effectsStaker () {
 
     # define an effect method into effect namespace
-    effect method mattersLot(msg) {
+    effect method @mattersLot(msg) {
       console.print( 'It matters a lot: ' ++ msg )
 
       # `behave` can pull effects (either methods or other values) from
