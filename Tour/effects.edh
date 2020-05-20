@@ -11,7 +11,7 @@
     # kinda like a callback mechanism but for effects
     effect dataType = dataType
 
-    # `perform` pulls out an effect method (or other values as well),
+    # `perform` pulls out an effect method (could be other values as well),
     # from effect namespace
     perform mattersLot
       # then we call it from here with some args
@@ -22,7 +22,7 @@
 
   method effectsStaker () {
 
-    # define an effect method
+    # define an effect method into effect namespace
     effect method mattersLot(msg) {
       console.print( 'It matters a lot: ' ++ msg )
 
