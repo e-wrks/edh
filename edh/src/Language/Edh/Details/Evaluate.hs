@@ -2486,9 +2486,9 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                       EdhBreak ->
                         -- break for loop
                         exitEdhProc exit nil
-                      EdhReturn rtnVal ->
+                      rtn@EdhReturn{} ->
                         -- early return during for loop
-                        exitEdhProc exit rtnVal
+                        exitEdhProc exit rtn
                       _ -> contEdhSTM $ do
                         -- continue for loop
                         iterCollector doResult
