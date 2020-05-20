@@ -11,7 +11,8 @@
     # kinda like a callback mechanism but for effects
     effect dataType = dataType
 
-    # `perform` pulls out an effect method from effect namespace
+    # `perform` pulls out an effect method (or other values as well),
+    # from effect namespace
     perform mattersLot
       # then we call it from here with some args
       ('the data is of ' ++ dataType)
