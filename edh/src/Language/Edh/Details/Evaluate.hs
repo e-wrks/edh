@@ -775,35 +775,42 @@ evalStmt' !stmt !exit = do
         $ evalStmt' exps
         $ \rtn -> local (const pgs) $ exitEdhProc' exit rtn
 
-    ImportStmt argsRcvr srcExpr -> case srcExpr of
-      LitExpr (StringLiteral importSpec) ->
-        -- import from specified path
-        importEdhModule' argsRcvr importSpec exit
-      _ -> evalExpr srcExpr $ \(OriginalValue !srcVal _ _) -> case srcVal of
-        EdhString importSpec ->
-          -- import from dynamic path
-          importEdhModule' argsRcvr importSpec exit
-        EdhObject fromObj ->
-          -- import from an object
-          importFromObject argsRcvr fromObj exit
-        _ ->
-          -- todo support more sources of import ?
-          throwEdh EvalError
-            $  "Don't know how to import from a "
-            <> T.pack (edhTypeNameOf srcVal)
-            <> ": "
-            <> T.pack (show srcVal)
+    ImportStmt !argsRcvr !srcExpr ->
+      importInto (scopeEntity scope) argsRcvr srcExpr exit
+    ImportThisStmt !argsRcvr !srcExpr ->
+      importInto (objEntity this) argsRcvr srcExpr exit
 
     VoidStmt -> exitEdhProc exit nil
 
     -- _ -> throwEdh EvalError $ "Eval not yet impl for: " <> T.pack (show stmt)
 
 
+importInto :: Entity -> ArgsReceiver -> Expr -> EdhProcExit -> EdhProc
+importInto !tgtEnt !argsRcvr !srcExpr !exit = case srcExpr of
+  LitExpr (StringLiteral importSpec) ->
+    -- import from specified path
+    importEdhModule' tgtEnt argsRcvr importSpec exit
+  _ -> evalExpr srcExpr $ \(OriginalValue !srcVal _ _) -> case srcVal of
+    EdhString importSpec ->
+      -- import from dynamic path
+      importEdhModule' tgtEnt argsRcvr importSpec exit
+    EdhObject fromObj ->
+      -- import from an object
+      importFromObject tgtEnt argsRcvr fromObj exit
+    _ ->
+      -- todo support more sources of import ?
+      throwEdh EvalError
+        $  "Don't know how to import from a "
+        <> T.pack (edhTypeNameOf srcVal)
+        <> ": "
+        <> T.pack (show srcVal)
+
+
 edhExportsMagicName :: Text
 edhExportsMagicName = "__exports__"
 
-importFromObject :: ArgsReceiver -> Object -> EdhProcExit -> EdhProc
-importFromObject !argsRcvr !fromObj !exit = do
+importFromObject :: Entity -> ArgsReceiver -> Object -> EdhProcExit -> EdhProc
+importFromObject !tgtEnt !argsRcvr !fromObj !exit = do
   pgs <- ask
   let
     !ctx   = edh'context pgs
@@ -815,7 +822,7 @@ importFromObject !argsRcvr !fromObj !exit = do
       runEdhProc pgs $ recvEdhArgs ctx argsRcvr artsPk $ \em -> contEdhSTM $ do
         if not (contextEffDefining ctx)
           then -- normal import
-               updateEntityAttrs pgs (scopeEntity scope) $ Map.toList em
+               updateEntityAttrs pgs tgtEnt $ Map.toList em
           else do -- importing effects
             let !effd =
                   Map.fromList [ (attrKeyValue k, v) | (k, v) <- Map.toList em ]
@@ -831,23 +838,21 @@ importFromObject !argsRcvr !fromObj !exit = do
                                        (scopeEntity scope)
                                        (AttrByName edhEffectsMagicName)
                                        d
-        when (contextExporting ctx) $ if objEntity this /= scopeEntity scope
+        when (contextExporting ctx) $ if objEntity this /= tgtEnt
           then throwEdhSTM pgs
                            UsageError
                            "You don't export from a method procedure"
           else do -- do export what's imported
             let !impd =
                   Map.fromList [ (attrKeyValue k, v) | (k, v) <- Map.toList em ]
-            lookupEntityAttr pgs
-                             (scopeEntity scope)
-                             (AttrByName edhExportsMagicName)
+            lookupEntityAttr pgs tgtEnt (AttrByName edhExportsMagicName)
               >>= \case
                     EdhDict (Dict _ !thisExpDS) ->
                       modifyTVar' thisExpDS $ Map.union impd
                     _ -> do -- todo warn if of wrong type
                       d <- createEdhDict impd
                       changeEntityAttr pgs
-                                       (scopeEntity scope)
+                                       tgtEnt
                                        (AttrByName edhExportsMagicName)
                                        d
         exitEdhSTM pgs exit (EdhObject fromObj)
@@ -867,10 +872,10 @@ importFromObject !argsRcvr !fromObj !exit = do
             throwEdhSTM pgs UsageError $ "bad __exports__ type: " <> T.pack
               (edhTypeNameOf badExplVal)
 
-importEdhModule' :: ArgsReceiver -> Text -> EdhProcExit -> EdhProc
-importEdhModule' !argsRcvr !importSpec !exit =
+importEdhModule' :: Entity -> ArgsReceiver -> Text -> EdhProcExit -> EdhProc
+importEdhModule' !tgtEnt !argsRcvr !importSpec !exit =
   importEdhModule importSpec $ \(OriginalValue !moduVal _ _) -> case moduVal of
-    EdhObject !modu -> importFromObject argsRcvr modu exit
+    EdhObject !modu -> importFromObject tgtEnt argsRcvr modu exit
     _               -> error "bug"
 
 importEdhModule :: Text -> EdhProcExit -> EdhProc
@@ -1661,9 +1666,13 @@ edhMakeCall
   -> ((EdhProcExit -> EdhProc) -> STM ())
   -> STM ()
 edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !scopeMod !callMaker
-  = runEdhProc pgsCaller $ packEdhArgs argsSndr $ \apk ->
-    contEdhSTM
-      $ edhMakeCall' pgsCaller callee'val callee'that apk scopeMod callMaker
+  = case callee'val of
+    EdhIntrpr{} -> runEdhProc pgsCaller $ packEdhExprs argsSndr $ \apk ->
+      contEdhSTM
+        $ edhMakeCall' pgsCaller callee'val callee'that apk scopeMod callMaker
+    _ -> runEdhProc pgsCaller $ packEdhArgs argsSndr $ \apk ->
+      contEdhSTM
+        $ edhMakeCall' pgsCaller callee'val callee'that apk scopeMod callMaker
 
 edhMakeCall'
   :: EdhProgState
@@ -1685,8 +1694,8 @@ edhMakeCall' !pgsCaller !callee'val !callee'that apk@(ArgsPack !args !kwargs) !s
 
     -- calling an interpreter procedure
     EdhIntrpr !mth'proc -> do
-            -- an Edh interpreter proc needs a `callerScope` as its 1st arg,
-            -- while a host interpreter proc doesn't.
+      -- an Edh interpreter proc needs a `callerScope` as its 1st arg,
+      -- while a host interpreter proc doesn't.
       apk' <- case procedure'body $ procedure'decl mth'proc of
         Right _ -> return apk
         Left  _ -> do

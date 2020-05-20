@@ -963,6 +963,9 @@ data Stmt =
     | DeferStmt !Expr
       -- | import with args (re)pack receiving syntax
     | ImportStmt !ArgsReceiver !Expr
+      -- | `import this xxx yyy` can be used from a method procedure,
+      -- targeting current object scope instead of method scope
+    | ImportThisStmt !ArgsReceiver !Expr
       -- | only artifacts introduced within an `export` statement, into
       -- `this` object in context, are eligible for importing by others
     | ExportStmt !StmtSrc

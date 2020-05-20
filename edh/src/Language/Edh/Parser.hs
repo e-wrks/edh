@@ -128,11 +128,13 @@ parseExportStmt si = do
   return (ExportStmt s, si')
 
 parseImportStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseImportStmt si = do
-  void $ keyword "import"
-  ar        <- parseArgsReceiver
-  (se, si') <- parseExpr si
-  return (ImportStmt ar se, si')
+parseImportStmt si = keyword "import"
+  *> choice [keyword "this" >> go ImportThisStmt, go ImportStmt]
+ where
+  go dc = do
+    ar        <- parseArgsReceiver
+    (se, si') <- parseExpr si
+    return (dc ar se, si')
 
 parseLetStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseLetStmt si = do

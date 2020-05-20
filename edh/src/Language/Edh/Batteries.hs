@@ -543,8 +543,10 @@ installEdhBatteries world = liftIO $ do
       updateEntityAttrs pgs (objEntity scopeSuperObj) scopeSuperMethods
 
       -- import the parts written in Edh 
-      runEdhProc pgs
-        $ importEdhModule' WildReceiver "batteries/root" edhEndOfProc
+      runEdhProc pgs $ importEdhModule' rootEntity
+                                        WildReceiver
+                                        "batteries/root"
+                                        edhEndOfProc
 
  where
   !rootScope     = worldScope world
