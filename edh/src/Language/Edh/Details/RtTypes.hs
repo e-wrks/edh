@@ -361,7 +361,7 @@ instance Hashable Scope where
 instance Show Scope where
   show (Scope _ _ _ _ (ProcDefi _ _ pd@(ProcDecl _ _ procBody)) (StmtSrc (cPos, _)) _)
     = "📜 "
-      ++ T.unpack (procName pd)
+      ++ T.unpack (procedureName pd)
       ++ " 🔎 "
       ++ defLoc
       ++ " 👈 "
@@ -405,7 +405,7 @@ instance Show Object where
   -- the show, as 'show' may be called from an stm transaction, stm
   -- will fail hard on encountering of nested 'atomically' calls.
   show (Object _ (ProcDefi _ _ pd) _) =
-    "<object: " ++ T.unpack (procName pd) ++ ">"
+    "<object: " ++ T.unpack (procedureName pd) ++ ">"
 
 -- | View an entity as object of specified class with specified ancestors
 -- this is the black magic you want to avoid
@@ -611,7 +611,7 @@ getEdhCallContext !unwind !pgs = EdhCallContext
   !frames =
     foldl'
         (\sfs (Scope _ _ _ _ (ProcDefi _ _ pd@(ProcDecl _ _ procBody)) (StmtSrc (callerPos, _)) _) ->
-          EdhCallFrame (procName pd)
+          EdhCallFrame (procedureName pd)
                        (procSrcLoc procBody)
                        (T.pack $ sourcePosPretty callerPos)
             : sfs
@@ -764,13 +764,13 @@ instance Show EdhValue where
 
   show (EdhIntrOp preced (IntrinOpDefi _ opSym _)) =
     "<intrinsic: (" ++ T.unpack opSym ++ ") " ++ show preced ++ ">"
-  show (EdhClass  (ProcDefi _ _ pd)) = T.unpack (procName pd)
-  show (EdhMethod (ProcDefi _ _ pd)) = T.unpack (procName pd)
+  show (EdhClass  (ProcDefi _ _ pd)) = T.unpack (procedureName pd)
+  show (EdhMethod (ProcDefi _ _ pd)) = T.unpack (procedureName pd)
   show (EdhOprtor preced _ (ProcDefi _ _ pd)) =
-    "<operator: (" ++ T.unpack (procName pd) ++ ") " ++ show preced ++ ">"
-  show (EdhGnrtor (ProcDefi _ _ pd)) = T.unpack (procName pd)
-  show (EdhIntrpr (ProcDefi _ _ pd)) = T.unpack (procName pd)
-  show (EdhPrducr (ProcDefi _ _ pd)) = T.unpack (procName pd)
+    "<operator: (" ++ T.unpack (procedureName pd) ++ ") " ++ show preced ++ ">"
+  show (EdhGnrtor (ProcDefi _ _ pd)) = T.unpack (procedureName pd)
+  show (EdhIntrpr (ProcDefi _ _ pd)) = T.unpack (procedureName pd)
+  show (EdhPrducr (ProcDefi _ _ pd)) = T.unpack (procedureName pd)
 
   show EdhBreak                      = "<break>"
   show EdhContinue                   = "<continue>"
@@ -1091,12 +1091,12 @@ data ProcDecl = ProcDecl {
   }
 instance Show ProcDecl where
   show pd@(ProcDecl _ _ pb) = case pb of
-    Left  _ -> "<edh-proc " <> T.unpack (procName pd) <> ">"
-    Right _ -> "<host-proc " <> T.unpack (procName pd) <> ">"
+    Left  _ -> "<edh-proc " <> T.unpack (procedureName pd) <> ">"
+    Right _ -> "<host-proc " <> T.unpack (procedureName pd) <> ">"
 
-procName :: ProcDecl -> Text
-procName (ProcDecl (NamedAttr    !pn) _ _) = pn
-procName (ProcDecl (SymbolicAttr !pn) _ _) = "@" <> pn
+procedureName :: ProcDecl -> Text
+procedureName (ProcDecl (NamedAttr    !pn) _ _) = pn
+procedureName (ProcDecl (SymbolicAttr !pn) _ _) = "@" <> pn
 
 
 -- | Procedure definition, result of execution of the declaration

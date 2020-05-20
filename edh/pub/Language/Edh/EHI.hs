@@ -122,6 +122,7 @@ module Language.Edh.EHI
   , ArgsSender
   , ArgSender(..)
   , ProcDecl(..)
+  , procedureName
   , SourcePos(..)
   , mkPos
   , sourcePosPretty

@@ -1996,7 +1996,7 @@ constructEdhObject !cls apk@(ArgsPack !args !kwargs) !exit = do
                   else
                     throwEdhSTM pgsCaller EvalError
                     $  "No __init__() defined by class "
-                    <> procName (procedure'decl cls)
+                    <> procedureName (procedure'decl cls)
                     <> " to receive argument(s)"
               EdhMethod !initMth ->
                 case procedure'body $ procedure'decl initMth of
