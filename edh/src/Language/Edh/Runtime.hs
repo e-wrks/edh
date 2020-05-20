@@ -270,3 +270,25 @@ runEdhModule' !world !impPath !preRun = liftIO $ do
                                                       moduSource
                                                       edhEndOfProc
 
+
+-- | perform an effectful call from current Edh context
+performEdhEffect
+  :: AttrAddressor
+  -> [EdhValue]
+  -> [(AttrName, EdhValue)]
+  -> (EdhValue -> EdhProc)
+  -> EdhProc
+performEdhEffect !addr !args !kwargs !exit = ask >>= \pgs ->
+  contEdhSTM
+    $ resolveEdhCallee pgs (PerformExpr addr)
+    $ \(OriginalValue !effVal _ _, scopeMod) ->
+        edhMakeCall' pgs
+                     effVal
+                     (thisObject $ contextScope $ edh'context pgs)
+                     (ArgsPack args $ Map.fromList kwargs)
+                     scopeMod
+          $ \mkCall ->
+              runEdhProc pgs $ mkCall $ \(OriginalValue !rtnVal _ _) ->
+                exit rtnVal
+
+

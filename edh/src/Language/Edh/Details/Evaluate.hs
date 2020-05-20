@@ -1661,69 +1661,67 @@ edhMakeCall
   -> ((EdhProcExit -> EdhProc) -> STM ())
   -> STM ()
 edhMakeCall !pgsCaller !callee'val !callee'that !argsSndr !scopeMod !callMaker
+  = runEdhProc pgsCaller $ packEdhArgs argsSndr $ \apk ->
+    contEdhSTM
+      $ edhMakeCall' pgsCaller callee'val callee'that apk scopeMod callMaker
+
+edhMakeCall'
+  :: EdhProgState
+  -> EdhValue
+  -> Object
+  -> ArgsPack
+  -> (Scope -> Scope)
+  -> ((EdhProcExit -> EdhProc) -> STM ())
+  -> STM ()
+edhMakeCall' !pgsCaller !callee'val !callee'that apk@(ArgsPack !args !kwargs) !scopeMod !callMaker
   = case callee'val of
 
     -- calling a class (constructor) procedure
-    EdhClass !cls -> runEdhProc pgsCaller $ packEdhArgs argsSndr $ \apk ->
-      contEdhSTM $ callMaker $ \exit -> constructEdhObject cls apk exit
+    EdhClass  !cls      -> callMaker $ \exit -> constructEdhObject cls apk exit
 
     -- calling a method procedure
-    EdhMethod !mth'proc ->
-      runEdhProc pgsCaller $ packEdhArgs argsSndr $ \apk ->
-        contEdhSTM $ callMaker $ \exit ->
-          callEdhMethod callee'that mth'proc apk scopeMod exit
+    EdhMethod !mth'proc -> callMaker
+      $ \exit -> callEdhMethod callee'that mth'proc apk scopeMod exit
 
     -- calling an interpreter procedure
-    EdhIntrpr !mth'proc ->
-      runEdhProc pgsCaller
-        $ packEdhExprs argsSndr
-        $ \apk@(ArgsPack args kwargs) -> contEdhSTM $ do
+    EdhIntrpr !mth'proc -> do
             -- an Edh interpreter proc needs a `callerScope` as its 1st arg,
             -- while a host interpreter proc doesn't.
-            apk' <- case procedure'body $ procedure'decl mth'proc of
-              Right _ -> return apk
-              Left  _ -> do
-                let callerCtx = edh'context pgsCaller
-                !argCallerScope <- mkScopeWrapper callerCtx
-                  $ contextScope callerCtx
-                return $ ArgsPack (EdhObject argCallerScope : args) kwargs
-            callMaker
-              $ \exit -> callEdhMethod callee'that mth'proc apk' scopeMod exit
+      apk' <- case procedure'body $ procedure'decl mth'proc of
+        Right _ -> return apk
+        Left  _ -> do
+          let callerCtx = edh'context pgsCaller
+          !argCallerScope <- mkScopeWrapper callerCtx $ contextScope callerCtx
+          return $ ArgsPack (EdhObject argCallerScope : args) kwargs
+      callMaker $ \exit -> callEdhMethod callee'that mth'proc apk' scopeMod exit
 
     -- calling a producer procedure
     EdhPrducr !mth'proc -> case procedure'body $ procedure'decl mth'proc of
       Right _ -> throwEdhSTM pgsCaller EvalError "bug: host producer procedure"
-      Left !pb ->
-        runEdhProc pgsCaller
-          $ packEdhArgs argsSndr
-          $ \(ArgsPack !args !kwargs) ->
-              contEdhSTM $ case edhUltimate <$> Map.lookup "outlet" kwargs of
-                Nothing -> do
-                  outlet <- newEventSink
-                  callMaker $ \exit ->
-                    launchEventProducer exit outlet $ callEdhMethod'
-                      Nothing
-                      callee'that
-                      mth'proc
-                      pb
-                      (ArgsPack args
-                                (Map.insert "outlet" (EdhSink outlet) kwargs)
-                      )
-                      scopeMod
-                      edhEndOfProc
-                Just (EdhSink !outlet) -> callMaker $ \exit ->
-                  launchEventProducer exit outlet $ callEdhMethod'
-                    Nothing
-                    callee'that
-                    mth'proc
-                    pb
-                    (ArgsPack args kwargs)
-                    scopeMod
-                    edhEndOfProc
-                Just !badVal ->
-                  throwEdhSTM pgsCaller UsageError
-                    $ "The value passed to a producer as `outlet` found to be a "
-                    <> T.pack (edhTypeNameOf badVal)
+      Left !pb -> case edhUltimate <$> Map.lookup "outlet" kwargs of
+        Nothing -> do
+          outlet <- newEventSink
+          callMaker $ \exit -> launchEventProducer exit outlet $ callEdhMethod'
+            Nothing
+            callee'that
+            mth'proc
+            pb
+            (ArgsPack args (Map.insert "outlet" (EdhSink outlet) kwargs))
+            scopeMod
+            edhEndOfProc
+        Just (EdhSink !outlet) -> callMaker $ \exit ->
+          launchEventProducer exit outlet $ callEdhMethod'
+            Nothing
+            callee'that
+            mth'proc
+            pb
+            (ArgsPack args kwargs)
+            scopeMod
+            edhEndOfProc
+        Just !badVal ->
+          throwEdhSTM pgsCaller UsageError
+            $  "The value passed to a producer as `outlet` found to be a "
+            <> T.pack (edhTypeNameOf badVal)
 
     -- calling a generator
     (EdhGnrtor _) -> throwEdhSTM

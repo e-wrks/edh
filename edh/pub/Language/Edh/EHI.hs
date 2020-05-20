@@ -45,6 +45,7 @@ module Language.Edh.EHI
   , declareEdhOperators
 
     -- ** Spliced execution
+  , performEdhEffect
   , runEdhModule
   , runEdhModule'
   , EdhModulePreparation
