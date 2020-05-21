@@ -16,7 +16,7 @@ export mattersLot = Symbol('mattersLot')
     # `perform` pulls out an effect method (could be other values as well),
     # from effect namespace
     perform @mattersLot
-      # then we call it from here with some args
+      # then we call it from here, just like a vanilla procedure
       ('the data is of ' ++ dataType)
 
   }
@@ -33,8 +33,11 @@ export mattersLot = Symbol('mattersLot')
       # outer stack relative to where the effect method is defined
       console.print( 'No doubt the data is of ' ++ behave dataType )
     }
+    # now we have the effect procedure in context
 
-    # now we do it:
+    # call some procedures make use of the effects
+    # something like `effectsConsumer` should really be imported from
+    # some library modules in real cases
     effectsConsumer(3)
     effectsConsumer(Symbol('awesome'))
 
