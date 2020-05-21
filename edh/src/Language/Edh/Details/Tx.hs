@@ -69,6 +69,8 @@ driveEdhProgram !haltResult !progCtx !prog = do
                 -- keep the forker running
                 forkDescendants
      where
+      -- TODO it may be desirable to let exception handlers handle exceptions thrown
+      --      from descendant threads ? cases may be investigated for some deal
       -- if the forked go routine doesn't handle an exception itself, treat the
       -- exception as uncaught immediately, it'll be throwTo the main thread then
       handleAsyncExc :: EdhExcptHndlr
