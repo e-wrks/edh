@@ -19,6 +19,11 @@
 - explicit exports, any artifact must be explicitly defined within an
   export statement to be eligible for import. then neither name nor type
   matters for exportability
+- a dynamic effects system
+
+  - fixes the `go` (considered `goto 2.0`) statement  
+     [go statement considered harmful](https://vorpus.org/blog/notes-on-structured-concurrency-or-go-statement-considered-harmful/#go-statement-considered-harmful)
+
 - bugfixes and improvements
 
 ## 0.2.0.0
