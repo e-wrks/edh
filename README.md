@@ -54,14 +54,14 @@
 ## What is Đ (Edh)
 
 **Edh** is a **dynamically** & **strongly** typed, **procedural** (thus
-**imperative**), **value-oriented** (i.e. **immutability** first, yet with
+**imperative**), **value-oriented** (i.e. **immutable** first, yet with
 **non-traditional** **Object** constructs), **interpreted** programming
 language, that **parasitic** on [GHC](https://haskell.org/ghc)
 and heavily relying on
 [the Haskell implementation](http://hackage.haskell.org/package/stm)
 of
 [Software Transactional Memory](https://en.wikipedia.org/wiki/Software_transactional_memory)
-for **concurrency** and **data-consistency** at the same time.
+for unified intuition of **concurrency** and **data-consistency**.
 
 **Edh** tries to bridge **procedural** mindsets to **functional** mindesets
 as smooth as possible, by following good spirits, designs and practices of
