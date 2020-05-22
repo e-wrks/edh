@@ -66,7 +66,7 @@ for unified intuition of **concurrency** and **data-consistency**.
 **Edh** tries to bridge **procedural** mindsets to **functional** mindesets
 as smooth as possible, by following good spirits, designs and practices of
 **Python**, **Go**, **JavaScript**, while aiming at **Haskell** in
-pursuit of quality for software to be developmented.
+pursuit of quality in the software to be developed.
 
 **Edh** implements its version of the `go` statement that
 [not guilty](./GoNoGoto2.0.md) on the
