@@ -11,7 +11,6 @@ import           Control.Monad.Reader
 import           Control.Concurrent
 import           Control.Concurrent.STM
 
-import qualified Data.List.NonEmpty            as NE
 import           Data.Dynamic
 
 import           Language.Edh.Control
@@ -69,13 +68,6 @@ driveEdhProgram !haltResult !progCtx !prog = do
                 -- keep the forker running
                 forkDescendants
      where
-      -- TODO it may be desirable to let exception handlers handle exceptions thrown
-      --      from descendant threads ? cases may be investigated for some deal
-      -- if the forked go routine doesn't handle an exception itself, treat the
-      -- exception as uncaught immediately, it'll be throwTo the main thread then
-      handleAsyncExc :: EdhExcptHndlr
-      handleAsyncExc !exv _ =
-        ask >>= \pgs -> contEdhSTM $ edhErrorUncaught pgs exv
       -- derive program state for the descendant thread
       deriveState :: EdhProgState -> IO EdhProgState
       deriveState !pgsFrom = do
@@ -88,19 +80,13 @@ driveEdhProgram !haltResult !progCtx !prog = do
           , edh'defers     = defers
           -- the forker should have checked not in tx, enforce here
           , edh'in'tx      = False
-          , edh'context    = fromCtx
-            {
-              -- disable all exception handlers from parent thread's stack
-              callStack        =
-              (NE.head fromStack) { exceptionHandler = handleAsyncExc }
-                NE.:| NE.tail fromStack
-              -- don't be exporting on a forked thread by default
-            , contextExporting = False
-            }
+          -- don't be exporting or defining effects on a forked thread
+          -- by default, the programmer must explicitly mark so
+          , edh'context    = fromCtx { contextExporting   = False
+                                     , contextEffDefining = False
+                                     }
           }
-       where
-        !fromCtx   = edh'context pgsFrom
-        !fromStack = callStack fromCtx
+        where !fromCtx = edh'context pgsFrom
   -- start forker thread
   void $ mask_ $ forkIOWithUnmask $ \unmask ->
     catch (unmask forkDescendants) onDescendantExc

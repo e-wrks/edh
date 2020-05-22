@@ -21,10 +21,8 @@
   matters for exportability
 - a dynamic effects system
 
-  - fixes the `go` (considered `goto 2.0`) statement  
-     [go statement considered harmful](https://vorpus.org/blog/notes-on-structured-concurrency-or-go-statement-considered-harmful/#go-statement-considered-harmful)
-
-- bugfixes and improvements
+  - define effects with `effect` keyword, pull effectful artifacts with
+    `perform` and `behave` keywords
 
 ## 0.2.0.0
 

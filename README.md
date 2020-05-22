@@ -53,23 +53,24 @@
 
 ## What is Đ (Edh)
 
-**Edh** as a programming language is born just recently,
-but it's vastly neither new, major ideas all come from successful languages
-like **Python**, **Go**, **JavaScript**, and especially **Haskell**,
-verified in the field. There're a few creative attempts though, but in mind
-is kept that overly smart not to be about.
-
-**Edh** code is imperative, runs embedded in **Haskell** (GHC), interpreted.
-
-The killer feature may be the very
-[Haskell implementation](http://hackage.haskell.org/package/stm)
+**Edh** is a **dynamically** & **strongly** typed, **procedural** (thus
+**imperative**), **value-oriented** (i.e. **immutability** first, yet with
+**non-traditional** **Object** constructs), **interpreted** programming
+language, that **parasitic** on [GHC](https://haskell.org/ghc)
+and heavily relying on
+[the Haskell implementation](http://hackage.haskell.org/package/stm)
 of
-[Software transactional memory](https://en.wikipedia.org/wiki/Software_transactional_memory)
-brought into an _Object_ layer, together with the
-[Go routine](./Tour/Readme.md#go-routine) brought from [Go](https://golang.org),
-and the
-[Reactor mechanism with Event Sinks](./Tour/Readme.md#event-sink--reactor--defer),
-you can:
+[Software Transactional Memory](https://en.wikipedia.org/wiki/Software_transactional_memory)
+for **concurrency** and **data-consistency** at the same time.
+
+**Edh** tries to bridge **procedural** mindsets to **functional** mindesets
+as smooth as possible, by following good spirits, designs and practices of
+**Python**, **Go**, **JavaScript**, while aiming at **Haskell** in
+pursuit of quality for software to be developmented.
+
+**Edh** implements its version of the `go` statement that
+[not guilty](./GoNoGoto2.0.md) on the
+[goto 2.0 charge](https://vorpus.org/blog/notes-on-structured-concurrency-or-go-statement-considered-harmful/#go-statement-considered-harmful)
 
 ### [Program Concurrency and Data Consistency as a whole](./Tour/Readme.md#programming-concurrency-and-data-consistency-as-a-whole)
 
