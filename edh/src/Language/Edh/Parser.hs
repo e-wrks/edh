@@ -292,10 +292,13 @@ parseArgSends si ss = (lookAhead (symbol ")") >> return (ss, si)) <|> do
 parseClassStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseClassStmt si = do
   void $ keyword "class"
-  cn          <- parseAlphaName
+  pn <- choice
+    [ symbol "@" *> (SymbolicAttr <$> parseAlphaName)
+    , NamedAttr <$> parseMagicProcName
+    , NamedAttr <$> parseAlphaName
+    ]
   (body, si') <- parseStmt si
-  return
-    (ClassStmt $ ProcDecl (NamedAttr cn) (PackReceiver []) (Left body), si')
+  return (ClassStmt $ ProcDecl pn (PackReceiver []) (Left body), si')
 
 parseExtendsStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseExtendsStmt si = do
