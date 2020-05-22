@@ -7,7 +7,7 @@ in most programming languages/runtimes of today, as pointed out in
 [Notes on structured concurrency, or: Go statement considered harmful](https://vorpus.org/blog/notes-on-structured-concurrency-or-go-statement-considered-harmful)
 , but I see faith from **algebraic effects**, which bears even greater
 ambitions with elegance, to have various programming language constructs,
-concurrency included, finally implemented a top a single system, as
+concurrency included, finally implemented atop a single system, as
 individual effects.
 
 I argue that, there can exist a version of `go` statement, not guilty on
@@ -44,4 +44,8 @@ identify some forker thread as thread group leader, or call it main
 thread if not too confusing. Then upon termination of a main thread,
 all its forkee threads are terminated, by ceasing each's chunk
 execution, and execute all `defer`ed computations scheduled on it,
-then discard it.
+before discard it.
+
+## The Result
+
+> to be elaborated
