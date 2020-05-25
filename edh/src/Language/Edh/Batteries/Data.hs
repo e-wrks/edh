@@ -184,9 +184,9 @@ reprProc (ArgsPack !args !kwargs) !exit = do
   pgs <- ask
   let go
         :: [EdhValue]
-        -> [(AttrName, EdhValue)]
+        -> [(AttrKey, EdhValue)]
         -> [EdhValue]
-        -> [(AttrName, EdhValue)]
+        -> [(AttrKey, EdhValue)]
         -> STM ()
       go [repr] kwReprs [] [] | null kwReprs = exitEdhSTM pgs exit repr
       go reprs kwReprs [] [] =
@@ -263,8 +263,8 @@ dictProc :: EdhProcedure
 dictProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   contEdhSTM $ do
-    let !kwDict = Map.fromList $ (<$> Map.toList kwargs) $ \(attrName, val) ->
-          (EdhString attrName, val)
+    let !kwDict = Map.fromList $ (<$> Map.toList kwargs) $ \(key, val) ->
+          (attrKeyValue key, val)
     u <- unsafeIOToSTM newUnique
     d <- newTVar $ Map.union kwDict $ Map.fromList
       [ (EdhDecimal (fromIntegral i), t) | (i, t) <- zip [(0 :: Int) ..] args ]

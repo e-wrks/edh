@@ -81,13 +81,13 @@ scopeObtainProc :: EdhProcedure
 scopeObtainProc (ArgsPack _args !kwargs) !exit = do
   !pgs <- ask
   let !ctx = edh'context pgs
-  case Map.lookup "ofObj" kwargs of
+  case Map.lookup (AttrByName "ofObj") kwargs of
     Just (EdhObject ofObj) -> contEdhSTM $ do
       wrapperObj <- mkScopeWrapper ctx $ objectScope ctx ofObj
       exitEdhSTM pgs exit $ EdhObject wrapperObj
     _ -> do
       let unwind :: Int
-          !unwind = case Map.lookup "unwind" kwargs of
+          !unwind = case Map.lookup (AttrByName "unwind") kwargs of
             Just (EdhDecimal d) -> case decimalToInteger d of
               Just n  -> fromIntegral n
               Nothing -> 0
@@ -177,10 +177,10 @@ scopeGetProc (ArgsPack !args !kwargs) !exit = do
       !ent       = scopeEntity $ wrappedScopeOf that
       lookupAttrs
         :: [EdhValue]
-        -> [(AttrName, EdhValue)]
+        -> [(AttrKey, EdhValue)]
         -> [EdhValue]
-        -> [(AttrName, EdhValue)]
-        -> (([EdhValue], [(AttrName, EdhValue)]) -> STM ())
+        -> [(AttrKey, EdhValue)]
+        -> (([EdhValue], [(AttrKey, EdhValue)]) -> STM ())
         -> STM ()
       lookupAttrs rtnArgs rtnKwArgs [] [] !exit' = exit' (rtnArgs, rtnKwArgs)
       lookupAttrs rtnArgs rtnKwArgs [] ((n, v) : restKwArgs) !exit' =
@@ -214,9 +214,7 @@ scopePutProc (ArgsPack !args !kwargs) !exit = do
       !that      = thatObject $ contextScope callerCtx
       !ent       = scopeEntity $ wrappedScopeOf that
   contEdhSTM $ putAttrs pgs args [] $ \attrs -> do
-    updateEntityAttrs pgs ent
-      $  attrs
-      ++ [ (AttrByName k, v) | (k, v) <- Map.toList kwargs ]
+    updateEntityAttrs pgs ent $ attrs ++ Map.toList kwargs
     exitEdhSTM pgs exit nil
  where
   putAttrs
@@ -254,9 +252,9 @@ scopeEvalProc (ArgsPack !args !kwargs) !exit = do
     !scopeCallStack = theScope <| callStack callerCtx
     evalThePack
       :: [EdhValue]
-      -> Map.HashMap AttrName EdhValue
+      -> Map.HashMap AttrKey EdhValue
       -> [EdhValue]
-      -> [(AttrName, EdhValue)]
+      -> [(AttrKey, EdhValue)]
       -> EdhProc
     evalThePack !argsValues !kwargsValues [] [] =
       contEdhSTM

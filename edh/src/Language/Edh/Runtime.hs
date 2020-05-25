@@ -150,7 +150,7 @@ createEdhWorld !console = liftIO $ do
   -- used to define an error class in Edh
   errCtor :: (ArgsPack -> EdhCallContext -> EdhError) -> EdhHostCtor
   errCtor !hec !pgs apk@(ArgsPack _ !kwargs) !obs !ctorExit = do
-    let !unwind = case Map.lookup "unwind" kwargs of
+    let !unwind = case Map.lookup (AttrByName "unwind") kwargs of
           Just (EdhDecimal d) -> case decimalToInteger d of
             Just n -> fromIntegral n
             _      -> 1
@@ -282,11 +282,15 @@ performEdhEffect !addr !args !kwargs !exit = ask >>= \pgs ->
   contEdhSTM
     $ resolveEdhCallee pgs (PerformExpr addr)
     $ \(OriginalValue !effVal _ _, scopeMod) ->
-        edhMakeCall' pgs
-                     effVal
-                     (thisObject $ contextScope $ edh'context pgs)
-                     (ArgsPack args $ Map.fromList kwargs)
-                     scopeMod
+        edhMakeCall'
+            pgs
+            effVal
+            (thisObject $ contextScope $ edh'context pgs)
+            ( ArgsPack args
+            $ Map.fromList
+            $ [ (AttrByName k, v) | (k, v) <- kwargs ]
+            )
+            scopeMod
           $ \mkCall ->
               runEdhProc pgs $ mkCall $ \(OriginalValue !rtnVal _ _) ->
                 exit rtnVal

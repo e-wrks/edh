@@ -7,6 +7,7 @@ import           Prelude
 import           Control.Concurrent.STM
 
 import           Data.Text                      ( Text )
+import qualified Data.Text                     as T
 import           Data.Hashable
 import qualified Data.HashMap.Strict           as Map
 
@@ -41,14 +42,16 @@ parseArgsPack defVal (ArgsPackParser posParsers kwParsers) (ArgsPack posArgs kwA
     :: [EdhValue -> a -> Either Text a]
     -> Map.HashMap AttrName (EdhValue -> a -> Either Text a)
     -> [EdhValue]
-    -> [(AttrName, EdhValue)]
+    -> [(AttrKey, EdhValue)]
     -> a
     -> Either Text a
-  go _  _    []      []                     result = Right result
-  go [] _    (_ : _) _                      _      = Left "too many args"
-  go _  kwps []      ((kwn, kwv) : kwargs') result = case Map.lookup kwn kwps of
-    Nothing  -> Left $ "unknown arg: " <> kwn
-    Just kwp -> kwp kwv result >>= go [] kwps [] kwargs'
+  go _  _    []      []                    result = Right result
+  go [] _    (_ : _) _                     _      = Left "too many args"
+  go _  kwps []      ((kw, kwv) : kwargs') result = case kw of
+    AttrByName !kwn -> case Map.lookup kwn kwps of
+      Nothing  -> Left $ "unknown arg: " <> kwn
+      Just kwp -> kwp kwv result >>= go [] kwps [] kwargs'
+    _ -> Left $ "unknown symbolic arg: " <> T.pack (show kw)
   go (p : posParsers') kwps (arg : args') kwargs result =
     p arg result >>= go posParsers' kwps args' kwargs
 

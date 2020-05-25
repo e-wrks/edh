@@ -144,7 +144,7 @@ data AttrKey = AttrByName !AttrName | AttrBySym !Symbol
     deriving (Eq, Ord)
 instance Show AttrKey where
   show (AttrByName attrName      ) = T.unpack attrName
-  show (AttrBySym  (Symbol _ sym)) = "@" <> T.unpack sym
+  show (AttrBySym  (Symbol _ sym)) = T.unpack sym
 instance Hashable AttrKey where
   hashWithSalt s (AttrByName name) =
     s `hashWithSalt` (0 :: Int) `hashWithSalt` name
@@ -629,7 +629,7 @@ getEdhCallContext !unwind !pgs = EdhCallContext
 -- normally obtained by invoking `packEdhArgs ctx argsSender`.
 data ArgsPack = ArgsPack {
     positional'args :: ![EdhValue]
-    , keyword'args :: !(Map.HashMap AttrName EdhValue)
+    , keyword'args :: !(Map.HashMap AttrKey EdhValue)
   } deriving (Eq)
 instance Hashable ArgsPack where
   hashWithSalt s (ArgsPack args kwargs) =
@@ -643,9 +643,7 @@ instance Show ArgsPack where
       "( "
       ++ concat [ show i ++ ", " | i <- posArgs ]
       ++ concat
-           [ T.unpack kw ++ "=" ++ show v ++ ", "
-           | (kw, v) <- Map.toList kwArgs
-           ]
+           [ show kw ++ "=" ++ show v ++ ", " | (kw, v) <- Map.toList kwArgs ]
       ++ ")"
 
 
@@ -1045,6 +1043,10 @@ data AttrAddressor =
 instance Show AttrAddressor where
   show (NamedAttr    n) = T.unpack n
   show (SymbolicAttr s) = "@" <> T.unpack s
+instance Hashable AttrAddressor where
+  hashWithSalt s (NamedAttr name) = s `hashWithSalt` name
+  hashWithSalt s (SymbolicAttr sym) =
+    s `hashWithSalt` ("@" :: Text) `hashWithSalt` sym
 
 
 receivesNamedArg :: Text -> ArgsReceiver -> Bool

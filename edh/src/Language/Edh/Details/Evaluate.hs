@@ -690,7 +690,7 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit = do
     !ctx   = edh'context pgs
     !scope = contextScope ctx
     !this  = thisObject scope
-    withExps :: Map.HashMap AttrName EdhValue -> STM ()
+    withExps :: Map.HashMap AttrKey EdhValue -> STM ()
     withExps !exps = do
       let !artsPk = ArgsPack [] exps
       runEdhProc pgs $ recvEdhArgs ctx argsRcvr artsPk $ \em -> contEdhSTM $ do
@@ -738,7 +738,8 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit = do
           EdhDict (Dict _ !fromExpDS) -> readTVar fromExpDS >>= \expd ->
             withExps $ Map.fromList $ catMaybes
               [ case k of
-                  EdhString !expKey -> Just (expKey, v)
+                  EdhString !expKey -> Just (AttrByName expKey, v)
+                  EdhSymbol !expSym -> Just (AttrBySym expSym, v)
                   _                 -> Nothing -- todo warn about this
               | (k, v) <- Map.toList expd
               ]
@@ -1581,30 +1582,35 @@ edhMakeCall' !pgsCaller !callee'val !callee'that apk@(ArgsPack !args !kwargs) !s
     -- calling a producer procedure
     EdhPrducr !mth'proc -> case procedure'body $ procedure'decl mth'proc of
       Right _ -> throwEdhSTM pgsCaller EvalError "bug: host producer procedure"
-      Left !pb -> case edhUltimate <$> Map.lookup "outlet" kwargs of
-        Nothing -> do
-          outlet <- newEventSink
-          callMaker $ \exit -> launchEventProducer exit outlet $ callEdhMethod'
-            Nothing
-            callee'that
-            mth'proc
-            pb
-            (ArgsPack args (Map.insert "outlet" (EdhSink outlet) kwargs))
-            scopeMod
-            edhEndOfProc
-        Just (EdhSink !outlet) -> callMaker $ \exit ->
-          launchEventProducer exit outlet $ callEdhMethod'
-            Nothing
-            callee'that
-            mth'proc
-            pb
-            (ArgsPack args kwargs)
-            scopeMod
-            edhEndOfProc
-        Just !badVal ->
-          throwEdhSTM pgsCaller UsageError
-            $  "The value passed to a producer as `outlet` found to be a "
-            <> T.pack (edhTypeNameOf badVal)
+      Left !pb ->
+        case edhUltimate <$> Map.lookup (AttrByName "outlet") kwargs of
+          Nothing -> do
+            outlet <- newEventSink
+            callMaker $ \exit ->
+              launchEventProducer exit outlet $ callEdhMethod'
+                Nothing
+                callee'that
+                mth'proc
+                pb
+                (ArgsPack
+                  args
+                  (Map.insert (AttrByName "outlet") (EdhSink outlet) kwargs)
+                )
+                scopeMod
+                edhEndOfProc
+          Just (EdhSink !outlet) -> callMaker $ \exit ->
+            launchEventProducer exit outlet $ callEdhMethod'
+              Nothing
+              callee'that
+              mth'proc
+              pb
+              (ArgsPack args kwargs)
+              scopeMod
+              edhEndOfProc
+          Just !badVal ->
+            throwEdhSTM pgsCaller UsageError
+              $  "The value passed to a producer as `outlet` found to be a "
+              <> T.pack (edhTypeNameOf badVal)
 
     -- calling a generator
     (EdhGnrtor _) -> throwEdhSTM
@@ -2402,11 +2408,10 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
           ]
 
         -- loop from a keyword-only args pack
-        (EdhArgsPack (ArgsPack !args !kwargs)) | null args ->
-          iterThem
-            [ ArgsPack [EdhString k, v] $ Map.empty
-            | (k, v) <- Map.toList kwargs
-            ]
+        (EdhArgsPack (ArgsPack !args !kwargs)) | null args -> iterThem
+          [ ArgsPack [attrKeyValue k, v] $ Map.empty
+          | (k, v) <- Map.toList kwargs
+          ]
 
         -- loop from a tuple
         (EdhTuple vs) -> iterThem
@@ -2633,13 +2638,7 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
           -- from incoming pack
           exit' (ArgsPack posArgs' Map.empty, em)
         RecvRestKwArgs restKwArgAttr -> if T.null restKwArgAttr
-          then exit'
-            ( ArgsPack posArgs' Map.empty
-            , Map.union
-              (Map.fromList [ (AttrByName k, v) | (k, v) <- Map.toList kwArgs' ]
-              )
-              em
-            )
+          then exit' (ArgsPack posArgs' Map.empty, Map.union kwArgs' em)
           else exit'
             ( ArgsPack posArgs' Map.empty
             , Map.insert (AttrByName restKwArgAttr)
@@ -2695,12 +2694,12 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
       resolveArgValue
         :: AttrName
         -> Maybe Expr
-        -> (  (EdhValue, [EdhValue], Map.HashMap AttrName EdhValue)
+        -> (  (EdhValue, [EdhValue], Map.HashMap AttrKey EdhValue)
            -> STM ()
            )
         -> STM ()
       resolveArgValue !argName !argDefault !exit'' = do
-        let (inKwArgs, kwArgs'') = takeOutFromMap argName kwArgs'
+        let (inKwArgs, kwArgs'') = takeOutFromMap (AttrByName argName) kwArgs'
         case inKwArgs of
           Just argVal -> exit'' (argVal, posArgs', kwArgs'')
           _           -> case posArgs' of
@@ -2734,7 +2733,7 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
       | not (Map.null kwResidual)
       = throwEdhSTM pgsCaller UsageError
         $  "Extraneous keyword arguments: "
-        <> T.unwords (Map.keys kwResidual)
+        <> T.pack (unwords (show <$> Map.keys kwResidual))
       | otherwise
       = exit' em
     doReturn :: Map.HashMap AttrKey EdhValue -> STM ()
@@ -2756,8 +2755,7 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
       contEdhSTM $ recvFromPack (apk, Map.empty) argRcvr $ \(apk', em) ->
         woResidual apk' em doReturn
     WildReceiver -> contEdhSTM $ if null posArgs
-      then doReturn
-        (Map.fromList [ (AttrByName k, v) | (k, v) <- Map.toList kwArgs ])
+      then doReturn kwArgs
       else
         throwEdhSTM pgsRecv EvalError
         $  "Unexpected "
@@ -2782,8 +2780,10 @@ packEdhExprs (x : xs) !exit = case x of
     pgs <- ask
     contEdhSTM $ do
       xu <- unsafeIOToSTM newUnique
-      runEdhProc pgs $ packEdhExprs xs $ \(ArgsPack !posArgs !kwArgs) ->
-        exit (ArgsPack posArgs $ Map.insert kw (EdhExpr xu argExpr "") kwArgs)
+      runEdhProc pgs $ packEdhExprs xs $ \(ArgsPack !posArgs !kwArgs) -> exit
+        ( ArgsPack posArgs
+        $ Map.insert (AttrByName kw) (EdhExpr xu argExpr "") kwArgs
+        )
 
 
 -- | Pack args as caller, normally in preparation of calling another procedure
@@ -2801,17 +2801,18 @@ packEdhArgs !argsSender !pkExit = do
   pkArgs (x : xs) !exit = do
     !pgs <- ask
     let
-      edhVal2Kw :: EdhValue -> STM () -> (AttrName -> STM ()) -> STM ()
+      edhVal2Kw :: EdhValue -> STM () -> (AttrKey -> STM ()) -> STM ()
       edhVal2Kw !k !nopExit !exit' = case k of
-        EdhString s -> exit' s
-        _           -> nopExit
+        EdhString !name -> exit' $ AttrByName name
+        EdhSymbol !sym  -> exit' $ AttrBySym sym
+        _               -> nopExit
       dictKvs2Kwl
-        :: [(ItemKey, EdhValue)] -> ([(AttrName, EdhValue)] -> STM ()) -> STM ()
+        :: [(ItemKey, EdhValue)] -> ([(AttrKey, EdhValue)] -> STM ()) -> STM ()
       dictKvs2Kwl !ps !exit' = go ps []       where
-        go :: [(ItemKey, EdhValue)] -> [(AttrName, EdhValue)] -> STM ()
+        go :: [(ItemKey, EdhValue)] -> [(AttrKey, EdhValue)] -> STM ()
         go [] !kvl = exit' kvl
         go ((k, v) : rest) !kvl =
-          edhVal2Kw k (go rest kvl) $ \k' -> go rest ((k', v) : kvl)
+          edhVal2Kw k (go rest kvl) $ \ !k' -> go rest ((k', v) : kvl)
     case x of
       UnpackPosArgs !posExpr ->
         evalExpr posExpr $ \(OriginalValue !val _ _) -> case edhUltimate val of
@@ -2847,15 +2848,16 @@ packEdhArgs !argsSender !pkExit = do
                     $  "Invalid keyword type: "
                     <> T.pack (edhTypeNameOf k)
                     )
-                $ \kw ->
+                $ \ !kw ->
                     runEdhProc pgs $ exit
                       (ArgsPack posArgs $ Map.insert kw (noneNil v) kwArgs)
           (EdhDict (Dict _ !ds)) -> pkArgs xs $ \case
             (ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
-              dm <- readTVar ds
-              dictKvs2Kwl (Map.toList dm) $ \kvl ->
-                runEdhProc pgs $ exit
-                  (ArgsPack posArgs $ Map.union kwArgs $ Map.fromList kvl)
+              !dm <- readTVar ds
+              dictKvs2Kwl (Map.toList dm) $ \ !kvl ->
+                runEdhProc pgs $ exit $ ArgsPack posArgs $ Map.union
+                  (Map.fromList kvl)
+                  kwArgs
           _ ->
             throwEdh EvalError
               $  "Can not unpack kwargs from a "
@@ -2887,7 +2889,7 @@ packEdhArgs !argsSender !pkExit = do
                   Nothing        -> Just $ noneNil val
                   Just !laterVal -> Just laterVal
                 )
-                kw
+                (AttrByName kw)
                 kwArgs
               )
 
@@ -2957,13 +2959,15 @@ _edhCSR reprs (v : rest) !exit = edhValueRepr v $ \(OriginalValue r _ _) ->
     EdhString repr -> _edhCSR (repr : reprs) rest exit
     _              -> error "bug: edhValueRepr returned non-string in CPS"
 -- comma separated repr string for kwargs
-_edhKwArgsCSR :: [(Text, Text)] -> [(Text, EdhValue)] -> EdhProcExit -> EdhProc
+_edhKwArgsCSR
+  :: [(Text, Text)] -> [(AttrKey, EdhValue)] -> EdhProcExit -> EdhProc
 _edhKwArgsCSR entries [] !exit' = exitEdhProc exit' $ EdhString $ T.concat
   [ k <> "=" <> v <> ", " | (k, v) <- entries ]
 _edhKwArgsCSR entries ((k, v) : rest) exit' =
   edhValueRepr v $ \(OriginalValue r _ _) -> case r of
-    EdhString repr -> _edhKwArgsCSR ((k, repr) : entries) rest exit'
-    _              -> error "bug: edhValueRepr returned non-string in CPS"
+    EdhString repr ->
+      _edhKwArgsCSR ((T.pack (show k), repr) : entries) rest exit'
+    _ -> error "bug: edhValueRepr returned non-string in CPS"
 -- comma separated repr string for dict entries
 _edhDictCSR
   :: [(Text, Text)] -> [(EdhValue, EdhValue)] -> EdhProcExit -> EdhProc

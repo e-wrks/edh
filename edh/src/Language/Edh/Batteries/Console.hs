@@ -224,16 +224,28 @@ conReadCommandProc !apk !exit = ask >>= \pgs ->
 conPrintProc :: EdhProcedure
 conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
   let !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context pgs
-      printVS :: [EdhValue] -> [(AttrName, EdhValue)] -> STM ()
+      printVS :: [EdhValue] -> [(AttrKey, EdhValue)] -> STM ()
       printVS [] []              = exitEdhSTM pgs exit nil
       printVS [] ((k, v) : rest) = case v of
         EdhString !s -> do
-          writeTQueue ioQ $ ConsoleOut $ "  " <> k <> "=" <> s <> "\n"
+          writeTQueue ioQ
+            $  ConsoleOut
+            $  "  "
+            <> T.pack (show k)
+            <> "="
+            <> s
+            <> "\n"
           printVS [] rest
         _ -> runEdhProc pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
           case vr of
             EdhString !s -> contEdhSTM $ do
-              writeTQueue ioQ $ ConsoleOut $ "  " <> k <> "=" <> s <> "\n"
+              writeTQueue ioQ
+                $  ConsoleOut
+                $  "  "
+                <> T.pack (show k)
+                <> "="
+                <> s
+                <> "\n"
               printVS [] rest
             _ -> error "bug"
       printVS (v : rest) !kvs = case v of
