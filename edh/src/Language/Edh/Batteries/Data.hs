@@ -400,7 +400,7 @@ cprhProc !lhExpr !rhExpr !exit = do
     _ -> evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
       evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate lhVal of
         EdhTuple vs -> case edhUltimate rhVal of
-          EdhArgsPack (ArgsPack !args !kwargs) | Map.null kwargs ->
+          EdhArgsPack (ArgsPack !args _) ->
             exitEdhProc exit (EdhTuple $ vs ++ args)
           EdhTuple vs'         -> exitEdhProc exit (EdhTuple $ vs ++ vs')
           EdhList  (List _ !l) -> contEdhSTM $ do
@@ -416,10 +416,9 @@ cprhProc !lhExpr !rhExpr !exit = do
               <> ": "
               <> T.pack (show rhVal)
         EdhList (List _ !l) -> case edhUltimate rhVal of
-          EdhArgsPack (ArgsPack !args !kwargs) | Map.null kwargs ->
-            contEdhSTM $ do
-              modifyTVar' l (++ args)
-              exitEdhSTM pgs exit lhVal
+          EdhArgsPack (ArgsPack !args _) -> contEdhSTM $ do
+            modifyTVar' l (++ args)
+            exitEdhSTM pgs exit lhVal
           EdhTuple vs -> contEdhSTM $ do
             modifyTVar' l (++ vs)
             exitEdhSTM pgs exit lhVal
@@ -438,10 +437,10 @@ cprhProc !lhExpr !rhExpr !exit = do
               <> ": "
               <> T.pack (show rhVal)
         EdhDict (Dict _ !d) -> case edhUltimate rhVal of
-          EdhArgsPack (ArgsPack !args !kwargs) | Map.null kwargs ->
-            contEdhSTM $ pvlToDict pgs args $ \d' -> do
-              modifyTVar d $ Map.union d'
-              exitEdhSTM pgs exit lhVal
+          EdhArgsPack (ArgsPack _ !kwargs) -> contEdhSTM $ do
+            modifyTVar d $ Map.union $ Map.fromList
+              [ (attrKeyValue k, v) | (k, v) <- Map.toList kwargs ]
+            exitEdhSTM pgs exit lhVal
           EdhTuple vs -> contEdhSTM $ pvlToDict pgs vs $ \d' -> do
             modifyTVar d $ Map.union d'
             exitEdhSTM pgs exit lhVal

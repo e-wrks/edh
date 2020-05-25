@@ -110,8 +110,8 @@ scopeAttrsProc _ !exit = do
   !pgs <- ask
   let !that = thatObject $ contextScope $ edh'context pgs
   contEdhSTM $ do
-    ad <- edhDictFromEntity pgs $ scopeEntity $ wrappedScopeOf that
-    exitEdhSTM pgs exit $ EdhDict ad
+    ps <- allEntityAttrs pgs $ scopeEntity $ wrappedScopeOf that
+    exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack [] $ Map.fromList ps
 
 
 -- | repr of a scope

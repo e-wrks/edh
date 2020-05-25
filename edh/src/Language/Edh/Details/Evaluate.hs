@@ -2409,7 +2409,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
 
         -- loop from a keyword-only args pack
         (EdhArgsPack (ArgsPack !args !kwargs)) | null args -> iterThem
-          [ ArgsPack [attrKeyValue k, v] $ Map.empty
+          [ ArgsPack [attrKeyValue k, v] Map.empty
           | (k, v) <- Map.toList kwargs
           ]
 
