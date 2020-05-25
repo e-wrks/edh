@@ -35,17 +35,14 @@ export method concur(*tasks, c=6, dbgLogger=0) {
 
       # snoc this.tasks within an *atoiso* tx block
       ai case this.tasks of {
-
-        {()} -> task2do = None # no more tasks in backlog
-
-        { task2do => rest } -> # one task taken out of backlog
-          this.tasks = rest # update this.task within tx
-
-      }
-
-      if None == task2do then {
-        doneSig <- this.cntRunning # notify about overall finishing up
-        return nil # skip all following code
+        {()} -> {  # no more tasks in backlog
+          doneSig <- this.cntRunning # notify about overall finishing up
+          return nil
+        }
+        { task2do => rest } -> {  # one task taken out of backlog
+          this.tasks = rest  # update this.task within tx
+          rest = nil  # unref so it's garbage collectable a bit earlier
+        }
       }
 
       go { # start a new thread (goroutine) to run 'task2do'
@@ -80,7 +77,8 @@ export method concur(*tasks, c=6, dbgLogger=0) {
   for nTasksRunning from doneSig do if nTasksRunning < 1 then {
     dbgLogger <| '  🎉  all concur tasks done.'
     return nil # don't forget to break out the 'doneSig' event loop
-  } else
+  } else {
     dbgLogger <| '  ⏲️  finishing up concur tasks, ' ++ nTasksRunning
       ++ ' still running.'
+  }
 }
