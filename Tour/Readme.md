@@ -17,6 +17,7 @@ See [Edh Im](https://github.com/e-wrks/edhim) for an example.
   - [Paste code snippets from this Tour](#paste-code-snippets-from-this-tour)
 - [Program / Threading Model](#program--threading-model)
 - [Package / Module Structures](#package--module-structures)
+  - [Entry Module vs Persistent Module](#entry-module-vs-persistent-module)
 - [Micro Structures](#micro-structures)
   - [Importing other Edh modules](#importing-other-edh-modules)
   - [Lossless Decimal for Numbers](#lossless-decimal-for-numbers)
@@ -273,6 +274,22 @@ already (kidding).
 Note that module `batteries/root` will be imported into root scope of an
 **Edh** **world** when default batteries are installed (the most common case
 when a **world** is created).
+
+### Entry Module vs Persistent Module
+
+An entry module is always named by a `__main__.edh` file, the name is infered
+from the intermediate file path segments from `edh_modules` to that
+`__main__.edh`, an entry module won't be registered to the Edh world and not
+importable.
+
+Otherwise a `.edh` file names a persistent module, the name is intermediate
+file path segments from `edh_modules` to that `.edh` file but with `.edh`
+suffix stripped. One special case is `edh_modules/some/path/__init__.edh`,
+the module name will be `some/path`.
+
+A persistent module will have a single instance per **Edh** world, loaded &
+shared among the world. Subsequent `import` will get everything exported from
+that module.
 
 ## Micro Structures
 
