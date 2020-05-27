@@ -829,6 +829,7 @@ instance Eq EdhValue where
   EdhContinue                 == EdhContinue                 = True
   EdhCaseClose x              == EdhCaseClose y              = x == y
   EdhFallthrough              == EdhFallthrough              = True
+  EdhRethrow                  == EdhRethrow                  = True
 -- todo: regard a yielded/returned value equal to the value itself ?
   EdhYield  x'v               == EdhYield  y'v               = x'v == y'v
   EdhReturn x'v               == EdhReturn y'v               = x'v == y'v
