@@ -42,9 +42,7 @@ import           Language.Edh.Details.Utils
 
 -- | Fork a GHC thread to run the specified Edh proc concurrently
 forkEdh :: EdhProgState -> EdhProc -> STM ()
-forkEdh !pgs !p = if edh'in'tx pgs
-  then throwEdhSTM pgs UsageError "You don't fork within a transaction"
-  else writeTQueue (edh'fork'queue pgs) $ EdhTxTask pgs (wuji pgs) (const p)
+forkEdh !pgs !p = writeTQueue (edh'fork'queue pgs) (pgs, p)
 
 
 -- | Fork a new Edh thread to run the specified event producer, but hold the 
@@ -59,13 +57,13 @@ launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerProg = do
     void $ forkEdh pgsLaunch $ do
       pgsProducer <- ask
       contEdhSTM
-        $ edhPerformIO
+        $ edhPerformSTM
             pgsProducer
-            (atomically $ do
+            (do
               subcNow <- readTVar subc
               when (subcNow == subcBefore) retry
             )
-        $ \_ -> runEdhProc pgsProducer producerProg
+        $ const producerProg
     exitEdhSTM pgsConsumer exit $ EdhSink sink
 
 
@@ -803,15 +801,15 @@ importEdhModule !impSpec !exit = do
                 -- put back immediately
                 putTMVar (worldModules world) moduMap'
                 -- blocking wait the target module loaded
-                waitEdhSTM pgs (readTMVar moduSlot) $ \case
+                edhPerformSTM pgs (readTMVar moduSlot) $ \case
                   -- TODO GHC should be able to detect cyclic imports as 
                   --      deadlock, better to report that more friendly,
                   --      and more importantly, to prevent the crash.
                   EdhNamedValue _ !importError ->
                     -- the first importer failed loading it,
                     -- replicate the error in this thread
-                    runEdhProc pgs $ edhThrow importError
-                  !modu -> exitEdhSTM pgs exit modu
+                    edhThrow importError
+                  !modu -> exitEdhProc exit modu
               Nothing -> do -- we are the first importer
                 -- allocate an empty slot
                 moduSlot <- newEmptyTMVar
@@ -1658,21 +1656,21 @@ resolveEdhAttrAddr !pgs (SymbolicAttr !symName) !exit =
 
 
 -- | Wait an stm action without tracking the retries
-waitEdhSTM :: EdhProgState -> STM a -> (a -> STM ()) -> STM ()
-waitEdhSTM !pgs !act !exit = if edh'in'tx pgs
+edhPerformSTM :: EdhProgState -> STM a -> (a -> EdhProc) -> STM ()
+edhPerformSTM !pgs !act !exit = if edh'in'tx pgs
   then throwEdhSTM pgs UsageError "You don't wait stm from within a transaction"
-  else edhPerformIO pgs (atomically act) exit
+  else writeTQueue (edh'task'queue pgs) $ EdhSTMTask pgs act exit
 
 -- | Perform a synchronous IO action from an Edh thread
-edhPerformIO :: EdhProgState -> IO a -> (a -> STM ()) -> STM ()
+--
+-- CAVEAT during the IO action:
+--         * event perceivers won't fire
+--         * the Edh thread won't terminate with the Edh program
+--        so 'edhPerformSTM' is more preferable whenever possible
+edhPerformIO :: EdhProgState -> IO a -> (a -> EdhProc) -> STM ()
 edhPerformIO !pgs !act !exit = if edh'in'tx pgs
   then throwEdhSTM pgs UsageError "You don't perform IO within a transaction"
-  else
-    writeTQueue (edh'task'queue pgs)
-    $ Left
-    $ catch (act >>= atomically . exit)
-    $ \(e :: SomeException) ->
-        atomically $ toEdhError pgs e $ \exv -> edhThrowSTM pgs exv
+  else writeTQueue (edh'task'queue pgs) $ EdhIOTask pgs act exit
 
 
 -- | Create an Edh error as both an Edh exception value and a host exception
@@ -2384,11 +2382,11 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
 
           -- loop over a subscriber's channel of an event sink
           iterEvt :: TChan EdhValue -> STM ()
-          iterEvt !subChan = waitEdhSTM pgs (readTChan subChan) $ \case
+          iterEvt !subChan = edhPerformSTM pgs (readTChan subChan) $ \case
             EdhNil -> -- nil marks end-of-stream from an event sink
-              exitEdhSTM pgs exit nil -- stop the for-from-do loop
-            EdhArgsPack apk -> do1 apk $ iterEvt subChan
-            v               -> do1 (ArgsPack [v] Map.empty) $ iterEvt subChan
+              exitEdhProc exit nil -- stop the for-from-do loop
+            EdhArgsPack apk -> contEdhSTM $ do1 apk $ iterEvt subChan
+            v -> contEdhSTM $ do1 (ArgsPack [v] Map.empty) $ iterEvt subChan
 
       case edhUltimate iterVal of
 

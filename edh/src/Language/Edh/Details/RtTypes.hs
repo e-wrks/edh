@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 
 module Language.Edh.Details.RtTypes where
 
@@ -491,8 +492,8 @@ type EdhProc = EdhMonad (STM ())
 
 -- | The states of a program
 data EdhProgState = EdhProgState {
-      edh'fork'queue :: !(TQueue EdhTxTask)
-    , edh'task'queue :: !(TQueue (Either (IO ()) EdhTxTask))
+      edh'fork'queue :: !(TQueue (EdhProgState, EdhProc))
+    , edh'task'queue :: !(TQueue EdhTask)
     , edh'perceivers :: !(TVar [PerceiveRecord])
     , edh'defers :: !(TVar [DeferRecord])
     , edh'in'tx :: !Bool
@@ -540,15 +541,26 @@ exitEdhSTM !pgs !exit !val =
 exitEdhSTM' :: EdhProgState -> EdhProcExit -> OriginalValue -> STM ()
 exitEdhSTM' !pgs !exit !result = if edh'in'tx pgs
   then join $ runReaderT (exit result) pgs
-  else writeTQueue (edh'task'queue pgs) $ Right $ EdhTxTask pgs result exit
+  else writeTQueue (edh'task'queue pgs) $ EdhTxTask pgs result exit
 {-# INLINE exitEdhSTM' #-}
 
--- | An atomic task, an Edh program is composed of many this kind of tasks.
-data EdhTxTask = EdhTxTask {
-    edh'task'pgs :: !EdhProgState
+-- | An Edh task record
+data EdhTask where
+  EdhTxTask ::{
+      edh'task'pgs :: !EdhProgState
     , edh'task'input :: !OriginalValue
     , edh'task'job :: !(OriginalValue -> EdhProc)
-  }
+    } -> EdhTask
+  EdhSTMTask ::{
+      edh'stm'pgs :: !EdhProgState
+    , edh'stm'act :: !(STM a)
+    , edh'stm'job :: !(a -> EdhProc)
+    } -> EdhTask
+  EdhIOTask ::{
+      edh'io'pgs :: !EdhProgState
+    , edh'io'act :: !(IO a)
+    , edh'io'job :: !(a -> EdhProc)
+    } -> EdhTask
 
 -- | Type of an intrinsic infix operator in host language.
 --

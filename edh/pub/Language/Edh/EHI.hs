@@ -78,7 +78,7 @@ module Language.Edh.EHI
   , OriginalValue(..)
   , EdhProc
   , EdhProgState(..)
-  , EdhTxTask(..)
+  , EdhTask(..)
   , Context(..)
   , Scope(..)
   , EdhProcedure
@@ -105,9 +105,9 @@ module Language.Edh.EHI
   , seqcontSTM
   , mapcontSTM
     -- ** Sync utilities
-  , edhPerformIO
   , forkEdh
-  , waitEdhSTM
+  , edhPerformSTM
+  , edhPerformIO
   , edhNop
   , edhEndOfProc
     -- ** Reflective manipulation

@@ -26,23 +26,19 @@
 
   }
 
-  # wait a second
-  for _ from console.everySeconds(1) do { break }
-
-  evs <- '  🛎️  ding.ding..'
-
-  # wait a second
-  for _ from console.everySeconds(1) do { break }
-
-  # stopSig <- "don't do that!"
-
-  evs <- '  🍃  chill..chill...'
-
-  # wait a second
-  for _ from console.everySeconds(1) do { break }
-
-  stopSig <- "that's enough!"
-
-  evs <- '  ☎️  ling.ling..ling...'
-
 }
+
+# wait a second
+for _ from console.everySeconds(1) do { break }
+evs <- '  🛎️  ding.ding..' ;pass
+# stopSig <- "don't do that!" ;pass
+
+# wait a second
+for _ from console.everySeconds(1) do { break }
+evs <- '  🍃  chill..chill...' ;pass
+stopSig <- "that's enough!" ;pass
+
+# wait a second
+for _ from console.everySeconds(1) do { break }
+evs <- '  ☎️  ling.ling..ling...' ;pass
+# stopSig <- nil

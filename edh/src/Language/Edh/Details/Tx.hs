@@ -53,13 +53,15 @@ driveEdhProgram !haltResult !progCtx !prog = do
           `orElse` (Just <$> readTQueue forkQueue)
           )
         >>= \case
-              Nothing       -> return () -- Edh program halted, done
-              Just !edhTask -> do
-                pgsDesc <- deriveState $ edh'task'pgs edhTask
+              Nothing               -> return () -- Edh program halted, done
+              Just (pgsForker, job) -> do
+                pgsDesc <- deriveState pgsForker
                 -- bootstrap on the descendant thread
-                atomically
-                  $ writeTQueue (edh'task'queue pgsDesc)
-                  $ Right edhTask { edh'task'pgs = pgsDesc }
+                atomically $ writeTQueue (edh'task'queue pgsDesc) $ EdhTxTask
+                  { edh'task'pgs   = pgsDesc
+                  , edh'task'input = wuji pgsForker
+                  , edh'task'job   = const job
+                  }
                 void $ mask_ $ forkIOWithUnmask $ \unmask -> catch
                   (unmask $ driveEdhThread (edh'defers pgsDesc)
                                            (edh'task'queue pgsDesc)
@@ -125,16 +127,15 @@ driveEdhProgram !haltResult !progCtx !prog = do
                                       , edh'context    = progCtx
                                       }
         -- bootstrap the program on main Edh thread
-        atomically $ writeTQueue mainQueue $ Right
-          (EdhTxTask pgsAtBoot (wuji pgsAtBoot) (const prog))
+        atomically $ writeTQueue mainQueue $ EdhTxTask pgsAtBoot
+                                                       (wuji pgsAtBoot)
+                                                       (const prog)
         -- drive the main Edh thread
         driveEdhThread defers mainQueue
 
  where
 
-  nextTaskFromQueue
-    :: TQueue (Either (IO ()) EdhTxTask)
-    -> STM (Maybe (Either (IO ()) EdhTxTask))
+  nextTaskFromQueue :: TQueue EdhTask -> STM (Maybe EdhTask)
   nextTaskFromQueue = orElse (Nothing <$ readTMVar haltResult) . tryReadTQueue
 
   driveDefers :: [DeferRecord] -> IO ()
@@ -143,7 +144,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
     !deferPerceivers <- newTVarIO []
     !deferDefers     <- newTVarIO []
     !deferTaskQueue  <- newTQueueIO
-    atomically $ writeTQueue deferTaskQueue $ Right $ EdhTxTask
+    atomically $ writeTQueue deferTaskQueue $ EdhTxTask
       pgsDefer { edh'task'queue = deferTaskQueue
                , edh'perceivers = deferPerceivers
                , edh'defers     = deferDefers
@@ -177,10 +178,9 @@ driveEdhProgram !haltResult !progCtx !prog = do
                                   , edh'defers     = reactDefers
                                   , edh'in'tx      = False
                                   }
-    atomically $ writeTQueue reactTaskQueue $ Right $ EdhTxTask
-      pgsPerceiver
-      (wuji pgsPerceiver)
-      (const perceiverProg)
+    atomically $ writeTQueue reactTaskQueue $ EdhTxTask pgsPerceiver
+                                                        (wuji pgsPerceiver)
+                                                        (const perceiverProg)
     driveEdhThread reactDefers reactTaskQueue
     atomically $ readTMVar breakThread
   drivePerceivers :: [(EdhValue, PerceiveRecord)] -> IO Bool
@@ -189,27 +189,59 @@ driveEdhProgram !haltResult !progCtx !prog = do
     True  -> return True
     False -> drivePerceivers rest
 
-  driveEdhThread
-    :: TVar [DeferRecord] -> TQueue (Either (IO ()) EdhTxTask) -> IO ()
+  driveEdhThread :: TVar [DeferRecord] -> TQueue EdhTask -> IO ()
   driveEdhThread !defers !tq = atomically (nextTaskFromQueue tq) >>= \case
     Nothing -> -- this thread is done, run defers lastly
       readTVarIO defers >>= driveDefers
-    Just (Left !ioTask) -> do
-      ioTask
+    Just (EdhIOTask !pgs !ioAct !job) -> do
+      let
+        -- during ioAct, perceivers won't fire, program termination won't stop
+        -- this thread
+        doIt = ioAct >>= \actResult ->
+          atomically $ writeTQueue tq $ EdhTxTask pgs (wuji pgs) $ const $ job
+            actResult
+      catch doIt $ \(e :: SomeException) ->
+        atomically $ toEdhError pgs e $ \exv ->
+          writeTQueue tq
+            $ EdhTxTask pgs (wuji pgs)
+            $ const
+            $ contEdhSTM
+            $ edhThrowSTM pgs exv
       driveEdhThread defers tq -- loop another iteration for the thread
-    Just (Right !txTask) -> goSTM txTask >>= \case -- run this task
-      True -> -- terminate this thread, after running defers lastly
-        readTVarIO defers >>= driveDefers
-      False -> -- loop another iteration for the thread
-        driveEdhThread defers tq
+    Just (EdhSTMTask !pgs !stmAct !job) -> do
+      let
+        doIt = goSTM False pgs stmAct >>= \case
+          Left{} -> -- terminate this thread, after running defers lastly
+            readTVarIO defers >>= driveDefers
+          Right !actResult -> do
+            atomically $ writeTQueue tq $ EdhTxTask pgs (wuji pgs) $ const $ job
+              actResult
+            driveEdhThread defers tq -- loop another iteration for the thread
+      catch doIt $ \(e :: SomeException) -> do
+        atomically $ toEdhError pgs e $ \exv ->
+          writeTQueue tq
+            $ EdhTxTask pgs (wuji pgs)
+            $ const
+            $ contEdhSTM
+            $ edhThrowSTM pgs exv
+        driveEdhThread defers tq -- loop another iteration for the thread
+    Just (EdhTxTask !pgsTask !input !task) ->
+      goSTM True pgsTask (join $ runReaderT (task input) pgsTask) >>= \case
+        Left{} -> -- terminate this thread, after running defers lastly
+          readTVarIO defers >>= driveDefers
+        Right{} -> -- loop another iteration for the thread
+          driveEdhThread defers tq
 
-  -- blocking wait not expected, track stm retries explicitly
-  goSTM :: EdhTxTask -> IO Bool
-  goSTM (EdhTxTask !pgsTask !input !task) = doSTM 0
+  goSTM :: forall a . Bool -> EdhProgState -> STM a -> IO (Either () a)
+  goSTM !trackRetry !pgsTask !taskJob = if trackRetry
+    then trackSTM 0
+    else waitSTM
    where
     callCtx = getEdhCallContext 0 pgsTask
-    doSTM :: Int -> IO Bool
-    doSTM !rtc = do
+
+    -- blocking wait not expected, track stm retries explicitly
+    trackSTM :: Int -> IO (Either () a)
+    trackSTM !rtc = do
 
       when -- todo increase the threshold of reporting?
            (rtc > 0) $ do
@@ -226,31 +258,50 @@ driveEdhProgram !haltResult !progCtx !prog = do
           $ return ()
 
       atomically ((Just <$> stmJob) `orElse` return Nothing) >>= \case
-        Just Nothing -> return True -- to terminate as program halted
+        Just Nothing -> return $ Left () -- to terminate as program halted
         Nothing -> -- stm failed, do a tracked retry
-          doSTM (rtc + 1)
-        Just (Just []) ->
+          trackSTM (rtc + 1)
+        Just (Just (Right !result)) ->
           -- no perceiver has fired, the tx job has already been executed
-          return False
-        Just (Just !gotevl) -> drivePerceivers gotevl >>= \case
+          return $ Right result
+        Just (Just (Left !gotevl)) -> drivePerceivers gotevl >>= \case
           True -> -- a perceiver is terminating this thread
-            return True
+            return $ Left ()
           False ->
             -- there've been one or more perceivers fired, the tx job have
             -- been skipped, as no perceiver is terminating the thread,
             -- continue with this tx job
-            doSTM rtc
+            trackSTM rtc
 
-    stmJob :: STM (Maybe [(EdhValue, PerceiveRecord)])
+    -- blocking wait expected, but keep perceivers firing along the way,
+    -- and terminate with the Edh program if that's the case
+    waitSTM :: IO (Either () a)
+    waitSTM = atomically stmJob >>= \case
+      Nothing -> return $ Left () -- to terminate as program halted
+      Just (Right !result) ->
+          -- no perceiver has fired, the tx job has already been executed
+        return $ Right result
+      Just (Left !gotevl) -> drivePerceivers gotevl >>= \case
+        True -> -- a perceiver is terminating this thread
+          return $ Left ()
+        False ->
+          -- there've been one or more perceivers fired, the tx job have
+          -- been skipped, as no perceiver is terminating the thread,
+          -- continue with this tx job
+          waitSTM
+
+    -- this is the STM work package, where perceivers can preempt the inline
+    -- job on an Edh thread
+    stmJob :: STM (Maybe (Either [(EdhValue, PerceiveRecord)] a))
     stmJob = tryReadTMVar haltResult >>= \case
       Just _ -> return Nothing -- program halted
       Nothing -> -- program still running
         (readTVar (edh'perceivers pgsTask) >>= perceiverChk []) >>= \gotevl ->
           if null gotevl
             then -- no perceiver fires, execute the tx job
-                 join (runReaderT (task input) pgsTask) >> return (Just [])
+                 Just . Right <$> taskJob
             else -- skip the tx job if at least one perceiver fires
-                 return (Just gotevl)
+                 return $ Just $ Left gotevl
 
     perceiverChk
       :: [(EdhValue, PerceiveRecord)]

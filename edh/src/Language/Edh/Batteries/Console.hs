@@ -113,8 +113,8 @@ conReadSourceProc !apk !exit = ask >>= \pgs ->
       let !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context pgs
       cmdIn <- newEmptyTMVar
       writeTQueue ioQ $ ConsoleIn cmdIn ps1 ps2
-      waitEdhSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
-        src@EdhString{} -> exitEdhSTM pgs exit src
+      edhPerformSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
+        src@EdhString{} -> exitEdhProc exit src
         _               -> error "impossible"
  where
   argsParser =
@@ -187,9 +187,9 @@ conReadCommandProc !apk !exit = ask >>= \pgs ->
             }
       cmdIn <- newEmptyTMVar
       writeTQueue ioQ $ ConsoleIn cmdIn ps1 ps2
-      waitEdhSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
+      edhPerformSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
         EdhString !cmdCode ->
-          runEdhProc pgsCmd $ evalEdh "<console>" cmdCode exit
+          local (const pgsCmd) $ evalEdh "<console>" cmdCode exit
         _ -> error "impossible"
  where
   argsParser =
