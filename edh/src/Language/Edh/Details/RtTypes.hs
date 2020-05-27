@@ -728,6 +728,7 @@ data EdhValue =
     | EdhContinue
     | EdhCaseClose !EdhValue
     | EdhFallthrough
+    | EdhRethrow
     | EdhYield !EdhValue
     | EdhReturn !EdhValue
 
@@ -774,6 +775,7 @@ instance Show EdhValue where
   show EdhContinue                   = "<continue>"
   show (EdhCaseClose v)              = "<caseclose: " ++ show v ++ ">"
   show EdhFallthrough                = "<fallthrough>"
+  show EdhRethrow                    = "<rethrow>"
   show (EdhYield  v)                 = "<yield: " ++ show v ++ ">"
   show (EdhReturn v)                 = "<return: " ++ show v ++ ">"
 
@@ -873,6 +875,7 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhCaseClose v) =
     s `hashWithSalt` (-3 :: Int) `hashWithSalt` v
   hashWithSalt s EdhFallthrough            = hashWithSalt s (-4 :: Int)
+  hashWithSalt s EdhRethrow                = hashWithSalt s (-7 :: Int)
   hashWithSalt s (EdhYield v) = s `hashWithSalt` (-5 :: Int) `hashWithSalt` v
   hashWithSalt s (EdhReturn v) = s `hashWithSalt` (-6 :: Int) `hashWithSalt` v
 
@@ -1012,6 +1015,8 @@ data Stmt =
     | ContinueStmt
       -- | similar to fallthrough in Go
     | FallthroughStmt
+      -- | rethrow current exception
+    | RethrowStmt
       -- | operator declaration
     | OpDeclStmt !OpSymbol !Precedence !ProcDecl
       -- | operator override
@@ -1237,6 +1242,7 @@ data EdhTypeValue = TypeType
     | ContinueType
     | CaseCloseType
     | FallthroughType
+    | RethrowType
     | YieldType
     | ReturnType
     | SinkType
@@ -1295,6 +1301,7 @@ edhTypeOf EdhBreak            = BreakType
 edhTypeOf EdhContinue         = ContinueType
 edhTypeOf EdhCaseClose{}      = CaseCloseType
 edhTypeOf EdhFallthrough      = FallthroughType
+edhTypeOf EdhRethrow          = RethrowType
 edhTypeOf EdhYield{}          = YieldType
 edhTypeOf EdhReturn{}         = ReturnType
 edhTypeOf EdhSink{}           = SinkType

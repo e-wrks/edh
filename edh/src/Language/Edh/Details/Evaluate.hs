@@ -142,6 +142,7 @@ evalBlock [!ss] !exit = evalStmt ss $ \(OriginalValue !val _ _) -> case val of
   -- explicit `fallthrough` at end of this block, cascade to outer block
   EdhFallthrough    -> exitEdhProc exit EdhFallthrough
   -- ctrl to be propagated outwards
+  EdhRethrow        -> exitEdhProc exit EdhRethrow
   EdhBreak          -> exitEdhProc exit EdhBreak
   EdhContinue       -> exitEdhProc exit EdhContinue
   (EdhReturn !v)    -> exitEdhProc exit (EdhReturn v)
@@ -156,6 +157,7 @@ evalBlock (ss : rest) !exit = evalStmt ss $ \(OriginalValue !val _ _) ->
     -- should fallthrough to next branch (or stmt)
     EdhFallthrough    -> evalBlock rest exit
     -- ctrl to be propagated outwards
+    EdhRethrow        -> exitEdhProc exit EdhRethrow
     EdhBreak          -> exitEdhProc exit EdhBreak
     EdhContinue       -> exitEdhProc exit EdhContinue
     (EdhReturn !v)    -> exitEdhProc exit (EdhReturn v)
@@ -269,6 +271,7 @@ evalStmt' !stmt !exit = do
     BreakStmt       -> exitEdhProc exit EdhBreak
     ContinueStmt    -> exitEdhProc exit EdhContinue
     FallthroughStmt -> exitEdhProc exit EdhFallthrough
+    RethrowStmt     -> exitEdhProc exit EdhRethrow
 
     ReturnStmt expr -> evalExpr expr
       $ \(OriginalValue !val _ _) -> exitEdhProc exit (EdhReturn val)

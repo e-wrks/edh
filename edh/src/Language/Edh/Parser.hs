@@ -445,6 +445,7 @@ parseStmt si = do
         , (ContinueStmt, si) <$ keyword "continue"
           -- TODO validate fallthrough must within a branch block
         , (FallthroughStmt, si) <$ keyword "fallthrough"
+        , (RethrowStmt, si) <$ keyword "rethrow"
         , parseOpDeclOvrdStmt si
           -- TODO validate yield must within a generator procedure
         , parseReturnStmt si
@@ -575,6 +576,7 @@ parseLitExpr = choice
   , TypeLiteral ContinueType <$ litKw "ContinueType"
   , TypeLiteral CaseCloseType <$ litKw "CaseCloseType"
   , TypeLiteral FallthroughType <$ litKw "FallthroughType"
+  , TypeLiteral RethrowType <$ litKw "RethrowType"
   , TypeLiteral YieldType <$ litKw "YieldType"
   , TypeLiteral ReturnType <$ litKw "ReturnType"
   , TypeLiteral SinkType <$ litKw "SinkType"

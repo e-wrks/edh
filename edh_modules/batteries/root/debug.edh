@@ -58,14 +58,14 @@ interpreter shellHere( callerScope, prompt=None ) {
 
   } $=> {  # catch exceptions
 
-    {{ ProgramHalt: ph }} -> {
-      throw ph  # escalate a halt to the program loop of the
+    {{ ProgramHalt:_ }} -> {
+      rethrow  # escalate a halt to the program loop of the
       # host interpreter, let it decide what to do.
     }
 
     {{ IOError:exc }} -> {
       console.fatal <| 'IO error - ' ++ exc
-      throw exc  # escalate it to the program loop of the
+      rethrow  # escalate it to the program loop of the
       # host interpreter, let it decide what to do.
     }
 
@@ -103,14 +103,14 @@ method shellWith( obj=this ) {
 
   } $=> {  # catch exceptions
 
-    {{ ProgramHalt: ph }} -> {
-      throw ph  # escalate a halt to the program loop of the
+    {{ ProgramHalt:_ }} -> {
+      rethrow  # escalate a halt to the program loop of the
       # host interpreter, let it decide what to do.
     }
 
     {{ IOError:exc }} -> {
       console.fatal <| 'IO error - ' ++ exc
-      throw exc  # escalate it to the program loop of the
+      rethrow  # escalate it to the program loop of the
       # host interpreter, let it decide what to do.
     }
 

@@ -4,7 +4,8 @@
 
 - exception throwing and handling work now, but using operators instead of
   keyword based syntax
-  - `throw` keyword /w syntax unchanged
+  - `throw` statement /w syntax unchanged
+  - add `rethrow` statement
   - use (`$=>`) as `catch` and (`@=>`) as `finally`
   - originally planned `try`/`catch`/`finally` keywords and syntax dropped
   - exception classes refactored for Edh code to easily handle host errors
