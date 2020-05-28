@@ -64,5 +64,5 @@ edhProgLoop !console = do
               doneRightOrRebirth
   doneRightOrRebirth
  where
-  consoleOut      = writeTQueue (consoleIO console) . ConsoleOut
-  consoleShutdown = writeTQueue (consoleIO console) ConsoleShutdown
+  consoleOut      = writeTBQueue (consoleIO console) . ConsoleOut
+  consoleShutdown = writeTBQueue (consoleIO console) ConsoleShutdown

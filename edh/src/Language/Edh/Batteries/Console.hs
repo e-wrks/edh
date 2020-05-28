@@ -46,7 +46,7 @@ loggingProc !lhExpr !rhExpr !exit = do
         _ -> Nothing
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case parseSpec lhVal of
     Just (logLevel, StmtSrc (srcPos, _)) -> if logLevel < 0
-      -- as the log queue is a TQueue per se, log msgs from a failing STM
+      -- as the log queue is a TBQueue per se, log msgs from a failing STM
       -- transaction has no way to go into the queue then get logged, but the
       -- failing cases are especially in need of diagnostics, so negative log
       -- level number is used to instruct a debug trace.
@@ -112,7 +112,7 @@ conReadSourceProc !apk !exit = ask >>= \pgs ->
     Right (ps1, ps2) -> contEdhSTM $ do
       let !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context pgs
       cmdIn <- newEmptyTMVar
-      writeTQueue ioQ $ ConsoleIn cmdIn ps1 ps2
+      writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
       edhPerformSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
         src@EdhString{} -> exitEdhProc exit src
         _               -> error "impossible"
@@ -186,7 +186,7 @@ conReadCommandProc !apk !exit = ask >>= \pgs ->
                               }
             }
       cmdIn <- newEmptyTMVar
-      writeTQueue ioQ $ ConsoleIn cmdIn ps1 ps2
+      writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
       edhPerformSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
         EdhString !cmdCode ->
           local (const pgsCmd) $ evalEdh "<console>" cmdCode exit
@@ -228,7 +228,7 @@ conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
       printVS [] []              = exitEdhSTM pgs exit nil
       printVS [] ((k, v) : rest) = case v of
         EdhString !s -> do
-          writeTQueue ioQ
+          writeTBQueue ioQ
             $  ConsoleOut
             $  "  "
             <> T.pack (show k)
@@ -239,7 +239,7 @@ conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
         _ -> runEdhProc pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
           case vr of
             EdhString !s -> contEdhSTM $ do
-              writeTQueue ioQ
+              writeTBQueue ioQ
                 $  ConsoleOut
                 $  "  "
                 <> T.pack (show k)
@@ -250,12 +250,12 @@ conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
             _ -> error "bug"
       printVS (v : rest) !kvs = case v of
         EdhString !s -> do
-          writeTQueue ioQ $ ConsoleOut $ s <> "\n"
+          writeTBQueue ioQ $ ConsoleOut $ s <> "\n"
           printVS rest kvs
         _ -> runEdhProc pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
           case vr of
             EdhString !s -> contEdhSTM $ do
-              writeTQueue ioQ $ ConsoleOut $ s <> "\n"
+              writeTBQueue ioQ $ ConsoleOut $ s <> "\n"
               printVS rest kvs
             _ -> error "bug"
   printVS args $ Map.toList kwargs

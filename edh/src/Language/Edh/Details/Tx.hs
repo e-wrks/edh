@@ -44,20 +44,20 @@ driveEdhProgram !haltResult !progCtx !prog = do
           throwTo mainThId asyncExc
         _ -> throwTo mainThId e
   -- prepare the go routine forker
-  !forkQueue <- newTQueueIO
+  !forkQueue <- newTBQueueIO 100
   let
     forkDescendants :: IO ()
     forkDescendants =
       atomically
           (        (Nothing <$ readTMVar haltResult)
-          `orElse` (Just <$> readTQueue forkQueue)
+          `orElse` (Just <$> readTBQueue forkQueue)
           )
         >>= \case
               Nothing               -> return () -- Edh program halted, done
               Just (pgsForker, job) -> do
                 pgsDesc <- deriveState pgsForker
                 -- bootstrap on the descendant thread
-                atomically $ writeTQueue (edh'task'queue pgsDesc) $ EdhTxTask
+                atomically $ writeTBQueue (edh'task'queue pgsDesc) $ EdhTxTask
                   { edh'task'pgs   = pgsDesc
                   , edh'task'input = wuji pgsForker
                   , edh'task'job   = const job
@@ -73,7 +73,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
       -- derive program state for the descendant thread
       deriveState :: EdhProgState -> IO EdhProgState
       deriveState !pgsFrom = do
-        !descQueue  <- newTQueueIO
+        !descQueue  <- newTBQueueIO 200
         !perceivers <- newTVarIO []
         !defers     <- newTVarIO []
         return pgsFrom
@@ -116,7 +116,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
         )
     $ do
         -- prepare program state for main Edh thread
-        !mainQueue  <- newTQueueIO
+        !mainQueue  <- newTBQueueIO 300
         !perceivers <- newTVarIO []
         !defers     <- newTVarIO []
         let !pgsAtBoot = EdhProgState { edh'fork'queue = forkQueue
@@ -127,31 +127,31 @@ driveEdhProgram !haltResult !progCtx !prog = do
                                       , edh'context    = progCtx
                                       }
         -- bootstrap the program on main Edh thread
-        atomically $ writeTQueue mainQueue $ EdhTxTask pgsAtBoot
-                                                       (wuji pgsAtBoot)
-                                                       (const prog)
+        atomically $ writeTBQueue mainQueue $ EdhTxTask pgsAtBoot
+                                                        (wuji pgsAtBoot)
+                                                        (const prog)
         -- drive the main Edh thread
         driveEdhThread defers mainQueue
 
  where
 
-  nextTaskFromQueue :: TQueue EdhTask -> STM (Maybe EdhTask)
-  nextTaskFromQueue = orElse (Nothing <$ readTMVar haltResult) . tryReadTQueue
+  nextTaskFromQueue :: TBQueue EdhTask -> STM (Maybe EdhTask)
+  nextTaskFromQueue = orElse (Nothing <$ readTMVar haltResult) . tryReadTBQueue
 
   driveDefers :: [DeferRecord] -> IO ()
   driveDefers [] = return ()
-  driveDefers ((!pgsDefer, !deferedProg) : restDefers) = do
+  driveDefers ((!pgsDefer, !deferedProc) : restDefers) = do
     !deferPerceivers <- newTVarIO []
     !deferDefers     <- newTVarIO []
-    !deferTaskQueue  <- newTQueueIO
-    atomically $ writeTQueue deferTaskQueue $ EdhTxTask
+    !deferTaskQueue  <- newTBQueueIO 100
+    atomically $ writeTBQueue deferTaskQueue $ EdhTxTask
       pgsDefer { edh'task'queue = deferTaskQueue
                , edh'perceivers = deferPerceivers
                , edh'defers     = deferDefers
                , edh'in'tx      = False
                }
       (wuji pgsDefer)
-      (const deferedProg)
+      (const deferedProc)
     driveEdhThread deferDefers deferTaskQueue
     driveDefers restDefers
 
@@ -159,7 +159,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
   drivePerceiver !ev (_, pgsOrigin, reactExpr) = do
     !breakThread <- newEmptyTMVarIO
     let
-      !perceiverProg =
+      !perceiverProc =
         local
             (\pgs ->
               pgs { edh'context = (edh'context pgs) { contextMatch = ev } }
@@ -172,15 +172,15 @@ driveEdhProgram !haltResult !progCtx !prog = do
               contEdhSTM $ putTMVar breakThread doBreak
     !reactPerceivers <- newTVarIO []
     !reactDefers     <- newTVarIO []
-    !reactTaskQueue  <- newTQueueIO
+    !reactTaskQueue  <- newTBQueueIO 100
     let !pgsPerceiver = pgsOrigin { edh'task'queue = reactTaskQueue
                                   , edh'perceivers = reactPerceivers
                                   , edh'defers     = reactDefers
                                   , edh'in'tx      = False
                                   }
-    atomically $ writeTQueue reactTaskQueue $ EdhTxTask pgsPerceiver
-                                                        (wuji pgsPerceiver)
-                                                        (const perceiverProg)
+    atomically $ writeTBQueue reactTaskQueue $ EdhTxTask pgsPerceiver
+                                                         (wuji pgsPerceiver)
+                                                         (const perceiverProc)
     driveEdhThread reactDefers reactTaskQueue
     atomically $ readTMVar breakThread
   drivePerceivers :: [(EdhValue, PerceiveRecord)] -> IO Bool
@@ -189,7 +189,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
     True  -> return True
     False -> drivePerceivers rest
 
-  driveEdhThread :: TVar [DeferRecord] -> TQueue EdhTask -> IO ()
+  driveEdhThread :: TVar [DeferRecord] -> TBQueue EdhTask -> IO ()
   driveEdhThread !defers !tq = atomically (nextTaskFromQueue tq) >>= \case
     Nothing -> -- this thread is done, run defers lastly
       readTVarIO defers >>= driveDefers
@@ -198,11 +198,11 @@ driveEdhProgram !haltResult !progCtx !prog = do
         -- during ioAct, perceivers won't fire, program termination won't stop
         -- this thread
         doIt = ioAct >>= \actResult ->
-          atomically $ writeTQueue tq $ EdhTxTask pgs (wuji pgs) $ const $ job
+          atomically $ writeTBQueue tq $ EdhTxTask pgs (wuji pgs) $ const $ job
             actResult
       catch doIt $ \(e :: SomeException) ->
         atomically $ toEdhError pgs e $ \exv ->
-          writeTQueue tq
+          writeTBQueue tq
             $ EdhTxTask pgs (wuji pgs)
             $ const
             $ contEdhSTM
@@ -214,12 +214,15 @@ driveEdhProgram !haltResult !progCtx !prog = do
           Left{} -> -- terminate this thread, after running defers lastly
             readTVarIO defers >>= driveDefers
           Right !actResult -> do
-            atomically $ writeTQueue tq $ EdhTxTask pgs (wuji pgs) $ const $ job
-              actResult
+            atomically
+              $ writeTBQueue tq
+              $ EdhTxTask pgs (wuji pgs)
+              $ const
+              $ job actResult
             driveEdhThread defers tq -- loop another iteration for the thread
       catch doIt $ \(e :: SomeException) -> do
         atomically $ toEdhError pgs e $ \exv ->
-          writeTQueue tq
+          writeTBQueue tq
             $ EdhTxTask pgs (wuji pgs)
             $ const
             $ contEdhSTM

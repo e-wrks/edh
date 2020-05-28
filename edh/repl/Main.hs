@@ -19,7 +19,7 @@ main :: IO ()
 main = do
 
   console <- defaultEdhConsole defaultEdhConsoleSettings
-  let consoleOut = writeTQueue (consoleIO console) . ConsoleOut
+  let consoleOut = writeTBQueue (consoleIO console) . ConsoleOut
 
   void $ forkFinally (edhProgLoop console) $ \result -> do
     case result of
@@ -27,7 +27,7 @@ main = do
         atomically $ consoleOut $ "💥 " <> T.pack (show e)
       Right _ -> pure ()
     -- shutdown console IO anyway
-    atomically $ writeTQueue (consoleIO console) ConsoleShutdown
+    atomically $ writeTBQueue (consoleIO console) ConsoleShutdown
 
   atomically $ do
     consoleOut ">> Bare Đ (Edh) Interpreter <<\n"

@@ -463,7 +463,7 @@ worldContext !world = Context
 -- | Checkout 'defaultEdhConsole' and 'defaultEdhIOLoop' from the
 -- default batteries for implementation details, or just use that.
 data EdhConsole = EdhConsole {
-    consoleIO :: !(TQueue EdhConsoleIO)
+    consoleIO :: !(TBQueue EdhConsoleIO)
   , consoleIOLoop :: IO ()
   , consoleLogLevel :: !LogLevel
   , consoleLogger :: !EdhLogger
@@ -492,8 +492,8 @@ type EdhProc = EdhMonad (STM ())
 
 -- | The states of a program
 data EdhProgState = EdhProgState {
-      edh'fork'queue :: !(TQueue (EdhProgState, EdhProc))
-    , edh'task'queue :: !(TQueue EdhTask)
+      edh'fork'queue :: !(TBQueue (EdhProgState, EdhProc))
+    , edh'task'queue :: !(TBQueue EdhTask)
     , edh'perceivers :: !(TVar [PerceiveRecord])
     , edh'defers :: !(TVar [DeferRecord])
     , edh'in'tx :: !Bool
@@ -541,7 +541,7 @@ exitEdhSTM !pgs !exit !val =
 exitEdhSTM' :: EdhProgState -> EdhProcExit -> OriginalValue -> STM ()
 exitEdhSTM' !pgs !exit !result = if edh'in'tx pgs
   then join $ runReaderT (exit result) pgs
-  else writeTQueue (edh'task'queue pgs) $ EdhTxTask pgs result exit
+  else writeTBQueue (edh'task'queue pgs) $ EdhTxTask pgs result exit
 {-# INLINE exitEdhSTM' #-}
 
 -- | An Edh task record

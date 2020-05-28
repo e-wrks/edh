@@ -42,7 +42,7 @@ import           Language.Edh.Details.Utils
 
 -- | Fork a GHC thread to run the specified Edh proc concurrently
 forkEdh :: EdhProgState -> EdhProc -> STM ()
-forkEdh !pgs !p = writeTQueue (edh'fork'queue pgs) (pgs, p)
+forkEdh !pgs !p = writeTBQueue (edh'fork'queue pgs) (pgs, p)
 
 
 -- | Fork a new Edh thread to run the specified event producer, but hold the 
@@ -1659,7 +1659,7 @@ resolveEdhAttrAddr !pgs (SymbolicAttr !symName) !exit =
 edhPerformSTM :: EdhProgState -> STM a -> (a -> EdhProc) -> STM ()
 edhPerformSTM !pgs !act !exit = if edh'in'tx pgs
   then throwEdhSTM pgs UsageError "You don't wait stm from within a transaction"
-  else writeTQueue (edh'task'queue pgs) $ EdhSTMTask pgs act exit
+  else writeTBQueue (edh'task'queue pgs) $ EdhSTMTask pgs act exit
 
 -- | Perform a synchronous IO action from an Edh thread
 --
@@ -1670,7 +1670,7 @@ edhPerformSTM !pgs !act !exit = if edh'in'tx pgs
 edhPerformIO :: EdhProgState -> IO a -> (a -> EdhProc) -> STM ()
 edhPerformIO !pgs !act !exit = if edh'in'tx pgs
   then throwEdhSTM pgs UsageError "You don't perform IO within a transaction"
-  else writeTQueue (edh'task'queue pgs) $ EdhIOTask pgs act exit
+  else writeTBQueue (edh'task'queue pgs) $ EdhIOTask pgs act exit
 
 
 -- | Create an Edh error as both an Edh exception value and a host exception

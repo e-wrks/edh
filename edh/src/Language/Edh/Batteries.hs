@@ -54,7 +54,7 @@ defaultEdhConsoleSettings = Settings
   }
 
 -- | This console serializes all out messages to 'stdout', all log messages
--- to 'stderr', through a 'TQueue', so they don't mess up under concurrency.
+-- to 'stderr', through a 'TBQueue', so they don't mess up under concurrency.
 --
 -- Console input will wait the out queue being idle before prompting, this
 -- is not perfect but better than otherwise more naive implementations.
@@ -68,8 +68,8 @@ defaultEdhConsole !inputSettings = do
   envLogLevel <- lookupEnv "EDH_LOG_LEVEL"
   logIdle     <- newEmptyTMVarIO
   outIdle     <- newEmptyTMVarIO
-  ioQ         <- newTQueueIO
-  logQueue    <- newTQueueIO
+  ioQ         <- newTBQueueIO 100
+  logQueue    <- newTBQueueIO 100
   let logLevel = case envLogLevel of
         Nothing      -> 20
         Just "DEBUG" -> 10
@@ -84,13 +84,13 @@ defaultEdhConsole !inputSettings = do
       flushLogs = atomically $ readTMVar logIdle
       logPrinter :: IO ()
       logPrinter = do
-        lr <- atomically (tryReadTQueue logQueue) >>= \case
+        lr <- atomically (tryReadTBQueue logQueue) >>= \case
           Just !lr -> do
             void $ atomically $ tryTakeTMVar logIdle
             return lr
           Nothing -> do
             void $ atomically $ tryPutTMVar logIdle ()
-            lr <- atomically $ readTQueue logQueue
+            lr <- atomically $ readTBQueue logQueue
             void $ atomically $ tryTakeTMVar logIdle
             return lr
         TIO.hPutStr stderr lr
@@ -100,10 +100,13 @@ defaultEdhConsole !inputSettings = do
         void $ tryTakeTMVar logIdle
         case pkargs of
           ArgsPack [!argVal] !kwargs | Map.null kwargs ->
-            writeTQueue logQueue $! T.pack logPrefix <> logString argVal <> "\n"
+            writeTBQueue logQueue
+              $! T.pack logPrefix
+              <> logString argVal
+              <> "\n"
           _ -> -- todo: format structured log record,
                -- with some log parsers in mind
-            writeTQueue logQueue $! T.pack (logPrefix ++ show pkargs) <> "\n"
+            writeTBQueue logQueue $! T.pack (logPrefix ++ show pkargs) <> "\n"
        where
         logString :: EdhValue -> Text
         logString (EdhString s) = s
@@ -123,13 +126,13 @@ defaultEdhConsole !inputSettings = do
                 _               -> "😥 "
       ioLoop :: InputT IO ()
       ioLoop = do
-        ior <- liftIO $ atomically (tryReadTQueue ioQ) >>= \case
+        ior <- liftIO $ atomically (tryReadTBQueue ioQ) >>= \case
           Just !ior -> do
             void $ atomically $ tryTakeTMVar outIdle
             return ior
           Nothing -> do
             void $ atomically $ tryPutTMVar outIdle ()
-            ior <- atomically $ readTQueue ioQ
+            ior <- atomically $ readTBQueue ioQ
             void $ atomically $ tryTakeTMVar outIdle
             return ior
         case ior of
