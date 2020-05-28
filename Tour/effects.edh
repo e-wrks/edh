@@ -1,4 +1,57 @@
 
+{# the STATE example at: https://www.eff-lang.org/try/
+
+(* We can improve it by giving the state a default initial value using the
+   "finally" keyword. The value of the initial value is given to the handler
+   as a parameter. By modifying the case for values we also return the result
+   and the final state value instead of just the result. *)
+
+let better_state initial = handler
+  | y -> (fun s -> (y, s))
+  | effect Get k -> (fun s -> (continue k s) s)
+  | effect (Set s') k -> (fun _ -> (continue k ()) s')
+  | finally f -> f initial
+;;
+
+with better_state 30 handle
+  let x = perform Get in
+  perform (Set (2 * x));
+  perform Get + 10
+;;
+
+ #}
+
+{
+  # convention: retrieve the state which is an int
+  Get = Symbol('Get')
+  # convention: set the state, should be an int
+  Set = Symbol('Set')
+
+  method better_state (initial) {
+    # this anonymous class procedure constructs an object instance,
+    # serving as the state storage
+    # the magic method __init__ receives construction args
+    class _ method __init__ (act) {
+      this.s = initial
+      effect method @Get () this.s
+      effect method @Set (s') this.s = s'
+      return (act(), this.s)
+    }
+  }
+
+  better_state (30) (
+    # this anonymous nullary procedure simulates a niladic computation
+    {method _ () {
+
+      let x = perform @Get ()
+      perform @Set (2 * x)
+      perform @Get () + 10
+
+    }}
+  )
+}
+
+
 export mattersLot = Symbol('mattersLot')
 
 {
