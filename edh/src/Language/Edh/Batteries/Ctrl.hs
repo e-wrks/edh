@@ -164,7 +164,7 @@ branchProc !lhExpr !rhExpr !exit = do
         -> case ctxMatch of
           EdhString !fullStr ->
             evalExpr matchExpr $ \(OriginalValue !mVal _ _) ->
-              edhValueStr mVal $ \(OriginalValue !mStrVal _ _) ->
+              edhValueStr (edhUltimate mVal) $ \(OriginalValue !mStrVal _ _) ->
                 case mStrVal of
                   EdhString !mStr -> if T.null mStr
                     then throwEdh UsageError
@@ -188,13 +188,13 @@ branchProc !lhExpr !rhExpr !exit = do
         -> case ctxMatch of
           EdhString !fullStr ->
             evalExpr prefixExpr $ \(OriginalValue !lhVal _ _) ->
-              edhValueStr lhVal $ \(OriginalValue !lhStrVal _ _) ->
-                case lhStrVal of
-                  EdhString !lhStr -> case T.stripPrefix lhStr fullStr of
-                    Just !suffix -> contEdhSTM
-                      $ branchMatched [(suffixName, EdhString suffix)]
-                    _ -> exitEdhProc exit EdhFallthrough
-                  _ -> error "bug: edhValueStr returned non-string"
+              edhValueStr (edhUltimate lhVal)
+                $ \(OriginalValue !lhStrVal _ _) -> case lhStrVal of
+                    EdhString !lhStr -> case T.stripPrefix lhStr fullStr of
+                      Just !suffix -> contEdhSTM
+                        $ branchMatched [(suffixName, EdhString suffix)]
+                      _ -> exitEdhProc exit EdhFallthrough
+                    _ -> error "bug: edhValueStr returned non-string"
           _ -> exitEdhProc exit EdhFallthrough
 
       -- { prefix @< match } -- suffix cut pattern
@@ -202,13 +202,13 @@ branchProc !lhExpr !rhExpr !exit = do
         -> case ctxMatch of
           EdhString !fullStr ->
             evalExpr suffixExpr $ \(OriginalValue !rhVal _ _) ->
-              edhValueStr rhVal $ \(OriginalValue !rhStrVal _ _) ->
-                case rhStrVal of
-                  EdhString !rhStr -> case T.stripSuffix rhStr fullStr of
-                    Just !prefix -> contEdhSTM
-                      $ branchMatched [(prefixName, EdhString prefix)]
-                    _ -> exitEdhProc exit EdhFallthrough
-                  _ -> error "bug: edhValueStr returned non-string"
+              edhValueStr (edhUltimate rhVal)
+                $ \(OriginalValue !rhStrVal _ _) -> case rhStrVal of
+                    EdhString !rhStr -> case T.stripSuffix rhStr fullStr of
+                      Just !prefix -> contEdhSTM
+                        $ branchMatched [(prefixName, EdhString prefix)]
+                      _ -> exitEdhProc exit EdhFallthrough
+                    _ -> error "bug: edhValueStr returned non-string"
           _ -> exitEdhProc exit EdhFallthrough
 
       -- {( x,y,z,... )} -- positional args / tuple pattern
