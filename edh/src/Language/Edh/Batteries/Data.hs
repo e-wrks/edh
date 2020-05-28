@@ -101,6 +101,8 @@ defProc !lhExpr _ _ =
 
 -- | operator (?:=) - named value definition if missing
 defMissingProc :: EdhIntrinsicOp
+defMissingProc (AttrExpr (DirectRef (NamedAttr "_"))) _ _ =
+  throwEdh UsageError "Not so reasonable: _ ?:= xxx"
 defMissingProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
   pgs <- ask
   let !ent   = scopeEntity $ contextScope $ edh'context pgs

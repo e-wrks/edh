@@ -76,28 +76,20 @@ assignProc !lhExpr !rhExpr !exit = do
 
 -- | operator (?=)
 assignMissingProc :: EdhIntrinsicOp
-assignMissingProc !lhExpr !rhExpr !exit = do
-  pgs <- ask
-  case lhExpr of
-    AttrExpr !addr -> case addr of
-      DirectRef (NamedAttr "_") ->
-        throwEdh UsageError "Not so reasonable: _ ?= xxx"
-      DirectRef !addr' -> contEdhSTM $ resolveEdhAttrAddr pgs addr' $ \key ->
-        do
-          let !ent   = scopeEntity $ contextScope $ edh'context pgs
-              !pgsTx = pgs { edh'in'tx = True } -- must within a tx
-          lookupEntityAttr pgsTx ent key >>= \case
-            EdhNil ->
-              runEdhProc pgsTx
-                $ evalExpr rhExpr
-                $ \(OriginalValue !rhVal _ _) -> contEdhSTM $ do
-                    changeEntityAttr pgsTx ent key rhVal
-                    exitEdhSTM pgs exit rhVal
-            !preVal -> exitEdhSTM pgs exit preVal
-      _ ->
-        throwEdh UsageError $ "Invalid left-hand expression to (?=) " <> T.pack
-          (show lhExpr)
-    _ ->
-      throwEdh UsageError $ "Invalid left-hand expression to (?=) " <> T.pack
-        (show lhExpr)
+assignMissingProc (AttrExpr (DirectRef (NamedAttr "_"))) _ _ =
+  throwEdh UsageError "Not so reasonable: _ ?= xxx"
+assignMissingProc (AttrExpr (DirectRef !addr)) !rhExpr !exit = ask >>= \pgs ->
+  contEdhSTM $ resolveEdhAttrAddr pgs addr $ \key -> do
+    let !ent   = scopeEntity $ contextScope $ edh'context pgs
+        !pgsTx = pgs { edh'in'tx = True } -- must within a tx
+    lookupEntityAttr pgsTx ent key >>= \case
+      EdhNil ->
+        runEdhProc pgsTx $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+          contEdhSTM $ do
+            changeEntityAttr pgsTx ent key rhVal
+            exitEdhSTM pgs exit rhVal
+      !preVal -> exitEdhSTM pgs exit preVal
+assignMissingProc !lhExpr _ _ =
+  throwEdh EvalError $ "Invalid left-hand expression to (?=) " <> T.pack
+    (show lhExpr)
 
