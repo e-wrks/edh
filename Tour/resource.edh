@@ -3,10 +3,9 @@
 
   # a generator can be used to implement sth like Python's
   # context manager
-  # bonus that nondeterministic is modeled as well
-  generator withResource(initiator) {
-    console.info<| 'allocating ' ++ initiator
-    res = 'allocated resource [' ++ initiator ++ ']'
+  generator withResource(resArgs) {
+    console.info<| 'allocating ' ++ resArgs
+    res = 'allocated [' ++ resArgs ++ ']'
     {
       # unlike in Python, a generator procedure in Edh can
       # only be call by a for-from-do loop, and exceptions
@@ -15,12 +14,11 @@
       yield res
     } @=> {  # unlike generator in Python, this finally
       # block is guaranteed to run
-      console.info<| 'releaing resource [' ++ initiator ++ ']'
+      console.info<| 'releaing [' ++ resArgs ++ ']'
     }
   }
 
   # the for-from-do loop can act like Python's `with`
-  # bonus that nondeterministic is modeled as well
   for res from withResource('some-resource') do {
     console.info<| 'using ' ++ res
     throw IOError('some failure')
