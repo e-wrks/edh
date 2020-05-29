@@ -271,8 +271,9 @@ evalStmt' !stmt !exit = do
     FallthroughStmt -> exitEdhProc exit EdhFallthrough
     RethrowStmt     -> exitEdhProc exit EdhRethrow
 
-    ReturnStmt expr -> evalExpr expr
-      $ \(OriginalValue !val _ _) -> exitEdhProc exit (EdhReturn val)
+    ReturnStmt expr -> evalExpr expr $ \(OriginalValue !val _ _) -> case val of
+      EdhReturn{} -> throwEdh UsageError "you don't double return"
+      _           -> exitEdhProc exit (EdhReturn val)
 
 
     AtoIsoStmt expr ->
