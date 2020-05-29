@@ -1,0 +1,26 @@
+
+{
+  method asyncRisk() {
+    defer {
+      ;-1<| 'async defer cleanup'
+    }
+
+    throw '!AsyncFailure!'
+  }
+
+  {
+    go asyncRisk()
+  } $=> {
+    { exc } -> {
+      ;-1<| 'handling ' ++ exc
+    }
+  }
+
+  # too obviously, but it could really go wrong with,
+  # a continuation based implementation
+  ;-1<| 'this should run only once by forker thread'
+
+  for _ from console.everySeconds(1) do { break }
+
+  ;-1<| 'done.'
+}

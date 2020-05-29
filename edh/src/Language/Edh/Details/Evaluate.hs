@@ -10,6 +10,7 @@ import           Control.Exception
 import           Control.Monad.Except
 import           Control.Monad.Reader
 import           Control.Monad.State.Strict
+import           Control.Concurrent
 import           Control.Concurrent.STM
 
 import           Data.Unique
@@ -1151,7 +1152,8 @@ evalExpr expr exit = do
           Nothing -> throwEdh EvalError "Unexpected yield"
           Just (pgsGenrCaller, yieldVal) ->
             contEdhSTM $ runEdhProc pgsGenrCaller $ yieldVal valToYield $ \case
-              Left  !exv      -> edhThrowSTM pgs exv
+              Left (pgsThrower, exv) ->
+                edhThrowSTM pgsThrower { edh'context = edh'context pgs } exv
               Right !doResult -> case doResult of
                 EdhContinue -> -- for loop should send nil here instead in
                   -- case continue issued from the do block
@@ -1839,38 +1841,50 @@ edhCatch !tryAct !exit !passOn = ask >>= \pgsOuter ->
     $ edhCatchSTM pgsOuter
                   (\pgsTry exit' -> runEdhProc pgsTry (tryAct exit'))
                   exit
-    $ \exv recover rethrow -> do
+    $ \pgsThrower exv recover rethrow -> do
         let !ctxOuter = edh'context pgsOuter
             !ctxHndl  = ctxOuter { contextMatch = exv }
-            !pgsHndl  = pgsOuter { edh'context = ctxHndl }
+            !pgsHndl  = pgsThrower { edh'context = ctxHndl }
         runEdhProc pgsHndl $ passOn recover $ contEdhSTM rethrow
 edhCatchSTM
   :: EdhProgState
   -> (EdhProgState -> EdhProcExit -> STM ())  -- ^ tryAct
   -> EdhProcExit
-  -> (  EdhValue     -- ^ exception value or nil
+  -> (  EdhProgState -- ^ thrower's pgs, the task queue is important
+     -> EdhValue     -- ^ exception value or nil
      -> EdhProcExit  -- ^ recover exit
      -> STM ()       -- ^ rethrow exit
      -> STM ()
      )
   -> STM ()
 edhCatchSTM !pgsOuter !tryAct !exit !passOn = do
+  hndlrTh <- unsafeIOToSTM myThreadId
   let
     !ctxOuter   = edh'context pgsOuter
     !scopeOuter = contextScope ctxOuter
-    !tryScope   = scopeOuter { exceptionHandler = hdlr }
+    !tryScope   = scopeOuter { exceptionHandler = hndlr }
     !tryCtx = ctxOuter { callStack = tryScope :| NE.tail (callStack ctxOuter) }
     !pgsTry     = pgsOuter { edh'context = tryCtx }
     recover :: EdhProcExit
-    recover = local (const pgsOuter) . exit
-    hdlr :: EdhExcptHndlr
-    hdlr !exv !rethrow =
-      contEdhSTM $ passOn exv recover $ runEdhProc pgsOuter $ exceptionHandler
-        scopeOuter
-        exv
-        rethrow
-  tryAct pgsTry $ \tryResult ->
-    contEdhSTM $ passOn nil recover $ exitEdhSTM' pgsOuter exit tryResult
+    recover !result = contEdhSTM $ do
+      rcvrTh <- unsafeIOToSTM myThreadId
+      if rcvrTh /= hndlrTh
+        then -- don't continue from a different thread
+             return () -- other than the handler installer
+        else runEdhProc pgsOuter $ exit result
+    hndlr :: EdhExcptHndlr
+    hndlr !exv !rethrow = do
+      pgsThrower <- ask
+      contEdhSTM
+        $ passOn pgsThrower exv recover
+        $ runEdhProc pgsThrower { edh'context = edh'context pgsOuter }
+        $ exceptionHandler scopeOuter exv rethrow
+  tryAct pgsTry $ \tryResult -> contEdhSTM $ do
+    rcvrTh <- unsafeIOToSTM myThreadId
+    if rcvrTh /= hndlrTh
+      then --  don't continue from a different thread
+           return () -- other than the handler installer
+      else passOn pgsOuter nil recover $ exitEdhSTM' pgsOuter exit tryResult
 
 
 -- | Construct an Edh object from a class
@@ -2247,14 +2261,15 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
         -- to continue the generator execution, result passed to the 'genrCont'
         -- here is the eval'ed value of the `yield` expression from the
         -- generator's perspective, or exception to be thrown from there
-      recvYield
-        :: EdhProcExit
-        -> EdhValue
-        -> (Either EdhValue EdhValue -> STM ())
-        -> EdhProc
-      recvYield !exit !yielded'val !genrCont = do
-        pgs <- ask
-        let !ctx   = edh'context pgs
+        recvYield
+          :: EdhProcExit
+          -> EdhValue
+          -> (Either (EdhProgState, EdhValue) EdhValue -> STM ())
+          -> EdhProc
+        recvYield !exit !yielded'val !genrCont = do
+          pgs <- ask
+          let
+            !ctx   = edh'context pgs
             !scope = contextScope ctx
             doOne !pgsTry !exit' =
               runEdhProc pgsTry
@@ -2291,21 +2306,21 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                 -- normal result from do, send to generator
                 iterCollector doResult
                 genrCont $ Right doResult
-        case yielded'val of
-          EdhNil -> -- nil yielded from a generator effectively early stops
-            exitEdhProc exit nil
-          EdhContinue -> throwEdh EvalError "generator yielded continue"
-          EdhBreak    -> throwEdh EvalError "generator yielded break"
-          EdhReturn{} -> throwEdh EvalError "generator yielded return"
-          _ ->
-            contEdhSTM
-              $ edhCatchSTM pgs doOne doneOne
-              $ \ !exv _recover rethrow -> case exv of
-                  EdhNil -> rethrow -- no exception occurred in do block
-                  _ -> -- exception uncaught in do block
-                    -- propagate to the generator, the genr may catch it or 
-                    -- the exception will propagate to outer of for-from-do
-                    genrCont $ Left exv
+          case yielded'val of
+            EdhNil -> -- nil yielded from a generator effectively early stops
+              exitEdhProc exit nil
+            EdhContinue -> throwEdh EvalError "generator yielded continue"
+            EdhBreak    -> throwEdh EvalError "generator yielded break"
+            EdhReturn{} -> throwEdh EvalError "generator yielded return"
+            _ ->
+              contEdhSTM
+                $ edhCatchSTM pgs doOne doneOne
+                $ \ !pgsThrower !exv _recover rethrow -> case exv of
+                    EdhNil -> rethrow -- no exception occurred in do block
+                    _ -> -- exception uncaught in do block
+                      -- propagate to the generator, the genr may catch it or 
+                      -- the exception will propagate to outer of for-from-do
+                      genrCont $ Left (pgsThrower, exv)
 
     runEdhProc pgsLooper $ case deParen iterExpr of
       CallExpr !procExpr !argsSndr -> -- loop over a generator

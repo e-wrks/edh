@@ -309,9 +309,11 @@ type EdhGenrCaller
       -- the yield receiver, a.k.a. the caller's continuation
     ,  EdhValue -- one value yielded from the generator
     -> ( -- continuation of the genrator
-        -- Left is exception to be thrown from that `yield` expr
-        -- Right is value given to that `yield` expr
-        Either EdhValue EdhValue -> STM ())
+        -- Left (pgsThrower, exv)
+        --   exception to be thrown from that `yield` expr
+        -- Right yieldedValue
+        --   value given to that `yield` expr
+        Either (EdhProgState, EdhValue) EdhValue -> STM ())
     -> EdhProc
     )
 

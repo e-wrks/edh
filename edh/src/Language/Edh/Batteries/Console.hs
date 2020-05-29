@@ -278,7 +278,8 @@ timelyNotify !pgs !delayMicros genr'caller@(!pgs', !iter'cb) !exit = do
     getTime Realtime
   -- yield the nanosecond timestamp to iterator
   runEdhProc pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \case
-    Left  !exv             -> edhThrowSTM pgs exv
+    Left (pgsThrower, exv) ->
+      edhThrowSTM pgsThrower { edh'context = edh'context pgs } exv
     Right EdhBreak         -> exitEdhSTM pgs exit nil
     Right (EdhReturn !rtn) -> exitEdhSTM pgs exit rtn
     _                      -> timelyNotify pgs delayMicros genr'caller exit
