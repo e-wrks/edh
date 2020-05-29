@@ -1145,14 +1145,33 @@ evalExpr expr exit = do
 
     -- yield stmt evals to the value of caller's `do` expression
     YieldExpr yieldExpr ->
-      evalExpr yieldExpr $ \(OriginalValue !yieldResult _ _) ->
+      evalExpr yieldExpr $ \(OriginalValue !valToYield _ _) ->
         case genr'caller of
           Nothing -> throwEdh EvalError "Unexpected yield"
-          Just (pgsGenrCaller, yieldTo) ->
-            contEdhSTM
-              $ runEdhProc pgsGenrCaller
-              $ yieldTo yieldResult
-              $ \doResult -> exitEdhSTM pgs exit doResult
+          Just (pgsGenrCaller, yieldVal) ->
+            contEdhSTM $ runEdhProc pgsGenrCaller $ yieldVal valToYield $ \case
+              Left  !exv      -> edhThrowSTM pgs exv
+              Right !doResult -> case doResult of
+                EdhContinue -> -- for loop should send nil here instead in
+                  -- case continue issued from the do block
+                  throwEdhSTM pgs EvalError "<continue> reached yield"
+                EdhBreak -> -- for loop is breaking, let the generator
+                  -- return nil
+                  -- the generator can intervene the return, that'll be
+                  -- black magic
+                  exitEdhSTM pgs exit $ EdhReturn EdhNil
+                EdhReturn loopRtn@EdhReturn{} -> -- this must be synthesiszed,
+                  -- in case do block issued return, the for loop wrap it as
+                  -- double return, so as to let the yield expr in the generator
+                  -- propagate the return value, as the result of the for loop
+                  -- the generator can intervene the return, that'll be
+                  -- black magic
+                  exitEdhSTM pgs exit loopRtn
+                EdhReturn{} -> -- for loop should have double-wrapped the
+                  -- return, which is handled above, in case its do block
+                  -- issued a return
+                  throwEdhSTM pgs EvalError "<return> reached yield"
+                _ -> exitEdhSTM pgs exit doResult
 
     ForExpr argsRcvr iterExpr doExpr ->
       contEdhSTM
@@ -2226,44 +2245,66 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
         -- receive one yielded value from the generator, the 'genrCont' here is
         -- to continue the generator execution, result passed to the 'genrCont'
         -- here is the eval'ed value of the `yield` expression from the
-        -- generator's perspective
-        recvYield :: EdhProcExit -> EdhValue -> (EdhValue -> STM ()) -> EdhProc
-        recvYield !exit !yielded'val !genrCont = do
-          pgs <- ask
-          let !ctx   = edh'context pgs
-              !scope = contextScope ctx
-          case yielded'val of
-            EdhContinue ->
-              throwEdh EvalError "Unexpected continue from generator"
-            EdhBreak -> throwEdh EvalError "Unexpected break from generator"
-            EdhNil -> -- nil yielded from a generator effectively early stops
-              exitEdhProc exit nil
-            _ ->
-              recvEdhArgs
-                  ctx
-                  argsRcvr
-                  (case yielded'val of
-                    EdhArgsPack apk -> apk
-                    _               -> ArgsPack [yielded'val] Map.empty
-                  )
+        -- generator's perspective, or exception to be thrown from there
+      recvYield
+        :: EdhProcExit
+        -> EdhValue
+        -> (Either EdhValue EdhValue -> STM ())
+        -> EdhProc
+      recvYield !exit !yielded'val !genrCont = do
+        pgs <- ask
+        let !ctx   = edh'context pgs
+            !scope = contextScope ctx
+            doOne !pgsTry !exit' =
+              runEdhProc pgsTry
+                $ recvEdhArgs
+                    (edh'context pgsTry)
+                    argsRcvr
+                    (case yielded'val of
+                      EdhArgsPack apk -> apk
+                      _               -> ArgsPack [yielded'val] Map.empty
+                    )
                 $ \em -> contEdhSTM $ do
-                    updateEntityAttrs pgs (scopeEntity scope) $ Map.toList em
-                    runEdhProc pgs
-                      $ evalExpr doExpr
-                      $ \(OriginalValue !doResult _ _) -> case doResult of
-                          EdhContinue ->
-                            -- propagate the continue to generator
-                            contEdhSTM $ genrCont EdhContinue
-                          EdhBreak ->
-                            -- break out of the for-from-do loop
-                            exitEdhProc exit nil
-                          EdhReturn !rtnVal ->
-                            -- early return from for-from-do
-                            exitEdhProc exit (EdhReturn rtnVal)
-                          _ -> contEdhSTM $ do
-                            -- normal result from do, send to generator
-                            iterCollector doResult
-                            genrCont doResult
+                    updateEntityAttrs pgsTry (scopeEntity scope)
+                      $ Map.toList em
+                    runEdhProc pgsTry $ evalExpr doExpr exit'
+            doneOne (OriginalValue !doResult _ _) = case doResult of
+              EdhContinue ->
+                -- propagate the continue to generator
+                contEdhSTM $ genrCont $ Right EdhContinue
+              EdhBreak ->
+                -- break out of the for-from-do loop,
+                -- the generator on <break> yielded will return
+                -- nil, effectively have the for loop eval to nil
+                contEdhSTM $ genrCont $ Right EdhBreak
+              EdhReturn EdhReturn{} -> -- this has special meaning
+                -- Edh code should not use this pattern
+                throwEdh UsageError "double return from do-of-for?"
+              EdhReturn !rtnVal ->
+                -- early return from for-from-do, the geneerator on
+                -- double wrapped return yielded, will unwrap one
+                -- level and return the result, effectively have the
+                -- for loop eval to return that 
+                contEdhSTM $ genrCont $ Right $ EdhReturn $ EdhReturn rtnVal
+              _ -> contEdhSTM $ do
+                -- normal result from do, send to generator
+                iterCollector doResult
+                genrCont $ Right doResult
+        case yielded'val of
+          EdhNil -> -- nil yielded from a generator effectively early stops
+            exitEdhProc exit nil
+          EdhContinue -> throwEdh EvalError "generator yielded continue"
+          EdhBreak    -> throwEdh EvalError "generator yielded break"
+          EdhReturn{} -> throwEdh EvalError "generator yielded return"
+          _ ->
+            contEdhSTM
+              $ edhCatchSTM pgs doOne doneOne
+              $ \ !exv _recover rethrow -> case exv of
+                  EdhNil -> rethrow -- no exception occurred in do block
+                  _ -> -- exception uncaught in do block
+                    -- propagate to the generator, the genr may catch it or 
+                    -- the exception will propagate to outer of for-from-do
+                    genrCont $ Left exv
 
     runEdhProc pgsLooper $ case deParen iterExpr of
       CallExpr !procExpr !argsSndr -> -- loop over a generator
@@ -2323,7 +2364,10 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                             EdhBreak ->
                               -- todo what's the case a generator would break out?
                               contEdhSTM $ exitEdhSTM pgsLooper exit nil
-                            EdhReturn !rtnVal ->
+                            EdhReturn !rtnVal -> -- it'll be double return, in
+                              -- case do block issued return and propagated here
+                              -- or the generator can make it that way, which is
+                              -- black magic
                               -- unwrap the return, as result of this for-loop 
                               contEdhSTM $ exitEdhSTM pgsLooper exit rtnVal
                             -- otherwise passthrough
