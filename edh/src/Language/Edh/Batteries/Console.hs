@@ -50,10 +50,12 @@ loggingProc !lhExpr !rhExpr !exit = do
       -- transaction has no way to go into the queue then get logged, but the
       -- failing cases are especially in need of diagnostics, so negative log
       -- level number is used to instruct a debug trace.
-      then
-        let tracePrefix = " 🐞 " ++ sourcePosPretty srcPos ++ " ❗ "
-        in
-          evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case rhVal of
+      then contEdhSTM $ do
+        th <- unsafeIOToSTM myThreadId
+        let !tracePrefix =
+              " 🐞 " <> show th <> " 👉 " <> sourcePosPretty srcPos <> " ❗ "
+        runEdhProc pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+          case rhVal of
             EdhString !logStr ->
               trace (tracePrefix ++ T.unpack logStr) $ exitEdhProc exit nil
             _ -> edhValueRepr rhVal $ \(OriginalValue !rhRepr _ _) ->
@@ -269,40 +271,43 @@ conNowProc _ !exit = do
     exitEdhSTM pgs exit (EdhDecimal $ fromInteger nanos)
 
 
-timelyNotify :: Int -> EdhGenrCaller -> STM ()
-timelyNotify !delayMicros genr'caller@(!pgs', !iter'cb) = do
+timelyNotify :: EdhProgState -> Int -> EdhGenrCaller -> EdhProcExit -> STM ()
+timelyNotify !pgs !delayMicros genr'caller@(!pgs', !iter'cb) !exit = do
   nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ do
     threadDelay delayMicros
     getTime Realtime
   -- yield the nanosecond timestamp to iterator
-  runEdhProc pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \_ ->
-    timelyNotify delayMicros genr'caller
+  runEdhProc pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \case
+    Left  !exv             -> edhThrowSTM pgs exv
+    Right EdhBreak         -> exitEdhSTM pgs exit nil
+    Right (EdhReturn !rtn) -> exitEdhSTM pgs exit rtn
+    _                      -> timelyNotify pgs delayMicros genr'caller exit
 
 -- | host generator console.everyMicros(n) - with fixed interval
 conEveryMicrosProc :: EdhProcedure
-conEveryMicrosProc !apk _ = ask >>= \pgs ->
+conEveryMicrosProc !apk !exit = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of
     Nothing          -> throwEdh EvalError "Can only be called as generator"
     Just genr'caller -> case _parseInterval apk of
-      Just !n -> contEdhSTM $ timelyNotify n genr'caller
+      Just !n -> contEdhSTM $ timelyNotify pgs n genr'caller exit
       _       -> throwEdh EvalError "Invalid argument to console.everyMicros(n)"
 
 -- | host generator console.everyMillis(n) - with fixed interval
 conEveryMillisProc :: EdhProcedure
-conEveryMillisProc !apk _ = ask >>= \pgs ->
+conEveryMillisProc !apk !exit = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of
     Nothing          -> throwEdh EvalError "Can only be called as generator"
     Just genr'caller -> case _parseInterval apk of
-      Just !n -> contEdhSTM $ timelyNotify (1000 * n) genr'caller
+      Just !n -> contEdhSTM $ timelyNotify pgs (1000 * n) genr'caller exit
       _       -> throwEdh EvalError "Invalid argument to console.everyMillis(n)"
 
 -- | host generator console.everySeconds(n) - with fixed interval
 conEverySecondsProc :: EdhProcedure
-conEverySecondsProc !apk _ = ask >>= \pgs ->
+conEverySecondsProc !apk !exit = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of
     Nothing          -> throwEdh EvalError "Can only be called as generator"
     Just genr'caller -> case _parseInterval apk of
-      Just !n -> contEdhSTM $ timelyNotify (1000000 * n) genr'caller
+      Just !n -> contEdhSTM $ timelyNotify pgs (1000000 * n) genr'caller exit
       _ -> throwEdh EvalError "Invalid argument to console.everySeconds(n)"
 
 _parseInterval :: ArgsPack -> Maybe Int
