@@ -1,7 +1,8 @@
 # Non-determinism
 
-The `for-from-do` loop in **Edh** is much like a procedural version
-of **Haskell**'s list Monad, modeling non-determinism as well.
+In **Edh** the `for-from-do` loop, combined with `generator` procedures,
+are much like a procedural version of **Haskell**'s list Monad,
+modeling non-determinism as well.
 
 Take the example in
 [this blog post](https://deque.blog/2017/09/04/list-monad-and-np-complexity/)
