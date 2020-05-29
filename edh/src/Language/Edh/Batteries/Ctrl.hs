@@ -127,6 +127,22 @@ branchProc !lhExpr !rhExpr !exit = do
         EdhContinue -> contEdhSTM $ branchMatched []
         _           -> exitEdhProc exit EdhFallthrough
 
+      -- { break } -- match with break
+      [StmtSrc (_, BreakStmt)] -> case ctxMatch of
+        EdhBreak -> contEdhSTM $ branchMatched []
+        _        -> exitEdhProc exit EdhFallthrough
+
+      -- { fallthrough } -- match with fallthrough
+      [StmtSrc (_, FallthroughStmt)] -> case ctxMatch of
+        EdhFallthrough -> contEdhSTM $ branchMatched []
+        _              -> exitEdhProc exit EdhFallthrough
+
+      -- { return xx } -- match with return
+      [StmtSrc (_, ReturnStmt (AttrExpr (DirectRef (NamedAttr attrName))))] ->
+        case ctxMatch of
+          EdhReturn !rtnVal -> contEdhSTM $ branchMatched [(attrName, rtnVal)]
+          _                 -> exitEdhProc exit EdhFallthrough
+
       -- { val } -- wild capture pattern, used to capture a non-nil result as
       -- an attribute.
       -- Note: a raw nil value should be value-matched explicitly
