@@ -36,7 +36,7 @@
 # Note:
 # we use negative log level to trigger debug trace, so thread
 # id is shown as well;
-# and the minus sign (-) will parse as infix substraction
+# and the minus sign (-) will parse as infix subtraction
 # operator if following some expression, so we prefix it with
 # a semicolon (;) to disambiguate;
 # then `;-1<| 'xxx'` reads `trace "xxx"` with extra info
