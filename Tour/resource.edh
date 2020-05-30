@@ -4,7 +4,7 @@
   # a generator can be used to implement sth like Python's
   # context manager
   generator withResource(resArgs) {
-    console.info<| 'allocating ' ++ resArgs
+    console.info<| 'allocating [' ++ resArgs ++ ']'
     res = 'allocated [' ++ resArgs ++ ']'
     {
       # unlike in Python, a generator procedure in Edh can
@@ -14,7 +14,7 @@
       yield res
     } @=> {  # unlike generator in Python, this finally
       # block is guaranteed to run
-      console.info<| 'releaing [' ++ resArgs ++ ']'
+      console.info<| 'releasing [' ++ resArgs ++ ']'
     }
   }
 
