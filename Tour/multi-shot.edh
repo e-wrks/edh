@@ -1,16 +1,23 @@
 
 {
-  method asyncRisk() {
+  method asyncRisk(n) {
     defer {
-      ;-1<| 'async defer cleanup'
+      ;-1<| 'async defer cleanup #' ++ n
     }
 
-    throw '!AsyncFailure!'
+    throw '!AsyncFailure#' ++ n
+
+    ;-1<| 'not a chance to see this'
   }
 
   {
-    go asyncRisk()
-  } $=> {
+    for i from range(3) do {
+      go asyncRisk(i)
+    }
+  } $=> {  # this exception handler will be triggered to run
+    # in multiple forked threads (forkees), but its recover
+    # continuation will only run by the thread installed it,
+    # i.e. the forker thread.
     { exc } -> {
       ;-1<| 'handling ' ++ exc
     }
@@ -20,7 +27,16 @@
   # a continuation based implementation
   ;-1<| 'this should run only once by forker thread'
 
-  for _ from console.everySeconds(1) do { break }
+  for _ from console.everyMillis(10) do { break }
 
-  ;-1<| 'done.'
+  ;-1<| 'all done.'
 }
+
+
+# Note:
+# we use negative log level to trigger debug trace, so thread
+# id is shown as well;
+# and the minus sign (-) will parse as infix substraction
+# operator if following some expression, so we prefix it with
+# a semicolon (;) to disambiguate;
+# then `;-1<| 'xxx'` reads `trace "xxx"` with extra info
