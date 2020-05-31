@@ -8,6 +8,7 @@ import           GHC.Conc                       ( unsafeIOToSTM )
 
 import           Control.Monad.Reader
 
+import           Control.Concurrent
 import           Control.Concurrent.STM
 
 import           Data.Maybe
@@ -54,8 +55,24 @@ catchProc !tryExpr !catchExpr !exit =
 -- an exception if occurred, will never be assumed as recovered by the
 -- right-hand-expr.
 finallyProc :: EdhIntrinsicOp
-finallyProc !tryExpr !finallyExpr !exit = edhCatch (evalExpr tryExpr) exit
-  $ \_ rethrow -> evalMatchingExpr finallyExpr $ const rethrow
+finallyProc !tryExpr !finallyExpr !exit = ask >>= \pgs -> contEdhSTM $ do
+  hndlrTh <- unsafeIOToSTM myThreadId
+  edhCatchSTM pgs
+              (\ !pgsTry !exit' -> runEdhProc pgsTry $ evalExpr tryExpr exit')
+              exit
+    $ \pgsThrower !exv _recover !rethrow -> do
+        fnlyTh <- unsafeIOToSTM myThreadId
+        if fnlyTh /= hndlrTh
+          then -- don't run the finally block from a different thread other
+               -- than the handler installer
+               rethrow
+          else
+            runEdhProc pgsThrower
+              { edh'context = (edh'context pgs) { contextMatch = exv }
+              }
+            $ evalMatchingExpr finallyExpr
+            $ const
+            $ contEdhSTM rethrow
 
 
 -- | operator (->) - the brancher, if its left-hand matches, early stop its
