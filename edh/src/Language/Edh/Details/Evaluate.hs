@@ -111,8 +111,10 @@ evalStmt ss@(StmtSrc (_sp, !stmt)) !exit = ask >>= \pgs ->
 evalMatchingExpr :: Expr -> EdhProcExit -> EdhProc
 -- special case for a block as matching expression:
 --   don't let `evalExpr` to apply `true` as its contextMatch
-evalMatchingExpr (BlockExpr !stmts) !exit' = evalBlock stmts exit'
-evalMatchingExpr !expr              !exit' = evalExpr expr exit'
+evalMatchingExpr (BlockExpr !stmts) !exit = evalBlock stmts exit
+evalMatchingExpr !expr !exit =
+  evalExpr expr $ \result@(OriginalValue !val _ _) ->
+    exitEdhProc' exit result { valueFromOrigin = edhDeCaseClose val }
 
 evalCaseBlock :: Expr -> EdhProcExit -> EdhProc
 evalCaseBlock !expr !exit = case expr of
@@ -121,7 +123,7 @@ evalCaseBlock !expr !exit = case expr of
   -- single branch case is some special
   _                -> evalExpr expr $ \(OriginalValue !val _ _) -> case val of
     -- the only branch did match
-    (EdhCaseClose !v) -> exitEdhProc exit v
+    (EdhCaseClose !v) -> exitEdhProc exit $ edhDeCaseClose v
     -- the only branch didn't match
     EdhCaseOther      -> exitEdhProc exit nil
     -- yield should have been handled by 'evalExpr'
@@ -139,7 +141,7 @@ evalBlock :: [StmtSrc] -> EdhProcExit -> EdhProc
 evalBlock []    !exit = exitEdhProc exit nil
 evalBlock [!ss] !exit = evalStmt ss $ \(OriginalValue !val _ _) -> case val of
   -- last branch did match
-  (EdhCaseClose !v) -> exitEdhProc exit v
+  (EdhCaseClose !v) -> exitEdhProc exit $ edhDeCaseClose v
   -- yield should have been handled by 'evalExpr'
   (EdhYield     _ ) -> throwEdh EvalError "bug yield reached block"
   -- ctrl to be propagated outwards, as this is the last stmt, no need to
@@ -155,7 +157,7 @@ evalBlock [!ss] !exit = evalStmt ss $ \(OriginalValue !val _ _) -> case val of
 evalBlock (ss : rest) !exit = evalStmt ss $ \(OriginalValue !val _ _) ->
   case val of
     -- a branch matched, finish this block
-    (EdhCaseClose !v) -> exitEdhProc exit v
+    (EdhCaseClose !v) -> exitEdhProc exit $ edhDeCaseClose v
     -- should continue to next branch (or stmt)
     EdhCaseOther      -> evalBlock rest exit
     -- should fallthrough to next branch (or stmt)
@@ -178,7 +180,7 @@ evalExprs :: [Expr] -> EdhProcExit -> EdhProc
 evalExprs []       !exit = exitEdhProc exit (EdhTuple [])
 evalExprs (x : xs) !exit = evalExpr x $ \(OriginalValue !val _ _) ->
   evalExprs xs $ \(OriginalValue !tv _ _) -> case tv of
-    EdhTuple l -> exitEdhProc exit (EdhTuple (val : l))
+    EdhTuple l -> exitEdhProc exit (EdhTuple (edhDeCaseClose val : l))
     _          -> error "bug"
 
 
@@ -222,7 +224,8 @@ evalStmt' !stmt !exit = do
                                  d
   case stmt of
 
-    ExprStmt expr -> evalExpr expr exit
+    ExprStmt expr -> evalExpr expr $ \result@(OriginalValue !val _ _) ->
+      exitEdhProc' exit result { valueFromOrigin = edhDeCaseClose val }
 
     LetStmt argsRcvr argsSndr ->
       -- ensure args sending and receiving happens within a same tx
@@ -277,13 +280,14 @@ evalStmt' !stmt !exit = do
     FallthroughStmt -> exitEdhProc exit EdhFallthrough
     RethrowStmt     -> exitEdhProc exit EdhRethrow
 
-    ReturnStmt expr -> evalExpr expr $ \(OriginalValue !val _ _) -> case val of
-      EdhReturn{} -> exitEdhProc exit (EdhReturn val)
-        -- actually when a generator procedure checks the result of its `yield`
-        -- for the case of early return from the do block, if it wants to
-        -- cooperate, double return is the only option
-        -- throwEdh UsageError "you don't double return"
-      _           -> exitEdhProc exit (EdhReturn val)
+    ReturnStmt expr -> evalExpr expr $ \(OriginalValue !v2r _ _) ->
+      case edhDeCaseClose v2r of
+        val@EdhReturn{} -> exitEdhProc exit (EdhReturn val)
+          -- actually when a generator procedure checks the result of its `yield`
+          -- for the case of early return from the do block, if it wants to
+          -- cooperate, double return is the only option
+          -- throwEdh UsageError "you don't double return"
+        !val            -> exitEdhProc exit (EdhReturn val)
 
 
     AtoIsoStmt expr ->
@@ -291,7 +295,7 @@ evalStmt' !stmt !exit = do
         $ runEdhProc pgs { edh'in'tx = True } -- ensure in'tx state
         $ evalExpr expr
         $ \(OriginalValue !val _ _) -> -- restore original tx state
-                                       contEdhSTM $ exitEdhSTM pgs exit val
+            contEdhSTM $ exitEdhSTM pgs exit $ edhDeCaseClose val
 
 
     GoStmt expr -> case expr of
@@ -300,7 +304,8 @@ evalStmt' !stmt !exit = do
         evalExpr tgtExpr $ \(OriginalValue !val _ _) -> contEdhSTM $ do
           -- eval the branch(es) expr with the case target
           -- being the 'contextMatch'
-          forkEdh pgs { edh'context = ctx { contextMatch = val } }
+          forkEdh pgs { edh'context = ctx { contextMatch = edhDeCaseClose val }
+                      }
             $ evalCaseBlock branchesExpr edhEndOfProc
           exitEdhSTM pgs exit nil
 
@@ -343,7 +348,9 @@ evalStmt' !stmt !exit = do
         CaseExpr tgtExpr branchesExpr ->
           evalExpr tgtExpr $ \(OriginalValue !val _ _) ->
             contEdhSTM
-              $ schedDefered pgs { edh'context = ctx { contextMatch = val } }
+              $ schedDefered pgs
+                  { edh'context = ctx { contextMatch = edhDeCaseClose val }
+                  }
               -- eval the branch(es) expr with the case target being the 'contextMatch'
               $ evalCaseBlock branchesExpr edhEndOfProc
 
@@ -387,17 +394,17 @@ evalStmt' !stmt !exit = do
               <> T.pack (show sinkVal)
 
 
-    ThrowStmt excExpr ->
-      evalExpr excExpr $ \(OriginalValue !exv _ _) -> edhThrow exv
+    ThrowStmt excExpr -> evalExpr excExpr
+      $ \(OriginalValue !exv _ _) -> edhThrow $ edhDeCaseClose exv
 
 
     WhileStmt cndExpr bodyExpr -> do
       let doWhile :: EdhProc
           doWhile = evalExpr cndExpr $ \(OriginalValue !cndVal _ _) ->
-            case cndVal of
+            case edhDeCaseClose cndVal of
               (EdhBool True) ->
                 evalExpr bodyExpr $ \(OriginalValue !blkVal _ _) ->
-                  case blkVal of
+                  case edhDeCaseClose blkVal of
                   -- early stop of procedure
                     rtnVal@EdhReturn{} -> exitEdhProc exit rtnVal
                     -- break while loop
@@ -415,41 +422,45 @@ evalStmt' !stmt !exit = do
       doWhile
 
     ExtendsStmt superExpr ->
-      evalExpr superExpr $ \(OriginalValue !superVal _ _) -> case superVal of
-        (EdhObject !superObj) -> contEdhSTM $ do
-          let
-            !magicSpell = AttrByName "<-^"
-            noMagic :: EdhProc
-            noMagic =
-              contEdhSTM $ lookupEdhObjAttr pgs superObj magicSpell >>= \case
-                EdhNil    -> exitEdhSTM pgs exit nil
-                !magicMth -> withMagicMethod magicMth
-            withMagicMethod :: EdhValue -> STM ()
-            withMagicMethod magicMth = case magicMth of
-              EdhNil              -> exitEdhSTM pgs exit nil
-              EdhMethod !mth'proc -> do
-                scopeObj <- mkScopeWrapper ctx $ objectScope ctx this
-                runEdhProc pgs
-                  $ callEdhMethod this
-                                  mth'proc
-                                  (ArgsPack [EdhObject scopeObj] Map.empty)
-                                  id
-                  $ \_ -> contEdhSTM $ exitEdhSTM pgs exit nil
-              _ ->
-                throwEdhSTM pgs EvalError
-                  $  "Invalid magic (<-^) method type: "
-                  <> T.pack (edhTypeNameOf magicMth)
-          modifyTVar' (objSupers this) (superObj :)
-          runEdhProc pgs
-            $ getEdhAttrWithMagic edhMetaMagicSpell superObj magicSpell noMagic
-            $ \(OriginalValue !magicMth _ _) ->
-                contEdhSTM $ withMagicMethod magicMth
-        _ ->
-          throwEdh EvalError
-            $  "Can only extends an object, not "
-            <> T.pack (edhTypeNameOf superVal)
-            <> ": "
-            <> T.pack (show superVal)
+      evalExpr superExpr $ \(OriginalValue !superVal _ _) ->
+        case edhDeCaseClose superVal of
+          (EdhObject !superObj) -> contEdhSTM $ do
+            let
+              !magicSpell = AttrByName "<-^"
+              noMagic :: EdhProc
+              noMagic =
+                contEdhSTM $ lookupEdhObjAttr pgs superObj magicSpell >>= \case
+                  EdhNil    -> exitEdhSTM pgs exit nil
+                  !magicMth -> withMagicMethod magicMth
+              withMagicMethod :: EdhValue -> STM ()
+              withMagicMethod magicMth = case magicMth of
+                EdhNil              -> exitEdhSTM pgs exit nil
+                EdhMethod !mth'proc -> do
+                  scopeObj <- mkScopeWrapper ctx $ objectScope ctx this
+                  runEdhProc pgs
+                    $ callEdhMethod this
+                                    mth'proc
+                                    (ArgsPack [EdhObject scopeObj] Map.empty)
+                                    id
+                    $ \_ -> contEdhSTM $ exitEdhSTM pgs exit nil
+                _ ->
+                  throwEdhSTM pgs EvalError
+                    $  "Invalid magic (<-^) method type: "
+                    <> T.pack (edhTypeNameOf magicMth)
+            modifyTVar' (objSupers this) (superObj :)
+            runEdhProc pgs
+              $ getEdhAttrWithMagic edhMetaMagicSpell
+                                    superObj
+                                    magicSpell
+                                    noMagic
+              $ \(OriginalValue !magicMth _ _) ->
+                  contEdhSTM $ withMagicMethod magicMth
+          _ ->
+            throwEdh EvalError
+              $  "Can only extends an object, not "
+              <> T.pack (edhTypeNameOf superVal)
+              <> ": "
+              <> T.pack (show superVal)
 
     ClassStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
       u <- unsafeIOToSTM newUnique
@@ -676,20 +687,21 @@ importInto !tgtEnt !argsRcvr !srcExpr !exit = case srcExpr of
   LitExpr (StringLiteral importSpec) ->
     -- import from specified path
     importEdhModule' tgtEnt argsRcvr importSpec exit
-  _ -> evalExpr srcExpr $ \(OriginalValue !srcVal _ _) -> case srcVal of
-    EdhString importSpec ->
-      -- import from dynamic path
-      importEdhModule' tgtEnt argsRcvr importSpec exit
-    EdhObject fromObj ->
-      -- import from an object
-      importFromObject tgtEnt argsRcvr fromObj exit
-    _ ->
-      -- todo support more sources of import ?
-      throwEdh EvalError
-        $  "Don't know how to import from a "
-        <> T.pack (edhTypeNameOf srcVal)
-        <> ": "
-        <> T.pack (show srcVal)
+  _ -> evalExpr srcExpr $ \(OriginalValue !srcVal _ _) ->
+    case edhDeCaseClose srcVal of
+      EdhString importSpec ->
+        -- import from dynamic path
+        importEdhModule' tgtEnt argsRcvr importSpec exit
+      EdhObject fromObj ->
+        -- import from an object
+        importFromObject tgtEnt argsRcvr fromObj exit
+      _ ->
+        -- todo support more sources of import ?
+        throwEdh EvalError
+          $  "Don't know how to import from a "
+          <> T.pack (edhTypeNameOf srcVal)
+          <> ": "
+          <> T.pack (show srcVal)
 
 
 edhExportsMagicName :: Text
@@ -1028,7 +1040,7 @@ intplStmt !pgs !stmt !exit = case stmt of
 
 
 evalExpr :: Expr -> EdhProcExit -> EdhProc
-evalExpr expr exit = do
+evalExpr !expr !exit = do
   !pgs <- ask
   let !ctx                   = edh'context pgs
       !world                 = contextWorld ctx
@@ -1045,9 +1057,10 @@ evalExpr expr exit = do
             SrcSeg !s -> exit' s
             IntplSeg !sx ->
               runEdhProc pgs $ evalExpr sx $ \(OriginalValue !val _ _) ->
-                edhValueRepr val $ \(OriginalValue !rv _ _) -> case rv of
-                  EdhString !rs -> contEdhSTM $ exit' rs
-                  _             -> error "bug: edhValueRepr returned non-string"
+                edhValueRepr (edhDeCaseClose val) $ \(OriginalValue !rv _ _) ->
+                  case rv of
+                    EdhString !rs -> contEdhSTM $ exit' rs
+                    _ -> error "bug: edhValueRepr returned non-string"
       seqcontSTM (intplSrc <$> sss) $ \ssl -> do
         u <- unsafeIOToSTM newUnique
         exitEdhSTM pgs exit $ EdhExpr u x' $ T.concat ssl
@@ -1065,24 +1078,26 @@ evalExpr expr exit = do
 
     PrefixExpr prefix expr' -> case prefix of
       PrefixPlus  -> evalExpr expr' exit
-      PrefixMinus -> evalExpr expr' $ \(OriginalValue !val _ _) -> case val of
-        (EdhDecimal v) -> exitEdhProc exit (EdhDecimal (-v))
-        _ ->
-          throwEdh EvalError
-            $  "Can not negate a "
-            <> T.pack (edhTypeNameOf val)
-            <> ": "
-            <> T.pack (show val)
-            <> " ❌"
-      Not -> evalExpr expr' $ \(OriginalValue !val _ _) -> case val of
-        (EdhBool v) -> exitEdhProc exit (EdhBool $ not v)
-        _ ->
-          throwEdh EvalError
-            $  "Expect bool but got a "
-            <> T.pack (edhTypeNameOf val)
-            <> ": "
-            <> T.pack (show val)
-            <> " ❌"
+      PrefixMinus -> evalExpr expr' $ \(OriginalValue !val _ _) ->
+        case edhDeCaseClose val of
+          (EdhDecimal !v) -> exitEdhProc exit (EdhDecimal (-v))
+          !v ->
+            throwEdh EvalError
+              $  "Can not negate a "
+              <> T.pack (edhTypeNameOf v)
+              <> ": "
+              <> T.pack (show v)
+              <> " ❌"
+      Not -> evalExpr expr' $ \(OriginalValue !val _ _) ->
+        case edhDeCaseClose val of
+          (EdhBool v) -> exitEdhProc exit (EdhBool $ not v)
+          !v ->
+            throwEdh EvalError
+              $  "Expect bool but got a "
+              <> T.pack (edhTypeNameOf v)
+              <> ": "
+              <> T.pack (show v)
+              <> " ❌"
       Guard -> contEdhSTM $ do
         (consoleLogger $ worldConsole world)
           30
@@ -1093,18 +1108,18 @@ evalExpr expr exit = do
         runEdhProc pgs $ evalExpr expr' exit
 
     IfExpr cond cseq alt -> evalExpr cond $ \(OriginalValue !val _ _) ->
-      case val of
+      case edhDeCaseClose val of
         (EdhBool True ) -> evalExpr cseq exit
         (EdhBool False) -> case alt of
           Just elseClause -> evalExpr elseClause exit
           _               -> exitEdhProc exit nil
-        _ ->
+        !v ->
           -- we are so strongly typed
           throwEdh EvalError
             $  "Expecting a boolean value but got a "
-            <> T.pack (edhTypeNameOf val)
+            <> T.pack (edhTypeNameOf v)
             <> ": "
-            <> T.pack (show val)
+            <> T.pack (show v)
             <> " ❌"
 
     DictExpr xs -> -- make sure dict k:v pairs are evaluated in same tx
@@ -1147,7 +1162,11 @@ evalExpr expr exit = do
     CaseExpr tgtExpr branchesExpr ->
       evalExpr tgtExpr $ \(OriginalValue !tgtVal _ _) ->
         -- eval the branch(es) expr with the case target being the 'contextMatch'
-        local (const pgs { edh'context = ctx { contextMatch = tgtVal } })
+        local
+            (const pgs
+              { edh'context = ctx { contextMatch = edhDeCaseClose tgtVal }
+              }
+            )
           $ evalCaseBlock branchesExpr
           -- restore program state after block done
           $ \(OriginalValue !blkResult _ _) ->
@@ -1160,30 +1179,33 @@ evalExpr expr exit = do
         case genr'caller of
           Nothing -> throwEdh EvalError "Unexpected yield"
           Just (pgsGenrCaller, yieldVal) ->
-            contEdhSTM $ runEdhProc pgsGenrCaller $ yieldVal valToYield $ \case
-              Left (pgsThrower, exv) ->
-                edhThrowSTM pgsThrower { edh'context = edh'context pgs } exv
-              Right !doResult -> case doResult of
-                EdhContinue -> -- for loop should send nil here instead in
-                  -- case continue issued from the do block
-                  throwEdhSTM pgs EvalError "<continue> reached yield"
-                EdhBreak -> -- for loop is breaking, let the generator
-                  -- return nil
-                  -- the generator can intervene the return, that'll be
-                  -- black magic
-                  exitEdhSTM pgs exit $ EdhReturn EdhNil
-                EdhReturn EdhReturn{} -> -- this must be synthesiszed,
-                  -- in case do block issued return, the for loop wrap it as
-                  -- double return, so as to let the yield expr in the generator
-                  -- propagate the value return, as the result of the for loop
-                  -- the generator can intervene the return, that'll be
-                  -- black magic
-                  exitEdhSTM pgs exit doResult
-                EdhReturn{} -> -- for loop should have double-wrapped the
-                  -- return, which is handled above, in case its do block
-                  -- issued a return
-                  throwEdhSTM pgs EvalError "<return> reached yield"
-                _ -> exitEdhSTM pgs exit doResult
+            contEdhSTM
+              $ runEdhProc pgsGenrCaller
+              $ yieldVal (edhDeCaseClose valToYield)
+              $ \case
+                  Left (pgsThrower, exv) ->
+                    edhThrowSTM pgsThrower { edh'context = edh'context pgs } exv
+                  Right !doResult -> case edhDeCaseClose doResult of
+                    EdhContinue -> -- for loop should send nil here instead in
+                      -- case continue issued from the do block
+                      throwEdhSTM pgs EvalError "<continue> reached yield"
+                    EdhBreak -> -- for loop is breaking, let the generator
+                      -- return nil
+                      -- the generator can intervene the return, that'll be
+                      -- black magic
+                      exitEdhSTM pgs exit $ EdhReturn EdhNil
+                    EdhReturn EdhReturn{} -> -- this must be synthesiszed,
+                      -- in case do block issued return, the for loop wrap it as
+                      -- double return, so as to let the yield expr in the generator
+                      -- propagate the value return, as the result of the for loop
+                      -- the generator can intervene the return, that'll be
+                      -- black magic
+                      exitEdhSTM pgs exit doResult
+                    EdhReturn{} -> -- for loop should have double-wrapped the
+                      -- return, which is handled above, in case its do block
+                      -- issued a return
+                      throwEdhSTM pgs EvalError "<return> reached yield"
+                    !val -> exitEdhSTM pgs exit val
 
     ForExpr argsRcvr iterExpr doExpr ->
       contEdhSTM
@@ -1234,51 +1256,53 @@ evalExpr expr exit = do
             exit
 
 
-    IndexExpr ixExpr tgtExpr ->
-      evalExpr ixExpr $ \(OriginalValue !ixVal _ _) ->
-        evalExpr tgtExpr $ \(OriginalValue !tgtVal _ _) -> case tgtVal of
+    IndexExpr ixExpr tgtExpr -> evalExpr ixExpr $ \(OriginalValue !ixV _ _) ->
+      let !ixVal = edhDeCaseClose ixV
+      in
+        evalExpr tgtExpr $ \(OriginalValue !tgtV _ _) ->
+          case edhDeCaseClose tgtV of
 
-        -- indexing a dict
-          (EdhDict (Dict _ !d)) -> contEdhSTM $ do
-            ds <- readTVar d
-            case Map.lookup ixVal ds of
-              Nothing  -> exitEdhSTM pgs exit nil
-              Just val -> exitEdhSTM pgs exit val
+            -- indexing a dict
+            (EdhDict (Dict _ !d)) -> contEdhSTM $ do
+              ds <- readTVar d
+              case Map.lookup ixVal ds of
+                Nothing  -> exitEdhSTM pgs exit nil
+                Just val -> exitEdhSTM pgs exit val
 
-          -- indexing an object, by calling its ([]) method with ixVal as the single arg
-          (EdhObject obj) ->
-            contEdhSTM $ lookupEdhObjAttr pgs obj (AttrByName "[]") >>= \case
+            -- indexing an object, by calling its ([]) method with ixVal as the single arg
+            (EdhObject obj) ->
+              contEdhSTM $ lookupEdhObjAttr pgs obj (AttrByName "[]") >>= \case
 
-              EdhNil ->
-                throwEdhSTM pgs EvalError $ "No ([]) method from: " <> T.pack
-                  (show obj)
+                EdhNil ->
+                  throwEdhSTM pgs EvalError $ "No ([]) method from: " <> T.pack
+                    (show obj)
 
-              EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
-                obj
-                mth'proc
-                (ArgsPack [ixVal] Map.empty)
-                id
-                exit
+                EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
+                  obj
+                  mth'proc
+                  (ArgsPack [ixVal] Map.empty)
+                  id
+                  exit
 
-              !badIndexer ->
-                throwEdhSTM pgs EvalError
-                  $  "Malformed index method ([]) on "
-                  <> T.pack (show obj)
-                  <> " - "
-                  <> T.pack (edhTypeNameOf badIndexer)
-                  <> ": "
-                  <> T.pack (show badIndexer)
+                !badIndexer ->
+                  throwEdhSTM pgs EvalError
+                    $  "Malformed index method ([]) on "
+                    <> T.pack (show obj)
+                    <> " - "
+                    <> T.pack (edhTypeNameOf badIndexer)
+                    <> ": "
+                    <> T.pack (show badIndexer)
 
-          _ ->
-            throwEdh EvalError
-              $  "Don't know how to index "
-              <> T.pack (edhTypeNameOf tgtVal)
-              <> ": "
-              <> T.pack (show tgtVal)
-              <> " with "
-              <> T.pack (edhTypeNameOf ixVal)
-              <> ": "
-              <> T.pack (show ixVal)
+            tgtVal ->
+              throwEdh EvalError
+                $  "Don't know how to index "
+                <> T.pack (edhTypeNameOf tgtVal)
+                <> ": "
+                <> T.pack (show tgtVal)
+                <> " with "
+                <> T.pack (edhTypeNameOf ixVal)
+                <> ": "
+                <> T.pack (show ixVal)
 
 
     CallExpr !procExpr !argsSndr ->
@@ -1311,11 +1335,12 @@ evalExpr expr exit = do
                   $ evalExpr lhExpr
                   $ \(OriginalValue lhVal _ _) ->
                       evalExpr rhExpr $ \(OriginalValue rhVal _ _) ->
-                        callEdhOperator (thatObject op'lexi)
-                                        op'proc
-                                        op'pred
-                                        [lhVal, rhVal]
-                                        exit
+                        callEdhOperator
+                          (thatObject op'lexi)
+                          op'proc
+                          op'pred
+                          [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
+                          exit
               -- 3 pos-args - caller scope + lh/rh expr receiving operator
               (PackReceiver [RecvArg{}, RecvArg{}, RecvArg{}]) -> do
                 lhu          <- unsafeIOToSTM newUnique
@@ -2241,7 +2266,8 @@ resolveEdhCallee !pgs !expr !exit = case expr of
     []         -> NE.tail $ callStack ctx
     outerStack -> outerStack
   BehaveExpr effAddr -> goEff effAddr $ NE.tail $ callStack ctx
-  _ -> runEdhProc pgs $ evalExpr expr $ \ov -> contEdhSTM $ exit (ov, id)
+  _ -> runEdhProc pgs $ evalExpr expr $ \ov@(OriginalValue !v _ _) ->
+    contEdhSTM $ exit (ov { valueFromOrigin = edhDeCaseClose v }, id)
  where
   !ctx   = edh'context pgs
   !scope = contextScope ctx
@@ -2270,30 +2296,30 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
         -- to continue the generator execution, result passed to the 'genrCont'
         -- here is the eval'ed value of the `yield` expression from the
         -- generator's perspective, or exception to be thrown from there
-        recvYield
-          :: EdhProcExit
-          -> EdhValue
-          -> (Either (EdhProgState, EdhValue) EdhValue -> STM ())
-          -> EdhProc
-        recvYield !exit !yielded'val !genrCont = do
-          pgs <- ask
-          let
-            !ctx   = edh'context pgs
-            !scope = contextScope ctx
-            doOne !pgsTry !exit' =
-              runEdhProc pgsTry
-                $ recvEdhArgs
-                    (edh'context pgsTry)
-                    argsRcvr
-                    (case yielded'val of
-                      EdhArgsPack apk -> apk
-                      _               -> ArgsPack [yielded'val] Map.empty
-                    )
-                $ \em -> contEdhSTM $ do
-                    updateEntityAttrs pgsTry (scopeEntity scope)
-                      $ Map.toList em
-                    runEdhProc pgsTry $ evalExpr doExpr exit'
-            doneOne (OriginalValue !doResult _ _) = case doResult of
+      recvYield
+        :: EdhProcExit
+        -> EdhValue
+        -> (Either (EdhProgState, EdhValue) EdhValue -> STM ())
+        -> EdhProc
+      recvYield !exit !yielded'val !genrCont = do
+        pgs <- ask
+        let
+          !ctx   = edh'context pgs
+          !scope = contextScope ctx
+          doOne !pgsTry !exit' =
+            runEdhProc pgsTry
+              $ recvEdhArgs
+                  (edh'context pgsTry)
+                  argsRcvr
+                  (case yielded'val of
+                    EdhArgsPack apk -> apk
+                    _               -> ArgsPack [yielded'val] Map.empty
+                  )
+              $ \em -> contEdhSTM $ do
+                  updateEntityAttrs pgsTry (scopeEntity scope) $ Map.toList em
+                  runEdhProc pgsTry $ evalExpr doExpr exit'
+          doneOne (OriginalValue !doResult _ _) =
+            case edhDeCaseClose doResult of
               EdhContinue ->
                 -- send nil to generator on continue
                 contEdhSTM $ genrCont $ Right nil
@@ -2302,9 +2328,6 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                 -- the generator on <break> yielded will return
                 -- nil, effectively have the for loop eval to nil
                 contEdhSTM $ genrCont $ Right EdhBreak
-              EdhCaseClose !val ->
-                -- send branch result to generator if one matched
-                contEdhSTM $ genrCont $ Right val
               EdhCaseOther ->
                 -- send nil to generator on no-match of a branch
                 contEdhSTM $ genrCont $ Right nil
@@ -2320,25 +2343,25 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                 -- level and return the result, effectively have the
                 -- for loop eval to return that 
                 contEdhSTM $ genrCont $ Right $ EdhReturn $ EdhReturn rtnVal
-              _ -> contEdhSTM $ do
-                -- normal result from do, send to generator
-                iterCollector doResult
-                genrCont $ Right doResult
-          case yielded'val of
-            EdhNil -> -- nil yielded from a generator effectively early stops
-              exitEdhProc exit nil
-            EdhContinue -> throwEdh EvalError "generator yielded continue"
-            EdhBreak    -> throwEdh EvalError "generator yielded break"
-            EdhReturn{} -> throwEdh EvalError "generator yielded return"
-            _ ->
-              contEdhSTM
-                $ edhCatchSTM pgs doOne doneOne
-                $ \ !pgsThrower !exv _recover rethrow -> case exv of
-                    EdhNil -> rethrow -- no exception occurred in do block
-                    _ -> -- exception uncaught in do block
-                      -- propagate to the generator, the genr may catch it or 
-                      -- the exception will propagate to outer of for-from-do
-                      genrCont $ Left (pgsThrower, exv)
+              !val -> contEdhSTM $ do
+                -- vanilla val from do, send to generator
+                iterCollector val
+                genrCont $ Right val
+        case yielded'val of
+          EdhNil -> -- nil yielded from a generator effectively early stops
+            exitEdhProc exit nil
+          EdhContinue -> throwEdh EvalError "generator yielded continue"
+          EdhBreak    -> throwEdh EvalError "generator yielded break"
+          EdhReturn{} -> throwEdh EvalError "generator yielded return"
+          _ ->
+            contEdhSTM
+              $ edhCatchSTM pgs doOne doneOne
+              $ \ !pgsThrower !exv _recover rethrow -> case exv of
+                  EdhNil -> rethrow -- no exception occurred in do block
+                  _ -> -- exception uncaught in do block
+                    -- propagate to the generator, the genr may catch it or 
+                    -- the exception will propagate to outer of for-from-do
+                    genrCont $ Left (pgsThrower, exv)
 
     runEdhProc pgsLooper $ case deParen iterExpr of
       CallExpr !procExpr !argsSndr -> -- loop over a generator
@@ -2422,8 +2445,8 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                               loopOverValue iterVal
 
       _ -> -- loop over an iterable value
-           evalExpr iterExpr
-        $ \(OriginalValue !iterVal _ _) -> loopOverValue iterVal
+           evalExpr iterExpr $ \(OriginalValue !iterVal _ _) ->
+        loopOverValue $ edhDeCaseClose iterVal
 
  where
 
@@ -2790,7 +2813,7 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
                 runEdhProc pgsRecv $ evalExpr
                   defaultExpr
                   (\(OriginalValue !val _ _) ->
-                    contEdhSTM (putTMVar defaultVar val)
+                    contEdhSTM (putTMVar defaultVar $ edhDeCaseClose val)
                   )
                 defaultVal <- readTMVar defaultVar
                 exit'' (defaultVal, posArgs', kwArgs'')
@@ -2954,9 +2977,11 @@ packEdhArgs !argsSender !pkExit = do
               <> T.pack (edhTypeNameOf val)
               <> ": "
               <> T.pack (show val)
-      SendPosArg !argExpr -> evalExpr argExpr $ \(OriginalValue !val _ _) ->
-        pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
-          exit (ArgsPack (noneNil val : posArgs) kwArgs)
+      SendPosArg !argExpr ->
+        evalExpr argExpr
+          $ \(OriginalValue !val _ _) ->
+              pkArgs xs $ \(ArgsPack !posArgs !kwArgs) -> exit
+                (ArgsPack (noneNil (edhDeCaseClose val) : posArgs) kwArgs)
       SendKwArg !kw !argExpr ->
         evalExpr argExpr $ \(OriginalValue !val _ _) ->
           pkArgs xs $ \pk@(ArgsPack !posArgs !kwArgs) -> case kw of
@@ -2965,7 +2990,7 @@ packEdhArgs !argsSender !pkExit = do
             _ -> exit
               (ArgsPack posArgs $ Map.alter
                 (\case -- make sure latest value with same kw take effect
-                  Nothing        -> Just $ noneNil val
+                  Nothing        -> Just $ noneNil $ edhDeCaseClose val
                   Just !laterVal -> Just laterVal
                 )
                 (AttrByName kw)

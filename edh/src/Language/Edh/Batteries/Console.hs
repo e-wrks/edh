@@ -44,50 +44,54 @@ loggingProc !lhExpr !rhExpr !exit = do
             .   fromInteger
             <$> decimalToInteger unwind
         _ -> Nothing
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case parseSpec lhVal of
-    Just (logLevel, StmtSrc (srcPos, _)) -> if logLevel < 0
-      -- as the log queue is a TBQueue per se, log msgs from a failing STM
-      -- transaction has no way to go into the queue then get logged, but the
-      -- failing cases are especially in need of diagnostics, so negative log
-      -- level number is used to instruct a debug trace.
-      then contEdhSTM $ do
-        th <- unsafeIOToSTM myThreadId
-        let !tracePrefix =
-              " 🐞 " <> show th <> " 👉 " <> sourcePosPretty srcPos <> " ❗ "
-        runEdhProc pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-          case rhVal of
-            EdhString !logStr ->
-              trace (tracePrefix ++ T.unpack logStr) $ exitEdhProc exit nil
-            _ -> edhValueRepr rhVal $ \(OriginalValue !rhRepr _ _) ->
-              case rhRepr of
-                EdhString !logStr ->
-                  trace (tracePrefix ++ T.unpack logStr) $ exitEdhProc exit nil
-                _ -> trace (tracePrefix ++ show rhRepr) $ exitEdhProc exit nil
-      else contEdhSTM $ do
-        let console      = worldConsole $ contextWorld ctx
-            !conLogLevel = consoleLogLevel console
-            !logger      = consoleLogger console
-        if logLevel < conLogLevel
-          then -- drop log msg without even eval it
-               exitEdhSTM pgs exit nil
-          else
-            runEdhProc pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> do
-              let !srcLoc = if conLogLevel <= 20
-                    then -- with source location info
-                         Just $ sourcePosPretty srcPos
-                    else -- no source location info
-                         Nothing
-              contEdhSTM $ case rhVal of
-                EdhArgsPack pkargs -> do
-                  logger logLevel srcLoc pkargs
-                  exitEdhSTM pgs exit nil
-                EdhTuple vals -> do
-                  logger logLevel srcLoc $ ArgsPack vals Map.empty
-                  exitEdhSTM pgs exit nil
-                _ -> do
-                  logger logLevel srcLoc $ ArgsPack [rhVal] Map.empty
-                  exitEdhSTM pgs exit nil
-    _ -> throwEdh EvalError $ "Invalid log target: " <> T.pack (show lhVal)
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
+    case parseSpec $ edhDeCaseClose lhVal of
+      Just (logLevel, StmtSrc (srcPos, _)) -> if logLevel < 0
+        -- as the log queue is a TBQueue per se, log msgs from a failing STM
+        -- transaction has no way to go into the queue then get logged, but the
+        -- failing cases are especially in need of diagnostics, so negative log
+        -- level number is used to instruct a debug trace.
+        then contEdhSTM $ do
+          th <- unsafeIOToSTM myThreadId
+          let !tracePrefix =
+                " 🐞 " <> show th <> " 👉 " <> sourcePosPretty srcPos <> " ❗ "
+          runEdhProc pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+            case edhDeCaseClose rhVal of
+              EdhString !logStr ->
+                trace (tracePrefix ++ T.unpack logStr) $ exitEdhProc exit nil
+              _ -> edhValueRepr rhVal $ \(OriginalValue !rhRepr _ _) ->
+                case rhRepr of
+                  EdhString !logStr ->
+                    trace (tracePrefix ++ T.unpack logStr)
+                      $ exitEdhProc exit nil
+                  _ ->
+                    trace (tracePrefix ++ show rhRepr) $ exitEdhProc exit nil
+        else contEdhSTM $ do
+          let console      = worldConsole $ contextWorld ctx
+              !conLogLevel = consoleLogLevel console
+              !logger      = consoleLogger console
+          if logLevel < conLogLevel
+            then -- drop log msg without even eval it
+                 exitEdhSTM pgs exit nil
+            else
+              runEdhProc pgs $ evalExpr rhExpr $ \(OriginalValue !rhV _ _) -> do
+                let !rhVal  = edhDeCaseClose rhV
+                    !srcLoc = if conLogLevel <= 20
+                      then -- with source location info
+                           Just $ sourcePosPretty srcPos
+                      else -- no source location info
+                           Nothing
+                contEdhSTM $ case rhVal of
+                  EdhArgsPack pkargs -> do
+                    logger logLevel srcLoc pkargs
+                    exitEdhSTM pgs exit nil
+                  EdhTuple vals -> do
+                    logger logLevel srcLoc $ ArgsPack vals Map.empty
+                    exitEdhSTM pgs exit nil
+                  _ -> do
+                    logger logLevel srcLoc $ ArgsPack [rhVal] Map.empty
+                    exitEdhSTM pgs exit nil
+      _ -> throwEdh EvalError $ "Invalid log target: " <> T.pack (show lhVal)
 
 
 -- | host method console.exit(***apk)

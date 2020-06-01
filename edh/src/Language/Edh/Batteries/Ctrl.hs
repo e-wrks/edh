@@ -329,7 +329,7 @@ branchProc !lhExpr !rhExpr !exit = do
     -- condition itself is true
     PrefixExpr Guard guardedExpr ->
       evalExpr guardedExpr $ \(OriginalValue !predValue _ _) ->
-        if predValue /= true
+        if edhDeCaseClose predValue /= true
           then exitEdhProc exit EdhCaseOther
           else contEdhSTM $ branchMatched []
 
@@ -341,7 +341,7 @@ branchProc !lhExpr !rhExpr !exit = do
           namelyMatch EdhNamedValue{} _               = False
           namelyMatch _               EdhNamedValue{} = False
           namelyMatch x               y               = x == y
-      in  if not $ namelyMatch lhVal ctxMatch
+      in  if not $ namelyMatch (edhDeCaseClose lhVal) ctxMatch
             then exitEdhProc exit EdhCaseOther
             else contEdhSTM $ branchMatched []
 

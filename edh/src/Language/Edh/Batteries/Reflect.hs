@@ -268,14 +268,17 @@ scopeEvalProc (ArgsPack !args !kwargs) !exit = do
         (!kw, EdhExpr _ !expr _) ->
           evalExpr expr $ \(OriginalValue !val _ _) -> evalThePack
             argsValues
-            (Map.insert kw val kwargsValues)
+            (Map.insert kw (edhDeCaseClose val) kwargsValues)
             []
             kwargsExprs'
         v -> throwEdh EvalError $ "Not an expr: " <> T.pack (show v)
     evalThePack !argsValues !kwargsValues (!argExpr : argsExprs') !kwargsExprs
       = case argExpr of
         EdhExpr _ !expr _ -> evalExpr expr $ \(OriginalValue !val _ _) ->
-          evalThePack (val : argsValues) kwargsValues argsExprs' kwargsExprs
+          evalThePack (edhDeCaseClose val : argsValues)
+                      kwargsValues
+                      argsExprs'
+                      kwargsExprs
         v -> throwEdh EvalError $ "Not an expr: " <> T.pack (show v)
   if null kwargs && null args
     then exitEdhProc exit nil

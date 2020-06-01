@@ -165,6 +165,7 @@ module Language.Edh.EHI
   , edhValueReprSTM
   , EdhValue(..)
   , EdhTypeValue(..)
+  , edhDeCaseClose
   , edhUltimate
   , nil
   , edhNone

@@ -906,12 +906,15 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhExpr u _           _) = hashWithSalt s u
 
 
+edhDeCaseClose :: EdhValue -> EdhValue
+edhDeCaseClose (EdhCaseClose !val) = edhDeCaseClose val
+edhDeCaseClose !val                = val
+
 edhUltimate :: EdhValue -> EdhValue
-edhUltimate (EdhNamedValue _ v) = edhUltimate v
-edhUltimate (EdhCaseClose v   ) = edhUltimate v
-edhUltimate (EdhReturn    v   ) = edhUltimate v
-edhUltimate (EdhYield     v   ) = edhUltimate v
-edhUltimate v                   = v
+edhUltimate (EdhNamedValue _ v) = edhDeCaseClose v
+edhUltimate (EdhReturn v      ) = edhDeCaseClose v
+edhUltimate (EdhYield  v      ) = edhDeCaseClose v
+edhUltimate v                   = edhDeCaseClose v
 
 
 nil :: EdhValue

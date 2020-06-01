@@ -49,8 +49,9 @@ attrDerefAddrProc !lhExpr !rhExpr !exit =
 defProc :: EdhIntrinsicOp
 defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
   pgs <- ask
-  evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> contEdhSTM $ do
-    let !ctx     = edh'context pgs
+  evalExpr rhExpr $ \(OriginalValue !rhV _ _) -> contEdhSTM $ do
+    let !rhVal   = edhDeCaseClose rhV
+        !ctx     = edh'context pgs
         !scope   = contextScope ctx
         this     = thisObject scope
         !nv      = EdhNamedValue valName rhVal
@@ -110,9 +111,10 @@ defMissingProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
       !pgsTx = pgs { edh'in'tx = True } -- must within a tx
   contEdhSTM $ lookupEntityAttr pgsTx ent key >>= \case
     EdhNil ->
-      runEdhProc pgsTx $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+      runEdhProc pgsTx $ evalExpr rhExpr $ \(OriginalValue !rhV _ _) ->
         contEdhSTM $ do
-          let !nv = EdhNamedValue valName rhVal
+          let !rhVal = edhDeCaseClose rhV
+              !nv    = EdhNamedValue valName rhVal
           changeEntityAttr pgsTx ent key nv
           exitEdhSTM pgs exit nv
     !preVal -> exitEdhSTM pgs exit preVal
@@ -128,8 +130,10 @@ consProc !lhExpr !rhExpr !exit = do
   local (const pgs { edh'in'tx = True })
     $ evalExpr lhExpr
     $ \(OriginalValue !lhVal _ _) ->
-        evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-          contEdhSTM $ exitEdhSTM pgs exit (EdhPair lhVal rhVal)
+        evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> contEdhSTM $ exitEdhSTM
+          pgs
+          exit
+          (EdhPair (edhDeCaseClose lhVal) (edhDeCaseClose rhVal))
 
 
 -- | operator (?) - attribute tempter, 
@@ -211,9 +215,10 @@ concatProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     edhValueStr lhVal $ \(OriginalValue lhStr _ _) -> case lhStr of
       EdhString !lhs -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-        edhValueStr rhVal $ \(OriginalValue rhStr _ _) -> case rhStr of
-          EdhString !rhs -> exitEdhProc exit (EdhString $ lhs <> rhs)
-          _              -> error "bug: edhValueStr returned non-string"
+        edhValueStr (edhDeCaseClose rhVal) $ \(OriginalValue rhStr _ _) ->
+          case rhStr of
+            EdhString !rhs -> exitEdhProc exit (EdhString $ lhs <> rhs)
+            _              -> error "bug: edhValueStr returned non-string"
       _ -> error "bug: edhValueStr returned non-string"
 
 
@@ -329,22 +334,24 @@ hasSuffixProc !lhExpr !rhExpr !exit =
 prpdProc :: EdhIntrinsicOp
 prpdProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
-    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate rhVal of
-      EdhTuple vs          -> exitEdhProc exit (EdhTuple $ lhVal : vs)
-      EdhList  (List _ !l) -> contEdhSTM $ do
-        modifyTVar' l (lhVal :)
-        exitEdhSTM pgs exit rhVal
-      EdhDict (Dict _ !d) -> contEdhSTM $ val2DictEntry pgs lhVal $ \(k, v) ->
-        do
-          modifyTVar' d (setDictItem k v)
+  evalExpr lhExpr $ \(OriginalValue !lhV _ _) ->
+    let !lhVal = edhDeCaseClose lhV
+    in
+      evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate rhVal of
+        EdhTuple vs          -> exitEdhProc exit (EdhTuple $ lhVal : vs)
+        EdhList  (List _ !l) -> contEdhSTM $ do
+          modifyTVar' l (lhVal :)
           exitEdhSTM pgs exit rhVal
-      _ ->
-        throwEdh EvalError
-          $  "Don't know how to prepend to a "
-          <> T.pack (edhTypeNameOf rhVal)
-          <> ": "
-          <> T.pack (show rhVal)
+        EdhDict (Dict _ !d) ->
+          contEdhSTM $ val2DictEntry pgs lhVal $ \(k, v) -> do
+            modifyTVar' d (setDictItem k v)
+            exitEdhSTM pgs exit rhVal
+        _ ->
+          throwEdh EvalError
+            $  "Don't know how to prepend to a "
+            <> T.pack (edhTypeNameOf rhVal)
+            <> ": "
+            <> T.pack (show rhVal)
 
 
 -- | operator (>>) - list reverse prepender
@@ -495,10 +502,11 @@ evtPubProc :: EdhIntrinsicOp
 evtPubProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
-    EdhSink es -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      contEdhSTM $ do
-        publishEvent es rhVal
-        exitEdhSTM pgs exit rhVal
+    EdhSink es -> evalExpr rhExpr $ \(OriginalValue !rhV _ _) ->
+      let !rhVal = edhDeCaseClose rhV
+      in  contEdhSTM $ do
+            publishEvent es rhVal
+            exitEdhSTM pgs exit rhVal
     _ ->
       throwEdh EvalError
         $  "Can only publish event to a sink, not a "
