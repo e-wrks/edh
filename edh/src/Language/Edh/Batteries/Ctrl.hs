@@ -186,7 +186,7 @@ branchProc !lhExpr !rhExpr !exit = do
             branchMatched [(termName, EdhString n), (valueName, v)]
           _ -> exitEdhSTM pgs exit EdhCaseOther
 
-      -- { head => tail } -- snoc pattern
+      -- { head => tail } -- uncons pattern
       [StmtSrc (_, ExprStmt (InfixExpr "=>" (AttrExpr (DirectRef (NamedAttr headName))) (AttrExpr (DirectRef (NamedAttr tailName)))))]
         -> let doMatched headVal tailVal =
                    branchMatched [(headName, headVal), (tailName, tailVal)]

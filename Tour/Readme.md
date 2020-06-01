@@ -952,8 +952,8 @@ the pair pattern can be parenthesised
 Đ: case 3*7-5 of { result } -> 'a wild capture pattern receives the ' ++ result
 a wild capture pattern receives the 16
 Đ:
-Đ: case [7, 3, 5] of { head => tail } -> 'snoc pattern does snoc, got ' ++ (head, tail)
-snoc pattern does snoc, got ( 7, [ 3, 5, ], )
+Đ: case [7, 3, 5] of { head => tail } -> 'uncons pattern does uncons, got ' ++ (head, tail)
+uncons pattern does uncons, got ( 7, [ 3, 5, ], )
 Đ:
 Đ: case (3, 5, 7) of { (x, y, z) } -> 'tuple pattern matches the length'
 tuple pattern matches the length

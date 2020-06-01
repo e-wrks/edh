@@ -33,7 +33,7 @@ export method concur(*tasks, c=6, dbgLogger=0) {
 
     method scheduleMore() {
 
-      # snoc this.tasks within an *atoiso* tx block
+      # uncons this.tasks within an *atoiso* tx block
       ai case this.tasks of {
         {()} -> {  # no more tasks in backlog
           doneSig <- this.cntRunning # notify about overall finishing up
