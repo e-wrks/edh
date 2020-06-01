@@ -2302,6 +2302,15 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                 -- the generator on <break> yielded will return
                 -- nil, effectively have the for loop eval to nil
                 contEdhSTM $ genrCont $ Right EdhBreak
+              EdhCaseClose !val ->
+                -- send branch result to generator if one matched
+                contEdhSTM $ genrCont $ Right val
+              EdhCaseOther ->
+                -- send nil to generator on no-match of a branch
+                contEdhSTM $ genrCont $ Right nil
+              EdhFallthrough ->
+                -- send nil to generator on fallthrough
+                contEdhSTM $ genrCont $ Right nil
               EdhReturn EdhReturn{} -> -- this has special meaning
                 -- Edh code should not use this pattern
                 throwEdh UsageError "double return from do-of-for?"
