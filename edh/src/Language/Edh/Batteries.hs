@@ -295,8 +295,16 @@ installEdhBatteries world = liftIO $ do
           ) -- why brittany insists on formatting it like this ?.?
           -- prepand to list
           --     l = [3,7,5]
-          --     [2,9] => l
+          --     2 => l
+          --     [2,3,7,5]
         , ( "=>"
+          , 2
+          )
+          -- reverse left-list and prepend to right-list
+          --     l = [3,7,5]
+          --     [9,2] >> l
+          --     [2,9,3,7,5]
+        , ( ">>"
           , 2
           )
           -- element-of test
@@ -364,6 +372,7 @@ installEdhBatteries world = liftIO $ do
           , ("|*" , isPrefixOfProc)
           , ("*|" , hasSuffixProc)
           , ("=>" , prpdProc)
+          , (">>" , lstrvrsPrpdProc)
           , ("<-" , evtPubProc)
           , ("+"  , addProc)
           , ("-"  , subsProc)

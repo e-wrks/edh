@@ -347,6 +347,27 @@ prpdProc !lhExpr !rhExpr !exit = do
           <> T.pack (show rhVal)
 
 
+-- | operator (>>) - list reverse prepender
+lstrvrsPrpdProc :: EdhIntrinsicOp
+lstrvrsPrpdProc !lhExpr !rhExpr !exit = do
+  !pgs <- ask
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
+    EdhList (List _ !ll) -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+      case edhUltimate rhVal of
+        EdhTuple vs -> contEdhSTM $ do
+          lll <- readTVar ll
+          exitEdhSTM pgs exit (EdhTuple $ reverse lll ++ vs)
+        EdhList (List _ !l) -> contEdhSTM $ do
+          lll <- readTVar ll
+          modifyTVar' l (reverse lll ++)
+          exitEdhSTM pgs exit rhVal
+        _ ->
+          throwEdh UsageError $ "You don't reverse-prepend to a " <> T.pack
+            (edhTypeNameOf rhVal)
+    _ -> throwEdh UsageError $ "You don't reverse-prepend a " <> T.pack
+      (edhTypeNameOf lhVal)
+
+
 -- | operator (=<) - comprehension maker, appender
 --  * list comprehension:
 --     [] =< for x from range(10) do x*x
