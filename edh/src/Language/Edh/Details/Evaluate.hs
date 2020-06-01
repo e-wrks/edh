@@ -120,49 +120,54 @@ evalCaseBlock !expr !exit = case expr of
   BlockExpr stmts' -> evalBlock stmts' exit
   -- single branch case is some special
   _                -> evalExpr expr $ \(OriginalValue !val _ _) -> case val of
-    -- the only branch does match
+    -- the only branch did match
     (EdhCaseClose !v) -> exitEdhProc exit v
-    -- the only branch does not match
-    EdhFallthrough    -> exitEdhProc exit nil
-    -- ctrl to be propagated outwards
-    EdhBreak          -> exitEdhProc exit EdhBreak
-    EdhContinue       -> exitEdhProc exit EdhContinue
-    (EdhReturn !v)    -> exitEdhProc exit (EdhReturn v)
+    -- the only branch didn't match
+    EdhCaseOther      -> exitEdhProc exit nil
     -- yield should have been handled by 'evalExpr'
-    (EdhYield  _ )    -> throwEdh EvalError "bug yield reached block"
-    -- the only expr has no special branching result, propagate as is
+    (EdhYield _)      -> throwEdh EvalError "bug yield reached block"
+    -- ctrl to be propagated outwards, as this is the only stmt, no need to
+    -- be specifically written out
+    -- EdhFallthrough    -> exitEdhProc exit EdhFallthrough
+    -- EdhBreak          -> exitEdhProc exit EdhBreak
+    -- EdhContinue       -> exitEdhProc exit EdhContinue
+    -- (EdhReturn !v)    -> exitEdhProc exit (EdhReturn v)
+    -- other vanilla result, propagate as is
     _                 -> exitEdhProc exit val
 
 evalBlock :: [StmtSrc] -> EdhProcExit -> EdhProc
 evalBlock []    !exit = exitEdhProc exit nil
 evalBlock [!ss] !exit = evalStmt ss $ \(OriginalValue !val _ _) -> case val of
-  -- last branch does match
+  -- last branch did match
   (EdhCaseClose !v) -> exitEdhProc exit v
-  -- explicit `fallthrough` at end of this block, cascade to outer block
-  EdhFallthrough    -> exitEdhProc exit EdhFallthrough
-  -- ctrl to be propagated outwards
-  EdhRethrow        -> exitEdhProc exit EdhRethrow
-  EdhBreak          -> exitEdhProc exit EdhBreak
-  EdhContinue       -> exitEdhProc exit EdhContinue
-  (EdhReturn !v)    -> exitEdhProc exit (EdhReturn v)
   -- yield should have been handled by 'evalExpr'
-  (EdhYield  _ )    -> throwEdh EvalError "bug yield reached block"
-  -- last stmt has no special branching result, propagate as is
+  (EdhYield     _ ) -> throwEdh EvalError "bug yield reached block"
+  -- ctrl to be propagated outwards, as this is the last stmt, no need to
+  -- be specifically written out
+  -- EdhCaseOther      -> exitEdhProc exit EdhCaseOther
+  -- EdhFallthrough    -> exitEdhProc exit EdhFallthrough
+  -- EdhRethrow        -> exitEdhProc exit EdhRethrow
+  -- EdhBreak          -> exitEdhProc exit EdhBreak
+  -- EdhContinue       -> exitEdhProc exit EdhContinue
+  -- (EdhReturn !v)    -> exitEdhProc exit (EdhReturn v)
+  -- other vanilla result, propagate as is
   _                 -> exitEdhProc exit val
 evalBlock (ss : rest) !exit = evalStmt ss $ \(OriginalValue !val _ _) ->
   case val of
-    -- this branch matches without fallthrough, done this block
+    -- a branch matched, finish this block
     (EdhCaseClose !v) -> exitEdhProc exit v
+    -- should continue to next branch (or stmt)
+    EdhCaseOther      -> evalBlock rest exit
     -- should fallthrough to next branch (or stmt)
     EdhFallthrough    -> evalBlock rest exit
-    -- ctrl to be propagated outwards
+    -- yield should have been handled by 'evalExpr'
+    (EdhYield _)      -> throwEdh EvalError "bug yield reached block"
+    -- ctrl to interrupt this block, and to be propagated outwards
     EdhRethrow        -> exitEdhProc exit EdhRethrow
     EdhBreak          -> exitEdhProc exit EdhBreak
     EdhContinue       -> exitEdhProc exit EdhContinue
     (EdhReturn !v)    -> exitEdhProc exit (EdhReturn v)
-    -- yield should have been handled by 'evalExpr'
-    (EdhYield  _ )    -> throwEdh EvalError "bug yield reached block"
-    -- no special branching result, continue this block
+    -- other vanilla result, continue this block
     _                 -> evalBlock rest exit
 
 

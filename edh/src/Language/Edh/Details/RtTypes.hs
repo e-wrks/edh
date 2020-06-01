@@ -741,6 +741,7 @@ data EdhValue =
     | EdhBreak
     | EdhContinue
     | EdhCaseClose !EdhValue
+    | EdhCaseOther
     | EdhFallthrough
     | EdhRethrow
     | EdhYield !EdhValue
@@ -788,6 +789,7 @@ instance Show EdhValue where
   show EdhBreak                      = "<break>"
   show EdhContinue                   = "<continue>"
   show (EdhCaseClose v)              = "<caseclose: " ++ show v ++ ">"
+  show EdhCaseOther                  = "<caseother>"
   show EdhFallthrough                = "<fallthrough>"
   show EdhRethrow                    = "<rethrow>"
   show (EdhYield  v)                 = "<yield: " ++ show v ++ ">"
@@ -842,6 +844,7 @@ instance Eq EdhValue where
   EdhBreak                    == EdhBreak                    = True
   EdhContinue                 == EdhContinue                 = True
   EdhCaseClose x              == EdhCaseClose y              = x == y
+  EdhCaseOther                == EdhCaseOther                = True
   EdhFallthrough              == EdhFallthrough              = True
   EdhRethrow                  == EdhRethrow                  = True
 -- todo: regard a yielded/returned value equal to the value itself ?
@@ -889,10 +892,11 @@ instance Hashable EdhValue where
   hashWithSalt s EdhContinue = hashWithSalt s (-2 :: Int)
   hashWithSalt s (EdhCaseClose v) =
     s `hashWithSalt` (-3 :: Int) `hashWithSalt` v
-  hashWithSalt s EdhFallthrough            = hashWithSalt s (-4 :: Int)
-  hashWithSalt s EdhRethrow                = hashWithSalt s (-7 :: Int)
-  hashWithSalt s (EdhYield v) = s `hashWithSalt` (-5 :: Int) `hashWithSalt` v
-  hashWithSalt s (EdhReturn v) = s `hashWithSalt` (-6 :: Int) `hashWithSalt` v
+  hashWithSalt s EdhCaseOther              = hashWithSalt s (-4 :: Int)
+  hashWithSalt s EdhFallthrough            = hashWithSalt s (-5 :: Int)
+  hashWithSalt s EdhRethrow                = hashWithSalt s (-6 :: Int)
+  hashWithSalt s (EdhYield v) = s `hashWithSalt` (-7 :: Int) `hashWithSalt` v
+  hashWithSalt s (EdhReturn v) = s `hashWithSalt` (-8 :: Int) `hashWithSalt` v
 
   hashWithSalt s (EdhSink   x            ) = hashWithSalt s x
 
@@ -1256,6 +1260,7 @@ data EdhTypeValue = TypeType
     | BreakType
     | ContinueType
     | CaseCloseType
+    | CaseOtherType
     | FallthroughType
     | RethrowType
     | YieldType
@@ -1315,6 +1320,7 @@ edhTypeOf EdhPrducr{}         = ProducerType
 edhTypeOf EdhBreak            = BreakType
 edhTypeOf EdhContinue         = ContinueType
 edhTypeOf EdhCaseClose{}      = CaseCloseType
+edhTypeOf EdhCaseOther        = CaseOtherType
 edhTypeOf EdhFallthrough      = FallthroughType
 edhTypeOf EdhRethrow          = RethrowType
 edhTypeOf EdhYield{}          = YieldType

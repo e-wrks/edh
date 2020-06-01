@@ -575,6 +575,7 @@ parseLitExpr = choice
   , TypeLiteral BreakType <$ litKw "BreakType"
   , TypeLiteral ContinueType <$ litKw "ContinueType"
   , TypeLiteral CaseCloseType <$ litKw "CaseCloseType"
+  , TypeLiteral CaseOtherType <$ litKw "CaseOtherType"
   , TypeLiteral FallthroughType <$ litKw "FallthroughType"
   , TypeLiteral RethrowType <$ litKw "RethrowType"
   , TypeLiteral YieldType <$ litKw "YieldType"
