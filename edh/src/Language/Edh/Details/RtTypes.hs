@@ -908,6 +908,9 @@ instance Hashable EdhValue where
 
 edhUltimate :: EdhValue -> EdhValue
 edhUltimate (EdhNamedValue _ v) = edhUltimate v
+edhUltimate (EdhCaseClose v   ) = edhUltimate v
+edhUltimate (EdhReturn    v   ) = edhUltimate v
+edhUltimate (EdhYield     v   ) = edhUltimate v
 edhUltimate v                   = v
 
 
