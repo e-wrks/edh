@@ -273,7 +273,11 @@ evalStmt' !stmt !exit = do
     RethrowStmt     -> exitEdhProc exit EdhRethrow
 
     ReturnStmt expr -> evalExpr expr $ \(OriginalValue !val _ _) -> case val of
-      EdhReturn{} -> throwEdh UsageError "you don't double return"
+      EdhReturn{} -> exitEdhProc exit (EdhReturn val)
+        -- actually when a generator procedure checks the result of its `yield`
+        -- for the case of early return from the do block, if it wants to
+        -- cooperate, double return is the only option
+        -- throwEdh UsageError "you don't double return"
       _           -> exitEdhProc exit (EdhReturn val)
 
 
@@ -1163,13 +1167,13 @@ evalExpr expr exit = do
                   -- the generator can intervene the return, that'll be
                   -- black magic
                   exitEdhSTM pgs exit $ EdhReturn EdhNil
-                EdhReturn loopRtn@EdhReturn{} -> -- this must be synthesiszed,
+                EdhReturn EdhReturn{} -> -- this must be synthesiszed,
                   -- in case do block issued return, the for loop wrap it as
                   -- double return, so as to let the yield expr in the generator
-                  -- propagate the return value, as the result of the for loop
+                  -- propagate the value return, as the result of the for loop
                   -- the generator can intervene the return, that'll be
                   -- black magic
-                  exitEdhSTM pgs exit loopRtn
+                  exitEdhSTM pgs exit doResult
                 EdhReturn{} -> -- for loop should have double-wrapped the
                   -- return, which is handled above, in case its do block
                   -- issued a return
@@ -2286,8 +2290,8 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                     runEdhProc pgsTry $ evalExpr doExpr exit'
             doneOne (OriginalValue !doResult _ _) = case doResult of
               EdhContinue ->
-                -- propagate the continue to generator
-                contEdhSTM $ genrCont $ Right EdhContinue
+                -- send nil to generator on continue
+                contEdhSTM $ genrCont $ Right nil
               EdhBreak ->
                 -- break out of the for-from-do loop,
                 -- the generator on <break> yielded will return

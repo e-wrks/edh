@@ -1144,7 +1144,103 @@ I am good
 
 ### Generator Procedures
 
-Checkout how the `range()` clone from **Python** is
+Checkout [generator.edh](./generator.edh)
+
+A generator procedure can only be called by a `for-from-do` loop, facilitating
+single producer, single consumer event streaming with backpressure.
+
+Values can be exchanged between the generator and the `do` expr
+
+```bash
+Đ: generator ss n while true n = yield n*n
+ss
+Đ: for n from ss(3) do { console.info<|n; if n > 100 then break else n }
+Đ: ℹ️ <adhoc>:1:23
+9
+ℹ️ <adhoc>:1:23
+81
+ℹ️ <adhoc>:1:23
+6561
+
+Đ:
+```
+
+The `for-from-do` loop is an expression, and its final value evaluates to the
+return value of the generator procedure as invoked:
+
+```bash
+Đ: {
+Đ|  1:
+Đ|  2:   generator g () {
+Đ|  3:     yield 1
+Đ|  4:     yield 2
+Đ|  5:     return 3
+Đ|  6:   }
+Đ|  7:
+Đ|  8:   result = for n from g() do console.info <| 'got ' ++ n
+Đ|  9:
+Đ| 10:   console.info <| 'Result is: ' ++ result
+Đ| 11: }
+Đ: ℹ️ <adhoc>:8:3
+got 1
+ℹ️ <adhoc>:8:3
+got 2
+ℹ️ <adhoc>:10:3
+Result is: 3
+
+Đ:
+```
+
+```bash
+Đ: {
+Đ|  1:   generator g() {
+Đ|  2:
+Đ|  3:     # a `yield` expression in a generator procedure evals to:
+Đ|  4:     #   *) `return nil` on `break` from do block of the loop
+Đ|  5:     #   *) `return {return val}` on `return val` from do block of the loop
+Đ|  6:     #   *) exception from do block of the loop re-thrown from its position
+Đ|  7:
+Đ|  8:     case yield 'something' of {
+Đ|  9:       { return nil } -> {
+Đ| 10:         console.info<| 'the do block broke the for loop'
+Đ| 11:         return nil  # cooperate nicely,
+Đ| 12:         # or cast black magic if you wish
+Đ| 13:       }
+Đ| 14:       { return rtn } -> {
+Đ| 15:         console.info<| 'early returning from do block: ' ++ rtn
+Đ| 16:         return rtn  # cooperate nicely,
+Đ| 17:         # or cast black magic if you wish
+Đ| 18:       }
+Đ| 19:       { xchg'val } -> {
+Đ| 20:         console.info<| 'the do block sent ' ++ xchg'val ++ " to generator's yield"
+Đ| 21:       }
+Đ| 22:       console.info<| 'the do block continued the for loop'
+Đ| 23:     }
+Đ| 24:
+Đ| 25:   }
+Đ| 26: }
+g
+Đ:
+Đ: for _ from g() do { pass }
+ℹ️ <console>:22:7
+the do block continued the for loop
+Đ:
+Đ: for _ from g() do { continue }
+ℹ️ <console>:22:7
+the do block continued the for loop
+Đ:
+Đ: for _ from g() do { break }
+ℹ️ <console>:10:9
+the do block broke the for loop
+Đ:
+Đ: for _ from g() do { return 'otherthing' }
+ℹ️ <console>:15:9
+early returning from do block: <return: "otherthing">
+<return: "otherthing">
+Đ:
+```
+
+Also checkout how the `range()` clone from **Python** is
 [implemented in **Edh**](../edh_modules/batteries/root/iter.edh) :
 
 ```js
@@ -1213,49 +1309,6 @@ This is pasteable to the REPL:
   # Python style `enumerate`
   for (i, n) from enumerate(range, 5) do console.info <| ' # ' ++ i ++ ' >> ' ++ n
 }
-```
-
-Also values can be exchanged between the generator and the `do` expr
-
-```bash
-Đ: generator ss n while true n = yield n*n
-ss
-Đ: for n from ss(3) do { console.info<|n; if n > 100 then break else n }
-Đ: ℹ️ <adhoc>:1:23
-9
-ℹ️ <adhoc>:1:23
-81
-ℹ️ <adhoc>:1:23
-6561
-
-Đ:
-```
-
-An extra feature of **Edh** generator than in other languages, is that the
-`for-from-do` loop is an expression, and its final value evaluates to the
-return value of the generator procedure as invoked:
-
-```bash
-Đ: {
-Đ|  1:
-Đ|  2:   generator g () {
-Đ|  3:     yield 1
-Đ|  4:     yield 2
-Đ|  5:     return 3
-Đ|  6:   }
-Đ|  7:
-Đ|  8:   result = for n from g() do console.info <| 'got ' ++ n
-Đ|  9:
-Đ| 10:   console.info <| 'Result is: ' ++ result
-Đ| 11: }
-Đ: ℹ️ <adhoc>:8:3
-got 1
-ℹ️ <adhoc>:8:3
-got 2
-ℹ️ <adhoc>:10:3
-Result is: 3
-
-Đ:
 ```
 
 ### Interpreter Procedures
@@ -1466,6 +1519,10 @@ usage in action.
 ### Producer Procedures
 
 Checkout [producer.edh](./producer.edh)
+
+A producer procedure is always run from a separate thread forked when it's
+called, faciliating multiple event streaming without backpressure, with
+possibly multiple producers and multiple consumers.
 
 See [Producer Procedure](#producer-procedure)
 

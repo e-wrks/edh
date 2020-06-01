@@ -1,0 +1,56 @@
+
+
+generator ss n while true n = yield n*n
+for n from ss(3) do { console.info<|n; if n > 100 then break else n }
+
+
+{
+  generator g () {
+    yield 1
+    yield 2
+    return 3
+  }
+
+  result = for n from g() do console.info <| 'got ' ++ n
+  console.info <| 'Result is: ' ++ result
+}
+
+
+{
+  generator g() {
+
+    # a `yield` expression in a generator procedure evals to:
+    #   *) `return nil` on `break` from do block of the loop
+    #   *) `return {return val}` on `return val` from do block of the loop
+    #   *) exception from do block of the loop re-thrown from its position
+
+    case yield 'something' of {
+      { return nil } -> {
+        console.info<| 'the do block broke the for loop'
+        return nil  # cooperate nicely,
+        # or cast black magic if you wish
+      }
+      { return rtn } -> {
+        console.info<| 'early returning from do block: ' ++ rtn
+        return rtn  # cooperate nicely,
+        # or cast black magic if you wish
+      }
+      { xchg'val } -> {
+        console.info<| 'the do block sent ' ++ xchg'val ++ " to generator's yield"
+      }
+      console.info<| 'the do block continued the for loop'
+    }
+
+  }
+}
+
+for _ from g() do { pass }
+
+for _ from g() do { continue }
+
+for _ from g() do { break }
+
+for _ from g() do { return 'otherthing' }
+
+for _ from g() do { return nil }
+
