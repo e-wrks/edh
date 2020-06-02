@@ -1424,17 +1424,23 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
             $   readTVar (objSupers this)
             >>= runEdhProc pgs
             .   getFromSupers
-    -- give super objects the magical power to intercept
-    -- attribute access on descendant objects, via obj ref
     _ -> evalExpr fromExpr $ \(OriginalValue !fromVal _ _) ->
       case edhUltimate fromVal of
         (EdhObject !obj) -> do
+          -- give super objects the magical power to intercept
+          -- attribute access on descendant objects, via obj ref
           let fromScope = objectScope ctx obj
               noMagic :: EdhProc
               noMagic = contEdhSTM $ lookupEdhObjAttr pgs obj key >>= \case
                 EdhNil -> runEdhProc pgs $ exitNoAttr fromVal
                 !val   -> exitEdhSTM' pgs exit $ OriginalValue val fromScope obj
           getEdhAttrWithMagic (AttrByName "@<-*") obj key noMagic exit
+        -- virtual attrs for special types
+        (EdhDict (Dict _ !dsv)) -> case key of
+          AttrByName "size" -> contEdhSTM $ do
+            ds <- readTVar dsv
+            exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral $ Map.size ds
+          _ -> contEdhSTM $ runEdhProc pgs $ exitNoAttr fromVal
         _ -> contEdhSTM $ runEdhProc pgs $ exitNoAttr fromVal
 
 
