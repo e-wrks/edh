@@ -438,7 +438,7 @@ installEdhBatteries world = liftIO $ do
              ]
            ]
         ++ [ (AttrByName nm, ) <$> mkHostClass rootScope nm True hc
-           | (nm, hc) <- [("Vector", vecHostCtor)]
+           | (nm, hc) <- [("Vector", vecHostCtor), ("MVector", mvecHostCtor)]
            ]
 
       !conEntity <- createHashEntity $ Map.fromList
