@@ -9,6 +9,8 @@
   - use (`$=>`) as `catch` and (`@=>`) as `finally`
   - originally planned `try`/`catch`/`finally` keywords and syntax dropped
   - exception classes refactored for Edh code to easily handle host errors
+  - far-reaching exception handler
+    - forker thread handles exceptions occurred in forkee threads
 - reactor procedure dropped, changed to `perceive` construct, same feature
   but different syntax that breaks old code
 - the `runtime` module and its host artifacts from default batteries are
@@ -21,9 +23,10 @@
   export statement to be eligible for import. then neither name nor type
   matters for exportability
 - a dynamic effects system
-
   - define effects with `effect` keyword, pull effectful artifacts with
     `perform` and `behave` keywords
+- add `Vector` and `MVector` to default batteries
+- various bugfixes and improvements
 
 ## 0.2.0.0
 
