@@ -36,6 +36,7 @@ import           Data.Lossless.Decimal         as D
 import           Language.Edh.Runtime
 
 import           Language.Edh.Batteries.Data
+import           Language.Edh.Batteries.Vector
 import           Language.Edh.Batteries.Math
 import           Language.Edh.Batteries.Assign
 import           Language.Edh.Batteries.Reflect
@@ -398,43 +399,47 @@ installEdhBatteries world = liftIO $ do
         ]
 
       -- global procedures at world root scope
-      !rootProcs <- sequence
-        [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp args
-        | (mc, nm, hp, args) <-
-          [ ( EdhMethod
-            , "Symbol"
-            , symbolCtorProc
-            , PackReceiver [RecvArg "description" Nothing Nothing]
-            )
-          , (EdhMethod, "pkargs"     , pkargsProc     , WildReceiver)
-          , (EdhMethod, "repr"       , reprProc       , WildReceiver)
-          , (EdhMethod, "dict"       , dictProc       , WildReceiver)
-          , (EdhMethod, "null"       , isNullProc     , WildReceiver)
-          , (EdhMethod, "type"       , typeProc       , WildReceiver)
-          , (EdhMethod, "constructor", ctorProc       , WildReceiver)
-          , (EdhMethod, "supers"     , supersProc     , WildReceiver)
-          , (EdhMethod, "scope"      , scopeObtainProc, PackReceiver [])
-          , ( EdhMethod
-            , "makeOp"
-            , makeOpProc
-            , PackReceiver
-              [ RecvArg "lhe"   Nothing Nothing
-              , RecvArg "opSym" Nothing Nothing
-              , RecvArg "rhe"   Nothing Nothing
-              ]
-            )
-          , ( EdhMethod
-            , "mre"
-            , mreProc
-            , PackReceiver [RecvArg "evs" Nothing Nothing]
-            )
-          , ( EdhMethod
-            , "eos"
-            , eosProc
-            , PackReceiver [RecvArg "evs" Nothing Nothing]
-            )
-          ]
-        ]
+      !rootProcs <-
+        sequence
+        $  [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp args
+           | (mc, nm, hp, args) <-
+             [ ( EdhMethod
+               , "Symbol"
+               , symbolCtorProc
+               , PackReceiver [RecvArg "description" Nothing Nothing]
+               )
+             , (EdhMethod, "pkargs"     , pkargsProc     , WildReceiver)
+             , (EdhMethod, "repr"       , reprProc       , WildReceiver)
+             , (EdhMethod, "dict"       , dictProc       , WildReceiver)
+             , (EdhMethod, "null"       , isNullProc     , WildReceiver)
+             , (EdhMethod, "type"       , typeProc       , WildReceiver)
+             , (EdhMethod, "constructor", ctorProc       , WildReceiver)
+             , (EdhMethod, "supers"     , supersProc     , WildReceiver)
+             , (EdhMethod, "scope"      , scopeObtainProc, PackReceiver [])
+             , ( EdhMethod
+               , "makeOp"
+               , makeOpProc
+               , PackReceiver
+                 [ RecvArg "lhe"   Nothing Nothing
+                 , RecvArg "opSym" Nothing Nothing
+                 , RecvArg "rhe"   Nothing Nothing
+                 ]
+               )
+             , ( EdhMethod
+               , "mre"
+               , mreProc
+               , PackReceiver [RecvArg "evs" Nothing Nothing]
+               )
+             , ( EdhMethod
+               , "eos"
+               , eosProc
+               , PackReceiver [RecvArg "evs" Nothing Nothing]
+               )
+             ]
+           ]
+        ++ [ (AttrByName nm, ) <$> mkHostClass rootScope nm True hc
+           | (nm, hc) <- [("Vector", vecHostCtor)]
+           ]
 
       !conEntity <- createHashEntity $ Map.fromList
         [ (AttrByName "__repr__", EdhString "<console>")

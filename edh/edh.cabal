@@ -47,6 +47,7 @@ library edh-internal
         Language.Edh.Control
         Language.Edh.Batteries
         Language.Edh.Batteries.Data
+        Language.Edh.Batteries.Vector
         Language.Edh.Batteries.Math
         Language.Edh.Batteries.Assign
         Language.Edh.Batteries.Reflect
