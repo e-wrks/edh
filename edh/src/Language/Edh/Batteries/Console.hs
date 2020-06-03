@@ -275,49 +275,83 @@ conNowProc _ !exit = do
     exitEdhSTM pgs exit (EdhDecimal $ fromInteger nanos)
 
 
-timelyNotify :: EdhProgState -> Int -> EdhGenrCaller -> EdhProcExit -> STM ()
-timelyNotify !pgs !delayMicros genr'caller@(!pgs', !iter'cb) !exit = do
-  nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ do
-    threadDelay delayMicros
-    getTime Realtime
-  -- yield the nanosecond timestamp to iterator
-  runEdhProc pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \case
-    Left (pgsThrower, exv) ->
-      edhThrowSTM pgsThrower { edh'context = edh'context pgs } exv
-    Right EdhBreak         -> exitEdhSTM pgs exit nil
-    Right (EdhReturn !rtn) -> exitEdhSTM pgs exit rtn
-    _                      -> timelyNotify pgs delayMicros genr'caller exit
+data PeriodicArgs = PeriodicArgs {
+    periodic'interval :: !Int
+  , periodic'wait1st :: !Bool
+  }
 
--- | host generator console.everyMicros(n) - with fixed interval
+timelyNotify
+  :: EdhProgState -> PeriodicArgs -> EdhGenrCaller -> EdhProcExit -> STM ()
+timelyNotify !pgs (PeriodicArgs !delayMicros !wait1st) (!pgs', !iter'cb) !exit
+  = if wait1st
+    then edhPerformIO pgs (threadDelay delayMicros) $ \() -> contEdhSTM notifOne
+    else notifOne
+ where
+  notifOne = do
+    nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ getTime Realtime
+    runEdhProc pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \case
+      Left (pgsThrower, exv) ->
+        edhThrowSTM pgsThrower { edh'context = edh'context pgs } exv
+      Right EdhBreak         -> exitEdhSTM pgs exit nil
+      Right (EdhReturn !rtn) -> exitEdhSTM pgs exit rtn
+      _ ->
+        edhPerformIO pgs (threadDelay delayMicros) $ \() -> contEdhSTM notifOne
+
+-- | host generator console.everyMicros(n, wait1st=true) - with fixed interval
 conEveryMicrosProc :: EdhProcedure
 conEveryMicrosProc !apk !exit = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of
-    Nothing          -> throwEdh EvalError "Can only be called as generator"
-    Just genr'caller -> case _parseInterval apk of
-      Just !n -> contEdhSTM $ timelyNotify pgs n genr'caller exit
-      _       -> throwEdh EvalError "Invalid argument to console.everyMicros(n)"
+    Nothing -> throwEdh EvalError "Can only be called as generator"
+    Just genr'caller ->
+      case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
+        Right !pargs -> contEdhSTM $ timelyNotify pgs pargs genr'caller exit
+        Left  !err   -> throwEdh UsageError err
 
--- | host generator console.everyMillis(n) - with fixed interval
+-- | host generator console.everyMillis(n, wait1st=true) - with fixed interval
 conEveryMillisProc :: EdhProcedure
 conEveryMillisProc !apk !exit = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of
-    Nothing          -> throwEdh EvalError "Can only be called as generator"
-    Just genr'caller -> case _parseInterval apk of
-      Just !n -> contEdhSTM $ timelyNotify pgs (1000 * n) genr'caller exit
-      _       -> throwEdh EvalError "Invalid argument to console.everyMillis(n)"
+    Nothing -> throwEdh EvalError "Can only be called as generator"
+    Just genr'caller ->
+      case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
+        Right !pargs -> contEdhSTM $ timelyNotify
+          pgs
+          pargs { periodic'interval = 1000 * periodic'interval pargs }
+          genr'caller
+          exit
+        Left !err -> throwEdh UsageError err
 
--- | host generator console.everySeconds(n) - with fixed interval
+-- | host generator console.everySeconds(n, wait1st=true) - with fixed interval
 conEverySecondsProc :: EdhProcedure
 conEverySecondsProc !apk !exit = ask >>= \pgs ->
   case generatorCaller $ edh'context pgs of
-    Nothing          -> throwEdh EvalError "Can only be called as generator"
-    Just genr'caller -> case _parseInterval apk of
-      Just !n -> contEdhSTM $ timelyNotify pgs (1000000 * n) genr'caller exit
-      _ -> throwEdh EvalError "Invalid argument to console.everySeconds(n)"
+    Nothing -> throwEdh EvalError "Can only be called as generator"
+    Just genr'caller ->
+      case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
+        Right !pargs -> contEdhSTM $ timelyNotify
+          pgs
+          pargs { periodic'interval = 1000000 * periodic'interval pargs }
+          genr'caller
+          exit
+        Left !err -> throwEdh UsageError err
 
-_parseInterval :: ArgsPack -> Maybe Int
-_parseInterval (ArgsPack !args !kwargs) = do
-  unless (Map.null kwargs) Nothing
-  case args of
-    [EdhDecimal d] | d > 0 -> fromIntegral <$> decimalToInteger d
-    _                      -> Nothing
+parsePeriodicArgs :: ArgsPackParser PeriodicArgs
+parsePeriodicArgs =
+  ArgsPackParser
+      [ \arg pargs -> case arg of
+          EdhDecimal !d -> case decimalToInteger d of
+            Just !i -> Right $ pargs { periodic'interval = fromIntegral i }
+            _ -> Left $ "Invalid interval, expect an integer but: " <> T.pack
+              (show arg)
+          _ -> Left $ "Invalid interval, expect an integer but: " <> T.pack
+            (show arg)
+      ]
+    $ Map.fromList
+        [ ( "wait1st"
+          , \arg pargs -> case arg of
+            EdhBool !w -> Right pargs { periodic'wait1st = w }
+            _ -> Left $ "Invalid wait1st, expect true or false but: " <> T.pack
+              (show arg)
+          )
+        ]
+
