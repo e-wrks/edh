@@ -224,8 +224,7 @@ evalStmt' !stmt !exit = do
                                  d
   case stmt of
 
-    ExprStmt expr -> evalExpr expr $ \result@(OriginalValue !val _ _) ->
-      exitEdhProc' exit result { valueFromOrigin = edhDeCaseClose val }
+    ExprStmt expr -> evalExpr expr $ \result -> exitEdhProc' exit result
 
     LetStmt argsRcvr argsSndr ->
       -- ensure args sending and receiving happens within a same tx

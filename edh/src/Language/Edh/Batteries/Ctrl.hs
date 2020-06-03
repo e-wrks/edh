@@ -96,15 +96,17 @@ branchProc !lhExpr !rhExpr !exit = do
         updAttrs [ (AttrByName n, noneNil v) | (n, v) <- ps, n /= "_" ]
         runEdhProc pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
           exitEdhProc exit $ case rhVal of
-            -- a nested branch matched, the outer branch eval to its value too
-            EdhCaseClose !nestedMatch -> EdhCaseClose nestedMatch
+            -- a nested branch matched, the outer branch eval to its final
+            -- value with case closed
+            EdhCaseClose !nestedMatch ->
+              EdhCaseClose $ edhDeCaseClose nestedMatch
             -- a nested branch mismatched, while the outer branch did match,
-            -- so eval to nil
-            EdhCaseOther              -> nil
+            -- so eval to nil with case closed
+            EdhCaseOther   -> EdhCaseClose nil
             -- propagate an explicit fallthrough
-            EdhFallthrough            -> EdhFallthrough
+            EdhFallthrough -> EdhFallthrough
             -- some other value, the outer branch eval to it
-            _                         -> EdhCaseClose rhVal
+            _              -> EdhCaseClose rhVal
 
       handlePairPattern !pairPattern =
         case matchPairPattern pairPattern ctxMatch [] of
