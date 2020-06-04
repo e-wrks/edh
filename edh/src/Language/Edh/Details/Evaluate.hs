@@ -247,7 +247,7 @@ evalStmt' !stmt !exit = do
                       _ -> do
                         d <- createEdhDict effd
                         changeEntityAttr pgs
-                                         (objEntity this)
+                                         (scopeEntity scope)
                                          (AttrByName edhEffectsMagicName)
                                          d
           when (contextExporting ctx) $ if objEntity this /= scopeEntity scope
@@ -2622,10 +2622,7 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
             modifyTVar' effDS $ Map.insert (attrKeyValue artKey) rhVal
           _ -> do
             d <- createEdhDict $ Map.singleton (attrKeyValue artKey) rhVal
-            changeEntityAttr pgs
-                             (objEntity this)
-                             (AttrByName edhEffectsMagicName)
-                             d
+            changeEntityAttr pgs ent (AttrByName edhEffectsMagicName) d
   case lhExpr of
     AttrExpr !addr -> case addr of
       -- silently drop value assigned to single underscore
