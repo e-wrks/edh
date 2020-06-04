@@ -243,10 +243,12 @@ installEdhBatteries world = liftIO $ do
           ) -- why brittany insists on formatting it like this ?.?
 
         -- arithmetic
-        , ("+", 6)
-        , ("-", 6)
-        , ("*", 7)
-        , ("/", 7)
+        , ("+" , 6)
+        , ("-" , 6)
+        , ("*" , 7)
+        , ("/" , 7)
+        , ("//", 7)
+        , ("%" , 7)
         , ( "**"
           , 8
           )
@@ -379,6 +381,8 @@ installEdhBatteries world = liftIO $ do
           , ("-"  , subsProc)
           , ("*"  , mulProc)
           , ("/"  , divProc)
+          , ("//" , divIntProc)
+          , ("%"  , modIntProc)
           , ("**" , powProc)
           , ("&&" , logicalAndProc)
           , ("||" , logicalOrProc)

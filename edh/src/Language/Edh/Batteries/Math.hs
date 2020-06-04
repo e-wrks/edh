@@ -88,6 +88,62 @@ divProc !lhExpr !rhExpr !exit =
         $  "Invalid left-hand value for (/) operation: "
         <> T.pack (show lhVal)
 
+-- | operator (//) integer division, following Python 
+-- http://python-history.blogspot.com/2010/08/why-pythons-integer-division-floors.html
+divIntProc :: EdhIntrinsicOp
+divIntProc !lhExpr !rhExpr !exit =
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
+    EdhDecimal lhNum -> case decimalToInteger lhNum of
+      Nothing ->
+        throwEdh EvalError
+          $  "Not an integer as left-hand value for (//) operation: "
+          <> T.pack (show lhNum)
+      Just lhi -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+        case edhUltimate rhVal of
+          EdhDecimal rhNum -> case decimalToInteger rhNum of
+            Nothing ->
+              throwEdh EvalError
+                $  "Not an integer as right-hand value for (//) operation: "
+                <> T.pack (show rhNum)
+            Just rhi ->
+              exitEdhProc exit $ EdhDecimal $ Decimal 1 0 $ lhi `div` rhi
+          _ ->
+            throwEdh EvalError
+              $  "Invalid right-hand value for (//) operation: "
+              <> T.pack (show rhVal)
+    _ ->
+      throwEdh EvalError
+        $  "Invalid left-hand value for (//) operation: "
+        <> T.pack (show lhVal)
+
+-- | operator (%) modulus of integer division, following Python 
+-- http://python-history.blogspot.com/2010/08/why-pythons-integer-division-floors.html
+modIntProc :: EdhIntrinsicOp
+modIntProc !lhExpr !rhExpr !exit =
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
+    EdhDecimal lhNum -> case decimalToInteger lhNum of
+      Nothing ->
+        throwEdh EvalError
+          $  "Not an integer as left-hand value for (%) operation: "
+          <> T.pack (show lhNum)
+      Just lhi -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+        case edhUltimate rhVal of
+          EdhDecimal rhNum -> case decimalToInteger rhNum of
+            Nothing ->
+              throwEdh EvalError
+                $  "Not an integer as right-hand value for (%) operation: "
+                <> T.pack (show rhNum)
+            Just rhi ->
+              exitEdhProc exit $ EdhDecimal $ Decimal 1 0 $ lhi `mod` rhi
+          _ ->
+            throwEdh EvalError
+              $  "Invalid right-hand value for (%) operation: "
+              <> T.pack (show rhVal)
+    _ ->
+      throwEdh EvalError
+        $  "Invalid left-hand value for (%) operation: "
+        <> T.pack (show lhVal)
+
 
 -- | operator (**)
 powProc :: EdhIntrinsicOp
