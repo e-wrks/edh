@@ -1427,13 +1427,21 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
                 EdhNil -> runEdhProc pgs $ exitNoAttr fromVal
                 !val   -> exitEdhSTM' pgs exit $ OriginalValue val fromScope obj
           getEdhAttrWithMagic (AttrByName "@<-*") obj key noMagic exit
-        -- virtual attrs for special types
-        (EdhDict (Dict _ !dsv)) -> case key of
-          AttrByName "size" -> contEdhSTM $ do
-            ds <- readTVar dsv
-            exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral $ Map.size ds
-          _ -> contEdhSTM $ runEdhProc pgs $ exitNoAttr fromVal
-        _ -> contEdhSTM $ runEdhProc pgs $ exitNoAttr fromVal
+        -- virtual attrs by magic method from context
+        !val -> case key of
+          AttrByName !attrName -> contEdhSTM $ do
+            let !magicName = "__" <> typeNameOf val <> "_" <> attrName <> "__"
+            lookupEdhCtxAttr pgs scope (AttrByName magicName) >>= \case
+              EdhMethod !mth -> runEdhProc pgs
+                $ callEdhMethod this mth (ArgsPack [val] Map.empty) id exit
+              _ -> runEdhProc pgs $ exitNoAttr fromVal
+          _ -> exitNoAttr fromVal
+ where
+  typeNameOf :: EdhValue -> Text
+  typeNameOf EdhNil                   = "nil"
+  typeNameOf (EdhNamedValue n EdhNil) = n
+  typeNameOf (EdhNamedValue _ v     ) = typeNameOf v
+  typeNameOf v                        = T.pack $ show $ edhTypeOf v
 
 
 -- There're 2 tiers of magic happen during object attribute resolution in Edh.

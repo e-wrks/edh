@@ -4,6 +4,7 @@ export {
 # alias this module
 batteries = this
 
+import * './vattr'
 import * './ctrl'
 import * './ops'
 import * './iter'

@@ -277,6 +277,63 @@ dictProc (ArgsPack !args !kwargs) !exit = do
       [ (EdhDecimal (fromIntegral i), t) | (i, t) <- zip [(0 :: Int) ..] args ]
     exitEdhSTM pgs exit (EdhDict (Dict u d))
 
+dictSizeProc :: EdhProcedure
+dictSizeProc (ArgsPack [EdhDict (Dict _ !dsv)] !kwargs) !exit
+  | Map.null kwargs = do
+    !pgs <- ask
+    contEdhSTM $ do
+      ds <- readTVar dsv
+      exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral $ Map.size ds
+dictSizeProc _ _ =
+  throwEdh EvalError "bug: __DictType_size__ dispatched to non-dict"
+
+
+listPushProc :: EdhProcedure
+listPushProc (ArgsPack [l@(EdhList (List _ !lv))] !kwargs) !exit
+  | Map.null kwargs = do
+    !pgs <- ask
+    contEdhSTM
+      $   mkHostProc (contextScope $ edh'context pgs)
+                     EdhMethod
+                     "push"
+                     listPush
+                     (PackReceiver [RecvRestPosArgs "values"])
+      >>= \mth -> exitEdhSTM pgs exit mth
+ where
+  listPush :: EdhProcedure
+  listPush (ArgsPack !args !kwargs') !exit' | Map.null kwargs' =
+    ask >>= \pgs -> contEdhSTM $ do
+      modifyTVar' lv (args ++)
+      exitEdhSTM pgs exit' l
+  listPush _ _ = throwEdh UsageError "Invalid args to list.push()"
+listPushProc _ _ =
+  throwEdh EvalError "bug: __ListType_push__ dispatched to non-list"
+
+listPopProc :: EdhProcedure
+listPopProc (ArgsPack [EdhList (List _ !lv)] !kwargs) !exit | Map.null kwargs =
+  do
+    !pgs <- ask
+    contEdhSTM
+      $   mkHostProc
+            (contextScope $ edh'context pgs)
+            EdhMethod
+            "pop"
+            listPop
+            (PackReceiver [RecvArg "default" Nothing $ Just $ IntplSubs edhNone])
+      >>= \mth -> exitEdhSTM pgs exit mth
+ where
+  listPop :: EdhProcedure
+  listPop !apk !exit' = case parseArgsPack edhNone parseArgs apk of
+    Left  err     -> throwEdh UsageError err
+    Right !defVal -> ask >>= \pgs -> contEdhSTM $ readTVar lv >>= \case
+      (val : rest) -> writeTVar lv rest >> exitEdhSTM pgs exit' val
+      _            -> exitEdhSTM pgs exit' defVal
+   where
+    parseArgs = ArgsPackParser [\arg _ -> Right arg]
+      $ Map.fromList [("default", \arg _ -> Right arg)]
+listPopProc _ _ =
+  throwEdh EvalError "bug: __ListType_pop__ dispatched to non-list"
+
 
 -- | operator (?<=) - element-of tester
 elemProc :: EdhIntrinsicOp

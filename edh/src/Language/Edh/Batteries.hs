@@ -439,6 +439,9 @@ installEdhBatteries world = liftIO $ do
                , eosProc
                , PackReceiver [RecvArg "evs" Nothing Nothing]
                )
+             , (EdhMethod, "__DictType_size__", dictSizeProc, WildReceiver)
+             , (EdhMethod, "__ListType_push__", listPushProc, WildReceiver)
+             , (EdhMethod, "__ListType_pop__" , listPopProc , WildReceiver)
              ]
            ]
         ++ [ (AttrByName nm, ) <$> mkHostClass rootScope nm True hc
