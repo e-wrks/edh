@@ -37,15 +37,15 @@ catchProc !tryExpr !catchExpr !exit =
     case contextMatch $ edh'context pgs of
       EdhNil -> rethrow -- no error occurred, no catch
       _ -> -- try recover by catch expression
-        evalMatchingExpr catchExpr
-          $ \recoverResult@(OriginalValue recoverVal _ _) -> case recoverVal of
-              EdhRethrow -> rethrow -- not to recover
-              EdhCaseClose val ->
-                -- don't bubble up the close-of-case, as `catch` is not a branch 
-                exitEdhProc' recover recoverResult { valueFromOrigin = val }
-              EdhCaseOther   -> rethrow -- not to recover
-              EdhFallthrough -> rethrow -- not to recover
-              _              -> exitEdhProc' recover recoverResult
+        evalExpr catchExpr $ \recoverResult@(OriginalValue recoverVal _ _) ->
+          case recoverVal of
+            EdhRethrow -> rethrow -- not to recover
+            EdhCaseClose val ->
+              -- don't bubble up the close-of-case, as `catch` is not a branch 
+              exitEdhProc' recover recoverResult { valueFromOrigin = val }
+            EdhCaseOther   -> rethrow -- not to recover
+            EdhFallthrough -> rethrow -- not to recover
+            _              -> exitEdhProc' recover recoverResult
 
 -- | operator (@=>) - the `finally`
 --
@@ -71,7 +71,7 @@ finallyProc !tryExpr !finallyExpr !exit = ask >>= \pgs -> contEdhSTM $ do
             runEdhProc pgsThrower
               { edh'context = (edh'context pgs) { contextMatch = exv }
               }
-            $ evalMatchingExpr finallyExpr
+            $ evalExpr finallyExpr
             $ const
             $ contEdhSTM rethrow
 

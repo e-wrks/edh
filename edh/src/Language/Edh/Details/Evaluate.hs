@@ -107,15 +107,6 @@ evalStmt ss@(StmtSrc (_sp, !stmt)) !exit = ask >>= \pgs ->
     $ evalStmt' stmt
     $ \rtn -> local (const pgs) $ exitEdhProc' exit rtn
 
-
-evalMatchingExpr :: Expr -> EdhProcExit -> EdhProc
--- special case for a block as matching expression:
---   don't let `evalExpr` to apply `true` as its contextMatch
-evalMatchingExpr (BlockExpr !stmts) !exit = evalBlock stmts exit
-evalMatchingExpr !expr !exit =
-  evalExpr expr $ \result@(OriginalValue !val _ _) ->
-    exitEdhProc' exit result { valueFromOrigin = edhDeCaseClose val }
-
 evalCaseBlock :: Expr -> EdhProcExit -> EdhProc
 evalCaseBlock !expr !exit = case expr of
   -- case-of with a block is normal
@@ -297,51 +288,58 @@ evalStmt' !stmt !exit = do
             contEdhSTM $ exitEdhSTM pgs exit $ edhDeCaseClose val
 
 
-    GoStmt expr -> case expr of
+    GoStmt expr -> do
+      let doFork :: EdhProgState -> EdhProc -> STM ()
+          doFork pgs' prog = do
+            forkEdh
+              pgs'
+                { edh'context = ctx { contextMatch       = true
+                                    , contextExporting   = False
+                                    , contextEffDefining = False
+                                    }
+                }
+              prog
+            exitEdhSTM pgs exit nil
+      case expr of
 
-      CaseExpr tgtExpr branchesExpr ->
-        evalExpr tgtExpr $ \(OriginalValue !val _ _) -> contEdhSTM $ do
-          -- eval the branch(es) expr with the case target
-          -- being the 'contextMatch'
-          forkEdh pgs { edh'context = ctx { contextMatch = edhDeCaseClose val }
-                      }
-            $ evalCaseBlock branchesExpr edhEndOfProc
-          exitEdhSTM pgs exit nil
+        CaseExpr tgtExpr branchesExpr ->
+          evalExpr tgtExpr $ \(OriginalValue !val _ _) ->
+            contEdhSTM
+              $ doFork pgs
+                  { edh'context = ctx { contextMatch = edhDeCaseClose val }
+                  }
+              $ evalCaseBlock branchesExpr edhEndOfProc
 
-      (CallExpr procExpr argsSndr) ->
-        contEdhSTM
-          $ resolveEdhCallee pgs procExpr
-          $ \(OriginalValue !callee'val _ !callee'that, scopeMod) -> do
-              edhMakeCall pgs callee'val callee'that argsSndr scopeMod
-                $ \mkCall -> forkEdh pgs (mkCall edhEndOfProc)
-              exitEdhSTM pgs exit nil
+        (CallExpr procExpr argsSndr) ->
+          contEdhSTM
+            $ resolveEdhCallee pgs procExpr
+            $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
+                edhMakeCall pgs callee'val callee'that argsSndr scopeMod
+                  $ \mkCall -> doFork pgs (mkCall edhEndOfProc)
 
-      (ForExpr argsRcvr iterExpr doExpr) -> contEdhSTM $ do
-        edhForLoop pgs argsRcvr iterExpr doExpr (const $ return ())
-          $ \runLoop -> forkEdh pgs (runLoop edhEndOfProc)
-        exitEdhSTM pgs exit nil
+        (ForExpr argsRcvr iterExpr doExpr) ->
+          contEdhSTM
+            $ edhForLoop pgs argsRcvr iterExpr doExpr (const $ return ())
+            $ \runLoop -> doFork pgs (runLoop edhEndOfProc)
 
-      _ -> contEdhSTM $ do
-        forkEdh pgs $ evalExpr expr edhEndOfProc
-        exitEdhSTM pgs exit nil
+        _ -> contEdhSTM $ doFork pgs $ evalExpr expr edhEndOfProc
+
 
     DeferStmt expr -> do
-      let
-        schedDefered :: EdhProgState -> EdhProc -> STM ()
-        schedDefered pgs' prog = do
-          modifyTVar'
-            (edh'defers pgs)
-            (( pgs'
-               {
-                 -- cease exporting in a defered stmt
-                 edh'context = (edh'context pgs') { contextExporting   = False
-                                                  , contextEffDefining = False
-                                                  }
-               }
-             , prog
-             ) :
-            )
-          exitEdhSTM pgs exit nil
+      let schedDefered :: EdhProgState -> EdhProc -> STM ()
+          schedDefered pgs' prog = do
+            modifyTVar'
+              (edh'defers pgs)
+              (( pgs'
+                 { edh'context = (edh'context pgs') { contextMatch       = true
+                                                    , contextExporting   = False
+                                                    , contextEffDefining = False
+                                                    }
+                 }
+               , prog
+               ) :
+              )
+            exitEdhSTM pgs exit nil
       case expr of
 
         CaseExpr tgtExpr branchesExpr ->
@@ -350,7 +348,6 @@ evalStmt' !stmt !exit = do
               $ schedDefered pgs
                   { edh'context = ctx { contextMatch = edhDeCaseClose val }
                   }
-              -- eval the branch(es) expr with the case target being the 'contextMatch'
               $ evalCaseBlock branchesExpr edhEndOfProc
 
         (CallExpr procExpr argsSndr) ->
@@ -1148,19 +1145,15 @@ evalExpr !expr !exit = do
             EdhTuple l -> exitEdhProc exit (EdhTuple l)
             _          -> error "bug"
 
-    ParenExpr x -> evalExpr x exit
+    ParenExpr x     -> evalExpr x exit
 
-    BlockExpr stmts ->
-      -- eval the block with `true` being the 'contextMatch'
-      local (const pgs { edh'context = ctx { contextMatch = true } })
-        $ evalBlock stmts
-        -- restore program state after block done
-        $ \(OriginalValue !blkResult _ _) ->
-            local (const pgs) $ exitEdhProc exit blkResult
+    BlockExpr stmts -> evalBlock stmts $ \(OriginalValue !blkResult _ _) ->
+      -- a branch match won't escape out of a block, so adjacent blocks always
+      -- execute sequentially
+      exitEdhProc exit $ edhDeCaseClose blkResult
 
     CaseExpr tgtExpr branchesExpr ->
       evalExpr tgtExpr $ \(OriginalValue !tgtVal _ _) ->
-        -- eval the branch(es) expr with the case target being the 'contextMatch'
         local
             (const pgs
               { edh'context = ctx { contextMatch = edhDeCaseClose tgtVal }

@@ -164,7 +164,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
             (\pgs ->
               pgs { edh'context = (edh'context pgs) { contextMatch = ev } }
             )
-          $ evalMatchingExpr reactExpr
+          $ evalExpr reactExpr
           $ \(OriginalValue !perceiverRtn _ _) -> do
               let doBreak = case perceiverRtn of
                     EdhBreak -> True -- terminate this thread
