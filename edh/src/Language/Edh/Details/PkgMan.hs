@@ -47,7 +47,7 @@ locateEdhModule !pkgPath !importPath = case splitExtension importPath of
     False -> throwPkgError $ "Path does not exist: " <> T.pack pkgPath
     True  -> case stripPrefix "./" importPath of
       Just !relImp -> resolveRelImport relImp
-      Nothing      -> canonicalizePath pkgPath >>= resolveAbsImport
+      Nothing      -> canonicalizePath "." >>= resolveAbsImport
  where
 
   resolveRelImport :: FilePath -> IO (FilePath, FilePath)
