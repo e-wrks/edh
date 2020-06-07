@@ -50,12 +50,13 @@ trailingComma = void $ optional $ symbol ","
 optionalSemicolon :: Parser ()
 optionalSemicolon = void $ optional $ symbol ";"
 
-
-isLetter :: Char -> Bool
-isLetter = flip elem $ '_' : ['a' .. 'z'] ++ ['A' .. 'Z']
+-- TODO support more Unicode ranges as valid identifier chars
+isIdentStart :: Char -> Bool
+isIdentStart = flip elem validChars
+  where !validChars = '_' : ['a' .. 'z'] ++ ['A' .. 'Z']
 
 isIdentChar :: Char -> Bool
-isIdentChar c = isLetter c || isDigit c || c == '\''
+isIdentChar c = isIdentStart c || isDigit c || c == '\''
 
 isDigit :: Char -> Bool
 isDigit = flip elem ['0' .. '9']
@@ -597,7 +598,7 @@ parseAttrSym = char '@' *> parseAlphaName
 
 parseAlphaName :: Parser AttrName
 parseAlphaName = lexeme $ do
-  anStart <- takeWhile1P (Just "attribute name") isLetter
+  anStart <- takeWhile1P (Just "attribute name") isIdentStart
   anRest  <- takeWhileP Nothing isIdentChar
   return $ anStart <> anRest
 
