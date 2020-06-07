@@ -3,123 +3,123 @@ import * './str'
 
 export {
 
-# the indicator whether this world is under debugging
-debug = if console.logLevel <= console.debug
-  then this   # alias to this module when debugging
-  else false  # not debugging
+  # the indicator whether this world is under debugging
+  debug = if console.logLevel <= console.debug
+  then this # alias to this module when debugging
+  else false # not debugging
 
-# used to create unique command objects
-class Command { __repr__ = 'Command()' }
+  # used to create unique command objects
+  class Command { __repr__ = 'Command()' }
 
-# the default basic implementation for the `dir` command
-interpreter printDir( callerScope, ofScope=None, ) {
-  ofScope = ofScope &> callerScope.eval(ofScope) |> callerScope
-  console.print( ofScope.lexiLoc(), **ofScope.attrs() )
-}
+  # the default basic implementation for the `dir` command
+  interpreter printDir( callerScope, ofScope=None, ) {
+    ofScope = ofScope &> callerScope.eval( ofScope ) |> callerScope
+    console.print( ofScope.lexiLoc(), **ofScope.attrs() )
+  }
 
-# basic implementation of a string form for `dir` command to
-# output to a remote console
-interpreter sprintDir( callerScope, ofScope=None, ) {
-  ofScope = ofScope &> callerScope.eval(ofScope) |> callerScope
+  # basic implementation of a string form for `dir` command to
+  # output to a remote console
+  interpreter sprintDir( callerScope, ofScope=None, ) {
+    ofScope = ofScope &> callerScope.eval( ofScope ) |> callerScope
 
-  return join(
-    ofScope.lexiLoc(), 
-    *()=< for (k,v) from ofScope.attrs() do 
+    return join(
+      ofScope.lexiLoc(),
+      *() =< for ( k, v ) from ofScope.attrs() do
       '  ' ++ k ++ '=' ++ v,
-    sep='\n',
-  )
-}
+      sep= '\n',
+    )
+  }
 
-# common shell commands
-quit := Command()
-dir := Command()
+  # common shell commands
+  quit := Command()
+  dir := Command()
 
-interpreter shellHere( callerScope, prompt=None ) {
-  prompt = prompt &> callerScope.eval(prompt) |> repr(callerScope)
+  interpreter shellHere( callerScope, prompt=None ) {
+    prompt = prompt &> callerScope.eval( prompt ) |> repr( callerScope )
 
-  console.print(
-    ' * entering a shell at ' ++ callerScope.lexiLoc(),
-    ' * which is called from ' ++ callerScope.callerLoc() )
-  console.print(
-    ' * key in `quit` or `continue` to leave the shell and continue.' )
+    console.print(
+      ' * entering a shell at ' ++ callerScope.lexiLoc(),
+      ' * which is called from ' ++ callerScope.callerLoc() )
+    console.print(
+      ' * key in `quit` or `continue` to leave the shell and continue.' )
 
-  cmdArgs = pkargs( ps1=''++prompt++' Đ: ', ps2="Đ| ", inScopeOf=callerScope )
-  while true {
+    cmdArgs = pkargs( ps1= '' ++prompt++ ' Đ: ', ps2= "Đ| ", inScopeOf=callerScope )
+    while true {
 
-    case console.readCommand(***cmdArgs) of {
-      quit -> { break }
-      { continue } -> { break }
-      dir -> printDir( callerScope )
-      { cmdVal } -> {
-        console.print( cmdVal )
-        cmdVal = nil  # clear it
+      case console.readCommand( ***cmdArgs ) of {
+        quit -> { break }
+        { continue } -> { break }
+        dir -> printDir( callerScope )
+        { cmdVal } -> {
+          console.print( cmdVal )
+          cmdVal = nil # clear it
+        }
       }
-    }
 
-  } $=> {  # catch exceptions
+    } $=> { # catch exceptions
 
-    {{ ProgramHalt:_ }} -> {
-      rethrow  # escalate a halt to the program loop of the
-      # host interpreter, let it decide what to do.
-    }
+      { { ProgramHalt:_ } } -> {
+        rethrow # escalate a halt to the program loop of the
+        # host interpreter, let it decide what to do.
+      }
 
-    {{ IOError:exc }} -> {
-      console.fatal <| 'IO error - ' ++ exc
-      rethrow  # escalate it to the program loop of the
-      # host interpreter, let it decide what to do.
-    }
+      { { IOError:exc } } -> {
+        console.fatal <| 'IO error - ' ++ exc
+        rethrow # escalate it to the program loop of the
+        # host interpreter, let it decide what to do.
+      }
 
-    { cmdExc } -> {
-      console.print( 'Recovered from error', exception=cmdExc )
+      { cmdExc } -> {
+        console.print( 'Recovered from error', exception=cmdExc )
+      }
+
     }
 
   }
 
-}
+  {#
+   # run a shell within an object's (probably a module) scope, e.g.
+  ```edh
+  case { import (**_) 'batteries/magic' } of { m } -> shellWith(m)
+  ```
+   #}
+  method shellWith( obj=this ) {
 
-{#
- # run a shell within an object's (probably a module) scope, e.g.
-```edh
-case { import (**_) 'batteries/magic' } of { m } -> shellWith(m)
-```
- #}
-method shellWith( obj=this ) {
+    console.print( ' * entering a shell within ' ++ obj )
+    console.print( ' * key in `quit` to leave the shell.' )
 
-  console.print(' * entering a shell within ' ++ obj )
-  console.print(' * key in `quit` to leave the shell.' )
+    # use scope obj's repr for ps1
+    cmdArgs = pkargs( ps1=repr( obj ) ++ ' Đ: ', ps2= "Đ| ", inScopeOf=obj )
+    while true {
 
-  # use scope obj's repr for ps1
-  cmdArgs = pkargs( ps1=repr(obj)++' Đ: ', ps2="Đ| ", inScopeOf=obj )
-  while true {
-
-    case console.readCommand(***cmdArgs) of {
-      quit -> { break }
-      dir -> printDir( scope( ofObj=obj ) )
-      { cmdVal } -> {
-        console.print( cmdVal )
-        cmdVal = nil  # clear it
+      case console.readCommand( ***cmdArgs ) of {
+        quit -> { break }
+        dir -> printDir( scope( ofObj=obj ) )
+        { cmdVal } -> {
+          console.print( cmdVal )
+          cmdVal = nil # clear it
+        }
       }
-    }
 
-  } $=> {  # catch exceptions
+    } $=> { # catch exceptions
 
-    {{ ProgramHalt:_ }} -> {
-      rethrow  # escalate a halt to the program loop of the
-      # host interpreter, let it decide what to do.
-    }
+      { { ProgramHalt:_ } } -> {
+        rethrow # escalate a halt to the program loop of the
+        # host interpreter, let it decide what to do.
+      }
 
-    {{ IOError:exc }} -> {
-      console.fatal <| 'IO error - ' ++ exc
-      rethrow  # escalate it to the program loop of the
-      # host interpreter, let it decide what to do.
-    }
+      { { IOError:exc } } -> {
+        console.fatal <| 'IO error - ' ++ exc
+        rethrow # escalate it to the program loop of the
+        # host interpreter, let it decide what to do.
+      }
 
-    { cmdExc } -> {
-      console.print( 'Recovered from error', exception=cmdExc )
+      { cmdExc } -> {
+        console.print( 'Recovered from error', exception=cmdExc )
+      }
+
     }
 
   }
-
-}
 
 }

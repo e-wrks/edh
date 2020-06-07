@@ -1,26 +1,26 @@
 
-while true {  # this is the *Loop* in so-called REPL
+while true { # this is the *Loop* in so-called REPL
   # Read+Eval (console.readCommand) -> Print (console.print) -> Loop
 
-  case console.readCommand(ps1="Đ: ", ps2="Đ| ") of {
+  case console.readCommand( ps1= "Đ: ", ps2= "Đ| " ) of {
     batteries.quit -> { break }
     batteries.dir -> printDir()
     { cmdVal } -> {
       console.print( cmdVal )
-      cmdVal = nil  # clear it
+      cmdVal = nil # clear it
     }
   }
 
-} $=> {  # catch exceptions
+} $=> { # catch exceptions
 
-  {{ ProgramHalt:_ }} -> {
-    rethrow  # escalate a halt to the program loop of the
+  { { ProgramHalt:_ } } -> {
+    rethrow # escalate a halt to the program loop of the
     # host interpreter, let it decide what to do.
   }
 
-  {{ IOError:exc }} -> {
-    console.fatal <| 'IO error - ' ++ exc
-    rethrow  # escalate it to the program loop of the
+  { { IOError:exc } } -> {
+    console.fatal<| 'IO error - ' ++ exc
+    rethrow # escalate it to the program loop of the
     # host interpreter, let it decide what to do.
   }
 
@@ -30,12 +30,12 @@ while true {  # this is the *Loop* in so-called REPL
     # asynchronous exception timely, we use error log here.
     console.error<| 'Recovered from error: ' ++ cmdExc
 
-    # TODO in case of asynchronous exception occurred, the last 
+    # TODO in case of asynchronous exception occurred, the last
     # console.readCommand() is interrupted, but the console IO loop is
-    # still reading stdin, and what ever read will subsequently be 
+    # still reading stdin, and what ever read will subsequently be
     # discarded anyway. this behavior may be rather surprising to the
     # user, need to optimize UX for such cases.
-    console.print('Your last input may have no effect due to the error.')
+    console.print( 'Your last input may have no effect due to the error.' )
   }
 
 }

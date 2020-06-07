@@ -1,18 +1,18 @@
 
 export {
 
-# alias this module
-batteries = this
+  # alias this module
+  batteries = this
 
-import * './vattr'
-import * './ctrl'
-import * './ops'
-import * './iter'
-import * './str'
-import * './concur'
-import * './evt'
-import * './math'
-import * './reflect'
-import * './debug'
+  import * './vattr'
+  import * './ctrl'
+  import * './ops'
+  import * './iter'
+  import * './str'
+  import * './concur'
+  import * './evt'
+  import * './math'
+  import * './reflect'
+  import * './debug'
 
 }

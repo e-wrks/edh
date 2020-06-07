@@ -1,9 +1,9 @@
 {#
- redirect operations to magic methods on objects in Python spirit
-#}
+ # redirect operations to magic methods on objects in Python spirit
+ #}
 
 export {
 
-import * './arith'
+  import * './arith'
 
 }

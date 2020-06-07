@@ -1,18 +1,18 @@
 
 {#
- schedule a number of tasks to run concurrently, but with
- concurrency limit specified by 'c'
+ # schedule a number of tasks to run concurrently, but with
+ # concurrency limit specified by 'c'
 
- each task must be a nullary procedure (i.e. a niladic 
- computation)
+ # each task must be a nullary procedure (i.e. a niladic
+ # computation)
 
- pass 'console.debug' or even 'console.info' as 'dbgLogger'
- to see verbose log of the finishing up
-#}
+ # pass 'console.debug' or even 'console.info' as 'dbgLogger'
+ # to see verbose log of the finishing up
+ #}
 
-export method concur(*tasks, c=6, dbgLogger=0) {
-  null(tasks) -> { return nil }
-  c < 1 -> error("Invalid concurrency: " ++ c)
+export method concur( *tasks, c=6, dbgLogger=0 ) {
+  null( tasks ) -> { return nil }
+  c < 1 -> error( "Invalid concurrency: " ++ c )
 
   # event sink for decreased number of running tasks, this will
   # read zero after all done. will only start to fire after all
@@ -35,13 +35,13 @@ export method concur(*tasks, c=6, dbgLogger=0) {
 
       # uncons this.tasks within an *atoiso* tx block
       ai case this.tasks of {
-        {()} -> {  # no more tasks in backlog
+        { () } -> { # no more tasks in backlog
           doneSig <- this.cntRunning # notify about overall finishing up
           return nil
         }
-        { task2do => rest } -> {  # one task taken out of backlog
-          this.tasks = rest  # update this.task within tx
-          rest = nil  # unref so it's garbage collectable a bit earlier
+        { task2do => rest } -> { # one task taken out of backlog
+          this.tasks = rest # update this.task within tx
+          rest = nil # unref so it's garbage collectable a bit earlier
         }
       }
 
@@ -55,10 +55,10 @@ export method concur(*tasks, c=6, dbgLogger=0) {
           this.cntRunning -= 1 # this is atomic in Edh
 
           if this.cntRunning < c then # seen run slot available
-            # to bring another pending task from backlog at running,
-            # or to post notification to 'doneSig' upon overall
-            # finishing up detected (i.e. backlog drained)
-            this.scheduleMore()
+          # to bring another pending task from backlog at running,
+          # or to post notification to 'doneSig' upon overall
+          # finishing up detected (i.e. backlog drained)
+          this.scheduleMore()
         }
 
         task2do() # do the real work
@@ -70,15 +70,15 @@ export method concur(*tasks, c=6, dbgLogger=0) {
     }
   }
 
-  schd = Scheduler(tasks)
-  while not null(schd.tasks) && schd.cntRunning < c
-    schd.scheduleMore()
+  schd = Scheduler( tasks )
+  while not null( schd.tasks ) && schd.cntRunning < c
+  schd.scheduleMore()
 
   for nTasksRunning from doneSig do if nTasksRunning < 1 then {
     dbgLogger <| '  🎉  all concur tasks done.'
     return nil # don't forget to break out the 'doneSig' event loop
   } else {
     dbgLogger <| '  ⏲️  finishing up concur tasks, ' ++ nTasksRunning
-      ++ ' still running.'
+    ++ ' still running.'
   }
 }
