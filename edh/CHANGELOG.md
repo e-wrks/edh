@@ -26,6 +26,9 @@
   - define effects with `effect` keyword, pull effectful artifacts with
     `perform` and `behave` keywords
 - add `Vector` and `MVector` to default batteries
+- `case-of` context match target value now is effective in nested code
+  blocks (breaking old code), and `fallthrough` can fall through multiple
+  block boundaries only if it's the last statement of those blocks
 - various bugfixes and improvements
 
 ## 0.2.0.0
