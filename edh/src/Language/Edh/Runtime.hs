@@ -296,3 +296,8 @@ performEdhEffect !addr !args !kwargs !exit = ask >>= \pgs ->
                 exit rtnVal
 
 
+-- | obtain an effectful value from current Edh context
+performEdhEffect' :: AttrAddressor -> (EdhValue -> EdhProc) -> EdhProc
+performEdhEffect' !addr !exit =
+  evalExpr (PerformExpr addr) $ \(OriginalValue !effVal _ _) -> exit effVal
+
