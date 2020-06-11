@@ -85,11 +85,7 @@ createEdhWorld !console = liftIO $ do
                                     }
         }
   -- operator precedence dict
-  opPD <- newTMVarIO $ Map.fromList
-    [ ( "$" -- dereferencing attribute addressor
-      , (10, "<Intrinsic>")
-      )
-    ]
+  opPD  <- newTMVarIO $ Map.empty
   -- the container of loaded modules
   modus <- newTMVarIO Map.empty
 
