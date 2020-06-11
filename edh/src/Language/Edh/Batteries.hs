@@ -350,6 +350,11 @@ installEdhBatteries world = liftIO $ do
           , -2
           )
 
+          -- annotation
+        , ( "::"
+          , -9
+          )
+
           -- string coercing concatenation
         , ( "++"
           , 2
@@ -398,6 +403,7 @@ installEdhBatteries world = liftIO $ do
           , ("->" , branchProc)
           , ("$=>", catchProc)
           , ("@=>", finallyProc)
+          , ("::" , annoProc)
           , ("<|" , loggingProc)
           ]
         ]

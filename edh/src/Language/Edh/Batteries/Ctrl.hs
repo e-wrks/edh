@@ -22,6 +22,22 @@ import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
 
 
+-- | operator (::) - arbitrary annotation
+--
+-- this should have lowest possible precedence and do nothing when eval'ed
+-- so an arbitrary expression, so long as it's syntactically correct,
+-- can be placed anywhere serving annotation purpose e.g.
+--
+--   abs :: ( DecimalType ) -> DecimalType
+--   method abs( n ) n<0 &> ( -n ) |> n
+--
+--   x :: StringType
+--   x = 'Hello'
+--
+annoProc :: EdhIntrinsicOp
+annoProc _ _ !exit = exitEdhProc exit nil
+
+
 -- | operator ($=>) - the `catch`
 --
 -- the right-hand-expr will only be eval'ed  when an exception occurred
