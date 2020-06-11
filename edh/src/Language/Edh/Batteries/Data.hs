@@ -20,7 +20,7 @@ import           Language.Edh.Details.Evaluate
 import           Language.Edh.Details.Utils
 
 
--- | operator ($) - dereferencing attribute addressor
+-- | operator (@) - dereferencing attribute addressor
 attrDerefAddrProc :: EdhIntrinsicOp
 attrDerefAddrProc !lhExpr !rhExpr !exit =
   evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate rhVal of
@@ -149,7 +149,7 @@ attrTemptProc !lhExpr !rhExpr !exit = do
     _ -> throwEdh EvalError $ "Invalid attribute expression: " <> T.pack
       (show rhExpr)
 
--- | operator (?$) - attribute dereferencing tempter, 
+-- | operator (?@) - attribute dereferencing tempter, 
 -- address an attribute off an object if possible, nil otherwise
 attrDerefTemptProc :: EdhIntrinsicOp
 attrDerefTemptProc !lhExpr !rhExpr !exit =

@@ -212,6 +212,10 @@ installEdhBatteries world = liftIO $ do
         "<batteries>"
         [ -- format: (symbol, precedence)
 
+        -- dereferencing attribute addressor 
+          ("@" , 10)
+        ,
+
         -- the definition operator, creates named value in Edh
           (":=", 1)
         , ( "?:="
@@ -226,7 +230,7 @@ installEdhBatteries world = liftIO $ do
         -- attribute tempter, 
         -- address an attribute off an object if possible, nil otherwise
         , ("?", 9)
-        , ( "?$"
+        , ( "?@"
           , 9
           )
 
@@ -368,12 +372,12 @@ installEdhBatteries world = liftIO $ do
       !rootOperators <- sequence
         [ (AttrByName sym, ) <$> mkIntrinsicOp world sym iop
         | (sym, iop) <-
-          [ ("$"  , attrDerefAddrProc)
+          [ ("@"  , attrDerefAddrProc)
           , (":=" , defProc)
           , ("?:=", defMissingProc)
           , (":"  , consProc)
           , ("?"  , attrTemptProc)
-          , ("?$" , attrDerefTemptProc)
+          , ("?@" , attrDerefTemptProc)
           , ("++" , concatProc)
           , ("=<" , cprhProc)
           , ("?<=", elemProc)

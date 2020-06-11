@@ -2667,7 +2667,7 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
       ThatRef  -> throwEdh EvalError "Can not assign to that"
       SuperRef -> throwEdh EvalError "Can not assign to super"
     -- dereferencing attribute assignment
-    InfixExpr "$" !tgtExpr !addrRef ->
+    InfixExpr "@" !tgtExpr !addrRef ->
       evalExpr addrRef $ \(OriginalValue !addrVal _ _) ->
         case edhUltimate addrVal of
           EdhExpr _ (AttrExpr (DirectRef !addr)) _ ->

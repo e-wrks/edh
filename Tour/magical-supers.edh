@@ -11,21 +11,21 @@
     #    *) `obj.xxx = yyy` (*<-@)
     #    *) `extends xxx` (<-^)
     # where `this`, `obj` and procedure context this is a grand business child
-    method (!<-) (magicSpell) {
+    method (!<-) ( magicSpell ) {
       30<| 'casting spell (' ++ magicSpell ++ ')'
 
       # treat explicit nil/false still as not present
-      that?$magicSpell |> { continue }
+      that?@magicSpell |> { continue }
     }
 
     # handles super attribute resolution, on a magic child (referred to by `that`),
     # for `super.xxx` from a grand business child
-    method (@<-^) (attrKey) {
+    method (@<-^) ( attrKey ) {
       20<| 'getting super.' ++ attrKey ++ ' from the super'
 
-      case that?$attrKey of {
-        nil -> { continue }  # to consult next super
-        { n } -> n / 2  # can do some transformation here
+      case that?@attrKey of {
+        nil -> { continue } # to consult next super
+        { n } -> n / 2 # can do some transformation here
       }
     }
 
@@ -38,39 +38,39 @@
   class Super1 {
 
     # handles `extends` from a business child (referred to by `that`),
-    # `this` is the new super object being added to `that`, if this 
+    # `this` is the new super object being added to `that`, if this
     # method err out, the inheritance relationship won't be established.
     # `boScope` is a scope object reflecting `that` object's entity
-    method (<-^) (boScope) {
-      20<| 'connecting child of ' ++ constructor(that)
-        ++ ' which is defined at: ' ++ boScope.lexiLoc()
+    method (<-^) ( boScope ) {
+      20<| 'connecting child of ' ++ constructor( that )
+      ++ ' which is defined at: ' ++ boScope.lexiLoc()
     }
 
     # handles `this.xxx` from a business child (referred to by `that`)
-    method (@<-) (attrKey) {
+    method (@<-) ( attrKey ) {
       20<| 'getting this.' ++ attrKey
-      continue  # try next super, or fail as normally if no such attr
+      continue # try next super, or fail as normally if no such attr
     }
 
     # handles `obj.xxx` from a business child (referred to by `that`)
-    method (@<-*) (attrKey) {
+    method (@<-*) ( attrKey ) {
       20<| 'getting ' ++ attrKey ++ ' from the obj'
-      that?$attrKey  # giving out nil if no such attr
+      that?@attrKey # giving out nil if no such attr
     }
 
     # a default attribute value
     n = 23
 
     # handles `this.xxx = yyy` from a business child (referred to by `that`)
-    method (<-@) (attrKey, attrVal) {
+    method (<-@) ( attrKey, attrVal ) {
       20<| 'setting this.' ++ attrKey ++ ' to ' ++ attrVal
-      that$attrKey = attrVal
+      that@attrKey = attrVal
     }
 
     # handles `obj.xxx = yyy` for `obj` being a business child (referred to by `that`)
-    method (*<-@) (attrKey, attrVal) {
+    method (*<-@) ( attrKey, attrVal ) {
       20<| 'setting ' ++ attrKey ++ ' to ' ++ attrVal ++ ' for the obj'
-      that$attrKey = attrVal
+      that@attrKey = attrVal
     }
 
     extends MetaSuper1()
@@ -79,7 +79,7 @@
 
   class BusObj1 {
 
-    _selfScope = scope()  # for debug purpose
+    _selfScope = scope() # for debug purpose
 
     method n () {
       30<| 'super provided n - ' ++ super?n
@@ -100,7 +100,7 @@ bo1 = BusObj1()
 
 {
 
-  20<| 'bo1.n() is ' ++ bo1.n() 
+  20<| 'bo1.n() is ' ++ bo1.n()
 
   20<| 'bo1.n1 is ' ++ bo1.n1
 
