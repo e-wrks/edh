@@ -1700,10 +1700,11 @@ resolveEdhAttrAddr !pgs (SymbolicAttr !symName) !exit =
   let scope = contextScope $ edh'context pgs
   in  resolveEdhCtxAttr pgs scope (AttrByName symName) >>= \case
         Just (!val, _) -> case val of
-          (EdhSymbol !symVal) -> exit (AttrBySym symVal)
+          (EdhSymbol !symVal ) -> exit (AttrBySym symVal)
+          (EdhString !nameVal) -> exit (AttrByName nameVal)
           _ ->
             throwEdhSTM pgs EvalError
-              $  "Not a symbol as "
+              $  "Not a symbol/string as "
               <> symName
               <> ", it is a "
               <> T.pack (edhTypeNameOf val)
@@ -1711,7 +1712,7 @@ resolveEdhAttrAddr !pgs (SymbolicAttr !symName) !exit =
               <> T.pack (show val)
         Nothing ->
           throwEdhSTM pgs EvalError
-            $  "No symbol named "
+            $  "No symbol/string named "
             <> T.pack (show symName)
             <> " available"
 {-# INLINE resolveEdhAttrAddr #-}
