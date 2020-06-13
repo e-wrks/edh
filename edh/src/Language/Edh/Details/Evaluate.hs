@@ -217,11 +217,16 @@ evalStmt' !stmt !exit = do
 
     ExprStmt expr -> evalExpr expr $ \result -> exitEdhProc' exit result
 
-    LetStmt argsRcvr argsSndr ->
+    LetStmt argsRcvr argsSndr -> do
+      let pkArgs exit' = case argsSndr of
+            [SendPosArg !x1] -> evalExpr x1 $ \case
+              (OriginalValue (EdhArgsPack !apk) _ _) -> exit' apk
+              (OriginalValue !v _ _) -> exit' $ ArgsPack [v] mempty
+            _ -> packEdhArgs argsSndr exit'
       -- ensure args sending and receiving happens within a same tx
       -- for atomicity of the let statement
-      local (const pgs { edh'in'tx = True }) $ packEdhArgs argsSndr $ \pk ->
-        recvEdhArgs ctx argsRcvr pk $ \um -> contEdhSTM $ do
+      local (const pgs { edh'in'tx = True }) $ pkArgs $ \ !apk ->
+        recvEdhArgs ctx argsRcvr apk $ \um -> contEdhSTM $ do
           if not (contextEffDefining ctx)
             then -- normal multi-assignment
                  updateEntityAttrs pgs (scopeEntity scope) $ Map.toList um
