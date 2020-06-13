@@ -212,8 +212,15 @@ installEdhBatteries world = liftIO $ do
         "<batteries>"
         [ -- format: (symbol, precedence)
 
-        -- dereferencing attribute addressor 
+        -- the attribute key dereferencing operator
           ("@" , 10)
+        ,
+
+        -- the function application operator
+          ("$" , 1)
+        ,
+        -- the flipped function application operator, a.k.a pipe operator
+          ("|" , 1)
         ,
 
         -- the definition operator, creates named value in Edh
@@ -373,6 +380,8 @@ installEdhBatteries world = liftIO $ do
         [ (AttrByName sym, ) <$> mkIntrinsicOp world sym iop
         | (sym, iop) <-
           [ ("@"  , attrDerefAddrProc)
+          , ("$"  , fapProc)
+          , ("|"  , ffapProc)
           , (":=" , defProc)
           , ("?:=", defMissingProc)
           , (":"  , consProc)
@@ -420,13 +429,69 @@ installEdhBatteries world = liftIO $ do
              [ ( EdhMethod
                , "Symbol"
                , symbolCtorProc
-               , PackReceiver [RecvArg "description" Nothing Nothing]
+               , PackReceiver
+                 [RecvArg "repr" Nothing Nothing, RecvRestPosArgs "reprs"]
                )
-             , (EdhMethod, "pkargs"     , pkargsProc     , WildReceiver)
-             , (EdhMethod, "repr"       , reprProc       , WildReceiver)
-             , (EdhMethod, "dict"       , dictProc       , WildReceiver)
-             , (EdhMethod, "null"       , isNullProc     , WildReceiver)
-             , (EdhMethod, "type"       , typeProc       , WildReceiver)
+             , (EdhMethod, "pkargs", pkargsProc, WildReceiver)
+             , ( EdhMethod
+               , "__ArgsPackType_args__"
+               , apkArgsProc
+               , PackReceiver [RecvArg "apk" Nothing Nothing]
+               )
+             , ( EdhMethod
+               , "__ArgsPackType_kwargs__"
+               , apkKwrgsProc
+               , PackReceiver [RecvArg "apk" Nothing Nothing]
+               )
+             , (EdhMethod, "repr", reprProc  , WildReceiver)
+             , (EdhMethod, "dict", dictProc  , WildReceiver)
+             , (EdhMethod, "null", isNullProc, WildReceiver)
+             , (EdhMethod, "type", typeProc  , WildReceiver)
+             , ( EdhMethod
+               , "__IntrinsicType_name__"
+               , procNameProc
+               , PackReceiver [RecvArg "p" Nothing Nothing]
+               )
+             , ( EdhMethod
+               , "__ClassType_name__"
+               , procNameProc
+               , PackReceiver [RecvArg "p" Nothing Nothing]
+               )
+             , ( EdhMethod
+               , "__HostClassType_name__"
+               , procNameProc
+               , PackReceiver [RecvArg "p" Nothing Nothing]
+               )
+             , ( EdhMethod
+               , "__MethodType_name__"
+               , procNameProc
+               , PackReceiver [RecvArg "p" Nothing Nothing]
+               )
+             , ( EdhMethod
+               , "__HostMethodType_name__"
+               , procNameProc
+               , PackReceiver [RecvArg "p" Nothing Nothing]
+               )
+             , ( EdhMethod
+               , "__OperatorType_name__"
+               , procNameProc
+               , PackReceiver [RecvArg "p" Nothing Nothing]
+               )
+             , ( EdhMethod
+               , "__HostOperType_name__"
+               , procNameProc
+               , PackReceiver [RecvArg "p" Nothing Nothing]
+               )
+             , ( EdhMethod
+               , "__GeneratorType_name__"
+               , procNameProc
+               , PackReceiver [RecvArg "p" Nothing Nothing]
+               )
+             , ( EdhMethod
+               , "__HostGenrType_name__"
+               , procNameProc
+               , PackReceiver [RecvArg "p" Nothing Nothing]
+               )
              , (EdhMethod, "constructor", ctorProc       , WildReceiver)
              , (EdhMethod, "supers"     , supersProc     , WildReceiver)
              , (EdhMethod, "scope"      , scopeObtainProc, PackReceiver [])
@@ -449,9 +514,21 @@ installEdhBatteries world = liftIO $ do
                , eosProc
                , PackReceiver [RecvArg "evs" Nothing Nothing]
                )
-             , (EdhMethod, "__DictType_size__", dictSizeProc, WildReceiver)
-             , (EdhMethod, "__ListType_push__", listPushProc, WildReceiver)
-             , (EdhMethod, "__ListType_pop__" , listPopProc , WildReceiver)
+             , ( EdhMethod
+               , "__DictType_size__"
+               , dictSizeProc
+               , PackReceiver [RecvArg "d" Nothing Nothing]
+               )
+             , ( EdhMethod
+               , "__ListType_push__"
+               , listPushProc
+               , PackReceiver [RecvArg "l" Nothing Nothing]
+               )
+             , ( EdhMethod
+               , "__ListType_pop__"
+               , listPopProc
+               , PackReceiver [RecvArg "l" Nothing Nothing]
+               )
              ]
            ]
         ++ [ (AttrByName nm, ) <$> mkHostClass rootScope nm True hc
@@ -470,22 +547,21 @@ installEdhBatteries world = liftIO $ do
           )
         ]
       !conSupers <- newTVar []
-      let !console = Object
-            { objEntity = conEntity
-            , objClass  = ProcDefi
-                            { procedure'uniq = conClassUniq
-                            , procedure'lexi = Just rootScope
-                            , procedure'decl = ProcDecl
-                                                 { procedure'name = NamedAttr
-                                                                      "<console>"
-                                                 , procedure'args = PackReceiver
-                                                                      []
-                                                 , procedure'body = Right edhNop
-                                                 }
-                            }
-            , objSupers = conSupers
+      let
+        !console = Object
+          { objEntity = conEntity
+          , objClass  = ProcDefi
+            { procedure'uniq = conClassUniq
+            , procedure'name = AttrByName "<console>"
+            , procedure'lexi = Just rootScope
+            , procedure'decl = ProcDecl { procedure'addr = NamedAttr "<console>"
+                                        , procedure'args = PackReceiver []
+                                        , procedure'body = Right edhNop
+                                        }
             }
-          !conScope = objectScope (edh'context pgs) console
+          , objSupers = conSupers
+          }
+        !conScope = objectScope (edh'context pgs) console
 
       !conArts <- sequence
         [ (AttrByName nm, ) <$> mkHostProc conScope vc nm hp args

@@ -35,7 +35,7 @@ ctorProc (ArgsPack !args !kwargs) !exit = do
     then case argsCls of
       []  -> exitEdhProc exit (EdhClass $ objClass $ thisObject callerScope)
       [t] -> exitEdhProc exit t
-      _   -> exitEdhProc exit (EdhTuple argsCls)
+      _   -> exitEdhProc exit $ EdhArgsPack $ ArgsPack argsCls mempty
     else exitEdhProc
       exit
       (EdhArgsPack $ ArgsPack argsCls $ Map.map edhClassOf kwargs)
@@ -54,7 +54,7 @@ supersProc (ArgsPack !args !kwargs) !exit = do
     then contEdhSTM $ do
       supers <-
         map EdhObject <$> (readTVar $ objSupers $ thatObject callerScope)
-      exitEdhSTM pgs exit (EdhTuple supers)
+      exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack supers mempty
     else if null kwargs
       then case args of
         [v] -> contEdhSTM $ do
@@ -62,7 +62,7 @@ supersProc (ArgsPack !args !kwargs) !exit = do
           exitEdhSTM pgs exit supers
         _ -> contEdhSTM $ do
           argsSupers <- sequence $ supersOf <$> args
-          exitEdhSTM pgs exit (EdhTuple argsSupers)
+          exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack argsSupers mempty
       else contEdhSTM $ do
         argsSupers   <- sequence $ supersOf <$> args
         kwargsSupers <- sequence $ Map.map supersOf kwargs

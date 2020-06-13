@@ -1,0 +1,55 @@
+
+{
+  # partial functions
+
+  method f( a, b, c ) {
+    console.print( 'this is f()', a=a, b=b, c=c )
+  }
+
+  # partial is used to create partially applied functions
+  # TODO add `partial` to syntax highlighter as lib utilities
+  f1 = partial ( 1, 2 ) ( f )
+
+  # ( | ) pipe operator is flipped function application, then
+  # f2 is equivalent to f1
+  f2 = f|partial( 1, 2 )
+
+}
+f1( 3 )
+f2( 5 )
+
+
+{
+  # decorator
+
+  interpreter decor( callerScope, fe ) {
+    class Wrapper { method __init__( f as this.f ) pass
+      method def ( fn ) method @fn ( ***apk ) {
+        console.info<| 'Calling procedure `' ++this.f.name++ '` with: ' ++ apk
+        this.f( ***apk )
+      }
+    }
+    f = callerScope.eval( fe )
+    wrapper = Wrapper( f )
+    callerScope.put(
+      f.name: wrapper.def( f.name )
+    )
+  }
+
+  # ( $ ) dollar operator is function application similar to ($) in Haskell
+
+  # TODO make procedure declarations expression,
+  # so curly quoting is not needed
+  decor$ { method g ( a, b, c ) {
+      console.print( 'this is g()', a=a, b=b, c=c )
+  } }
+
+  # TODO once procedure declarations are made expression,
+  # we can write in nicer syntax like this:
+  # decor$
+  # method g ( a, b, c ) {
+  #   console.print( 'this is g()', a=a, b=b, c=c )
+  # }
+
+}
+g( 1, 2, 3 )

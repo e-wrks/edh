@@ -7,6 +7,7 @@ export {
   import * './vattr'
   import * './ctrl'
   import * './ops'
+  import * './ho'
   import * './iter'
   import * './str'
   import * './concur'

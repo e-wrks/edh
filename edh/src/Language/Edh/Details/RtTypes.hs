@@ -362,13 +362,8 @@ instance Ord Scope where
 instance Hashable Scope where
   hashWithSalt s x = hashWithSalt s (scopeEntity x)
 instance Show Scope where
-  show (Scope _ _ _ _ (ProcDefi _ _ pd@(ProcDecl _ _ procBody)) (StmtSrc (cPos, _)) _)
-    = "📜 "
-      ++ T.unpack (procedureName pd)
-      ++ " 🔎 "
-      ++ defLoc
-      ++ " 👈 "
-      ++ sourcePosPretty cPos
+  show (Scope _ _ _ _ (ProcDefi _ _ _ (ProcDecl !addr _ !procBody)) (StmtSrc (!cPos, _)) _)
+    = "📜 " ++ show addr ++ " 🔎 " ++ defLoc ++ " 👈 " ++ sourcePosPretty cPos
    where
     defLoc = case procBody of
       Right _                   -> "<host-code>"
@@ -407,8 +402,7 @@ instance Show Object where
   -- it's not right to call 'atomically' here to read 'objSupers' for
   -- the show, as 'show' may be called from an stm transaction, stm
   -- will fail hard on encountering of nested 'atomically' calls.
-  show (Object _ (ProcDefi _ _ pd) _) =
-    "<object: " ++ T.unpack (procedureName pd) ++ ">"
+  show (Object _ pd _) = "<object: " ++ T.unpack (procedureName pd) ++ ">"
 
 -- | View an entity as object of specified class with specified ancestors
 -- this is the black magic you want to avoid
@@ -624,7 +618,7 @@ getEdhCallContext !unwind !pgs = EdhCallContext
   (StmtSrc (!tip, _)) = contextStmt ctx
   !frames =
     foldl'
-        (\sfs (Scope _ _ _ _ (ProcDefi _ _ pd@(ProcDecl _ _ procBody)) (StmtSrc (callerPos, _)) _) ->
+        (\sfs (Scope _ _ _ _ pd@(ProcDefi _ _ _ (ProcDecl _ _ !procBody)) (StmtSrc (!callerPos, _)) _) ->
           EdhCallFrame (procedureName pd)
                        (procSrcLoc procBody)
                        (T.pack $ sourcePosPretty callerPos)
@@ -776,26 +770,26 @@ instance Show EdhValue where
          "( " ++ concat [ show i ++ ", " | i <- v ] ++ ")"
   show (EdhArgsPack v) = "pkargs" ++ show v
 
-  show (EdhIntrOp preced (IntrinOpDefi _ opSym _)) =
+  show (EdhIntrOp !preced (IntrinOpDefi _ !opSym _)) =
     "<intrinsic: (" ++ T.unpack opSym ++ ") " ++ show preced ++ ">"
-  show (EdhClass  (ProcDefi _ _ pd)) = T.unpack (procedureName pd)
-  show (EdhMethod (ProcDefi _ _ pd)) = T.unpack (procedureName pd)
-  show (EdhOprtor preced _ (ProcDefi _ _ pd)) =
+  show (EdhClass  !pd) = T.unpack (procedureName pd)
+  show (EdhMethod !pd) = T.unpack (procedureName pd)
+  show (EdhOprtor !preced _ !pd) =
     "<operator: (" ++ T.unpack (procedureName pd) ++ ") " ++ show preced ++ ">"
-  show (EdhGnrtor (ProcDefi _ _ pd)) = T.unpack (procedureName pd)
-  show (EdhIntrpr (ProcDefi _ _ pd)) = T.unpack (procedureName pd)
-  show (EdhPrducr (ProcDefi _ _ pd)) = T.unpack (procedureName pd)
+  show (EdhGnrtor !pd)  = T.unpack (procedureName pd)
+  show (EdhIntrpr !pd)  = T.unpack (procedureName pd)
+  show (EdhPrducr !pd)  = T.unpack (procedureName pd)
 
-  show EdhBreak                      = "<break>"
-  show EdhContinue                   = "<continue>"
-  show (EdhCaseClose v)              = "<caseclose: " ++ show v ++ ">"
-  show EdhCaseOther                  = "<caseother>"
-  show EdhFallthrough                = "<fallthrough>"
-  show EdhRethrow                    = "<rethrow>"
-  show (EdhYield  v)                 = "<yield: " ++ show v ++ ">"
-  show (EdhReturn v)                 = "<return: " ++ show v ++ ">"
+  show EdhBreak         = "<break>"
+  show EdhContinue      = "<continue>"
+  show (EdhCaseClose v) = "<caseclose: " ++ show v ++ ">"
+  show EdhCaseOther     = "<caseother>"
+  show EdhFallthrough   = "<fallthrough>"
+  show EdhRethrow       = "<rethrow>"
+  show (EdhYield  v)    = "<yield: " ++ show v ++ ">"
+  show (EdhReturn v)    = "<return: " ++ show v ++ ">"
 
-  show (EdhSink   v)                 = show v
+  show (EdhSink   v)    = show v
 
   show (EdhNamedValue n v@EdhNamedValue{}) =
     -- Edh operators are all left-associative, parenthesis needed
@@ -1120,38 +1114,41 @@ data ArgSender = UnpackPosArgs !Expr
 
 -- | Procedure declaration, result of parsing
 data ProcDecl = ProcDecl {
-      procedure'name :: !AttrAddressor
+      procedure'addr :: !AttrAddressor
     , procedure'args :: !ArgsReceiver
     , procedure'body :: !(Either StmtSrc EdhProcedure)
   }
 instance Show ProcDecl where
-  show pd@(ProcDecl _ _ pb) = case pb of
-    Left  _ -> "<edh-proc " <> T.unpack (procedureName pd) <> ">"
-    Right _ -> "<host-proc " <> T.unpack (procedureName pd) <> ">"
-
-procedureName :: ProcDecl -> Text
-procedureName (ProcDecl (NamedAttr    !pn) _ _) = pn
-procedureName (ProcDecl (SymbolicAttr !pn) _ _) = "@" <> pn
+  show (ProcDecl !addr _ !pb) = case pb of
+    Left  _ -> "<edh-proc " <> show addr <> ">"
+    Right _ -> "<host-proc " <> show addr <> ">"
 
 
 -- | Procedure definition, result of execution of the declaration
 data ProcDefi = ProcDefi {
     procedure'uniq :: !Unique
+    , procedure'name :: !AttrKey
     , procedure'lexi :: !(Maybe Scope)
     , procedure'decl :: {-# UNPACK #-} !ProcDecl
   }
 instance Eq ProcDefi where
-  ProcDefi x'u _ _ == ProcDefi y'u _ _ = x'u == y'u
+  ProcDefi x'u _ _ _ == ProcDefi y'u _ _ _ = x'u == y'u
 instance Ord ProcDefi where
-  compare (ProcDefi x'u _ _) (ProcDefi y'u _ _) = compare x'u y'u
+  compare (ProcDefi x'u _ _ _) (ProcDefi y'u _ _ _) = compare x'u y'u
 instance Hashable ProcDefi where
-  hashWithSalt s (ProcDefi u scope _) = s `hashWithSalt` u `hashWithSalt` scope
+  hashWithSalt s (ProcDefi u _ scope _) =
+    s `hashWithSalt` u `hashWithSalt` scope
 instance Show ProcDefi where
-  show (ProcDefi _ _ decl) = show decl
+  show (ProcDefi _ !name _ (ProcDecl !addr _ !pb)) = case pb of
+    Left  _ -> "<edh-proc " <> show name <> " : " <> show addr <> ">"
+    Right _ -> "<host-proc " <> show name <> " : " <> show addr <> ">"
+
+procedureName :: ProcDefi -> Text
+procedureName (ProcDefi _ !name _ _) = T.pack $ show name
 
 lexicalScopeOf :: ProcDefi -> Scope
-lexicalScopeOf (ProcDefi _ (Just scope) _) = scope
-lexicalScopeOf (ProcDefi _ Nothing _) =
+lexicalScopeOf (ProcDefi _ _ (Just scope) _) = scope
+lexicalScopeOf (ProcDefi _ _ Nothing _) =
   error "bug: asking for scope of world root"
 
 
@@ -1308,16 +1305,16 @@ edhTypeOf EdhTuple{}               = TupleType
 edhTypeOf EdhArgsPack{}            = ArgsPackType
 
 edhTypeOf EdhIntrOp{}              = IntrinsicType
-edhTypeOf (EdhClass (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
+edhTypeOf (EdhClass (ProcDefi _ _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> ClassType
   Right _ -> HostClassType
-edhTypeOf (EdhMethod (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
+edhTypeOf (EdhMethod (ProcDefi _ _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> MethodType
   Right _ -> HostMethodType
-edhTypeOf (EdhOprtor _ _ (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
+edhTypeOf (EdhOprtor _ _ (ProcDefi _ _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> OperatorType
   Right _ -> HostOperType
-edhTypeOf (EdhGnrtor (ProcDefi _ _ (ProcDecl _ _ pb))) = case pb of
+edhTypeOf (EdhGnrtor (ProcDefi _ _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> GeneratorType
   Right _ -> HostGenrType
 
@@ -1360,8 +1357,9 @@ mkHostProc !scope !vc !nm !p !args = do
   u <- unsafeIOToSTM newUnique
   return $ vc ProcDefi
     { procedure'uniq = u
+    , procedure'name = AttrByName nm
     , procedure'lexi = Just scope
-    , procedure'decl = ProcDecl { procedure'name = NamedAttr nm
+    , procedure'decl = ProcDecl { procedure'addr = NamedAttr nm
                                 , procedure'args = args
                                 , procedure'body = Right p
                                 }
@@ -1385,8 +1383,9 @@ mkHostClass !scope !nm !writeProtected !hc = do
   classUniq <- unsafeIOToSTM newUnique
   let !cls = ProcDefi
         { procedure'uniq = classUniq
+        , procedure'name = AttrByName nm
         , procedure'lexi = Just scope
-        , procedure'decl = ProcDecl { procedure'name = NamedAttr nm
+        , procedure'decl = ProcDecl { procedure'addr = NamedAttr nm
                                     , procedure'args = PackReceiver []
                                     , procedure'body = Right ctor
                                     }

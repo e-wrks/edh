@@ -458,76 +458,86 @@ evalStmt' !stmt !exit = do
               <> ": "
               <> T.pack (show superVal)
 
-    ClassStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
-      u <- unsafeIOToSTM newUnique
-      let !cls = EdhClass ProcDefi { procedure'uniq = u
-                                   , procedure'lexi = Just scope
-                                   , procedure'decl = pd
-                                   }
-      when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
-        if contextEffDefining ctx
-          then defEffect artKey cls
-          else changeEntityAttr pgs (scopeEntity scope) artKey cls
-        chkExport artKey cls
-      exitEdhSTM pgs exit cls
+    ClassStmt pd@(ProcDecl !addr _ _) ->
+      contEdhSTM $ resolveEdhAttrAddr pgs addr $ \name -> do
+        u <- unsafeIOToSTM newUnique
+        let !cls = EdhClass ProcDefi { procedure'uniq = u
+                                     , procedure'name = name
+                                     , procedure'lexi = Just scope
+                                     , procedure'decl = pd
+                                     }
+        when (addr /= NamedAttr "_") $ do
+          if contextEffDefining ctx
+            then defEffect name cls
+            else changeEntityAttr pgs (scopeEntity scope) name cls
+          chkExport name cls
+        exitEdhSTM pgs exit cls
 
-    MethodStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
-      u <- unsafeIOToSTM newUnique
-      let mth = EdhMethod ProcDefi { procedure'uniq = u
-                                   , procedure'lexi = Just scope
-                                   , procedure'decl = pd
-                                   }
-      when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
-        if contextEffDefining ctx
-          then defEffect artKey mth
-          else changeEntityAttr pgs (scopeEntity scope) artKey mth
-        chkExport artKey mth
-      exitEdhSTM pgs exit mth
+    MethodStmt pd@(ProcDecl !addr _ _) ->
+      contEdhSTM $ resolveEdhAttrAddr pgs addr $ \name -> do
+        u <- unsafeIOToSTM newUnique
+        let mth = EdhMethod ProcDefi { procedure'uniq = u
+                                     , procedure'name = name
+                                     , procedure'lexi = Just scope
+                                     , procedure'decl = pd
+                                     }
+        when (addr /= NamedAttr "_") $ do
+          if contextEffDefining ctx
+            then defEffect name mth
+            else changeEntityAttr pgs (scopeEntity scope) name mth
+          chkExport name mth
+        exitEdhSTM pgs exit mth
 
-    GeneratorStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
-      u <- unsafeIOToSTM newUnique
-      let gdf = EdhGnrtor ProcDefi { procedure'uniq = u
-                                   , procedure'lexi = Just scope
-                                   , procedure'decl = pd
-                                   }
-      when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
-        if contextEffDefining ctx
-          then defEffect artKey gdf
-          else changeEntityAttr pgs (scopeEntity scope) artKey gdf
-        chkExport artKey gdf
-      exitEdhSTM pgs exit gdf
+    GeneratorStmt pd@(ProcDecl !addr _ _) ->
+      contEdhSTM $ resolveEdhAttrAddr pgs addr $ \name -> do
+        u <- unsafeIOToSTM newUnique
+        let gdf = EdhGnrtor ProcDefi { procedure'uniq = u
+                                     , procedure'name = name
+                                     , procedure'lexi = Just scope
+                                     , procedure'decl = pd
+                                     }
+        when (addr /= NamedAttr "_") $ do
+          if contextEffDefining ctx
+            then defEffect name gdf
+            else changeEntityAttr pgs (scopeEntity scope) name gdf
+          chkExport name gdf
+        exitEdhSTM pgs exit gdf
 
-    InterpreterStmt pd@(ProcDecl name _ _) -> contEdhSTM $ do
-      u <- unsafeIOToSTM newUnique
-      let mth = EdhIntrpr ProcDefi { procedure'uniq = u
-                                   , procedure'lexi = Just scope
-                                   , procedure'decl = pd
-                                   }
-      when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
-        if contextEffDefining ctx
-          then defEffect artKey mth
-          else changeEntityAttr pgs (scopeEntity scope) artKey mth
-        chkExport artKey mth
-      exitEdhSTM pgs exit mth
+    InterpreterStmt pd@(ProcDecl !addr _ _) ->
+      contEdhSTM $ resolveEdhAttrAddr pgs addr $ \name -> do
+        u <- unsafeIOToSTM newUnique
+        let mth = EdhIntrpr ProcDefi { procedure'uniq = u
+                                     , procedure'name = name
+                                     , procedure'lexi = Just scope
+                                     , procedure'decl = pd
+                                     }
+        when (addr /= NamedAttr "_") $ do
+          if contextEffDefining ctx
+            then defEffect name mth
+            else changeEntityAttr pgs (scopeEntity scope) name mth
+          chkExport name mth
+        exitEdhSTM pgs exit mth
 
-    ProducerStmt pd@(ProcDecl name args _) -> contEdhSTM $ do
-      u <- unsafeIOToSTM newUnique
-      let mth = EdhPrducr ProcDefi { procedure'uniq = u
-                                   , procedure'lexi = Just scope
-                                   , procedure'decl = pd
-                                   }
-      unless (receivesNamedArg "outlet" args) $ throwEdhSTM
-        pgs
-        EvalError
-        "a producer procedure should receive a `outlet` keyword argument"
-      when (name /= NamedAttr "_") $ resolveEdhAttrAddr pgs name $ \artKey -> do
-        if contextEffDefining ctx
-          then defEffect artKey mth
-          else changeEntityAttr pgs (scopeEntity scope) artKey mth
-        chkExport artKey mth
-      exitEdhSTM pgs exit mth
+    ProducerStmt pd@(ProcDecl !addr !args _) ->
+      contEdhSTM $ resolveEdhAttrAddr pgs addr $ \name -> do
+        u <- unsafeIOToSTM newUnique
+        let mth = EdhPrducr ProcDefi { procedure'uniq = u
+                                     , procedure'name = name
+                                     , procedure'lexi = Just scope
+                                     , procedure'decl = pd
+                                     }
+        unless (receivesNamedArg "outlet" args) $ throwEdhSTM
+          pgs
+          EvalError
+          "a producer procedure should receive a `outlet` keyword argument"
+        when (addr /= NamedAttr "_") $ do
+          if contextEffDefining ctx
+            then defEffect name mth
+            else changeEntityAttr pgs (scopeEntity scope) name mth
+          chkExport name mth
+        exitEdhSTM pgs exit mth
 
-    OpDeclStmt opSym opPrec opProc@(ProcDecl _ _ !pb) ->
+    OpDeclStmt !opSym !opPrec opProc@(ProcDecl _ _ !pb) ->
       if contextEffDefining ctx
         then throwEdh UsageError "Why should an operator be effectful?"
         else case pb of
@@ -562,6 +572,7 @@ evalStmt' !stmt !exit = do
                   opPrec
                   Nothing
                   ProcDefi { procedure'uniq = u
+                           , procedure'name = AttrByName opSym
                            , procedure'lexi = Just scope
                            , procedure'decl = opProc
                            }
@@ -587,7 +598,7 @@ evalStmt' !stmt !exit = do
                                            d
             exitEdhSTM pgs exit op
 
-    OpOvrdStmt opSym opProc opPrec -> if contextEffDefining ctx
+    OpOvrdStmt !opSym !opProc !opPrec -> if contextEffDefining ctx
       then throwEdh UsageError "Why should an operator be effectful?"
       else contEdhSTM $ do
         validateOperDecl pgs opProc
@@ -623,6 +634,7 @@ evalStmt' !stmt !exit = do
               opPrec
               predecessor
               ProcDefi { procedure'uniq = u
+                       , procedure'name = AttrByName opSym
                        , procedure'lexi = Just scope
                        , procedure'decl = opProc
                        }
@@ -915,20 +927,22 @@ createEdhModule' !world !moduId !srcName = do
   return Object
     { objEntity = moduEntity
     , objClass  = ProcDefi
-                    { procedure'uniq = moduClassUniq
-                    , procedure'lexi = Just $ worldScope world
-                    , procedure'decl = ProcDecl
-                      { procedure'name = NamedAttr $ "module:" <> moduId
-                      , procedure'args = PackReceiver []
-                      , procedure'body = Left $ StmtSrc
-                                           ( SourcePos { sourceName   = srcName
-                                                       , sourceLine   = mkPos 1
-                                                       , sourceColumn = mkPos 1
-                                                       }
-                                           , VoidStmt
-                                           )
-                      }
-                    }
+      { procedure'uniq = moduClassUniq
+      , procedure'name = AttrByName $ "module:" <> moduId
+      , procedure'lexi = Just $ worldScope world
+      , procedure'decl = ProcDecl
+                           { procedure'addr = NamedAttr $ "module:" <> moduId
+                           , procedure'args = PackReceiver []
+                           , procedure'body = Left $ StmtSrc
+                                                ( SourcePos
+                                                  { sourceName   = srcName
+                                                  , sourceLine   = mkPos 1
+                                                  , sourceColumn = mkPos 1
+                                                  }
+                                                , VoidStmt
+                                                )
+                           }
+      }
     , objSupers = moduSupers
     }
 
@@ -1959,7 +1973,7 @@ constructEdhObject !cls apk@(ArgsPack !args !kwargs) !exit = do
                   else
                     throwEdhSTM pgsCaller EvalError
                     $  "No __init__() defined by class "
-                    <> procedureName (procedure'decl cls)
+                    <> procedureName cls
                     <> " to receive argument(s)"
               EdhMethod !initMth ->
                 case procedure'body $ procedure'decl initMth of
@@ -2152,13 +2166,11 @@ callEdhOperator' !gnr'caller !callee'that !mth'proc !prede !mth'body !args !exit
                                   }
               !pgsMth = pgsCaller { edh'context = mthCtx }
           case prede of
-            Nothing      -> pure ()
+            Nothing -> pure ()
             -- put the overridden predecessor operator in scope of the overriding
             -- op proc's run ctx
-            Just !predOp -> case procedure'name $ procedure'decl mth'proc of
-              NamedAttr !opSym ->
-                changeEntityAttr pgsMth ent (AttrByName opSym) predOp
-              SymbolicAttr{} -> error "bug: op procedure of symbolic name"
+            Just !predOp ->
+              changeEntityAttr pgsMth ent (procedure'name mth'proc) predOp
           -- push stack for the Edh procedure
           runEdhProc pgsMth
             $ evalStmt mth'body
@@ -2922,18 +2934,18 @@ packEdhArgs !argsSender !pkExit = do
     case x of
       UnpackPosArgs !posExpr ->
         evalExpr posExpr $ \(OriginalValue !val _ _) -> case edhUltimate val of
-          (EdhArgsPack (ArgsPack !posArgs' _kwArgs')) ->
-            pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
-              exit (ArgsPack (posArgs ++ posArgs') kwArgs)
+          (EdhArgsPack (ArgsPack !posArgs _kwArgs)) ->
+            pkArgs xs $ \(ArgsPack !posArgs' !kwArgs') ->
+              exit (ArgsPack (posArgs ++ posArgs') kwArgs')
           (EdhPair !k !v) -> pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
-            exit (ArgsPack (posArgs ++ [k, noneNil v]) kwArgs)
+            exit (ArgsPack ([k, noneNil v] ++ posArgs) kwArgs)
           (EdhTuple !l) -> pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
-            exit (ArgsPack (posArgs ++ (noneNil <$> l)) kwArgs)
+            exit (ArgsPack ((noneNil <$> l) ++ posArgs) kwArgs)
           (EdhList (List _ !l)) -> pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
             contEdhSTM $ do
               ll <- readTVar l
               runEdhProc pgs
-                $ exit (ArgsPack (posArgs ++ (noneNil <$> ll)) kwArgs)
+                $ exit (ArgsPack ((noneNil <$> ll) ++ posArgs) kwArgs)
           _ ->
             throwEdh EvalError
               $  "Can not unpack args from a "
@@ -2942,9 +2954,9 @@ packEdhArgs !argsSender !pkExit = do
               <> T.pack (show val)
       UnpackKwArgs !kwExpr -> evalExpr kwExpr $ \(OriginalValue !val _ _) ->
         case edhUltimate val of
-          EdhArgsPack (ArgsPack _posArgs' !kwArgs') ->
-            pkArgs xs $ \(ArgsPack !posArgs !kwArgs) ->
-              exit (ArgsPack posArgs (Map.union kwArgs kwArgs'))
+          EdhArgsPack (ArgsPack _posArgs !kwArgs) ->
+            pkArgs xs $ \(ArgsPack !posArgs' !kwArgs') ->
+              exit (ArgsPack posArgs' (Map.union kwArgs' kwArgs))
           (EdhPair !k !v) -> pkArgs xs $ \case
             (ArgsPack !posArgs !kwArgs) ->
               contEdhSTM
@@ -2955,15 +2967,18 @@ packEdhArgs !argsSender !pkExit = do
                     <> T.pack (edhTypeNameOf k)
                     )
                 $ \ !kw ->
-                    runEdhProc pgs $ exit
-                      (ArgsPack posArgs $ Map.insert kw (noneNil v) kwArgs)
+                    runEdhProc pgs
+                      $ exit
+                          (ArgsPack posArgs $ Map.union kwArgs $ Map.fromList
+                            [(kw, noneNil v)]
+                          )
           (EdhDict (Dict _ !ds)) -> pkArgs xs $ \case
             (ArgsPack !posArgs !kwArgs) -> contEdhSTM $ do
               !dm <- readTVar ds
               dictKvs2Kwl (Map.toList dm) $ \ !kvl ->
                 runEdhProc pgs $ exit $ ArgsPack posArgs $ Map.union
-                  (Map.fromList kvl)
                   kwArgs
+                  (Map.fromList kvl)
           _ ->
             throwEdh EvalError
               $  "Can not unpack kwargs from a "
@@ -2972,9 +2987,9 @@ packEdhArgs !argsSender !pkExit = do
               <> T.pack (show val)
       UnpackPkArgs !pkExpr -> evalExpr pkExpr $ \(OriginalValue !val _ _) ->
         case edhUltimate val of
-          (EdhArgsPack (ArgsPack !posArgs' !kwArgs')) -> pkArgs xs $ \case
-            (ArgsPack !posArgs !kwArgs) ->
-              exit (ArgsPack (posArgs ++ posArgs') (Map.union kwArgs kwArgs'))
+          (EdhArgsPack (ArgsPack !posArgs !kwArgs)) -> pkArgs xs $ \case
+            (ArgsPack !posArgs' !kwArgs') ->
+              exit (ArgsPack (posArgs ++ posArgs') (Map.union kwArgs' kwArgs))
           _ ->
             throwEdh EvalError
               $  "Can not unpack pkargs from a "

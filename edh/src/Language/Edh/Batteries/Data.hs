@@ -20,7 +20,7 @@ import           Language.Edh.Details.Evaluate
 import           Language.Edh.Details.Utils
 
 
--- | operator (@) - dereferencing attribute addressor
+-- | operator (@) - attribute key dereferencing
 attrDerefAddrProc :: EdhIntrinsicOp
 attrDerefAddrProc !lhExpr !rhExpr !exit =
   evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate rhVal of
@@ -44,6 +44,41 @@ attrDerefAddrProc !lhExpr !rhExpr !exit =
       <> T.pack (edhTypeNameOf lhVal)
       <> ": "
       <> T.pack (show lhVal)
+
+
+-- | operator ($) - function application
+--
+-- similar to ($) operator in Haskell
+-- can be used to apply decorators with nicer syntax
+fapProc :: EdhIntrinsicOp
+fapProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
+  contEdhSTM
+    $ resolveEdhCallee pgs lhExpr
+    $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
+        edhMakeCall pgs callee'val callee'that argsExpr scopeMod
+          $ \mkCall -> runEdhProc pgs (mkCall exit)
+ where
+  argsExpr :: ArgsSender
+  argsExpr = case rhExpr of
+    CallExpr (AttrExpr (DirectRef (NamedAttr "pkargs"))) !sndr -> sndr
+    _ -> [SendPosArg rhExpr]
+
+-- | operator (|) - flipped function application
+--
+-- similar to UNIX pipe
+ffapProc :: EdhIntrinsicOp
+ffapProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
+  contEdhSTM
+    $ resolveEdhCallee pgs rhExpr
+    $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
+        edhMakeCall pgs callee'val callee'that argsExpr scopeMod
+          $ \mkCall -> runEdhProc pgs (mkCall exit)
+ where
+  argsExpr :: ArgsSender
+  argsExpr = case lhExpr of
+    CallExpr (AttrExpr (DirectRef (NamedAttr "pkargs"))) !sndr -> sndr
+    _ -> [SendPosArg lhExpr]
+
 
 -- | operator (:=) - named value definition
 defProc :: EdhIntrinsicOp
@@ -168,20 +203,39 @@ attrDerefTemptProc !lhExpr !rhExpr !exit =
       (edhTypeNameOf rhVal)
 
 
--- | the Symbol(description) constructor
+-- | the Symbol(repr, *reprs) constructor
 symbolCtorProc :: EdhProcedure
-symbolCtorProc (ArgsPack !args _) !exit = do
-  !pgs <- ask
-  contEdhSTM $ case args of
-    [EdhString description] -> do
-      sym <- mkSymbol description
-      exitEdhSTM pgs exit $ EdhSymbol sym
-    _ -> throwEdhSTM pgs EvalError "Invalid arg to Symbol()"
+symbolCtorProc (ArgsPack _ !kwargs) _ | not $ Map.null kwargs =
+  throwEdh UsageError "No kwargs should be passed to Symbol()"
+symbolCtorProc (ArgsPack !reprs _) !exit = ask >>= \pgs -> contEdhSTM $ do
+  let ctorSym :: EdhValue -> (Symbol -> STM ()) -> STM ()
+      ctorSym (EdhString !repr) !exit' = mkSymbol repr >>= exit'
+      ctorSym _ _ = throwEdhSTM pgs EvalError "Invalid arg to Symbol()"
+  seqcontSTM (ctorSym <$> reprs) $ \case
+    [sym] -> exitEdhSTM pgs exit $ EdhSymbol sym
+    syms ->
+      exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack (EdhSymbol <$> syms) mempty
 
 
 -- | utility pkargs(***apk) - arguments packer
 pkargsProc :: EdhProcedure
 pkargsProc !apk !exit = exitEdhProc exit (EdhArgsPack apk)
+
+apkArgsProc :: EdhProcedure
+apkArgsProc (ArgsPack _ !kwargs) _ | not $ Map.null kwargs =
+  throwEdh EvalError "bug: __ArgsPackType_args__ got kwargs"
+apkArgsProc (ArgsPack [EdhArgsPack (ArgsPack !args _)] _) !exit =
+  exitEdhProc exit $ EdhArgsPack $ ArgsPack args Map.empty
+apkArgsProc _ _ =
+  throwEdh EvalError "bug: __ArgsPackType_args__ got unexpected args"
+
+apkKwrgsProc :: EdhProcedure
+apkKwrgsProc (ArgsPack _ !kwargs) _ | not $ Map.null kwargs =
+  throwEdh EvalError "bug: __ArgsPackType_kwargs__ got kwargs"
+apkKwrgsProc (ArgsPack [EdhArgsPack (ArgsPack _ !kwargs')] _) !exit =
+  exitEdhProc exit $ EdhArgsPack $ ArgsPack [] kwargs'
+apkKwrgsProc _ _ =
+  throwEdh EvalError "bug: __ArgsPackType_kwargs__ got unexpected args"
 
 
 -- | utility repr(*args,**kwargs) - repr extractor
@@ -230,8 +284,9 @@ isNullProc (ArgsPack !args !kwargs) !exit = do
     then case args of
       [v] ->
         edhValueNull pgs v $ \isNull -> exitEdhSTM pgs exit $ EdhBool isNull
-      _ -> seqcontSTM (edhValueNull pgs <$> args)
-        $ \argsNulls -> exitEdhSTM pgs exit (EdhTuple $ EdhBool <$> argsNulls)
+      _ -> seqcontSTM (edhValueNull pgs <$> args) $ \argsNulls ->
+        exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack (EdhBool <$> argsNulls)
+                                                     mempty
     else seqcontSTM (edhValueNull pgs <$> args) $ \argsNulls ->
       seqcontSTM
           [ \exit' -> edhValueNull pgs v (\isNull -> exit' (k, isNull))
@@ -253,7 +308,7 @@ typeProc (ArgsPack !args !kwargs) !exit =
   in  if null kwargs
         then case argsType of
           [t] -> exitEdhProc exit t
-          _   -> exitEdhProc exit (EdhTuple argsType)
+          _   -> exitEdhProc exit $ EdhArgsPack $ ArgsPack argsType mempty
         else exitEdhProc
           exit
           (EdhArgsPack $ ArgsPack argsType $ Map.map edhTypeValOf kwargs)
@@ -262,6 +317,27 @@ typeProc (ArgsPack !args !kwargs) !exit =
   edhTypeValOf EdhNil              = EdhNil
   edhTypeValOf (EdhNamedValue n v) = EdhNamedValue n $ edhTypeValOf v
   edhTypeValOf v                   = EdhType $ edhTypeOf v
+
+
+procNameProc :: EdhProcedure
+procNameProc (ArgsPack _ !kwargs) _ | not $ Map.null kwargs =
+  throwEdh EvalError "bug: __ProcType_name__ got kwargs"
+procNameProc (ArgsPack [EdhIntrOp _ (IntrinOpDefi _ !opSym _)] _) !exit =
+  exitEdhProc exit $ EdhString $ "(" <> opSym <> ")"
+procNameProc (ArgsPack [EdhClass !pd] _) !exit =
+  exitEdhProc exit $ EdhString $ procedureName pd
+procNameProc (ArgsPack [EdhMethod !pd] _) !exit =
+  exitEdhProc exit $ EdhString $ procedureName pd
+procNameProc (ArgsPack [EdhOprtor _ _ !pd] _) !exit =
+  exitEdhProc exit $ EdhString $ procedureName pd
+procNameProc (ArgsPack [EdhGnrtor !pd] _) !exit =
+  exitEdhProc exit $ EdhString $ procedureName pd
+procNameProc (ArgsPack [EdhIntrpr !pd] _) !exit =
+  exitEdhProc exit $ EdhString $ procedureName pd
+procNameProc (ArgsPack [EdhPrducr !pd] _) !exit =
+  exitEdhProc exit $ EdhString $ procedureName pd
+procNameProc _ _ =
+  throwEdh EvalError "bug: __ProcType_name__ got unexpected args"
 
 
 -- | utility dict(***pkargs,**kwargs,*args) - dict constructor by arguments
@@ -278,27 +354,29 @@ dictProc (ArgsPack !args !kwargs) !exit = do
     exitEdhSTM pgs exit (EdhDict (Dict u d))
 
 dictSizeProc :: EdhProcedure
-dictSizeProc (ArgsPack [EdhDict (Dict _ !dsv)] !kwargs) !exit
-  | Map.null kwargs = do
-    !pgs <- ask
-    contEdhSTM $ do
-      ds <- readTVar dsv
-      exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral $ Map.size ds
+dictSizeProc (ArgsPack _ !kwargs) _ | not $ Map.null kwargs =
+  throwEdh EvalError "bug: __DictType_size__ got kwargs"
+dictSizeProc (ArgsPack [EdhDict (Dict _ !dsv)] _) !exit = do
+  !pgs <- ask
+  contEdhSTM $ do
+    ds <- readTVar dsv
+    exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral $ Map.size ds
 dictSizeProc _ _ =
-  throwEdh EvalError "bug: __DictType_size__ dispatched to non-dict"
+  throwEdh EvalError "bug: __DictType_size__ got unexpected args"
 
 
 listPushProc :: EdhProcedure
-listPushProc (ArgsPack [l@(EdhList (List _ !lv))] !kwargs) !exit
-  | Map.null kwargs = do
-    !pgs <- ask
-    contEdhSTM
-      $   mkHostProc (contextScope $ edh'context pgs)
-                     EdhMethod
-                     "push"
-                     listPush
-                     (PackReceiver [RecvRestPosArgs "values"])
-      >>= \mth -> exitEdhSTM pgs exit mth
+listPushProc (ArgsPack _ !kwargs) _ | not $ Map.null kwargs =
+  throwEdh EvalError "bug: __ListType_push__ got kwargs"
+listPushProc (ArgsPack [l@(EdhList (List _ !lv))] _) !exit = do
+  !pgs <- ask
+  contEdhSTM
+    $   mkHostProc (contextScope $ edh'context pgs)
+                   EdhMethod
+                   "push"
+                   listPush
+                   (PackReceiver [RecvRestPosArgs "values"])
+    >>= \mth -> exitEdhSTM pgs exit mth
  where
   listPush :: EdhProcedure
   listPush (ArgsPack !args !kwargs') !exit' | Map.null kwargs' =
@@ -307,20 +385,21 @@ listPushProc (ArgsPack [l@(EdhList (List _ !lv))] !kwargs) !exit
       exitEdhSTM pgs exit' l
   listPush _ _ = throwEdh UsageError "Invalid args to list.push()"
 listPushProc _ _ =
-  throwEdh EvalError "bug: __ListType_push__ dispatched to non-list"
+  throwEdh EvalError "bug: __ListType_push__ got unexpected args"
 
 listPopProc :: EdhProcedure
-listPopProc (ArgsPack [EdhList (List _ !lv)] !kwargs) !exit | Map.null kwargs =
-  do
-    !pgs <- ask
-    contEdhSTM
-      $   mkHostProc
-            (contextScope $ edh'context pgs)
-            EdhMethod
-            "pop"
-            listPop
-            (PackReceiver [RecvArg "default" Nothing $ Just $ IntplSubs edhNone])
-      >>= \mth -> exitEdhSTM pgs exit mth
+listPopProc (ArgsPack _ !kwargs) _ | not $ Map.null kwargs =
+  throwEdh EvalError "bug: __ListType_pop__ got kwargs"
+listPopProc (ArgsPack [EdhList (List _ !lv)] _) !exit = do
+  !pgs <- ask
+  contEdhSTM
+    $   mkHostProc
+          (contextScope $ edh'context pgs)
+          EdhMethod
+          "pop"
+          listPop
+          (PackReceiver [RecvArg "default" Nothing $ Just $ IntplSubs edhNone])
+    >>= \mth -> exitEdhSTM pgs exit mth
  where
   listPop :: EdhProcedure
   listPop !apk !exit' = case parseArgsPack edhNone parseArgs apk of
@@ -332,7 +411,7 @@ listPopProc (ArgsPack [EdhList (List _ !lv)] !kwargs) !exit | Map.null kwargs =
     parseArgs = ArgsPackParser [\arg _ -> Right arg]
       $ Map.fromList [("default", \arg _ -> Right arg)]
 listPopProc _ _ =
-  throwEdh EvalError "bug: __ListType_pop__ dispatched to non-list"
+  throwEdh EvalError "bug: __ListType_pop__ got unexpected args"
 
 
 -- | operator (?<=) - element-of tester

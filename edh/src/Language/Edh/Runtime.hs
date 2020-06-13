@@ -51,8 +51,9 @@ createEdhWorld !console = liftIO $ do
   scopeClassUniq   <- newUnique
   let !rootClass = ProcDefi
         { procedure'uniq = rootClassUniq
+        , procedure'name = AttrByName "<root>"
         , procedure'lexi = Nothing
-        , procedure'decl = ProcDecl { procedure'name = NamedAttr "<root>"
+        , procedure'decl = ProcDecl { procedure'addr = NamedAttr "<root>"
                                     , procedure'args = PackReceiver []
                                     , procedure'body = Right edhNop
                                     }
@@ -78,8 +79,9 @@ createEdhWorld !console = liftIO $ do
         }
       !scopeClass = ProcDefi
         { procedure'uniq = scopeClassUniq
+        , procedure'name = AttrByName "<scope>"
         , procedure'lexi = Just rootScope
-        , procedure'decl = ProcDecl { procedure'name = NamedAttr "<scope>"
+        , procedure'decl = ProcDecl { procedure'addr = NamedAttr "<scope>"
                                     , procedure'args = PackReceiver []
                                     , procedure'body = Right edhNop
                                     }
