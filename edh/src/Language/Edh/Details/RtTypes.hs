@@ -1160,6 +1160,8 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
       -- | only artifacts introduced within an `export` statement, into
       -- `this` object in context, are eligible for importing by others
     | ExportExpr !Expr
+      -- | namespace object creation
+    | NamespaceExpr !ProcDecl !ArgsSender
       -- | class (constructor) procedure definition
     | ClassExpr !ProcDecl
       -- | method procedure definition

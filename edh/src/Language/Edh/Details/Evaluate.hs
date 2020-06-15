@@ -1143,8 +1143,8 @@ evalExpr !expr !exit = do
                   op'proc
                   op'pred
                   [ EdhObject scopeWrapper
-                  , (EdhExpr lhu lhExpr "")
-                  , (EdhExpr rhu rhExpr "")
+                  , EdhExpr lhu lhExpr ""
+                  , EdhExpr rhu rhExpr ""
                   ]
                   exit
               _ ->
@@ -1161,6 +1161,37 @@ evalExpr !expr !exit = do
               <> " expressed with: "
               <> T.pack (show expr)
 
+    NamespaceExpr pd@(ProcDecl !addr _ _) !argsSndr ->
+      packEdhArgs argsSndr $ \apk ->
+        contEdhSTM $ resolveEdhAttrAddr pgs addr $ \name -> do
+          u <- unsafeIOToSTM newUnique
+          let !cls = ProcDefi { procedure'uniq = u
+                              , procedure'name = name
+                              , procedure'lexi = Just scope
+                              , procedure'decl = pd
+                              }
+          runEdhProc pgs
+            $ createEdhObject cls apk
+            $ \(OriginalValue !nsv _ _) -> case nsv of
+                EdhObject !nso -> contEdhSTM $ do
+                  lookupEdhObjAttr pgs nso (AttrByName "__repr__") >>= \case
+                    EdhNil ->
+                      changeEntityAttr pgs
+                                       (objEntity nso)
+                                       (AttrByName "__repr__")
+                        $  EdhString
+                        $  "namespace:"
+                        <> if addr == NamedAttr "_"
+                             then "<anonymous>"
+                             else T.pack $ show addr
+                    _ -> pure ()
+                  when (addr /= NamedAttr "_") $ do
+                    if contextEffDefining ctx
+                      then defEffect name nsv
+                      else changeEntityAttr pgs (scopeEntity scope) name nsv
+                    chkExport name nsv
+                  exitEdhSTM pgs exit nsv
+                _ -> error "bug: createEdhObject returned non-object"
 
     ClassExpr pd@(ProcDecl !addr _ _) ->
       contEdhSTM $ resolveEdhAttrAddr pgs addr $ \name -> do
@@ -1697,6 +1728,13 @@ edhMakeCall' !pgsCaller !callee'val !callee'that apk@(ArgsPack !args !kwargs) !s
       EvalError
       "Can only call a generator method by for-from-do"
 
+    -- calling an object
+    (EdhObject !o) ->
+      lookupEdhObjAttr pgsCaller o (AttrByName "__call__") >>= \case
+        EdhMethod !callMth -> callMaker
+          $ \exit -> callEdhMethod callee'that callMth apk scopeMod exit
+        _ -> throwEdhSTM pgsCaller EvalError "No __call__ method on object"
+
     _ ->
       throwEdhSTM pgsCaller EvalError
         $  "Can not call a "
@@ -2040,35 +2078,59 @@ createEdhObject !cls !apk !exit = do
       runEdhProc pgsCallee $ hp apk $ \(OriginalValue !val _ _) ->
         contEdhSTM $ exitEdhSTM pgsCaller exit val
 
-    -- calling an Edh class (constructor) procedure
+    -- calling an Edh namespace/class (constructor) procedure
     Left !pb -> contEdhSTM $ do
       newEnt  <- createHashEntity Map.empty
       newThis <- viewAsEdhObject newEnt cls []
-      let !ctorScope = objectScope callerCtx newThis
-          !ctorCtx   = callerCtx { callStack = ctorScope <| callStack callerCtx
-                                 , generatorCaller    = Nothing
-                                 , contextMatch       = true
-                                 , contextStmt        = pb
-                                 , contextExporting   = False
-                                 , contextEffDefining = False
-                                 }
-          !pgsCtor = pgsCaller { edh'context = ctorCtx }
-      runEdhProc pgsCtor $ evalStmt pb $ \(OriginalValue !ctorRtn _ _) ->
-        local (const pgsCaller) $ case ctorRtn of
-          -- allow a class procedure to explicitly return other
-          -- value than newly constructed `this` object
-          -- it can still `return this` to early stop the proc
-          -- which is magically an advanced feature
-          EdhReturn !rtnVal -> exitEdhProc exit rtnVal
-          EdhContinue ->
-            throwEdh EvalError "Unexpected continue from constructor"
-          -- allow the use of `break` to early stop a constructor 
-          -- procedure with nil result
-          EdhBreak -> exitEdhProc exit nil
-          -- no explicit return from class procedure, return the
-          -- newly constructed this object, throw away the last
-          -- value from the procedure execution
-          _        -> exitEdhProc exit (EdhObject newThis)
+      let
+        goCtor = do
+          let !ctorScope = objectScope callerCtx newThis
+              !ctorCtx   = callerCtx
+                { callStack          = ctorScope <| callStack callerCtx
+                , generatorCaller    = Nothing
+                , contextMatch       = true
+                , contextStmt        = pb
+                , contextExporting   = False
+                , contextEffDefining = False
+                }
+              !pgsCtor = pgsCaller { edh'context = ctorCtx }
+          runEdhProc pgsCtor $ evalStmt pb $ \(OriginalValue !ctorRtn _ _) ->
+            local (const pgsCaller) $ case ctorRtn of
+              -- allow a class procedure to explicitly return other
+              -- value than newly constructed `this` object
+              -- it can still `return this` to early stop the proc
+              -- which is magically an advanced feature
+              EdhReturn !rtnVal -> exitEdhProc exit rtnVal
+              EdhContinue ->
+                throwEdh EvalError "Unexpected continue from constructor"
+              -- allow the use of `break` to early stop a constructor 
+              -- procedure with nil result
+              EdhBreak -> exitEdhProc exit nil
+              -- no explicit return from class procedure, return the
+              -- newly constructed this object, throw away the last
+              -- value from the procedure execution
+              _        -> exitEdhProc exit (EdhObject newThis)
+      case procedure'args $ procedure'decl cls of
+        -- a namespace procedure, should pass ctor args to it
+        WildReceiver -> do
+          let !recvCtx = callerCtx
+                { callStack = (lexicalScopeOf cls) { thisObject = newThis
+                                                   , thatObject = newThis
+                                                   }
+                                :| []
+                , generatorCaller    = Nothing
+                , contextMatch       = true
+                , contextStmt        = pb
+                , contextExporting   = False
+                , contextEffDefining = False
+                }
+          runEdhProc pgsCaller $ recvEdhArgs recvCtx WildReceiver apk $ \oed ->
+            contEdhSTM $ do
+              updateEntityAttrs pgsCaller (objEntity newThis) $ Map.toList oed
+              goCtor
+        -- a class procedure, should leave ctor args for its __init__ method
+        PackReceiver [] -> goCtor
+        _               -> error "bug: imposible constructor procedure args"
 
 
 callEdhOperator

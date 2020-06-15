@@ -290,6 +290,18 @@ parseArgSends si ss = (lookAhead (symbol ")") >> return (ss, si)) <|> do
       vExpr -> return (SendPosArg vExpr, si')
 
 
+parseNamespaceExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseNamespaceExpr si = do
+  void $ keyword "namespace"
+  pn <- choice
+    [ symbol "@" *> (SymbolicAttr <$> parseAlphaName)
+    , NamedAttr <$> parseMagicProcName
+    , NamedAttr <$> parseAlphaName
+    ]
+  (argSender, si' ) <- parseArgsSender si
+  (body     , si'') <- parseProcBody si'
+  return (NamespaceExpr (ProcDecl pn WildReceiver (Left body)) argSender, si'')
+
 parseClassExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseClassExpr si = do
   void $ keyword "class"
@@ -792,6 +804,7 @@ parseExprPrec prec si = lookAhead illegalExprStart >>= \case
       , parseOpAddrOrTupleOrParen si
       , parseExportExpr si
       , parseImportExpr si
+      , parseNamespaceExpr si
       , parseClassExpr si
       , parseMethodExpr si
       , parseGeneratorExpr si

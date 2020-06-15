@@ -1,21 +1,16 @@
 
 {#
- # functional high order procedure support
+ # functional paradigm, higher order procedure support
  #}
 export {
 
   # partial application
-  method partial (*** apk1 ) {
-    class Applied { method __init__( f as this.f, apk1 as this.apk1 ) pass
-      method def( fn ) {
-        method @fn (*** apk2 ) {
-          this.f(*** this.apk1, *** apk2 )
-        }
-      }
-    }
-    method apply'to ( f ) {
-      applied = Applied( f, apk1 )
-      applied.def( f.name )
+  method partial (*** apk1 ) method apply'to ( f ) {
+    # leverage a namespace and the separate scope of its __call__ method,
+    # to avoid name clashing with `f.name`
+    f.name ++ '|partial' ++ repr( apk1 ) | namespace _ ( f=f, apk1=apk1 )
+    method __call__( fn ) method @fn (*** apk2 ) {
+      this.f(*** this.apk1, *** apk2 )
     }
   }
 
