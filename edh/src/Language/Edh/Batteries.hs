@@ -212,46 +212,62 @@ installEdhBatteries world = liftIO $ do
         "<batteries>"
         [ -- format: (symbol, precedence)
 
+          -- annotation
+          ( "::"
+          , -9
+          )
+
+          -- branch
+        , ( "->"
+          , -1
+          )
+          -- catch
+        , ( "$=>"
+          , -2
+          )
+          -- finally
+        , ( "@=>"
+          , -2
+          )
+
         -- the attribute key dereferencing operator
-          ("@" , 10)
-        ,
+        , ( "@"
+          , 10
+          )
+        -- attribute tempter, 
+        -- address an attribute off an object if possible, nil otherwise
+        , ("?", 10)
+        , ( "?@"
+          , 10
+          )
 
         -- the function application operator
-          ("$" , 1)
-        ,
+        , ( "$"
+          , -5
+          )
         -- the flipped function application operator, a.k.a pipe operator
-          ("|" , 1)
-        ,
+        , ( "|"
+          , -5
+          )
 
+        -- assignments, make it lower than (++), so don't need to quote `a = b ++ c`
+        , ("=", 0)
+        , ( "?="
+          , 0
+          )
         -- the definition operator, creates named value in Edh
-          (":=", 1)
+        , (":=", 1)
         , ( "?:="
           , 1
           )
 
-        -- the cons operator, creates pairs in Edh
-        , ( ":"
-          , 2
-          ) -- why brittany insists on formatting it like this ?.?
-
-        -- attribute tempter, 
-        -- address an attribute off an object if possible, nil otherwise
-        , ("?", 9)
-        , ( "?@"
-          , 9
-          )
-
-        -- assignments
-        , ("=", 0)
-        , ( "?="
-          , 0
-          ) -- make it lower than (++), so don't need to quote `a = b ++ c`
+        -- syntactic sugars for (=)
         , ("+=", 2)
         , ("-=", 2)
         , ("/=", 2)
         , ( "*="
           , 2
-          ) -- why brittany insists on formatting it like this ?.?
+          )
 
         -- arithmetic
         , ("+" , 6)
@@ -284,7 +300,7 @@ installEdhBatteries world = liftIO $ do
         , ("&&", 3)
         , ( "||"
           , 3
-          ) -- why brittany insists on formatting it like this ?.?
+          )
 
           -- emulate the ternary operator in C:
           --       onCnd ? oneThing : theOther
@@ -295,7 +311,7 @@ installEdhBatteries world = liftIO $ do
         , ("&>", 3)
         , ( "|>"
           , 3
-          ) -- why brittany insists on formatting it like this ?.?
+          )
 
           -- comprehension
           --  * list comprehension:
@@ -306,12 +322,16 @@ installEdhBatteries world = liftIO $ do
           --     (,) =< for x from range(100) do x*x
         , ( "=<"
           , 2
-          ) -- why brittany insists on formatting it like this ?.?
+          )
           -- prepand to list
           --     l = [3,7,5]
           --     2 => l
           --     [2,3,7,5]
         , ( "=>"
+          , 2
+          )
+        -- the pair constructor, creates pairs in Edh
+        , ( ":"
           , 2
           )
           -- reverse left-list and prepend to right-list
@@ -348,24 +368,6 @@ installEdhBatteries world = liftIO $ do
           , 1
           )
 
-          -- branch
-        , ( "->"
-          , -1
-          )
-          -- catch
-        , ( "$=>"
-          , -2
-          )
-          -- finally
-        , ( "@=>"
-          , -2
-          )
-
-          -- annotation
-        , ( "::"
-          , -9
-          )
-
           -- string coercing concatenation
         , ( "++"
           , 2
@@ -384,7 +386,7 @@ installEdhBatteries world = liftIO $ do
           , ("|"  , ffapProc)
           , (":=" , defProc)
           , ("?:=", defMissingProc)
-          , (":"  , consProc)
+          , (":"  , pairCtorProc)
           , ("?"  , attrTemptProc)
           , ("?@" , attrDerefTemptProc)
           , ("++" , concatProc)

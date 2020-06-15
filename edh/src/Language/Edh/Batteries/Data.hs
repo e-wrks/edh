@@ -158,8 +158,8 @@ defMissingProc !lhExpr _ _ =
 
 
 -- | operator (:) - pair constructor
-consProc :: EdhIntrinsicOp
-consProc !lhExpr !rhExpr !exit = do
+pairCtorProc :: EdhIntrinsicOp
+pairCtorProc !lhExpr !rhExpr !exit = do
   pgs <- ask
   -- make sure left hand and right hand values are evaluated in same tx
   local (const pgs { edh'in'tx = True })

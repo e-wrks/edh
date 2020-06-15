@@ -38,18 +38,10 @@ f2( 5 )
 
   # ( $ ) dollar operator is function application similar to ($) in Haskell
 
-  # TODO make procedure declarations expression,
-  # so curly quoting is not needed
-  decor$ { method g ( a, b, c ) {
-      console.print( 'this is g()', a=a, b=b, c=c )
-  } }
-
-  # TODO once procedure declarations are made expression,
-  # we can write in nicer syntax like this:
-  # decor$
-  # method g ( a, b, c ) {
-  #   console.print( 'this is g()', a=a, b=b, c=c )
-  # }
+  decor$
+  method g ( a, b, c ) {
+    console.print( 'this is g()', a=a, b=b, c=c )
+  }
 
 }
 g( 1, 2, 3 )

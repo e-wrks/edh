@@ -119,18 +119,18 @@ parseDeferStmt si = do
 parseEffectStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseEffectStmt si = do
   void $ keyword "effect"
-  (s, si') <- parseStmt si
+  (s, si') <- parseExpr si
   return (EffectStmt s, si')
 
-parseExportStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseExportStmt si = do
+parseExportExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseExportExpr si = do
   void $ keyword "export"
-  (s, si') <- parseStmt si
-  return (ExportStmt s, si')
+  (s, si') <- parseExpr si
+  return (ExportExpr s, si')
 
-parseImportStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseImportStmt si = keyword "import"
-  *> choice [keyword "this" >> go ImportThisStmt, go ImportStmt]
+parseImportExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseImportExpr si = keyword "import"
+  *> choice [keyword "this" >> go ImportThisExpr, go ImportExpr]
  where
   go dc = do
     ar        <- parseArgsReceiver
@@ -290,16 +290,16 @@ parseArgSends si ss = (lookAhead (symbol ")") >> return (ss, si)) <|> do
       vExpr -> return (SendPosArg vExpr, si')
 
 
-parseClassStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseClassStmt si = do
+parseClassExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseClassExpr si = do
   void $ keyword "class"
   pn <- choice
     [ symbol "@" *> (SymbolicAttr <$> parseAlphaName)
     , NamedAttr <$> parseMagicProcName
     , NamedAttr <$> parseAlphaName
     ]
-  (body, si') <- parseStmt si
-  return (ClassStmt $ ProcDecl pn (PackReceiver []) (Left body), si')
+  (body, si') <- parseProcBody si
+  return (ClassExpr $ ProcDecl pn (PackReceiver []) (Left body), si')
 
 parseExtendsStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseExtendsStmt si = do
@@ -307,17 +307,17 @@ parseExtendsStmt si = do
   (x, si') <- parseExpr si
   return (ExtendsStmt x, si')
 
-parseMethodStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseMethodStmt si = do
+parseMethodExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseMethodExpr si = do
   void $ keyword "method"
   (pd, si') <- parseProcDecl si
-  return (MethodStmt pd, si')
+  return (MethodExpr pd, si')
 
-parseGeneratorStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseGeneratorStmt si = do
+parseGeneratorExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseGeneratorExpr si = do
   void $ keyword "generator"
   (pd, si') <- parseProcDecl si
-  return (GeneratorStmt pd, si')
+  return (GeneratorExpr pd, si')
 
 
 parsePerceiveStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
@@ -327,17 +327,17 @@ parsePerceiveStmt si = do
   (body, si'') <- parseExpr si'
   return (PerceiveStmt sink body, si'')
 
-parseInterpreterStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseInterpreterStmt si = do
+parseInterpreterExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseInterpreterExpr si = do
   void $ keyword "interpreter"
   (pd, si') <- parseProcDecl si
-  return (InterpreterStmt pd, si')
+  return (InterpreterExpr pd, si')
 
-parseProducerStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseProducerStmt si = do
+parseProducerExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseProducerExpr si = do
   void $ keyword "producer"
   (pd, si') <- parseProcDecl si
-  return (ProducerStmt pd, si')
+  return (ProducerExpr pd, si')
 
 parseWhileStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseWhileStmt si = do
@@ -354,7 +354,7 @@ parseProcDecl si = do
     , NamedAttr <$> parseAlphaName
     ]
   ar          <- parseArgsReceiver
-  (body, si') <- parseStmt si
+  (body, si') <- parseProcBody si
   return (ProcDecl pn ar (Left body), si')
 
 parseMagicProcName :: Parser Text
@@ -366,8 +366,8 @@ parseMagicProcName = between (symbol "(") (symbol ")") $ lexeme $ takeWhile1P
 isMagicProcChar :: Char -> Bool
 isMagicProcChar c = isOperatorChar c || elem c ("[]" :: [Char])
 
-parseOpDeclOvrdStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseOpDeclOvrdStmt si = do
+parseOpDeclOvrdExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseOpDeclOvrdExpr si = do
   void $ keyword "operator"
   srcPos      <- getSourcePos
   errRptPos   <- getOffset
@@ -377,7 +377,7 @@ parseOpDeclOvrdStmt si = do
   --  * 2 pos-args - simple lh/rh value receiving operator
   --  * 3 pos-args - caller scope + lh/rh expr receiving operator
   argRcvr     <- parseArgsReceiver
-  (body, si') <- parseStmt si
+  (body, si') <- parseProcBody si
   let procDecl = ProcDecl (NamedAttr opSym) argRcvr (Left body)
   opPD <- get
   case precDecl of
@@ -388,7 +388,7 @@ parseOpDeclOvrdStmt si = do
           $  "You forget to specify the precedence for operator: "
           <> T.unpack opSym
           <> " ?"
-      Just (opPrec, _) -> return (OpOvrdStmt opSym procDecl opPrec, si')
+      Just (opPrec, _) -> return (OpOvrdExpr opSym procDecl opPrec, si')
     Just opPrec -> do
       when (opPrec < 0 || opPrec >= 10) $ do
         setOffset errRptPos
@@ -404,7 +404,7 @@ parseOpDeclOvrdStmt si = do
             <> T.unpack odl
             <> ", omit the precedence if you mean to override it."
       put $ Map.insert opSym (opPrec, T.pack $ sourcePosPretty srcPos) opPD
-      return (OpDeclStmt opSym opPrec procDecl, si')
+      return (OpDeclExpr opSym opPrec procDecl, si')
 
 parseReturnStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseReturnStmt si = do
@@ -419,8 +419,8 @@ parseThrowStmt si = do
   return (ThrowStmt x, si')
 
 
-parseStmt :: IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
-parseStmt si = do
+parseStmt' :: Int -> IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
+parseStmt' !prec !si = do
   srcPos      <- getSourcePos
   (stmt, si') <-
     choice
@@ -428,16 +428,9 @@ parseStmt si = do
         , parseGoStmt si
         , parseDeferStmt si
         , parseEffectStmt si
-        , parseExportStmt si
-        , parseImportStmt si
         , parseLetStmt si
-        , parseClassStmt si
         , parseExtendsStmt si
-        , parseMethodStmt si
-        , parseGeneratorStmt si
         , parsePerceiveStmt si
-        , parseInterpreterStmt si
-        , parseProducerStmt si
         , parseWhileStmt si
           -- TODO validate <break> must within a loop construct
         , (BreakStmt, si) <$ keyword "break"
@@ -447,18 +440,26 @@ parseStmt si = do
           -- TODO validate fallthrough must within a branch block
         , (FallthroughStmt, si) <$ keyword "fallthrough"
         , (RethrowStmt, si) <$ keyword "rethrow"
-        , parseOpDeclOvrdStmt si
-          -- TODO validate yield must within a generator procedure
         , parseReturnStmt si
         , parseThrowStmt si
         , (, si) <$> parseVoidStmt
 
           -- NOTE: statements above should probably all be detected by
           -- `illegalExprStart` as invalid start for an expr
-        , parseExpr si >>= \(x, si') -> return (ExprStmt x, si')
+        , parseExprPrec prec si >>= \(x, si') -> return (ExprStmt x, si')
         ]
       <* optionalSemicolon
   return (StmtSrc (srcPos, stmt), si')
+
+parseStmt :: IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
+parseStmt !si = parseStmt' (-10) si
+
+-- procedure bodies are statements, for procedures to include ($=> -2)
+-- and (@=> -2) in their bodies, and to be applied by ($ -5) or (| -5)
+-- without necessarity to be curly quoted, we use precedence (-3) to
+-- parse expressions for statements
+parseProcBody :: IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
+parseProcBody !si = parseStmt' (-3) si
 
 
 parseIfExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -713,22 +714,14 @@ illegalExprStart =
           [ keyword "ai"
           , keyword "go"
           , keyword "defer"
-          , keyword "import"
-          , keyword "export"
           , keyword "effect"
           , keyword "let"
-          , keyword "class"
           , keyword "extends"
-          , keyword "method"
-          , keyword "generator"
           , keyword "perceive"
-          , keyword "interpreter"
-          , keyword "producer"
           , keyword "while"
           , keyword "break"
           , keyword "continue"
           , keyword "fallthrough"
-          , keyword "operator"
           , keyword "return"
           , keyword "throw"
           , keyword "pass"
@@ -787,6 +780,7 @@ parseExprPrec prec si = lookAhead illegalExprStart >>= \case
   False -> ((, si) <$> parseExprLit) <|> parseIntplExpr si <|> do
     (x, si') <- choice
       [ parsePrefixExpr si
+        -- TODO validate yield must within a generator procedure
       , parseYieldExpr si
       , parseForExpr si
       , parseIfExpr si
@@ -796,6 +790,14 @@ parseExprPrec prec si = lookAhead illegalExprStart >>= \case
       , parseListExpr si
       , parseBlockOrDict si
       , parseOpAddrOrTupleOrParen si
+      , parseExportExpr si
+      , parseImportExpr si
+      , parseClassExpr si
+      , parseMethodExpr si
+      , parseGeneratorExpr si
+      , parseInterpreterExpr si
+      , parseProducerExpr si
+      , parseOpDeclOvrdExpr si
       , (, si) . LitExpr <$> parseLitExpr
       , (, si) . AttrExpr <$> parseAttrAddr
       ]

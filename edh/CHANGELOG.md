@@ -29,6 +29,11 @@
 - `case-of` context match target value now is effective in nested code
   blocks (breaking old code), and `fallthrough` can fall through multiple
   block boundaries only if it's the last statement of those blocks
+- to better support functional paradigm and higher order functions,
+  procedure declaration statements are turned into expressions, added function
+  application operator (\$) and the flipped version (|), which is similar to
+  UNIX pipe at the same time
+- import/export turned into expressions as well
 - various bugfixes and improvements
 
 ## 0.2.0.0

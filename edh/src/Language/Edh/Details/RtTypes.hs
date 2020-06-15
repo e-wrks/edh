@@ -981,28 +981,14 @@ data Stmt =
       -- and schedules execution on func return), but in Edh `defer`
       -- schedules execution on thread termination
     | DeferStmt !Expr
-      -- | import with args (re)pack receiving syntax
-    | ImportStmt !ArgsReceiver !Expr
-      -- | `import this xxx yyy` can be used from a method procedure,
-      -- targeting current object scope instead of method scope
-    | ImportThisStmt !ArgsReceiver !Expr
-      -- | only artifacts introduced within an `export` statement, into
-      -- `this` object in context, are eligible for importing by others
-    | ExportStmt !StmtSrc
       -- | artifacts introduced within an `effect` statement will be put
       -- into effect namespace, which as currently implemented, a dict
       -- resides in current scope entity addressed by name `__exports__`
-    | EffectStmt !StmtSrc
+    | EffectStmt !Expr
       -- | assignment with args (un/re)pack sending/receiving syntax
     | LetStmt !ArgsReceiver !ArgsSender
       -- | super object declaration for a descendant object
     | ExtendsStmt !Expr
-      -- | class (constructor) procedure definition
-    | ClassStmt !ProcDecl
-      -- | method procedure definition
-    | MethodStmt !ProcDecl
-      -- | generator procedure definition
-    | GeneratorStmt !ProcDecl
       -- | perceiption declaration, a perceiver is bound to an event `sink`
       -- with the calling thread as context, when an event fires from that
       -- event `sink`, the bound perceiver body will be executed from the
@@ -1019,12 +1005,6 @@ data Stmt =
       -- the perceiption construct is somewhat similar to traditional signal
       -- handling mechanism in OS process management
     | PerceiveStmt !Expr !Expr
-      -- | interpreter declaration, an interpreter procedure is not otherwise
-      -- different from a method procedure, except it receives arguments
-      -- in expression form rather than values, in addition to the reflective
-      -- `callerScope` as first argument
-    | InterpreterStmt !ProcDecl
-    | ProducerStmt !ProcDecl
       -- | while loop
     | WhileStmt !Expr !Expr
       -- | break from a while/for loop, or terminate the Edh thread if given
@@ -1036,10 +1016,6 @@ data Stmt =
     | FallthroughStmt
       -- | rethrow current exception
     | RethrowStmt
-      -- | operator declaration
-    | OpDeclStmt !OpSymbol !Precedence !ProcDecl
-      -- | operator override
-    | OpOvrdStmt !OpSymbol !ProcDecl !Precedence
       -- | any value can be thrown as exception, handling will rely on the
       --   ($=>) as `catch` and (@=>) as `finally` operators
     | ThrowStmt !Expr
@@ -1118,6 +1094,8 @@ data ProcDecl = ProcDecl {
     , procedure'args :: !ArgsReceiver
     , procedure'body :: !(Either StmtSrc EdhProcedure)
   }
+instance Eq ProcDecl where
+  ProcDecl{} == ProcDecl{} = False
 instance Show ProcDecl where
   show (ProcDecl !addr _ !pb) = case pb of
     Left  _ -> "<edh-proc " <> show addr <> ">"
@@ -1174,6 +1152,31 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
     | TupleExpr ![Expr]
     | ParenExpr !Expr
 
+      -- | import with args (re)pack receiving syntax
+    | ImportExpr !ArgsReceiver !Expr
+      -- | `import this xxx yyy` can be used from a method procedure,
+      -- targeting current object scope instead of method scope
+    | ImportThisExpr !ArgsReceiver !Expr
+      -- | only artifacts introduced within an `export` statement, into
+      -- `this` object in context, are eligible for importing by others
+    | ExportExpr !Expr
+      -- | class (constructor) procedure definition
+    | ClassExpr !ProcDecl
+      -- | method procedure definition
+    | MethodExpr !ProcDecl
+      -- | generator procedure definition
+    | GeneratorExpr !ProcDecl
+      -- | interpreter declaration, an interpreter procedure is not otherwise
+      -- different from a method procedure, except it receives arguments
+      -- in expression form rather than values, in addition to the reflective
+      -- `callerScope` as first argument
+    | InterpreterExpr !ProcDecl
+    | ProducerExpr !ProcDecl
+      -- | operator declaration
+    | OpDeclExpr !OpSymbol !Precedence !ProcDecl
+      -- | operator override
+    | OpOvrdExpr !OpSymbol !ProcDecl !Precedence
+
     -- | the block is made an expression in Edh, instead of a statement
     -- as in a C family language. it evaluates to the value of last expr
     -- within it, in case no `EdhCaseClose` encountered, or can stop
@@ -1184,7 +1187,8 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
     -- fitting into subclauses of if-then-else, while, for-from-do,
     -- and try-catch-finally etc. where an expression is expected.
     -- 
-    -- this also made possible for a method procedure to explicitly
+    -- then the curly brackets can be used to quote a statement into an
+    -- expression, e.g. so that a method procedure can explicitly
     -- `return { continue }` to carry a semantic to the magic method
     -- caller that it should try next method, similar to what
     -- `NotImplemented` does in Python.
