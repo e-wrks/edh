@@ -6,19 +6,19 @@
 # 🆔🆘🆚
 
 {
-  operator 📣 5 (lhv, rhv) {
+  operator 📣 5 ( lhv, rhv ) {
     console.info <| rhv ++ ' is telling ' ++ lhv
   }
 
-  operator 🆚 1 (lhv, rhv) {
+  operator 🆚 1 ( lhv, rhv ) {
     console.info <| "🌀 What's the difference?\n     "
-      ++ lhv ++ '\n  🆚\n     ' ++ rhv
+    ++ lhv ++ '\n  🆚\n     ' ++ rhv
   }
 }
 
 'a tale' 📣 'the goat'
 
-let (a, b) = ( 'Orange', 'Apple', )
+let ( a, b ) = ( 'Orange', 'Apple', )
 a 🆚 b
 
 
@@ -28,7 +28,7 @@ a 🆚 b
     # polluting the module scope
 
     before = 'You' ++ ' and ' ++ 'me'
-    operator ++ (lhv, rhv) {
+    operator ++ ( lhv, rhv ) {
       # inside the overriding operator definition, the overridden,
       # original operator is available as was before the overide
       lhv ++ ' ⭕ ' ++ rhv
@@ -40,4 +40,3 @@ a 🆚 b
 }
 
 localOverrides()
-

@@ -6,20 +6,20 @@
   }
 }
 
-case 3:2 of { (x:y) } -> 'the pair pattern can be parenthesised'
+case 3:2 of { ( x:y ) } -> 'the pair pattern can be parenthesised'
 
 case 3*7-5 of { result } -> 'a wild capture pattern receives the ' ++ result
 
-case [7, 3, 5] of { head => tail } -> 'uncons pattern does uncons, got ' ++ (head, tail)
+case [ 7, 3, 5 ] of { head => tail } -> 'uncons pattern does uncons, got ' ++ ( head, tail )
 
-case (3, 5, 7) of { (x, y, z) } -> 'tuple pattern matches the length'
+case ( 3, 5, 7 ) of { ( x, y, z ) } -> 'tuple pattern matches the length'
 
-case (3, 5, 7) of { (x, y) } -> 'tuple pattern matches the length'
+case ( 3, 5, 7 ) of { ( x, y ) } -> 'tuple pattern matches the length'
 
 class B pass
 class C extends B()
 c = C()
 
-case c of {{ B:b }} -> 'instance resolving pattern obtains the right super instance: ' ++ b
+case c of { { B:b } } -> 'instance resolving pattern obtains the right super instance: ' ++ b
 
-case 'b' of {[ 'a', 'b', 'c' ]} -> 'any-of pattern feels like list element-of test'
+case 'b' of { [ 'a', 'b', 'c' ] } -> 'any-of pattern feels like list element-of test'

@@ -1,7 +1,7 @@
 
 
 generator ss n while true n = yield n*n
-for n from ss(3) do { console.info<|n; if n > 100 then break else n }
+for n from ss( 3 ) do { console.info<|n; if n > 100 then { break } else n }
 
 
 {
@@ -27,12 +27,12 @@ for n from ss(3) do { console.info<|n; if n > 100 then break else n }
     case yield 'something' of {
       { return nil } -> {
         console.info<| 'the do block broke the for loop'
-        return nil  # cooperate nicely,
+        return nil # cooperate nicely,
         # or cast black magic if you wish
       }
       { return rtn } -> {
         console.info<| 'early returning from do block: ' ++ rtn
-        return rtn  # cooperate nicely,
+        return rtn # cooperate nicely,
         # or cast black magic if you wish
       }
       { xchg'val } -> {
@@ -53,4 +53,3 @@ for _ from g() do { break }
 for _ from g() do { return 'otherthing' }
 
 for _ from g() do { return nil }
-

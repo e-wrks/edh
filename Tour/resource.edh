@@ -3,7 +3,7 @@
 
   # a generator can be used to implement sth like Python's
   # context manager
-  generator withResource(resArgs) {
+  generator withResource( resArgs ) {
     console.info<| 'allocating [' ++ resArgs ++ ']'
     res = 'allocated [' ++ resArgs ++ ']'
     {
@@ -12,17 +12,17 @@
       # occurred in that do block will be propagated to the
       # yield expression here
       yield res
-    } @=> {  # unlike generator in Python, this finally
+    } @=> { # unlike generator in Python, this finally
       # block is guaranteed to run
       console.info<| 'releasing [' ++ resArgs ++ ']'
     }
   }
 
   # the for-from-do loop can act like Python's `with`
-  for res from withResource('some-resource') do {
+  for res from withResource( 'some-resource' ) do {
     console.info<| 'using ' ++ res
-    throw IOError('some failure')
-    break  # or no exception but loop broken
+    throw IOError( 'some failure' )
+    break # or no exception but loop broken
     return nil # or early return from the loop
   }
 

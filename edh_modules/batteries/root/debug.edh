@@ -46,7 +46,7 @@ export {
     cmdArgs = pkargs( ps1= '' ++prompt++ ' Đ: ', ps2= "Đ| ", inScopeOf=callerScope )
     while true {
 
-      case console.readCommand( ***cmdArgs ) of {
+      case console.readCommand(*** cmdArgs ) of {
         quit -> { break }
         { continue } -> { break }
         dir -> printDir( callerScope )
@@ -92,7 +92,7 @@ export {
     cmdArgs = pkargs( ps1=repr( obj ) ++ ' Đ: ', ps2= "Đ| ", inScopeOf=obj )
     while true {
 
-      case console.readCommand( ***cmdArgs ) of {
+      case console.readCommand(*** cmdArgs ) of {
         quit -> { break }
         dir -> printDir( scope( ofObj=obj ) )
         { cmdVal } -> {

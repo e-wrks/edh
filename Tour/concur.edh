@@ -2,52 +2,44 @@
 {
 
   # fake some time costing works to do
-  generator allWorksToDo(nJobs=10, leastSeconds=3) {
+  generator allWorksToDo( nJobs=10, leastSeconds=3 ) {
 
     # use this proc to capture a local copy of the arguments for the task
-    method longthyWork(job'num, seconds2take) {
+    method longthyWork( job'num, seconds2take ) method _ () {
       # this anonymous nullary proc defines the task in form of niladic computation
-      method _ () {
-        console.info <| '  🏎️  #' ++ job'num ++ ' started'
-        n = 0
-        for nanos from console.everySeconds(1) do if (n+=1) >= seconds2take
-          then {
-            console.info <| '  🏁  #' ++ job'num ++ ' done'
-            break
-          } else {
-            # uncomment line below to see even more verbose log
-            console.info <| '  📝  #' ++ job'num ++ ' tick ' ++ nanos
-          }
+      console.info <| '  🏎️  #' ++ job'num ++ ' started'
+      n = 0
+      for nanos from console.everySeconds( 1 )
+      do if ( n+=1 ) >= seconds2take then {
+        console.info <| '  🏁  #' ++ job'num ++ ' done'
+        break
+      } else {
+        # uncomment line below to see even more verbose log
+        console.info <| '  📝  #' ++ job'num ++ ' tick ' ++ nanos
       }
     }
 
-    for n from range(nJobs) do yield longthyWork(n, leastSeconds + n)
+    for n from range( nJobs ) do yield longthyWork( n, leastSeconds + n )
   }
 
 }
 
 {
 
-{#
-  # `concur()` is the sorta primitive for concurrency scheduling,
-  # it's a plain Edh method procedure defined in `batteries/root`
-  # module so automically available in a Edh world, its signature
-  # looks like following:
+  {#
+   # `concur()` is the sorta primitive for concurrency scheduling,
+   # it's a plain Edh method procedure defined in `batteries/root`
+   # module so automically available in a Edh world, its signature
+   # looks like following:
 
-  method concur(*tasks, c=6, dbgLogger=0) {
-    ...
-  }
-#}
+   # method concur(*tasks, c=6, dbgLogger=0) {
+   #   ...
+   # }
+   #}
 
   concur(
-
-    * (,) =< for work from allWorksToDo(10, 3) do work,
-#   ^--^--^------positional arguments unpacking
-#      |--+------tuple comprehension target/tag
-#         |------comprehension operator in Edh
-
+    * () =< for work from allWorksToDo( 10, 3 ) do work,
     c=5, dbgLogger=console.info,
-#    ^------------^---------------keyword arguments
-
   )
+
 }

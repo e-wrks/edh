@@ -5,11 +5,11 @@
 export {
 
   # partial application
-  method partial ( ***apk1 ) {
+  method partial (*** apk1 ) {
     class Applied { method __init__( f as this.f, apk1 as this.apk1 ) pass
       method def( fn ) {
-        method @fn ( ***apk2 ) {
-          this.f( ***this.apk1, ***apk2 )
+        method @fn (*** apk2 ) {
+          this.f(*** this.apk1, *** apk2 )
         }
       }
     }

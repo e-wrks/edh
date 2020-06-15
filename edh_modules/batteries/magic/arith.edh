@@ -1,18 +1,18 @@
 
 export {
 
-  operator + ( lhv, rhv ) case type( lhv, rhv ) of {
+  operator + ( lhv, rhv ) case () =< type( lhv, rhv ) of {
     ( DecimalType, DecimalType ) -> lhv + rhv
 
-    case type( lhv?( + ) ) of MethodType -> {
-      case lhv.( + ) ( rhv ) of {
+    case type( lhv?(+) ) of MethodType -> {
+      case lhv.(+) ( rhv ) of {
         { continue } -> nil # NotImplemented, try next method
         { r } -> { return r }
       }
     }
 
-    case type( rhv?( + ) ) of MethodType -> {
-      case rhv.( + ) ( lhv ) of {
+    case type( rhv?(+) ) of MethodType -> {
+      case rhv.(+) ( lhv ) of {
         { continue } -> nil # NotImplemented, try next method
         { r } -> { return r }
       }
@@ -23,18 +23,18 @@ export {
   }
 
 
-  operator * ( lhv, rhv ) case type( lhv, rhv ) of {
+  operator * ( lhv, rhv ) case () =< type( lhv, rhv ) of {
     ( DecimalType, DecimalType ) -> lhv * rhv
 
-    case type( lhv?( * ) ) of MethodType -> {
-      case lhv.( * ) ( rhv ) of {
+    case type( lhv?(*) ) of MethodType -> {
+      case lhv.(*) ( rhv ) of {
         { continue } -> nil # NotImplemented, try next method
         { r } -> { return r }
       }
     }
 
-    case type( rhv?( * ) ) of MethodType -> {
-      case rhv.( * ) ( lhv ) of {
+    case type( rhv?(*) ) of MethodType -> {
+      case rhv.(*) ( lhv ) of {
         { continue } -> nil # NotImplemented, try next method
         { r } -> { return r }
       }
@@ -45,18 +45,18 @@ export {
   }
 
 
-  operator - ( lhv, rhv ) case type( lhv, rhv ) of {
+  operator - ( lhv, rhv ) case () =< type( lhv, rhv ) of {
     ( DecimalType, DecimalType ) -> lhv - rhv
 
-    case type( lhv?( - ) ) of MethodType -> {
-      case lhv.( - ) ( rhv ) of {
+    case type( lhv?(-) ) of MethodType -> {
+      case lhv.(-) ( rhv ) of {
         { continue } -> nil # NotImplemented, try next method
         { r } -> { return r }
       }
     }
 
-    case type( rhv?( -@ ) ) of MethodType -> {
-      case rhv.( -@ ) ( lhv ) of {
+    case type( rhv?(-@) ) of MethodType -> {
+      case rhv.(-@) ( lhv ) of {
         { continue } -> nil # NotImplemented, try next method
         { r } -> { return r }
       }
@@ -67,18 +67,18 @@ export {
   }
 
 
-  operator / ( lhv, rhv ) case type( lhv, rhv ) of {
+  operator / ( lhv, rhv ) case () =< type( lhv, rhv ) of {
     ( DecimalType, DecimalType ) -> lhv / rhv
 
-    case type( lhv?( / ) ) of MethodType -> {
-      case lhv.( / ) ( rhv ) of {
+    case type( lhv?(/) ) of MethodType -> {
+      case lhv.(/) ( rhv ) of {
         { continue } -> nil # NotImplemented, try next method
         { r } -> { return r }
       }
     }
 
-    case type( rhv?( /@ ) ) of MethodType -> {
-      case rhv.( /@ ) ( lhv ) of {
+    case type( rhv?(/@) ) of MethodType -> {
+      case rhv.(/@) ( lhv ) of {
         { continue } -> nil # NotImplemented, try next method
         { r } -> { return r }
       }

@@ -55,7 +55,7 @@ export {
     n = 0
     case type( g ) of {
 
-      GeneratorType -> for i from g( ***gargs ) do {
+      GeneratorType -> for i from g(*** gargs ) do {
         yield pkargs( n, i )
         n += 1
       }

@@ -10,7 +10,7 @@
  # to see verbose log of the finishing up
  #}
 
-export method concur( *tasks, c=6, dbgLogger=0 ) {
+export method concur(* tasks, c=6, dbgLogger=0 ) {
   null( tasks ) -> { return nil }
   c < 1 -> error( "Invalid concurrency: " ++ c )
 

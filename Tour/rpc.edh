@@ -49,7 +49,7 @@
 
   currentCountry = CN
 
-  rpc = expr callThePolice( telno = {$ emergCallNumOf(currentCountry) $} )
+  rpc = expr callThePolice( telno = {$ emergCallNumOf( currentCountry ) $} )
   console.info<| 'Remote procedure call:\n  ' ++ rpc
 
   evalRemotely( rpc )

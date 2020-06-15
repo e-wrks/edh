@@ -20,25 +20,25 @@ export {
   operator += ( callerScope, lhe, rhe ) {
     callerScope.eval( makeOp(
         lhe, "=", makeOp( lhe, "+", rhe )
-      ) )
+    ) )
   }
 
   operator -= ( callerScope, lhe, rhe ) {
     callerScope.eval( makeOp(
         lhe, "=", makeOp( lhe, "-", rhe )
-      ) )
+    ) )
   }
 
   operator *= ( callerScope, lhe, rhe ) {
     callerScope.eval( makeOp(
         lhe, "=", makeOp( lhe, "*", rhe )
-      ) )
+    ) )
   }
 
   operator /= ( callerScope, lhe, rhe ) {
     callerScope.eval( makeOp(
         lhe, "=", makeOp( lhe, "/", rhe )
-      ) )
+    ) )
   }
 
 }

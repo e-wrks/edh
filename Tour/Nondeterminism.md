@@ -36,7 +36,7 @@ method satExample() or ({generator _ ()
 The utility procedure `or`'s **Edh** implementation:
 
 ```edh
-method or (possibles) {
+method or ( possibles ) {
   for predict from possibles() do
     predict -> return true
   return false

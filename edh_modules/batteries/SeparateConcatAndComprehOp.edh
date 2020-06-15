@@ -5,7 +5,7 @@
 # be used for concat.
 
 # re-declare (=<) as the concat operator (<=<)
-export operator <=< 1 () ( =< )
+export operator <=< 1 () (=<)
 
 # Override operator (=<) to comprehend into empty ones only
 export operator =< ( callerScope, lhe, rhe ) {

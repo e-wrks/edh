@@ -8,7 +8,7 @@
   # the `sink` will be passed to the producer procedure as `outlet`
   # arg as well, so the caller acts as the consumer of this producer.
   producer timelyAlert (
-    interval, 
+    interval,
 
     # the `outlet` arg is always filled, if not explicitly passed by
     # the caller, Edh will create a new `sink`, to be returned to the
@@ -22,8 +22,8 @@
     # loop), as this procedure will only get actually running *after*
     # the first consumer started receiving events from `outlet`.
     outlet <- 'start alerting you every ' ++ interval ++ ' second(s) ...'
-    for ts from console.everySeconds(interval) do
-      outlet <- '⏰ alarm @@ ' ++ ts
+    for ts from console.everySeconds( interval ) do
+    outlet <- '⏰ alarm @@ ' ++ ts
   }
 
 }
@@ -31,9 +31,9 @@
 {
 
   n = 1
-  for notif from timelyAlert(1) do {
+  for notif from timelyAlert( 1 ) do {
     console.info<| ' ALARM #' ++ n ++ ' - ' ++ notif
-    if (n+=1) > 3 then { break }
+    if ( n+=1 ) > 3 then { break }
   }
 
 }

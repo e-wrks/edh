@@ -3,11 +3,11 @@
 
 # with original src reserved
 x = expr a + b*c
-type(x)
+type( x )
 
 # without src info
 x' = makeExpr( a + b*c )
-type(x')
+type( x' )
 
 # a scope can be captured anywhere within Edh code
 this'modu'scope = scope()
@@ -27,14 +27,14 @@ this'modu'scope.eval( x )
 # by its owning procedure willingly, some more demos
 
 {
-  method f(n) {
-    method g(m) {
+  method f( n ) {
+    method g( m ) {
       scope()
     }
-    return (scope(), g(5))
+    return ( scope(), g( 5 ) )
   }
 }
-let (s1, s2) = (*f(3))
+let ( s1, s2 ) = (* f( 3 ) )
 
 s2.lexiLoc()
 
@@ -45,10 +45,10 @@ s2.attrs()
 s2.eval( expr m/n )
 
 {
-  s2.eval( assign'result = (expr
-    t=n/m
+  s2.eval( assign'result = ( expr
+      t=n/m
   ) )
 }
 
 s2.attrs()
-s2.t
+s2.get( 't' )
