@@ -34,7 +34,9 @@
   application operator (\$) and the flipped version (|), which is similar to
   UNIX pipe at the same time
 - import/export turned into expressions as well
-- removed tuple type, ArgsPack works in places of tuples
+- removed tuple type, ArgsPack works in places of tuples, and parenthesis
+  can not be used to quote assign operation now, it's interpreted as keyword
+  argument specification in creating a new apk
 - can send and receive symbolic arguments now
 - spaces are allowed between @ and attribute name for symbolic attributes
 - various bugfixes and improvements
