@@ -1330,27 +1330,51 @@ evalExpr !expr !exit = do
           -- support re-declaring an existing operator to another name,
           -- with possibly a different precedence
           Left (StmtSrc (_, ExprStmt (AttrExpr (DirectRef (NamedAttr !origOpSym)))))
-            -> contEdhSTM
-              $   lookupEdhCtxAttr pgs scope (AttrByName origOpSym)
-              >>= \case
-                    EdhNil ->
-                      throwEdhSTM pgs EvalError
-                        $  "Original operator ("
-                        <> origOpSym
-                        <> ") not in scope"
-                    origOp@EdhOprtor{} -> do
-                      changeEntityAttr pgs
-                                       (scopeEntity scope)
-                                       (AttrByName opSym)
-                                       origOp
-                      exitEdhSTM pgs exit origOp
-                    val ->
-                      throwEdhSTM pgs EvalError
-                        $  "Can not re-declare a "
-                        <> T.pack (edhTypeNameOf val)
-                        <> ": "
-                        <> T.pack (show val)
-                        <> " as an operator"
+            -> contEdhSTM $ do
+              let
+                redeclareOp !origOp = do
+                  changeEntityAttr pgs
+                                   (scopeEntity scope)
+                                   (AttrByName opSym)
+                                   origOp
+                  when (contextExporting ctx)
+                    $ if objEntity this /= scopeEntity scope
+                        then throwEdhSTM
+                          pgs
+                          UsageError
+                          "You don't export from a method procedure"
+                        else
+                          lookupEntityAttr pgs
+                                           (objEntity this)
+                                           (AttrByName edhExportsMagicName)
+                            >>= \case
+                                  EdhDict (Dict _ !thisExpDS) ->
+                                    modifyTVar' thisExpDS
+                                      $ Map.insert (EdhString opSym) origOp
+                                  _ -> do
+                                    d <- createEdhDict
+                                      $ Map.singleton (EdhString opSym) origOp
+                                    changeEntityAttr
+                                      pgs
+                                      (objEntity this)
+                                      (AttrByName edhExportsMagicName)
+                                      d
+                  exitEdhSTM pgs exit origOp
+              lookupEdhCtxAttr pgs scope (AttrByName origOpSym) >>= \case
+                EdhNil ->
+                  throwEdhSTM pgs EvalError
+                    $  "Original operator ("
+                    <> origOpSym
+                    <> ") not in scope"
+                origOp@EdhIntrOp{} -> redeclareOp origOp
+                origOp@EdhOprtor{} -> redeclareOp origOp
+                val ->
+                  throwEdhSTM pgs EvalError
+                    $  "Can not re-declare a "
+                    <> T.pack (edhTypeNameOf val)
+                    <> ": "
+                    <> T.pack (show val)
+                    <> " as an operator"
           _ -> contEdhSTM $ do
             validateOperDecl pgs opProc
             u <- unsafeIOToSTM newUnique

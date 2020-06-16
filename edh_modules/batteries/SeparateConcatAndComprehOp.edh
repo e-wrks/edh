@@ -10,8 +10,10 @@ export operator <=< 1 () (=<)
 # Override operator (=<) to comprehend into empty ones only
 export operator =< ( callerScope, lhe, rhe ) {
   lhv = callerScope.eval( lhe )
-  if not null( lhv ) then
-  error( "You don't comprehend into non-empty ones!" )
+
+  not null( lhv )
+  -> error( "You don't comprehend into non-empty ones!" )
+
   # left-hand value is empty, can do it
   callerScope.eval( makeOp( lhe, "<=<", rhe ) )
 
