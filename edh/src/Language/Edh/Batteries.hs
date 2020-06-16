@@ -71,119 +71,117 @@ defaultEdhConsole !inputSettings = do
   outIdle     <- newEmptyTMVarIO
   ioQ         <- newTBQueueIO 100
   logQueue    <- newTBQueueIO 100
-  let logLevel = case envLogLevel of
-        Nothing      -> 20
-        Just "DEBUG" -> 10
-        Just "INFO"  -> 20
-        Just "WARN"  -> 30
-        Just "ERROR" -> 40
-        Just "FATAL" -> 50
-        Just ns      -> case readEither ns of
-          Left  _           -> 0
-          Right (ln :: Int) -> ln
-      flushLogs :: IO ()
-      flushLogs = atomically $ readTMVar logIdle
-      logPrinter :: IO ()
-      logPrinter = do
-        lr <- atomically (tryReadTBQueue logQueue) >>= \case
-          Just !lr -> do
-            void $ atomically $ tryTakeTMVar logIdle
-            return lr
-          Nothing -> do
-            void $ atomically $ tryPutTMVar logIdle ()
-            lr <- atomically $ readTBQueue logQueue
-            void $ atomically $ tryTakeTMVar logIdle
-            return lr
-        TIO.hPutStr stderr lr
-        logPrinter
-      logger :: EdhLogger
-      logger !level !srcLoc !pkargs = do
-        void $ tryTakeTMVar logIdle
-        case pkargs of
-          ArgsPack [!argVal] !kwargs | Map.null kwargs ->
-            writeTBQueue logQueue
-              $! T.pack logPrefix
-              <> logString argVal
-              <> "\n"
-          _ -> -- todo: format structured log record,
-               -- with some log parsers in mind
-            writeTBQueue logQueue $! T.pack (logPrefix ++ show pkargs) <> "\n"
-       where
-        logString :: EdhValue -> Text
-        logString (EdhString s) = s
-        logString v             = T.pack $ show v
-        logPrefix :: String
-        logPrefix =
-          (case srcLoc of
-              Nothing -> id
-              Just sl -> (++ sl ++ "\n")
-            )
-            $ case level of
-                _ | level >= 50 -> "🔥 "
-                _ | level >= 40 -> "❗ "
-                _ | level >= 30 -> "⚠️ "
-                _ | level >= 20 -> "ℹ️ "
-                _ | level >= 10 -> "🐞 "
-                _               -> "😥 "
-      ioLoop :: InputT IO ()
-      ioLoop = do
-        ior <- liftIO $ atomically (tryReadTBQueue ioQ) >>= \case
-          Just !ior -> do
-            void $ atomically $ tryTakeTMVar outIdle
-            return ior
-          Nothing -> do
-            void $ atomically $ tryPutTMVar outIdle ()
-            ior <- atomically $ readTBQueue ioQ
-            void $ atomically $ tryTakeTMVar outIdle
-            return ior
-        case ior of
-          ConsoleShutdown -> return () -- gracefully stop the io loop
-          ConsoleOut !txt -> do
-            outputStr $ T.unpack txt
+  let
+    logLevel = case envLogLevel of
+      Nothing      -> 20
+      Just "DEBUG" -> 10
+      Just "INFO"  -> 20
+      Just "WARN"  -> 30
+      Just "ERROR" -> 40
+      Just "FATAL" -> 50
+      Just ns      -> case readEither ns of
+        Left  _           -> 0
+        Right (ln :: Int) -> ln
+    flushLogs :: IO ()
+    flushLogs = atomically $ readTMVar logIdle
+    logPrinter :: IO ()
+    logPrinter = do
+      lr <- atomically (tryReadTBQueue logQueue) >>= \case
+        Just !lr -> do
+          void $ atomically $ tryTakeTMVar logIdle
+          return lr
+        Nothing -> do
+          void $ atomically $ tryPutTMVar logIdle ()
+          lr <- atomically $ readTBQueue logQueue
+          void $ atomically $ tryTakeTMVar logIdle
+          return lr
+      TIO.hPutStr stderr lr
+      logPrinter
+    logger :: EdhLogger
+    logger !level !srcLoc !logArgs = do
+      void $ tryTakeTMVar logIdle
+      case logArgs of
+        ArgsPack [!argVal] !kwargs | Map.null kwargs ->
+          writeTBQueue logQueue $! T.pack logPrefix <> logString argVal <> "\n"
+        _ -> -- todo: format structured log record,
+             -- with some log parsers in mind
+          writeTBQueue logQueue $! T.pack (logPrefix ++ show logArgs) <> "\n"
+     where
+      logString :: EdhValue -> Text
+      logString (EdhString s) = s
+      logString v             = T.pack $ show v
+      logPrefix :: String
+      logPrefix =
+        (case srcLoc of
+            Nothing -> id
+            Just sl -> (++ sl ++ "\n")
+          )
+          $ case level of
+              _ | level >= 50 -> "🔥 "
+              _ | level >= 40 -> "❗ "
+              _ | level >= 30 -> "⚠️ "
+              _ | level >= 20 -> "ℹ️ "
+              _ | level >= 10 -> "🐞 "
+              _               -> "😥 "
+    ioLoop :: InputT IO ()
+    ioLoop = do
+      ior <- liftIO $ atomically (tryReadTBQueue ioQ) >>= \case
+        Just !ior -> do
+          void $ atomically $ tryTakeTMVar outIdle
+          return ior
+        Nothing -> do
+          void $ atomically $ tryPutTMVar outIdle ()
+          ior <- atomically $ readTBQueue ioQ
+          void $ atomically $ tryTakeTMVar outIdle
+          return ior
+      case ior of
+        ConsoleShutdown -> return () -- gracefully stop the io loop
+        ConsoleOut !txt -> do
+          outputStr $ T.unpack txt
+          ioLoop
+        ConsoleIn !cmdIn !ps1 !ps2 -> readInput ps1 ps2 [] >>= \case
+          Nothing -> -- reached EOF (end-of-feed) before clean shutdown
+            liftIO $ TIO.hPutStrLn stderr "Your work may have lost, sorry."
+          Just !cmd -> do -- got one piece of code
+            liftIO $ atomically $ putTMVar cmdIn cmd
             ioLoop
-          ConsoleIn !cmdIn !ps1 !ps2 -> readInput ps1 ps2 [] >>= \case
-            Nothing -> -- reached EOF (end-of-feed) before clean shutdown
-              liftIO $ TIO.hPutStrLn stderr "Your work may have lost, sorry."
-            Just !cmd -> do -- got one piece of code
-              liftIO $ atomically $ putTMVar cmdIn cmd
-              ioLoop
+     where
+        -- | The repl line reader
+      readInput :: Text -> Text -> [Text] -> InputT IO (Maybe Text)
+      readInput !ps1 !ps2 !initialLines =
+        handleInterrupt ( -- start over on Ctrl^C
+                         outputStrLn "" >> readLines [])
+          $ withInterrupt
+          $ readLines initialLines
        where
-          -- | The repl line reader
-        readInput :: Text -> Text -> [Text] -> InputT IO (Maybe Text)
-        readInput !ps1 !ps2 !initialLines =
-          handleInterrupt ( -- start over on Ctrl^C
-                           outputStrLn "" >> readLines [])
-            $ withInterrupt
-            $ readLines initialLines
+        readLines pendingLines =
+          liftIO flushLogs >> getInputLine prompt >>= \case
+            Nothing -> case pendingLines of
+              [] -> return Nothing
+              _ -> -- TODO warn about premature EOF ?
+                return Nothing
+            Just text ->
+              let code = T.pack text
+              in  case pendingLines of
+                    [] -> case T.stripEnd code of
+                      "{" -> -- an unindented `{` marks start of multi-line input
+                        readLines [""]
+                      _ -> case T.strip code of
+                        "" -> -- got an empty line in single-line input mode
+                          readLines [] -- start over in single-line input mode
+                        _ -> -- got a single line input
+                          return $ Just code
+                    _ -> case T.stripEnd code of
+                      "}" -> -- an unindented `}` marks end of multi-line input
+                             return $ Just $ (T.unlines . reverse) $ init
+                        pendingLines
+                      _ -> -- got a line in multi-line input mode
+                        readLines $ code : pendingLines
          where
-          readLines pendingLines =
-            liftIO flushLogs >> getInputLine prompt >>= \case
-              Nothing -> case pendingLines of
-                [] -> return Nothing
-                _ -> -- TODO warn about premature EOF ?
-                  return Nothing
-              Just text ->
-                let code = T.pack text
-                in  case pendingLines of
-                      [] -> case T.stripEnd code of
-                        "{" -> -- an unindented `{` marks start of multi-line input
-                          readLines [""]
-                        _ -> case T.strip code of
-                          "" -> -- got an empty line in single-line input mode
-                            readLines [] -- start over in single-line input mode
-                          _ -> -- got a single line input
-                            return $ Just code
-                      _ -> case T.stripEnd code of
-                        "}" -> -- an unindented `}` marks end of multi-line input
-                               return $ Just $ (T.unlines . reverse) $ init
-                          pendingLines
-                        _ -> -- got a line in multi-line input mode
-                          readLines $ code : pendingLines
-           where
-            prompt :: String
-            prompt = case pendingLines of
-              [] -> T.unpack ps1
-              _  -> T.unpack ps2 <> printf "%2d" (length pendingLines) <> ": "
+          prompt :: String
+          prompt = case pendingLines of
+            [] -> T.unpack ps1
+            _  -> T.unpack ps2 <> printf "%2d" (length pendingLines) <> ": "
   void $ mask_ $ forkIOWithUnmask $ \unmask ->
     finally (unmask logPrinter) $ atomically $ do
       void $ tryPutTMVar logIdle ()
@@ -431,19 +429,17 @@ installEdhBatteries world = liftIO $ do
              [ ( EdhMethod
                , "Symbol"
                , symbolCtorProc
-               , PackReceiver
-                 [RecvArg "repr" Nothing Nothing, RecvRestPosArgs "reprs"]
+               , PackReceiver [mandatoryArg "repr", RecvRestPosArgs "reprs"]
                )
-             , (EdhMethod, "pkargs", pkargsProc, WildReceiver)
              , ( EdhMethod
                , "__ArgsPackType_args__"
                , apkArgsProc
-               , PackReceiver [RecvArg "apk" Nothing Nothing]
+               , PackReceiver [mandatoryArg "apk"]
                )
              , ( EdhMethod
                , "__ArgsPackType_kwargs__"
                , apkKwrgsProc
-               , PackReceiver [RecvArg "apk" Nothing Nothing]
+               , PackReceiver [mandatoryArg "apk"]
                )
              , (EdhMethod, "repr", reprProc  , WildReceiver)
              , (EdhMethod, "dict", dictProc  , WildReceiver)
@@ -452,47 +448,47 @@ installEdhBatteries world = liftIO $ do
              , ( EdhMethod
                , "__IntrinsicType_name__"
                , procNameProc
-               , PackReceiver [RecvArg "p" Nothing Nothing]
+               , PackReceiver [mandatoryArg "p"]
                )
              , ( EdhMethod
                , "__ClassType_name__"
                , procNameProc
-               , PackReceiver [RecvArg "p" Nothing Nothing]
+               , PackReceiver [mandatoryArg "p"]
                )
              , ( EdhMethod
                , "__HostClassType_name__"
                , procNameProc
-               , PackReceiver [RecvArg "p" Nothing Nothing]
+               , PackReceiver [mandatoryArg "p"]
                )
              , ( EdhMethod
                , "__MethodType_name__"
                , procNameProc
-               , PackReceiver [RecvArg "p" Nothing Nothing]
+               , PackReceiver [mandatoryArg "p"]
                )
              , ( EdhMethod
                , "__HostMethodType_name__"
                , procNameProc
-               , PackReceiver [RecvArg "p" Nothing Nothing]
+               , PackReceiver [mandatoryArg "p"]
                )
              , ( EdhMethod
                , "__OperatorType_name__"
                , procNameProc
-               , PackReceiver [RecvArg "p" Nothing Nothing]
+               , PackReceiver [mandatoryArg "p"]
                )
              , ( EdhMethod
                , "__HostOperType_name__"
                , procNameProc
-               , PackReceiver [RecvArg "p" Nothing Nothing]
+               , PackReceiver [mandatoryArg "p"]
                )
              , ( EdhMethod
                , "__GeneratorType_name__"
                , procNameProc
-               , PackReceiver [RecvArg "p" Nothing Nothing]
+               , PackReceiver [mandatoryArg "p"]
                )
              , ( EdhMethod
                , "__HostGenrType_name__"
                , procNameProc
-               , PackReceiver [RecvArg "p" Nothing Nothing]
+               , PackReceiver [mandatoryArg "p"]
                )
              , (EdhMethod, "constructor", ctorProc       , WildReceiver)
              , (EdhMethod, "supers"     , supersProc     , WildReceiver)
@@ -501,35 +497,24 @@ installEdhBatteries world = liftIO $ do
                , "makeOp"
                , makeOpProc
                , PackReceiver
-                 [ RecvArg "lhe"   Nothing Nothing
-                 , RecvArg "opSym" Nothing Nothing
-                 , RecvArg "rhe"   Nothing Nothing
-                 ]
+                 [mandatoryArg "lhe", mandatoryArg "opSym", mandatoryArg "rhe"]
                )
-             , ( EdhMethod
-               , "mre"
-               , mreProc
-               , PackReceiver [RecvArg "evs" Nothing Nothing]
-               )
-             , ( EdhMethod
-               , "eos"
-               , eosProc
-               , PackReceiver [RecvArg "evs" Nothing Nothing]
-               )
+             , (EdhMethod, "mre", mreProc, PackReceiver [mandatoryArg "evs"])
+             , (EdhMethod, "eos", eosProc, PackReceiver [mandatoryArg "evs"])
              , ( EdhMethod
                , "__DictType_size__"
                , dictSizeProc
-               , PackReceiver [RecvArg "d" Nothing Nothing]
+               , PackReceiver [mandatoryArg "d"]
                )
              , ( EdhMethod
                , "__ListType_push__"
                , listPushProc
-               , PackReceiver [RecvArg "l" Nothing Nothing]
+               , PackReceiver [mandatoryArg "l"]
                )
              , ( EdhMethod
                , "__ListType_pop__"
                , listPopProc
-               , PackReceiver [RecvArg "l" Nothing Nothing]
+               , PackReceiver [mandatoryArg "l"]
                )
              ]
            ]
@@ -573,25 +558,17 @@ installEdhBatteries world = liftIO $ do
             , "readSource"
             , conReadSourceProc
             , PackReceiver
-              [ RecvArg "ps1"
-                        Nothing
-                        (Just (LitExpr (StringLiteral defaultEdhPS1)))
-              , RecvArg "ps2"
-                        Nothing
-                        (Just (LitExpr (StringLiteral defaultEdhPS2)))
+              [ optionalArg "ps1" $ LitExpr $ StringLiteral defaultEdhPS1
+              , optionalArg "ps2" $ LitExpr $ StringLiteral defaultEdhPS2
               ]
             )
           , ( EdhMethod
             , "readCommand"
             , conReadCommandProc
             , PackReceiver
-              [ RecvArg "ps1"
-                        Nothing
-                        (Just (LitExpr (StringLiteral defaultEdhPS1)))
-              , RecvArg "ps2"
-                        Nothing
-                        (Just (LitExpr (StringLiteral defaultEdhPS2)))
-              , RecvArg "inScopeOf" Nothing (Just edhNoneExpr)
+              [ optionalArg "ps1" $ LitExpr $ StringLiteral defaultEdhPS1
+              , optionalArg "ps2" $ LitExpr $ StringLiteral defaultEdhPS2
+              , optionalArg "inScopeOf" edhNoneExpr
               ]
             )
           , (EdhMethod, "print", conPrintProc, WildReceiver)
@@ -599,17 +576,17 @@ installEdhBatteries world = liftIO $ do
           , ( EdhGnrtor
             , "everyMicros"
             , conEveryMicrosProc
-            , PackReceiver [RecvArg "interval" Nothing Nothing]
+            , PackReceiver [mandatoryArg "interval"]
             )
           , ( EdhGnrtor
             , "everyMillis"
             , conEveryMillisProc
-            , PackReceiver [RecvArg "interval" Nothing Nothing]
+            , PackReceiver [mandatoryArg "interval"]
             )
           , ( EdhGnrtor
             , "everySeconds"
             , conEverySecondsProc
-            , PackReceiver [RecvArg "interval" Nothing Nothing]
+            , PackReceiver [mandatoryArg "interval"]
             )
           ]
         ]

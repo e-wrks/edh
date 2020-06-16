@@ -1,14 +1,14 @@
 
 {
-  generator g (n) {
-    for i from range(n) do
-      # pack an arguments sender to yield out,
-      # you'd feel it like calling a callback
-      yield pkargs (i, i * i, desc="square of " ++ i)
+  generator g ( n ) {
+    for i from range( n ) do
+    # pack an arguments sender to yield out,
+    # you'd feel it like calling a callback
+    yield ( i, i * i, desc= "square of " ++ i )
   }
 
   # arguments receiver syntax in for expression,
   # you'd feel it like defining a callback
-  for (x, y, desc="the result") from g(5) do
-    console.info <| (x ++ ": " ++ desc ++ " is " ++ y)
+  for ( x, y, desc= "the result" ) from g( 5 ) do
+  console.info <| ( x ++ ": " ++ desc ++ " is " ++ y )
 }

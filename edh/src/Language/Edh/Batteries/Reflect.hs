@@ -70,8 +70,8 @@ supersProc (ArgsPack !args !kwargs) !exit = do
  where
   supersOf :: EdhValue -> STM EdhValue
   supersOf v = case v of
-    EdhObject o ->
-      map EdhObject <$> readTVar (objSupers o) >>= return . EdhTuple
+    EdhObject o -> map EdhObject <$> readTVar (objSupers o) >>= \supers ->
+      return $ EdhArgsPack $ ArgsPack supers mempty
     _ -> return nil
 
 
@@ -228,10 +228,6 @@ scopePutProc (ArgsPack !args !kwargs) !exit = do
     EdhPair (EdhString !k) !v ->
       putAttrs pgs rest ((AttrByName k, v) : cumu) exit'
     EdhPair (EdhSymbol !k) !v ->
-      putAttrs pgs rest ((AttrBySym k, v) : cumu) exit'
-    EdhTuple [EdhString !k, v] ->
-      putAttrs pgs rest ((AttrByName k, v) : cumu) exit'
-    EdhTuple [EdhSymbol !k, v] ->
       putAttrs pgs rest ((AttrBySym k, v) : cumu) exit'
     _ ->
       throwEdhSTM pgs UsageError

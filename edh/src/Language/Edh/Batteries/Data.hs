@@ -58,10 +58,10 @@ fapProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
         edhMakeCall pgs callee'val callee'that argsExpr scopeMod
           $ \mkCall -> runEdhProc pgs (mkCall exit)
  where
-  argsExpr :: ArgsSender
+  argsExpr :: ArgsPacker
   argsExpr = case rhExpr of
-    CallExpr (AttrExpr (DirectRef (NamedAttr "pkargs"))) !sndr -> sndr
-    _ -> [SendPosArg rhExpr]
+    ArgsPackExpr !pkr -> pkr
+    _                 -> [SendPosArg rhExpr]
 
 -- | operator (|) - flipped function application
 --
@@ -74,10 +74,10 @@ ffapProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
         edhMakeCall pgs callee'val callee'that argsExpr scopeMod
           $ \mkCall -> runEdhProc pgs (mkCall exit)
  where
-  argsExpr :: ArgsSender
+  argsExpr :: ArgsPacker
   argsExpr = case lhExpr of
-    CallExpr (AttrExpr (DirectRef (NamedAttr "pkargs"))) !sndr -> sndr
-    _ -> [SendPosArg lhExpr]
+    ArgsPackExpr !pkr -> pkr
+    _                 -> [SendPosArg lhExpr]
 
 
 -- | operator (:=) - named value definition
@@ -216,11 +216,6 @@ symbolCtorProc (ArgsPack !reprs _) !exit = ask >>= \pgs -> contEdhSTM $ do
     syms ->
       exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack (EdhSymbol <$> syms) mempty
 
-
--- | utility pkargs(***apk) - arguments packer
-pkargsProc :: EdhProcedure
-pkargsProc !apk !exit = exitEdhProc exit (EdhArgsPack apk)
-
 apkArgsProc :: EdhProcedure
 apkArgsProc (ArgsPack _ !kwargs) _ | not $ Map.null kwargs =
   throwEdh EvalError "bug: __ArgsPackType_args__ got kwargs"
@@ -340,7 +335,7 @@ procNameProc _ _ =
   throwEdh EvalError "bug: __ProcType_name__ got unexpected args"
 
 
--- | utility dict(***pkargs,**kwargs,*args) - dict constructor by arguments
+-- | utility dict(***apk,**kwargs,*args) - dict constructor by arguments
 -- can be used to convert arguments pack into dict
 dictProc :: EdhProcedure
 dictProc (ArgsPack !args !kwargs) !exit = do
@@ -393,12 +388,11 @@ listPopProc (ArgsPack _ !kwargs) _ | not $ Map.null kwargs =
 listPopProc (ArgsPack [EdhList (List _ !lv)] _) !exit = do
   !pgs <- ask
   contEdhSTM
-    $   mkHostProc
-          (contextScope $ edh'context pgs)
-          EdhMethod
-          "pop"
-          listPop
-          (PackReceiver [RecvArg "default" Nothing $ Just $ IntplSubs edhNone])
+    $   mkHostProc (contextScope $ edh'context pgs)
+                   EdhMethod
+                   "pop"
+                   listPop
+                   (PackReceiver [optionalArg "default" $ IntplSubs edhNone])
     >>= \mth -> exitEdhSTM pgs exit mth
  where
   listPop :: EdhProcedure
@@ -420,8 +414,9 @@ elemProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate rhVal of
-      EdhTuple vs          -> exitEdhProc exit (EdhBool $ lhVal `elem` vs)
-      EdhList  (List _ !l) -> contEdhSTM $ do
+      EdhArgsPack (ArgsPack !vs _) ->
+        exitEdhProc exit (EdhBool $ lhVal `elem` vs)
+      EdhList (List _ !l) -> contEdhSTM $ do
         ll <- readTVar l
         exitEdhSTM pgs exit $ EdhBool $ lhVal `elem` ll
       EdhDict (Dict _ !d) -> contEdhSTM $ do
@@ -474,8 +469,9 @@ prpdProc !lhExpr !rhExpr !exit = do
     let !lhVal = edhDeCaseClose lhV
     in
       evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate rhVal of
-        EdhTuple vs          -> exitEdhProc exit (EdhTuple $ lhVal : vs)
-        EdhList  (List _ !l) -> contEdhSTM $ do
+        EdhArgsPack (ArgsPack !vs !kwargs) ->
+          exitEdhProc exit (EdhArgsPack $ ArgsPack (lhVal : vs) kwargs)
+        EdhList (List _ !l) -> contEdhSTM $ do
           modifyTVar' l (lhVal :)
           exitEdhSTM pgs exit rhVal
         EdhDict (Dict _ !d) ->
@@ -497,9 +493,10 @@ lstrvrsPrpdProc !lhExpr !rhExpr !exit = do
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhList (List _ !ll) -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
-        EdhTuple vs -> contEdhSTM $ do
+        EdhArgsPack (ArgsPack !vs !kwargs) -> contEdhSTM $ do
           lll <- readTVar ll
-          exitEdhSTM pgs exit (EdhTuple $ reverse lll ++ vs)
+          exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack (reverse lll ++ vs)
+                                                       kwargs
         EdhList (List _ !l) -> contEdhSTM $ do
           lll <- readTVar ll
           modifyTVar' l (reverse lll ++)
@@ -547,16 +544,22 @@ cprhProc !lhExpr !rhExpr !exit = do
           doExpr
           (\val -> insertToDict val d)
           (\mkLoop -> runEdhProc pgs $ mkLoop $ \_ -> exitEdhProc exit lhVal)
-        EdhTuple vs -> contEdhSTM $ do
-          l <- newTVar []
-          edhForLoop pgs
-                     argsRcvr
-                     iterExpr
-                     doExpr
-                     (\val -> modifyTVar' l (val :))
+        EdhArgsPack !apk -> contEdhSTM $ do
+          apkVar <- newTVar apk
+          edhForLoop
+              pgs
+              argsRcvr
+              iterExpr
+              doExpr
+              (\val -> modifyTVar' apkVar $ \(ArgsPack !args !kwargs) ->
+                case val of
+                  EdhArgsPack (ArgsPack !args' !kwargs') ->
+                    ArgsPack (args ++ args') (Map.union kwargs' kwargs)
+                  _ -> ArgsPack (args ++ [val]) kwargs
+              )
             $ \mkLoop -> runEdhProc pgs $ mkLoop $ \_ -> contEdhSTM $ do
-                vs' <- readTVar l
-                exitEdhSTM pgs exit (EdhTuple $ vs ++ reverse vs')
+                apk' <- readTVar apkVar
+                exitEdhSTM pgs exit (EdhArgsPack apk')
         _ ->
           throwEdh EvalError
             $  "Don't know how to comprehend into a "
@@ -565,16 +568,18 @@ cprhProc !lhExpr !rhExpr !exit = do
             <> T.pack (show lhVal)
     _ -> evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
       evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> case edhUltimate lhVal of
-        EdhTuple vs -> case edhUltimate rhVal of
+        EdhArgsPack (ArgsPack !vs kwargs) -> case edhUltimate rhVal of
           EdhArgsPack (ArgsPack !args _) ->
-            exitEdhProc exit (EdhTuple $ vs ++ args)
-          EdhTuple vs'         -> exitEdhProc exit (EdhTuple $ vs ++ vs')
-          EdhList  (List _ !l) -> contEdhSTM $ do
+            exitEdhProc exit (EdhArgsPack $ ArgsPack (vs ++ args) kwargs)
+          EdhList (List _ !l) -> contEdhSTM $ do
             ll <- readTVar l
-            exitEdhSTM pgs exit (EdhTuple $ vs ++ ll)
+            exitEdhSTM pgs exit (EdhArgsPack $ ArgsPack (vs ++ ll) kwargs)
           EdhDict (Dict _ !d) -> contEdhSTM $ do
             ds <- readTVar d
-            exitEdhSTM pgs exit (EdhTuple $ vs ++ dictEntryList ds)
+            exitEdhSTM
+              pgs
+              exit
+              (EdhArgsPack $ ArgsPack (vs ++ dictEntryList ds) kwargs)
           _ ->
             throwEdh EvalError
               $  "Don't know how to comprehend from a "
@@ -584,9 +589,6 @@ cprhProc !lhExpr !rhExpr !exit = do
         EdhList (List _ !l) -> case edhUltimate rhVal of
           EdhArgsPack (ArgsPack !args _) -> contEdhSTM $ do
             modifyTVar' l (++ args)
-            exitEdhSTM pgs exit lhVal
-          EdhTuple vs -> contEdhSTM $ do
-            modifyTVar' l (++ vs)
             exitEdhSTM pgs exit lhVal
           EdhList (List _ !l') -> contEdhSTM $ do
             ll <- readTVar l'
@@ -606,9 +608,6 @@ cprhProc !lhExpr !rhExpr !exit = do
           EdhArgsPack (ArgsPack _ !kwargs) -> contEdhSTM $ do
             modifyTVar d $ Map.union $ Map.fromList
               [ (attrKeyValue k, v) | (k, v) <- Map.toList kwargs ]
-            exitEdhSTM pgs exit lhVal
-          EdhTuple vs -> contEdhSTM $ pvlToDict pgs vs $ \d' -> do
-            modifyTVar d $ Map.union d'
             exitEdhSTM pgs exit lhVal
           EdhList (List _ !l) -> contEdhSTM $ do
             ll <- readTVar l

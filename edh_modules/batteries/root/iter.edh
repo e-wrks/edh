@@ -56,7 +56,7 @@ export {
     case type( g ) of {
 
       GeneratorType -> for i from g(*** gargs ) do {
-        yield pkargs( n, i )
+        yield ( n, i )
         n += 1
       }
 
@@ -64,7 +64,7 @@ export {
       console.warn <| '`enumerate` can hanle one series only'
 
       _ -> for i from g do {
-        yield pkargs( n, i )
+        yield ( n, i )
         n += 1
       }
 
@@ -76,7 +76,7 @@ export {
     while true case xs of {
       { x => xs } -> case ys of {
         { y => ys } -> {
-          yield pkargs( x, y )
+          yield ( x, y )
         } return nil
       } return nil
     }
@@ -88,7 +88,7 @@ export {
       { x => xs } -> case ys of {
         { y => ys } -> case zs of {
           { z => zs } -> {
-            yield pkargs( x, y, z )
+            yield ( x, y, z )
           } return nil
         } return nil
       } return nil

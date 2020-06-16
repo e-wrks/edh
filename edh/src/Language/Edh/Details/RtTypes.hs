@@ -68,7 +68,8 @@ setDictItem !k v !ds = case v of
   _      -> Map.insert k v ds
 
 dictEntryList :: DictStore -> [EdhValue]
-dictEntryList d = (<$> Map.toList d) $ \(k, v) -> EdhTuple [k, v]
+dictEntryList d =
+  (<$> Map.toList d) $ \(k, v) -> EdhArgsPack $ ArgsPack [k, v] Map.empty
 
 edhDictFromEntity :: EdhProgState -> Entity -> STM Dict
 edhDictFromEntity pgs ent = do
@@ -634,7 +635,9 @@ getEdhCallContext !unwind !pgs = EdhCallContext
 
 
 -- | A pack of evaluated argument values with positional/keyword origin,
--- normally obtained by invoking `packEdhArgs ctx argsSender`.
+-- this works in places of tuples in other languages, apk in Edh can be
+-- considered a tuple if only positional arguments inside.
+-- Specifically, an empty apk is just considered an empty tuple.
 data ArgsPack = ArgsPack {
     positional'args :: ![EdhValue]
     , keyword'args :: !(Map.HashMap AttrKey EdhValue)
@@ -719,7 +722,6 @@ data EdhValue =
   -- | immutable containers
   --   the elements may still pointer to mutable data
     | EdhPair !EdhValue !EdhValue
-    | EdhTuple ![EdhValue]
     | EdhArgsPack ArgsPack
 
   -- executable precedures
@@ -751,24 +753,20 @@ data EdhValue =
     | EdhExpr !Unique !Expr !Text
 
 instance Show EdhValue where
-  show (EdhType t)    = show t
-  show EdhNil         = "nil"
-  show (EdhDecimal v) = showDecimal v
-  show (EdhBool    v) = if v then "true" else "false"
-  show (EdhString  v) = show v
-  show (EdhSymbol  v) = show v
+  show (EdhType t)     = show t
+  show EdhNil          = "nil"
+  show (EdhDecimal v ) = showDecimal v
+  show (EdhBool    v ) = if v then "true" else "false"
+  show (EdhString  v ) = show v
+  show (EdhSymbol  v ) = show v
 
-  show (EdhObject  v) = show v
+  show (EdhObject  v ) = show v
 
-  show (EdhDict    v) = show v
-  show (EdhList    v) = show v
+  show (EdhDict    v ) = show v
+  show (EdhList    v ) = show v
 
-  show (EdhPair k v ) = show k <> ":" <> show v
-  show (EdhTuple v  ) = if null v
-    then "()" -- no space should show in an empty tuple
-    else -- advocate trailing comma here
-         "( " ++ concat [ show i ++ ", " | i <- v ] ++ ")"
-  show (EdhArgsPack v) = "pkargs" ++ show v
+  show (EdhPair k v  ) = show k <> ":" <> show v
+  show (EdhArgsPack v) = show v
 
   show (EdhIntrOp !preced (IntrinOpDefi _ !opSym _)) =
     "<intrinsic: (" ++ T.unpack opSym ++ ") " ++ show preced ++ ">"
@@ -823,7 +821,6 @@ instance Eq EdhValue where
   EdhDict    x    == EdhDict    y    = x == y
   EdhList    x    == EdhList    y    = x == y
   EdhPair x'k x'v == EdhPair y'k y'v = x'k == y'k && x'v == y'v
-  EdhTuple    x   == EdhTuple    y   = x == y
   EdhArgsPack x   == EdhArgsPack y   = x == y
 
   EdhIntrOp _ (IntrinOpDefi x'u _ _) == EdhIntrOp _ (IntrinOpDefi y'u _ _) =
@@ -871,7 +868,6 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhDict    x                      ) = hashWithSalt s x
   hashWithSalt s (EdhList    x                      ) = hashWithSalt s x
   hashWithSalt s (EdhPair k v) = s `hashWithSalt` k `hashWithSalt` v
-  hashWithSalt s (EdhTuple    x                     ) = foldl' hashWithSalt s x
   hashWithSalt s (EdhArgsPack x                     ) = hashWithSalt s x
 
   hashWithSalt s (EdhIntrOp _ (IntrinOpDefi x'u _ _)) = hashWithSalt s x'u
@@ -986,7 +982,7 @@ data Stmt =
       -- resides in current scope entity addressed by name `__exports__`
     | EffectStmt !Expr
       -- | assignment with args (un/re)pack sending/receiving syntax
-    | LetStmt !ArgsReceiver !ArgsSender
+    | LetStmt !ArgsReceiver !ArgsPacker
       -- | super object declaration for a descendant object
     | ExtendsStmt !Expr
       -- | perceiption declaration, a perceiver is bound to an event `sink`
@@ -1057,8 +1053,8 @@ receivesNamedArg !name (PackReceiver   argRcvrs) = _hasNamedArg name argRcvrs
 _hasNamedArg :: Text -> [ArgReceiver] -> Bool
 _hasNamedArg _     []           = False
 _hasNamedArg !name (arg : rest) = case arg of
-  RecvArg !argName _ _ -> argName == name || _hasNamedArg name rest
-  _                    -> _hasNamedArg name rest
+  RecvArg (NamedAttr !argName) _ _ -> argName == name || _hasNamedArg name rest
+  _ -> _hasNamedArg name rest
 
 data ArgsReceiver = PackReceiver ![ArgReceiver]
     | SingleReceiver !ArgReceiver
@@ -1072,20 +1068,27 @@ instance Show ArgsReceiver where
 data ArgReceiver = RecvRestPosArgs !AttrName
     | RecvRestKwArgs !AttrName
     | RecvRestPkArgs !AttrName
-    | RecvArg !AttrName !(Maybe AttrAddr) !(Maybe Expr)
+    | RecvArg !AttrAddressor !(Maybe AttrAddr) !(Maybe Expr)
   deriving (Eq)
 instance Show ArgReceiver where
   show (RecvRestPosArgs nm) = "*" ++ T.unpack nm
   show (RecvRestKwArgs  nm) = "**" ++ T.unpack nm
   show (RecvRestPkArgs  nm) = "***" ++ T.unpack nm
-  show (RecvArg nm _ _    ) = T.unpack nm
+  show (RecvArg nm _ _    ) = show nm
 
-type ArgsSender = [ArgSender]
+mandatoryArg :: AttrName -> ArgReceiver
+mandatoryArg !name = RecvArg (NamedAttr name) Nothing Nothing
+
+optionalArg :: AttrName -> Expr -> ArgReceiver
+optionalArg !name !defExpr = RecvArg (NamedAttr name) Nothing (Just defExpr)
+
+
+type ArgsPacker = [ArgSender]
 data ArgSender = UnpackPosArgs !Expr
     | UnpackKwArgs !Expr
     | UnpackPkArgs !Expr
     | SendPosArg !Expr
-    | SendKwArg !AttrName !Expr
+    | SendKwArg !AttrAddressor !Expr
   deriving (Eq, Show)
 
 -- | Procedure declaration, result of parsing
@@ -1140,6 +1143,12 @@ data Prefix = PrefixPlus | PrefixMinus | Not
     | Guard
   deriving (Eq, Show)
 
+data DictKeyExpr =
+      LitDictKey !Literal
+    | AddrDictKey !AttrAddr
+    | ExprDictKey !Expr -- this must be quoted in parenthesis
+  deriving (Eq, Show)
+
 data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
     | IfExpr { if'condition :: !Expr
             , if'consequence :: !Expr
@@ -1147,9 +1156,10 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
             }
     | CaseExpr { case'target :: !Expr , case'branches :: !Expr }
 
-    | DictExpr ![Expr] -- should all be Infix ":"
+      -- note: the order of entries is reversed as parsed from source
+    | DictExpr ![(DictKeyExpr, Expr)]
     | ListExpr ![Expr]
-    | TupleExpr ![Expr]
+    | ArgsPackExpr !ArgsPacker
     | ParenExpr !Expr
 
       -- | import with args (re)pack receiving syntax
@@ -1161,7 +1171,7 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
       -- `this` object in context, are eligible for importing by others
     | ExportExpr !Expr
       -- | namespace object creation
-    | NamespaceExpr !ProcDecl !ArgsSender
+    | NamespaceExpr !ProcDecl !ArgsPacker
       -- | class (constructor) procedure definition
     | ClassExpr !ProcDecl
       -- | method procedure definition
@@ -1212,7 +1222,7 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
     | IndexExpr { index'value :: !Expr
                 , index'target :: !Expr
                 }
-    | CallExpr !Expr !ArgsSender
+    | CallExpr !Expr !ArgsPacker
 
     | InfixExpr !OpSymbol !Expr !Expr
 
@@ -1252,7 +1262,6 @@ data EdhTypeValue = TypeType
     | DictType
     | ListType
     | PairType
-    | TupleType
     | ArgsPackType
     | BlockType
     | HostClassType
@@ -1307,7 +1316,6 @@ edhTypeOf EdhObject{}              = ObjectType
 edhTypeOf EdhDict{}                = DictType
 edhTypeOf EdhList{}                = ListType
 edhTypeOf EdhPair{}                = PairType
-edhTypeOf EdhTuple{}               = TupleType
 edhTypeOf EdhArgsPack{}            = ArgsPackType
 
 edhTypeOf EdhIntrOp{}              = IntrinsicType

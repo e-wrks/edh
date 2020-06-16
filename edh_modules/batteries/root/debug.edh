@@ -43,7 +43,7 @@ export {
     console.print(
       ' * key in `quit` or `continue` to leave the shell and continue.' )
 
-    cmdArgs = pkargs( ps1= '' ++prompt++ ' Đ: ', ps2= "Đ| ", inScopeOf=callerScope )
+    cmdArgs = ( ps1= '' ++prompt++ ' Đ: ', ps2= "Đ| ", inScopeOf=callerScope )
     while true {
 
       case console.readCommand(*** cmdArgs ) of {
@@ -89,7 +89,7 @@ export {
     console.print( ' * key in `quit` to leave the shell.' )
 
     # use scope obj's repr for ps1
-    cmdArgs = pkargs( ps1=repr( obj ) ++ ' Đ: ', ps2= "Đ| ", inScopeOf=obj )
+    cmdArgs = ( ps1=repr( obj ) ++ ' Đ: ', ps2= "Đ| ", inScopeOf=obj )
     while true {
 
       case console.readCommand(*** cmdArgs ) of {

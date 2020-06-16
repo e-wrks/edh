@@ -1,8 +1,10 @@
 
-[7, 11] =< for n from range(5) do n
+[ 7, 11 ] =< for n from range( 5 ) do n
 
-{'a': 7, 'b': 11} =< for n from range(5) do 'square of '++n : n*n
+{ 'a' : 7, 'b' : 11 } =< for n from range( 5 ) do 'square of ' ++n : n*n
 
-(31, 17) =< for n from range(5) do n
+( 31, 17 ) =< for n from range( 5 ) do n
 
-{} =< for (k,v) from zip(('a', 'b', 'd'), [3, 7]) do k:v
+{} =< for ( k, v ) from zip( ( 'a', 'b', 'd' ), [ 3, 7 ] ) do k:v
+
+() =< for ( k, v ) from zip( ( 'a', 'b', 'd' ), [ 3, 7 ] ) do (@ k = v )

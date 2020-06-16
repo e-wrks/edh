@@ -124,13 +124,19 @@ branchProc !lhExpr !rhExpr !exit = do
             -- some other value, the outer branch eval to it
             _              -> EdhCaseClose rhVal
 
-      handlePairPattern !pairPattern =
+      handlePairPattern !maybeName1 !pairPattern =
         case matchPairPattern pairPattern ctxMatch [] of
           Nothing -> throwEdh EvalError $ "Invalid pair pattern: " <> T.pack
             (show pairPattern)
-          Just [] -> -- valid pattern, no match
+          Just (_, []) -> -- valid pattern, no match
             exitEdhProc exit EdhCaseOther
-          Just !mps -> contEdhSTM $ branchMatched mps
+          Just (resi, mps) -> case maybeName1 of
+            Just !name1 -> case resi of
+              Nothing    -> exitEdhProc exit EdhCaseOther
+              Just !val1 -> contEdhSTM $ branchMatched $ (name1, val1) : mps
+            Nothing -> case resi of
+              Nothing -> contEdhSTM $ branchMatched mps
+              Just{}  -> exitEdhProc exit EdhCaseOther
 
   case lhExpr of
     -- recognize `_` as similar to the wildcard pattern match in Haskell,
@@ -140,7 +146,8 @@ branchProc !lhExpr !rhExpr !exit = do
     -- TODO support nested patterns
 
     -- { x:y:z:... } -- pair pattern matching
-    DictExpr [pairPattern              ] -> handlePairPattern pairPattern
+    DictExpr [(AddrDictKey (DirectRef (NamedAttr !name1)), pairPattern)] ->
+      handlePairPattern (Just name1) pairPattern
     -- this is to establish the intuition that `{ ... }` always invokes
     -- pattern matching. if a literal dict value really meant to be matched,
     -- the parenthesized form `( {k1: v1, k2: v2, ...} )` should be used.
@@ -159,7 +166,7 @@ branchProc !lhExpr !rhExpr !exit = do
 
       -- {( x:y:z:... )} -- parenthesised pair pattern
       [StmtSrc (_, ExprStmt (ParenExpr pairPattern@(InfixExpr ":" _ _)))] ->
-        handlePairPattern pairPattern
+        handlePairPattern Nothing pairPattern
 
       -- { continue } -- match with continue
       [StmtSrc (_, ContinueStmt)] -> case ctxMatch of
@@ -211,8 +218,7 @@ branchProc !lhExpr !rhExpr !exit = do
            in  contEdhSTM $ case ctxMatch of
                  EdhArgsPack (ArgsPack (h : rest) !kwargs) | Map.null kwargs ->
                    doMatched h (EdhArgsPack (ArgsPack rest kwargs))
-                 EdhTuple (h    : rest) -> doMatched h (EdhTuple rest)
-                 EdhList  (List _ !l  ) -> readTVar l >>= \case
+                 EdhList (List _ !l) -> readTVar l >>= \case
                    (h : rest) -> do
                      rl <- newTVar rest
                      u  <- unsafeIOToSTM newUnique
@@ -272,59 +278,57 @@ branchProc !lhExpr !rhExpr !exit = do
                     _ -> error "bug: edhValueStr returned non-string"
           _ -> exitEdhProc exit EdhCaseOther
 
-      -- {( x,y,z,... )} -- positional args / tuple pattern
-      [StmtSrc (_, ExprStmt (TupleExpr vExprs))] -> contEdhSTM $ if null vExprs
-        then -- an empty tuple pattern matches any empty sequence
-             case ctxMatch of
-          EdhArgsPack (ArgsPack [] !kwargs) | Map.null kwargs ->
-            branchMatched []
-          EdhTuple [] -> branchMatched []
-          EdhList (List _ !l) ->
-            readTVar l
-              >>= \ll -> if null ll
-                    then branchMatched []
-                    else exitEdhSTM pgs exit EdhCaseOther
-          _ -> exitEdhSTM pgs exit EdhCaseOther
-        else do
-          attrNames <- fmap catMaybes $ sequence $ (<$> vExprs) $ \case
-            (AttrExpr (DirectRef (NamedAttr vAttr))) -> return $ Just vAttr
-            _ -> return Nothing
-          if length attrNames /= length vExprs
-            then throwEdhSTM
-              pgs
-              UsageError
-              ("Invalid element in tuple pattern: " <> T.pack (show vExprs))
-            else case ctxMatch of
-              EdhArgsPack (ArgsPack args kwargs)
-                | length args == length vExprs && Map.null kwargs -> branchMatched
-                $ zip attrNames args
-              EdhTuple vs | length vs == length vExprs ->
-                branchMatched $ zip attrNames vs
-              _ -> exitEdhSTM pgs exit EdhCaseOther
+      -- {( x,y,z,... )} -- pattern matching number of positional args
+      [StmtSrc (_, ExprStmt (ArgsPackExpr !argSenders))] ->
+        contEdhSTM $ if null argSenders
+          then case ctxMatch of
+            -- an empty apk pattern matches any empty sequence
+            EdhArgsPack (ArgsPack [] !kwargs) | Map.null kwargs ->
+              branchMatched []
+            EdhList (List _ !l) ->
+              readTVar l
+                >>= \ll -> if null ll
+                      then branchMatched []
+                      else exitEdhSTM pgs exit EdhCaseOther
+            _ -> exitEdhSTM pgs exit EdhCaseOther
+          else do
+            attrNames <- fmap catMaybes $ sequence $ (<$> argSenders) $ \case
+              SendPosArg (AttrExpr (DirectRef (NamedAttr vAttr))) ->
+                return $ Just vAttr
+              _ -> return Nothing
+            if length attrNames /= length argSenders
+              then throwEdhSTM
+                pgs
+                UsageError
+                ("Invalid element in apk pattern: " <> T.pack (show argSenders))
+              else case ctxMatch of
+                EdhArgsPack (ArgsPack !args !kwargs)
+                  | length args == length argSenders && Map.null kwargs -> branchMatched
+                  $ zip attrNames args
+                _ -> exitEdhSTM pgs exit EdhCaseOther
 
       -- {{ class:inst }} -- instance resolving pattern
-      [StmtSrc (_, ExprStmt (DictExpr [InfixExpr ":" (AttrExpr (DirectRef (NamedAttr classAttr))) (AttrExpr (DirectRef (NamedAttr instAttr)))]))]
+      [StmtSrc (_, ExprStmt (DictExpr [(AddrDictKey !clsAddr, AttrExpr (DirectRef (NamedAttr instAttr)))]))]
         -> -- brittany insists on putting together the long line above, any workaround?
            case ctxMatch of
           EdhObject ctxObj ->
-            contEdhSTM
-              $   lookupEdhCtxAttr pgs callerScope (AttrByName classAttr)
-              >>= \case
-                    EdhNil -> exitEdhSTM pgs exit EdhCaseOther
-                    val    -> case val of
-                      EdhClass class_ ->
-                        resolveEdhInstance pgs class_ ctxObj >>= \case
-                          Just instObj ->
-                            branchMatched [(instAttr, EdhObject instObj)]
-                          Nothing -> exitEdhSTM pgs exit EdhCaseOther
-                      _ ->
-                        throwEdhSTM pgs EvalError
-                          $  "Invalid class "
-                          <> classAttr
-                          <> ", it is a "
-                          <> T.pack (edhTypeNameOf val)
-                          <> ": "
-                          <> T.pack (show val)
+            evalAttrAddr clsAddr $ \(OriginalValue !clsVal _ _) ->
+              case clsVal of
+                EdhNil -> exitEdhProc exit EdhCaseOther
+                EdhClass !cls ->
+                  contEdhSTM $ resolveEdhInstance pgs cls ctxObj >>= \case
+                    Just instObj ->
+                      branchMatched [(instAttr, EdhObject instObj)]
+                    Nothing -> exitEdhSTM pgs exit EdhCaseOther
+                _ ->
+                  throwEdh EvalError
+                    $  T.pack
+                    $  "Invalid class "
+                    <> show clsAddr
+                    <> ", it is a "
+                    <> edhTypeNameOf clsVal
+                    <> ": "
+                    <> show clsVal
           _ -> exitEdhProc exit EdhCaseOther
 
       -- {[ x,y,z,... ]} -- any-of pattern
@@ -332,10 +336,10 @@ branchProc !lhExpr !rhExpr !exit = do
         then exitEdhProc exit EdhCaseOther
         else evalExprs vExprs $ \(OriginalValue matchVals _ _) ->
           case matchVals of
-            EdhTuple l -> if ctxMatch `elem` l
+            EdhArgsPack (ArgsPack !l _) -> if ctxMatch `elem` l
               then contEdhSTM $ branchMatched []
               else exitEdhProc exit EdhCaseOther
-            _ -> error "bug: evalExprs returned non-tuple"
+            _ -> error "bug: evalExprs returned non-apk"
 
 
       -- TODO more kinds of match patterns to support ?
@@ -367,16 +371,24 @@ branchProc !lhExpr !rhExpr !exit = do
 -- | `Nothing` means invalid pattern, `[]` means no match, non-empty list is
 -- the aligned values along with attr names as matched
 matchPairPattern
-  :: Expr -> EdhValue -> [(AttrName, EdhValue)] -> Maybe [(AttrName, EdhValue)]
-matchPairPattern p v matches = case p of
-  InfixExpr ":" leftExpr (AttrExpr (DirectRef (NamedAttr vAttr))) -> case v of
-    EdhPair leftVal val ->
-      let matches' = (vAttr, val) : matches
-      in  case leftExpr of
-            (AttrExpr (DirectRef (NamedAttr leftAttr))) -> case leftVal of
-              EdhPair _ _ -> Just []
-              _           -> Just $ (leftAttr, leftVal) : matches'
-            InfixExpr ":" _ _ -> matchPairPattern leftExpr leftVal matches'
-            _                 -> Nothing
-    _ -> Just []
+  :: Expr
+  -> EdhValue
+  -> [(AttrName, EdhValue)]
+  -> Maybe (Maybe EdhValue, [(AttrName, EdhValue)])
+matchPairPattern !p !v !matches = case p of
+  AttrExpr (DirectRef (NamedAttr !lastAttr)) -> case v of
+    EdhPair !resi !lastVal -> Just (Just resi, (lastAttr, lastVal) : matches)
+    _                      -> Just (Nothing, (lastAttr, v) : matches)
+  InfixExpr ":" !leftExpr (AttrExpr (DirectRef (NamedAttr !vAttr))) ->
+    case v of
+      EdhPair !leftVal !val ->
+        let matches' = (vAttr, val) : matches
+        in  case leftExpr of
+              (AttrExpr (DirectRef (NamedAttr !leftAttr))) -> case leftVal of
+                EdhPair !resi !lastVal ->
+                  Just (Just resi, (leftAttr, lastVal) : matches')
+                _ -> Just (Nothing, (leftAttr, leftVal) : matches')
+              InfixExpr ":" _ _ -> matchPairPattern leftExpr leftVal matches'
+              _                 -> Nothing
+      _ -> Just (Nothing, [])
   _ -> Nothing

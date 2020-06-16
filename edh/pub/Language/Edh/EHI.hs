@@ -122,7 +122,9 @@ module Language.Edh.EHI
   , AttrAddressor(..)
   , ArgsReceiver(..)
   , ArgReceiver(..)
-  , ArgsSender
+  , mandatoryArg
+  , optionalArg
+  , ArgsPacker
   , ArgSender(..)
   , ProcDecl(..)
   , procedureName

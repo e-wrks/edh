@@ -45,7 +45,7 @@ vecHostCtor !pgsCtor (ArgsPack !ctorArgs !ctorKwargs) !obs !ctorExit = do
             [ ( "[]"
               , EdhMethod
               , vecIdxReadProc
-              , PackReceiver [RecvArg "idx" Nothing Nothing]
+              , PackReceiver [mandatoryArg "idx"]
               )
             , ("__repr__", EdhMethod, vecReprProc, PackReceiver [])
             , ("all"     , EdhMethod, vecAllProc , PackReceiver [])
@@ -142,7 +142,7 @@ vecHostCtor !pgsCtor (ArgsPack !ctorArgs !ctorKwargs) !obs !ctorExit = do
           throwEdhSTM pgs UsageError $ "bug: this is not a vec : " <> T.pack
             (show esd)
         Just (vec :: EdhVector) ->
-          exitEdhSTM pgs exit $ EdhTuple $ V.toList vec
+          exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack (V.toList vec) mempty
 
 
 -- Boxed MVector for Edh values
@@ -169,13 +169,12 @@ mvecHostCtor !pgsCtor (ArgsPack !ctorArgs !ctorKwargs) !obs !ctorExit = do
           [ ( "[]"
             , EdhMethod
             , mvecIdxReadProc
-            , PackReceiver [RecvArg "idx" Nothing Nothing]
+            , PackReceiver [mandatoryArg "idx"]
             )
           , ( "[=]"
             , EdhMethod
             , mvecIdxWriteProc
-            , PackReceiver
-              [RecvArg "idx" Nothing Nothing, RecvArg "val" Nothing Nothing]
+            , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
             )
           , ("__repr__", EdhMethod, mvecReprProc, PackReceiver [])
           , ("all"     , EdhMethod, mvecAllProc , PackReceiver [])
@@ -311,5 +310,5 @@ mvecHostCtor !pgsCtor (ArgsPack !ctorArgs !ctorKwargs) !obs !ctorExit = do
             (show esd)
         Just (mvec :: EdhMVector) -> do
           vs <- sequence $ readTVar <$> V.toList mvec
-          exitEdhSTM pgs exit $ EdhTuple vs
+          exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack vs mempty
 

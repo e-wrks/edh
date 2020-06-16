@@ -34,6 +34,9 @@
   application operator (\$) and the flipped version (|), which is similar to
   UNIX pipe at the same time
 - import/export turned into expressions as well
+- removed tuple type, ArgsPack works in places of tuples
+- can send and receive symbolic arguments now
+- spaces are allowed between @ and attribute name for symbolic attributes
 - various bugfixes and improvements
 
 ## 0.2.0.0

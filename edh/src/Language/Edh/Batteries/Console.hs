@@ -82,11 +82,8 @@ loggingProc !lhExpr !rhExpr !exit = do
                       else -- no source location info
                            Nothing
                 contEdhSTM $ case rhVal of
-                  EdhArgsPack pkargs -> do
-                    logger logLevel srcLoc pkargs
-                    exitEdhSTM pgs exit nil
-                  EdhTuple vals -> do
-                    logger logLevel srcLoc $ ArgsPack vals Map.empty
+                  EdhArgsPack !apk -> do
+                    logger logLevel srcLoc apk
                     exitEdhSTM pgs exit nil
                   _ -> do
                     logger logLevel srcLoc $ ArgsPack [rhVal] Map.empty
