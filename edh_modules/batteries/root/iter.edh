@@ -71,6 +71,13 @@ export {
     }
   }
 
+  # resembles `replicate` in Haskell
+  method replicate( n, *args ) {
+    apk = ()
+    for _ from range( n ) do apk = ( apk=<args )
+    return apk
+  }
+
   # resembles `zip` in Haskell
   generator zip( xs, ys ) {
     while true case xs of {
