@@ -13,11 +13,6 @@ while true { # this is the *Loop* in so-called REPL
 
 } $=> { # catch exceptions
 
-  { { ProgramHalt:_ } } -> {
-    rethrow # escalate a halt to the program loop of the
-    # host interpreter, let it decide what to do.
-  }
-
   { { IOError:exc } } -> {
     console.fatal<| 'IO error - ' ++ exc
     rethrow # escalate it to the program loop of the

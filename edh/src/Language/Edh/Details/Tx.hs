@@ -99,8 +99,9 @@ driveEdhProgram !haltResult !progCtx !prog = do
         -- so all descendant threads will terminate. or else hanging STM jobs
         -- may cause the whole process killed by GHC deadlock detector.
         atomically $ void $ tryPutTMVar haltResult (Right nil)
-        -- TODO let all live Edh threads go through ProgramHalt propagation,
-        --      providing the chance for them to do cleanup.
+        -- TODO is it good idea to let all live Edh threads go through
+        --      ProgramHalt propagation? Their `defer` actions can do cleanup
+        --      already, need such a chance with exception handlers too?
                                                               )
     $ handle
         (\(e :: SomeException) -> case fromException e :: Maybe EdhError of

@@ -7,34 +7,34 @@
 
   # there is no `try` keyword in Edh, just use a block (or single
   # expression) as the left-hand-expr of ($=>) or (@=>)
-  # 
+  #
   # pattern/value matching can be used in the right-hand-expr of
-  # catch/finally. you may never want to match the exception in 
+  # catch/finally. you may never want to match the exception in
   # a finally block, but you probably always do in a catch block
 
   {
 
-    throw 3*7  # any value can be thrown
+    throw 3*7 # any value can be thrown
 
-  } $=> {{ UsageError: exc }} -> {
+  } $=> { { UsageError: exc } } -> {
     # (->) binds tighter than ($=>) and (@=>) so can be single branch catch
 
     console.warn <| "Obviously it's your fault by not doing the right thing! "
-      ++ exc # it's bad smell to swallow error information in your code
+    ++ exc # it's bad smell to swallow error information in your code
 
-  } $=> {{ IOError: exc }} -> {
+  } $=> { { IOError: exc } } -> {
     # multiple `catch`es can be chained, same intuition as in other languages
 
     console.fatal <| 'The realworld is insane sometimes ... '
 
-    fallthrough  # this way to re-throw the original exception
+    fallthrough # this way to re-throw the original exception
 
-  } $=> {  # and catches can be grouped in a block too, 
+  } $=> { # and catches can be grouped in a block too,
     # with the exception value as pattern/value match target throughout
 
     { n } -> {
-      console.print( 'a ' ++ type(n) ++ ' exception is thrown!' )
-      fallthrough  # or it'll be recovered right from here
+      console.print( 'a ' ++ type( n ) ++ ' exception is thrown!' )
+      fallthrough # or it'll be recovered right from here
     }
 
     21 -> {
@@ -43,13 +43,13 @@
       # exception is considered to have been recovered
     }
 
-  } @=> {  # (@=>) is the `finally` operator
+  } @=> { # (@=>) is the `finally` operator
     console.print( 'I always do cleanup anyway.' )
-  } @=> {{ ProgramHalt:_ }} -> {
+  } @=> { { ProgramHalt:_ } } -> {
     # `finally`s can be chained and matched too in Edh, surprise!
     # but if you are fond of this fact, maybe you've unfortunately
     # been trapped often.
-    console.print( "There're never short of cleanup jobs to do.")
+    console.print( "There're never short of cleanup jobs to do." )
   }
 
   console.print( "there're other stuffs beyond the dangerous zone." )
@@ -58,26 +58,37 @@
 
 
 {
+  {
+    console.exit( 'You can never recover from a ProgramHalt really.' )
+  } $=> { { ProgramHalt:_ } } -> {
+    console.print( 'Though you can catch a ProgramHalt and do sth.' )
+    "What ever this evals to, it's not used for a recovery."
+  }
+  console.print( 'This never gonna to happen.' )
+}
+
+
+{
 
   # custom exception classes can be defined and caught accordingly
   # wrt class hierarchy
 
-  class MyException extends Exception("My bad!")
+  class MyException extends Exception( "My bad!" )
 
-  class AppException method __init__ (***apk) extends Exception(***apk)
+  class AppException method __init__ (*** apk ) extends Exception(*** apk )
 
-  class RuleViolated method __init__ (***apk) extends AppException(***apk)
+  class RuleViolated method __init__ (*** apk ) extends AppException(*** apk )
 
   method doBusiness () {
-    throw RuleViolated( "warning ignored", reason='unknown', degree='perphaps!' )
+    throw RuleViolated( "warning ignored", reason= 'unknown', degree= 'perphaps!' )
   }
 
   {
     doBusiness()
-  } $=> {{ RuleViolated:exc }} -> {
+  } $=> { { RuleViolated:exc } } -> {
     console.print( 'or maybe the rule is wrong ...' )
     fallthrough
-  } $=> {{ AppException:exc }} -> {
+  } $=> { { AppException:exc } } -> {
     console.info <| 'app error recorded - ' ++ exc.details
   } @=> {
     console.info <| 'looking forward for more business to do'
@@ -92,7 +103,7 @@
 
   method f() {
     console.print( "I suspect why I'm called anyway ...",
-      backtrace = Exception("See I'm so called.") )
+      backtrace = Exception( "See I'm so called." ) )
   }
 
   method g() {
@@ -101,4 +112,3 @@
 
   g()
 }
-

@@ -2035,26 +2035,35 @@ edhCatchSTM !pgsOuter !tryAct !exit !passOn = do
     !tryScope   = scopeOuter { exceptionHandler = hndlr }
     !tryCtx = ctxOuter { callStack = tryScope :| NE.tail (callStack ctxOuter) }
     !pgsTry     = pgsOuter { edh'context = tryCtx }
-    recover :: EdhProcExit
-    recover !result = contEdhSTM $ do
-      rcvrTh <- unsafeIOToSTM myThreadId
-      if rcvrTh /= hndlrTh
-        then -- don't continue from a different thread
-             return () -- other than the handler installer
-        else runEdhProc pgsOuter $ exit result
     hndlr :: EdhExcptHndlr
     hndlr !exv !rethrow = do
       pgsThrower <- ask
-      contEdhSTM
-        $ passOn pgsThrower exv recover
-        $ runEdhProc pgsThrower { edh'context = edh'context pgsOuter }
-        $ exceptionHandler scopeOuter exv rethrow
+      let goRecover :: EdhProcExit
+          goRecover !result = ask >>= \pgs ->
+            -- an exception handler provided another result value to recover
+            contEdhSTM $ fromEdhError pgs exv $ \ex -> case fromException ex of
+              Just ProgramHalt{} -> goRethrow -- never recover from ProgramHalt
+              _                  -> do
+                -- do recover from the exception
+                rcvrTh <- unsafeIOToSTM myThreadId
+                if rcvrTh /= hndlrTh
+                  then -- just skip the action if from a different thread
+                       return () -- other than the handler installer
+                  else runEdhProc pgsOuter $ exit result
+          goRethrow :: STM ()
+          goRethrow =
+            runEdhProc pgsThrower { edh'context = edh'context pgsOuter }
+              $ exceptionHandler scopeOuter exv rethrow
+      contEdhSTM $ passOn pgsThrower exv goRecover goRethrow
   tryAct pgsTry $ \tryResult -> contEdhSTM $ do
+    -- no exception occurred, go trigger finally block
     rcvrTh <- unsafeIOToSTM myThreadId
     if rcvrTh /= hndlrTh
-      then --  don't continue from a different thread
+      then -- just skip the action if from a different thread
            return () -- other than the handler installer
-      else passOn pgsOuter nil recover $ exitEdhSTM' pgsOuter exit tryResult
+      else
+        passOn pgsOuter nil (error "bug: recovering from finally block")
+          $ exitEdhSTM' pgsOuter exit tryResult
 
 
 -- | Construct an Edh object from a class

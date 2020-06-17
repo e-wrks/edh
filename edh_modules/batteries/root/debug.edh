@@ -58,11 +58,6 @@ export {
 
     } $=> { # catch exceptions
 
-      { { ProgramHalt:_ } } -> {
-        rethrow # escalate a halt to the program loop of the
-        # host interpreter, let it decide what to do.
-      }
-
       { { IOError:exc } } -> {
         console.fatal <| 'IO error - ' ++ exc
         rethrow # escalate it to the program loop of the
@@ -102,11 +97,6 @@ export {
       }
 
     } $=> { # catch exceptions
-
-      { { ProgramHalt:_ } } -> {
-        rethrow # escalate a halt to the program loop of the
-        # host interpreter, let it decide what to do.
-      }
 
       { { IOError:exc } } -> {
         console.fatal <| 'IO error - ' ++ exc
