@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "ComplYue.edh-vscode-pack",
+    "ComplYue.edh-vscode-syntax",
+    "ComplYue.edh-vscode-formatter"
+  ],
+  "unwantedRecommendations": []
+}
