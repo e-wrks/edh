@@ -477,7 +477,6 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit = do
   let
     !ctx   = edh'context pgs
     !scope = contextScope ctx
-    !this  = thisObject scope
     withExps :: Map.HashMap AttrKey EdhValue -> STM ()
     withExps !exps = do
       let !artsPk = ArgsPack [] exps
@@ -500,23 +499,15 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit = do
                                        (scopeEntity scope)
                                        (AttrByName edhEffectsMagicName)
                                        d
-        when (contextExporting ctx) $ if objEntity this /= tgtEnt
-          then throwEdhSTM pgs
-                           UsageError
-                           "You don't export from a method procedure"
-          else do -- do export what's imported
-            let !impd =
-                  Map.fromList [ (attrKeyValue k, v) | (k, v) <- Map.toList em ]
-            lookupEntityAttr pgs tgtEnt (AttrByName edhExportsMagicName)
-              >>= \case
-                    EdhDict (Dict _ !thisExpDS) ->
-                      modifyTVar' thisExpDS $ Map.union impd
-                    _ -> do -- todo warn if of wrong type
-                      d <- createEdhDict impd
-                      changeEntityAttr pgs
-                                       tgtEnt
-                                       (AttrByName edhExportsMagicName)
-                                       d
+        when (contextExporting ctx) $ do -- do export what's imported
+          let !impd =
+                Map.fromList [ (attrKeyValue k, v) | (k, v) <- Map.toList em ]
+          lookupEntityAttr pgs tgtEnt (AttrByName edhExportsMagicName) >>= \case
+            EdhDict (Dict _ !thisExpDS) ->
+              modifyTVar' thisExpDS $ Map.union impd
+            _ -> do -- todo warn if of wrong type
+              d <- createEdhDict impd
+              changeEntityAttr pgs tgtEnt (AttrByName edhExportsMagicName) d
         exitEdhSTM pgs exit (EdhObject fromObj)
   contEdhSTM
     $ lookupEntityAttr pgs (objEntity fromObj) (AttrByName edhExportsMagicName)
