@@ -742,8 +742,11 @@ intplExpr !pgs !x !exit = case x of
     seqcontSTM (intplArgSndr pgs <$> args) $ \args' -> exit $ CallExpr v' args'
   InfixExpr !op !lhe !rhe -> intplExpr pgs lhe
     $ \lhe' -> intplExpr pgs rhe $ \rhe' -> exit $ InfixExpr op lhe' rhe'
-  ImportExpr !rcvrs !xFrom -> intplArgsRcvr pgs rcvrs $ \rcvrs' ->
-    intplExpr pgs xFrom $ \xFrom' -> exit $ ImportExpr rcvrs' xFrom'
+  ImportExpr !rcvrs !xFrom !maybeInto -> intplArgsRcvr pgs rcvrs $ \rcvrs' ->
+    intplExpr pgs xFrom $ \xFrom' -> case maybeInto of
+      Nothing     -> exit $ ImportExpr rcvrs' xFrom' Nothing
+      Just !oInto -> intplExpr pgs oInto
+        $ \oInto' -> exit $ ImportExpr rcvrs' xFrom' $ Just oInto'
   _ -> exit x
  where
   intplStmtSrc :: StmtSrc -> (StmtSrc -> STM ()) -> STM ()
@@ -1479,10 +1482,16 @@ evalExpr !expr !exit = do
         $ \rtn -> local (const pgs) $ exitEdhProc' exit rtn
 
 
-    ImportExpr !argsRcvr !srcExpr ->
-      importInto (scopeEntity scope) argsRcvr srcExpr exit
-    ImportThisExpr !argsRcvr !srcExpr ->
-      importInto (objEntity this) argsRcvr srcExpr exit
+    ImportExpr !argsRcvr !srcExpr !maybeInto -> case maybeInto of
+      Nothing        -> importInto (scopeEntity scope) argsRcvr srcExpr exit
+      Just !intoExpr -> evalExpr intoExpr $ \(OriginalValue !intoVal _ _) ->
+        case intoVal of
+          EdhObject !intoObj ->
+            importInto (objEntity intoObj) argsRcvr srcExpr exit
+          _ ->
+            throwEdh UsageError
+              $  "Can only import into an object, not a "
+              <> T.pack (edhTypeNameOf intoVal)
 
     -- _ -> throwEdh EvalError $ "Eval not yet impl for: " <> T.pack (show expr)
 

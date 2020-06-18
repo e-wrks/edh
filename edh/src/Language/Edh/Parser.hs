@@ -129,13 +129,15 @@ parseExportExpr !si = do
   return (ExportExpr s, si')
 
 parseImportExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
-parseImportExpr !si = keyword "import"
-  *> choice [keyword "this" >> go ImportThisExpr, go ImportExpr]
- where
-  go dc = do
-    ar        <- parseArgsReceiver
-    (se, si') <- parseExpr si
-    return (dc ar se, si')
+parseImportExpr !si = do
+  void $ keyword "import"
+  ar        <- parseArgsReceiver
+  (se, si') <- parseExpr si
+  (<|> return (ImportExpr ar se Nothing, si')) $ do
+    void $ keyword "into"
+    (intoExpr, si'') <- parseExpr si'
+    return (ImportExpr ar se (Just intoExpr), si'')
+
 
 parseLetStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseLetStmt !si = do
