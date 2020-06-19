@@ -184,9 +184,9 @@ evalStmt' !stmt !exit = do
       this   = thisObject scope
   case stmt of
 
-    ExprStmt expr -> evalExpr expr $ \result -> exitEdhProc' exit result
+    ExprStmt !expr -> evalExpr expr $ \result -> exitEdhProc' exit result
 
-    LetStmt argsRcvr argsSndr -> do
+    LetStmt !argsRcvr !argsSndr -> do
       let pkArgs exit' = case argsSndr of
             [SendPosArg !x1] -> evalExpr x1 $ \case
               (OriginalValue (EdhArgsPack !apk) _ _) -> exit' apk
@@ -239,12 +239,12 @@ evalStmt' !stmt !exit = do
           -- let statement evaluates to nil always, with previous tx
           -- state restored
 
-    BreakStmt       -> exitEdhProc exit EdhBreak
-    ContinueStmt    -> exitEdhProc exit EdhContinue
-    FallthroughStmt -> exitEdhProc exit EdhFallthrough
-    RethrowStmt     -> exitEdhProc exit EdhRethrow
+    BreakStmt        -> exitEdhProc exit EdhBreak
+    ContinueStmt     -> exitEdhProc exit EdhContinue
+    FallthroughStmt  -> exitEdhProc exit EdhFallthrough
+    RethrowStmt      -> exitEdhProc exit EdhRethrow
 
-    ReturnStmt expr -> evalExpr expr $ \(OriginalValue !v2r _ _) ->
+    ReturnStmt !expr -> evalExpr expr $ \(OriginalValue !v2r _ _) ->
       case edhDeCaseClose v2r of
         val@EdhReturn{} -> exitEdhProc exit (EdhReturn val)
           -- actually when a generator procedure checks the result of its `yield`
@@ -254,7 +254,7 @@ evalStmt' !stmt !exit = do
         !val            -> exitEdhProc exit (EdhReturn val)
 
 
-    AtoIsoStmt expr ->
+    AtoIsoStmt !expr ->
       contEdhSTM
         $ runEdhProc pgs { edh'in'tx = True } -- ensure in'tx state
         $ evalExpr expr
@@ -262,7 +262,7 @@ evalStmt' !stmt !exit = do
             contEdhSTM $ exitEdhSTM pgs exit $ edhDeCaseClose val
 
 
-    GoStmt expr -> do
+    GoStmt !expr -> do
       let doFork :: EdhProgState -> EdhProc -> STM ()
           doFork pgs' prog = do
             forkEdh
@@ -276,7 +276,7 @@ evalStmt' !stmt !exit = do
             exitEdhSTM pgs exit nil
       case expr of
 
-        CaseExpr tgtExpr branchesExpr ->
+        CaseExpr !tgtExpr !branchesExpr ->
           evalExpr tgtExpr $ \(OriginalValue !val _ _) ->
             contEdhSTM
               $ doFork pgs
@@ -284,14 +284,14 @@ evalStmt' !stmt !exit = do
                   }
               $ evalCaseBlock branchesExpr edhEndOfProc
 
-        (CallExpr procExpr argsSndr) ->
+        (CallExpr !procExpr !argsSndr) ->
           contEdhSTM
             $ resolveEdhCallee pgs procExpr
             $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
                 edhMakeCall pgs callee'val callee'that argsSndr scopeMod
                   $ \mkCall -> doFork pgs (mkCall edhEndOfProc)
 
-        (ForExpr argsRcvr iterExpr doExpr) ->
+        (ForExpr !argsRcvr !iterExpr !doExpr) ->
           contEdhSTM
             $ edhForLoop pgs argsRcvr iterExpr doExpr (const $ return ())
             $ \runLoop -> doFork pgs (runLoop edhEndOfProc)
@@ -299,7 +299,7 @@ evalStmt' !stmt !exit = do
         _ -> contEdhSTM $ doFork pgs $ evalExpr expr edhEndOfProc
 
 
-    DeferStmt expr -> do
+    DeferStmt !expr -> do
       let schedDefered :: EdhProgState -> EdhProc -> STM ()
           schedDefered pgs' prog = do
             modifyTVar'
@@ -316,7 +316,7 @@ evalStmt' !stmt !exit = do
             exitEdhSTM pgs exit nil
       case expr of
 
-        CaseExpr tgtExpr branchesExpr ->
+        CaseExpr !tgtExpr !branchesExpr ->
           evalExpr tgtExpr $ \(OriginalValue !val _ _) ->
             contEdhSTM
               $ schedDefered pgs
@@ -324,14 +324,14 @@ evalStmt' !stmt !exit = do
                   }
               $ evalCaseBlock branchesExpr edhEndOfProc
 
-        (CallExpr procExpr argsSndr) ->
+        (CallExpr !procExpr !argsSndr) ->
           contEdhSTM
             $ resolveEdhCallee pgs procExpr
             $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
                 edhMakeCall pgs callee'val callee'that argsSndr scopeMod
                   $ \mkCall -> schedDefered pgs (mkCall edhEndOfProc)
 
-        (ForExpr argsRcvr iterExpr doExpr) ->
+        (ForExpr !argsRcvr !iterExpr !doExpr) ->
           contEdhSTM
             $ edhForLoop pgs argsRcvr iterExpr doExpr (const $ return ())
             $ \runLoop -> schedDefered pgs (runLoop edhEndOfProc)
@@ -339,7 +339,7 @@ evalStmt' !stmt !exit = do
         _ -> contEdhSTM $ schedDefered pgs $ evalExpr expr edhEndOfProc
 
 
-    PerceiveStmt sinkExpr bodyExpr ->
+    PerceiveStmt !sinkExpr !bodyExpr ->
       evalExpr sinkExpr $ \(OriginalValue !sinkVal _ _) ->
         case edhUltimate sinkVal of
           (EdhSink sink) -> contEdhSTM $ do
@@ -368,7 +368,7 @@ evalStmt' !stmt !exit = do
       $ \(OriginalValue !exv _ _) -> edhThrow $ edhDeCaseClose exv
 
 
-    WhileStmt cndExpr bodyExpr -> do
+    WhileStmt !cndExpr !bodyExpr -> do
       let doWhile :: EdhProc
           doWhile = evalExpr cndExpr $ \(OriginalValue !cndVal _ _) ->
             case edhDeCaseClose cndVal of
@@ -391,7 +391,7 @@ evalStmt' !stmt !exit = do
                   <> T.pack (show cndVal)
       doWhile
 
-    ExtendsStmt superExpr ->
+    ExtendsStmt !superExpr ->
       evalExpr superExpr $ \(OriginalValue !superVal _ _) ->
         case edhDeCaseClose superVal of
           (EdhObject !superObj) -> contEdhSTM $ do
@@ -448,17 +448,20 @@ evalStmt' !stmt !exit = do
 
 importInto :: Entity -> ArgsReceiver -> Expr -> EdhProcExit -> EdhProc
 importInto !tgtEnt !argsRcvr !srcExpr !exit = case srcExpr of
-  LitExpr (StringLiteral importSpec) ->
+  LitExpr (StringLiteral !importSpec) ->
     -- import from specified path
     importEdhModule' tgtEnt argsRcvr importSpec exit
   _ -> evalExpr srcExpr $ \(OriginalValue !srcVal _ _) ->
     case edhDeCaseClose srcVal of
-      EdhString importSpec ->
+      EdhString !importSpec ->
         -- import from dynamic path
         importEdhModule' tgtEnt argsRcvr importSpec exit
-      EdhObject fromObj ->
+      EdhObject !fromObj ->
         -- import from an object
         importFromObject tgtEnt argsRcvr fromObj exit
+      EdhArgsPack !fromApk ->
+        -- import from an argument pack
+        importFromApk tgtEnt argsRcvr fromApk exit
       _ ->
         -- todo support more sources of import ?
         throwEdh EvalError
@@ -468,47 +471,43 @@ importInto !tgtEnt !argsRcvr !srcExpr !exit = case srcExpr of
           <> T.pack (show srcVal)
 
 
+importFromApk :: Entity -> ArgsReceiver -> ArgsPack -> EdhProcExit -> EdhProc
+importFromApk !tgtEnt !argsRcvr !fromApk !exit = do
+  pgs <- ask
+  let !ctx = edh'context pgs
+  recvEdhArgs ctx argsRcvr fromApk $ \em -> contEdhSTM $ do
+    if not (contextEffDefining ctx)
+      then -- normal import
+           updateEntityAttrs pgs tgtEnt $ Map.toList em
+      else do -- importing effects
+        let !effd =
+              Map.fromList [ (attrKeyValue k, v) | (k, v) <- Map.toList em ]
+        lookupEntityAttr pgs tgtEnt (AttrByName edhEffectsMagicName) >>= \case
+          EdhDict (Dict _ !effDS) -> modifyTVar' effDS $ Map.union effd
+          _                       -> do -- todo warn if of wrong type
+            d <- createEdhDict effd
+            changeEntityAttr pgs tgtEnt (AttrByName edhEffectsMagicName) d
+    when (contextExporting ctx) $ do -- do export what's imported
+      let !impd =
+            Map.fromList [ (attrKeyValue k, v) | (k, v) <- Map.toList em ]
+      lookupEntityAttr pgs tgtEnt (AttrByName edhExportsMagicName) >>= \case
+        EdhDict (Dict _ !thisExpDS) -> modifyTVar' thisExpDS $ Map.union impd
+        _                           -> do -- todo warn if of wrong type
+          d <- createEdhDict impd
+          changeEntityAttr pgs tgtEnt (AttrByName edhExportsMagicName) d
+    exitEdhSTM pgs exit $ EdhArgsPack fromApk
+
 edhExportsMagicName :: Text
 edhExportsMagicName = "__exports__"
 
 importFromObject :: Entity -> ArgsReceiver -> Object -> EdhProcExit -> EdhProc
 importFromObject !tgtEnt !argsRcvr !fromObj !exit = do
   pgs <- ask
-  let
-    !ctx   = edh'context pgs
-    !scope = contextScope ctx
-    withExps :: Map.HashMap AttrKey EdhValue -> STM ()
-    withExps !exps = do
-      let !artsPk = ArgsPack [] exps
-      runEdhProc pgs $ recvEdhArgs ctx argsRcvr artsPk $ \em -> contEdhSTM $ do
-        if not (contextEffDefining ctx)
-          then -- normal import
-               updateEntityAttrs pgs tgtEnt $ Map.toList em
-          else do -- importing effects
-            let !effd =
-                  Map.fromList [ (attrKeyValue k, v) | (k, v) <- Map.toList em ]
-            lookupEntityAttr pgs
-                             (scopeEntity scope)
-                             (AttrByName edhEffectsMagicName)
-              >>= \case
-                    EdhDict (Dict _ !effDS) ->
-                      modifyTVar' effDS $ Map.union effd
-                    _ -> do -- todo warn if of wrong type
-                      d <- createEdhDict effd
-                      changeEntityAttr pgs
-                                       (scopeEntity scope)
-                                       (AttrByName edhEffectsMagicName)
-                                       d
-        when (contextExporting ctx) $ do -- do export what's imported
-          let !impd =
-                Map.fromList [ (attrKeyValue k, v) | (k, v) <- Map.toList em ]
-          lookupEntityAttr pgs tgtEnt (AttrByName edhExportsMagicName) >>= \case
-            EdhDict (Dict _ !thisExpDS) ->
-              modifyTVar' thisExpDS $ Map.union impd
-            _ -> do -- todo warn if of wrong type
-              d <- createEdhDict impd
-              changeEntityAttr pgs tgtEnt (AttrByName edhExportsMagicName) d
-        exitEdhSTM pgs exit (EdhObject fromObj)
+  let withExps :: Map.HashMap AttrKey EdhValue -> STM ()
+      withExps !exps =
+        runEdhProc pgs
+          $ importFromApk tgtEnt argsRcvr (ArgsPack [] exps)
+          $ \_ -> exitEdhProc exit $ EdhObject fromObj
   contEdhSTM
     $ lookupEntityAttr pgs (objEntity fromObj) (AttrByName edhExportsMagicName)
     >>= \case
