@@ -147,13 +147,14 @@ defaultEdhConsole !inputSettings = do
             ioLoop
      where
         -- | The repl line reader
-      readInput :: Text -> Text -> [Text] -> InputT IO (Maybe Text)
+      readInput :: Text -> Text -> [Text] -> InputT IO (Maybe EdhInput)
       readInput !ps1 !ps2 !initialLines =
         handleInterrupt ( -- start over on Ctrl^C
                          outputStrLn "" >> readLines [])
           $ withInterrupt
           $ readLines initialLines
        where
+        readLines :: [Text] -> InputT IO (Maybe EdhInput)
         readLines pendingLines =
           liftIO flushLogs >> getInputLine prompt >>= \case
             Nothing -> case pendingLines of
@@ -170,10 +171,14 @@ defaultEdhConsole !inputSettings = do
                         "" -> -- got an empty line in single-line input mode
                           readLines [] -- start over in single-line input mode
                         _ -> -- got a single line input
-                          return $ Just code
+                             return $ Just $ EdhInput
+                          { edh'input'src'name  = ""
+                          , edh'input'1st'line  = 1
+                          , edh'input'src'lines = [code]
+                          }
                     _ -> case T.stripEnd code of
                       "}" -> -- an unindented `}` marks end of multi-line input
-                             return $ Just $ (T.unlines . reverse) $ init
+                             return $ Just $ EdhInput "" 1 $ reverse $ init
                         pendingLines
                       _ -> -- got a line in multi-line input mode
                         readLines $ code : pendingLines

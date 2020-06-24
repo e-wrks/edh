@@ -57,7 +57,9 @@ module Language.Edh.EHI
   , moduleContext
   , contextScope
   , parseEdh
+  , parseEdh'
   , evalEdh
+  , evalEdh'
   , haltEdhProgram
   , runEdhProgram
   , runEdhProgram'

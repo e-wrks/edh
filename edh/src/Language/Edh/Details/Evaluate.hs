@@ -69,9 +69,33 @@ launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerProg = do
 
 
 parseEdh :: EdhWorld -> String -> Text -> STM (Either ParserError [StmtSrc])
-parseEdh !world !srcName !srcCode = do
+parseEdh !world !srcName !srcCode = parseEdh' world srcName 1 srcCode
+parseEdh'
+  :: EdhWorld -> String -> Int -> Text -> STM (Either ParserError [StmtSrc])
+parseEdh' !world !srcName !lineNo !srcCode = do
   pd <- takeTMVar wops -- update 'worldOperators' atomically wrt parsing
-  let (pr, pd') = runState (runParserT parseProgram srcName srcCode) pd
+  let ((_, pr), pd') = runState
+        (runParserT'
+          parseProgram
+          State
+            { stateInput       = srcCode
+            , stateOffset      = 0
+            , statePosState    = PosState
+                                   { pstateInput      = srcCode
+                                   , pstateOffset     = 0
+                                   , pstateSourcePos  = SourcePos
+                                                          { sourceName = srcName
+                                                          , sourceLine = mkPos
+                                                                           lineNo
+                                                          , sourceColumn = mkPos 1
+                                                          }
+                                   , pstateTabWidth   = mkPos 2
+                                   , pstateLinePrefix = ""
+                                   }
+            , stateParseErrors = []
+            }
+        )
+        pd
   case pr of
     -- update operator precedence dict on success of parsing
     Right _ -> putTMVar wops pd'
@@ -82,11 +106,13 @@ parseEdh !world !srcName !srcCode = do
 
 
 evalEdh :: String -> Text -> EdhProcExit -> EdhProc
-evalEdh !srcName !srcCode !exit = do
+evalEdh !srcName !srcCode !exit = evalEdh' srcName 1 srcCode exit
+evalEdh' :: String -> Int -> Text -> EdhProcExit -> EdhProc
+evalEdh' !srcName !lineNo !srcCode !exit = do
   pgs <- ask
   let ctx   = edh'context pgs
       world = contextWorld ctx
-  contEdhSTM $ parseEdh world srcName srcCode >>= \case
+  contEdhSTM $ parseEdh' world srcName lineNo srcCode >>= \case
     Left !err -> getEdhErrClass pgs ParseError >>= \ec ->
       runEdhProc pgs
         $ createEdhObject

@@ -468,10 +468,15 @@ data EdhConsole = EdhConsole {
   }
 data EdhConsoleIO = ConsoleShutdown
     | ConsoleOut !Text -- ^ output a line
-    | ConsoleIn !(TMVar Text) !Text !Text
+    | ConsoleIn !(TMVar EdhInput) !Text !Text
     -- ^ read input into the var, with ps1 ps2
     --   ps1 is single line prompt, ps2 for multil-line
   deriving (Eq)
+data EdhInput = EdhInput {
+    edh'input'src'name :: !Text
+  , edh'input'1st'line :: !Int
+  , edh'input'src'lines :: ![Text]
+  } deriving (Eq, Show)
 type EdhLogger = LogLevel -> Maybe String -> ArgsPack -> STM ()
 type LogLevel = Int
 

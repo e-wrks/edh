@@ -116,9 +116,16 @@ conReadSourceProc !apk !exit = ask >>= \pgs ->
       let !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context pgs
       cmdIn <- newEmptyTMVar
       writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
-      edhPerformSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
-        src@EdhString{} -> exitEdhProc exit src
-        _               -> error "impossible"
+      edhPerformSTM pgs (readTMVar cmdIn)
+        $ \(EdhInput !name !lineNo !lines_) -> case name of
+            "" -> exitEdhProc exit $ EdhString $ T.unlines lines_
+            _ ->
+              exitEdhProc exit
+                $ EdhPair
+                    (EdhPair (EdhString name) (EdhDecimal $ fromIntegral lineNo)
+                    )
+                $ EdhString
+                $ T.unlines lines_
  where
   argsParser =
     ArgsPackParser
@@ -190,10 +197,12 @@ conReadCommandProc !apk !exit = ask >>= \pgs ->
             }
       cmdIn <- newEmptyTMVar
       writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
-      edhPerformSTM pgs (EdhString <$> readTMVar cmdIn) $ \case
-        EdhString !cmdCode ->
-          local (const pgsCmd) $ evalEdh "<console>" cmdCode exit
-        _ -> error "impossible"
+      edhPerformSTM pgs (readTMVar cmdIn)
+        $ \(EdhInput !name !lineNo !lines_) -> local (const pgsCmd) $ evalEdh'
+            (if T.null name then "<console>" else T.unpack name)
+            lineNo
+            (T.unlines lines_)
+            exit
  where
   argsParser =
     ArgsPackParser
