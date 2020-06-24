@@ -27,9 +27,14 @@ import           System.Console.Haskeline       ( InputT
                                                 , outputStr
                                                 , outputStrLn
                                                 , getInputLine
+                                                , getPassword
                                                 , handleInterrupt
                                                 , withInterrupt
                                                 )
+import           Data.Void
+import           Text.Megaparsec
+import           Text.Megaparsec.Char
+import qualified Text.Megaparsec.Char.Lexer    as L
 
 import           Data.Lossless.Decimal         as D
 
@@ -154,28 +159,67 @@ defaultEdhConsole !inputSettings = do
           $ withInterrupt
           $ readLines initialLines
        where
+        parsePasteSpec :: Parsec Void Text (Int, Int, Text)
+        parsePasteSpec = do
+          space
+          lineCnt :: Int <- L.decimal
+          space
+          lineNo :: Int <- L.decimal
+          space
+          srcName <- takeRest
+          return (lineCnt, lineNo, srcName)
+        recvPaste :: Text -> InputT IO (Maybe EdhInput)
+        recvPaste !pasteSpec =
+          case runParser parsePasteSpec "%%paste" pasteSpec of
+            Right (lineCnt, lineNo, srcName) | lineCnt > 0 && lineNo > 0 ->
+              recvLines lineCnt [] >>= \case
+                Nothing      -> return Nothing
+                Just !lines_ -> return $ Just $ EdhInput
+                  { edh'input'src'name  = srcName
+                  , edh'input'1st'line  = lineNo
+                  , edh'input'src'lines = lines_
+                  }
+            _ ->
+              getInputLine
+                  "Invalid %%paste spec\nKey in a valid one or Ctrl^C to cancel: "
+                >>= \case
+                      Nothing -> return Nothing
+                      Just !text ->
+                        case T.stripPrefix "%%paste" (T.pack text) of
+                          Nothing          -> recvPaste ""
+                          Just !pasteSpec' -> recvPaste pasteSpec'
+        recvLines :: Int -> [Text] -> InputT IO (Maybe [Text])
+        recvLines 0  !lines_ = return $ Just $ reverse lines_
+        recvLines !n !lines_ = getPassword Nothing "" >>= \case
+          Nothing    -> return Nothing
+          Just !line -> do
+            outputStr "\ESC[1A"
+            recvLines (n - 1) (T.pack line : lines_)
         readLines :: [Text] -> InputT IO (Maybe EdhInput)
-        readLines pendingLines =
+        readLines !pendingLines =
           liftIO flushLogs >> getInputLine prompt >>= \case
             Nothing -> case pendingLines of
               [] -> return Nothing
               _ -> -- TODO warn about premature EOF ?
                 return Nothing
-            Just text ->
-              let code = T.pack text
+            Just !text ->
+              let !code = T.pack text
               in  case pendingLines of
-                    [] -> case T.stripEnd code of
-                      "{" -> -- an unindented `{` marks start of multi-line input
-                        readLines [""]
-                      _ -> case T.strip code of
-                        "" -> -- got an empty line in single-line input mode
-                          readLines [] -- start over in single-line input mode
-                        _ -> -- got a single line input
-                             return $ Just $ EdhInput
-                          { edh'input'src'name  = ""
-                          , edh'input'1st'line  = 1
-                          , edh'input'src'lines = [code]
-                          }
+                    [] | "{" == T.stripEnd code ->
+                      -- an unindented `{` marks start of multi-line input
+                      readLines [""]
+                    [] | "" == T.strip code ->
+                      -- got an empty line in single-line input mode
+                      readLines [] -- start over in single-line input mode
+                    [] -> case T.stripPrefix "%%paste" code of
+                      -- start pasting
+                      Just !pasteSpec -> recvPaste pasteSpec
+                      -- got a single line input
+                      _               -> return $ Just $ EdhInput
+                        { edh'input'src'name  = ""
+                        , edh'input'1st'line  = 1
+                        , edh'input'src'lines = [code]
+                        }
                     _ -> case T.stripEnd code of
                       "}" -> -- an unindented `}` marks end of multi-line input
                              return $ Just $ EdhInput "" 1 $ reverse $ init
