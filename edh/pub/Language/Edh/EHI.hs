@@ -106,6 +106,7 @@ module Language.Edh.EHI
   , exitEdhProc
   , exitEdhProc'
   , seqcontSTM
+  , foldl'contSTM
   , mapcontSTM
     -- ** Sync utilities
   , forkEdh
