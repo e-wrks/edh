@@ -571,6 +571,7 @@ parseLitExpr = choice
   , TypeLiteral DecimalType <$ litKw "DecimalType"
   , TypeLiteral BoolType <$ litKw "BoolType"
   , TypeLiteral StringType <$ litKw "StringType"
+  , TypeLiteral BlobType <$ litKw "BlobType"
   , TypeLiteral SymbolType <$ litKw "SymbolType"
   , TypeLiteral ObjectType <$ litKw "ObjectType"
   , TypeLiteral DictType <$ litKw "DictType"

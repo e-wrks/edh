@@ -20,6 +20,8 @@ import           Data.Foldable
 import           Data.Unique
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
+import           Data.ByteString                ( ByteString )
+import qualified Data.ByteString               as B
 import           Data.Hashable
 import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..) )
@@ -714,6 +716,7 @@ data EdhValue =
     | EdhNil
     | EdhDecimal !Decimal
     | EdhBool !Bool
+    | EdhBlob !ByteString
     | EdhString !Text
     | EdhSymbol !Symbol
 
@@ -762,6 +765,7 @@ instance Show EdhValue where
   show EdhNil          = "nil"
   show (EdhDecimal v ) = showDecimal v
   show (EdhBool    v ) = if v then "true" else "false"
+  show (EdhBlob    b ) = "<blob#" <> show (B.length b) <> ">"
   show (EdhString  v ) = show v
   show (EdhSymbol  v ) = show v
 
@@ -818,6 +822,7 @@ instance Eq EdhValue where
   EdhNil          == EdhNil          = True
   EdhDecimal x    == EdhDecimal y    = x == y
   EdhBool    x    == EdhBool    y    = x == y
+  EdhBlob    x    == EdhBlob    y    = x == y
   EdhString  x    == EdhString  y    = x == y
   EdhSymbol  x    == EdhSymbol  y    = x == y
 
@@ -866,6 +871,7 @@ instance Hashable EdhValue where
   hashWithSalt s EdhNil = hashWithSalt s (0 :: Int)
   hashWithSalt s (EdhDecimal x                      ) = hashWithSalt s x
   hashWithSalt s (EdhBool    x                      ) = hashWithSalt s x
+  hashWithSalt s (EdhBlob    x                      ) = hashWithSalt s x
   hashWithSalt s (EdhString  x                      ) = hashWithSalt s x
   hashWithSalt s (EdhSymbol  x                      ) = hashWithSalt s x
   hashWithSalt s (EdhObject  x                      ) = hashWithSalt s x
@@ -1260,6 +1266,7 @@ data EdhTypeValue = TypeType
     | DecimalType
     | BoolType
     | StringType
+    | BlobType
     | SymbolType
     | ObjectType
     | DictType
@@ -1313,6 +1320,7 @@ edhTypeOf EdhType{}                = TypeType
 
 edhTypeOf EdhDecimal{}             = DecimalType
 edhTypeOf EdhBool{}                = BoolType
+edhTypeOf EdhBlob{}                = BlobType
 edhTypeOf EdhString{}              = StringType
 edhTypeOf EdhSymbol{}              = SymbolType
 edhTypeOf EdhObject{}              = ObjectType

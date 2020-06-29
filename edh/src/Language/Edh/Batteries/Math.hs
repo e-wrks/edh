@@ -8,6 +8,7 @@ import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
 import qualified Data.Text                     as T
+import qualified Data.Text.Encoding            as TE
 import qualified Data.HashMap.Strict           as Map
 
 import           Data.Lossless.Decimal
@@ -19,20 +20,30 @@ import           Language.Edh.Details.Evaluate
 
 -- | operator (+)
 addProc :: EdhIntrinsicOp
-addProc !lhExpr !rhExpr !exit =
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
-    EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+addProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \(OriginalValue !lhv _ _) ->
+  case edhUltimate lhv of
+    EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
-        EdhDecimal rhNum -> exitEdhProc exit (EdhDecimal $ lhNum + rhNum)
+        EdhDecimal !rhNum -> exitEdhProc exit (EdhDecimal $ lhNum + rhNum)
         _ ->
           throwEdh EvalError
             $  "Invalid right-hand value for (+) operation: "
             <> T.pack (show rhVal)
-    EdhString lhs -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      edhValueStr rhVal $ \(OriginalValue rhStr _ _) -> case rhStr of
-        EdhString !rhs -> exitEdhProc exit (EdhString $ lhs <> rhs)
-        _              -> error "bug: edhValueStr returned non-string"
-    _ ->
+    EdhBlob !lhb -> evalExpr rhExpr $ \(OriginalValue !rhv _ _) ->
+      case edhUltimate rhv of
+        EdhBlob   !rhb -> exitEdhProc exit (EdhBlob $ lhb <> rhb)
+        EdhString !rhs -> exitEdhProc exit (EdhBlob $ lhb <> TE.encodeUtf8 rhs)
+        rhVal ->
+          throwEdh UsageError
+            $  "Should not (+) a "
+            <> T.pack (edhTypeNameOf rhVal)
+            <> " to a blob."
+    EdhString !lhs -> evalExpr rhExpr $ \(OriginalValue !rhv _ _) ->
+      edhValueStr (edhUltimate rhv) $ \(OriginalValue rhStr _ _) ->
+        case rhStr of
+          EdhString !rhs -> exitEdhProc exit (EdhString $ lhs <> rhs)
+          _              -> error "bug: edhValueStr returned non-string"
+    lhVal ->
       throwEdh EvalError
         $  "Invalid left-hand value for (+) operation: "
         <> T.pack (show lhVal)
@@ -42,9 +53,9 @@ addProc !lhExpr !rhExpr !exit =
 subsProc :: EdhIntrinsicOp
 subsProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
-    EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+    EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
-        EdhDecimal rhNum -> exitEdhProc exit (EdhDecimal $ lhNum - rhNum)
+        EdhDecimal !rhNum -> exitEdhProc exit (EdhDecimal $ lhNum - rhNum)
         _ ->
           throwEdh EvalError
             $  "Invalid right-hand value for (-) operation: "
@@ -59,9 +70,9 @@ subsProc !lhExpr !rhExpr !exit =
 mulProc :: EdhIntrinsicOp
 mulProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
-    EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+    EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
-        EdhDecimal rhNum -> exitEdhProc exit (EdhDecimal $ lhNum * rhNum)
+        EdhDecimal !rhNum -> exitEdhProc exit (EdhDecimal $ lhNum * rhNum)
         _ ->
           throwEdh EvalError
             $  "Invalid right-hand value for (*) operation: "
@@ -76,9 +87,9 @@ mulProc !lhExpr !rhExpr !exit =
 divProc :: EdhIntrinsicOp
 divProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
-    EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+    EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
-        EdhDecimal rhNum -> exitEdhProc exit (EdhDecimal $ lhNum / rhNum)
+        EdhDecimal !rhNum -> exitEdhProc exit (EdhDecimal $ lhNum / rhNum)
         _ ->
           throwEdh EvalError
             $  "Invalid right-hand value for (/) operation: "
@@ -93,14 +104,14 @@ divProc !lhExpr !rhExpr !exit =
 divIntProc :: EdhIntrinsicOp
 divIntProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
-    EdhDecimal lhNum -> case decimalToInteger lhNum of
+    EdhDecimal !lhNum -> case decimalToInteger lhNum of
       Nothing ->
         throwEdh EvalError
           $  "Not an integer as left-hand value for (//) operation: "
           <> T.pack (show lhNum)
       Just lhi -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
         case edhUltimate rhVal of
-          EdhDecimal rhNum -> case decimalToInteger rhNum of
+          EdhDecimal !rhNum -> case decimalToInteger rhNum of
             Nothing ->
               throwEdh EvalError
                 $  "Not an integer as right-hand value for (//) operation: "
@@ -121,14 +132,14 @@ divIntProc !lhExpr !rhExpr !exit =
 modIntProc :: EdhIntrinsicOp
 modIntProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
-    EdhDecimal lhNum -> case decimalToInteger lhNum of
+    EdhDecimal !lhNum -> case decimalToInteger lhNum of
       Nothing ->
         throwEdh EvalError
           $  "Not an integer as left-hand value for (%) operation: "
           <> T.pack (show lhNum)
       Just lhi -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
         case edhUltimate rhVal of
-          EdhDecimal rhNum -> case decimalToInteger rhNum of
+          EdhDecimal !rhNum -> case decimalToInteger rhNum of
             Nothing ->
               throwEdh EvalError
                 $  "Not an integer as right-hand value for (%) operation: "
@@ -149,7 +160,7 @@ modIntProc !lhExpr !rhExpr !exit =
 powProc :: EdhIntrinsicOp
 powProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
-    EdhDecimal lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+    EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
         EdhDecimal (Decimal rh'd rh'e rh'n) -> if rh'd /= 1
           then
@@ -314,9 +325,9 @@ doEdhComparison pgs exit lhVal rhVal cm = compareEdhValue lhVal rhVal >>= \case
 
 compareEdhValue :: EdhValue -> EdhValue -> STM (Maybe Ordering)
 compareEdhValue lhVal rhVal = case edhUltimate lhVal of
-  EdhDecimal lhNum -> case edhUltimate rhVal of
-    EdhDecimal rhNum -> return $ Just $ compare lhNum rhNum
-    _                -> return Nothing
+  EdhDecimal !lhNum -> case edhUltimate rhVal of
+    EdhDecimal !rhNum -> return $ Just $ compare lhNum rhNum
+    _                 -> return Nothing
   EdhString lhStr -> case edhUltimate rhVal of
     EdhString rhStr -> return $ Just $ compare lhStr rhStr
     _               -> return Nothing

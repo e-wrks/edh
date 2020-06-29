@@ -476,6 +476,16 @@ installEdhBatteries world = liftIO $ do
         $  [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp args
            | (mc, nm, hp, args) <-
              [ ( EdhMethod
+               , "__StringType_bytes__"
+               , strEncodeProc
+               , PackReceiver [mandatoryArg "str"]
+               )
+             , ( EdhMethod
+               , "__BlobType_utf8string__"
+               , blobDecodeProc
+               , PackReceiver [mandatoryArg "blob"]
+               )
+             , ( EdhMethod
                , "Symbol"
                , symbolCtorProc
                , PackReceiver [mandatoryArg "repr", RecvRestPosArgs "reprs"]

@@ -11,6 +11,7 @@ import           Control.Concurrent.STM
 
 import           Data.Unique
 import qualified Data.Text                     as T
+import qualified Data.Text.Encoding            as TE
 import qualified Data.HashMap.Strict           as Map
 
 import           Language.Edh.Control
@@ -18,6 +19,19 @@ import           Language.Edh.Event
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
 import           Language.Edh.Details.Utils
+
+
+strEncodeProc :: EdhProcedure
+strEncodeProc (ArgsPack [EdhString !str] !kwargs) !exit | Map.null kwargs =
+  exitEdhProc exit $ EdhBlob $ TE.encodeUtf8 str
+strEncodeProc _ _ =
+  throwEdh EvalError "bug: __StringType_bytes__ got unexpected args"
+
+blobDecodeProc :: EdhProcedure
+blobDecodeProc (ArgsPack [EdhBlob !blob] !kwargs) !exit | Map.null kwargs =
+  exitEdhProc exit $ EdhString $ TE.decodeUtf8 blob
+blobDecodeProc _ _ =
+  throwEdh EvalError "bug: __BlobType_utf8string__ got unexpected args"
 
 
 -- | operator (@) - attribute key dereferencing
@@ -261,13 +275,23 @@ reprProc (ArgsPack !args !kwargs) !exit = do
 -- | operator (++) - string coercing concatenator
 concatProc :: EdhIntrinsicOp
 concatProc !lhExpr !rhExpr !exit =
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
-    edhValueStr lhVal $ \(OriginalValue lhStr _ _) -> case lhStr of
-      EdhString !lhs -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-        edhValueStr (edhDeCaseClose rhVal) $ \(OriginalValue rhStr _ _) ->
-          case rhStr of
-            EdhString !rhs -> exitEdhProc exit (EdhString $ lhs <> rhs)
-            _              -> error "bug: edhValueStr returned non-string"
+  evalExpr lhExpr $ \(OriginalValue !lhv _ _) -> case edhUltimate lhv of
+    EdhBlob !lhBlob -> evalExpr rhExpr $ \(OriginalValue !rhv _ _) ->
+      case edhUltimate rhv of
+        EdhBlob !rhBlob -> exitEdhProc exit $ EdhBlob $ lhBlob <> rhBlob
+        EdhString !rhStr ->
+          exitEdhProc exit $ EdhBlob $ lhBlob <> TE.encodeUtf8 rhStr
+        rhVal ->
+          throwEdh UsageError
+            $  "Should not (++) a "
+            <> T.pack (edhTypeNameOf rhVal)
+            <> " to a blob."
+    lhVal -> edhValueStr lhVal $ \(OriginalValue lhStr _ _) -> case lhStr of
+      EdhString !lhs -> evalExpr rhExpr $ \(OriginalValue !rhv _ _) ->
+        edhValueStr (edhDeCaseClose $ edhUltimate rhv)
+          $ \(OriginalValue rhStr _ _) -> case rhStr of
+              EdhString !rhs -> exitEdhProc exit (EdhString $ lhs <> rhs)
+              _              -> error "bug: edhValueStr returned non-string"
       _ -> error "bug: edhValueStr returned non-string"
 
 
