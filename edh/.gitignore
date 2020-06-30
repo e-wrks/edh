@@ -1,10 +1,26 @@
+
+# System/Editor garbage
 *~
 *.swp
+.DS_Store
+Thumbs.db
+
+# log files
+*.log
+
+# Haskell projects
 tarballs/
 .stack-work/
 stack.yaml.lock
-/dist/
-/dist-newstyle/
-result
+dist/
+dist-newstyle/
 .ghc.environment*
 cabal.project.local
+
+# Nix
+result
+
+# vscode extensions
+*/node_modules/
+*/out/
+*/.vs/

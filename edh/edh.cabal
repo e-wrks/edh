@@ -2,7 +2,7 @@ cabal-version: 2.4
 name: edh
 version: 0.3.0.0
 license: BSD-3-Clause
-copyright: 2019 Compl Yue
+copyright: Compl Yue
 maintainer: compl.yue@icloud.com
 author: Compl Yue
 stability: experimental
