@@ -4,18 +4,18 @@ export {
   # resembles `range` in Python
   generator range( start, stop=None, step=None ) {
 
-    if None == stop && None == step then case start of {
+    if stop is None && step is None then case start of {
       # enable the hidden *Edhic* version of `range` using pair
       { ( start:stop:step ) } -> { fallthrough }
       { ( start:stop ) } -> { fallthrough }
     }
 
-    if None == stop then { let ( stop, start ) = ( start, 0 ) }
+    if stop is None then { let ( stop, start ) = ( start, 0 ) }
     start == stop -> { return nil }
     n = start
 
     start < stop -> {
-      if None == step
+      if step is None
       then step = 1
       else if step <= 0 then {
         console.warn <| 'step of ' ++ step ++ ' for range [' ++
@@ -29,7 +29,7 @@ export {
     }
 
     start > stop -> {
-      if None == step
+      if step is None
       then step = -1
       else if step >= 0 then {
         console.warn <| 'step of ' ++ step ++ ' for range [' ++
