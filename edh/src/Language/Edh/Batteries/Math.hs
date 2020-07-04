@@ -9,7 +9,6 @@ import           Control.Concurrent.STM
 
 import qualified Data.Text                     as T
 import qualified Data.Text.Encoding            as TE
-import qualified Data.HashMap.Strict           as Map
 
 import           Data.Lossless.Decimal
 
@@ -203,62 +202,35 @@ logicalOrProc !lhExpr !rhExpr !exit =
       (edhTypeNameOf lhVal)
 
 
--- | operator (~=)
+-- | operator (==)
 valEqProc :: EdhIntrinsicOp
 valEqProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
-  let
-    cmp2List :: [EdhValue] -> [EdhValue] -> STM Bool
-    cmp2List []               []               = return True
-    cmp2List (_ : _)          []               = return False
-    cmp2List []               (_     : _     ) = return False
-    cmp2List (lhVal : lhRest) (rhVal : rhRest) = cmp2Val lhVal rhVal >>= \case
-      False -> return False
-      True  -> cmp2List lhRest rhRest
-    cmp2Map :: [(ItemKey, EdhValue)] -> [(ItemKey, EdhValue)] -> STM Bool
-    cmp2Map []      []      = return True
-    cmp2Map (_ : _) []      = return False
-    cmp2Map []      (_ : _) = return False
-    cmp2Map ((lhKey, lhVal) : lhRest) ((rhKey, rhVal) : rhRest) =
-      if lhKey /= rhKey
-        then return False
-        else cmp2Val lhVal rhVal >>= \case
-          False -> return False
-          True  -> cmp2Map lhRest rhRest
-    cmp2Val :: EdhValue -> EdhValue -> STM Bool
-    cmp2Val lhVal rhVal = if lhVal == rhVal
-      then return True
-      else case edhUltimate lhVal of
-        EdhList (List _ lhll) -> case edhUltimate rhVal of
-          EdhList (List _ rhll) -> do
-            lhl <- readTVar lhll
-            rhl <- readTVar rhll
-            cmp2List lhl rhl
-          _ -> return False
-        EdhDict (Dict _ lhd) -> case edhUltimate rhVal of
-          EdhDict (Dict _ rhd) -> do
-            lhm <- readTVar lhd
-            rhm <- readTVar rhd
-            cmp2Map (Map.toList lhm) (Map.toList rhm)
-          _ -> return False
-        _ -> return False
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> if lhVal == rhVal
       then exitEdhProc exit true
-      else contEdhSTM $ cmp2Val lhVal rhVal >>= \conclusion ->
+      else contEdhSTM $ edhValueEqual pgs lhVal rhVal $ \ !conclusion ->
         exitEdhSTM pgs exit (EdhBool conclusion)
 
+-- | operator (!=)
+idNeProc :: EdhIntrinsicOp
+idNeProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
+  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
+    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> if lhVal == rhVal
+      then exitEdhProc exit false
+      else contEdhSTM $ edhValueEqual pgs lhVal rhVal $ \ !conclusion ->
+        exitEdhSTM pgs exit (EdhBool $ not conclusion)
 
--- | operator (==)
+-- | operator (is)
 idEqProc :: EdhIntrinsicOp
 idEqProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       exitEdhProc exit (EdhBool $ lhVal == rhVal)
 
--- | operator (!=)
-idNeProc :: EdhIntrinsicOp
-idNeProc !lhExpr !rhExpr !exit =
+-- | operator (is not) (not is)
+idNotEqProc :: EdhIntrinsicOp
+idNotEqProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       exitEdhProc exit (EdhBool $ lhVal /= rhVal)

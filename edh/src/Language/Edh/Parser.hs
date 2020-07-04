@@ -627,7 +627,12 @@ parseOpName :: Parser Text
 parseOpName = between (symbol "(") (symbol ")") parseOpLit
 
 parseOpLit :: Parser Text
-parseOpLit = lexeme $ takeWhile1P (Just "operator symbol") isOperatorChar
+parseOpLit = choice
+  [ lexeme $ takeWhile1P (Just "operator symbol") isOperatorChar
+  , keyword "is not"
+  , keyword "is"
+  , keyword "not is"
+  ]
 
 parseDictOrBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseDictOrBlock !si0 = symbol "{"

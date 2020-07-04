@@ -326,16 +326,22 @@ installEdhBatteries world = liftIO $ do
           , 8
           )
         -- comparations
-        , ( "~="
-          , 4
-          ) -- deep-value-wise equality test
         , ( "=="
           , 4
-          ) -- identity-wise equality test
+          ) -- deep-value-wise equality test
         , ( "!="
           , 4
           ) -- inversed identity-wise equality test
             -- C style here, as (/=) is used for inplace division
+        , ( "is not"
+          , 4
+          ) -- identity-wise negative equality test
+        , ( "is"
+          , 4
+          ) -- identity-wise equality test
+        , ( "not is"
+          , 4
+          ) -- another form of `is not`
         , (">" , 4)
         , (">=", 4)
         , ("<" , 4)
@@ -427,155 +433,157 @@ installEdhBatteries world = liftIO $ do
       !rootOperators <- sequence
         [ (AttrByName sym, ) <$> mkIntrinsicOp world sym iop
         | (sym, iop) <-
-          [ ("@"  , attrDerefAddrProc)
-          , ("$"  , fapProc)
-          , ("|"  , ffapProc)
-          , (":=" , defProc)
-          , ("?:=", defMissingProc)
-          , (":"  , pairCtorProc)
-          , ("?"  , attrTemptProc)
-          , ("?@" , attrDerefTemptProc)
-          , ("++" , concatProc)
-          , ("=<" , cprhProc)
-          , ("?<=", elemProc)
-          , ("|*" , isPrefixOfProc)
-          , ("*|" , hasSuffixProc)
-          , ("=>" , prpdProc)
-          , (">>" , lstrvrsPrpdProc)
-          , ("<-" , evtPubProc)
-          , ("+"  , addProc)
-          , ("-"  , subsProc)
-          , ("*"  , mulProc)
-          , ("/"  , divProc)
-          , ("//" , divIntProc)
-          , ("%"  , modIntProc)
-          , ("**" , powProc)
-          , ("&&" , logicalAndProc)
-          , ("||" , logicalOrProc)
-          , ("~=" , valEqProc)
-          , ("==" , idEqProc)
-          , ("!=" , idNeProc)
-          , (">"  , isGtProc)
-          , (">=" , isGeProc)
-          , ("<"  , isLtProc)
-          , ("<=" , isLeProc)
-          , ("="  , assignProc)
-          , ("?=" , assignMissingProc)
-          , ("->" , branchProc)
-          , ("$=>", catchProc)
-          , ("@=>", finallyProc)
-          , ("::" , annoProc)
-          , ("<|" , loggingProc)
+          [ ("@"     , attrDerefAddrProc)
+          , ("$"     , fapProc)
+          , ("|"     , ffapProc)
+          , (":="    , defProc)
+          , ("?:="   , defMissingProc)
+          , (":"     , pairCtorProc)
+          , ("?"     , attrTemptProc)
+          , ("?@"    , attrDerefTemptProc)
+          , ("++"    , concatProc)
+          , ("=<"    , cprhProc)
+          , ("?<="   , elemProc)
+          , ("|*"    , isPrefixOfProc)
+          , ("*|"    , hasSuffixProc)
+          , ("=>"    , prpdProc)
+          , (">>"    , lstrvrsPrpdProc)
+          , ("<-"    , evtPubProc)
+          , ("+"     , addProc)
+          , ("-"     , subsProc)
+          , ("*"     , mulProc)
+          , ("/"     , divProc)
+          , ("//"    , divIntProc)
+          , ("%"     , modIntProc)
+          , ("**"    , powProc)
+          , ("&&"    , logicalAndProc)
+          , ("||"    , logicalOrProc)
+          , ("=="    , valEqProc)
+          , ("is not", idNotEqProc)
+          , ("is"    , idEqProc)
+          , ("not is", idNotEqProc)
+          , ("!="    , idNeProc)
+          , (">"     , isGtProc)
+          , (">="    , isGeProc)
+          , ("<"     , isLtProc)
+          , ("<="    , isLeProc)
+          , ("="     , assignProc)
+          , ("?="    , assignMissingProc)
+          , ("->"    , branchProc)
+          , ("$=>"   , catchProc)
+          , ("@=>"   , finallyProc)
+          , ("::"    , annoProc)
+          , ("<|"    , loggingProc)
           ]
         ]
 
       -- global procedures at world root scope
       !rootProcs <-
         sequence
-        $  [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp args
-           | (mc, nm, hp, args) <-
-             [ ( EdhMethod
-               , "__StringType_bytes__"
-               , strEncodeProc
-               , PackReceiver [mandatoryArg "str"]
-               )
-             , ( EdhMethod
-               , "__BlobType_utf8string__"
-               , blobDecodeProc
-               , PackReceiver [mandatoryArg "blob"]
-               )
-             , ( EdhMethod
-               , "Symbol"
-               , symbolCtorProc
-               , PackReceiver [mandatoryArg "repr", RecvRestPosArgs "reprs"]
-               )
-             , ( EdhMethod
-               , "__ArgsPackType_args__"
-               , apkArgsProc
-               , PackReceiver [mandatoryArg "apk"]
-               )
-             , ( EdhMethod
-               , "__ArgsPackType_kwargs__"
-               , apkKwrgsProc
-               , PackReceiver [mandatoryArg "apk"]
-               )
-             , (EdhMethod, "repr", reprProc  , WildReceiver)
-             , (EdhMethod, "dict", dictProc  , WildReceiver)
-             , (EdhMethod, "null", isNullProc, WildReceiver)
-             , (EdhMethod, "type", typeProc  , WildReceiver)
-             , ( EdhMethod
-               , "__IntrinsicType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__ClassType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__HostClassType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__MethodType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__HostMethodType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__OperatorType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__HostOperType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__GeneratorType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__HostGenrType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , (EdhMethod, "constructor", ctorProc       , WildReceiver)
-             , (EdhMethod, "supers"     , supersProc     , WildReceiver)
-             , (EdhMethod, "scope"      , scopeObtainProc, PackReceiver [])
-             , ( EdhMethod
-               , "makeOp"
-               , makeOpProc
-               , PackReceiver
-                 [mandatoryArg "lhe", mandatoryArg "opSym", mandatoryArg "rhe"]
-               )
-             , (EdhMethod, "mre", mreProc, PackReceiver [mandatoryArg "evs"])
-             , (EdhMethod, "eos", eosProc, PackReceiver [mandatoryArg "evs"])
-             , ( EdhMethod
-               , "__DictType_size__"
-               , dictSizeProc
-               , PackReceiver [mandatoryArg "d"]
-               )
-             , ( EdhMethod
-               , "__ListType_push__"
-               , listPushProc
-               , PackReceiver [mandatoryArg "l"]
-               )
-             , ( EdhMethod
-               , "__ListType_pop__"
-               , listPopProc
-               , PackReceiver [mandatoryArg "l"]
-               )
-             ]
-           ]
+          $ [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp args
+            | (mc, nm, hp, args) <-
+              [ ( EdhMethod
+                , "__StringType_bytes__"
+                , strEncodeProc
+                , PackReceiver [mandatoryArg "str"]
+                )
+              , ( EdhMethod
+                , "__BlobType_utf8string__"
+                , blobDecodeProc
+                , PackReceiver [mandatoryArg "blob"]
+                )
+              , ( EdhMethod
+                , "Symbol"
+                , symbolCtorProc
+                , PackReceiver [mandatoryArg "repr", RecvRestPosArgs "reprs"]
+                )
+              , ( EdhMethod
+                , "__ArgsPackType_args__"
+                , apkArgsProc
+                , PackReceiver [mandatoryArg "apk"]
+                )
+              , ( EdhMethod
+                , "__ArgsPackType_kwargs__"
+                , apkKwrgsProc
+                , PackReceiver [mandatoryArg "apk"]
+                )
+              , (EdhMethod, "repr", reprProc  , WildReceiver)
+              , (EdhMethod, "dict", dictProc  , WildReceiver)
+              , (EdhMethod, "null", isNullProc, WildReceiver)
+              , (EdhMethod, "type", typeProc  , WildReceiver)
+              , ( EdhMethod
+                , "__IntrinsicType_name__"
+                , procNameProc
+                , PackReceiver [mandatoryArg "p"]
+                )
+              , ( EdhMethod
+                , "__ClassType_name__"
+                , procNameProc
+                , PackReceiver [mandatoryArg "p"]
+                )
+              , ( EdhMethod
+                , "__HostClassType_name__"
+                , procNameProc
+                , PackReceiver [mandatoryArg "p"]
+                )
+              , ( EdhMethod
+                , "__MethodType_name__"
+                , procNameProc
+                , PackReceiver [mandatoryArg "p"]
+                )
+              , ( EdhMethod
+                , "__HostMethodType_name__"
+                , procNameProc
+                , PackReceiver [mandatoryArg "p"]
+                )
+              , ( EdhMethod
+                , "__OperatorType_name__"
+                , procNameProc
+                , PackReceiver [mandatoryArg "p"]
+                )
+              , ( EdhMethod
+                , "__HostOperType_name__"
+                , procNameProc
+                , PackReceiver [mandatoryArg "p"]
+                )
+              , ( EdhMethod
+                , "__GeneratorType_name__"
+                , procNameProc
+                , PackReceiver [mandatoryArg "p"]
+                )
+              , ( EdhMethod
+                , "__HostGenrType_name__"
+                , procNameProc
+                , PackReceiver [mandatoryArg "p"]
+                )
+              , (EdhMethod, "constructor", ctorProc       , WildReceiver)
+              , (EdhMethod, "supers"     , supersProc     , WildReceiver)
+              , (EdhMethod, "scope"      , scopeObtainProc, PackReceiver [])
+              , ( EdhMethod
+                , "makeOp"
+                , makeOpProc
+                , PackReceiver
+                  [mandatoryArg "lhe", mandatoryArg "opSym", mandatoryArg "rhe"]
+                )
+              , (EdhMethod, "mre", mreProc, PackReceiver [mandatoryArg "evs"])
+              , (EdhMethod, "eos", eosProc, PackReceiver [mandatoryArg "evs"])
+              , ( EdhMethod
+                , "__DictType_size__"
+                , dictSizeProc
+                , PackReceiver [mandatoryArg "d"]
+                )
+              , ( EdhMethod
+                , "__ListType_push__"
+                , listPushProc
+                , PackReceiver [mandatoryArg "l"]
+                )
+              , ( EdhMethod
+                , "__ListType_pop__"
+                , listPopProc
+                , PackReceiver [mandatoryArg "l"]
+                )
+              ]
+            ]
 
       !conEntity <- createHashEntity $ Map.fromList
         [ (AttrByName "__repr__", EdhString "<console>")
