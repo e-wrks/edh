@@ -41,7 +41,6 @@ import           Data.Lossless.Decimal         as D
 import           Language.Edh.Runtime
 
 import           Language.Edh.Batteries.Data
-import           Language.Edh.Batteries.Vector
 import           Language.Edh.Batteries.Math
 import           Language.Edh.Batteries.Assign
 import           Language.Edh.Batteries.Reflect
@@ -576,9 +575,6 @@ installEdhBatteries world = liftIO $ do
                , PackReceiver [mandatoryArg "l"]
                )
              ]
-           ]
-        ++ [ (AttrByName nm, ) <$> mkHostClass rootScope nm True hc
-           | (nm, hc) <- [("Vector", vecHostCtor), ("MVector", mvecHostCtor)]
            ]
 
       !conEntity <- createHashEntity $ Map.fromList
