@@ -357,15 +357,9 @@ branchProc !lhExpr !rhExpr !exit = do
 
     -- value-wise matching against the target in context
     _ -> evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
-      let namelyMatch :: EdhValue -> EdhValue -> Bool
-          namelyMatch (EdhNamedValue x'n x'v) (EdhNamedValue y'n y'v) =
-              x'n == y'n && x'v == y'v
-          namelyMatch EdhNamedValue{} _               = False
-          namelyMatch _               EdhNamedValue{} = False
-          namelyMatch x               y               = x == y
-      in  if not $ namelyMatch (edhDeCaseClose lhVal) ctxMatch
-            then exitEdhProc exit EdhCaseOther
-            else contEdhSTM $ branchMatched []
+      contEdhSTM $ edhNamelyEqual pgs (edhDeCaseClose lhVal) ctxMatch $ \case
+        True  -> branchMatched []
+        False -> exitEdhSTM pgs exit EdhCaseOther
 
 
 -- | `Nothing` means invalid pattern, `[]` means no match, non-empty list is

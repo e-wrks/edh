@@ -226,14 +226,14 @@ idEqProc :: EdhIntrinsicOp
 idEqProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      exitEdhProc exit (EdhBool $ lhVal == rhVal)
+      exitEdhProc exit (EdhBool $ edhIdentEqual lhVal rhVal)
 
 -- | operator (is not) (not is)
 idNotEqProc :: EdhIntrinsicOp
 idNotEqProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      exitEdhProc exit (EdhBool $ lhVal /= rhVal)
+      exitEdhProc exit (EdhBool $ not $ edhIdentEqual lhVal rhVal)
 
 
 -- | operator (>)

@@ -3200,6 +3200,21 @@ edhValueNull !pgs (EdhObject !o) !exit =
 edhValueNull _ _ !exit = exit False
 
 
+edhIdentEqual :: EdhValue -> EdhValue -> Bool
+edhIdentEqual (EdhNamedValue x'n x'v) (EdhNamedValue y'n y'v) =
+  x'n == y'n && edhIdentEqual x'v y'v
+edhIdentEqual EdhNamedValue{} _               = False
+edhIdentEqual _               EdhNamedValue{} = False
+edhIdentEqual x               y               = x == y
+
+edhNamelyEqual
+  :: EdhProgState -> EdhValue -> EdhValue -> (Bool -> STM ()) -> STM ()
+edhNamelyEqual !pgs (EdhNamedValue !x'n !x'v) (EdhNamedValue !y'n !y'v) !exit =
+  if x'n /= y'n then exit False else edhNamelyEqual pgs x'v y'v exit
+edhNamelyEqual _ EdhNamedValue{} _ !exit = exit False
+edhNamelyEqual _ _ EdhNamedValue{} !exit = exit False
+edhNamelyEqual !pgs !x !y !exit = edhValueEqual pgs x y exit
+
 edhValueEqual
   :: EdhProgState -> EdhValue -> EdhValue -> (Bool -> STM ()) -> STM ()
 edhValueEqual !pgs !lhVal !rhVal !exit = if lhVal == rhVal
@@ -3264,30 +3279,30 @@ edhValueEqual !pgs !lhVal !rhVal !exit = if lhVal == rhVal
           <> ": "
           <> T.pack (show badEqMth)
     _ -> case edhUltimate rhVal of
-        EdhObject !rhObj ->
-          lookupEdhObjAttr pgs rhObj (AttrByName "==") >>= \case
-            EdhNil -> exit False
-            EdhMethod !mth'proc ->
-              runEdhProc pgs
-                $ callEdhMethod rhObj mth'proc (ArgsPack [lhVal] Map.empty) id
-                $ \(OriginalValue !conclusionVal _ _) ->
-                    case edhUltimate conclusionVal of
-                      EdhBool !conclusion -> contEdhSTM $ exit conclusion
-                      !badConclusion ->
-                        throwEdh UsageError
-                          $  "Bool return expected but magic method (==) on "
-                          <> T.pack (show rhObj)
-                          <> " returned a "
-                          <> T.pack (edhTypeNameOf badConclusion)
-            !badEqMth ->
-              throwEdhSTM pgs UsageError
-                $  "Malformed magic method (==) on "
-                <> T.pack (show rhObj)
-                <> " - "
-                <> T.pack (edhTypeNameOf badEqMth)
-                <> ": "
-                <> T.pack (show badEqMth)
-        _ -> exit False
+      EdhObject !rhObj ->
+        lookupEdhObjAttr pgs rhObj (AttrByName "==") >>= \case
+          EdhNil -> exit False
+          EdhMethod !mth'proc ->
+            runEdhProc pgs
+              $ callEdhMethod rhObj mth'proc (ArgsPack [lhVal] Map.empty) id
+              $ \(OriginalValue !conclusionVal _ _) ->
+                  case edhUltimate conclusionVal of
+                    EdhBool !conclusion -> contEdhSTM $ exit conclusion
+                    !badConclusion ->
+                      throwEdh UsageError
+                        $  "Bool return expected but magic method (==) on "
+                        <> T.pack (show rhObj)
+                        <> " returned a "
+                        <> T.pack (edhTypeNameOf badConclusion)
+          !badEqMth ->
+            throwEdhSTM pgs UsageError
+              $  "Malformed magic method (==) on "
+              <> T.pack (show rhObj)
+              <> " - "
+              <> T.pack (edhTypeNameOf badEqMth)
+              <> ": "
+              <> T.pack (show badEqMth)
+      _ -> exit False
  where
   cmp2List :: [EdhValue] -> [EdhValue] -> (Bool -> STM ()) -> STM ()
   cmp2List []      []      !exit' = exit' True
