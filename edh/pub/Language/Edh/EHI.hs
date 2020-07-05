@@ -63,9 +63,6 @@ module Language.Edh.EHI
   , haltEdhProgram
   , runEdhProgram
   , runEdhProgram'
-  , viewAsEdhObject
-  , createEdhObject
-  , constructEdhObject
   , edhMakeCall
   , edhMakeCall'
   , callEdhMethod
@@ -150,6 +147,12 @@ module Language.Edh.EHI
   , createMaoEntity
   , createHashEntity
   , createSideEntity
+  , withThisEntityStore
+  , withThatEntityStore
+  , viewAsEdhObject
+  , cloneEdhObject
+  , createEdhObject
+  , constructEdhObject
   , AttrKey(..)
   , attrKeyValue
   , lookupEdhCtxAttr
@@ -167,6 +170,9 @@ module Language.Edh.EHI
   , edhTypeNameOf
   , edhTypeOf
   , edhValueNull
+  , edhIdentEqual
+  , edhNamelyEqual
+  , edhValueEqual
   , edhValueRepr
   , edhValueReprSTM
   , EdhValue(..)
@@ -200,6 +206,9 @@ module Language.Edh.EHI
     -- * args pack parsing
   , ArgsPackParser(..)
   , parseArgsPack
+
+    -- * misc
+  , edhRegulateIndex
   )
 where
 

@@ -410,7 +410,25 @@ instance Show Object where
 -- | View an entity as object of specified class with specified ancestors
 -- this is the black magic you want to avoid
 viewAsEdhObject :: Entity -> Class -> [Object] -> STM Object
-viewAsEdhObject ent cls supers = Object ent cls <$> newTVar supers
+viewAsEdhObject !ent !cls !supers = Object ent cls <$> newTVar supers
+
+-- | Clone an Edh object, with the specified function to clone the 'Dynamic'
+-- entity store, while the 'EntityManipulater' is inherited.
+--
+-- CAVEATS:
+--  *) the out-of-band storage if present, is referenced rather than copied
+--  *) all super objects are referenced rather than deep copied
+cloneEdhObject
+  :: Object
+  -> (Dynamic -> (Dynamic -> STM ()) -> STM ())
+  -> (Object -> STM ())
+  -> STM ()
+cloneEdhObject (Object (Entity _ !esv !esm) !cls !supers) !esClone !exit =
+  (readTVar esv >>=) $ flip esClone $ \ !esd' -> do
+    !esv'    <- newTVar esd'
+    !supers' <- newTVar =<< readTVar supers
+    !u       <- unsafeIOToSTM newUnique
+    exit $ Object (Entity u esv' esm) cls supers'
 
 
 -- | A world for Edh programs to change

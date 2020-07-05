@@ -3461,3 +3461,49 @@ edhValueStr :: EdhValue -> EdhProcExit -> EdhProc
 edhValueStr s@EdhString{} !exit' = exitEdhProc exit' s
 edhValueStr !v            !exit' = edhValueRepr v exit'
 
+
+withThisEntityStore
+  :: forall a . Typeable a => (EdhProgState -> a -> STM ()) -> EdhProc
+withThisEntityStore !exit = ask >>= \ !pgs ->
+  contEdhSTM
+    $   fromDynamic
+    <$> readTVar
+          (entity'store $ objEntity $ thisObject $ contextScope $ edh'context
+            pgs
+          )
+    >>= \case
+          Nothing ->
+            throwEdhSTM pgs UsageError "bug: unexpected entity storage type"
+
+          Just !esd -> exit pgs esd
+
+withThatEntityStore
+  :: forall a . Typeable a => (EdhProgState -> a -> STM ()) -> EdhProc
+withThatEntityStore !exit = ask >>= \ !pgs ->
+  contEdhSTM
+    $   fromDynamic
+    <$> readTVar
+          (entity'store $ objEntity $ thatObject $ contextScope $ edh'context
+            pgs
+          )
+    >>= \case
+          Nothing ->
+            throwEdhSTM pgs UsageError "bug: unexpected entity storage type"
+
+          Just !esd -> exit pgs esd
+
+
+edhRegulateIndex :: EdhProgState -> Int -> Int -> (Int -> STM ()) -> STM ()
+edhRegulateIndex !pgs !len !idx !exit =
+  let !posIdx = if idx < 0  -- Python style negative index
+        then idx + len
+        else idx
+  in  if posIdx < 0 || posIdx >= len
+        then
+          throwEdhSTM pgs EvalError
+          $  "Index out of bounds: "
+          <> T.pack (show idx)
+          <> " vs "
+          <> T.pack (show len)
+        else exit posIdx
+
