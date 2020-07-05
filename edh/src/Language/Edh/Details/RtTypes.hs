@@ -416,7 +416,8 @@ viewAsEdhObject !ent !cls !supers = Object ent cls <$> newTVar supers
 -- entity store, while the 'EntityManipulater' is inherited.
 --
 -- CAVEATS:
---  *) the out-of-band storage if present, is referenced rather than copied
+--  *) the out-of-band storage if present, is referenced (via inherited 
+--     'EntityManipulater') rather than copied
 --  *) all super objects are referenced rather than deep copied
 cloneEdhObject
   :: Object
