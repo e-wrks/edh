@@ -93,6 +93,7 @@ module Language.Edh.EHI
   , throwEdhSTM
   , createEdhError
   , toEdhError
+  , toEdhError'
   , fromEdhError
   , getEdhErrClass
     -- ** CPS helpers
@@ -146,9 +147,12 @@ module Language.Edh.EHI
   , updateEntityAttrs
   , createMaoEntity
   , createHashEntity
+  , createSideEntityManipulater
   , createSideEntity
   , withThisEntityStore
+  , withThisEntityStore'
   , withThatEntityStore
+  , withThatEntityStore'
   , viewAsEdhObject
   , cloneEdhObject
   , createEdhObject

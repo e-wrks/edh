@@ -8,7 +8,6 @@ import           Prelude
 import           GHC.Conc                       ( unsafeIOToSTM )
 import           System.IO.Unsafe
 
-import           Control.Exception
 import           Control.Monad.Except
 import           Control.Monad.Reader
 
@@ -201,11 +200,20 @@ createHashEntity !m = do
     return . toDyn . Map.union (Map.fromList ps) . hm
 
 
--- | Create an entity with an out-of-band 'Data.HashMap.Strict.HashMap'
--- as backing storage
-createSideEntity :: Bool -> STM (Entity, TVar (Map.HashMap AttrKey EdhValue))
-createSideEntity !writeProtected = do
-  obs <- newTVar Map.empty
+-- | Create an entity with an out-of-band storage manipulater and an in-band
+-- 'Dynamic' storage
+createSideEntity :: EntityManipulater -> Dynamic -> STM Entity
+createSideEntity !manip !esd = do
+  u  <- unsafeIOToSTM newUnique
+  es <- newTVar esd
+  return $ Entity u es manip
+
+-- | Create an entity manipulater with an out-of-band
+-- 'Data.HashMap.Strict.HashMap' as backing storage
+createSideEntityManipulater
+  :: Bool -> [(AttrKey, EdhValue)] -> STM EntityManipulater
+createSideEntityManipulater !writeProtected !arts = do
+  obs <- newTVar $ Map.fromList arts
   let the'lookup'entity'attr _ !k _ =
         fromMaybe EdhNil . Map.lookup k <$> readTVar obs
       the'all'entity'attrs _ _ = Map.toList <$> readTVar obs
@@ -225,15 +233,10 @@ createSideEntity !writeProtected = do
         else do
           modifyTVar' obs $ Map.union (Map.fromList ps)
           return inband
-  u  <- unsafeIOToSTM newUnique
-  es <- newTVar $ toDyn nil -- put a nil in-band atm
-  return
-    ( Entity u es $ EntityManipulater the'lookup'entity'attr
-                                      the'all'entity'attrs
-                                      the'change'entity'attr
-                                      the'update'entity'attrs
-    , obs
-    )
+  return $ EntityManipulater the'lookup'entity'attr
+                             the'all'entity'attrs
+                             the'change'entity'attr
+                             the'update'entity'attrs
 
 
 -- | A symbol can stand in place of an alphanumeric name, used to
@@ -1412,18 +1415,19 @@ mkHostProc !scope !vc !nm !p !args = do
 
 type EdhHostCtor
   =  EdhProgState
-  -> ArgsPack -- ctor args, if __init__() is provided, will go there too
-  -> TVar (Map.HashMap AttrKey EdhValue)  -- out-of-band attr store
-  -> (Dynamic -> STM ())  -- in-band data to be written to entity store
+  -- | ctor args, if __init__() is provided, will go there too
+  -> ArgsPack
+  -- | exit for in-band data to be written to entity store
+  -> (Dynamic -> STM ())
   -> STM ()
 
 mkHostClass
   :: Scope -- ^ outer lexical scope
   -> Text  -- ^ class name
-  -> Bool  -- ^ write protect the out-of-band attribute store
-  -> EdhHostCtor
+  -> EdhHostCtor -- ^ instance constructor
+  -> EntityManipulater -- ^ custom entity storage manipulater
   -> STM EdhValue
-mkHostClass !scope !nm !writeProtected !hc = do
+mkHostClass !scope !nm !hc !esm = do
   classUniq <- unsafeIOToSTM newUnique
   let !cls = ProcDefi
         { procedure'uniq = classUniq
@@ -1435,45 +1439,10 @@ mkHostClass !scope !nm !writeProtected !hc = do
                                     }
         }
       ctor :: EdhProcedure
-      ctor !apk !exit = do
-        -- note: cross check logic here with `createEdhObject`
-        pgs <- ask
-        contEdhSTM $ do
-          (ent, obs) <- createSideEntity writeProtected
-          !newThis   <- viewAsEdhObject ent cls []
-          let ctx     = edh'context pgs
-              pgsCtor = pgs { edh'context = ctorCtx }
-              ctorCtx = ctx { callStack = ctorScope :| NE.tail (callStack ctx)
-                            , contextExporting = False
-                            , contextEffDefining = False
-                            }
-              ctorScope = Scope { scopeEntity      = ent
-                                , thisObject       = newThis
-                                , thatObject       = newThis
-                                , scopeProc        = cls
-                                , scopeCaller      = contextStmt ctx
-                                , exceptionHandler = defaultEdhExcptHndlr
-                                , effectsStack     = []
-                                }
-          hc pgsCtor apk obs $ \esd -> do
-            writeTVar (entity'store ent) esd
-            exitEdhSTM pgs exit $ EdhObject newThis
+      ctor !apk !exit = ask >>= \ !pgs -> contEdhSTM $ hc pgs apk $ \ !esd ->
+        do
+          !ent     <- createSideEntity esm esd
+          !newThis <- viewAsEdhObject ent cls []
+          exitEdhSTM pgs exit $ EdhObject newThis
   return $ EdhClass cls
-
-
-edhErrorCtor :: SomeException -> EdhHostCtor
-edhErrorCtor !e !pgs !apk !obs !ctorExit = do
-  let __repr__ :: EdhProcedure
-      __repr__ _ !exit = exitEdhProc exit $ EdhString $ T.pack $ show e
-  methods <- sequence
-    [ (AttrByName nm, ) <$> mkHostProc scope vc nm hp args
-    | (nm, vc, hp, args) <- [("__repr__", EdhMethod, __repr__, PackReceiver [])]
-    ]
-  modifyTVar' obs
-    $  Map.union
-    $  Map.fromList
-    $  methods -- todo expose more attrs to aid handling
-    ++ [(AttrByName "details", EdhArgsPack apk)]
-  ctorExit $ toDyn e
-  where !scope = contextScope $ edh'context pgs
 

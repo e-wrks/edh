@@ -1889,19 +1889,25 @@ fromEdhError !pgs !exv !exit = case exv of
       $ getEdhCallContext 0 pgs
   EdhObject !exo -> do
     esd <- readTVar $ entity'store $ objEntity exo
-    case fromDynamic esd :: Maybe SomeException of
-      Just e -> exit e
-      _      -> ioErr
+    case fromDynamic esd of
+      Just (e :: SomeException, _apk :: ArgsPack) -> exit e
+      Nothing -> case fromDynamic esd of
+        Just (e :: SomeException) -> exit e
+        Nothing                   -> ioErr
   _ -> ioErr
  where
   ioErr = edhValueReprSTM pgs exv $ \exr ->
     exit $ toException $ EdhError EvalError exr $ getEdhCallContext 0 pgs
 
--- | Convert an arbitrary exception to Edh error
+-- | Convert an arbitrary exception to an Edh error
 toEdhError :: EdhProgState -> SomeException -> (EdhValue -> STM ()) -> STM ()
-toEdhError !pgs !e !exit = case fromException e :: Maybe EdhError of
-  Just err -> case err of
-    EdhError et _ _ -> getEdhErrClass pgs et >>= withErrCls
+toEdhError !pgs !e !exit = toEdhError' pgs e (ArgsPack [] Map.empty) exit
+-- | Convert an arbitrary exception plus details to an Edh error
+toEdhError'
+  :: EdhProgState -> SomeException -> ArgsPack -> (EdhValue -> STM ()) -> STM ()
+toEdhError' !pgs !e !details !exit = case fromException e :: Maybe EdhError of
+  Just !err -> case err of
+    EdhError !et _ _ -> getEdhErrClass pgs et >>= withErrCls
     EdhPeerError{} ->
       _getEdhErrClass pgs (AttrByName "PeerError") >>= withErrCls
     EdhIOError{} -> _getEdhErrClass pgs (AttrByName "IOError") >>= withErrCls
@@ -1911,11 +1917,10 @@ toEdhError !pgs !e !exit = case fromException e :: Maybe EdhError of
  where
   withErrCls :: Class -> STM ()
   withErrCls !ec = do
-    (ent, obs) <- createSideEntity False
-    !exo       <- viewAsEdhObject ent ec []
-    edhErrorCtor e pgs (ArgsPack [] Map.empty) obs $ \esd -> do
-      writeTVar (entity'store ent) esd
-      exit $ EdhObject exo
+    !esm <- createErrEntManipulater $ procedureName ec
+    !ent <- createSideEntity esm $ toDyn (e, details)
+    !exo <- viewAsEdhObject ent ec []
+    exit $ EdhObject exo
 
 -- | Get Edh class for an error tag
 getEdhErrClass :: EdhProgState -> EdhErrorTag -> STM Class
@@ -1946,6 +1951,44 @@ _getEdhErrClass !pgs !eck =
                   <> T.pack (edhTypeNameOf badVal)
                   )
               $ getEdhCallContext 0 pgs
+
+createErrEntManipulater :: Text -> STM EntityManipulater
+createErrEntManipulater !clsName = do
+  let the'lookup'entity'attr _ !k !esd = case fromDynamic esd of
+        Just (e :: SomeException, apk :: ArgsPack) -> case k of
+          AttrByName "__repr__" -> return $ EdhString $ T.pack $ show e
+          AttrByName "details"  -> return $ EdhArgsPack apk
+          _                     -> return nil
+        Nothing -> case fromDynamic esd of
+          Just (apk :: ArgsPack) -> case k of
+            AttrByName "__repr__" ->
+              return $ EdhString $ clsName <> T.pack (show apk)
+            AttrByName "details" -> return $ EdhArgsPack apk
+            _                    -> return nil
+          Nothing -> case fromDynamic esd of
+            Just (e :: SomeException) -> case k of
+              AttrByName "__repr__" -> return $ EdhString $ T.pack $ show e
+              AttrByName "details" ->
+                return $ EdhArgsPack $ ArgsPack [] Map.empty
+              _ -> return nil
+            Nothing -> case k of
+              AttrByName "__repr__" -> return $ EdhString $ clsName <> "()"
+              AttrByName "details" ->
+                return $ EdhArgsPack $ ArgsPack [] Map.empty
+              _ -> return nil
+      the'all'entity'attrs _ _ = return []
+      the'change'entity'attr !pgs _ _ _ =
+        throwSTM
+          $ EdhError UsageError "Edh error object not changable"
+          $ getEdhCallContext 0 pgs
+      the'update'entity'attrs !pgs _ _ =
+        throwSTM
+          $ EdhError UsageError "Edh error object not changable"
+          $ getEdhCallContext 0 pgs
+  return $ EntityManipulater the'lookup'entity'attr
+                             the'all'entity'attrs
+                             the'change'entity'attr
+                             the'update'entity'attrs
 
 
 -- | Throw a tagged error from an Edh proc
@@ -3464,7 +3507,15 @@ edhValueStr !v            !exit' = edhValueRepr v exit'
 
 withThisEntityStore
   :: forall a . Typeable a => (EdhProgState -> a -> STM ()) -> EdhProc
-withThisEntityStore !exit = ask >>= \ !pgs ->
+withThisEntityStore = withThisEntityStore'
+  $ \ !pgs -> throwEdhSTM pgs UsageError "bug: unexpected entity storage type"
+withThisEntityStore'
+  :: forall a
+   . Typeable a
+  => (EdhProgState -> STM ())
+  -> (EdhProgState -> a -> STM ())
+  -> EdhProc
+withThisEntityStore' !naExit !exit = ask >>= \ !pgs ->
   contEdhSTM
     $   fromDynamic
     <$> readTVar
@@ -3472,14 +3523,21 @@ withThisEntityStore !exit = ask >>= \ !pgs ->
             pgs
           )
     >>= \case
-          Nothing ->
-            throwEdhSTM pgs UsageError "bug: unexpected entity storage type"
+          Nothing   -> naExit pgs
 
           Just !esd -> exit pgs esd
 
 withThatEntityStore
   :: forall a . Typeable a => (EdhProgState -> a -> STM ()) -> EdhProc
-withThatEntityStore !exit = ask >>= \ !pgs ->
+withThatEntityStore = withThatEntityStore'
+  $ \ !pgs -> throwEdhSTM pgs UsageError "bug: unexpected entity storage type"
+withThatEntityStore'
+  :: forall a
+   . Typeable a
+  => (EdhProgState -> STM ())
+  -> (EdhProgState -> a -> STM ())
+  -> EdhProc
+withThatEntityStore' !naExit !exit = ask >>= \ !pgs ->
   contEdhSTM
     $   fromDynamic
     <$> readTVar
@@ -3487,8 +3545,7 @@ withThatEntityStore !exit = ask >>= \ !pgs ->
             pgs
           )
     >>= \case
-          Nothing ->
-            throwEdhSTM pgs UsageError "bug: unexpected entity storage type"
+          Nothing   -> naExit pgs
 
           Just !esd -> exit pgs esd
 

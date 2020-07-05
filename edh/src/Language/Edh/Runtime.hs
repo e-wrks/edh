@@ -111,11 +111,12 @@ createEdhWorld !console = liftIO $ do
       errClasses <- sequence
         -- leave the out-of-band entity store open so Edh code can
         -- assign arbitrary attrs to exceptions for informative
-        [ (AttrByName nm, ) <$> mkHostClass rootScope nm False hc
+        [ (AttrByName nm, )
+            <$> (mkHostClass rootScope nm hc =<< createErrEntManipulater nm)
         | (nm, hc) <- -- cross check with 'throwEdhSTM' for type safety
           [ ("ProgramHalt" , errCtor edhProgramHalt)
-          , ("IOError"     , fakableErr "IOError")
-          , ("PeerError"   , fakableErr "PeerError")
+          , ("IOError"     , fakableErr)
+          , ("PeerError"   , fakableErr)
           , ("Exception"   , errCtor $ edhSomeErr EdhException)
           , ("PackageError", errCtor $ edhSomeErr PackageError)
           , ("ParseError"  , errCtor $ edhSomeErr ParseError)
@@ -133,21 +134,16 @@ createEdhWorld !console = liftIO $ do
   edhProgramHalt (ArgsPack [] !kwargs) _ | Map.null kwargs =
     ProgramHalt $ toDyn nil
   edhProgramHalt !apk _ = ProgramHalt $ toDyn $ EdhArgsPack apk
+  fakableErr :: EdhHostCtor
+  fakableErr _ !apk !exit = exit $ toDyn apk
   edhSomeErr :: EdhErrorTag -> ArgsPack -> EdhCallContext -> EdhError
   edhSomeErr !et (ArgsPack [] _) !cc = EdhError et "❌" cc
   edhSomeErr !et (ArgsPack (EdhString msg : _) _) !cc = EdhError et msg cc
   edhSomeErr !et (ArgsPack (v : _) _) !cc = EdhError et (T.pack $ show v) cc
-  fakableErr :: Text -> EdhHostCtor
-  fakableErr !ctorName _ !apk !obs !exit = do
-    modifyTVar' obs $ Map.union $ Map.fromList
-      [ (AttrByName "__repr__", EdhString $ ctorName <> T.pack (show apk))
-      , (AttrByName "details" , EdhArgsPack apk)
-      ]
-    exit $ toDyn nil
   -- wrap a Haskell error data constructor as a host error object contstructor,
   -- used to define an error class in Edh
   errCtor :: (ArgsPack -> EdhCallContext -> EdhError) -> EdhHostCtor
-  errCtor !hec !pgs apk@(ArgsPack _ !kwargs) !obs !ctorExit = do
+  errCtor !hec !pgs apk@(ArgsPack _ !kwargs) !ctorExit = do
     let !unwind = case Map.lookup (AttrByName "unwind") kwargs of
           Just (EdhDecimal d) -> case decimalToInteger d of
             Just n -> fromIntegral n
@@ -155,7 +151,7 @@ createEdhWorld !console = liftIO $ do
           _ -> 1
         !cc = getEdhCallContext unwind pgs
         !he = hec apk cc
-    edhErrorCtor (toException he) pgs apk obs ctorExit
+    ctorExit $ toDyn (toException he, apk)
 
 
 declareEdhOperators :: EdhWorld -> Text -> [(OpSymbol, Precedence)] -> STM ()
