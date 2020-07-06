@@ -7,7 +7,7 @@
 
     property$ method m () {
       # getter
-      this._n
+      this?_m
     }
 
     # no setter, m is readonly
@@ -15,7 +15,7 @@
     _n = 5
     property$ method n () {
       # getter
-      this._n
+      this?_n
     }
 
     setter$ method n (* psa ) case psa of {
@@ -48,3 +48,10 @@ o.m = 7
 o.n
 o.n = 9
 o.n
+
+o.n = nil
+
+o.n
+
+# this should fail
+o._n
