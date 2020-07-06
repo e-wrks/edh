@@ -1,0 +1,50 @@
+
+{
+
+  class C {
+
+    _m = 3
+
+    property$ method m () {
+      # getter
+      this._n
+    }
+
+    # no setter, m is readonly
+
+    _n = 5
+    property$ method n () {
+      # getter
+      this._n
+    }
+
+    setter$ method n (* psa ) case psa of {
+      # delete
+      { () } -> this._n = nil
+      # normal value setting
+      { ( val ) } -> this._n = val
+    }
+
+    # shellHere()
+
+    console.info<|
+    '''Without (.) dot notation, descriptors are not interpreted, '''
+    ++ 'so you can see:\n  ' ++ m ++ '\n and\n  ' ++ n
+  }
+
+}
+
+# this won't enforce tx during construction
+case C() of { o } -> { pass }
+
+# this enforces tx during construction, then shellHere() won't work there
+# o = C()
+
+o.m
+
+# this should fail
+o.m = 7
+
+o.n
+o.n = 9
+o.n

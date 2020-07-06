@@ -590,6 +590,7 @@ parseLitExpr = choice
   , TypeLiteral GeneratorType <$ litKw "GeneratorType"
   , TypeLiteral InterpreterType <$ litKw "InterpreterType"
   , TypeLiteral ProducerType <$ litKw "ProducerType"
+  , TypeLiteral DescriptorType <$ litKw "DescriptorType"
   , TypeLiteral BreakType <$ litKw "BreakType"
   , TypeLiteral ContinueType <$ litKw "ContinueType"
   , TypeLiteral CaseCloseType <$ litKw "CaseCloseType"

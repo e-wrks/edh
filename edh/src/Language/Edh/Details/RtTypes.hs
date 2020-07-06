@@ -768,6 +768,12 @@ data EdhValue =
     | EdhIntrpr !ProcDefi
     | EdhPrducr !ProcDefi
 
+  -- similar to Python Descriptor
+  -- with a getter method and optionally a settor method, for properties
+  -- (programmatically managed attributes) to be defined on objects
+  -- deleter semantic is expressed as calling setter without arg
+    | EdhDescriptor !ProcDefi !(Maybe ProcDefi)
+
   -- | flow control
     | EdhBreak
     | EdhContinue
@@ -810,9 +816,14 @@ instance Show EdhValue where
   show (EdhMethod !pd) = T.unpack (procedureName pd)
   show (EdhOprtor !preced _ !pd) =
     "<operator: (" ++ T.unpack (procedureName pd) ++ ") " ++ show preced ++ ">"
-  show (EdhGnrtor !pd)  = T.unpack (procedureName pd)
-  show (EdhIntrpr !pd)  = T.unpack (procedureName pd)
-  show (EdhPrducr !pd)  = T.unpack (procedureName pd)
+  show (EdhGnrtor !pd) = T.unpack (procedureName pd)
+  show (EdhIntrpr !pd) = T.unpack (procedureName pd)
+  show (EdhPrducr !pd) = T.unpack (procedureName pd)
+
+  show (EdhDescriptor !getter !setter) =
+    (<> T.unpack (procedureName getter) <> ">") $ case setter of
+      Nothing -> "<readonly property "
+      Just _  -> "<property "
 
   show EdhBreak         = "<break>"
   show EdhContinue      = "<continue>"
@@ -862,12 +873,15 @@ instance Eq EdhValue where
 
   EdhIntrOp _ (IntrinOpDefi x'u _ _) == EdhIntrOp _ (IntrinOpDefi y'u _ _) =
     x'u == y'u
-  EdhClass  x                 == EdhClass  y                 = x == y
-  EdhMethod x                 == EdhMethod y                 = x == y
-  EdhOprtor _ _ x             == EdhOprtor _ _ y             = x == y
-  EdhGnrtor x                 == EdhGnrtor y                 = x == y
-  EdhIntrpr x                 == EdhIntrpr y                 = x == y
-  EdhPrducr x                 == EdhPrducr y                 = x == y
+  EdhClass  x     == EdhClass  y     = x == y
+  EdhMethod x     == EdhMethod y     = x == y
+  EdhOprtor _ _ x == EdhOprtor _ _ y = x == y
+  EdhGnrtor x     == EdhGnrtor y     = x == y
+  EdhIntrpr x     == EdhIntrpr y     = x == y
+  EdhPrducr x     == EdhPrducr y     = x == y
+
+  EdhDescriptor x'getter x'setter == EdhDescriptor y'getter y'setter =
+    x'getter == y'getter && x'setter == y'setter
 
   EdhBreak                    == EdhBreak                    = True
   EdhContinue                 == EdhContinue                 = True
@@ -916,7 +930,10 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhIntrpr x                       ) = hashWithSalt s x
   hashWithSalt s (EdhPrducr x                       ) = hashWithSalt s x
 
-  hashWithSalt s EdhBreak = hashWithSalt s (-1 :: Int)
+  hashWithSalt s (EdhDescriptor getter setter) =
+    s `hashWithSalt` getter `hashWithSalt` setter
+
+  hashWithSalt s EdhBreak    = hashWithSalt s (-1 :: Int)
   hashWithSalt s EdhContinue = hashWithSalt s (-2 :: Int)
   hashWithSalt s (EdhCaseClose v) =
     s `hashWithSalt` (-3 :: Int) `hashWithSalt` v
@@ -1312,6 +1329,7 @@ data EdhTypeValue = TypeType
     | GeneratorType
     | InterpreterType
     | ProducerType
+    | DescriptorType
     | BreakType
     | ContinueType
     | CaseCloseType
@@ -1369,6 +1387,8 @@ edhTypeOf (EdhOprtor _ _ (ProcDefi _ _ _ (ProcDecl _ _ pb))) = case pb of
 edhTypeOf (EdhGnrtor (ProcDefi _ _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> GeneratorType
   Right _ -> HostGenrType
+
+edhTypeOf EdhDescriptor{}     = DescriptorType
 
 edhTypeOf EdhIntrpr{}         = InterpreterType
 edhTypeOf EdhPrducr{}         = ProducerType

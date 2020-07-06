@@ -557,6 +557,19 @@ installEdhBatteries world = liftIO $ do
                , procNameProc
                , PackReceiver [mandatoryArg "p"]
                )
+             , ( EdhMethod
+               , "property"
+               , propertyProc
+               , PackReceiver
+                 [ mandatoryArg "getter"
+                 , optionalArg "setter" $ LitExpr NilLiteral
+                 ]
+               )
+             , ( EdhMethod
+               , "setter"
+               , setterProc
+               , PackReceiver [mandatoryArg "mth"]
+               )
              , (EdhMethod, "constructor", ctorProc       , WildReceiver)
              , (EdhMethod, "supers"     , supersProc     , WildReceiver)
              , (EdhMethod, "scope"      , scopeObtainProc, PackReceiver [])

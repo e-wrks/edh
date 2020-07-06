@@ -16,6 +16,7 @@ import qualified Data.HashMap.Strict           as Map
 
 import           Language.Edh.Control
 import           Language.Edh.Event
+import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
 import           Language.Edh.Details.Utils
@@ -32,6 +33,76 @@ blobDecodeProc (ArgsPack [EdhBlob !blob] !kwargs) !exit | Map.null kwargs =
   exitEdhProc exit $ EdhString $ TE.decodeUtf8 blob
 blobDecodeProc _ _ =
   throwEdh EvalError "bug: __BlobType_utf8string__ got unexpected args"
+
+
+propertyProc :: EdhProcedure
+propertyProc !apk !exit =
+  case parseArgsPack (Nothing, Nothing) argsParser apk of
+    Left !err -> throwEdh UsageError err
+    Right (Nothing, _) ->
+      throwEdh UsageError "Missing getter method to define a property"
+    Right (Just getter, setter) -> ask >>= \ !pgs -> contEdhSTM $ do
+      let !ctx  = edh'context pgs
+          !this = thisObject $ contextFrame ctx 1
+          !pd   = EdhDescriptor getter setter
+          !name = procedure'name getter
+      when (name /= AttrByName "_")
+        $ unless (contextPure ctx)
+        $ changeEntityAttr pgs (objEntity this) name pd
+      exitEdhSTM pgs exit pd
+ where
+  argsParser =
+    ArgsPackParser
+        [ \arg (_, setter) -> case arg of
+          EdhMethod !getter -> Right (Just getter, setter)
+          !badVal ->
+            Left
+              $  "Need a method procedure to define a property, not a: "
+              <> T.pack (edhTypeNameOf badVal)
+        , \arg (getter, _) -> case arg of
+          EdhMethod !setter -> Right (getter, Just setter)
+          !badVal ->
+            Left
+              $  "Need a method procedure to define a property, not a: "
+              <> T.pack (edhTypeNameOf badVal)
+        ]
+      $ Map.fromList
+          [ ( "getter"
+            , \arg (_, setter) -> case arg of
+              EdhMethod !getter -> Right (Just getter, setter)
+              !badVal ->
+                Left
+                  $  "Need a method procedure to define a property, not a: "
+                  <> T.pack (edhTypeNameOf badVal)
+            )
+          , ( "setter"
+            , \arg (getter, _) -> case arg of
+              EdhMethod !setter -> Right (getter, Just setter)
+              !badVal ->
+                Left
+                  $  "Need a method procedure to define a property, not a: "
+                  <> T.pack (edhTypeNameOf badVal)
+            )
+          ]
+
+setterProc :: EdhProcedure
+setterProc (ArgsPack [EdhMethod !setter] !kwargs) !exit | Map.null kwargs =
+  ask >>= \ !pgs -> contEdhSTM $ do
+    let !ctx  = edh'context pgs
+        !this = thisObject $ contextFrame ctx 1
+        !name = procedure'name setter
+    if name == AttrByName "_"
+      then throwEdhSTM pgs UsageError "Why you want a setter named `_` ?"
+      else lookupEdhObjAttr pgs this name >>= \case
+        EdhDescriptor !getter _ -> do
+          let !pd = EdhDescriptor getter $ Just setter
+          unless (contextPure ctx)
+            $ changeEntityAttr pgs (objEntity this) name pd
+          exitEdhSTM pgs exit pd
+        _ ->
+          throwEdhSTM pgs UsageError $ "Missing property getter " <> T.pack
+            (show name)
+setterProc _ _ = throwEdh EvalError "Invalid args to setter"
 
 
 -- | operator (@) - attribute key dereferencing
