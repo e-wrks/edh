@@ -127,6 +127,10 @@ deParen x = case x of
   ParenExpr x' -> deParen x'
   _            -> x
 
+deApk :: ArgsPack -> ArgsPack
+deApk (ArgsPack [EdhArgsPack !apk] !kwargs) | Map.null kwargs = apk
+deApk apk = apk
+
 evalStmt :: StmtSrc -> EdhProcExit -> EdhProc
 evalStmt ss@(StmtSrc (_sp, !stmt)) !exit = ask >>= \pgs ->
   local (const pgs { edh'context = (edh'context pgs) { contextStmt = ss } })
@@ -212,16 +216,11 @@ evalStmt' !stmt !exit = do
 
     ExprStmt !expr -> evalExpr expr $ \result -> exitEdhProc' exit result
 
-    LetStmt !argsRcvr !argsSndr -> do
-      let pkArgs exit' = case argsSndr of
-            [SendPosArg !x1] -> evalExpr x1 $ \case
-              (OriginalValue (EdhArgsPack !apk) _ _) -> exit' apk
-              (OriginalValue !v _ _) -> exit' $ ArgsPack [v] mempty
-            _ -> packEdhArgs argsSndr exit'
+    LetStmt !argsRcvr !argsSndr ->
       -- ensure args sending and receiving happens within a same tx
       -- for atomicity of the let statement
-      local (const pgs { edh'in'tx = True }) $ pkArgs $ \ !apk ->
-        recvEdhArgs ctx argsRcvr apk $ \um -> contEdhSTM $ do
+      local (const pgs { edh'in'tx = True }) $ packEdhArgs argsSndr $ \ !apk ->
+        recvEdhArgs ctx argsRcvr (deApk apk) $ \um -> contEdhSTM $ do
           if not (contextEffDefining ctx)
             then -- normal multi-assignment
                  updateEntityAttrs pgs (scopeEntity scope) $ Map.toList um
@@ -1347,7 +1346,8 @@ evalExpr !expr !exit = do
                   when (addr /= NamedAttr "_") $ do
                     if contextEffDefining ctx
                       then defEffect name nsv
-                      else changeEntityAttr pgs (scopeEntity scope) name nsv
+                      else unless (contextPure ctx)
+                        $ changeEntityAttr pgs (scopeEntity scope) name nsv
                     chkExport name nsv
                   exitEdhSTM pgs exit nsv
                 _ -> error "bug: createEdhObject returned non-object"
@@ -1363,7 +1363,8 @@ evalExpr !expr !exit = do
         when (addr /= NamedAttr "_") $ do
           if contextEffDefining ctx
             then defEffect name cls
-            else changeEntityAttr pgs (scopeEntity scope) name cls
+            else unless (contextPure ctx)
+              $ changeEntityAttr pgs (scopeEntity scope) name cls
           chkExport name cls
         exitEdhSTM pgs exit cls
 
@@ -1378,7 +1379,8 @@ evalExpr !expr !exit = do
         when (addr /= NamedAttr "_") $ do
           if contextEffDefining ctx
             then defEffect name mth
-            else changeEntityAttr pgs (scopeEntity scope) name mth
+            else unless (contextPure ctx)
+              $ changeEntityAttr pgs (scopeEntity scope) name mth
           chkExport name mth
         exitEdhSTM pgs exit mth
 
@@ -1393,7 +1395,8 @@ evalExpr !expr !exit = do
         when (addr /= NamedAttr "_") $ do
           if contextEffDefining ctx
             then defEffect name gdf
-            else changeEntityAttr pgs (scopeEntity scope) name gdf
+            else unless (contextPure ctx)
+              $ changeEntityAttr pgs (scopeEntity scope) name gdf
           chkExport name gdf
         exitEdhSTM pgs exit gdf
 
@@ -1408,7 +1411,8 @@ evalExpr !expr !exit = do
         when (addr /= NamedAttr "_") $ do
           if contextEffDefining ctx
             then defEffect name mth
-            else changeEntityAttr pgs (scopeEntity scope) name mth
+            else unless (contextPure ctx)
+              $ changeEntityAttr pgs (scopeEntity scope) name mth
           chkExport name mth
         exitEdhSTM pgs exit mth
 
@@ -1427,7 +1431,8 @@ evalExpr !expr !exit = do
         when (addr /= NamedAttr "_") $ do
           if contextEffDefining ctx
             then defEffect name mth
-            else changeEntityAttr pgs (scopeEntity scope) name mth
+            else unless (contextPure ctx)
+              $ changeEntityAttr pgs (scopeEntity scope) name mth
           chkExport name mth
         exitEdhSTM pgs exit mth
 
@@ -1441,10 +1446,11 @@ evalExpr !expr !exit = do
             -> contEdhSTM $ do
               let
                 redeclareOp !origOp = do
-                  changeEntityAttr pgs
-                                   (scopeEntity scope)
-                                   (AttrByName opSym)
-                                   origOp
+                  unless (contextPure ctx) $ changeEntityAttr
+                    pgs
+                    (scopeEntity scope)
+                    (AttrByName opSym)
+                    origOp
                   when (contextExporting ctx)
                     $   lookupEntityAttr pgs
                                          (objEntity this)
@@ -1487,7 +1493,8 @@ evalExpr !expr !exit = do
                            , procedure'lexi = Just scope
                            , procedure'decl = opProc
                            }
-            changeEntityAttr pgs (scopeEntity scope) (AttrByName opSym) op
+            unless (contextPure ctx)
+              $ changeEntityAttr pgs (scopeEntity scope) (AttrByName opSym) op
             when (contextExporting ctx)
               $   lookupEntityAttr pgs
                                    (objEntity this)
@@ -1543,7 +1550,8 @@ evalExpr !expr !exit = do
                        , procedure'lexi = Just scope
                        , procedure'decl = opProc
                        }
-        changeEntityAttr pgs (scopeEntity scope) (AttrByName opSym) op
+        unless (contextPure ctx)
+          $ changeEntityAttr pgs (scopeEntity scope) (AttrByName opSym) op
         when (contextExporting ctx)
           $   lookupEntityAttr pgs
                                (objEntity this)
@@ -3179,8 +3187,14 @@ packEdhExprs (x : xs) !exit = case x of
 packEdhArgs :: ArgsPacker -> (ArgsPack -> EdhProc) -> EdhProc
 packEdhArgs !argSenders !pkExit = do
   !pgs <- ask
-  -- make sure values in a pack are evaluated in same tx
-  let !pgsPacking = pgs { edh'in'tx = True }
+  let !pgsPacking = pgs
+        {
+          -- make sure values in a pack are evaluated in same tx
+          edh'in'tx   = True
+        , edh'context = (edh'context pgs) {
+          -- discourage artifact definition during args packing
+                                            contextPure = True }
+        }
   local (const pgsPacking) $ pkArgs argSenders $ \apk ->
     -- restore original tx state after args packed
     local (const pgs) $ pkExit apk

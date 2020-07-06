@@ -293,6 +293,10 @@ data Context = Context {
     , contextMatch :: EdhValue
     -- | currently executing statement
     , contextStmt :: !StmtSrc
+    -- | whether it's discouraged for procedure definitions or similar
+    -- expressions from installing their results as attributes into the
+    -- context scope, i.e. the top of current call stack
+    , contextPure :: !Bool
     -- | whether running within an exporting stmt
     , contextExporting :: !Bool
     -- | whether running within an effect stmt
@@ -475,6 +479,7 @@ worldContext !world = Context
                                        }
                            , VoidStmt
                            )
+  , contextPure        = False
   , contextExporting   = False
   , contextEffDefining = False
   }
@@ -776,7 +781,7 @@ data EdhValue =
   -- | event sink
     | EdhSink !EventSink
 
-  -- | named value
+  -- | named value, a.k.a. term definition
     | EdhNamedValue !AttrName !EdhValue
 
   -- | reflective expr, with source (or not, if empty)
