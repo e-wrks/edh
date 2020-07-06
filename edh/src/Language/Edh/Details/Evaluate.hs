@@ -1167,60 +1167,158 @@ evalExpr !expr !exit = do
 
 
     InfixExpr !opSym !lhExpr !rhExpr ->
-      contEdhSTM $ resolveEdhCtxAttr pgs scope (AttrByName opSym) >>= \case
-        Nothing ->
-          throwEdhSTM pgs EvalError
-            $  "Operator ("
-            <> T.pack (show opSym)
-            <> ") not in scope"
-        Just (!opVal, !op'lexi) -> case opVal of
-
-          -- calling an intrinsic operator
-          EdhIntrOp _ (IntrinOpDefi _ _ iop'proc) ->
-            runEdhProc pgs $ iop'proc lhExpr rhExpr exit
-
-          -- calling an operator procedure
-          EdhOprtor _ !op'pred !op'proc ->
-            case procedure'args $ procedure'decl op'proc of
-              -- 2 pos-args - simple lh/rh value receiving operator
-              (PackReceiver [RecvArg{}, RecvArg{}]) ->
-                runEdhProc pgs
-                  $ evalExpr lhExpr
-                  $ \(OriginalValue lhVal _ _) ->
-                      evalExpr rhExpr $ \(OriginalValue rhVal _ _) ->
-                        callEdhOperator
-                          (thatObject op'lexi)
-                          op'proc
-                          op'pred
-                          [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
-                          exit
-              -- 3 pos-args - caller scope + lh/rh expr receiving operator
-              (PackReceiver [RecvArg{}, RecvArg{}, RecvArg{}]) -> do
-                lhu          <- unsafeIOToSTM newUnique
-                rhu          <- unsafeIOToSTM newUnique
-                scopeWrapper <- mkScopeWrapper ctx scope
-                runEdhProc pgs $ callEdhOperator
-                  (thatObject op'lexi)
-                  op'proc
-                  op'pred
-                  [ EdhObject scopeWrapper
-                  , EdhExpr lhu lhExpr ""
-                  , EdhExpr rhu rhExpr ""
-                  ]
-                  exit
-              _ ->
-                throwEdhSTM pgs EvalError
-                  $  "Invalid operator signature: "
-                  <> T.pack (show $ procedure'args $ procedure'decl op'proc)
-
-          _ ->
+      let
+        tryMagicMethod :: EdhValue -> EdhValue -> STM ()
+        tryMagicMethod !lhVal !rhVal = case edhUltimate lhVal of
+          EdhObject !lhObj ->
+            lookupEdhObjAttr pgs lhObj (AttrByName opSym) >>= \case
+              EdhNil -> case edhUltimate rhVal of
+                EdhObject !rhObj ->
+                  lookupEdhObjAttr pgs rhObj (AttrByName $ opSym <> "@")
+                    >>= \case
+                          EdhNil              -> notApplicable
+                          EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
+                            rhObj
+                            mth'proc
+                            (ArgsPack [lhVal] Map.empty)
+                            id
+                            chkExit
+                          !badEqMth ->
+                            throwEdhSTM pgs UsageError
+                              $  "Malformed magic method ("
+                              <> opSym
+                              <> "@) on "
+                              <> T.pack (show rhObj)
+                              <> " - "
+                              <> T.pack (edhTypeNameOf badEqMth)
+                              <> ": "
+                              <> T.pack (show badEqMth)
+                _ -> notApplicable
+              EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
+                lhObj
+                mth'proc
+                (ArgsPack [rhVal] Map.empty)
+                id
+                chkExit
+              !badEqMth ->
+                throwEdhSTM pgs UsageError
+                  $  "Malformed magic method ("
+                  <> opSym
+                  <> ") on "
+                  <> T.pack (show lhObj)
+                  <> " - "
+                  <> T.pack (edhTypeNameOf badEqMth)
+                  <> ": "
+                  <> T.pack (show badEqMth)
+          _ -> case edhUltimate rhVal of
+            EdhObject !rhObj ->
+              lookupEdhObjAttr pgs rhObj (AttrByName $ opSym <> "@") >>= \case
+                EdhNil              -> notApplicable
+                EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
+                  rhObj
+                  mth'proc
+                  (ArgsPack [lhVal] Map.empty)
+                  id
+                  chkExit
+                !badEqMth ->
+                  throwEdhSTM pgs UsageError
+                    $  "Malformed magic method ("
+                    <> opSym
+                    <> "@) on "
+                    <> T.pack (show rhObj)
+                    <> " - "
+                    <> T.pack (edhTypeNameOf badEqMth)
+                    <> ": "
+                    <> T.pack (show badEqMth)
+            _ -> notApplicable
+         where
+          notApplicable =
             throwEdhSTM pgs EvalError
-              $  "Not callable "
-              <> T.pack (edhTypeNameOf opVal)
-              <> ": "
-              <> T.pack (show opVal)
-              <> " expressed with: "
-              <> T.pack (show expr)
+              $  "Operator ("
+              <> opSym
+              <> ") not applicable to "
+              <> T.pack (edhTypeNameOf $ edhUltimate lhVal)
+              <> " and "
+              <> T.pack (edhTypeNameOf $ edhUltimate rhVal)
+          chkExit rtn@(OriginalValue !rtnVal _ _) =
+            case edhDeCaseClose rtnVal of
+              EdhContinue -> contEdhSTM notApplicable
+              _           -> exitEdhProc' exit rtn
+      in
+        contEdhSTM $ resolveEdhCtxAttr pgs scope (AttrByName opSym) >>= \case
+          Nothing ->
+            runEdhProc pgs $ evalExpr lhExpr $ \(OriginalValue lhVal _ _) ->
+              evalExpr rhExpr $ \(OriginalValue rhVal _ _) ->
+                contEdhSTM $ tryMagicMethod lhVal rhVal
+          Just (!opVal, !op'lexi) -> case opVal of
+
+            -- calling an intrinsic operator
+            EdhIntrOp _ (IntrinOpDefi _ _ iop'proc) ->
+              runEdhProc pgs
+                $ iop'proc lhExpr rhExpr
+                $ \rtn@(OriginalValue !rtnVal _ _) ->
+                    case edhDeCaseClose rtnVal of
+                      EdhContinue ->
+                        evalExpr lhExpr $ \(OriginalValue lhVal _ _) ->
+                          evalExpr rhExpr $ \(OriginalValue rhVal _ _) ->
+                            contEdhSTM $ tryMagicMethod lhVal rhVal
+                      _ -> exitEdhProc' exit rtn
+
+            -- calling an operator procedure
+            EdhOprtor _ !op'pred !op'proc ->
+              case procedure'args $ procedure'decl op'proc of
+                -- 2 pos-args - simple lh/rh value receiving operator
+                (PackReceiver [RecvArg{}, RecvArg{}]) ->
+                  runEdhProc pgs
+                    $ evalExpr lhExpr
+                    $ \(OriginalValue lhVal _ _) ->
+                        evalExpr rhExpr $ \(OriginalValue rhVal _ _) ->
+                          callEdhOperator
+                              (thatObject op'lexi)
+                              op'proc
+                              op'pred
+                              [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
+                            $ \rtn@(OriginalValue !rtnVal _ _) ->
+                                case edhDeCaseClose rtnVal of
+                                  EdhContinue ->
+                                    contEdhSTM $ tryMagicMethod lhVal rhVal
+                                  _ -> exitEdhProc' exit rtn
+
+                -- 3 pos-args - caller scope + lh/rh expr receiving operator
+                (PackReceiver [RecvArg{}, RecvArg{}, RecvArg{}]) -> do
+                  lhu          <- unsafeIOToSTM newUnique
+                  rhu          <- unsafeIOToSTM newUnique
+                  scopeWrapper <- mkScopeWrapper ctx scope
+                  runEdhProc pgs
+                    $ callEdhOperator
+                        (thatObject op'lexi)
+                        op'proc
+                        op'pred
+                        [ EdhObject scopeWrapper
+                        , EdhExpr lhu lhExpr ""
+                        , EdhExpr rhu rhExpr ""
+                        ]
+                    $ \rtn@(OriginalValue !rtnVal _ _) ->
+                        case edhDeCaseClose rtnVal of
+                          EdhContinue ->
+                            evalExpr lhExpr $ \(OriginalValue lhVal _ _) ->
+                              evalExpr rhExpr $ \(OriginalValue rhVal _ _) ->
+                                contEdhSTM $ tryMagicMethod lhVal rhVal
+                          _ -> exitEdhProc' exit rtn
+
+                _ ->
+                  throwEdhSTM pgs EvalError
+                    $  "Invalid operator signature: "
+                    <> T.pack (show $ procedure'args $ procedure'decl op'proc)
+
+            _ ->
+              throwEdhSTM pgs EvalError
+                $  "Not callable "
+                <> T.pack (edhTypeNameOf opVal)
+                <> ": "
+                <> T.pack (show opVal)
+                <> " expressed with: "
+                <> T.pack (show expr)
 
     NamespaceExpr pd@(ProcDecl !addr _ _) !argsSndr ->
       packEdhArgs argsSndr $ \apk ->

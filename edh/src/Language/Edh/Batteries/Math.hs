@@ -24,10 +24,7 @@ addProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \(OriginalValue !lhv _ _) ->
     EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhProc exit (EdhDecimal $ lhNum + rhNum)
-        _ ->
-          throwEdh EvalError
-            $  "Invalid right-hand value for (+) operation: "
-            <> T.pack (show rhVal)
+        _                 -> exitEdhProc exit EdhContinue
     EdhBlob !lhb -> evalExpr rhExpr $ \(OriginalValue !rhv _ _) ->
       case edhUltimate rhv of
         EdhBlob   !rhb -> exitEdhProc exit (EdhBlob $ lhb <> rhb)
@@ -42,10 +39,7 @@ addProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \(OriginalValue !lhv _ _) ->
         case rhStr of
           EdhString !rhs -> exitEdhProc exit (EdhString $ lhs <> rhs)
           _              -> error "bug: edhValueStr returned non-string"
-    lhVal ->
-      throwEdh EvalError
-        $  "Invalid left-hand value for (+) operation: "
-        <> T.pack (show lhVal)
+    _ -> exitEdhProc exit EdhContinue
 
 
 -- | operator (-)
@@ -55,14 +49,8 @@ subsProc !lhExpr !rhExpr !exit =
     EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhProc exit (EdhDecimal $ lhNum - rhNum)
-        _ ->
-          throwEdh EvalError
-            $  "Invalid right-hand value for (-) operation: "
-            <> T.pack (show rhVal)
-    _ ->
-      throwEdh EvalError
-        $  "Invalid left-hand value for (-) operation: "
-        <> T.pack (show lhVal)
+        _                 -> exitEdhProc exit EdhContinue
+    _ -> exitEdhProc exit EdhContinue
 
 
 -- | operator (*)
@@ -72,14 +60,8 @@ mulProc !lhExpr !rhExpr !exit =
     EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhProc exit (EdhDecimal $ lhNum * rhNum)
-        _ ->
-          throwEdh EvalError
-            $  "Invalid right-hand value for (*) operation: "
-            <> T.pack (show rhVal)
-    _ ->
-      throwEdh EvalError
-        $  "Invalid left-hand value for (*) operation: "
-        <> T.pack (show lhVal)
+        _                 -> exitEdhProc exit EdhContinue
+    _ -> exitEdhProc exit EdhContinue
 
 
 -- | operator (/)
@@ -89,14 +71,8 @@ divProc !lhExpr !rhExpr !exit =
     EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhProc exit (EdhDecimal $ lhNum / rhNum)
-        _ ->
-          throwEdh EvalError
-            $  "Invalid right-hand value for (/) operation: "
-            <> T.pack (show rhVal)
-    _ ->
-      throwEdh EvalError
-        $  "Invalid left-hand value for (/) operation: "
-        <> T.pack (show lhVal)
+        _                 -> exitEdhProc exit EdhContinue
+    _ -> exitEdhProc exit EdhContinue
 
 -- | operator (//) integer division, following Python 
 -- http://python-history.blogspot.com/2010/08/why-pythons-integer-division-floors.html
@@ -117,14 +93,8 @@ divIntProc !lhExpr !rhExpr !exit =
                 <> T.pack (show rhNum)
             Just rhi ->
               exitEdhProc exit $ EdhDecimal $ Decimal 1 0 $ lhi `div` rhi
-          _ ->
-            throwEdh EvalError
-              $  "Invalid right-hand value for (//) operation: "
-              <> T.pack (show rhVal)
-    _ ->
-      throwEdh EvalError
-        $  "Invalid left-hand value for (//) operation: "
-        <> T.pack (show lhVal)
+          _ -> exitEdhProc exit EdhContinue
+    _ -> exitEdhProc exit EdhContinue
 
 -- | operator (%) modulus of integer division, following Python 
 -- http://python-history.blogspot.com/2010/08/why-pythons-integer-division-floors.html
@@ -145,14 +115,8 @@ modIntProc !lhExpr !rhExpr !exit =
                 <> T.pack (show rhNum)
             Just rhi ->
               exitEdhProc exit $ EdhDecimal $ Decimal 1 0 $ lhi `mod` rhi
-          _ ->
-            throwEdh EvalError
-              $  "Invalid right-hand value for (%) operation: "
-              <> T.pack (show rhVal)
-    _ ->
-      throwEdh EvalError
-        $  "Invalid left-hand value for (%) operation: "
-        <> T.pack (show lhVal)
+          _ -> exitEdhProc exit EdhContinue
+    _ -> exitEdhProc exit EdhContinue
 
 
 -- | operator (**)
@@ -162,19 +126,10 @@ powProc !lhExpr !rhExpr !exit =
     EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
         EdhDecimal (Decimal rh'd rh'e rh'n) -> if rh'd /= 1
-          then
-            throwEdh EvalError
-            $  "Invalid right-hand value for (**) operation: "
-            <> T.pack (show rhVal)
+          then exitEdhProc exit EdhContinue
           else exitEdhProc exit (EdhDecimal $ lhNum ^^ (rh'n * 10 ^ rh'e))
-        _ ->
-          throwEdh EvalError
-            $  "Invalid right-hand value for (**) operation: "
-            <> T.pack (show rhVal)
-    _ ->
-      throwEdh EvalError
-        $  "Invalid left-hand value for (**) operation: "
-        <> T.pack (show lhVal)
+        _ -> exitEdhProc exit EdhContinue
+    _ -> exitEdhProc exit EdhContinue
 
 
 -- | operator (&&)
@@ -184,10 +139,8 @@ logicalAndProc !lhExpr !rhExpr !exit =
     EdhBool lhBool -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
         EdhBool rhBool -> exitEdhProc exit (EdhBool $ lhBool && rhBool)
-        _ -> throwEdh EvalError $ "Invalid right-hand value type: " <> T.pack
-          (edhTypeNameOf rhVal)
-    _ -> throwEdh EvalError $ "Invalid left-hand value type: " <> T.pack
-      (edhTypeNameOf lhVal)
+        _              -> exitEdhProc exit EdhContinue
+    _ -> exitEdhProc exit EdhContinue
 
 -- | operator (||)
 logicalOrProc :: EdhIntrinsicOp
@@ -196,10 +149,8 @@ logicalOrProc !lhExpr !rhExpr !exit =
     EdhBool lhBool -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
         EdhBool rhBool -> exitEdhProc exit (EdhBool $ lhBool || rhBool)
-        _ -> throwEdh EvalError $ "Invalid right-hand value type: " <> T.pack
-          (edhTypeNameOf rhVal)
-    _ -> throwEdh EvalError $ "Invalid left-hand value type: " <> T.pack
-      (edhTypeNameOf lhVal)
+        _              -> exitEdhProc exit EdhContinue
+    _ -> exitEdhProc exit EdhContinue
 
 
 -- | operator (==)
@@ -287,12 +238,7 @@ doEdhComparison
   -> (Ordering -> Bool)
   -> STM ()
 doEdhComparison pgs exit lhVal rhVal cm = compareEdhValue lhVal rhVal >>= \case
-  Nothing ->
-    throwEdhSTM pgs EvalError
-      $  "Not comparable: "
-      <> T.pack (edhTypeNameOf lhVal)
-      <> " vs "
-      <> T.pack (edhTypeNameOf rhVal)
+  Nothing  -> exitEdhSTM pgs exit EdhContinue
   Just ord -> exitEdhSTM pgs exit (EdhBool $ cm ord)
 
 compareEdhValue :: EdhValue -> EdhValue -> STM (Maybe Ordering)

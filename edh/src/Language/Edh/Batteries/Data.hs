@@ -448,12 +448,7 @@ elemProc !lhExpr !rhExpr !exit = do
         exitEdhSTM pgs exit $ EdhBool $ case Map.lookup lhVal ds of
           Nothing -> False
           Just _  -> True
-      _ ->
-        throwEdh EvalError
-          $  "Don't know how to check element of a "
-          <> T.pack (edhTypeNameOf rhVal)
-          <> ": "
-          <> T.pack (show rhVal)
+      _ -> exitEdhProc exit EdhContinue
 
 
 -- | operator (|*) - prefix tester
@@ -502,12 +497,7 @@ prpdProc !lhExpr !rhExpr !exit = do
           contEdhSTM $ val2DictEntry pgs lhVal $ \(k, v) -> do
             modifyTVar' d (setDictItem k v)
             exitEdhSTM pgs exit rhVal
-        _ ->
-          throwEdh EvalError
-            $  "Don't know how to prepend to a "
-            <> T.pack (edhTypeNameOf rhVal)
-            <> ": "
-            <> T.pack (show rhVal)
+        _ -> exitEdhProc exit EdhContinue
 
 
 -- | operator (>>) - list reverse prepender
@@ -525,11 +515,8 @@ lstrvrsPrpdProc !lhExpr !rhExpr !exit = do
           lll <- readTVar ll
           modifyTVar' l (reverse lll ++)
           exitEdhSTM pgs exit rhVal
-        _ ->
-          throwEdh UsageError $ "You don't reverse-prepend to a " <> T.pack
-            (edhTypeNameOf rhVal)
-    _ -> throwEdh UsageError $ "You don't reverse-prepend a " <> T.pack
-      (edhTypeNameOf lhVal)
+        _ -> exitEdhProc exit EdhContinue
+    _ -> exitEdhProc exit EdhContinue
 
 
 -- | operator (=<) - comprehension maker, appender
@@ -604,12 +591,7 @@ cprhProc !lhExpr !rhExpr !exit = do
               pgs
               exit
               (EdhArgsPack $ ArgsPack (vs ++ dictEntryList ds) kwargs)
-          _ ->
-            throwEdh EvalError
-              $  "Don't know how to comprehend from a "
-              <> T.pack (edhTypeNameOf rhVal)
-              <> ": "
-              <> T.pack (show rhVal)
+          _ -> exitEdhProc exit EdhContinue
         EdhList (List _ !l) -> case edhUltimate rhVal of
           EdhArgsPack (ArgsPack !args _) -> contEdhSTM $ do
             modifyTVar' l (++ args)
@@ -622,12 +604,7 @@ cprhProc !lhExpr !rhExpr !exit = do
             ds <- readTVar d
             modifyTVar' l (++ (dictEntryList ds))
             exitEdhSTM pgs exit lhVal
-          _ ->
-            throwEdh EvalError
-              $  "Don't know how to comprehend from a "
-              <> T.pack (edhTypeNameOf rhVal)
-              <> ": "
-              <> T.pack (show rhVal)
+          _ -> exitEdhProc exit EdhContinue
         EdhDict (Dict _ !d) -> case edhUltimate rhVal of
           EdhArgsPack (ArgsPack _ !kwargs) -> contEdhSTM $ do
             modifyTVar d $ Map.union $ Map.fromList
@@ -642,18 +619,8 @@ cprhProc !lhExpr !rhExpr !exit = do
             ds <- readTVar d'
             modifyTVar d $ Map.union ds
             exitEdhSTM pgs exit lhVal
-          _ ->
-            throwEdh EvalError
-              $  "Don't know how to comprehend from a "
-              <> T.pack (edhTypeNameOf rhVal)
-              <> ": "
-              <> T.pack (show rhVal)
-        _ ->
-          throwEdh EvalError
-            $  "Don't know how to comprehend into a "
-            <> T.pack (edhTypeNameOf lhVal)
-            <> ": "
-            <> T.pack (show lhVal)
+          _ -> exitEdhProc exit EdhContinue
+        _ -> exitEdhProc exit EdhContinue
 
 
 -- | operator (<-) - event publisher
@@ -661,15 +628,10 @@ evtPubProc :: EdhIntrinsicOp
 evtPubProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
-    EdhSink es -> evalExpr rhExpr $ \(OriginalValue !rhV _ _) ->
+    EdhSink !es -> evalExpr rhExpr $ \(OriginalValue !rhV _ _) ->
       let !rhVal = edhDeCaseClose rhV
       in  contEdhSTM $ do
             publishEvent es rhVal
             exitEdhSTM pgs exit rhVal
-    _ ->
-      throwEdh EvalError
-        $  "Can only publish event to a sink, not a "
-        <> T.pack (edhTypeNameOf lhVal)
-        <> ": "
-        <> T.pack (show lhVal)
+    _ -> exitEdhProc exit EdhContinue
 

@@ -1,13 +1,12 @@
 
-import * 'batteries/magic'
-
 {
 
   class Tensor {
 
     method __init__ ( name as this.name ) pass
 
-    method (+) ( other ) case type( other ) of {
+
+    this.(+@) = method (+) ( other ) case type( other ) of {
       # add to a constant
       DecimalType -> Tensor( name= '(' ++ this.name ++ '+' ++ other ++ ')' )
 
@@ -19,7 +18,8 @@ import * 'batteries/magic'
       continue # as NotImplemented in Python
     }
 
-    method (*) ( other ) case type( other ) of {
+
+    this.(*@) = method (*) ( other ) case type( other ) of {
       # mul to a constant
       DecimalType -> Tensor( name= '(' ++ this.name ++ '*' ++ other ++ ')' )
 
@@ -30,6 +30,7 @@ import * 'batteries/magic'
 
       continue # as NotImplemented in Python
     }
+
 
     method (-) ( other ) case type( other ) of {
       # sub a constant
@@ -53,6 +54,7 @@ import * 'batteries/magic'
 
       continue # as NotImplemented in Python
     }
+
 
     method (/) ( other ) case type( other ) of {
       # div by a constant
