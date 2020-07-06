@@ -93,8 +93,8 @@ vecMethods !pgsModule = sequence
         Nothing                       -> exitEdhSTM pgs exit $ EdhBool False
         Just (mvecOther :: EdhVector) -> do
           !conclusion <- unsafeIOToSTM $ do
-            -- TODO we're sacrificing thread safety for performance here
-            --      justify this decision
+            -- TODO we're sacrificing thread safety for zero-copy performance
+            --      here, justify this decision
             vec      <- V.unsafeFreeze mvec
             vecOther <- V.unsafeFreeze mvecOther
             return $ vec == vecOther
