@@ -53,6 +53,7 @@ module Language.Edh.EHI
   , edhModuleAsIs
   , createEdhModule
   , installEdhModule
+  , installedEdhModule
   , importEdhModule
   , moduleContext
   , contextScope
@@ -139,6 +140,8 @@ module Language.Edh.EHI
   , Class
   , EdhHostCtor
   , mkHostClass
+  , mkExtHostClass
+  , mkHostProperty
   , Entity(..)
   , EntityManipulater(..)
   , lookupEntityAttr
@@ -149,10 +152,14 @@ module Language.Edh.EHI
   , createHashEntity
   , createSideEntityManipulater
   , createSideEntity
-  , withThisEntityStore
-  , withThisEntityStore'
-  , withThatEntityStore
-  , withThatEntityStore'
+  , withThatEntity
+  , withThatEntity'
+  , withEntityOfClass
+  , withEntityOfClass'
+  , modifyThatEntity
+  , modifyThatEntity'
+  , modifyEntityOfClass
+  , modifyEntityOfClass'
   , viewAsEdhObject
   , cloneEdhObject
   , createEdhObject

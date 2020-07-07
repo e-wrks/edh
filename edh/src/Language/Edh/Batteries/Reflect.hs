@@ -284,6 +284,7 @@ scopeEvalProc (ArgsPack !args !kwargs) !exit = do
           { edh'context = callerCtx { callStack        = scopeCallStack
                                     , generatorCaller  = Nothing
                                     , contextMatch     = true
+                                    , contextPure      = False
                                     , contextExporting = False
                                     }
           }

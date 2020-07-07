@@ -283,14 +283,15 @@ evalStmt' !stmt !exit = do
 
 
     GoStmt !expr -> do
-      let doFork :: EdhProgState -> EdhProc -> STM ()
-          doFork pgs' prog = do
+      let doFork :: EdhProgState -> (Context -> Context) -> EdhProc -> STM ()
+          doFork pgs' !ctxMod !prog = do
             forkEdh
               pgs'
-                { edh'context = ctx { contextMatch       = true
-                                    , contextExporting   = False
-                                    , contextEffDefining = False
-                                    }
+                { edh'context = ctxMod ctx { contextMatch       = true
+                                           , contextPure        = False
+                                           , contextExporting   = False
+                                           , contextEffDefining = False
+                                           }
                 }
               prog
             exitEdhSTM pgs exit nil
@@ -299,9 +300,7 @@ evalStmt' !stmt !exit = do
         CaseExpr !tgtExpr !branchesExpr ->
           evalExpr tgtExpr $ \(OriginalValue !val _ _) ->
             contEdhSTM
-              $ doFork pgs
-                  { edh'context = ctx { contextMatch = edhDeCaseClose val }
-                  }
+              $ doFork pgs (\ctx' -> ctx' { contextMatch = edhDeCaseClose val })
               $ evalCaseBlock branchesExpr edhEndOfProc
 
         (CallExpr !procExpr !argsSndr) ->
@@ -309,26 +308,29 @@ evalStmt' !stmt !exit = do
             $ resolveEdhCallee pgs procExpr
             $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
                 edhMakeCall pgs callee'val callee'that argsSndr scopeMod
-                  $ \mkCall -> doFork pgs (mkCall edhEndOfProc)
+                  $ \mkCall -> doFork pgs id (mkCall edhEndOfProc)
 
         (ForExpr !argsRcvr !iterExpr !doExpr) ->
           contEdhSTM
             $ edhForLoop pgs argsRcvr iterExpr doExpr (const $ return ())
-            $ \runLoop -> doFork pgs (runLoop edhEndOfProc)
+            $ \runLoop -> doFork pgs id (runLoop edhEndOfProc)
 
-        _ -> contEdhSTM $ doFork pgs $ evalExpr expr edhEndOfProc
+        _ -> contEdhSTM $ doFork pgs id $ evalExpr expr edhEndOfProc
 
 
     DeferStmt !expr -> do
-      let schedDefered :: EdhProgState -> EdhProc -> STM ()
-          schedDefered pgs' prog = do
+      let schedDefered
+            :: EdhProgState -> (Context -> Context) -> EdhProc -> STM ()
+          schedDefered !pgs' !ctxMod !prog = do
             modifyTVar'
               (edh'defers pgs)
               (( pgs'
-                 { edh'context = (edh'context pgs') { contextMatch       = true
-                                                    , contextExporting   = False
-                                                    , contextEffDefining = False
-                                                    }
+                 { edh'context = ctxMod $ (edh'context pgs')
+                                   { contextMatch       = true
+                                   , contextPure        = False
+                                   , contextExporting   = False
+                                   , contextEffDefining = False
+                                   }
                  }
                , prog
                ) :
@@ -339,9 +341,9 @@ evalStmt' !stmt !exit = do
         CaseExpr !tgtExpr !branchesExpr ->
           evalExpr tgtExpr $ \(OriginalValue !val _ _) ->
             contEdhSTM
-              $ schedDefered pgs
-                  { edh'context = ctx { contextMatch = edhDeCaseClose val }
-                  }
+              $ schedDefered
+                  pgs
+                  (\ctx' -> ctx' { contextMatch = edhDeCaseClose val })
               $ evalCaseBlock branchesExpr edhEndOfProc
 
         (CallExpr !procExpr !argsSndr) ->
@@ -349,14 +351,14 @@ evalStmt' !stmt !exit = do
             $ resolveEdhCallee pgs procExpr
             $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
                 edhMakeCall pgs callee'val callee'that argsSndr scopeMod
-                  $ \mkCall -> schedDefered pgs (mkCall edhEndOfProc)
+                  $ \mkCall -> schedDefered pgs id (mkCall edhEndOfProc)
 
         (ForExpr !argsRcvr !iterExpr !doExpr) ->
           contEdhSTM
             $ edhForLoop pgs argsRcvr iterExpr doExpr (const $ return ())
-            $ \runLoop -> schedDefered pgs (runLoop edhEndOfProc)
+            $ \runLoop -> schedDefered pgs id (runLoop edhEndOfProc)
 
-        _ -> contEdhSTM $ schedDefered pgs $ evalExpr expr edhEndOfProc
+        _ -> contEdhSTM $ schedDefered pgs id $ evalExpr expr edhEndOfProc
 
 
     PerceiveStmt !sinkExpr !bodyExpr ->
@@ -2303,6 +2305,7 @@ createEdhObject !cls !apk !exit = do
             { callStack          = calleeScope <| callStack callerCtx
             , generatorCaller    = Nothing
             , contextMatch       = true
+            , contextPure        = False
             , contextExporting   = False
             , contextEffDefining = False
             }
@@ -2321,6 +2324,7 @@ createEdhObject !cls !apk !exit = do
                 { callStack          = ctorScope <| callStack callerCtx
                 , generatorCaller    = Nothing
                 , contextMatch       = true
+                , contextPure        = False
                 , contextStmt        = pb
                 , contextExporting   = False
                 , contextEffDefining = False
@@ -2352,6 +2356,7 @@ createEdhObject !cls !apk !exit = do
                                 :| []
                 , generatorCaller    = Nothing
                 , contextMatch       = true
+                , contextPure        = False
                 , contextStmt        = pb
                 , contextExporting   = False
                 , contextEffDefining = False
@@ -2392,6 +2397,7 @@ callEdhOperator !mth'that !mth'proc !prede !args !exit = do
           !mthCtx = callerCtx { callStack = mthScope <| callStack callerCtx
                               , generatorCaller    = Nothing
                               , contextMatch       = true
+                              , contextPure        = False
                               , contextExporting   = False
                               , contextEffDefining = False
                               }
@@ -2439,6 +2445,7 @@ callEdhOperator' !gnr'caller !callee'that !mth'proc !prede !mth'body !args !exit
           , generatorCaller    = Nothing
           , contextMatch       = true
           , contextStmt        = mth'body
+          , contextPure        = False
           , contextExporting   = False
           , contextEffDefining = False
           }
@@ -2457,6 +2464,7 @@ callEdhOperator' !gnr'caller !callee'that !mth'proc !prede !mth'body !args !exit
                                   , generatorCaller    = gnr'caller
                                   , contextMatch       = true
                                   , contextStmt        = mth'body
+                                  , contextPure        = False
                                   , contextExporting   = False
                                   , contextEffDefining = False
                                   }
@@ -2501,6 +2509,7 @@ callEdhMethod !mth'that !mth'proc !apk !scopeMod !exit = do
           !mthCtx = callerCtx { callStack = mthScope <| callStack callerCtx
                               , generatorCaller    = Nothing
                               , contextMatch       = true
+                              , contextPure        = False
                               , contextExporting   = False
                               , contextEffDefining = False
                               }
@@ -2546,6 +2555,7 @@ callEdhMethod' !gnr'caller !callee'that !mth'proc !mth'body !apk !scopeMod !exit
           , generatorCaller    = Nothing
           , contextMatch       = true
           , contextStmt        = mth'body
+          , contextPure        = False
           , contextExporting   = False
           , contextEffDefining = False
           }
@@ -2562,6 +2572,7 @@ callEdhMethod' !gnr'caller !callee'that !mth'proc !mth'body !apk !scopeMod !exit
                                 , generatorCaller    = gnr'caller
                                 , contextMatch       = true
                                 , contextStmt        = mth'body
+                                , contextPure        = False
                                 , contextExporting   = False
                                 , contextEffDefining = False
                                 }
@@ -2707,6 +2718,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                               { callStack = calleeScope <| callStack ctx
                               , generatorCaller    = Just (pgs, recvYield exit)
                               , contextMatch       = true
+                              , contextPure        = False
                               , contextExporting   = False
                               , contextEffDefining = False
                               }
@@ -3650,39 +3662,17 @@ edhValueStr s@EdhString{} !exit' = exitEdhProc exit' s
 edhValueStr !v            !exit' = edhValueRepr v exit'
 
 
-withThisEntityStore
+withThatEntity
   :: forall a . Typeable a => (EdhProgState -> a -> STM ()) -> EdhProc
-withThisEntityStore = withThisEntityStore'
+withThatEntity = withThatEntity'
   $ \ !pgs -> throwEdhSTM pgs UsageError "bug: unexpected entity storage type"
-withThisEntityStore'
+withThatEntity'
   :: forall a
    . Typeable a
   => (EdhProgState -> STM ())
   -> (EdhProgState -> a -> STM ())
   -> EdhProc
-withThisEntityStore' !naExit !exit = ask >>= \ !pgs ->
-  contEdhSTM
-    $   fromDynamic
-    <$> readTVar
-          (entity'store $ objEntity $ thisObject $ contextScope $ edh'context
-            pgs
-          )
-    >>= \case
-          Nothing   -> naExit pgs
-
-          Just !esd -> exit pgs esd
-
-withThatEntityStore
-  :: forall a . Typeable a => (EdhProgState -> a -> STM ()) -> EdhProc
-withThatEntityStore = withThatEntityStore'
-  $ \ !pgs -> throwEdhSTM pgs UsageError "bug: unexpected entity storage type"
-withThatEntityStore'
-  :: forall a
-   . Typeable a
-  => (EdhProgState -> STM ())
-  -> (EdhProgState -> a -> STM ())
-  -> EdhProc
-withThatEntityStore' !naExit !exit = ask >>= \ !pgs ->
+withThatEntity' !naExit !exit = ask >>= \ !pgs ->
   contEdhSTM
     $   fromDynamic
     <$> readTVar
@@ -3693,6 +3683,106 @@ withThatEntityStore' !naExit !exit = ask >>= \ !pgs ->
           Nothing   -> naExit pgs
 
           Just !esd -> exit pgs esd
+
+withEntityOfClass
+  :: forall a
+   . Typeable a
+  => Unique
+  -> (EdhProgState -> a -> STM ())
+  -> EdhProc
+withEntityOfClass !classUniq = withEntityOfClass' classUniq
+  $ \ !pgs -> throwEdhSTM pgs UsageError "bug: unexpected entity storage type"
+withEntityOfClass'
+  :: forall a
+   . Typeable a
+  => Unique
+  -> (EdhProgState -> STM ())
+  -> (EdhProgState -> a -> STM ())
+  -> EdhProc
+withEntityOfClass' !classUniq !naExit !exit = ask >>= \ !pgs -> contEdhSTM $ do
+  let !that = thatObject $ contextScope $ edh'context pgs
+  resolveEdhInstance pgs classUniq that >>= \case
+    Nothing -> naExit pgs
+    Just !inst ->
+      fromDynamic <$> readTVar (entity'store $ objEntity inst) >>= \case
+        Nothing   -> naExit pgs
+
+        Just !esd -> exit pgs esd
+
+
+modifyThatEntity
+  :: forall a
+   . Typeable a
+  => EdhProcExit
+  -> (EdhProgState -> a -> (a -> EdhValue -> STM ()) -> STM ())
+  -> EdhProc
+modifyThatEntity !exit !esMod = modifyThatEntity'
+  (\ !pgs ->
+    throwEdhSTM pgs UsageError "bug: unexpected heavy entity storage type"
+  )
+  exit
+  esMod
+modifyThatEntity'
+  :: forall a
+   . Typeable a
+  => (EdhProgState -> STM ())
+  -> EdhProcExit
+  -> (EdhProgState -> a -> (a -> EdhValue -> STM ()) -> STM ())
+  -> EdhProc
+modifyThatEntity' !naExit !exit !esMod = ask >>= \ !pgs -> contEdhSTM $ do
+  let !esv =
+        entity'store $ objEntity $ thatObject $ contextScope $ edh'context pgs
+  fromDynamic <$> readTVar esv >>= \case
+    Nothing                -> naExit pgs
+    Just (esmv :: TMVar a) -> do
+      !esd <- takeTMVar esmv
+      let tryAct !pgs' !exit' = esMod pgs' esd $ \ !esd' !exitVal -> do
+            putTMVar esmv esd'
+            exitEdhSTM pgs' exit' exitVal
+      edhCatchSTM pgs tryAct exit $ \_pgsThrower _exv _recover rethrow -> do
+        void $ tryPutTMVar esmv esd
+        rethrow
+
+modifyEntityOfClass
+  :: forall a
+   . Typeable a
+  => Unique
+  -> EdhProcExit
+  -> (EdhProgState -> a -> (a -> EdhValue -> STM ()) -> STM ())
+  -> EdhProc
+modifyEntityOfClass !classUniq !exit !esMod = modifyEntityOfClass'
+  classUniq
+  (\ !pgs ->
+    throwEdhSTM pgs UsageError "bug: unexpected heavy entity storage type"
+  )
+  exit
+  esMod
+modifyEntityOfClass'
+  :: forall a
+   . Typeable a
+  => Unique
+  -> (EdhProgState -> STM ())
+  -> EdhProcExit
+  -> (EdhProgState -> a -> (a -> EdhValue -> STM ()) -> STM ())
+  -> EdhProc
+modifyEntityOfClass' !classUniq !naExit !exit !esMod = ask >>= \ !pgs ->
+  contEdhSTM $ do
+    let !that = thatObject $ contextScope $ edh'context pgs
+    resolveEdhInstance pgs classUniq that >>= \case
+      Nothing    -> naExit pgs
+      Just !inst -> do
+        let !esv = entity'store $ objEntity inst
+        fromDynamic <$> readTVar esv >>= \case
+          Nothing                -> naExit pgs
+          Just (esmv :: TMVar a) -> do
+            !esd <- takeTMVar esmv
+            let tryAct !pgs' !exit' = esMod pgs' esd $ \ !esd' !exitVal -> do
+                  putTMVar esmv esd'
+                  exitEdhSTM pgs' exit' exitVal
+            edhCatchSTM pgs tryAct exit $ \_pgsThrower _exv _recover rethrow ->
+              do
+                void $ tryPutTMVar esmv esd
+                rethrow
 
 
 edhRegulateIndex :: EdhProgState -> Int -> Int -> (Int -> STM ()) -> STM ()

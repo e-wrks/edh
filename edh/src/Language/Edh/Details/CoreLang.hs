@@ -9,6 +9,7 @@ import           Control.Concurrent.STM
 
 import           Data.Text                      ( Text )
 import qualified Data.HashMap.Strict           as Map
+import           Data.Unique
 
 import           Language.Edh.Details.RtTypes
 
@@ -92,13 +93,14 @@ lookupEdhObjAttr' pgs !addr (obj : rest) =
 -- * Edh inheritance resolution
 
 
-resolveEdhInstance :: EdhProgState -> Class -> Object -> STM (Maybe Object)
-resolveEdhInstance pgs !class_ !this = resolveEdhInstance' pgs class_ [this]
+resolveEdhInstance :: EdhProgState -> Unique -> Object -> STM (Maybe Object)
+resolveEdhInstance pgs !classUniq !this =
+  resolveEdhInstance' pgs classUniq [this]
 {-# INLINE resolveEdhInstance #-}
-resolveEdhInstance' :: EdhProgState -> Class -> [Object] -> STM (Maybe Object)
+resolveEdhInstance' :: EdhProgState -> Unique -> [Object] -> STM (Maybe Object)
 resolveEdhInstance' _ _ [] = return Nothing
-resolveEdhInstance' pgs !class_ (obj : rest)
-  | objClass obj == class_ = return (Just obj)
-  | otherwise = resolveEdhInstance' pgs class_ . (rest ++) =<< readTVar
+resolveEdhInstance' pgs !classUniq (obj : rest)
+  | procedure'uniq (objClass obj) == classUniq = return (Just obj)
+  | otherwise = resolveEdhInstance' pgs classUniq . (rest ++) =<< readTVar
     (objSupers obj)
 {-# INLINE resolveEdhInstance' #-}

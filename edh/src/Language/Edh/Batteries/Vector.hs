@@ -88,7 +88,7 @@ vecMethods !pgsModule = sequence
 
   vecEqProc :: EdhProcedure
   vecEqProc (ArgsPack [EdhObject (Object !entOther _ _)] !kwargs) !exit
-    | Map.null kwargs = withThatEntityStore $ \ !pgs !mvec ->
+    | Map.null kwargs = withThatEntity $ \ !pgs !mvec ->
       fromDynamic <$> readTVar (entity'store entOther) >>= \case
         Nothing                       -> exitEdhSTM pgs exit $ EdhBool False
         Just (mvecOther :: EdhVector) -> do
@@ -103,7 +103,7 @@ vecMethods !pgsModule = sequence
 
   vecIdxReadProc :: EdhProcedure
   vecIdxReadProc (ArgsPack !args !_kwargs) !exit =
-    withThatEntityStore $ \ !pgs !mvec -> case args of
+    withThatEntity $ \ !pgs !mvec -> case args of
       [EdhDecimal !idx] -> case fromInteger <$> D.decimalToInteger idx of
         Just !n -> edhRegulateIndex pgs (MV.length mvec) n
           $ \ !i -> (unsafeIOToSTM $ MV.read mvec i) >>= exitEdhSTM pgs exit
@@ -115,7 +115,7 @@ vecMethods !pgsModule = sequence
 
   vecIdxWriteProc :: EdhProcedure
   vecIdxWriteProc (ArgsPack !args !_kwargs) !exit =
-    withThatEntityStore $ \ !pgs !mvec -> case args of
+    withThatEntity $ \ !pgs !mvec -> case args of
       [EdhDecimal !idx, !val] -> case fromInteger <$> D.decimalToInteger idx of
         Just !n -> edhRegulateIndex pgs (MV.length mvec) n $ \ !i ->
           unsafeIOToSTM (MV.write mvec i val) >> exitEdhSTM pgs exit val
@@ -126,15 +126,15 @@ vecMethods !pgsModule = sequence
       _ -> throwEdhSTM pgs UsageError "Invalid index for a Vector"
 
   vecNullProc :: EdhProcedure
-  vecNullProc _ !exit = withThatEntityStore $ \ !pgs (mvec :: EdhVector) ->
+  vecNullProc _ !exit = withThatEntity $ \ !pgs (mvec :: EdhVector) ->
     exitEdhSTM pgs exit $ EdhBool $ MV.length mvec <= 0
 
   vecLenProc :: EdhProcedure
-  vecLenProc _ !exit = withThatEntityStore $ \ !pgs (mvec :: EdhVector) ->
+  vecLenProc _ !exit = withThatEntity $ \ !pgs (mvec :: EdhVector) ->
     exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral $ MV.length mvec
 
   vecReprProc :: EdhProcedure
-  vecReprProc _ !exit = withThatEntityStore $ \ !pgs !mvec -> do
+  vecReprProc _ !exit = withThatEntity $ \ !pgs !mvec -> do
     let go :: [EdhValue] -> [Text] -> STM ()
         go [] !rs =
           exitEdhSTM pgs exit

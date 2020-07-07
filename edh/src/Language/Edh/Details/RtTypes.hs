@@ -1438,6 +1438,38 @@ mkHostProc !scope !vc !nm !p !args = do
     }
 
 
+mkHostProperty
+  :: Scope -> Text -> EdhProcedure -> Maybe EdhProcedure -> STM EdhValue
+mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
+  getter <- do
+    u <- unsafeIOToSTM newUnique
+    return $ ProcDefi
+      { procedure'uniq = u
+      , procedure'name = AttrByName nm
+      , procedure'lexi = Just scope
+      , procedure'decl = ProcDecl { procedure'addr = NamedAttr nm
+                                  , procedure'args = PackReceiver []
+                                  , procedure'body = Right getterProc
+                                  }
+      }
+  setter <- case maybeSetterProc of
+    Nothing          -> return Nothing
+    Just !setterProc -> do
+      u <- unsafeIOToSTM newUnique
+      return $ Just $ ProcDefi
+        { procedure'uniq = u
+        , procedure'name = AttrByName nm
+        , procedure'lexi = Just scope
+        , procedure'decl = ProcDecl
+          { procedure'addr = NamedAttr nm
+          , procedure'args = PackReceiver
+                               [optionalArg "newValue" $ LitExpr NilLiteral]
+          , procedure'body = Right setterProc
+          }
+        }
+  return $ EdhDescriptor getter setter
+
+
 type EdhHostCtor
   =  EdhProgState
   -- | ctor args, if __init__() is provided, will go there too
@@ -1446,6 +1478,24 @@ type EdhHostCtor
   -> (Dynamic -> STM ())
   -> STM ()
 
+-- | Make a host class with a 'EdhHostCtor' and custom entity manipulater
+--
+-- The entity manipulater is responsible to manage all kinds of instance
+-- attributes, including methods and mutable ones.
+--
+-- Note that even as an object method procedure, a host procedure's contextual
+-- `this` instance is the enclosed this object at the time it's defined (i.e.
+-- `this` in the scope passed to 'mkHostProc' that produced the host procedure,
+-- which is normally a host module), so such host methods normally operate
+-- against `that` instance's in-band storage.
+--
+-- `that` object is always the final instance down to the inheritance
+-- hierarchy, will be an Edh object if it extended such a host class instance,
+-- and will definitely not carrying the entity store produced by the
+-- 'EdhHostCtor' here. Use 'mkExtHostClass' to create host methods resolving
+-- the host class instance against `that`, to operate properly.
+--
+-- See: 'withThatEntity'
 mkHostClass
   :: Scope -- ^ outer lexical scope
   -> Text  -- ^ class name
@@ -1454,6 +1504,45 @@ mkHostClass
   -> STM EdhValue
 mkHostClass !scope !nm !hc !esm = do
   classUniq <- unsafeIOToSTM newUnique
+  let !cls = ProcDefi
+        { procedure'uniq = classUniq
+        , procedure'name = AttrByName nm
+        , procedure'lexi = Just scope
+        , procedure'decl = ProcDecl { procedure'addr = NamedAttr nm
+                                    , procedure'args = PackReceiver []
+                                    , procedure'body = Right ctor
+                                    }
+        }
+      ctor :: EdhProcedure
+      ctor !apk !exit = ask >>= \ !pgs -> contEdhSTM $ hc pgs apk $ \ !esd ->
+        do
+          !ent     <- createSideEntity esm esd
+          !newThis <- viewAsEdhObject ent cls []
+          exitEdhSTM pgs exit $ EdhObject newThis
+  return $ EdhClass cls
+
+-- | Make an extensible (by Edh objects) host class with a 'EdhHostCtor' and
+-- custom entity manipulater
+--
+-- When a host object carries some method operating against `that` instance,
+-- it won't be properly extended by other Edh objects, because `that` will 
+-- refer to that final Edh instance instead. Here the entity manipulater 
+-- creator is passed a unique identifier of the host class to be created, so
+-- you should let your host methods to 'resolveEdhInstance' of this class id
+-- agsinst `that` instance, to obtain the correct instance with entity store
+-- created by your 'EdhHostCtor' passed here.
+--
+-- See: 'withEntityOfClass'
+mkExtHostClass
+  :: Scope -- ^ outer lexical scope
+  -> Text  -- ^ class name
+  -> EdhHostCtor -- ^ instance constructor
+  -- | custom entity storage manipulater creator
+  -> (Unique -> STM EntityManipulater)
+  -> STM EdhValue
+mkExtHostClass !scope !nm !hc !esmCtor = do
+  classUniq <- unsafeIOToSTM newUnique
+  esm       <- esmCtor classUniq
   let !cls = ProcDefi
         { procedure'uniq = classUniq
         , procedure'name = AttrByName nm

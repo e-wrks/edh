@@ -316,10 +316,12 @@ branchProc !lhExpr !rhExpr !exit = do
               case clsVal of
                 EdhNil -> exitEdhProc exit EdhCaseOther
                 EdhClass !cls ->
-                  contEdhSTM $ resolveEdhInstance pgs cls ctxObj >>= \case
-                    Just instObj ->
-                      branchMatched [(instAttr, EdhObject instObj)]
-                    Nothing -> exitEdhSTM pgs exit EdhCaseOther
+                  contEdhSTM
+                    $   resolveEdhInstance pgs (procedure'uniq cls) ctxObj
+                    >>= \case
+                          Just instObj ->
+                            branchMatched [(instAttr, EdhObject instObj)]
+                          Nothing -> exitEdhSTM pgs exit EdhCaseOther
                 _ ->
                   throwEdh EvalError
                     $  T.pack

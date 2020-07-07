@@ -237,6 +237,16 @@ installEdhModule !world !moduId !preInstall = liftIO $ do
       putTMVar (worldModules world) $ Map.insert moduId moduSlot moduMap
   return modu
 
+installedEdhModule :: MonadIO m => EdhWorld -> ModuleId -> m (Maybe Object)
+installedEdhModule !world !moduId =
+  liftIO $ atomically $ tryReadTMVar (worldModules world) >>= \case
+    Nothing  -> return Nothing
+    Just !mm -> case Map.lookup moduId mm of
+      Nothing        -> return Nothing
+      Just !moduSlot -> tryReadTMVar moduSlot >>= \case
+        Just (EdhObject !modu) -> return $ Just modu
+        _                      -> return Nothing
+
 
 runEdhModule
   :: MonadIO m
