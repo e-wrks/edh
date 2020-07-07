@@ -149,7 +149,9 @@ module Language.Edh.EHI
   , changeEntityAttr
   , updateEntityAttrs
   , createMaoEntity
+  , maoEntityManipulater
   , createHashEntity
+  , hashEntityManipulater
   , createSideEntityManipulater
   , createSideEntity
   , withThatEntity

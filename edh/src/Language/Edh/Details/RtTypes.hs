@@ -166,10 +166,13 @@ createMaoEntity :: STM Entity
 createMaoEntity = do
   u  <- unsafeIOToSTM newUnique
   es <- newTVar $ toDyn EdhNil
-  return $ Entity u es $ EntityManipulater the'lookup'entity'attr
-                                           the'all'entity'attrs
-                                           the'change'entity'attr
-                                           the'update'entity'attrs
+  return $ Entity u es maoEntityManipulater
+
+maoEntityManipulater :: EntityManipulater
+maoEntityManipulater = EntityManipulater the'lookup'entity'attr
+                                         the'all'entity'attrs
+                                         the'change'entity'attr
+                                         the'update'entity'attrs
  where
   the'lookup'entity'attr _ _ _ = return EdhNil
   the'all'entity'attrs _ _ = return []
@@ -183,10 +186,13 @@ createHashEntity :: Map.HashMap AttrKey EdhValue -> STM Entity
 createHashEntity !m = do
   u  <- unsafeIOToSTM newUnique
   es <- newTVar $ toDyn m
-  return $ Entity u es $ EntityManipulater the'lookup'entity'attr
-                                           the'all'entity'attrs
-                                           the'change'entity'attr
-                                           the'update'entity'attrs
+  return $ Entity u es hashEntityManipulater
+
+hashEntityManipulater :: EntityManipulater
+hashEntityManipulater = EntityManipulater the'lookup'entity'attr
+                                          the'all'entity'attrs
+                                          the'change'entity'attr
+                                          the'update'entity'attrs
  where
   hm = flip fromDyn Map.empty
   the'lookup'entity'attr _ !k = return . fromMaybe EdhNil . Map.lookup k . hm
