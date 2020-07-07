@@ -437,34 +437,33 @@ parseThrowStmt !si = do
 
 parseStmt' :: Int -> IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
 parseStmt' !prec !si = do
+  void optionalSemicolon
   srcPos      <- getSourcePos
-  (stmt, si') <-
-    choice
-        [ parseAtoIsoStmt si
-        , parseGoStmt si
-        , parseDeferStmt si
-        , parseEffectStmt si
-        , parseLetStmt si
-        , parseExtendsStmt si
-        , parsePerceiveStmt si
-        , parseWhileStmt si
+  (stmt, si') <- choice
+    [ parseAtoIsoStmt si
+    , parseGoStmt si
+    , parseDeferStmt si
+    , parseEffectStmt si
+    , parseLetStmt si
+    , parseExtendsStmt si
+    , parsePerceiveStmt si
+    , parseWhileStmt si
           -- TODO validate <break> must within a loop construct
-        , (BreakStmt, si) <$ keyword "break"
+    , (BreakStmt, si) <$ keyword "break"
           -- note <continue> can be the eval'ed value of a proc,
           --      carrying NotImplemented semantics as in Python
-        , (ContinueStmt, si) <$ keyword "continue"
+    , (ContinueStmt, si) <$ keyword "continue"
           -- TODO validate fallthrough must within a branch block
-        , (FallthroughStmt, si) <$ keyword "fallthrough"
-        , (RethrowStmt, si) <$ keyword "rethrow"
-        , parseReturnStmt si
-        , parseThrowStmt si
-        , (, si) <$> parseVoidStmt
+    , (FallthroughStmt, si) <$ keyword "fallthrough"
+    , (RethrowStmt, si) <$ keyword "rethrow"
+    , parseReturnStmt si
+    , parseThrowStmt si
+    , (, si) <$> parseVoidStmt
 
           -- NOTE: statements above should probably all be detected by
           -- `illegalExprStart` as invalid start for an expr
-        , parseExprPrec prec si >>= \(x, si') -> return (ExprStmt x, si')
-        ]
-      <* optionalSemicolon
+    , parseExprPrec prec si >>= \(x, si') -> return (ExprStmt x, si')
+    ]
   return (StmtSrc (srcPos, stmt), si')
 
 parseStmt :: IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
