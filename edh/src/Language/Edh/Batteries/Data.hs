@@ -140,13 +140,11 @@ fapProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
   contEdhSTM
     $ resolveEdhCallee pgs lhExpr
     $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
-        runEdhProc pgs $ packEdhArgs argsExpr $ \ !apk ->
-          contEdhSTM
-            $ edhMakeCall' pgs callee'val callee'that (deApk apk) scopeMod
-            $ \mkCall -> runEdhProc pgs (mkCall exit)
+        edhMakeCall pgs callee'val callee'that argsPkr scopeMod
+          $ \mkCall -> runEdhProc pgs (mkCall exit)
  where
-  argsExpr :: ArgsPacker
-  argsExpr = case rhExpr of
+  argsPkr :: ArgsPacker
+  argsPkr = case rhExpr of
     ArgsPackExpr !pkr -> pkr
     _                 -> [SendPosArg rhExpr]
 
@@ -158,13 +156,11 @@ ffapProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
   contEdhSTM
     $ resolveEdhCallee pgs rhExpr
     $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
-        runEdhProc pgs $ packEdhArgs argsExpr $ \ !apk ->
-          contEdhSTM
-            $ edhMakeCall' pgs callee'val callee'that (deApk apk) scopeMod
-            $ \mkCall -> runEdhProc pgs (mkCall exit)
+        edhMakeCall pgs callee'val callee'that argsPkr scopeMod
+          $ \mkCall -> runEdhProc pgs (mkCall exit)
  where
-  argsExpr :: ArgsPacker
-  argsExpr = case lhExpr of
+  argsPkr :: ArgsPacker
+  argsPkr = case lhExpr of
     ArgsPackExpr !pkr -> pkr
     _                 -> [SendPosArg lhExpr]
 

@@ -1,0 +1,54 @@
+
+# Note:
+#  `$` is the function application operator as in Haskell
+#  curly brackets quoting is not necessary for a single statement
+
+# Hint:
+#  have a look at the implementation of `when/unless`, they are dead simple
+
+
+# this is the idiomatic form, it may help a bit if you build the intuition that
+# those 2 `$` are quoting the condition, or if any of the `$` omitted, that's
+# different semantic
+{
+
+  when$ 3>2 ${
+    console.print( 'Math never lies.' )
+  }
+
+  unless$ 3 is 2 ${
+    console.print( "So it's trust worthy." )
+  }
+
+}
+
+
+# working form without the 1st `$`, but this may be anti-idiomatic:
+#  * if you forget the `$`, things go definitely wrong
+{
+
+  when ( 3>2 ) ${
+    console.print( 'Math never lies.' )
+  }
+
+  unless ( 3 is 2 ) ${
+    console.print( "So it's trust worthy." )
+  }
+
+}
+
+
+# working form without `$` at all, but this may be anti-idiomatic:
+#  * if you forget the round brackets, things go definitely wrong
+#  * if you forget the curly brackets, it'll fail if you add a 2nd statement
+{
+
+  when( 3>2 ) ( {
+      console.print( 'Math never lies.' )
+  } )
+
+  unless( 3 is 2 ) ( {
+      console.print( "So it's trust worthy." )
+  } )
+
+}
