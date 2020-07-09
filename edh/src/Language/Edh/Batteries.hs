@@ -309,9 +309,10 @@ installEdhBatteries world = liftIO $ do
           )
 
         -- syntactic sugars for (=)
-        , ("+=", 2)
-        , ("-=", 2)
-        , ("/=", 2)
+        , ("+=" , 2)
+        , ("-=" , 2)
+        , ("/=" , 2)
+        , ("//=", 2)
         , ( "*="
           , 2
           )

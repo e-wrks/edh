@@ -3411,98 +3411,38 @@ edhNamelyEqual
   :: EdhProgState -> EdhValue -> EdhValue -> (Bool -> STM ()) -> STM ()
 edhNamelyEqual !pgs (EdhNamedValue !x'n !x'v) (EdhNamedValue !y'n !y'v) !exit =
   if x'n /= y'n then exit False else edhNamelyEqual pgs x'v y'v exit
-edhNamelyEqual _ EdhNamedValue{} _ !exit = exit False
-edhNamelyEqual _ _ EdhNamedValue{} !exit = exit False
-edhNamelyEqual !pgs !x !y !exit = edhValueEqual pgs x y exit
+edhNamelyEqual _ EdhNamedValue{} _               !exit = exit False
+edhNamelyEqual _ _               EdhNamedValue{} !exit = exit False
+edhNamelyEqual !pgs !x !y !exit =
+  -- it's considered namely not equal if can not trivially concluded, i.e.
+  -- may need to invoke magic methods or sth.
+  edhValueEqual pgs x y $ exit . fromMaybe False
 
 edhValueEqual
-  :: EdhProgState -> EdhValue -> EdhValue -> (Bool -> STM ()) -> STM ()
-edhValueEqual !pgs !lhVal !rhVal !exit = if lhVal == rhVal
-  then exit True
-  else case edhUltimate lhVal of
-    EdhList (List _ lhll) -> case edhUltimate rhVal of
-      EdhList (List _ rhll) -> do
-        lhl <- readTVar lhll
-        rhl <- readTVar rhll
-        cmp2List lhl rhl exit
-      _ -> exit False
-    EdhDict (Dict _ lhd) -> case edhUltimate rhVal of
-      EdhDict (Dict _ rhd) -> do
-        lhm <- readTVar lhd
-        rhm <- readTVar rhd
-        cmp2Map (Map.toList lhm) (Map.toList rhm) exit
-      _ -> exit False
-    EdhObject !lhObj -> lookupEdhObjAttr pgs lhObj (AttrByName "==") >>= \case
-      EdhNil -> case edhUltimate rhVal of
-        EdhObject !rhObj ->
-          lookupEdhObjAttr pgs rhObj (AttrByName "==") >>= \case
-            EdhNil -> exit False
-            EdhMethod !mth'proc ->
-              runEdhProc pgs
-                $ callEdhMethod rhObj mth'proc (ArgsPack [lhVal] Map.empty) id
-                $ \(OriginalValue !conclusionVal _ _) ->
-                    case edhUltimate conclusionVal of
-                      EdhBool !conclusion -> contEdhSTM $ exit conclusion
-                      !badConclusion ->
-                        throwEdh UsageError
-                          $  "Bool return expected but magic method (==) on "
-                          <> T.pack (show rhObj)
-                          <> " returned a "
-                          <> T.pack (edhTypeNameOf badConclusion)
-            !badEqMth ->
-              throwEdhSTM pgs UsageError
-                $  "Malformed magic method (==) on "
-                <> T.pack (show rhObj)
-                <> " - "
-                <> T.pack (edhTypeNameOf badEqMth)
-                <> ": "
-                <> T.pack (show badEqMth)
-        _ -> exit False
-      EdhMethod !mth'proc ->
-        runEdhProc pgs
-          $ callEdhMethod lhObj mth'proc (ArgsPack [rhVal] Map.empty) id
-          $ \(OriginalValue !conclusionVal _ _) ->
-              case edhUltimate conclusionVal of
-                EdhBool !conclusion -> contEdhSTM $ exit conclusion
-                !badConclusion ->
-                  throwEdh UsageError
-                    $  "Bool return expected but magic method (==) on "
-                    <> T.pack (show lhObj)
-                    <> " returned a "
-                    <> T.pack (edhTypeNameOf badConclusion)
-      !badEqMth ->
-        throwEdhSTM pgs UsageError
-          $  "Malformed magic method (==) on "
-          <> T.pack (show lhObj)
-          <> " - "
-          <> T.pack (edhTypeNameOf badEqMth)
-          <> ": "
-          <> T.pack (show badEqMth)
-    _ -> case edhUltimate rhVal of
-      EdhObject !rhObj ->
-        lookupEdhObjAttr pgs rhObj (AttrByName "==") >>= \case
-          EdhNil -> exit False
-          EdhMethod !mth'proc ->
-            runEdhProc pgs
-              $ callEdhMethod rhObj mth'proc (ArgsPack [lhVal] Map.empty) id
-              $ \(OriginalValue !conclusionVal _ _) ->
-                  case edhUltimate conclusionVal of
-                    EdhBool !conclusion -> contEdhSTM $ exit conclusion
-                    !badConclusion ->
-                      throwEdh UsageError
-                        $  "Bool return expected but magic method (==) on "
-                        <> T.pack (show rhObj)
-                        <> " returned a "
-                        <> T.pack (edhTypeNameOf badConclusion)
-          !badEqMth ->
-            throwEdhSTM pgs UsageError
-              $  "Malformed magic method (==) on "
-              <> T.pack (show rhObj)
-              <> " - "
-              <> T.pack (edhTypeNameOf badEqMth)
-              <> ": "
-              <> T.pack (show badEqMth)
-      _ -> exit False
+  :: EdhProgState -> EdhValue -> EdhValue -> (Maybe Bool -> STM ()) -> STM ()
+edhValueEqual !pgs !lhVal !rhVal !exit =
+  let lhv = edhUltimate lhVal
+      rhv = edhUltimate rhVal
+  in  if lhv == rhv
+        then -- identity equal
+             exit $ Just True
+        else case lhv of
+          EdhList (List _ lhll) -> case rhv of
+            EdhList (List _ rhll) -> do
+              lhl <- readTVar lhll
+              rhl <- readTVar rhll
+              cmp2List lhl rhl $ exit . Just
+            _ -> exit $ Just False
+          EdhDict (Dict _ lhd) -> case rhv of
+            EdhDict (Dict _ rhd) -> do
+              lhm <- readTVar lhd
+              rhm <- readTVar rhd
+              cmp2Map (Map.toList lhm) (Map.toList rhm) $ exit . Just
+            _ -> exit $ Just False
+          -- don't conclude it as for here, allow magic methods to be invoked,
+          -- there may be some magic to be invoked and some may even return
+          -- vectorized result
+          _ -> exit Nothing
  where
   cmp2List :: [EdhValue] -> [EdhValue] -> (Bool -> STM ()) -> STM ()
   cmp2List []      []      !exit' = exit' True
@@ -3510,8 +3450,8 @@ edhValueEqual !pgs !lhVal !rhVal !exit = if lhVal == rhVal
   cmp2List []      (_ : _) !exit' = exit' False
   cmp2List (lhVal' : lhRest) (rhVal' : rhRest) !exit' =
     edhValueEqual pgs lhVal' rhVal' $ \case
-      False -> exit' False
-      True  -> cmp2List lhRest rhRest exit'
+      Just True -> cmp2List lhRest rhRest exit'
+      _         -> exit' False
   cmp2Map
     :: [(ItemKey, EdhValue)]
     -> [(ItemKey, EdhValue)]
@@ -3524,8 +3464,8 @@ edhValueEqual !pgs !lhVal !rhVal !exit = if lhVal == rhVal
     if lhKey /= rhKey
       then exit' False
       else edhValueEqual pgs lhVal' rhVal' $ \case
-        False -> exit' False
-        True  -> cmp2Map lhRest rhRest exit'
+        Just True -> cmp2Map lhRest rhRest exit'
+        _         -> exit' False
 
 
 -- comma separated repr string

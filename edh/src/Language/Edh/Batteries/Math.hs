@@ -158,19 +158,21 @@ valEqProc :: EdhIntrinsicOp
 valEqProc !lhExpr !rhExpr !exit = do
   !pgs <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
-    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> if lhVal == rhVal
-      then exitEdhProc exit true
-      else contEdhSTM $ edhValueEqual pgs lhVal rhVal $ \ !conclusion ->
-        exitEdhSTM pgs exit (EdhBool conclusion)
+    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+      contEdhSTM $ edhValueEqual pgs lhVal rhVal $ \case
+        Just !conclusion -> exitEdhSTM pgs exit $ EdhBool conclusion
+        -- allow magic methods to be invoked
+        Nothing          -> exitEdhSTM pgs exit EdhContinue
 
 -- | operator (!=)
 idNeProc :: EdhIntrinsicOp
 idNeProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
-    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) -> if lhVal == rhVal
-      then exitEdhProc exit false
-      else contEdhSTM $ edhValueEqual pgs lhVal rhVal $ \ !conclusion ->
-        exitEdhSTM pgs exit (EdhBool $ not conclusion)
+    evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+      contEdhSTM $ edhValueEqual pgs lhVal rhVal $ \case
+        Just !conclusion -> exitEdhSTM pgs exit $ EdhBool $ not conclusion
+        -- allow magic methods to be invoked
+        Nothing          -> exitEdhSTM pgs exit EdhContinue
 
 -- | operator (is)
 idEqProc :: EdhIntrinsicOp
