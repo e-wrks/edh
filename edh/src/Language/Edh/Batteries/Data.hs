@@ -342,6 +342,60 @@ reprProc (ArgsPack !args !kwargs) !exit = do
           contEdhSTM $ go reprs ((k, r) : kwReprs) [] rest
   contEdhSTM $ go [] [] args (Map.toList kwargs)
 
+showProc :: EdhProcedure
+showProc (ArgsPack [v] _) !exit = do
+  !pgs <- ask
+  let -- todo specialize more informative show for intrinsic types of values
+    showWithNoMagic = edhValueReprSTM pgs v $ \ !r ->
+      exitEdhSTM pgs exit $ EdhString $ T.pack (edhTypeNameOf v) <> ": " <> r
+  contEdhSTM $ case v of
+    EdhObject !o -> lookupEdhObjAttr pgs o (AttrByName "__show__") >>= \case
+      EdhNil -> showWithNoMagic
+      EdhMethod !mth ->
+        runEdhProc pgs $ callEdhMethod o mth (ArgsPack [] mempty) id exit
+      !badMagic ->
+        throwEdhSTM pgs UsageError
+          $  "Bad magic __show__ of "
+          <> T.pack (edhTypeNameOf badMagic)
+          <> " on class "
+          <> procedureName (objClass o)
+    _ -> showWithNoMagic
+showProc _ _ = throwEdh UsageError "Please show one value at a time"
+
+descProc :: EdhProcedure
+descProc (ArgsPack [v] _) !exit = do
+  !pgs <- ask
+  let -- TODO specialize more informative description (statistical wise) for
+      --      intrinsic types of values
+      descWithNoMagic = edhValueReprSTM pgs v $ \ !r -> case v of
+        EdhObject !o ->
+          exitEdhSTM pgs exit
+            $  EdhString
+            $  "It is an object of class "
+            <> procedureName (objClass o)
+            <> ", having representation:\n"
+            <> r
+        _ ->
+          exitEdhSTM pgs exit
+            $  EdhString
+            $  "It is of "
+            <> T.pack (edhTypeNameOf v)
+            <> ", having representation:\n"
+            <> r
+  contEdhSTM $ case v of
+    EdhObject !o -> lookupEdhObjAttr pgs o (AttrByName "__desc__") >>= \case
+      EdhNil -> descWithNoMagic
+      EdhMethod !mth ->
+        runEdhProc pgs $ callEdhMethod o mth (ArgsPack [] mempty) id exit
+      !badMagic ->
+        throwEdhSTM pgs UsageError
+          $  "Bad magic __desc__ of "
+          <> T.pack (edhTypeNameOf badMagic)
+          <> " on class "
+          <> procedureName (objClass o)
+    _ -> descWithNoMagic
+descProc _ _ = throwEdh UsageError "Please describe one value at a time"
+
 
 -- | operator (++) - string coercing concatenator
 concatProc :: EdhIntrinsicOp

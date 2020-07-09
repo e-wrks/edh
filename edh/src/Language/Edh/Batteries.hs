@@ -509,6 +509,8 @@ installEdhBatteries world = liftIO $ do
                , PackReceiver [mandatoryArg "apk"]
                )
              , (EdhMethod, "repr", reprProc  , WildReceiver)
+             , (EdhMethod, "show", showProc  , WildReceiver)
+             , (EdhMethod, "desc", descProc  , WildReceiver)
              , (EdhMethod, "dict", dictProc  , WildReceiver)
              , (EdhMethod, "null", isNullProc, WildReceiver)
              , (EdhMethod, "type", typeProc  , WildReceiver)
