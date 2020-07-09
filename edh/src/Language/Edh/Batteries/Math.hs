@@ -84,14 +84,14 @@ divIntProc !lhExpr !rhExpr !exit =
         throwEdh EvalError
           $  "Not an integer as left-hand value for (//) operation: "
           <> T.pack (show lhNum)
-      Just lhi -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+      Just !lhi -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
         case edhUltimate rhVal of
           EdhDecimal !rhNum -> case decimalToInteger rhNum of
             Nothing ->
               throwEdh EvalError
                 $  "Not an integer as right-hand value for (//) operation: "
                 <> T.pack (show rhNum)
-            Just rhi ->
+            Just !rhi ->
               exitEdhProc exit $ EdhDecimal $ Decimal 1 0 $ lhi `div` rhi
           _ -> exitEdhProc exit EdhContinue
     _ -> exitEdhProc exit EdhContinue
