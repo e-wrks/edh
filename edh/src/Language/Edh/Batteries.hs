@@ -351,8 +351,10 @@ installEdhBatteries world = liftIO $ do
           , 4
           )
           -- logical arithmetic
-        , ("&&", 3)
-        , ( "||"
+        , ("&&" , 3)
+        , ("||" , 3)
+        , ("&&=", 3)
+        , ( "||="
           , 3
           )
 

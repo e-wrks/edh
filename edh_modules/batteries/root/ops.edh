@@ -17,6 +17,22 @@ export {
     callerScope.eval( rhe )
   }
 
+  operator &&= ( callerScope, lhe, rhe )
+  case type( callerScope.eval( lhe ) ) of {
+    ObjectType -> { return { continue } } # allow magic method to be invoked
+    callerScope.eval( makeOp(
+        lhe, "=", makeOp( lhe, "&&", rhe )
+    ) )
+  }
+
+  operator ||= ( callerScope, lhe, rhe )
+  case type( callerScope.eval( lhe ) ) of {
+    ObjectType -> { return { continue } } # allow magic method to be invoked
+    callerScope.eval( makeOp(
+        lhe, "=", makeOp( lhe, "||", rhe )
+    ) )
+  }
+
   operator += ( callerScope, lhe, rhe )
   case type( callerScope.eval( lhe ) ) of {
     ObjectType -> { return { continue } } # allow magic method to be invoked
