@@ -137,6 +137,7 @@ module Language.Edh.EHI
 
     -- ** Object system
   , Object(..)
+  , objStore
   , Class
   , EdhHostCtor
   , mkHostClass

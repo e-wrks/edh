@@ -420,6 +420,10 @@ instance Show Object where
   -- will fail hard on encountering of nested 'atomically' calls.
   show (Object _ pd _) = "<object: " ++ T.unpack (procedureName pd) ++ ">"
 
+-- | Read the entity store underlying an object
+objStore :: Object -> STM Dynamic
+objStore = readTVar . entity'store . objEntity
+
 -- | View an entity as object of specified class with specified ancestors
 -- this is the black magic you want to avoid
 viewAsEdhObject :: Entity -> Class -> [Object] -> STM Object
