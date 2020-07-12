@@ -1,13 +1,2 @@
 
 export method error (*** apk ) throw EvalError(*** apk )
-
-
-export method when( pred ) {
-  interpreter whenThat'sTrue ( callerScope, affirmExpr )
-  if pred then callerScope.eval( affirmExpr ) else nil
-}
-
-export method unless( pred ) {
-  interpreter unlessThat'sTrue ( callerScope, negatExpr )
-  if pred then nil else callerScope.eval( negatExpr )
-}

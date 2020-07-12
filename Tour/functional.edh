@@ -1,15 +1,26 @@
 
+# functional paradigm in Edh
+
+
+method when( pred ) {
+  interpreter whenThat'sTrue ( callerScope, affirmExpr )
+  if pred then callerScope.eval( affirmExpr ) else nil
+}
+
+method unless( pred ) {
+  interpreter unlessThat'sTrue ( callerScope, negatExpr )
+  if pred then nil else callerScope.eval( negatExpr )
+}
+
+
 # Note:
 #  `$` is the function application operator as in Haskell
 #  curly brackets quoting is not necessary for a single statement
 
-# Hint:
-#  have a look at the implementation of `when/unless`, they are dead simple
 
-
-# this is the idiomatic form, it may help a bit if you build the intuition that
-# those 2 `$` are quoting the condition, or if any of the `$` omitted, that's
-# different semantic
+# this may be the most idiomatic form, it may help a bit if you build the
+# intuition that those 2 `$` are quoting the condition, or if any of the `$`
+# omitted, that's different semantic
 {
 
   when$ 3>2 ${
