@@ -311,9 +311,11 @@ installEdhBatteries world = liftIO $ do
         -- syntactic sugars for (=)
         , ("+=" , 2)
         , ("-=" , 2)
+        , ("*=" , 2)
         , ("/=" , 2)
         , ("//=", 2)
-        , ( "*="
+        , ("%=" , 2)
+        , ( "**="
           , 2
           )
 
@@ -472,6 +474,15 @@ installEdhBatteries world = liftIO $ do
           , ("<"     , isLtProc)
           , ("<="    , isLeProc)
           , ("="     , assignProc)
+          , ("+="    , assignWithOpProc "+" addProc)
+          , ("-="    , assignWithOpProc "-" subsProc)
+          , ("*="    , assignWithOpProc "*" mulProc)
+          , ("/="    , assignWithOpProc "/" divProc)
+          , ("//="   , assignWithOpProc "//" divIntProc)
+          , ("%="    , assignWithOpProc "%" modIntProc)
+          , ("**="   , assignWithOpProc "**" powProc)
+          , ("&&="   , assignWithOpProc "&&" logicalAndProc)
+          , ("||="   , assignWithOpProc "||" logicalOrProc)
           , ("?="    , assignMissingProc)
           , ("->"    , branchProc)
           , ("$=>"   , catchProc)
