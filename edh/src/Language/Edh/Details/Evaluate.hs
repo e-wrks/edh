@@ -1087,22 +1087,12 @@ evalExpr !expr !exit = do
         $ \runLoop -> runEdhProc pgs (runLoop exit)
 
     PerformExpr !effAddr ->
-      contEdhSTM $ resolveEdhAttrAddr pgs effAddr $ \key -> do
-        let !targetStack = case effectsStack scope of
-              []         -> NE.tail $ callStack ctx
-              outerStack -> outerStack
-        resolveEffectfulAttr pgs targetStack (attrKeyValue key) >>= \case
-          Just (effArt, _) -> exitEdhSTM pgs exit effArt
-          Nothing -> throwEdhSTM pgs UsageError $ "No such effect: " <> T.pack
-            (show effAddr)
+      contEdhSTM $ resolveEdhAttrAddr pgs effAddr $ \ !effKey ->
+        resolveEdhPerform pgs effKey $ exitEdhSTM pgs exit
 
     BehaveExpr !effAddr ->
-      contEdhSTM $ resolveEdhAttrAddr pgs effAddr $ \key -> do
-        let !targetStack = NE.tail $ callStack ctx
-        resolveEffectfulAttr pgs targetStack (attrKeyValue key) >>= \case
-          Just (effArt, _) -> exitEdhSTM pgs exit effArt
-          Nothing -> throwEdhSTM pgs UsageError $ "No such effect: " <> T.pack
-            (show effAddr)
+      contEdhSTM $ resolveEdhAttrAddr pgs effAddr $ \ !effKey ->
+        resolveEdhBehave pgs effKey $ exitEdhSTM pgs exit
 
     AttrExpr !addr -> evalAttrAddr addr exit
 
@@ -2582,30 +2572,6 @@ callEdhMethod' !gnr'caller !callee'that !mth'proc !mth'body !apk !scopeMod !exit
           -- pop stack after Edh procedure returned
           local (const pgsCaller) $ exitEdhProc exit mthRtn
 
-resolveEdhCallee
-  :: EdhProgState
-  -> Expr
-  -> ((OriginalValue, Scope -> Scope) -> STM ())
-  -> STM ()
-resolveEdhCallee !pgs !expr !exit = case expr of
-  PerformExpr effAddr -> goEff effAddr $ case effectsStack scope of
-    []         -> NE.tail $ callStack ctx
-    outerStack -> outerStack
-  BehaveExpr effAddr -> goEff effAddr $ NE.tail $ callStack ctx
-  _ -> runEdhProc pgs $ evalExpr expr $ \ov@(OriginalValue !v _ _) ->
-    contEdhSTM $ exit (ov { valueFromOrigin = edhDeCaseClose v }, id)
- where
-  !ctx   = edh'context pgs
-  !scope = contextScope ctx
-  goEff effAddr targetStack = resolveEdhAttrAddr pgs effAddr $ \key ->
-    resolveEffectfulAttr pgs targetStack (attrKeyValue key) >>= \case
-      Just (effArt, outerStack) -> exit
-        ( OriginalValue effArt scope $ thisObject scope
-        , \procScope -> procScope { effectsStack = outerStack }
-        )
-      Nothing -> throwEdhSTM pgs UsageError $ "No such effect: " <> T.pack
-        (show effAddr)
-
 
 edhForLoop
   :: EdhProgState
@@ -3723,6 +3689,64 @@ modifyEntityOfClass' !classUniq !naExit !exit !esMod = ask >>= \ !pgs ->
               do
                 void $ tryPutTMVar esmv esd
                 rethrow
+
+
+resolveEdhCallee
+  :: EdhProgState
+  -> Expr
+  -> ((OriginalValue, Scope -> Scope) -> STM ())
+  -> STM ()
+resolveEdhCallee !pgs !expr !exit = case expr of
+  PerformExpr !effAddr -> resolveEdhAttrAddr pgs effAddr $ \ !effKey ->
+    resolveEdhEffCallee pgs effKey edhTargetStackForPerform exit
+  BehaveExpr !effAddr -> resolveEdhAttrAddr pgs effAddr
+    $ \ !effKey -> resolveEdhEffCallee pgs effKey edhTargetStackForBehave exit
+  _ -> runEdhProc pgs $ evalExpr expr $ \ov@(OriginalValue !v _ _) ->
+    contEdhSTM $ exit (ov { valueFromOrigin = edhDeCaseClose v }, id)
+
+resolveEdhEffCallee
+  :: EdhProgState
+  -> AttrKey
+  -> (EdhProgState -> [Scope])
+  -> ((OriginalValue, Scope -> Scope) -> STM ())
+  -> STM ()
+resolveEdhEffCallee !pgs !effKey !targetStack !exit =
+  resolveEffectfulAttr pgs (targetStack pgs) (attrKeyValue effKey) >>= \case
+    Just (!effArt, !outerStack) -> exit
+      ( OriginalValue effArt scope $ thisObject scope
+      , \ !procScope -> procScope { effectsStack = outerStack }
+      )
+    Nothing ->
+      throwEdhSTM pgs UsageError $ "No such effect: " <> T.pack (show effKey)
+  where !scope = contextScope $ edh'context pgs
+
+edhTargetStackForPerform :: EdhProgState -> [Scope]
+edhTargetStackForPerform !pgs = case effectsStack scope of
+  []         -> NE.tail $ callStack ctx
+  outerStack -> outerStack
+ where
+  !ctx   = edh'context pgs
+  !scope = contextScope ctx
+
+edhTargetStackForBehave :: EdhProgState -> [Scope]
+edhTargetStackForBehave !pgs = NE.tail $ callStack ctx
+  where !ctx = edh'context pgs
+
+resolveEdhPerform :: EdhProgState -> AttrKey -> (EdhValue -> STM ()) -> STM ()
+resolveEdhPerform !pgs !effKey !exit =
+  resolveEffectfulAttr pgs (edhTargetStackForPerform pgs) (attrKeyValue effKey)
+    >>= \case
+          Just (!effArt, _) -> exit effArt
+          Nothing -> throwEdhSTM pgs UsageError $ "No such effect: " <> T.pack
+            (show effKey)
+
+resolveEdhBehave :: EdhProgState -> AttrKey -> (EdhValue -> STM ()) -> STM ()
+resolveEdhBehave !pgs !effKey !exit =
+  resolveEffectfulAttr pgs (edhTargetStackForBehave pgs) (attrKeyValue effKey)
+    >>= \case
+          Just (!effArt, _) -> exit effArt
+          Nothing -> throwEdhSTM pgs UsageError $ "No such effect: " <> T.pack
+            (show effKey)
 
 
 edhRegulateIndex :: EdhProgState -> Int -> Int -> (Int -> STM ()) -> STM ()

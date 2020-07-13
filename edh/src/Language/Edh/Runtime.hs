@@ -276,15 +276,20 @@ runEdhModule' !world !impPath !preRun = liftIO $ do
 
 
 -- | perform an effectful call from current Edh context
+--
+-- if performing from an effectful procedure call, use the outer stack of
+-- that call in effect resolution
+--
+-- otherwise this is the same as 'behaveEdhEffect'
 performEdhEffect
-  :: AttrAddressor
+  :: AttrKey
   -> [EdhValue]
   -> [(AttrName, EdhValue)]
   -> (EdhValue -> EdhProc)
   -> EdhProc
-performEdhEffect !addr !args !kwargs !exit = ask >>= \pgs ->
+performEdhEffect !effKey !args !kwargs !exit = ask >>= \pgs ->
   contEdhSTM
-    $ resolveEdhCallee pgs (PerformExpr addr)
+    $ resolveEdhEffCallee pgs effKey edhTargetStackForPerform
     $ \(OriginalValue !effVal _ _, scopeMod) ->
         edhMakeCall'
             pgs
@@ -299,9 +304,50 @@ performEdhEffect !addr !args !kwargs !exit = ask >>= \pgs ->
               runEdhProc pgs $ mkCall $ \(OriginalValue !rtnVal _ _) ->
                 exit rtnVal
 
+-- | obtain an effectful value from current Edh context
+--
+-- if performing from an effectful procedure call, use the outer stack of
+-- that call in effect resolution
+--
+-- otherwise this is the same as 'behaveEdhEffect''
+performEdhEffect' :: AttrKey -> (EdhValue -> EdhProc) -> EdhProc
+performEdhEffect' !effKey !exit = ask >>= \ !pgs ->
+  contEdhSTM $ resolveEdhPerform pgs effKey $ runEdhProc pgs . exit
+
+
+-- | perform an effectful call from current Edh context
+-- 
+-- use full stack in effect resolution, may create infinite loops in effectful
+-- procedure calls if one effectful procedure would make unconditional
+-- recursive effectful call into itself, or there is some mutually recursive
+-- pattern between multiple procedures
+behaveEdhEffect
+  :: AttrKey
+  -> [EdhValue]
+  -> [(AttrName, EdhValue)]
+  -> (EdhValue -> EdhProc)
+  -> EdhProc
+behaveEdhEffect !effKey !args !kwargs !exit = ask >>= \pgs ->
+  contEdhSTM
+    $ resolveEdhEffCallee pgs effKey edhTargetStackForBehave
+    $ \(OriginalValue !effVal _ _, scopeMod) ->
+        edhMakeCall'
+            pgs
+            effVal
+            (thisObject $ contextScope $ edh'context pgs)
+            ( ArgsPack args
+            $ Map.fromList
+            $ [ (AttrByName k, v) | (k, v) <- kwargs ]
+            )
+            scopeMod
+          $ \mkCall ->
+              runEdhProc pgs $ mkCall $ \(OriginalValue !rtnVal _ _) ->
+                exit rtnVal
 
 -- | obtain an effectful value from current Edh context
-performEdhEffect' :: AttrAddressor -> (EdhValue -> EdhProc) -> EdhProc
-performEdhEffect' !addr !exit =
-  evalExpr (PerformExpr addr) $ \(OriginalValue !effVal _ _) -> exit effVal
+--
+-- use full stack in effect resolution
+behaveEdhEffect' :: AttrKey -> (EdhValue -> EdhProc) -> EdhProc
+behaveEdhEffect' !effKey !exit = ask >>= \ !pgs ->
+  contEdhSTM $ resolveEdhBehave pgs effKey $ runEdhProc pgs . exit
 

@@ -47,6 +47,8 @@ module Language.Edh.EHI
     -- ** Spliced execution
   , performEdhEffect
   , performEdhEffect'
+  , behaveEdhEffect
+  , behaveEdhEffect'
   , runEdhModule
   , runEdhModule'
   , EdhModulePreparation
