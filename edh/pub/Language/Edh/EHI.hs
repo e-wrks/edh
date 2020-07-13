@@ -229,6 +229,7 @@ module Language.Edh.EHI
     -- * indexing and slicing support
   , EdhIndex(..)
   , parseEdhIndex
+  , edhRegulateSlice
   , edhRegulateIndex
   )
 where

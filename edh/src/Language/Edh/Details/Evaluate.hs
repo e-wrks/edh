@@ -3808,6 +3808,231 @@ parseEdhIndex !pgs !val !exit = case val of
         <> badIdxNumRepr
 
 
+edhRegulateSlice
+  :: EdhProgState
+  -> Int
+  -> (Maybe Int, Maybe Int, Maybe Int)
+  -> ((Int, Int, Int) -> STM ())
+  -> STM ()
+edhRegulateSlice !pgs !len (!start, !stop, !step) !exit = case step of
+  Nothing -> case start of
+    Nothing -> case stop of
+      Nothing     -> exit (0, len, 1)
+
+      -- (Any:iStop:Any)
+      Just !iStop -> if iStop < 0
+        then
+          let iStop' = len + iStop
+          in  if iStop' < 0
+                then
+                  throwEdhSTM pgs UsageError
+                  $  "Stop index out of bounds: "
+                  <> T.pack (show iStop)
+                  <> " vs "
+                  <> T.pack (show len)
+                else exit (0, iStop', 1)
+        else if iStop > len
+          then
+            throwEdhSTM pgs EvalError
+            $  "Stop index out of bounds: "
+            <> T.pack (show iStop)
+            <> " vs "
+            <> T.pack (show len)
+          else exit (0, iStop, 1)
+
+    Just !iStart -> case stop of
+
+      -- (iStart:Any:Any)
+      Nothing -> if iStart < 0
+        then
+          let iStart' = len + iStart
+          in  if iStart' < 0
+                then
+                  throwEdhSTM pgs UsageError
+                  $  "Start index out of bounds: "
+                  <> T.pack (show iStart)
+                  <> " vs "
+                  <> T.pack (show len)
+                else exit (iStart', len, 1)
+        else if iStart > len
+          then
+            throwEdhSTM pgs UsageError
+            $  "Start index out of bounds: "
+            <> T.pack (show iStart)
+            <> " vs "
+            <> T.pack (show len)
+          else exit (iStart, len, 1)
+
+      -- (iStart:iStop:Any)
+      Just !iStop -> do
+        let !iStart' = if iStart < 0 then len + iStart else iStart
+            !iStop'  = if iStop < 0 then len + iStop else iStop
+        if iStart' < 0
+          then
+            throwEdhSTM pgs UsageError
+            $  "Start index out of bounds: "
+            <> T.pack (show iStart)
+            <> " vs "
+            <> T.pack (show len)
+          else if iStop' < 0
+            then
+              throwEdhSTM pgs EvalError
+              $  "Stop index out of bounds: "
+              <> T.pack (show iStop)
+              <> " vs "
+              <> T.pack (show len)
+            else if iStart' <= iStop'
+              then
+                (if iStop' > len
+                  then
+                    throwEdhSTM pgs EvalError
+                    $  "Stop index out of bounds: "
+                    <> T.pack (show iStop)
+                    <> " vs "
+                    <> T.pack (show len)
+                  else if iStart' >= len
+                    then
+                      throwEdhSTM pgs UsageError
+                      $  "Start index out of bounds: "
+                      <> T.pack (show iStart)
+                      <> " vs "
+                      <> T.pack (show len)
+                    else exit (iStart', iStop', 1)
+                )
+              else
+                (if iStop' >= len
+                  then
+                    throwEdhSTM pgs EvalError
+                    $  "Stop index out of bounds: "
+                    <> T.pack (show iStop)
+                    <> " vs "
+                    <> T.pack (show len)
+                  else if iStart' > len
+                    then
+                      throwEdhSTM pgs UsageError
+                      $  "Start index out of bounds: "
+                      <> T.pack (show iStart)
+                      <> " vs "
+                      <> T.pack (show len)
+                    else exit (iStart', iStop', -1)
+                )
+
+  Just !iStep -> if iStep == 0
+    then throwEdhSTM pgs UsageError "Step can not be zero in slice"
+    else if iStep < 0
+      then
+        (case start of
+          Nothing -> case stop of
+
+            -- (Any:Any: -n)
+            Nothing     -> exit (len - 1, -1, iStep)
+
+            -- (Any:iStop: -n)
+            Just !iStop -> if iStop == -1
+              then exit (len - 1, -1, iStep)
+              else do
+                let !iStop' = if iStop < 0 then len + iStop else iStop
+                if iStop' < -1 || iStop' >= len - 1
+                  then
+                    throwEdhSTM pgs EvalError
+                    $  "Backward stop index out of bounds: "
+                    <> T.pack (show iStop)
+                    <> " vs "
+                    <> T.pack (show len)
+                  else exit (len - 1, iStop', iStep)
+
+          Just !iStart -> case stop of
+
+            -- (iStart:Any: -n)
+            Nothing -> do
+              let !iStart' = if iStart < 0 then len + iStart else iStart
+              if iStart' < 0 || iStart' >= len
+                then
+                  throwEdhSTM pgs UsageError
+                  $  "Backward start index out of bounds: "
+                  <> T.pack (show iStart)
+                  <> " vs "
+                  <> T.pack (show len)
+                else exit (iStart', -1, iStep)
+
+            -- (iStart:iStop: -n)
+            Just !iStop -> do
+              let !iStart' = if iStart < 0 then len + iStart else iStart
+              if iStart' < 0 || iStart' >= len
+                then
+                  throwEdhSTM pgs UsageError
+                  $  "Backward start index out of bounds: "
+                  <> T.pack (show iStart)
+                  <> " vs "
+                  <> T.pack (show len)
+                else if iStop == -1
+                  then exit (iStart', -1, iStep)
+                  else do
+                    let !iStop' = if iStop < 0 then len + iStop else iStop
+                    if iStop' < -1 || iStop >= len - 1
+                      then
+                        throwEdhSTM pgs EvalError
+                        $  "Backward stop index out of bounds: "
+                        <> T.pack (show iStop)
+                        <> " vs "
+                        <> T.pack (show len)
+                      else if iStart' < iStop'
+                        then
+                          throwEdhSTM pgs EvalError
+                          $  "Can not step backward from "
+                          <> T.pack (show iStart)
+                          <> " to "
+                          <> T.pack (show iStop)
+                        else exit (iStart', iStop', iStep)
+        )
+      else -- iStep > 0
+        (case start of
+          Nothing -> case stop of
+
+            -- (Any:Any:n)
+            Nothing     -> exit (0, len, iStep)
+
+            -- (Any:iStop:n)
+            Just !iStop -> do
+              let !iStop' = if iStop < 0 then len + iStop else iStop
+              if iStop' < 0 || iStop' > len
+                then
+                  throwEdhSTM pgs EvalError
+                  $  "Stop index out of bounds: "
+                  <> T.pack (show iStop)
+                  <> " vs "
+                  <> T.pack (show len)
+                else exit (0, iStop', iStep)
+
+          Just !iStart -> case stop of
+
+            -- (iStart:Any:n)
+            Nothing -> do
+              let !iStart' = if iStart < 0 then len + iStart else iStart
+              if iStart' < 0 || iStart' >= len
+                then
+                  throwEdhSTM pgs UsageError
+                  $  "Start index out of bounds: "
+                  <> T.pack (show iStart)
+                  <> " vs "
+                  <> T.pack (show len)
+                else exit (iStart', len, iStep)
+
+            -- (iStart:iStop:n)
+            Just !iStop -> do
+              let !iStart' = if iStart < 0 then len + iStart else iStart
+              let !iStop'  = if iStop < 0 then len + iStop else iStop
+              if iStart' > iStop'
+                then
+                  throwEdhSTM pgs EvalError
+                  $  "Can not step from "
+                  <> T.pack (show iStart)
+                  <> " to "
+                  <> T.pack (show iStop)
+                else exit (iStart', iStop', iStep)
+        )
+
+
 edhRegulateIndex :: EdhProgState -> Int -> Int -> (Int -> STM ()) -> STM ()
 edhRegulateIndex !pgs !len !idx !exit =
   let !posIdx = if idx < 0  -- Python style negative index
