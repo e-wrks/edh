@@ -226,7 +226,9 @@ module Language.Edh.EHI
   , ArgsPackParser(..)
   , parseArgsPack
 
-    -- * misc
+    -- * indexing and slicing support
+  , EdhIndex(..)
+  , parseEdhIndex
   , edhRegulateIndex
   )
 where

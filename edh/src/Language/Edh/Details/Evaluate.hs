@@ -3749,6 +3749,65 @@ resolveEdhBehave !pgs !effKey !exit =
             (show effKey)
 
 
+parseEdhIndex
+  :: EdhProgState -> EdhValue -> (Either Text EdhIndex -> STM ()) -> STM ()
+parseEdhIndex !pgs !val !exit = case val of
+
+  -- empty  
+  EdhArgsPack (ArgsPack [] !kwargs') | Map.null kwargs' -> exit $ Right EdhAll
+
+  -- term
+  EdhNamedValue "All" _ -> exit $ Right EdhAll
+  EdhNamedValue "Any" _ -> exit $ Right EdhAny
+  EdhNamedValue _ !termVal -> parseEdhIndex pgs termVal exit
+
+  -- range 
+  EdhPair (EdhPair !startVal !stopVal) !stepVal -> sliceNum startVal $ \case
+    Left  !err   -> exit $ Left err
+    Right !start -> sliceNum stopVal $ \case
+      Left  !err  -> exit $ Left err
+      Right !stop -> sliceNum stepVal $ \case
+        Left  !err -> exit $ Left err
+        Right step -> exit $ Right $ EdhSlice start stop step
+  EdhPair !startVal !stopVal -> sliceNum startVal $ \case
+    Left  !err   -> exit $ Left err
+    Right !start -> sliceNum stopVal $ \case
+      Left  !err  -> exit $ Left err
+      Right !stop -> exit $ Right $ EdhSlice start stop Nothing
+
+  -- single
+  _ -> sliceNum val $ \case
+    Right Nothing   -> exit $ Right EdhAll
+    Right (Just !i) -> exit $ Right $ EdhIndex i
+    Left  !err      -> exit $ Left err
+
+ where
+  sliceNum :: EdhValue -> (Either Text (Maybe Int) -> STM ()) -> STM ()
+  sliceNum !val' !exit' = case val' of
+
+    -- number
+    EdhDecimal !idxNum -> case D.decimalToInteger idxNum of
+      Just !i -> exit' $ Right $ Just $ fromInteger i
+      _ ->
+        exit'
+          $  Left
+          $  "An integer expected as index number but given: "
+          <> T.pack (show idxNum)
+
+    -- term
+    EdhNamedValue "All" _        -> exit' $ Right Nothing
+    EdhNamedValue "Any" _        -> exit' $ Right Nothing
+    EdhNamedValue _     !termVal -> sliceNum termVal exit'
+
+    !badIdxNum -> edhValueReprSTM pgs badIdxNum $ \ !badIdxNumRepr ->
+      exit'
+        $  Left
+        $  "Bad index number of "
+        <> T.pack (edhTypeNameOf badIdxNum)
+        <> ": "
+        <> badIdxNumRepr
+
+
 edhRegulateIndex :: EdhProgState -> Int -> Int -> (Int -> STM ()) -> STM ()
 edhRegulateIndex !pgs !len !idx !exit =
   let !posIdx = if idx < 0  -- Python style negative index

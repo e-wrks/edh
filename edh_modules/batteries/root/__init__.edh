@@ -13,6 +13,7 @@ export {
   import * './concur'
   import * './evt'
   import * './math'
+  import * './slice'
   import * './reflect'
   import * './debug'
 

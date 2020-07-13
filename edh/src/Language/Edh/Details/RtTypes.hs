@@ -1599,3 +1599,10 @@ mkExtHostClass !scope !nm !hc !esmCtor = do
           exitEdhSTM pgs exit $ EdhObject newThis
   return $ EdhClass cls
 
+
+data EdhIndex = EdhIndex !Int | EdhAny | EdhAll | EdhSlice {
+    edh'slice'start :: !(Maybe Int)
+  , edh'slice'stop :: !(Maybe Int)
+  , edh'slice'step :: !(Maybe Int)
+  } deriving (Eq)
+
