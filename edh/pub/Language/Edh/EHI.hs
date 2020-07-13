@@ -207,6 +207,7 @@ module Language.Edh.EHI
   , inf
   , D.Decimal(..)
   , Symbol(..)
+  , symbolName
   , Dict(..)
   , ItemKey
   , showEdhDict
@@ -215,8 +216,10 @@ module Language.Edh.EHI
   , ArgsPack(..)
   , ProcDefi(..)
   , EdhGenrCaller
+  , globalSymbol
   , mkSymbol
   , mkHostProc
+  , mkSymbolicHostProc
   , mkIntrinsicOp
 
     -- * args pack parsing

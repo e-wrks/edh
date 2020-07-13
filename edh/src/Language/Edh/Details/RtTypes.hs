@@ -264,7 +264,17 @@ instance Ord Symbol where
 instance Hashable Symbol where
   hashWithSalt s (Symbol u _) = hashWithSalt s u
 instance Show Symbol where
-  show (Symbol _ sym) = T.unpack sym
+  show (Symbol _ desc) = T.unpack desc
+
+symbolName :: Symbol -> Text
+symbolName (Symbol _ !desc) = case T.stripPrefix "@" desc of
+  Nothing    -> desc
+  Just !name -> name
+
+globalSymbol :: Text -> Symbol
+globalSymbol !description = unsafePerformIO $ do
+  !u <- newUnique
+  return $ Symbol u description
 mkSymbol :: Text -> STM Symbol
 mkSymbol !description = do
   !u <- unsafeIOToSTM newUnique
@@ -1442,6 +1452,25 @@ mkHostProc !scope !vc !nm !p !args = do
     , procedure'name = AttrByName nm
     , procedure'lexi = Just scope
     , procedure'decl = ProcDecl { procedure'addr = NamedAttr nm
+                                , procedure'args = args
+                                , procedure'body = Right p
+                                }
+    }
+
+mkSymbolicHostProc
+  :: Scope
+  -> (ProcDefi -> EdhValue)
+  -> Symbol
+  -> EdhProcedure
+  -> ArgsReceiver
+  -> STM EdhValue
+mkSymbolicHostProc !scope !vc !sym !p !args = do
+  u <- unsafeIOToSTM newUnique
+  return $ vc ProcDefi
+    { procedure'uniq = u
+    , procedure'name = AttrBySym sym
+    , procedure'lexi = Just scope
+    , procedure'decl = ProcDecl { procedure'addr = SymbolicAttr $ symbolName sym
                                 , procedure'args = args
                                 , procedure'body = Right p
                                 }
