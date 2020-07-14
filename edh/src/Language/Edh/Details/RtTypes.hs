@@ -25,6 +25,7 @@ import           Data.Hashable
 import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
+import           Data.Vector.Mutable            ( IOVector )
 import           Data.Dynamic
 
 import           Text.Megaparsec
@@ -737,6 +738,10 @@ instance Hashable EventSink where
   hashWithSalt s (EventSink s'u _ _ _ _) = hashWithSalt s s'u
 instance Show EventSink where
   show EventSink{} = "<sink>"
+
+
+-- Boxed Vector for Edh values, non-transactional, mutable anytime
+type EdhVector = IOVector EdhValue
 
 
 -- Atop Haskell, most types in Edh the surface language, are for

@@ -221,6 +221,7 @@ module Language.Edh.EHI
   , mkHostProc
   , mkSymbolicHostProc
   , mkIntrinsicOp
+  , EdhVector
 
     -- * args pack parsing
   , ArgsPackParser(..)

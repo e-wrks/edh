@@ -25,9 +25,6 @@ import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
 
 
--- Boxed Vector for Edh values, mutable anytime
-type EdhVector = IOVector EdhValue
-
 -- | host constructor Vector(*elements,length=None)
 vecHostCtor :: EdhHostCtor
 vecHostCtor !pgsCtor (ArgsPack !ctorArgs !ctorKwargs) !ctorExit = do
