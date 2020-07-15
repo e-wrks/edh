@@ -1626,20 +1626,22 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
         _ -> exitEdhSTM' pgs exit rtn
       trySelfMagic :: Object -> EdhProc -> EdhProc
       trySelfMagic !obj !noMagic =
-        contEdhSTM
-          $   lookupEntityAttr pgs (objEntity obj) (AttrByName "@")
-          >>= \case
-                EdhNil         -> runEdhProc pgs $ noMagic
-                EdhMethod !mth -> runEdhProc pgs $ callEdhMethod
-                  obj
-                  mth
-                  (ArgsPack [attrKeyValue key] Map.empty)
-                  id
-                  exit
-                !badMth ->
-                  throwEdhSTM pgs UsageError
-                    $  "Malformed magic (@) method of "
-                    <> T.pack (edhTypeNameOf badMth)
+        contEdhSTM $ lookupEntityAttr pgs (objEntity obj) key >>= \case
+          EdhNil ->
+            lookupEntityAttr pgs (objEntity obj) (AttrByName "@") >>= \case
+              EdhNil         -> runEdhProc pgs $ noMagic
+              EdhMethod !mth -> runEdhProc pgs $ callEdhMethod
+                obj
+                mth
+                (ArgsPack [attrKeyValue key] Map.empty)
+                id
+                exit
+              !badMth ->
+                throwEdhSTM pgs UsageError
+                  $  "Malformed magic (@) method of "
+                  <> T.pack (edhTypeNameOf badMth)
+          !attrVal -> -- don't shadow an attr directly available from an obj
+            chkExit obj $ OriginalValue attrVal (objectScope ctx obj) obj
   case fromExpr of
     -- give super objects the magical power to intercept
     -- attribute access on descendant objects, via `this` ref
@@ -1813,22 +1815,6 @@ setEdhAttr !pgsAfter !tgtExpr !key !val !exit = do
   let !scope = contextScope $ edh'context pgs
       !this  = thisObject scope
       !that  = thatObject scope
-      trySelfMagic :: Object -> EdhProc -> EdhProc
-      trySelfMagic !obj !noMagic =
-        contEdhSTM
-          $   lookupEntityAttr pgs (objEntity obj) (AttrByName "@=")
-          >>= \case
-                EdhNil         -> runEdhProc pgs $ noMagic
-                EdhMethod !mth -> runEdhProc pgs $ callEdhMethod
-                  obj
-                  mth
-                  (ArgsPack [attrKeyValue key, val] Map.empty)
-                  id
-                  exit
-                !badMth ->
-                  throwEdhSTM pgs UsageError
-                    $  "Malformed magic (@=) method of "
-                    <> T.pack (edhTypeNameOf badMth)
   case tgtExpr of
     -- give super objects the magical power to intercept
     -- attribute assignment to descendant objects, via `this` ref
@@ -1837,19 +1823,11 @@ setEdhAttr !pgsAfter !tgtExpr !key !val !exit = do
           noMagic =
               contEdhSTM $ changeEdhObjAttr pgs this key val $ \ !valSet ->
                 runEdhProc pgsAfter $ exitEdhProc exit valSet
-      in  setEdhAttrWSM pgsAfter
-                        (AttrByName "<-@")
-                        this
-                        key
-                        val
-                        (trySelfMagic this noMagic)
-                        exit
+      in  setEdhAttrWSM pgsAfter (AttrByName "<-@") this key val noMagic exit
     -- no magic layer laid over assignment via `that` ref
     AttrExpr ThatRef ->
-      trySelfMagic that
-        $ contEdhSTM
-        $ changeEdhObjAttr pgs that key val
-        $ \ !valSet -> runEdhProc pgsAfter $ exitEdhProc exit valSet
+      contEdhSTM $ changeEdhObjAttr pgs that key val $ \ !valSet ->
+        runEdhProc pgsAfter $ exitEdhProc exit valSet
     -- not allowing assignment via super
     AttrExpr SuperRef -> throwEdh EvalError "Can not assign via super"
     -- give super objects the magical power to intercept
@@ -1866,7 +1844,7 @@ setEdhAttr !pgsAfter !tgtExpr !key !val !exit = do
                             tgtObj
                             key
                             val
-                            (trySelfMagic tgtObj noMagic)
+                            noMagic
                             exit
         _ ->
           throwEdh EvalError
@@ -3036,7 +3014,28 @@ changeEdhObjAttr
   -> (EdhValue -> STM ())
   -> STM ()
 changeEdhObjAttr !pgs !obj !key !val !exit =
-  lookupEdhObjAttr pgs obj key >>= \case
+  -- don't shadow overwriting to a directly existing attr
+  lookupEntityAttr pgs (objEntity obj) key >>= \case
+    EdhNil -> lookupEntityAttr pgs (objEntity obj) (AttrByName "@=") >>= \case
+      EdhNil ->
+        -- normal attr lookup with supers involved
+        lookupEdhObjAttr pgs obj key >>= chkProperty
+      EdhMethod !mth ->
+        -- call magic (@=) method
+        runEdhProc pgs
+          $ callEdhMethod obj
+                          mth
+                          (ArgsPack [attrKeyValue key, val] Map.empty)
+                          id
+          $ \(OriginalValue !rtnVal _ _) -> contEdhSTM $ exit rtnVal
+      !badMth ->
+        throwEdhSTM pgs UsageError $ "Malformed magic (@=) method of " <> T.pack
+          (edhTypeNameOf badMth)
+    !existingVal ->
+      -- a directly existing attr, bypassed magic (@=) method
+      chkProperty existingVal
+ where
+  chkProperty = \case
     EdhDescriptor !getter Nothing ->
       throwEdhSTM pgs UsageError
         $  "Property "
