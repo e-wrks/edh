@@ -359,7 +359,7 @@ parseWhileStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseWhileStmt !si = do
   void $ keyword "while"
   (cnd, si' ) <- parseExpr si
-  (act, si'') <- parseExpr si'
+  (act, si'') <- parseStmt si'
   return (WhileStmt cnd act, si'')
 
 parseProcDecl :: IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)

@@ -390,12 +390,12 @@ evalStmt' !stmt !exit = do
       $ \(OriginalValue !exv _ _) -> edhThrow $ edhDeCaseClose exv
 
 
-    WhileStmt !cndExpr !bodyExpr -> do
+    WhileStmt !cndExpr !bodyStmt -> do
       let doWhile :: EdhProc
           doWhile = evalExpr cndExpr $ \(OriginalValue !cndVal _ _) ->
             case edhDeCaseClose cndVal of
               (EdhBool True) ->
-                evalExpr bodyExpr $ \(OriginalValue !blkVal _ _) ->
+                evalStmt bodyStmt $ \(OriginalValue !blkVal _ _) ->
                   case edhDeCaseClose blkVal of
                   -- early stop of procedure
                     rtnVal@EdhReturn{} -> exitEdhProc exit rtnVal
@@ -743,7 +743,7 @@ intplExpr !pgs !x !exit = case x of
     $ \argSenders' -> exit $ ArgsPackExpr argSenders'
   ParenExpr !x' -> intplExpr pgs x' $ \x'' -> exit $ ParenExpr x''
   BlockExpr !ss ->
-    seqcontSTM (intplStmtSrc <$> ss) $ \ss' -> exit $ BlockExpr ss'
+    seqcontSTM (intplStmtSrc pgs <$> ss) $ \ss' -> exit $ BlockExpr ss'
   YieldExpr !x'             -> intplExpr pgs x' $ \x'' -> exit $ YieldExpr x''
   ForExpr !rcvs !fromX !doX -> intplExpr pgs fromX
     $ \fromX' -> intplExpr pgs doX $ \doX' -> exit $ ForExpr rcvs fromX' doX'
@@ -760,10 +760,6 @@ intplExpr !pgs !x !exit = case x of
       Just !oInto -> intplExpr pgs oInto
         $ \oInto' -> exit $ ImportExpr rcvrs' xFrom' $ Just oInto'
   _ -> exit x
- where
-  intplStmtSrc :: StmtSrc -> (StmtSrc -> STM ()) -> STM ()
-  intplStmtSrc (StmtSrc (!sp, !stmt)) !exit' =
-    intplStmt pgs stmt $ \stmt' -> exit' $ StmtSrc (sp, stmt')
 
 intplDictEntry
   :: EdhProgState
@@ -825,6 +821,10 @@ intplArgSndr !pgs !a !exit' = case a of
   SendPosArg    !v -> intplExpr pgs v $ \v' -> exit' $ SendPosArg v'
   SendKwArg !n !v  -> intplExpr pgs v $ \v' -> exit' $ SendKwArg n v'
 
+intplStmtSrc :: EdhProgState -> StmtSrc -> (StmtSrc -> STM ()) -> STM ()
+intplStmtSrc !pgs (StmtSrc (!sp, !stmt)) !exit' =
+  intplStmt pgs stmt $ \stmt' -> exit' $ StmtSrc (sp, stmt')
+
 intplStmt :: EdhProgState -> Stmt -> (Stmt -> STM ()) -> STM ()
 intplStmt !pgs !stmt !exit = case stmt of
   AtoIsoStmt !x         -> intplExpr pgs x $ \x' -> exit $ AtoIsoStmt x'
@@ -837,7 +837,7 @@ intplStmt !pgs !stmt !exit = case stmt of
   PerceiveStmt !sink !body -> intplExpr pgs sink
     $ \sink' -> intplExpr pgs body $ \body' -> exit $ PerceiveStmt sink' body'
   WhileStmt !cond !act -> intplExpr pgs cond
-    $ \cond' -> intplExpr pgs act $ \act' -> exit $ WhileStmt cond' act'
+    $ \cond' -> intplStmtSrc pgs act $ \act' -> exit $ WhileStmt cond' act'
   ThrowStmt  !x -> intplExpr pgs x $ \x' -> exit $ ThrowStmt x'
   ReturnStmt !x -> intplExpr pgs x $ \x' -> exit $ ReturnStmt x'
   ExprStmt   !x -> intplExpr pgs x $ \x' -> exit $ ExprStmt x'

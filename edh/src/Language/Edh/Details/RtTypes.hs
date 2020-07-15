@@ -1082,7 +1082,7 @@ data Stmt =
       -- handling mechanism in OS process management
     | PerceiveStmt !Expr !Expr
       -- | while loop
-    | WhileStmt !Expr !Expr
+    | WhileStmt !Expr !StmtSrc
       -- | break from a while/for loop, or terminate the Edh thread if given
       -- from a perceiver
     | BreakStmt
