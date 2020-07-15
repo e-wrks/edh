@@ -1173,7 +1173,7 @@ evalExpr !expr !exit = do
                             mth'proc
                             (ArgsPack [lhVal] Map.empty)
                             id
-                            chkExit
+                            exit
                           !badEqMth ->
                             throwEdhSTM pgs UsageError
                               $  "Malformed magic method ("
@@ -1190,7 +1190,7 @@ evalExpr !expr !exit = do
                 mth'proc
                 (ArgsPack [rhVal] Map.empty)
                 id
-                chkExit
+                exit
               !badEqMth ->
                 throwEdhSTM pgs UsageError
                   $  "Malformed magic method ("
@@ -1210,7 +1210,7 @@ evalExpr !expr !exit = do
                   mth'proc
                   (ArgsPack [lhVal] Map.empty)
                   id
-                  chkExit
+                  exit
                 !badEqMth ->
                   throwEdhSTM pgs UsageError
                     $  "Malformed magic method ("
@@ -1231,10 +1231,6 @@ evalExpr !expr !exit = do
               <> T.pack (edhTypeNameOf $ edhUltimate lhVal)
               <> " and "
               <> T.pack (edhTypeNameOf $ edhUltimate rhVal)
-          chkExit rtn@(OriginalValue !rtnVal _ _) =
-            case edhDeCaseClose rtnVal of
-              EdhContinue -> contEdhSTM notApplicable
-              _           -> exitEdhProc' exit rtn
       in
         contEdhSTM $ resolveEdhCtxAttr pgs scope (AttrByName opSym) >>= \case
           Nothing ->
@@ -3405,10 +3401,15 @@ edhValueEqual !pgs !lhVal !rhVal !exit =
               rhm <- readTVar rhd
               cmp2Map (Map.toList lhm) (Map.toList rhm) $ exit . Just
             _ -> exit $ Just False
-          -- don't conclude it as for here, allow magic methods to be invoked,
+          -- don't conclude it if either of the two is an object, so magic
+          -- methods can get the chance to be invoked
           -- there may be some magic to be invoked and some may even return
           -- vectorized result
-          _ -> exit Nothing
+          EdhObject{} -> exit Nothing
+          _           -> case rhv of
+            EdhObject{} -> exit Nothing
+            -- neither is object, not equal for sure
+            _           -> exit $ Just False
  where
   cmp2List :: [EdhValue] -> [EdhValue] -> (Bool -> STM ()) -> STM ()
   cmp2List []      []      !exit' = exit' True
