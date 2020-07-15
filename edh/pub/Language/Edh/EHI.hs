@@ -59,6 +59,7 @@ module Language.Edh.EHI
   , importEdhModule
   , moduleContext
   , contextScope
+  , contextFrame
   , parseEdh
   , parseEdh'
   , evalEdh
