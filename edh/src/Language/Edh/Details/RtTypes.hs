@@ -431,9 +431,22 @@ instance Show Object where
   -- will fail hard on encountering of nested 'atomically' calls.
   show (Object _ pd _) = "<object: " ++ T.unpack (procedureName pd) ++ ">"
 
+
 -- | Read the entity store underlying an object
 objStore :: Object -> STM Dynamic
 objStore = readTVar . entity'store . objEntity
+
+-- | Try cast and unveil an Object's storage of a known type
+castObjectStore :: forall a . (Typeable a) => Object -> STM (Maybe a)
+castObjectStore !obj = fromDynamic <$> objStore obj >>= \case
+  Nothing  -> return Nothing
+  Just !sv -> return $ Just sv
+-- | Try cast and unveil a possible Object's storage of a known type
+castObjectStore' :: forall a . (Typeable a) => EdhValue -> STM (Maybe a)
+castObjectStore' !val = case edhUltimate val of
+  EdhObject !obj -> castObjectStore obj
+  _              -> return Nothing
+
 
 -- | View an entity as object of specified class with specified ancestors
 -- this is the black magic you want to avoid
