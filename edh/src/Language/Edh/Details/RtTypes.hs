@@ -810,6 +810,15 @@ data EdhValue =
     | EdhReturn !EdhValue
   -- | prefer better efforted result, but can default to the specified value
   -- if none applicable
+  -- TODO use this in place of { continue } to signal try-next-impl semantics
+  --      similar to NotImplemented in Python. may enable the syntax of
+  --  `return default <expr>` for impls as Edh procedures, i.e. `default` to
+  --      be a keyword forming `DefaultExpr !Expr` expression.
+  --
+  --      then `return default { continue }` can be used to signal that it's
+  --      not implemented at all, as current semantic, after that the branch
+  --      will be able to eval to `{ continue }` without rendering the (->)
+  --      operator as considered not implemented.
     | EdhDefault !EdhValue
 
   -- | event sink
