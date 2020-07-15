@@ -598,6 +598,7 @@ parseLitExpr = choice
   , TypeLiteral RethrowType <$ litKw "RethrowType"
   , TypeLiteral YieldType <$ litKw "YieldType"
   , TypeLiteral ReturnType <$ litKw "ReturnType"
+  , TypeLiteral DefaultType <$ litKw "DefaultType"
   , TypeLiteral SinkType <$ litKw "SinkType"
   , TypeLiteral ExprType <$ litKw "ExprType"
   , TypeLiteral TypeType <$ litKw "TypeType"

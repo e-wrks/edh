@@ -799,7 +799,7 @@ data EdhValue =
   -- deleter semantic is expressed as calling setter without arg
     | EdhDescriptor !ProcDefi !(Maybe ProcDefi)
 
-  -- | flow control
+  -- * flow control
     | EdhBreak
     | EdhContinue
     | EdhCaseClose !EdhValue
@@ -808,6 +808,9 @@ data EdhValue =
     | EdhRethrow
     | EdhYield !EdhValue
     | EdhReturn !EdhValue
+  -- | prefer better efforted result, but can default to the specified value
+  -- if none applicable
+    | EdhDefault !EdhValue
 
   -- | event sink
     | EdhSink !EventSink
@@ -856,10 +859,11 @@ instance Show EdhValue where
   show EdhCaseOther     = "<caseother>"
   show EdhFallthrough   = "<fallthrough>"
   show EdhRethrow       = "<rethrow>"
-  show (EdhYield  v)    = "<yield: " ++ show v ++ ">"
-  show (EdhReturn v)    = "<return: " ++ show v ++ ">"
+  show (EdhYield   v)   = "<yield: " ++ show v ++ ">"
+  show (EdhReturn  v)   = "<return: " ++ show v ++ ">"
+  show (EdhDefault v)   = "<default: " ++ show v ++ ">"
 
-  show (EdhSink   v)    = show v
+  show (EdhSink    v)   = show v
 
   show (EdhNamedValue n v@EdhNamedValue{}) =
     -- Edh operators are all left-associative, parenthesis needed
@@ -915,10 +919,11 @@ instance Eq EdhValue where
   EdhFallthrough              == EdhFallthrough              = True
   EdhRethrow                  == EdhRethrow                  = True
 -- todo: regard a yielded/returned value equal to the value itself ?
-  EdhYield  x'v               == EdhYield  y'v               = x'v == y'v
-  EdhReturn x'v               == EdhReturn y'v               = x'v == y'v
+  EdhYield   x'v              == EdhYield   y'v              = x'v == y'v
+  EdhReturn  x'v              == EdhReturn  y'v              = x'v == y'v
+  EdhDefault x'v              == EdhDefault y'v              = x'v == y'v
 
-  EdhSink   x                 == EdhSink   y                 = x == y
+  EdhSink    x                == EdhSink    y                = x == y
 
   EdhNamedValue _ x'v         == EdhNamedValue _ y'v         = x'v == y'v
   EdhNamedValue _ x'v         == y                           = x'v == y
@@ -967,8 +972,9 @@ instance Hashable EdhValue where
   hashWithSalt s EdhRethrow                = hashWithSalt s (-6 :: Int)
   hashWithSalt s (EdhYield v) = s `hashWithSalt` (-7 :: Int) `hashWithSalt` v
   hashWithSalt s (EdhReturn v) = s `hashWithSalt` (-8 :: Int) `hashWithSalt` v
+  hashWithSalt s (EdhDefault v) = s `hashWithSalt` (-9 :: Int) `hashWithSalt` v
 
-  hashWithSalt s (EdhSink   x            ) = hashWithSalt s x
+  hashWithSalt s (EdhSink    x           ) = hashWithSalt s x
 
   hashWithSalt s (EdhNamedValue _ v      ) = hashWithSalt s v
 
@@ -982,8 +988,9 @@ edhDeCaseClose !val                = val
 
 edhUltimate :: EdhValue -> EdhValue
 edhUltimate (EdhNamedValue _ v) = edhDeCaseClose v
-edhUltimate (EdhReturn v      ) = edhDeCaseClose v
-edhUltimate (EdhYield  v      ) = edhDeCaseClose v
+edhUltimate (EdhReturn  v     ) = edhDeCaseClose v
+edhUltimate (EdhDefault v     ) = edhDeCaseClose v
+edhUltimate (EdhYield   v     ) = edhDeCaseClose v
 edhUltimate v                   = edhDeCaseClose v
 
 
@@ -1363,6 +1370,7 @@ data EdhTypeValue = TypeType
     | RethrowType
     | YieldType
     | ReturnType
+    | DefaultType
     | SinkType
     | ExprType
   deriving (Enum, Eq, Ord, Show)
@@ -1425,6 +1433,7 @@ edhTypeOf EdhFallthrough      = FallthroughType
 edhTypeOf EdhRethrow          = RethrowType
 edhTypeOf EdhYield{}          = YieldType
 edhTypeOf EdhReturn{}         = ReturnType
+edhTypeOf EdhDefault{}        = DefaultType
 edhTypeOf EdhSink{}           = SinkType
 edhTypeOf (EdhNamedValue _ v) = edhTypeOf v
 edhTypeOf EdhExpr{}           = ExprType

@@ -161,8 +161,8 @@ valEqProc !lhExpr !rhExpr !exit = do
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       contEdhSTM $ edhValueEqual pgs lhVal rhVal $ \case
         Just !conclusion -> exitEdhSTM pgs exit $ EdhBool conclusion
-        -- allow magic methods to be invoked
-        Nothing          -> exitEdhSTM pgs exit EdhContinue
+        -- allow magic methods to be invoked, but default to not equal
+        Nothing          -> exitEdhSTM pgs exit $ EdhDefault $ EdhBool False
 
 -- | operator (!=)
 idNeProc :: EdhIntrinsicOp
@@ -171,8 +171,8 @@ idNeProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       contEdhSTM $ edhValueEqual pgs lhVal rhVal $ \case
         Just !conclusion -> exitEdhSTM pgs exit $ EdhBool $ not conclusion
-        -- allow magic methods to be invoked
-        Nothing          -> exitEdhSTM pgs exit EdhContinue
+        -- allow magic methods to be invoked, but default to not equal
+        Nothing          -> exitEdhSTM pgs exit $ EdhDefault $ EdhBool True
 
 -- | operator (is)
 idEqProc :: EdhIntrinsicOp

@@ -1159,15 +1159,23 @@ evalExpr !expr !exit = do
 
     InfixExpr !opSym !lhExpr !rhExpr ->
       let
-        tryMagicMethod :: EdhValue -> EdhValue -> STM ()
-        tryMagicMethod !lhVal !rhVal = case edhUltimate lhVal of
+        notApplicable !lhVal !rhVal =
+          throwEdhSTM pgs EvalError
+            $  "Operator ("
+            <> opSym
+            <> ") not applicable to "
+            <> T.pack (edhTypeNameOf $ edhUltimate lhVal)
+            <> " and "
+            <> T.pack (edhTypeNameOf $ edhUltimate rhVal)
+        tryMagicMethod :: EdhValue -> EdhValue -> STM () -> STM ()
+        tryMagicMethod !lhVal !rhVal !naExit = case edhUltimate lhVal of
           EdhObject !lhObj ->
             lookupEdhObjAttr pgs lhObj (AttrByName opSym) >>= \case
               EdhNil -> case edhUltimate rhVal of
                 EdhObject !rhObj ->
                   lookupEdhObjAttr pgs rhObj (AttrByName $ opSym <> "@")
                     >>= \case
-                          EdhNil              -> notApplicable
+                          EdhNil              -> naExit
                           EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
                             rhObj
                             mth'proc
@@ -1184,7 +1192,7 @@ evalExpr !expr !exit = do
                               <> T.pack (edhTypeNameOf badEqMth)
                               <> ": "
                               <> T.pack (show badEqMth)
-                _ -> notApplicable
+                _ -> naExit
               EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
                 lhObj
                 mth'proc
@@ -1204,7 +1212,7 @@ evalExpr !expr !exit = do
           _ -> case edhUltimate rhVal of
             EdhObject !rhObj ->
               lookupEdhObjAttr pgs rhObj (AttrByName $ opSym <> "@") >>= \case
-                EdhNil              -> notApplicable
+                EdhNil              -> naExit
                 EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
                   rhObj
                   mth'proc
@@ -1221,22 +1229,14 @@ evalExpr !expr !exit = do
                     <> T.pack (edhTypeNameOf badEqMth)
                     <> ": "
                     <> T.pack (show badEqMth)
-            _ -> notApplicable
-         where
-          notApplicable =
-            throwEdhSTM pgs EvalError
-              $  "Operator ("
-              <> opSym
-              <> ") not applicable to "
-              <> T.pack (edhTypeNameOf $ edhUltimate lhVal)
-              <> " and "
-              <> T.pack (edhTypeNameOf $ edhUltimate rhVal)
+            _ -> naExit
       in
         contEdhSTM $ resolveEdhCtxAttr pgs scope (AttrByName opSym) >>= \case
           Nothing ->
             runEdhProc pgs $ evalExpr lhExpr $ \(OriginalValue lhVal _ _) ->
               evalExpr rhExpr $ \(OriginalValue rhVal _ _) ->
-                contEdhSTM $ tryMagicMethod lhVal rhVal
+                contEdhSTM $ tryMagicMethod lhVal rhVal $ notApplicable lhVal
+                                                                        rhVal
           Just (!opVal, !op'lexi) -> case opVal of
 
             -- calling an intrinsic operator
@@ -1245,10 +1245,19 @@ evalExpr !expr !exit = do
                 $ iop'proc lhExpr rhExpr
                 $ \rtn@(OriginalValue !rtnVal _ _) ->
                     case edhDeCaseClose rtnVal of
+                      EdhDefault !defResult ->
+                        evalExpr lhExpr $ \(OriginalValue lhVal _ _) ->
+                          evalExpr rhExpr $ \(OriginalValue rhVal _ _) ->
+                            contEdhSTM $ tryMagicMethod lhVal rhVal $ exitEdhSTM
+                              pgs
+                              exit
+                              defResult
                       EdhContinue ->
                         evalExpr lhExpr $ \(OriginalValue lhVal _ _) ->
                           evalExpr rhExpr $ \(OriginalValue rhVal _ _) ->
-                            contEdhSTM $ tryMagicMethod lhVal rhVal
+                            contEdhSTM
+                              $ tryMagicMethod lhVal rhVal
+                              $ notApplicable lhVal rhVal
                       _ -> exitEdhProc' exit rtn
 
             -- calling an operator procedure
@@ -1267,8 +1276,14 @@ evalExpr !expr !exit = do
                               [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
                             $ \rtn@(OriginalValue !rtnVal _ _) ->
                                 case edhDeCaseClose rtnVal of
+                                  EdhDefault !defResult ->
+                                    contEdhSTM
+                                      $ tryMagicMethod lhVal rhVal
+                                      $ exitEdhSTM pgs exit defResult
                                   EdhContinue ->
-                                    contEdhSTM $ tryMagicMethod lhVal rhVal
+                                    contEdhSTM
+                                      $ tryMagicMethod lhVal rhVal
+                                      $ notApplicable lhVal rhVal
                                   _ -> exitEdhProc' exit rtn
 
                 -- 3 pos-args - caller scope + lh/rh expr receiving operator
@@ -1287,10 +1302,18 @@ evalExpr !expr !exit = do
                         ]
                     $ \rtn@(OriginalValue !rtnVal _ _) ->
                         case edhDeCaseClose rtnVal of
+                          EdhDefault !defResult ->
+                            evalExpr lhExpr $ \(OriginalValue lhVal _ _) ->
+                              evalExpr rhExpr $ \(OriginalValue rhVal _ _) ->
+                                contEdhSTM
+                                  $ tryMagicMethod lhVal rhVal
+                                  $ exitEdhSTM pgs exit defResult
                           EdhContinue ->
                             evalExpr lhExpr $ \(OriginalValue lhVal _ _) ->
                               evalExpr rhExpr $ \(OriginalValue rhVal _ _) ->
-                                contEdhSTM $ tryMagicMethod lhVal rhVal
+                                contEdhSTM
+                                  $ tryMagicMethod lhVal rhVal
+                                  $ notApplicable lhVal rhVal
                           _ -> exitEdhProc' exit rtn
 
                 _ ->
