@@ -1,0 +1,50 @@
+
+{
+
+  _d={}
+
+  class Mo {
+
+    # any normal attribute will be shadowed by magic (@) method,
+    # and magic (@=) method will shadow attribute assignment accordingly
+    _n = 3721
+    # even any property
+    property$ method n () this._n
+    # any property setter too
+    setter$ method n ( v ) this._n = v
+    # (@) and (@=) magics are normally provided by host objects, with host
+    # entity storage underlying, not much useful by Edh objects
+
+
+    # these methods are addressing `_d` from lexical outer scope
+
+    # attribute reader
+    method (@) k _d[ k ]
+
+    # attribute writter
+    method (@=) ( k, v ) _d[ k ] = v
+
+  }
+
+  mo = Mo()
+
+}
+
+# a non-existing key to a dict gets nil back
+mo.a is nil
+
+# real attributes are shadowed
+mo._n is nil
+mo.n is nil
+
+# this will invoke (@=)
+mo.a=3
+# which actually stores data in that dict
+_d
+
+# and (@) can get data back from that dict
+mo.a is 3
+
+# otherwise it's just like an ordinary object
+mo.b=7
+mo.a * mo.b
