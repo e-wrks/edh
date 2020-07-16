@@ -9,7 +9,6 @@ import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
 import qualified Data.Text                     as T
-import qualified Data.HashMap.Strict           as Map
 
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
@@ -25,7 +24,7 @@ import           Language.Edh.Details.Evaluate
 -- return nil
 mreProc :: EdhProcedure
 mreProc (ArgsPack !args !kwargs) !exit = case args of
-  [v] | Map.null kwargs -> case edhUltimate v of
+  [v] | compactDictNull kwargs -> case edhUltimate v of
     EdhSink !sink -> ask >>= \pgs ->
       contEdhSTM $ readTVar (evs'mrv sink) >>= \mrv -> exitEdhSTM pgs exit mrv
     _ ->
@@ -40,7 +39,7 @@ mreProc (ArgsPack !args !kwargs) !exit = case args of
 -- by a nil data
 eosProc :: EdhProcedure
 eosProc (ArgsPack !args !kwargs) !exit = case args of
-  [v] | Map.null kwargs -> case edhUltimate v of
+  [v] | compactDictNull kwargs -> case edhUltimate v of
     EdhSink !sink -> ask >>= \pgs ->
       contEdhSTM $ readTVar (evs'seqn sink) >>= \case
         0 -> exitEdhSTM pgs exit $ EdhBool False

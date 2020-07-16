@@ -8,7 +8,6 @@ import           Prelude
 import           Control.Concurrent.STM
 
 import           Data.Text                      ( Text )
-import qualified Data.HashMap.Strict           as Map
 import           Data.Unique
 
 import           Language.Edh.Details.RtTypes
@@ -56,7 +55,7 @@ resolveEffectfulAttr pgs (scope : rest) !key =
           EdhNil               -> resolveEffectfulAttr pgs rest key
           EdhDict (Dict _ !ds) -> do
             d <- readTVar ds
-            case Map.lookup key d of
+            case compactDictLookup key d of
               Just val -> return $ Just (val, rest)
               Nothing  -> resolveEffectfulAttr pgs rest key
   -- todo crash in this case? warning may be more proper but in what way?

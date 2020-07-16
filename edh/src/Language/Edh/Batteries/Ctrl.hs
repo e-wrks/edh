@@ -14,7 +14,6 @@ import           Control.Concurrent.STM
 import           Data.Maybe
 import           Data.Unique
 import qualified Data.Text                     as T
-import qualified Data.HashMap.Strict           as Map
 
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
@@ -160,7 +159,7 @@ branchProc !lhExpr !rhExpr !exit = do
       -- {( x )} -- single arg 
       [StmtSrc (_, ExprStmt (ParenExpr (AttrExpr (DirectRef (NamedAttr attrName)))))]
         -> case ctxMatch of
-          EdhArgsPack (ArgsPack [argVal] !kwargs) | Map.null kwargs ->
+          EdhArgsPack (ArgsPack [argVal] !kwargs) | compactDictNull kwargs ->
             contEdhSTM $ branchMatched [(attrName, argVal)]
           _ -> exitEdhProc exit EdhCaseOther
 
@@ -215,16 +214,19 @@ branchProc !lhExpr !rhExpr !exit = do
       [StmtSrc (_, ExprStmt (InfixExpr "=>" (AttrExpr (DirectRef (NamedAttr headName))) (AttrExpr (DirectRef (NamedAttr tailName)))))]
         -> let doMatched headVal tailVal =
                    branchMatched [(headName, headVal), (tailName, tailVal)]
-           in  contEdhSTM $ case ctxMatch of
-                 EdhArgsPack (ArgsPack (h : rest) !kwargs) | Map.null kwargs ->
-                   doMatched h (EdhArgsPack (ArgsPack rest kwargs))
-                 EdhList (List _ !l) -> readTVar l >>= \case
-                   (h : rest) -> do
-                     rl <- newTVar rest
-                     u  <- unsafeIOToSTM newUnique
-                     doMatched h $ EdhList $ List u rl
-                   _ -> exitEdhSTM pgs exit EdhCaseOther
+           in
+             contEdhSTM $ case ctxMatch of
+               EdhArgsPack (ArgsPack (h : rest) !kwargs)
+                 | compactDictNull kwargs -> doMatched
+                   h
+                   (EdhArgsPack (ArgsPack rest kwargs))
+               EdhList (List _ !l) -> readTVar l >>= \case
+                 (h : rest) -> do
+                   rl <- newTVar rest
+                   u  <- unsafeIOToSTM newUnique
+                   doMatched h $ EdhList $ List u rl
                  _ -> exitEdhSTM pgs exit EdhCaseOther
+               _ -> exitEdhSTM pgs exit EdhCaseOther
 
       -- { prefix @< match >@ suffix } -- sub-string cut pattern
       [StmtSrc (_, ExprStmt (InfixExpr ">@" (InfixExpr "@<" (AttrExpr (DirectRef (NamedAttr prefixName))) matchExpr) (AttrExpr (DirectRef (NamedAttr suffixName)))))]
@@ -283,7 +285,7 @@ branchProc !lhExpr !rhExpr !exit = do
         contEdhSTM $ if null argSenders
           then case ctxMatch of
             -- an empty apk pattern matches any empty sequence
-            EdhArgsPack (ArgsPack [] !kwargs) | Map.null kwargs ->
+            EdhArgsPack (ArgsPack [] !kwargs) | compactDictNull kwargs ->
               branchMatched []
             EdhList (List _ !l) ->
               readTVar l
@@ -303,8 +305,8 @@ branchProc !lhExpr !rhExpr !exit = do
                 ("Invalid element in apk pattern: " <> T.pack (show argSenders))
               else case ctxMatch of
                 EdhArgsPack (ArgsPack !args !kwargs)
-                  | length args == length argSenders && Map.null kwargs -> branchMatched
-                  $ zip attrNames args
+                  | length args == length argSenders && compactDictNull kwargs
+                  -> branchMatched $ zip attrNames args
                 _ -> exitEdhSTM pgs exit EdhCaseOther
 
       -- {{ class:inst }} -- instance resolving pattern

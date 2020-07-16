@@ -1,4 +1,7 @@
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE
+    GADTs
+  , TypeApplications
+#-}
 
 module Language.Edh.Details.RtTypes where
 
@@ -6,14 +9,16 @@ import           Prelude
 -- import           Debug.Trace
 
 import           GHC.Conc                       ( unsafeIOToSTM )
-import           System.IO.Unsafe
+import           System.IO.Unsafe               ( unsafePerformIO )
 
+import           Control.Monad.ST
 import           Control.Monad.Except
 import           Control.Monad.Reader
 
 -- import           Control.Concurrent
 import           Control.Concurrent.STM
 
+import           Data.STRef
 import           Data.Maybe
 import           Data.Foldable
 import           Data.Unique
@@ -25,7 +30,12 @@ import           Data.Hashable
 import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
+import           Data.Vector                    ( Vector
+                                                , (!)
+                                                )
+import qualified Data.Vector                   as V
 import           Data.Vector.Mutable            ( IOVector )
+import qualified Data.Vector.Mutable           as MV
 import           Data.Dynamic
 
 import           Text.Megaparsec
@@ -33,6 +43,259 @@ import           Text.Megaparsec
 import           Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
+
+
+-- Boxed Vector for Edh values, non-transactional, mutable anytime
+type EdhVector = IOVector EdhValue
+
+
+-- | Similar to the insertion-order-preserving dict introduced since CPython
+-- 3.6 (from PyPy), which is then formalized since the Python language 3.7,
+-- but yet lacks much optimization.
+--
+-- Note: a nil (EdhNil) value in Edh has the special semantic of non-existence
+data CompactDict k where
+  CompactDict ::(Eq k, Hashable k) => {
+      compact'dict'map :: !(Map.HashMap k Int)
+    , compact'dict'write'pos :: !Int
+    , compact'dict'num'holes :: !Int
+    , compact'dict'array :: !(Vector (k, EdhValue))
+    } -> CompactDict k
+instance (Eq k, Hashable k) => Eq (CompactDict k) where
+  -- todo perf optimization ?
+  x == y = compactDictToList x == compactDictToList y
+instance (Eq k, Hashable k) => Hashable (CompactDict k) where
+  -- todo perf optimization ?
+  hashWithSalt s x = hashWithSalt s $ compactDictToList x
+
+compactDictEmpty :: forall k . (Eq k, Hashable k) => CompactDict k
+compactDictEmpty = CompactDict Map.empty 0 0 V.empty
+
+compactDictNull :: forall k . (Eq k, Hashable k) => CompactDict k -> Bool
+compactDictNull (CompactDict _ !wp !nh _) = wp - nh <= 0
+
+compactDictSize :: forall k . (Eq k, Hashable k) => CompactDict k -> Int
+compactDictSize (CompactDict _ !wp !nh _) = wp - nh
+
+compactDictSingleton
+  :: forall k . (Eq k, Hashable k) => k -> EdhValue -> CompactDict k
+compactDictSingleton !key !val =
+  let !yNew = runST $ do
+        y <- MV.unsafeNew 1
+        MV.unsafeWrite y 0 (key, val)
+        V.unsafeFreeze y
+  in  CompactDict (Map.singleton key 0) 1 0 yNew
+
+compactDictInsert
+  :: forall k
+   . (Eq k, Hashable k)
+  => k
+  -> EdhValue
+  -> CompactDict k
+  -> CompactDict k
+compactDictInsert !key !val d@(CompactDict !m !wp !nh !y) =
+  case Map.lookup key m of
+    Nothing -> if wp >= cap
+      then -- todo under certain circumstances, find a hole and fill it
+        let !cap2Grow = min 7 $ quot cap 2
+        in  runST $ do
+              !y'   <- MV.unsafeNew (cap + cap2Grow)
+              !ySrc <- V.unsafeThaw y
+              MV.unsafeCopy (MV.unsafeSlice 0 wp y') (MV.unsafeSlice 0 wp ySrc)
+              flip MV.set (undefined, EdhNil)
+                $ MV.unsafeSlice (wp + 1) (cap + cap2Grow - 1) y'
+              MV.unsafeWrite y' wp (key, val)
+              yNew <- V.unsafeFreeze y'
+              return $ CompactDict (Map.insert @k key wp m) (wp + 1) nh $! yNew
+      else runST $ do
+        y' <- V.unsafeThaw y
+        MV.unsafeWrite y' wp (key, val)
+        y'' <- V.unsafeFreeze y'
+        return $ CompactDict (Map.insert key wp m) (wp + 1) nh y''
+    Just !i -> runST $ do -- copy-on-write
+      y' <- V.thaw y
+      MV.unsafeWrite y' i (key, val)
+      y'' <- V.unsafeFreeze y'
+      return d { compact'dict'array = y'' }
+  where cap = V.length y
+
+compactDictLookup
+  :: forall k . (Eq k, Hashable k) => k -> CompactDict k -> Maybe EdhValue
+compactDictLookup !key (CompactDict !m _ _ !y) = case Map.lookup key m of
+  Nothing -> Nothing
+  Just !i -> let (_, !val) = y ! i in Just val
+
+compactDictLookupDefault
+  :: forall k
+   . (Eq k, Hashable k)
+  => EdhValue
+  -> k
+  -> CompactDict k
+  -> EdhValue
+compactDictLookupDefault !defVal !key (CompactDict !m _ _ !y) =
+  case Map.lookup key m of
+    Nothing -> defVal
+    Just !i -> let (_, !val) = y ! i in val
+
+-- CAVEATS
+--   the original dict will yield nil result, if looked up with the deleted key
+compactDictUnsafeTakeOut
+  :: forall k
+   . (Eq k, Hashable k)
+  => k
+  -> CompactDict k
+  -> (Maybe EdhValue, CompactDict k)
+compactDictUnsafeTakeOut !key d@(CompactDict !m !wp !nh !y) =
+  case Map.lookup key m of
+    Nothing -> (Nothing, d)
+    Just !i -> runST $ do
+      let (_, !val) = y ! i
+      !y' <- V.unsafeThaw y
+      MV.unsafeWrite y' i (key, EdhNil)
+      !y'' <- V.unsafeFreeze y'
+      return (Just val, CompactDict (Map.delete key m) wp (nh + 1) y'')
+
+compactDictMap
+  :: forall k
+   . (Eq k, Hashable k)
+  => (EdhValue -> EdhValue)
+  -> CompactDict k
+  -> CompactDict k
+compactDictMap !f (CompactDict !m !wp !nh !y) =
+  CompactDict m wp nh $ flip V.map y $ \e@(_, !val) ->
+    if val /= EdhNil then (fst e, f val) else (undefined, EdhNil)
+
+compactDictMapSTM
+  :: forall k
+   . (Eq k, Hashable k)
+  => (EdhValue -> STM EdhValue)
+  -> CompactDict k
+  -> STM (CompactDict k)
+compactDictMapSTM !f (CompactDict !m !wp !nh !y) = do
+  let !y' = flip V.map y $ \e@(_, !val) -> if val /= EdhNil
+        then (fst e, ) <$> f val
+        else pure (undefined, EdhNil)
+  y'' <- V.sequence y'
+  return $ CompactDict m wp nh y''
+
+compactDictDelete
+  :: forall k . (Eq k, Hashable k) => k -> CompactDict k -> CompactDict k
+compactDictDelete !key d@(CompactDict !m !wp !nh !y) = case Map.lookup key m of
+  Nothing -> d
+  Just !i -> runST $ do -- copy-on-write
+    y' <- V.thaw y
+    MV.unsafeWrite y' i (undefined, EdhNil)
+    CompactDict (Map.delete key m) wp (nh + 1) <$> V.unsafeFreeze y'
+
+compactDictKeys :: forall k . (Eq k, Hashable k) => CompactDict k -> [k]
+compactDictKeys (CompactDict _m !wp _nh !y) = go [] (wp - 1)
+ where
+  go :: [k] -> Int -> [k]
+  go keys !i | i < 0 = keys
+  go keys !i =
+    let entry@(_, !val) = y ! i
+    in  if val == EdhNil then go keys (i - 1) else go (fst entry : keys) (i - 1)
+
+compactDictToList
+  :: forall k . (Eq k, Hashable k) => CompactDict k -> [(k, EdhValue)]
+compactDictToList (CompactDict _m !wp _nh !y) = go [] (wp - 1)
+ where
+  go :: [(k, EdhValue)] -> Int -> [(k, EdhValue)]
+  go entries !i | i < 0 = entries
+  go entries !i =
+    let entry@(_, !val) = y ! i
+    in  if val == EdhNil
+          then go entries (i - 1)
+          else go (entry : entries) (i - 1)
+
+compactDictFromList
+  :: forall k . (Eq k, Hashable k) => [(k, EdhValue)] -> CompactDict k
+compactDictFromList !entries =
+  let !m0  = Map.fromList entries
+      !cap = Map.size m0 -- todo reserve some more slots ?
+  in  runST $ do
+        !y   <- MV.unsafeNew cap
+        !wpv <- newSTRef 0
+        let !m1 = flip Map.mapWithKey m0 $ \ !key !val -> runST $ do
+              !wp <- readSTRef wpv
+              MV.unsafeWrite y wp (key, val)
+              writeSTRef wpv (wp + 1)
+              return wp
+        !wp <- readSTRef wpv
+        when (wp < cap) $ flip MV.set (undefined, EdhNil) $ MV.unsafeSlice
+          wp
+          (cap - wp)
+          y
+        CompactDict m1 wp 0 <$> V.unsafeFreeze y
+
+compactDictUnion
+  :: forall k
+   . (Eq k, Hashable k)
+  => CompactDict k
+  -> CompactDict k
+  -> CompactDict k
+compactDictUnion d1 (CompactDict _ !wp2 !nh2 _) | wp2 - nh2 <= 0 = d1
+compactDictUnion (CompactDict _ !wp1 !nh1 _) d2 | wp1 - nh1 <= 0 = d2
+compactDictUnion (CompactDict !m1 !wp1 !nh1 !y1) (CompactDict _m2 !wp2 !nh2 !y2)
+  = runST $ do
+    !y'  <- MV.unsafeNew capNew
+    !wpv <- newSTRef 0
+    let !m1' = flip Map.map m1 $ \ !i1 -> runST $ do
+          let !e1 = y1 ! i1
+          !wp <- readSTRef wpv
+          MV.unsafeWrite y' wp e1
+          writeSTRef wpv (wp + 1)
+          return wp
+    let go m' !i2 | i2 < 0 = do
+          !wp <- readSTRef wpv
+          when (wp < capNew) $ flip MV.set (undefined, EdhNil) $ MV.unsafeSlice
+            wp
+            (capNew - wp)
+            y'
+          -- (m', y', ) <$> readSTRef wpv
+          -- let (!mNew, !yNew, !wpNew) =
+          CompactDict m' wp 0 <$> V.unsafeFreeze y'
+        go m' !i2 = do
+          let e2@(!key2, !val2) = y2 ! i2
+          if val2 == EdhNil
+            then go m' (i2 - 1)
+            else case Map.lookup key2 m' of
+              Just _  -> go m' (i2 - 1)
+              Nothing -> do
+                !wp <- readSTRef wpv
+                MV.unsafeWrite y' wp e2
+                writeSTRef wpv (wp + 1)
+                go (Map.insert key2 wp m') (i2 - 1)
+    go m1' (wp2 - 1)
+ where
+  !size1  = wp1 - nh1
+  !capNew = (wp2 - nh2) + size1
+
+
+-- | A pack of evaluated argument values with positional/keyword origin,
+-- this works in places of tuples in other languages, apk in Edh can be
+-- considered a tuple if only positional arguments inside.
+-- Specifically, an empty apk is just considered an empty tuple.
+data ArgsPack = ArgsPack {
+    positional'args :: ![EdhValue]
+    , keyword'args :: !(CompactDict AttrKey)
+  } deriving (Eq)
+instance Hashable ArgsPack where
+  hashWithSalt s (ArgsPack !args !kwargs) =
+    foldl' (\s' (k, v) -> s' `hashWithSalt` k `hashWithSalt` v)
+           (foldl' hashWithSalt s args)
+      $ compactDictToList kwargs
+instance Show ArgsPack where
+  show (ArgsPack !args kwargs) = if null args && compactDictNull kwargs
+    then "()"
+    else
+      "( "
+      ++ concat [ show i ++ ", " | i <- args ]
+      ++ concat
+           [ show kw ++ "=" ++ show v ++ ", "
+           | (kw, v) <- compactDictToList kwargs
+           ]
+      ++ ")"
 
 
 -- | A dict in Edh is neither an object nor an entity, but just a
@@ -47,14 +310,15 @@ instance Hashable Dict where
 instance Show Dict where
   show (Dict _ d) = showEdhDict ds where ds = unsafePerformIO $ readTVarIO d
 type ItemKey = EdhValue
-type DictStore = Map.HashMap EdhValue EdhValue
+type DictStore = CompactDict EdhValue
 
 showEdhDict :: DictStore -> String
-showEdhDict ds = if Map.null ds
+showEdhDict ds = if compactDictNull ds
   then "{}" -- no space should show in an empty dict
   else -- advocate trailing comma here
     "{ "
-    ++ concat [ show k ++ ":" ++ show v ++ ", " | (k, v) <- Map.toList ds ]
+    ++ concat
+         [ show k ++ ":" ++ show v ++ ", " | (k, v) <- compactDictToList ds ]
     ++ "}"
 
 -- | create a new Edh dict from a properly typed hash map
@@ -66,18 +330,20 @@ createEdhDict !ds = do
 -- | setting to `nil` value means deleting the item by the specified key
 setDictItem :: ItemKey -> EdhValue -> DictStore -> DictStore
 setDictItem !k v !ds = case v of
-  EdhNil -> Map.delete k ds
-  _      -> Map.insert k v ds
+  EdhNil -> compactDictDelete k ds
+  _      -> compactDictInsert k v ds
 
 dictEntryList :: DictStore -> [EdhValue]
-dictEntryList d =
-  (<$> Map.toList d) $ \(k, v) -> EdhArgsPack $ ArgsPack [k, v] Map.empty
+dictEntryList d = (<$> compactDictToList d)
+  $ \(k, v) -> EdhArgsPack $ ArgsPack [k, v] compactDictEmpty
+
 
 edhDictFromEntity :: EdhProgState -> Entity -> STM Dict
 edhDictFromEntity pgs ent = do
   u  <- unsafeIOToSTM newUnique
   ps <- allEntityAttrs pgs ent
-  (Dict u <$>) $ newTVar $ Map.fromList [ (attrKeyValue k, v) | (k, v) <- ps ]
+  (Dict u <$>) $ newTVar $ compactDictFromList
+    [ (attrKeyValue k, v) | (k, v) <- ps ]
 
 -- | An entity in Edh is the backing storage for a scope, with possibly 
 -- an object (actually more objects still possible, but god forbid it)
@@ -183,7 +449,7 @@ maoEntityManipulater = EntityManipulater the'lookup'entity'attr
 
 -- | Create an entity with an in-band 'Data.HashMap.Strict.HashMap'
 -- as backing storage
-createHashEntity :: Map.HashMap AttrKey EdhValue -> STM Entity
+createHashEntity :: CompactDict AttrKey -> STM Entity
 createHashEntity !m = do
   u  <- unsafeIOToSTM newUnique
   es <- newTVar $ toDyn m
@@ -195,16 +461,17 @@ hashEntityManipulater = EntityManipulater the'lookup'entity'attr
                                           the'change'entity'attr
                                           the'update'entity'attrs
  where
-  hm = flip fromDyn Map.empty
-  the'lookup'entity'attr _ !k = return . fromMaybe EdhNil . Map.lookup k . hm
-  the'all'entity'attrs _ = return . Map.toList . hm
+  hm = flip fromDyn compactDictEmpty
+  the'lookup'entity'attr _ !k =
+    return . fromMaybe EdhNil . compactDictLookup k . hm
+  the'all'entity'attrs _ = return . compactDictToList . hm
   the'change'entity'attr _ !k !v !d =
-    let !ds = fromDyn d Map.empty
+    let !ds = fromDyn d compactDictEmpty
     in  return $ toDyn $ case v of
-          EdhNil -> Map.delete k ds
-          _      -> Map.insert k v ds
+          EdhNil -> compactDictDelete k ds
+          _      -> compactDictInsert k v ds
   the'update'entity'attrs _ !ps =
-    return . toDyn . Map.union (Map.fromList ps) . hm
+    return . toDyn . compactDictUnion (compactDictFromList ps) . hm
 
 
 -- | Create an entity with an out-of-band storage manipulater and an in-band
@@ -220,17 +487,17 @@ createSideEntity !manip !esd = do
 createSideEntityManipulater
   :: Bool -> [(AttrKey, EdhValue)] -> STM EntityManipulater
 createSideEntityManipulater !writeProtected !arts = do
-  obs <- newTVar $ Map.fromList arts
+  obs <- newTVar $ compactDictFromList arts
   let the'lookup'entity'attr _ !k _ =
-        fromMaybe EdhNil . Map.lookup k <$> readTVar obs
-      the'all'entity'attrs _ _ = Map.toList <$> readTVar obs
+        fromMaybe EdhNil . compactDictLookup k <$> readTVar obs
+      the'all'entity'attrs _ _ = compactDictToList <$> readTVar obs
       the'change'entity'attr pgs !k !v inband = if writeProtected
         then
           throwSTM
           $ EdhError UsageError "Writing a protected entity"
           $ getEdhCallContext 0 pgs
         else do
-          modifyTVar' obs $ Map.insert k v
+          modifyTVar' obs $ compactDictInsert k v
           return inband
       the'update'entity'attrs pgs !ps inband = if writeProtected
         then
@@ -238,7 +505,7 @@ createSideEntityManipulater !writeProtected !arts = do
           $ EdhError UsageError "Writing a protected entity"
           $ getEdhCallContext 0 pgs
         else do
-          modifyTVar' obs $ Map.union (Map.fromList ps)
+          modifyTVar' obs $ compactDictUnion (compactDictFromList ps)
           return inband
   return $ EntityManipulater the'lookup'entity'attr
                              the'all'entity'attrs
@@ -702,30 +969,6 @@ getEdhCallContext !unwind !pgs = EdhCallContext
     Right _                   -> "<host-code>"
 
 
--- | A pack of evaluated argument values with positional/keyword origin,
--- this works in places of tuples in other languages, apk in Edh can be
--- considered a tuple if only positional arguments inside.
--- Specifically, an empty apk is just considered an empty tuple.
-data ArgsPack = ArgsPack {
-    positional'args :: ![EdhValue]
-    , keyword'args :: !(Map.HashMap AttrKey EdhValue)
-  } deriving (Eq)
-instance Hashable ArgsPack where
-  hashWithSalt s (ArgsPack args kwargs) =
-    foldl' (\s' (k, v) -> s' `hashWithSalt` k `hashWithSalt` v)
-           (foldl' hashWithSalt s args)
-      $ Map.toList kwargs
-instance Show ArgsPack where
-  show (ArgsPack posArgs kwArgs) = if null posArgs && Map.null kwArgs
-    then "()"
-    else
-      "( "
-      ++ concat [ show i ++ ", " | i <- posArgs ]
-      ++ concat
-           [ show kw ++ "=" ++ show v ++ ", " | (kw, v) <- Map.toList kwArgs ]
-      ++ ")"
-
-
 -- | An event sink is similar to a Go channel, but is broadcast
 -- in nature, in contrast to the unicast nature of channels in Go.
 data EventSink = EventSink {
@@ -751,10 +994,6 @@ instance Hashable EventSink where
   hashWithSalt s (EventSink s'u _ _ _ _) = hashWithSalt s s'u
 instance Show EventSink where
   show EventSink{} = "<sink>"
-
-
--- Boxed Vector for Edh values, non-transactional, mutable anytime
-type EdhVector = IOVector EdhValue
 
 
 -- Atop Haskell, most types in Edh the surface language, are for

@@ -8,16 +8,9 @@ import           Control.Concurrent.STM
 
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
-import           Data.Hashable
 import qualified Data.HashMap.Strict           as Map
 
 import           Language.Edh.Details.RtTypes
-
-
--- TODO seek more optimal method for this
-takeOutFromMap
-  :: (Eq k, Hashable k) => k -> Map.HashMap k a -> (Maybe a, Map.HashMap k a)
-takeOutFromMap k m = (Map.lookup k m, Map.delete k m)
 
 
 takeOutFromList :: forall a . (a -> Bool) -> [a] -> (Maybe a, [a])
@@ -36,7 +29,7 @@ data ArgsPackParser a = ArgsPackParser {
   }
 parseArgsPack :: a -> ArgsPackParser a -> ArgsPack -> Either Text a
 parseArgsPack defVal (ArgsPackParser posParsers kwParsers) (ArgsPack posArgs kwArgs)
-  = go posParsers kwParsers posArgs (Map.toList kwArgs) defVal
+  = go posParsers kwParsers posArgs (compactDictToList kwArgs) defVal
  where
   go
     :: [EdhValue -> a -> Either Text a]

@@ -19,7 +19,6 @@ import           Data.Unique
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.Text.IO                  as TIO
-import qualified Data.HashMap.Strict           as Map
 
 import           System.Console.Haskeline       ( InputT
                                                 , Settings(..)
@@ -106,7 +105,7 @@ defaultEdhConsole !inputSettings = do
     logger !level !srcLoc !logArgs = do
       void $ tryTakeTMVar logIdle
       case logArgs of
-        ArgsPack [!argVal] !kwargs | Map.null kwargs ->
+        ArgsPack [!argVal] !kwargs | compactDictNull kwargs ->
           writeTBQueue logQueue $! T.pack logPrefix <> logString argVal <> "\n"
         _ -> -- todo: format structured log record,
              -- with some log parsers in mind
@@ -622,7 +621,7 @@ installEdhBatteries world = liftIO $ do
            ]
 
 
-      !conEntity <- createHashEntity $ Map.fromList
+      !conEntity <- createHashEntity $ compactDictFromList
         [ (AttrByName "__repr__", EdhString "<console>")
         , (AttrByName "debug"   , EdhDecimal 10)
         , (AttrByName "info"    , EdhDecimal 20)

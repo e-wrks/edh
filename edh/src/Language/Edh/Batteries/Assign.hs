@@ -11,8 +11,6 @@ import           Control.Concurrent.STM
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 
-import qualified Data.HashMap.Strict           as Map
-
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.CoreLang
@@ -61,7 +59,7 @@ assignProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                               runEdhProc pgs $ callEdhMethod
                                 obj
                                 mth'proc
-                                (ArgsPack [ixVal, rhVal] Map.empty)
+                                (ArgsPack [ixVal, rhVal] compactDictEmpty)
                                 id
                                 exit
                             !badIndexer ->
@@ -113,8 +111,9 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                   -- indexing assign to a dict
                   EdhDict (Dict _ !d) -> contEdhSTM $ readTVar d >>= \ !ds ->
                     runEdhProc pgs
-                      $ withOp (IntplSubs $ Map.lookupDefault EdhNil ixVal ds)
-                               (IntplSubs rhVal)
+                      $ withOp
+                          (IntplSubs $ compactDictLookupDefault EdhNil ixVal ds)
+                          (IntplSubs rhVal)
                       $ \(OriginalValue !opRtnV _ _) -> contEdhSTM $ do
                           writeTVar d $ setDictItem ixVal opRtnV ds
                           exitEdhSTM pgs exit opRtnV
@@ -136,7 +135,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                               runEdhProc pgs $ callEdhMethod
                                 obj
                                 mth'proc
-                                (ArgsPack [ixVal, rhVal] Map.empty)
+                                (ArgsPack [ixVal, rhVal] compactDictEmpty)
                                 id
                                 exit
                             !badIndexer ->
