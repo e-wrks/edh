@@ -3405,7 +3405,7 @@ packEdhArgs !argSenders !pkExit = do
               <> T.pack (show val)
       SendPosArg !argExpr -> evalExpr argExpr $ \(OriginalValue !val _ _) ->
         pkArgs xs kwArgs $ \ !posArgs !kwArgs' ->
-          exit ((noneNil $ edhDeCaseClose val) : posArgs) kwArgs'
+          exit (noneNil (edhDeCaseClose val) : posArgs) kwArgs'
       SendKwArg !kwAddr !argExpr ->
         evalExpr argExpr $ \(OriginalValue !val _ _) -> case kwAddr of
           NamedAttr "_" ->  -- silently drop the value to keyword of single
@@ -3566,7 +3566,7 @@ _edhCSR reprs (v : rest) !exit = edhValueRepr v $ \(OriginalValue r _ _) ->
 _edhKwArgsCSR
   :: [(Text, Text)] -> [(AttrKey, EdhValue)] -> EdhProcExit -> EdhProc
 _edhKwArgsCSR entries [] !exit' = exitEdhProc exit' $ EdhString $ T.concat
-  [ k <> "=" <> v <> ", " | (k, v) <- entries ]
+  [ k <> "=" <> v <> ", " | (k, v) <- reverse entries ]
 _edhKwArgsCSR entries ((k, v) : rest) exit' =
   edhValueRepr v $ \(OriginalValue r _ _) -> case r of
     EdhString repr ->

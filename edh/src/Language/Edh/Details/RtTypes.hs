@@ -18,7 +18,6 @@ import           Control.Monad.Reader
 -- import           Control.Concurrent
 import           Control.Concurrent.STM
 
-import           Data.STRef
 import           Data.Maybe
 import           Data.Foldable
 import           Data.Unique
@@ -30,9 +29,7 @@ import           Data.Hashable
 import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
-import           Data.Vector                    ( Vector
-                                                , (!)
-                                                )
+import           Data.Vector                    ( Vector )
 import qualified Data.Vector                   as V
 import           Data.Vector.Mutable            ( IOVector )
 import qualified Data.Vector.Mutable           as MV
@@ -80,11 +77,7 @@ compactDictSize (CompactDict _ !wp !nh _) = wp - nh
 compactDictSingleton
   :: forall k . (Eq k, Hashable k) => k -> EdhValue -> CompactDict k
 compactDictSingleton !key !val =
-  let !yNew = runST $ do
-        y <- MV.unsafeNew 1
-        MV.unsafeWrite y 0 (key, val)
-        V.unsafeFreeze y
-  in  CompactDict (Map.singleton key 0) 1 0 yNew
+  CompactDict (Map.singleton key 0) 1 0 $ V.singleton (key, val)
 
 compactDictInsert
   :: forall k
@@ -97,21 +90,22 @@ compactDictInsert !key !val d@(CompactDict !m !wp !nh !y) =
   case Map.lookup key m of
     Nothing -> if wp >= cap
       then -- todo under certain circumstances, find a hole and fill it
-        let !cap2Grow = min 7 $ quot cap 2
-        in  runST $ do
-              !y'   <- MV.unsafeNew (cap + cap2Grow)
-              !ySrc <- V.unsafeThaw y
-              MV.unsafeCopy (MV.unsafeSlice 0 wp y') (MV.unsafeSlice 0 wp ySrc)
-              flip MV.set (undefined, EdhNil)
-                $ MV.unsafeSlice (wp + 1) (cap + cap2Grow - 1) y'
-              MV.unsafeWrite y' wp (key, val)
-              yNew <- V.unsafeFreeze y'
-              return $ CompactDict (Map.insert @k key wp m) (wp + 1) nh $! yNew
+        let !capNew = (cap +) $ max 7 $ quot cap 2
+        in
+          runST $ do
+            !y'   <- MV.unsafeNew capNew
+            !ySrc <- V.unsafeThaw y
+            MV.unsafeCopy (MV.unsafeSlice 0 wp y') (MV.unsafeSlice 0 wp ySrc)
+            flip MV.set (undefined, EdhNil)
+              $ MV.unsafeSlice (wp + 1) (capNew - 1) y'
+            MV.unsafeWrite y' wp (key, val)
+            CompactDict (Map.insert @k key wp m) (wp + 1) nh
+              <$> V.unsafeFreeze y'
       else runST $ do
+        -- TODO concrrent mod is an issue with this impl. real harm be it ?
         y' <- V.unsafeThaw y
         MV.unsafeWrite y' wp (key, val)
-        y'' <- V.unsafeFreeze y'
-        return $ CompactDict (Map.insert key wp m) (wp + 1) nh y''
+        CompactDict (Map.insert key wp m) (wp + 1) nh <$> V.unsafeFreeze y'
     Just !i -> runST $ do -- copy-on-write
       y' <- V.thaw y
       MV.unsafeWrite y' i (key, val)
@@ -123,7 +117,7 @@ compactDictLookup
   :: forall k . (Eq k, Hashable k) => k -> CompactDict k -> Maybe EdhValue
 compactDictLookup !key (CompactDict !m _ _ !y) = case Map.lookup key m of
   Nothing -> Nothing
-  Just !i -> let (_, !val) = y ! i in Just val
+  Just !i -> let (_, !val) = V.unsafeIndex y i in Just val
 
 compactDictLookupDefault
   :: forall k
@@ -135,7 +129,7 @@ compactDictLookupDefault
 compactDictLookupDefault !defVal !key (CompactDict !m _ _ !y) =
   case Map.lookup key m of
     Nothing -> defVal
-    Just !i -> let (_, !val) = y ! i in val
+    Just !i -> let (_, !val) = V.unsafeIndex y i in val
 
 -- CAVEATS
 --   the original dict will yield nil result, if looked up with the deleted key
@@ -149,11 +143,20 @@ compactDictUnsafeTakeOut !key d@(CompactDict !m !wp !nh !y) =
   case Map.lookup key m of
     Nothing -> (Nothing, d)
     Just !i -> runST $ do
-      let (_, !val) = y ! i
+      let (_, !val) = V.unsafeIndex y i
       !y' <- V.unsafeThaw y
       MV.unsafeWrite y' i (key, EdhNil)
       !y'' <- V.unsafeFreeze y'
       return (Just val, CompactDict (Map.delete key m) wp (nh + 1) y'')
+
+compactDictDelete
+  :: forall k . (Eq k, Hashable k) => k -> CompactDict k -> CompactDict k
+compactDictDelete !key d@(CompactDict !m !wp !nh !y) = case Map.lookup key m of
+  Nothing -> d
+  Just !i -> runST $ do -- copy-on-write
+    y' <- V.thaw y
+    MV.unsafeWrite y' i (undefined, EdhNil)
+    CompactDict (Map.delete key m) wp (nh + 1) <$> V.unsafeFreeze y'
 
 compactDictMap
   :: forall k
@@ -178,22 +181,13 @@ compactDictMapSTM !f (CompactDict !m !wp !nh !y) = do
   y'' <- V.sequence y'
   return $ CompactDict m wp nh y''
 
-compactDictDelete
-  :: forall k . (Eq k, Hashable k) => k -> CompactDict k -> CompactDict k
-compactDictDelete !key d@(CompactDict !m !wp !nh !y) = case Map.lookup key m of
-  Nothing -> d
-  Just !i -> runST $ do -- copy-on-write
-    y' <- V.thaw y
-    MV.unsafeWrite y' i (undefined, EdhNil)
-    CompactDict (Map.delete key m) wp (nh + 1) <$> V.unsafeFreeze y'
-
 compactDictKeys :: forall k . (Eq k, Hashable k) => CompactDict k -> [k]
 compactDictKeys (CompactDict _m !wp _nh !y) = go [] (wp - 1)
  where
   go :: [k] -> Int -> [k]
   go keys !i | i < 0 = keys
   go keys !i =
-    let entry@(_, !val) = y ! i
+    let entry@(_, !val) = V.unsafeIndex y i
     in  if val == EdhNil then go keys (i - 1) else go (fst entry : keys) (i - 1)
 
 compactDictToList
@@ -203,30 +197,36 @@ compactDictToList (CompactDict _m !wp _nh !y) = go [] (wp - 1)
   go :: [(k, EdhValue)] -> Int -> [(k, EdhValue)]
   go entries !i | i < 0 = entries
   go entries !i =
-    let entry@(_, !val) = y ! i
+    let entry@(_, !val) = V.unsafeIndex y i
     in  if val == EdhNil
           then go entries (i - 1)
           else go (entry : entries) (i - 1)
 
 compactDictFromList
   :: forall k . (Eq k, Hashable k) => [(k, EdhValue)] -> CompactDict k
-compactDictFromList !entries =
-  let !m0  = Map.fromList entries
-      !cap = Map.size m0 -- todo reserve some more slots ?
-  in  runST $ do
-        !y   <- MV.unsafeNew cap
-        !wpv <- newSTRef 0
-        let !m1 = flip Map.mapWithKey m0 $ \ !key !val -> runST $ do
-              !wp <- readSTRef wpv
-              MV.unsafeWrite y wp (key, val)
-              writeSTRef wpv (wp + 1)
-              return wp
-        !wp <- readSTRef wpv
+compactDictFromList !entries = runST $ do
+  !y <- MV.unsafeNew cap
+  let go [] !m !wp !nh = do
         when (wp < cap) $ flip MV.set (undefined, EdhNil) $ MV.unsafeSlice
           wp
           (cap - wp)
           y
-        CompactDict m1 wp 0 <$> V.unsafeFreeze y
+        CompactDict m wp nh <$> V.unsafeFreeze y
+      go (e@(!k, !v) : es) !m !wp !nh = if v == EdhNil
+        then case Map.lookup k m of
+          Just !i -> do
+            MV.unsafeWrite y i (undefined, EdhNil)
+            go es (Map.delete k m) wp (nh + 1)
+          Nothing -> go es m wp nh
+        else case Map.lookup k m of
+          Just !i -> do
+            MV.unsafeWrite y i e
+            go es m wp nh
+          Nothing -> do
+            MV.unsafeWrite y wp e
+            go es (Map.insert k wp m) (wp + 1) nh
+  go entries Map.empty 0 0
+  where cap = length entries
 
 compactDictUnion
   :: forall k
@@ -236,40 +236,40 @@ compactDictUnion
   -> CompactDict k
 compactDictUnion d1 (CompactDict _ !wp2 !nh2 _) | wp2 - nh2 <= 0 = d1
 compactDictUnion (CompactDict _ !wp1 !nh1 _) d2 | wp1 - nh1 <= 0 = d2
-compactDictUnion (CompactDict !m1 !wp1 !nh1 !y1) (CompactDict _m2 !wp2 !nh2 !y2)
+compactDictUnion (CompactDict _m1 !wp1 !nh1 !y1) (CompactDict _m2 !wp2 !nh2 !y2)
   = runST $ do
-    !y'  <- MV.unsafeNew capNew
-    !wpv <- newSTRef 0
-    let !m1' = flip Map.map m1 $ \ !i1 -> runST $ do
-          let !e1 = y1 ! i1
-          !wp <- readSTRef wpv
-          MV.unsafeWrite y' wp e1
-          writeSTRef wpv (wp + 1)
-          return wp
-    let go m' !i2 | i2 < 0 = do
-          !wp <- readSTRef wpv
-          when (wp < capNew) $ flip MV.set (undefined, EdhNil) $ MV.unsafeSlice
-            wp
-            (capNew - wp)
-            y'
-          -- (m', y', ) <$> readSTRef wpv
-          -- let (!mNew, !yNew, !wpNew) =
-          CompactDict m' wp 0 <$> V.unsafeFreeze y'
-        go m' !i2 = do
-          let e2@(!key2, !val2) = y2 ! i2
+    !y <- MV.unsafeNew cap
+    let go2 !m !i2 !wp | i2 >= wp2 = go1 m 0 wp
+        go2 !m !i2 !wp             = do
+          let e2@(key2, !val2) = V.unsafeIndex y2 i2
           if val2 == EdhNil
-            then go m' (i2 - 1)
-            else case Map.lookup key2 m' of
-              Just _  -> go m' (i2 - 1)
+            then go2 m (i2 + 1) wp
+            else case Map.lookup key2 m of
+              Just !i -> do
+                MV.unsafeWrite y i e2
+                go2 m (i2 + 1) wp
               Nothing -> do
-                !wp <- readSTRef wpv
-                MV.unsafeWrite y' wp e2
-                writeSTRef wpv (wp + 1)
-                go (Map.insert key2 wp m') (i2 - 1)
-    go m1' (wp2 - 1)
- where
-  !size1  = wp1 - nh1
-  !capNew = (wp2 - nh2) + size1
+                MV.unsafeWrite y wp e2
+                go2 (Map.insert key2 wp m) (i2 + 1) (wp + 1)
+        go1 !m !i1 !wp | i1 >= wp1 = do
+          when (wp < cap) $ flip MV.set (undefined, EdhNil) $ MV.unsafeSlice
+            wp
+            (cap - wp)
+            y
+          CompactDict m wp 0 <$> V.unsafeFreeze y
+        go1 !m !i1 !wp = do
+          let e1@(key1, !val1) = V.unsafeIndex y1 i1
+          if val1 == EdhNil
+            then go1 m (i1 + 1) wp
+            else case Map.lookup key1 m of
+              Just !i -> do
+                MV.unsafeWrite y i e1
+                go1 m (i1 + 1) wp
+              Nothing -> do
+                MV.unsafeWrite y wp e1
+                go1 (Map.insert key1 wp m) (i1 + 1) (wp + 1)
+    go2 Map.empty 0 0
+  where !cap = (wp1 - nh1) + (wp2 - nh2)
 
 
 -- | A pack of evaluated argument values with positional/keyword origin,
