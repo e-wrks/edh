@@ -57,6 +57,7 @@ library edh-internal
         Language.Edh.Runtime
         Language.Edh.Event
         Language.Edh.Parser
+        Language.Edh.Details.IOPD
         Language.Edh.Details.RtTypes
         Language.Edh.Details.CoreLang
         Language.Edh.Details.Evaluate

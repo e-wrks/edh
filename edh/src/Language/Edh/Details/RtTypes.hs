@@ -41,247 +41,11 @@ import           Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
 
+import           Language.Edh.Details.IOPD
+
 
 -- Boxed Vector for Edh values, non-transactional, mutable anytime
 type EdhVector = IOVector EdhValue
-
-
--- | This insertion-order-preserving dict is inspired by new dict
--- implementation introduced into CPython 3.6 (from PyPy), then had the
--- behavior formalized since Python language 3.7 onwards.
---
--- But we won't get the memory improvement that Python sees, as long as the
--- compact array stores thunks instead of final large object records like
--- Python. Yet this implementation still lacks much optimization.
---
--- TODO this impl. is not correct yet, as being not STM retry safe, need major
---      refactoring to achieve retry safety.
---
--- Note: a nil (EdhNil) value in Edh has the special semantic of non-existence
-data InsOrderPrsvDict k where
-  InsOrderPrsvDict ::(Eq k, Hashable k) => {
-      compact'dict'map :: !(Map.HashMap k Int)
-    , compact'dict'write'pos :: !Int
-    , compact'dict'num'holes :: !Int
-    , compact'dict'array :: !(Vector (k, EdhValue))
-    } -> InsOrderPrsvDict k
-instance (Eq k, Hashable k) => Eq (InsOrderPrsvDict k) where
-  -- todo perf optimization ?
-  x == y = iopdToList x == iopdToList y
-instance (Eq k, Hashable k) => Hashable (InsOrderPrsvDict k) where
-  -- todo perf optimization ?
-  hashWithSalt s x = hashWithSalt s $ iopdToList x
-
-iopdEmpty :: forall k . (Eq k, Hashable k) => InsOrderPrsvDict k
-iopdEmpty = InsOrderPrsvDict Map.empty 0 0 V.empty
-
-iopdNull :: forall k . (Eq k, Hashable k) => InsOrderPrsvDict k -> Bool
-iopdNull (InsOrderPrsvDict _ !wp !nh _) = wp - nh <= 0
-
-iopdSize :: forall k . (Eq k, Hashable k) => InsOrderPrsvDict k -> Int
-iopdSize (InsOrderPrsvDict _ !wp !nh _) = wp - nh
-
-iopdSingleton
-  :: forall k . (Eq k, Hashable k) => k -> EdhValue -> InsOrderPrsvDict k
-iopdSingleton !key !val =
-  InsOrderPrsvDict (Map.singleton key 0) 1 0 $ V.singleton (key, val)
-
-iopdInsert
-  :: forall k
-   . (Eq k, Hashable k)
-  => k
-  -> EdhValue
-  -> InsOrderPrsvDict k
-  -> InsOrderPrsvDict k
-iopdInsert !key !val d@(InsOrderPrsvDict !m !wp !nh !y) =
-  case Map.lookup key m of
-    Nothing -> if wp >= cap
-      then -- todo under certain circumstances, find a hole and fill it
-        let !capNew = (cap +) $ max 7 $ quot cap 2
-        in
-          runST $ do
-            !y'   <- MV.unsafeNew capNew
-            !ySrc <- V.unsafeThaw y
-            MV.unsafeCopy (MV.unsafeSlice 0 wp y') (MV.unsafeSlice 0 wp ySrc)
-            flip MV.set (undefined, EdhNil)
-              $ MV.unsafeSlice (wp + 1) (capNew - 1) y'
-            MV.unsafeWrite y' wp (key, val)
-            InsOrderPrsvDict (Map.insert @k key wp m) (wp + 1) nh
-              <$> V.unsafeFreeze y'
-      else runST $ do
-        -- TODO concrrent mod is an issue with this impl. make it single thread
-        -- owned, and copy-on-write by other threads
-        y' <- V.unsafeThaw y
-        MV.unsafeWrite y' wp (key, val)
-        InsOrderPrsvDict (Map.insert key wp m) (wp + 1) nh <$> V.unsafeFreeze y'
-    Just !i -> runST $ do -- copy-on-write
-      y' <- V.thaw y
-      MV.unsafeWrite y' i (key, val)
-      y'' <- V.unsafeFreeze y'
-      return d { compact'dict'array = y'' }
-  where cap = V.length y
-
-iopdLookup
-  :: forall k . (Eq k, Hashable k) => k -> InsOrderPrsvDict k -> Maybe EdhValue
-iopdLookup !key (InsOrderPrsvDict !m _ _ !y) = case Map.lookup key m of
-  Nothing -> Nothing
-  Just !i -> let (_, !val) = V.unsafeIndex y i in Just val
-
-iopdLookupDefault
-  :: forall k
-   . (Eq k, Hashable k)
-  => EdhValue
-  -> k
-  -> InsOrderPrsvDict k
-  -> EdhValue
-iopdLookupDefault !defVal !key (InsOrderPrsvDict !m _ _ !y) =
-  case Map.lookup key m of
-    Nothing -> defVal
-    Just !i -> let (_, !val) = V.unsafeIndex y i in val
-
--- CAVEATS
---   the original dict will yield nil result, if looked up with the deleted key
-iopdUnsafeTakeOut
-  :: forall k
-   . (Eq k, Hashable k)
-  => k
-  -> InsOrderPrsvDict k
-  -> (Maybe EdhValue, InsOrderPrsvDict k)
-iopdUnsafeTakeOut !key d@(InsOrderPrsvDict !m !wp !nh !y) =
-  case Map.lookup key m of
-    Nothing -> (Nothing, d)
-    Just !i -> runST $ do
-      let (_, !val) = V.unsafeIndex y i
-      !y' <- V.unsafeThaw y
-      MV.unsafeWrite y' i (key, EdhNil)
-      !y'' <- V.unsafeFreeze y'
-      return (Just val, InsOrderPrsvDict (Map.delete key m) wp (nh + 1) y'')
-
-iopdDelete
-  :: forall k
-   . (Eq k, Hashable k)
-  => k
-  -> InsOrderPrsvDict k
-  -> InsOrderPrsvDict k
-iopdDelete !key d@(InsOrderPrsvDict !m !wp !nh !y) = case Map.lookup key m of
-  Nothing -> d
-  Just !i -> runST $ do -- copy-on-write
-    y' <- V.thaw y
-    MV.unsafeWrite y' i (undefined, EdhNil)
-    InsOrderPrsvDict (Map.delete key m) wp (nh + 1) <$> V.unsafeFreeze y'
-
-iopdMap
-  :: forall k
-   . (Eq k, Hashable k)
-  => (EdhValue -> EdhValue)
-  -> InsOrderPrsvDict k
-  -> InsOrderPrsvDict k
-iopdMap !f (InsOrderPrsvDict !m !wp !nh !y) =
-  InsOrderPrsvDict m wp nh $ flip V.map y $ \e@(_, !val) ->
-    if val /= EdhNil then (fst e, f val) else (undefined, EdhNil)
-
-iopdMapSTM
-  :: forall k
-   . (Eq k, Hashable k)
-  => (EdhValue -> STM EdhValue)
-  -> InsOrderPrsvDict k
-  -> STM (InsOrderPrsvDict k)
-iopdMapSTM !f (InsOrderPrsvDict !m !wp !nh !y) = do
-  let !y' = flip V.map y $ \e@(_, !val) -> if val /= EdhNil
-        then (fst e, ) <$> f val
-        else pure (undefined, EdhNil)
-  y'' <- V.sequence y'
-  return $ InsOrderPrsvDict m wp nh y''
-
-iopdKeys :: forall k . (Eq k, Hashable k) => InsOrderPrsvDict k -> [k]
-iopdKeys (InsOrderPrsvDict _m !wp _nh !y) = go [] (wp - 1)
- where
-  go :: [k] -> Int -> [k]
-  go keys !i | i < 0 = keys
-  go keys !i =
-    let entry@(_, !val) = V.unsafeIndex y i
-    in  if val == EdhNil then go keys (i - 1) else go (fst entry : keys) (i - 1)
-
-iopdToList
-  :: forall k . (Eq k, Hashable k) => InsOrderPrsvDict k -> [(k, EdhValue)]
-iopdToList (InsOrderPrsvDict _m !wp _nh !y) = go [] (wp - 1)
- where
-  go :: [(k, EdhValue)] -> Int -> [(k, EdhValue)]
-  go entries !i | i < 0 = entries
-  go entries !i =
-    let entry@(_, !val) = V.unsafeIndex y i
-    in  if val == EdhNil
-          then go entries (i - 1)
-          else go (entry : entries) (i - 1)
-
-iopdFromList
-  :: forall k . (Eq k, Hashable k) => [(k, EdhValue)] -> InsOrderPrsvDict k
-iopdFromList !entries = runST $ do
-  !y <- MV.unsafeNew cap
-  let go [] !m !wp !nh = do
-        when (wp < cap) $ flip MV.set (undefined, EdhNil) $ MV.unsafeSlice
-          wp
-          (cap - wp)
-          y
-        InsOrderPrsvDict m wp nh <$> V.unsafeFreeze y
-      go (e@(!k, !v) : es) !m !wp !nh = if v == EdhNil
-        then case Map.lookup k m of
-          Just !i -> do
-            MV.unsafeWrite y i (undefined, EdhNil)
-            go es (Map.delete k m) wp (nh + 1)
-          Nothing -> go es m wp nh
-        else case Map.lookup k m of
-          Just !i -> do
-            MV.unsafeWrite y i e
-            go es m wp nh
-          Nothing -> do
-            MV.unsafeWrite y wp e
-            go es (Map.insert k wp m) (wp + 1) nh
-  go entries Map.empty 0 0
-  where cap = length entries
-
-iopdUnion
-  :: forall k
-   . (Eq k, Hashable k)
-  => InsOrderPrsvDict k
-  -> InsOrderPrsvDict k
-  -> InsOrderPrsvDict k
-iopdUnion d1 (InsOrderPrsvDict _ !wp2 !nh2 _) | wp2 - nh2 <= 0 = d1
-iopdUnion (InsOrderPrsvDict _ !wp1 !nh1 _) d2 | wp1 - nh1 <= 0 = d2
-iopdUnion (InsOrderPrsvDict _m1 !wp1 !nh1 !y1) (InsOrderPrsvDict _m2 !wp2 !nh2 !y2)
-  = runST $ do
-    !y <- MV.unsafeNew cap
-    let go2 !m !i2 !wp | i2 >= wp2 = go1 m 0 wp
-        go2 !m !i2 !wp             = do
-          let e2@(key2, !val2) = V.unsafeIndex y2 i2
-          if val2 == EdhNil
-            then go2 m (i2 + 1) wp
-            else case Map.lookup key2 m of
-              Just !i -> do
-                MV.unsafeWrite y i e2
-                go2 m (i2 + 1) wp
-              Nothing -> do
-                MV.unsafeWrite y wp e2
-                go2 (Map.insert key2 wp m) (i2 + 1) (wp + 1)
-        go1 !m !i1 !wp | i1 >= wp1 = do
-          when (wp < cap) $ flip MV.set (undefined, EdhNil) $ MV.unsafeSlice
-            wp
-            (cap - wp)
-            y
-          InsOrderPrsvDict m wp 0 <$> V.unsafeFreeze y
-        go1 !m !i1 !wp = do
-          let e1@(key1, !val1) = V.unsafeIndex y1 i1
-          if val1 == EdhNil
-            then go1 m (i1 + 1) wp
-            else case Map.lookup key1 m of
-              Just !i -> do
-                MV.unsafeWrite y i e1
-                go1 m (i1 + 1) wp
-              Nothing -> do
-                MV.unsafeWrite y wp e1
-                go1 (Map.insert key1 wp m) (i1 + 1) (wp + 1)
-    go2 Map.empty 0 0
-  where !cap = (wp1 - nh1) + (wp2 - nh2)
 
 
 -- | A pack of evaluated argument values with positional/keyword origin,
@@ -290,27 +54,25 @@ iopdUnion (InsOrderPrsvDict _m1 !wp1 !nh1 !y1) (InsOrderPrsvDict _m2 !wp2 !nh2 !
 -- Specifically, an empty apk is just considered an empty tuple.
 data ArgsPack = ArgsPack {
     positional'args :: ![EdhValue]
-    , keyword'args :: !(InsOrderPrsvDict AttrKey)
+    , keyword'args :: !(OrderedDict AttrKey EdhValue)
   } deriving (Eq)
 instance Hashable ArgsPack where
   hashWithSalt s (ArgsPack !args !kwargs) =
-    foldl' (\s' (k, v) -> s' `hashWithSalt` k `hashWithSalt` v)
-           (foldl' hashWithSalt s args)
-      $ iopdToList kwargs
+    s `hashWithSalt` args `hashWithSalt` kwargs
 instance Show ArgsPack where
-  show (ArgsPack !args kwargs) = if null args && iopdNull kwargs
+  show (ArgsPack !args kwargs) = if null args && odNull kwargs
     then "()"
     else
       "( "
       ++ concat [ show i ++ ", " | i <- args ]
       ++ concat
-           [ show kw ++ "=" ++ show v ++ ", " | (kw, v) <- iopdToList kwargs ]
+           [ show kw ++ "=" ++ show v ++ ", " | (kw, v) <- odToList kwargs ]
       ++ ")"
 
 
 -- | A dict in Edh is neither an object nor an entity, but just a
 -- mutable associative array.
-data Dict = Dict !Unique !(TVar DictStore)
+data Dict = Dict !Unique !DictStore
 instance Eq Dict where
   Dict x'u _ == Dict y'u _ = x'u == y'u
 instance Ord Dict where
@@ -318,23 +80,16 @@ instance Ord Dict where
 instance Hashable Dict where
   hashWithSalt s (Dict u _) = hashWithSalt s u
 instance Show Dict where
-  show (Dict _ d) = showEdhDict ds where ds = unsafePerformIO $ readTVarIO d
+  show _ = "<dict>"
 type ItemKey = EdhValue
-type DictStore = InsOrderPrsvDict EdhValue
-
-showEdhDict :: DictStore -> String
-showEdhDict ds = if iopdNull ds
-  then "{}" -- no space should show in an empty dict
-  else -- advocate trailing comma here
-    "{ "
-    ++ concat [ show k ++ ":" ++ show v ++ ", " | (k, v) <- iopdToList ds ]
-    ++ "}"
+type DictStore = IOPD EdhValue EdhValue
 
 -- | create a new Edh dict from a properly typed hash map
-createEdhDict :: DictStore -> STM EdhValue
-createEdhDict !ds = do
+createEdhDict :: [(EdhValue, EdhValue)] -> STM EdhValue
+createEdhDict !entries = do
   u <- unsafeIOToSTM newUnique
-  EdhDict . Dict u <$> newTVar ds
+  EdhDict . Dict u <$> iopdFromList
+    [ e | e@(key, val) <- entries, key /= EdhNil && val /= EdhNil ]
 
 -- | setting to `nil` value means deleting the item by the specified key
 setDictItem :: ItemKey -> EdhValue -> DictStore -> DictStore
@@ -457,7 +212,7 @@ maoEntityManipulater = EntityManipulater the'lookup'entity'attr
 
 -- | Create an entity with an in-band 'Data.HashMap.Strict.HashMap'
 -- as backing storage
-createHashEntity :: InsOrderPrsvDict AttrKey -> STM Entity
+createHashEntity :: IOPD AttrKey EdhValue -> STM Entity
 createHashEntity !m = do
   u  <- unsafeIOToSTM newUnique
   es <- newTVar $ toDyn m
