@@ -24,13 +24,13 @@ import           Language.Edh.Details.Utils
 
 strEncodeProc :: EdhProcedure
 strEncodeProc (ArgsPack [EdhString !str] !kwargs) !exit
-  | compactDictNull kwargs = exitEdhProc exit $ EdhBlob $ TE.encodeUtf8 str
+  | iopdNull kwargs = exitEdhProc exit $ EdhBlob $ TE.encodeUtf8 str
 strEncodeProc _ _ =
   throwEdh EvalError "bug: __StringType_bytes__ got unexpected args"
 
 blobDecodeProc :: EdhProcedure
 blobDecodeProc (ArgsPack [EdhBlob !blob] !kwargs) !exit
-  | compactDictNull kwargs = exitEdhProc exit $ EdhString $ TE.decodeUtf8 blob
+  | iopdNull kwargs = exitEdhProc exit $ EdhString $ TE.decodeUtf8 blob
 blobDecodeProc _ _ =
   throwEdh EvalError "bug: __BlobType_utf8string__ got unexpected args"
 
@@ -87,7 +87,7 @@ propertyProc !apk !exit =
 
 setterProc :: EdhProcedure
 setterProc (ArgsPack [EdhMethod !setter] !kwargs) !exit
-  | compactDictNull kwargs = ask >>= \ !pgs -> contEdhSTM $ do
+  | iopdNull kwargs = ask >>= \ !pgs -> contEdhSTM $ do
     let !ctx  = edh'context pgs
         !this = thisObject $ contextFrame ctx 1
         !name = procedure'name setter
@@ -184,10 +184,10 @@ defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
             >>= \case
                   EdhDict (Dict _ !thisExpDS) ->
                     modifyTVar' thisExpDS
-                      $ compactDictInsert (EdhString valName) nv
+                      $ iopdInsert (EdhString valName) nv
                   _ -> do
                     d <- createEdhDict
-                      $ compactDictSingleton (EdhString valName) nv
+                      $ iopdSingleton (EdhString valName) nv
                     changeEntityAttr pgs
                                      (objEntity this)
                                      (AttrByName edhExportsMagicName)
@@ -292,7 +292,7 @@ attrDerefTemptProc !lhExpr !rhExpr !exit =
 
 -- | the Symbol(repr, *reprs) constructor
 symbolCtorProc :: EdhProcedure
-symbolCtorProc (ArgsPack _ !kwargs) _ | not $ compactDictNull kwargs =
+symbolCtorProc (ArgsPack _ !kwargs) _ | not $ iopdNull kwargs =
   throwEdh UsageError "No kwargs should be passed to Symbol()"
 symbolCtorProc (ArgsPack !reprs _) !exit = ask >>= \pgs -> contEdhSTM $ do
   let ctorSym :: EdhValue -> (Symbol -> STM ()) -> STM ()
@@ -301,18 +301,18 @@ symbolCtorProc (ArgsPack !reprs _) !exit = ask >>= \pgs -> contEdhSTM $ do
   seqcontSTM (ctorSym <$> reprs) $ \case
     [sym] -> exitEdhSTM pgs exit $ EdhSymbol sym
     syms  -> exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack (EdhSymbol <$> syms)
-                                                          compactDictEmpty
+                                                          iopdEmpty
 
 apkArgsProc :: EdhProcedure
-apkArgsProc (ArgsPack _ !kwargs) _ | not $ compactDictNull kwargs =
+apkArgsProc (ArgsPack _ !kwargs) _ | not $ iopdNull kwargs =
   throwEdh EvalError "bug: __ArgsPackType_args__ got kwargs"
 apkArgsProc (ArgsPack [EdhArgsPack (ArgsPack !args _)] _) !exit =
-  exitEdhProc exit $ EdhArgsPack $ ArgsPack args compactDictEmpty
+  exitEdhProc exit $ EdhArgsPack $ ArgsPack args iopdEmpty
 apkArgsProc _ _ =
   throwEdh EvalError "bug: __ArgsPackType_args__ got unexpected args"
 
 apkKwrgsProc :: EdhProcedure
-apkKwrgsProc (ArgsPack _ !kwargs) _ | not $ compactDictNull kwargs =
+apkKwrgsProc (ArgsPack _ !kwargs) _ | not $ iopdNull kwargs =
   throwEdh EvalError "bug: __ArgsPackType_kwargs__ got kwargs"
 apkKwrgsProc (ArgsPack [EdhArgsPack (ArgsPack _ !kwargs')] _) !exit =
   exitEdhProc exit $ EdhArgsPack $ ArgsPack [] kwargs'
@@ -335,14 +335,14 @@ reprProc (ArgsPack !args !kwargs) !exit = do
         exitEdhSTM pgs exit
           $ EdhArgsPack
           $ ArgsPack (reverse reprs)
-          $ compactDictFromList kwReprs
+          $ iopdFromList kwReprs
       go reprs kwReprs (v : rest) kwps =
         runEdhProc pgs $ edhValueRepr v $ \(OriginalValue r _ _) ->
           contEdhSTM $ go (r : reprs) kwReprs rest kwps
       go reprs kwReprs [] ((k, v) : rest) =
         runEdhProc pgs $ edhValueRepr v $ \(OriginalValue r _ _) ->
           contEdhSTM $ go reprs ((k, r) : kwReprs) [] rest
-  contEdhSTM $ go [] [] args (compactDictToList kwargs)
+  contEdhSTM $ go [] [] args (iopdToList kwargs)
 
 showProc :: EdhProcedure
 showProc (ArgsPack [v] _) !exit = do
@@ -354,7 +354,7 @@ showProc (ArgsPack [v] _) !exit = do
     EdhObject !o -> lookupEdhObjAttr pgs o (AttrByName "__show__") >>= \case
       EdhNil         -> showWithNoMagic
       EdhMethod !mth -> runEdhProc pgs
-        $ callEdhMethod o mth (ArgsPack [] compactDictEmpty) id exit
+        $ callEdhMethod o mth (ArgsPack [] iopdEmpty) id exit
       !badMagic ->
         throwEdhSTM pgs UsageError
           $  "Bad magic __show__ of "
@@ -388,7 +388,7 @@ descProc (ArgsPack [v] _) !exit = do
     EdhObject !o -> lookupEdhObjAttr pgs o (AttrByName "__desc__") >>= \case
       EdhNil         -> descWithNoMagic
       EdhMethod !mth -> runEdhProc pgs
-        $ callEdhMethod o mth (ArgsPack [] compactDictEmpty) id exit
+        $ callEdhMethod o mth (ArgsPack [] iopdEmpty) id exit
       !badMagic ->
         throwEdhSTM pgs UsageError
           $  "Bad magic __desc__ of "
@@ -426,24 +426,24 @@ concatProc !lhExpr !rhExpr !exit =
 isNullProc :: EdhProcedure
 isNullProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
-  contEdhSTM $ if compactDictNull kwargs
+  contEdhSTM $ if iopdNull kwargs
     then case args of
       [v] ->
         edhValueNull pgs v $ \isNull -> exitEdhSTM pgs exit $ EdhBool isNull
       _ -> seqcontSTM (edhValueNull pgs <$> args) $ \ !argsNulls ->
         exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack (EdhBool <$> argsNulls)
-                                                     compactDictEmpty
+                                                     iopdEmpty
     else seqcontSTM (edhValueNull pgs <$> args) $ \argsNulls ->
       seqcontSTM
           [ \exit' ->
               edhValueNull pgs v (\ !isNull -> exit' (k, EdhBool isNull))
-          | (k, v) <- compactDictToList kwargs
+          | (k, v) <- iopdToList kwargs
           ]
         $ \ !kwargsNulls -> exitEdhSTM
             pgs
             exit
             (EdhArgsPack $ ArgsPack (EdhBool <$> argsNulls)
-                                    (compactDictFromList kwargsNulls)
+                                    (iopdFromList kwargsNulls)
             )
 
 
@@ -451,14 +451,14 @@ isNullProc (ArgsPack !args !kwargs) !exit = do
 typeProc :: EdhProcedure
 typeProc (ArgsPack !args !kwargs) !exit =
   let !argsType = edhTypeValOf <$> args
-  in  if compactDictNull kwargs
+  in  if iopdNull kwargs
         then case argsType of
           [t] -> exitEdhProc exit t
           _ ->
-            exitEdhProc exit $ EdhArgsPack $ ArgsPack argsType compactDictEmpty
+            exitEdhProc exit $ EdhArgsPack $ ArgsPack argsType iopdEmpty
         else exitEdhProc
           exit
-          (EdhArgsPack $ ArgsPack argsType $ compactDictMap edhTypeValOf kwargs)
+          (EdhArgsPack $ ArgsPack argsType $ iopdMap edhTypeValOf kwargs)
  where
   edhTypeValOf :: EdhValue -> EdhValue
   edhTypeValOf EdhNil              = EdhNil
@@ -467,7 +467,7 @@ typeProc (ArgsPack !args !kwargs) !exit =
 
 
 procNameProc :: EdhProcedure
-procNameProc (ArgsPack _ !kwargs) _ | not $ compactDictNull kwargs =
+procNameProc (ArgsPack _ !kwargs) _ | not $ iopdNull kwargs =
   throwEdh EvalError "bug: __ProcType_name__ got kwargs"
 procNameProc (ArgsPack [EdhIntrOp _ (IntrinOpDefi _ !opSym _)] _) !exit =
   exitEdhProc exit $ EdhString $ "(" <> opSym <> ")"
@@ -494,27 +494,27 @@ dictProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   contEdhSTM $ do
     let !kwDict =
-          compactDictFromList $ (<$> compactDictToList kwargs) $ \(key, val) ->
+          iopdFromList $ (<$> iopdToList kwargs) $ \(key, val) ->
             (attrKeyValue key, val)
     u <- unsafeIOToSTM newUnique
-    d <- newTVar $ compactDictUnion kwDict $ compactDictFromList
+    d <- newTVar $ iopdUnion kwDict $ iopdFromList
       [ (EdhDecimal (fromIntegral i), t) | (i, t) <- zip [(0 :: Int) ..] args ]
     exitEdhSTM pgs exit (EdhDict (Dict u d))
 
 dictSizeProc :: EdhProcedure
-dictSizeProc (ArgsPack _ !kwargs) _ | not $ compactDictNull kwargs =
+dictSizeProc (ArgsPack _ !kwargs) _ | not $ iopdNull kwargs =
   throwEdh EvalError "bug: __DictType_size__ got kwargs"
 dictSizeProc (ArgsPack [EdhDict (Dict _ !dsv)] _) !exit = do
   !pgs <- ask
   contEdhSTM $ do
     ds <- readTVar dsv
-    exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral $ compactDictSize ds
+    exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral $ iopdSize ds
 dictSizeProc _ _ =
   throwEdh EvalError "bug: __DictType_size__ got unexpected args"
 
 
 listPushProc :: EdhProcedure
-listPushProc (ArgsPack _ !kwargs) _ | not $ compactDictNull kwargs =
+listPushProc (ArgsPack _ !kwargs) _ | not $ iopdNull kwargs =
   throwEdh EvalError "bug: __ListType_push__ got kwargs"
 listPushProc (ArgsPack [l@(EdhList (List _ !lv))] _) !exit = do
   !pgs <- ask
@@ -527,7 +527,7 @@ listPushProc (ArgsPack [l@(EdhList (List _ !lv))] _) !exit = do
     >>= \mth -> exitEdhSTM pgs exit mth
  where
   listPush :: EdhProcedure
-  listPush (ArgsPack !args !kwargs') !exit' | compactDictNull kwargs' =
+  listPush (ArgsPack !args !kwargs') !exit' | iopdNull kwargs' =
     ask >>= \pgs -> contEdhSTM $ do
       modifyTVar' lv (args ++)
       exitEdhSTM pgs exit' l
@@ -536,7 +536,7 @@ listPushProc _ _ =
   throwEdh EvalError "bug: __ListType_push__ got unexpected args"
 
 listPopProc :: EdhProcedure
-listPopProc (ArgsPack _ !kwargs) _ | not $ compactDictNull kwargs =
+listPopProc (ArgsPack _ !kwargs) _ | not $ iopdNull kwargs =
   throwEdh EvalError "bug: __ListType_pop__ got kwargs"
 listPopProc (ArgsPack [EdhList (List _ !lv)] _) !exit = do
   !pgs <- ask
@@ -574,7 +574,7 @@ elemProc !lhExpr !rhExpr !exit = do
         exitEdhSTM pgs exit $ EdhBool $ lhVal `elem` ll
       EdhDict (Dict _ !d) -> contEdhSTM $ do
         ds <- readTVar d
-        exitEdhSTM pgs exit $ EdhBool $ case compactDictLookup lhVal ds of
+        exitEdhSTM pgs exit $ EdhBool $ case iopdLookup lhVal ds of
           Nothing -> False
           Just _  -> True
       _ -> exitEdhProc exit EdhContinue
@@ -694,7 +694,7 @@ cprhProc !lhExpr !rhExpr !exit = do
               (\val -> modifyTVar' apkVar $ \(ArgsPack !args !kwargs) ->
                 case val of
                   EdhArgsPack (ArgsPack !args' !kwargs') ->
-                    ArgsPack (args ++ args') (compactDictUnion kwargs' kwargs)
+                    ArgsPack (args ++ args') (iopdUnion kwargs' kwargs)
                   _ -> ArgsPack (args ++ [val]) kwargs
               )
             $ \mkLoop -> runEdhProc pgs $ mkLoop $ \_ -> contEdhSTM $ do
@@ -736,17 +736,17 @@ cprhProc !lhExpr !rhExpr !exit = do
           _ -> exitEdhProc exit EdhContinue
         EdhDict (Dict _ !d) -> case edhUltimate rhVal of
           EdhArgsPack (ArgsPack _ !kwargs) -> contEdhSTM $ do
-            modifyTVar d $ compactDictUnion $ compactDictFromList
-              [ (attrKeyValue k, v) | (k, v) <- compactDictToList kwargs ]
+            modifyTVar d $ iopdUnion $ iopdFromList
+              [ (attrKeyValue k, v) | (k, v) <- iopdToList kwargs ]
             exitEdhSTM pgs exit lhVal
           EdhList (List _ !l) -> contEdhSTM $ do
             ll <- readTVar l
             pvlToDict pgs ll $ \d' -> do
-              modifyTVar d $ compactDictUnion d'
+              modifyTVar d $ iopdUnion d'
               exitEdhSTM pgs exit lhVal
           EdhDict (Dict _ !d') -> contEdhSTM $ do
             ds <- readTVar d'
-            modifyTVar d $ compactDictUnion ds
+            modifyTVar d $ iopdUnion ds
             exitEdhSTM pgs exit lhVal
           _ -> exitEdhProc exit EdhContinue
         _ -> exitEdhProc exit EdhContinue

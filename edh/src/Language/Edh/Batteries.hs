@@ -105,7 +105,7 @@ defaultEdhConsole !inputSettings = do
     logger !level !srcLoc !logArgs = do
       void $ tryTakeTMVar logIdle
       case logArgs of
-        ArgsPack [!argVal] !kwargs | compactDictNull kwargs ->
+        ArgsPack [!argVal] !kwargs | iopdNull kwargs ->
           writeTBQueue logQueue $! T.pack logPrefix <> logString argVal <> "\n"
         _ -> -- todo: format structured log record,
              -- with some log parsers in mind
@@ -621,7 +621,7 @@ installEdhBatteries world = liftIO $ do
            ]
 
 
-      !conEntity <- createHashEntity $ compactDictFromList
+      !conEntity <- createHashEntity $ iopdFromList
         [ (AttrByName "__repr__", EdhString "<console>")
         , (AttrByName "debug"   , EdhDecimal 10)
         , (AttrByName "info"    , EdhDecimal 20)

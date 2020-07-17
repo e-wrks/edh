@@ -55,7 +55,7 @@ resolveEffectfulAttr pgs (scope : rest) !key =
           EdhNil               -> resolveEffectfulAttr pgs rest key
           EdhDict (Dict _ !ds) -> do
             d <- readTVar ds
-            case compactDictLookup key d of
+            case iopdLookup key d of
               Just val -> return $ Just (val, rest)
               Nothing  -> resolveEffectfulAttr pgs rest key
   -- todo crash in this case? warning may be more proper but in what way?

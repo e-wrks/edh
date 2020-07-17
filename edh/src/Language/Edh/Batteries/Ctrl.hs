@@ -159,7 +159,7 @@ branchProc !lhExpr !rhExpr !exit = do
       -- {( x )} -- single arg 
       [StmtSrc (_, ExprStmt (ParenExpr (AttrExpr (DirectRef (NamedAttr attrName)))))]
         -> case ctxMatch of
-          EdhArgsPack (ArgsPack [argVal] !kwargs) | compactDictNull kwargs ->
+          EdhArgsPack (ArgsPack [argVal] !kwargs) | iopdNull kwargs ->
             contEdhSTM $ branchMatched [(attrName, argVal)]
           _ -> exitEdhProc exit EdhCaseOther
 
@@ -217,7 +217,7 @@ branchProc !lhExpr !rhExpr !exit = do
            in
              contEdhSTM $ case ctxMatch of
                EdhArgsPack (ArgsPack (h : rest) !kwargs)
-                 | compactDictNull kwargs -> doMatched
+                 | iopdNull kwargs -> doMatched
                    h
                    (EdhArgsPack (ArgsPack rest kwargs))
                EdhList (List _ !l) -> readTVar l >>= \case
@@ -285,7 +285,7 @@ branchProc !lhExpr !rhExpr !exit = do
         contEdhSTM $ if null argSenders
           then case ctxMatch of
             -- an empty apk pattern matches any empty sequence
-            EdhArgsPack (ArgsPack [] !kwargs) | compactDictNull kwargs ->
+            EdhArgsPack (ArgsPack [] !kwargs) | iopdNull kwargs ->
               branchMatched []
             EdhList (List _ !l) ->
               readTVar l
@@ -305,7 +305,7 @@ branchProc !lhExpr !rhExpr !exit = do
                 ("Invalid element in apk pattern: " <> T.pack (show argSenders))
               else case ctxMatch of
                 EdhArgsPack (ArgsPack !args !kwargs)
-                  | length args == length argSenders && compactDictNull kwargs
+                  | length args == length argSenders && iopdNull kwargs
                   -> branchMatched $ zip attrNames args
                 _ -> exitEdhSTM pgs exit EdhCaseOther
 

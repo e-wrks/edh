@@ -86,7 +86,7 @@ loggingProc !lhExpr !rhExpr !exit = do
                     logger logLevel srcLoc apk
                     exitEdhSTM pgs exit nil
                   _ -> do
-                    logger logLevel srcLoc $ ArgsPack [rhVal] compactDictEmpty
+                    logger logLevel srcLoc $ ArgsPack [rhVal] iopdEmpty
                     exitEdhSTM pgs exit nil
       _ -> throwEdh EvalError $ "Invalid log target: " <> T.pack (show lhVal)
 
@@ -270,7 +270,7 @@ conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
               writeTBQueue ioQ $ ConsoleOut $ s <> "\n"
               printVS rest kvs
             _ -> error "bug"
-  printVS args $ compactDictToList kwargs
+  printVS args $ iopdToList kwargs
 
 
 conNowProc :: EdhProcedure

@@ -29,7 +29,7 @@ data ArgsPackParser a = ArgsPackParser {
   }
 parseArgsPack :: a -> ArgsPackParser a -> ArgsPack -> Either Text a
 parseArgsPack defVal (ArgsPackParser posParsers kwParsers) (ArgsPack posArgs kwArgs)
-  = go posParsers kwParsers posArgs (compactDictToList kwArgs) defVal
+  = go posParsers kwParsers posArgs (iopdToList kwArgs) defVal
  where
   go
     :: [EdhValue -> a -> Either Text a]

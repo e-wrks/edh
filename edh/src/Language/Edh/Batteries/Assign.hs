@@ -59,7 +59,7 @@ assignProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                               runEdhProc pgs $ callEdhMethod
                                 obj
                                 mth'proc
-                                (ArgsPack [ixVal, rhVal] compactDictEmpty)
+                                (ArgsPack [ixVal, rhVal] iopdEmpty)
                                 id
                                 exit
                             !badIndexer ->
@@ -112,7 +112,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                   EdhDict (Dict _ !d) -> contEdhSTM $ readTVar d >>= \ !ds ->
                     runEdhProc pgs
                       $ withOp
-                          (IntplSubs $ compactDictLookupDefault EdhNil ixVal ds)
+                          (IntplSubs $ iopdLookupDefault EdhNil ixVal ds)
                           (IntplSubs rhVal)
                       $ \(OriginalValue !opRtnV _ _) -> contEdhSTM $ do
                           writeTVar d $ setDictItem ixVal opRtnV ds
@@ -135,7 +135,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                               runEdhProc pgs $ callEdhMethod
                                 obj
                                 mth'proc
-                                (ArgsPack [ixVal, rhVal] compactDictEmpty)
+                                (ArgsPack [ixVal, rhVal] iopdEmpty)
                                 id
                                 exit
                             !badIndexer ->

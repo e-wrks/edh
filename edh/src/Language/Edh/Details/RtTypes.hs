@@ -46,47 +46,53 @@ import           Language.Edh.Control
 type EdhVector = IOVector EdhValue
 
 
--- | Similar to the insertion-order-preserving dict introduced since CPython
--- 3.6 (from PyPy), which is then formalized since the Python language 3.7,
--- but yet lacks much optimization.
+-- | This insertion-order-preserving dict is ispired by new dict implementation
+-- introduced into CPython 3.6 (from PyPy), then formalized its behavior from
+-- Python language 3.7 onwards. But we won't get the memory improvement that 
+-- Python sees, as long as the compact array stores thunks instead of final
+-- large object records like Python. Yet this implementation still lacks much
+-- optimization.
+--
+-- TODO this impl. is not correct yet, as being not STM retry safe, need major
+--      refactoring to achieve retry safety.
 --
 -- Note: a nil (EdhNil) value in Edh has the special semantic of non-existence
-data CompactDict k where
-  CompactDict ::(Eq k, Hashable k) => {
+data InsOrderPrsvDict k where
+  InsOrderPrsvDict ::(Eq k, Hashable k) => {
       compact'dict'map :: !(Map.HashMap k Int)
     , compact'dict'write'pos :: !Int
     , compact'dict'num'holes :: !Int
     , compact'dict'array :: !(Vector (k, EdhValue))
-    } -> CompactDict k
-instance (Eq k, Hashable k) => Eq (CompactDict k) where
+    } -> InsOrderPrsvDict k
+instance (Eq k, Hashable k) => Eq (InsOrderPrsvDict k) where
   -- todo perf optimization ?
-  x == y = compactDictToList x == compactDictToList y
-instance (Eq k, Hashable k) => Hashable (CompactDict k) where
+  x == y = iopdToList x == iopdToList y
+instance (Eq k, Hashable k) => Hashable (InsOrderPrsvDict k) where
   -- todo perf optimization ?
-  hashWithSalt s x = hashWithSalt s $ compactDictToList x
+  hashWithSalt s x = hashWithSalt s $ iopdToList x
 
-compactDictEmpty :: forall k . (Eq k, Hashable k) => CompactDict k
-compactDictEmpty = CompactDict Map.empty 0 0 V.empty
+iopdEmpty :: forall k . (Eq k, Hashable k) => InsOrderPrsvDict k
+iopdEmpty = InsOrderPrsvDict Map.empty 0 0 V.empty
 
-compactDictNull :: forall k . (Eq k, Hashable k) => CompactDict k -> Bool
-compactDictNull (CompactDict _ !wp !nh _) = wp - nh <= 0
+iopdNull :: forall k . (Eq k, Hashable k) => InsOrderPrsvDict k -> Bool
+iopdNull (InsOrderPrsvDict _ !wp !nh _) = wp - nh <= 0
 
-compactDictSize :: forall k . (Eq k, Hashable k) => CompactDict k -> Int
-compactDictSize (CompactDict _ !wp !nh _) = wp - nh
+iopdSize :: forall k . (Eq k, Hashable k) => InsOrderPrsvDict k -> Int
+iopdSize (InsOrderPrsvDict _ !wp !nh _) = wp - nh
 
-compactDictSingleton
-  :: forall k . (Eq k, Hashable k) => k -> EdhValue -> CompactDict k
-compactDictSingleton !key !val =
-  CompactDict (Map.singleton key 0) 1 0 $ V.singleton (key, val)
+iopdSingleton
+  :: forall k . (Eq k, Hashable k) => k -> EdhValue -> InsOrderPrsvDict k
+iopdSingleton !key !val =
+  InsOrderPrsvDict (Map.singleton key 0) 1 0 $ V.singleton (key, val)
 
-compactDictInsert
+iopdInsert
   :: forall k
    . (Eq k, Hashable k)
   => k
   -> EdhValue
-  -> CompactDict k
-  -> CompactDict k
-compactDictInsert !key !val d@(CompactDict !m !wp !nh !y) =
+  -> InsOrderPrsvDict k
+  -> InsOrderPrsvDict k
+iopdInsert !key !val d@(InsOrderPrsvDict !m !wp !nh !y) =
   case Map.lookup key m of
     Nothing -> if wp >= cap
       then -- todo under certain circumstances, find a hole and fill it
@@ -99,13 +105,14 @@ compactDictInsert !key !val d@(CompactDict !m !wp !nh !y) =
             flip MV.set (undefined, EdhNil)
               $ MV.unsafeSlice (wp + 1) (capNew - 1) y'
             MV.unsafeWrite y' wp (key, val)
-            CompactDict (Map.insert @k key wp m) (wp + 1) nh
+            InsOrderPrsvDict (Map.insert @k key wp m) (wp + 1) nh
               <$> V.unsafeFreeze y'
       else runST $ do
-        -- TODO concrrent mod is an issue with this impl. real harm be it ?
+        -- TODO concrrent mod is an issue with this impl. make it single thread
+        -- owned, and copy-on-write by other threads
         y' <- V.unsafeThaw y
         MV.unsafeWrite y' wp (key, val)
-        CompactDict (Map.insert key wp m) (wp + 1) nh <$> V.unsafeFreeze y'
+        InsOrderPrsvDict (Map.insert key wp m) (wp + 1) nh <$> V.unsafeFreeze y'
     Just !i -> runST $ do -- copy-on-write
       y' <- V.thaw y
       MV.unsafeWrite y' i (key, val)
@@ -113,33 +120,33 @@ compactDictInsert !key !val d@(CompactDict !m !wp !nh !y) =
       return d { compact'dict'array = y'' }
   where cap = V.length y
 
-compactDictLookup
-  :: forall k . (Eq k, Hashable k) => k -> CompactDict k -> Maybe EdhValue
-compactDictLookup !key (CompactDict !m _ _ !y) = case Map.lookup key m of
+iopdLookup
+  :: forall k . (Eq k, Hashable k) => k -> InsOrderPrsvDict k -> Maybe EdhValue
+iopdLookup !key (InsOrderPrsvDict !m _ _ !y) = case Map.lookup key m of
   Nothing -> Nothing
   Just !i -> let (_, !val) = V.unsafeIndex y i in Just val
 
-compactDictLookupDefault
+iopdLookupDefault
   :: forall k
    . (Eq k, Hashable k)
   => EdhValue
   -> k
-  -> CompactDict k
+  -> InsOrderPrsvDict k
   -> EdhValue
-compactDictLookupDefault !defVal !key (CompactDict !m _ _ !y) =
+iopdLookupDefault !defVal !key (InsOrderPrsvDict !m _ _ !y) =
   case Map.lookup key m of
     Nothing -> defVal
     Just !i -> let (_, !val) = V.unsafeIndex y i in val
 
 -- CAVEATS
 --   the original dict will yield nil result, if looked up with the deleted key
-compactDictUnsafeTakeOut
+iopdUnsafeTakeOut
   :: forall k
    . (Eq k, Hashable k)
   => k
-  -> CompactDict k
-  -> (Maybe EdhValue, CompactDict k)
-compactDictUnsafeTakeOut !key d@(CompactDict !m !wp !nh !y) =
+  -> InsOrderPrsvDict k
+  -> (Maybe EdhValue, InsOrderPrsvDict k)
+iopdUnsafeTakeOut !key d@(InsOrderPrsvDict !m !wp !nh !y) =
   case Map.lookup key m of
     Nothing -> (Nothing, d)
     Just !i -> runST $ do
@@ -147,42 +154,46 @@ compactDictUnsafeTakeOut !key d@(CompactDict !m !wp !nh !y) =
       !y' <- V.unsafeThaw y
       MV.unsafeWrite y' i (key, EdhNil)
       !y'' <- V.unsafeFreeze y'
-      return (Just val, CompactDict (Map.delete key m) wp (nh + 1) y'')
+      return (Just val, InsOrderPrsvDict (Map.delete key m) wp (nh + 1) y'')
 
-compactDictDelete
-  :: forall k . (Eq k, Hashable k) => k -> CompactDict k -> CompactDict k
-compactDictDelete !key d@(CompactDict !m !wp !nh !y) = case Map.lookup key m of
+iopdDelete
+  :: forall k
+   . (Eq k, Hashable k)
+  => k
+  -> InsOrderPrsvDict k
+  -> InsOrderPrsvDict k
+iopdDelete !key d@(InsOrderPrsvDict !m !wp !nh !y) = case Map.lookup key m of
   Nothing -> d
   Just !i -> runST $ do -- copy-on-write
     y' <- V.thaw y
     MV.unsafeWrite y' i (undefined, EdhNil)
-    CompactDict (Map.delete key m) wp (nh + 1) <$> V.unsafeFreeze y'
+    InsOrderPrsvDict (Map.delete key m) wp (nh + 1) <$> V.unsafeFreeze y'
 
-compactDictMap
+iopdMap
   :: forall k
    . (Eq k, Hashable k)
   => (EdhValue -> EdhValue)
-  -> CompactDict k
-  -> CompactDict k
-compactDictMap !f (CompactDict !m !wp !nh !y) =
-  CompactDict m wp nh $ flip V.map y $ \e@(_, !val) ->
+  -> InsOrderPrsvDict k
+  -> InsOrderPrsvDict k
+iopdMap !f (InsOrderPrsvDict !m !wp !nh !y) =
+  InsOrderPrsvDict m wp nh $ flip V.map y $ \e@(_, !val) ->
     if val /= EdhNil then (fst e, f val) else (undefined, EdhNil)
 
-compactDictMapSTM
+iopdMapSTM
   :: forall k
    . (Eq k, Hashable k)
   => (EdhValue -> STM EdhValue)
-  -> CompactDict k
-  -> STM (CompactDict k)
-compactDictMapSTM !f (CompactDict !m !wp !nh !y) = do
+  -> InsOrderPrsvDict k
+  -> STM (InsOrderPrsvDict k)
+iopdMapSTM !f (InsOrderPrsvDict !m !wp !nh !y) = do
   let !y' = flip V.map y $ \e@(_, !val) -> if val /= EdhNil
         then (fst e, ) <$> f val
         else pure (undefined, EdhNil)
   y'' <- V.sequence y'
-  return $ CompactDict m wp nh y''
+  return $ InsOrderPrsvDict m wp nh y''
 
-compactDictKeys :: forall k . (Eq k, Hashable k) => CompactDict k -> [k]
-compactDictKeys (CompactDict _m !wp _nh !y) = go [] (wp - 1)
+iopdKeys :: forall k . (Eq k, Hashable k) => InsOrderPrsvDict k -> [k]
+iopdKeys (InsOrderPrsvDict _m !wp _nh !y) = go [] (wp - 1)
  where
   go :: [k] -> Int -> [k]
   go keys !i | i < 0 = keys
@@ -190,9 +201,9 @@ compactDictKeys (CompactDict _m !wp _nh !y) = go [] (wp - 1)
     let entry@(_, !val) = V.unsafeIndex y i
     in  if val == EdhNil then go keys (i - 1) else go (fst entry : keys) (i - 1)
 
-compactDictToList
-  :: forall k . (Eq k, Hashable k) => CompactDict k -> [(k, EdhValue)]
-compactDictToList (CompactDict _m !wp _nh !y) = go [] (wp - 1)
+iopdToList
+  :: forall k . (Eq k, Hashable k) => InsOrderPrsvDict k -> [(k, EdhValue)]
+iopdToList (InsOrderPrsvDict _m !wp _nh !y) = go [] (wp - 1)
  where
   go :: [(k, EdhValue)] -> Int -> [(k, EdhValue)]
   go entries !i | i < 0 = entries
@@ -202,16 +213,16 @@ compactDictToList (CompactDict _m !wp _nh !y) = go [] (wp - 1)
           then go entries (i - 1)
           else go (entry : entries) (i - 1)
 
-compactDictFromList
-  :: forall k . (Eq k, Hashable k) => [(k, EdhValue)] -> CompactDict k
-compactDictFromList !entries = runST $ do
+iopdFromList
+  :: forall k . (Eq k, Hashable k) => [(k, EdhValue)] -> InsOrderPrsvDict k
+iopdFromList !entries = runST $ do
   !y <- MV.unsafeNew cap
   let go [] !m !wp !nh = do
         when (wp < cap) $ flip MV.set (undefined, EdhNil) $ MV.unsafeSlice
           wp
           (cap - wp)
           y
-        CompactDict m wp nh <$> V.unsafeFreeze y
+        InsOrderPrsvDict m wp nh <$> V.unsafeFreeze y
       go (e@(!k, !v) : es) !m !wp !nh = if v == EdhNil
         then case Map.lookup k m of
           Just !i -> do
@@ -228,15 +239,15 @@ compactDictFromList !entries = runST $ do
   go entries Map.empty 0 0
   where cap = length entries
 
-compactDictUnion
+iopdUnion
   :: forall k
    . (Eq k, Hashable k)
-  => CompactDict k
-  -> CompactDict k
-  -> CompactDict k
-compactDictUnion d1 (CompactDict _ !wp2 !nh2 _) | wp2 - nh2 <= 0 = d1
-compactDictUnion (CompactDict _ !wp1 !nh1 _) d2 | wp1 - nh1 <= 0 = d2
-compactDictUnion (CompactDict _m1 !wp1 !nh1 !y1) (CompactDict _m2 !wp2 !nh2 !y2)
+  => InsOrderPrsvDict k
+  -> InsOrderPrsvDict k
+  -> InsOrderPrsvDict k
+iopdUnion d1 (InsOrderPrsvDict _ !wp2 !nh2 _) | wp2 - nh2 <= 0 = d1
+iopdUnion (InsOrderPrsvDict _ !wp1 !nh1 _) d2 | wp1 - nh1 <= 0 = d2
+iopdUnion (InsOrderPrsvDict _m1 !wp1 !nh1 !y1) (InsOrderPrsvDict _m2 !wp2 !nh2 !y2)
   = runST $ do
     !y <- MV.unsafeNew cap
     let go2 !m !i2 !wp | i2 >= wp2 = go1 m 0 wp
@@ -256,7 +267,7 @@ compactDictUnion (CompactDict _m1 !wp1 !nh1 !y1) (CompactDict _m2 !wp2 !nh2 !y2)
             wp
             (cap - wp)
             y
-          CompactDict m wp 0 <$> V.unsafeFreeze y
+          InsOrderPrsvDict m wp 0 <$> V.unsafeFreeze y
         go1 !m !i1 !wp = do
           let e1@(key1, !val1) = V.unsafeIndex y1 i1
           if val1 == EdhNil
@@ -278,23 +289,21 @@ compactDictUnion (CompactDict _m1 !wp1 !nh1 !y1) (CompactDict _m2 !wp2 !nh2 !y2)
 -- Specifically, an empty apk is just considered an empty tuple.
 data ArgsPack = ArgsPack {
     positional'args :: ![EdhValue]
-    , keyword'args :: !(CompactDict AttrKey)
+    , keyword'args :: !(InsOrderPrsvDict AttrKey)
   } deriving (Eq)
 instance Hashable ArgsPack where
   hashWithSalt s (ArgsPack !args !kwargs) =
     foldl' (\s' (k, v) -> s' `hashWithSalt` k `hashWithSalt` v)
            (foldl' hashWithSalt s args)
-      $ compactDictToList kwargs
+      $ iopdToList kwargs
 instance Show ArgsPack where
-  show (ArgsPack !args kwargs) = if null args && compactDictNull kwargs
+  show (ArgsPack !args kwargs) = if null args && iopdNull kwargs
     then "()"
     else
       "( "
       ++ concat [ show i ++ ", " | i <- args ]
       ++ concat
-           [ show kw ++ "=" ++ show v ++ ", "
-           | (kw, v) <- compactDictToList kwargs
-           ]
+           [ show kw ++ "=" ++ show v ++ ", " | (kw, v) <- iopdToList kwargs ]
       ++ ")"
 
 
@@ -310,15 +319,14 @@ instance Hashable Dict where
 instance Show Dict where
   show (Dict _ d) = showEdhDict ds where ds = unsafePerformIO $ readTVarIO d
 type ItemKey = EdhValue
-type DictStore = CompactDict EdhValue
+type DictStore = InsOrderPrsvDict EdhValue
 
 showEdhDict :: DictStore -> String
-showEdhDict ds = if compactDictNull ds
+showEdhDict ds = if iopdNull ds
   then "{}" -- no space should show in an empty dict
   else -- advocate trailing comma here
     "{ "
-    ++ concat
-         [ show k ++ ":" ++ show v ++ ", " | (k, v) <- compactDictToList ds ]
+    ++ concat [ show k ++ ":" ++ show v ++ ", " | (k, v) <- iopdToList ds ]
     ++ "}"
 
 -- | create a new Edh dict from a properly typed hash map
@@ -330,20 +338,19 @@ createEdhDict !ds = do
 -- | setting to `nil` value means deleting the item by the specified key
 setDictItem :: ItemKey -> EdhValue -> DictStore -> DictStore
 setDictItem !k v !ds = case v of
-  EdhNil -> compactDictDelete k ds
-  _      -> compactDictInsert k v ds
+  EdhNil -> iopdDelete k ds
+  _      -> iopdInsert k v ds
 
 dictEntryList :: DictStore -> [EdhValue]
-dictEntryList d = (<$> compactDictToList d)
-  $ \(k, v) -> EdhArgsPack $ ArgsPack [k, v] compactDictEmpty
+dictEntryList d =
+  (<$> iopdToList d) $ \(k, v) -> EdhArgsPack $ ArgsPack [k, v] iopdEmpty
 
 
 edhDictFromEntity :: EdhProgState -> Entity -> STM Dict
 edhDictFromEntity pgs ent = do
   u  <- unsafeIOToSTM newUnique
   ps <- allEntityAttrs pgs ent
-  (Dict u <$>) $ newTVar $ compactDictFromList
-    [ (attrKeyValue k, v) | (k, v) <- ps ]
+  (Dict u <$>) $ newTVar $ iopdFromList [ (attrKeyValue k, v) | (k, v) <- ps ]
 
 -- | An entity in Edh is the backing storage for a scope, with possibly 
 -- an object (actually more objects still possible, but god forbid it)
@@ -449,7 +456,7 @@ maoEntityManipulater = EntityManipulater the'lookup'entity'attr
 
 -- | Create an entity with an in-band 'Data.HashMap.Strict.HashMap'
 -- as backing storage
-createHashEntity :: CompactDict AttrKey -> STM Entity
+createHashEntity :: InsOrderPrsvDict AttrKey -> STM Entity
 createHashEntity !m = do
   u  <- unsafeIOToSTM newUnique
   es <- newTVar $ toDyn m
@@ -461,17 +468,16 @@ hashEntityManipulater = EntityManipulater the'lookup'entity'attr
                                           the'change'entity'attr
                                           the'update'entity'attrs
  where
-  hm = flip fromDyn compactDictEmpty
-  the'lookup'entity'attr _ !k =
-    return . fromMaybe EdhNil . compactDictLookup k . hm
-  the'all'entity'attrs _ = return . compactDictToList . hm
+  hm = flip fromDyn iopdEmpty
+  the'lookup'entity'attr _ !k = return . fromMaybe EdhNil . iopdLookup k . hm
+  the'all'entity'attrs _ = return . iopdToList . hm
   the'change'entity'attr _ !k !v !d =
-    let !ds = fromDyn d compactDictEmpty
+    let !ds = fromDyn d iopdEmpty
     in  return $ toDyn $ case v of
-          EdhNil -> compactDictDelete k ds
-          _      -> compactDictInsert k v ds
+          EdhNil -> iopdDelete k ds
+          _      -> iopdInsert k v ds
   the'update'entity'attrs _ !ps =
-    return . toDyn . compactDictUnion (compactDictFromList ps) . hm
+    return . toDyn . iopdUnion (iopdFromList ps) . hm
 
 
 -- | Create an entity with an out-of-band storage manipulater and an in-band
@@ -487,17 +493,17 @@ createSideEntity !manip !esd = do
 createSideEntityManipulater
   :: Bool -> [(AttrKey, EdhValue)] -> STM EntityManipulater
 createSideEntityManipulater !writeProtected !arts = do
-  obs <- newTVar $ compactDictFromList arts
+  obs <- newTVar $ iopdFromList arts
   let the'lookup'entity'attr _ !k _ =
-        fromMaybe EdhNil . compactDictLookup k <$> readTVar obs
-      the'all'entity'attrs _ _ = compactDictToList <$> readTVar obs
+        fromMaybe EdhNil . iopdLookup k <$> readTVar obs
+      the'all'entity'attrs _ _ = iopdToList <$> readTVar obs
       the'change'entity'attr pgs !k !v inband = if writeProtected
         then
           throwSTM
           $ EdhError UsageError "Writing a protected entity"
           $ getEdhCallContext 0 pgs
         else do
-          modifyTVar' obs $ compactDictInsert k v
+          modifyTVar' obs $ iopdInsert k v
           return inband
       the'update'entity'attrs pgs !ps inband = if writeProtected
         then
@@ -505,7 +511,7 @@ createSideEntityManipulater !writeProtected !arts = do
           $ EdhError UsageError "Writing a protected entity"
           $ getEdhCallContext 0 pgs
         else do
-          modifyTVar' obs $ compactDictUnion (compactDictFromList ps)
+          modifyTVar' obs $ iopdUnion (iopdFromList ps)
           return inband
   return $ EntityManipulater the'lookup'entity'attr
                              the'all'entity'attrs

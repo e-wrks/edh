@@ -24,7 +24,7 @@ import           Language.Edh.Details.Evaluate
 -- return nil
 mreProc :: EdhProcedure
 mreProc (ArgsPack !args !kwargs) !exit = case args of
-  [v] | compactDictNull kwargs -> case edhUltimate v of
+  [v] | iopdNull kwargs -> case edhUltimate v of
     EdhSink !sink -> ask >>= \pgs ->
       contEdhSTM $ readTVar (evs'mrv sink) >>= \mrv -> exitEdhSTM pgs exit mrv
     _ ->
@@ -39,7 +39,7 @@ mreProc (ArgsPack !args !kwargs) !exit = case args of
 -- by a nil data
 eosProc :: EdhProcedure
 eosProc (ArgsPack !args !kwargs) !exit = case args of
-  [v] | compactDictNull kwargs -> case edhUltimate v of
+  [v] | iopdNull kwargs -> case edhUltimate v of
     EdhSink !sink -> ask >>= \pgs ->
       contEdhSTM $ readTVar (evs'seqn sink) >>= \case
         0 -> exitEdhSTM pgs exit $ EdhBool False

@@ -35,7 +35,7 @@ vecHostCtor !pgsCtor (ArgsPack !ctorArgs !ctorKwargs) !ctorExit = do
               _           -> V.fromListN len vs
         !mvec <- unsafeIOToSTM $ V.thaw vec
         ctorExit $ toDyn mvec
-  case compactDictLookup (AttrByName "length") ctorKwargs of
+  case iopdLookup (AttrByName "length") ctorKwargs of
     Nothing              -> doIt (-1) ctorArgs
     Just (EdhDecimal !d) -> case D.decimalToInteger d of
       Just !len | len >= 0 -> doIt (fromInteger len) $ ctorArgs ++ repeat nil
@@ -68,7 +68,7 @@ vecMethods !pgsModule = sequence
   !scope = contextScope $ edh'context pgsModule
 
   vecAppendProc :: EdhProcedure
-  vecAppendProc (ArgsPack !args !kwargs) !exit | compactDictNull kwargs = do
+  vecAppendProc (ArgsPack !args !kwargs) !exit | iopdNull kwargs = do
     pgs <- ask
     let
       !that = thatObject $ contextScope $ edh'context pgs
@@ -84,7 +84,7 @@ vecMethods !pgsModule = sequence
 
   vecEqProc :: EdhProcedure
   vecEqProc (ArgsPack [EdhObject (Object !entOther _ _)] !kwargs) !exit
-    | compactDictNull kwargs = withThatEntity $ \ !pgs !mvec ->
+    | iopdNull kwargs = withThatEntity $ \ !pgs !mvec ->
       fromDynamic <$> readTVar (entity'store entOther) >>= \case
         Nothing                       -> exitEdhSTM pgs exit $ EdhBool False
         Just (mvecOther :: EdhVector) -> do
@@ -99,7 +99,7 @@ vecMethods !pgsModule = sequence
 
 
   vecIdxReadProc :: EdhProcedure
-  vecIdxReadProc (ArgsPack [!idxVal] !kwargs) !exit | compactDictNull kwargs =
+  vecIdxReadProc (ArgsPack [!idxVal] !kwargs) !exit | iopdNull kwargs =
     withThatEntity $ \ !pgs !mvec -> do
       let vecObj = thatObject $ contextScope $ edh'context pgs
           exitWith :: IOVector EdhValue -> STM ()
@@ -139,7 +139,7 @@ vecMethods !pgsModule = sequence
 
   vecIdxWriteProc :: EdhProcedure
   vecIdxWriteProc (ArgsPack [!idxVal, !other] !kwargs) !exit
-    | compactDictNull kwargs = withThatEntity $ \ !pgs !mvec -> do
+    | iopdNull kwargs = withThatEntity $ \ !pgs !mvec -> do
       let exitWithRangeAssign :: Int -> Int -> Int -> STM ()
           exitWithRangeAssign !start !stop !step = case edhUltimate other of
             EdhObject !otherObj ->
