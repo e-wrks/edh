@@ -46,12 +46,13 @@ import           Language.Edh.Control
 type EdhVector = IOVector EdhValue
 
 
--- | This insertion-order-preserving dict is ispired by new dict implementation
--- introduced into CPython 3.6 (from PyPy), then formalized its behavior from
--- Python language 3.7 onwards. But we won't get the memory improvement that 
--- Python sees, as long as the compact array stores thunks instead of final
--- large object records like Python. Yet this implementation still lacks much
--- optimization.
+-- | This insertion-order-preserving dict is inspired by new dict
+-- implementation introduced into CPython 3.6 (from PyPy), then had the
+-- behavior formalized since Python language 3.7 onwards.
+--
+-- But we won't get the memory improvement that Python sees, as long as the
+-- compact array stores thunks instead of final large object records like
+-- Python. Yet this implementation still lacks much optimization.
 --
 -- TODO this impl. is not correct yet, as being not STM retry safe, need major
 --      refactoring to achieve retry safety.
