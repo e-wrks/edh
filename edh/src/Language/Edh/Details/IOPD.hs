@@ -286,6 +286,17 @@ odLookup !key (OrderedDict !m !a) = case Map.lookup key m of
   Nothing -> Nothing
   Just !i -> snd <$> V.unsafeIndex a i
 
+odLookupDefault
+  :: forall k v
+   . (Eq k, Hashable k, Eq v, Hashable v)
+  => v
+  -> k
+  -> OrderedDict k v
+  -> v
+odLookupDefault !defaultVal !key !d = case odLookup key d of
+  Nothing   -> defaultVal
+  Just !val -> val
+
 odTakeOut
   :: forall k v
    . (Eq k, Hashable k, Eq v, Hashable v)

@@ -1102,9 +1102,27 @@ evalExpr !expr !exit = do
                   Just val -> exitEdhSTM pgs exit val
 
               -- indexing an apk
-              EdhArgsPack (ArgsPack !args !kwargs) ->
-                -- TODO impl. 
-                undefined
+              EdhArgsPack (ArgsPack !args !kwargs) -> case edhUltimate ixVal of
+                EdhDecimal !idxNum -> case D.decimalToInteger idxNum of
+                  Just !i -> if i < 0 || i >= fromIntegral (length args)
+                    then
+                      throwEdh UsageError
+                      $  "apk index out of bounds: "
+                      <> T.pack (show i)
+                      <> " vs "
+                      <> T.pack (show $ length args)
+                    else exitEdhProc exit $ args !! fromInteger i
+                  Nothing ->
+                    throwEdh UsageError
+                      $  "Invalid numeric index to an apk: "
+                      <> T.pack (show idxNum)
+                EdhString !attrName -> exitEdhProc exit
+                  $ odLookupDefault EdhNil (AttrByName attrName) kwargs
+                EdhSymbol !attrSym -> exitEdhProc exit
+                  $ odLookupDefault EdhNil (AttrBySym attrSym) kwargs
+                !badIdxVal ->
+                  throwEdh UsageError $ "Invalid index to an apk: " <> T.pack
+                    (edhTypeNameOf badIdxVal)
 
               -- indexing an object, by calling its ([]) method with ixVal as the single arg
               EdhObject !obj ->
@@ -1696,8 +1714,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
 
         -- getting attr from an apk
         EdhArgsPack (ArgsPack _ !kwargs) ->
-          -- TODO impl.
-          undefined
+          exitEdhProc exit $ odLookupDefault EdhNil key kwargs
 
         -- virtual attrs by magic method from context
         !val -> case key of
