@@ -1,7 +1,3 @@
-{-# LANGUAGE
-    GADTs
-  , TypeApplications
-#-}
 
 module Language.Edh.Details.IOPD where
 
@@ -12,21 +8,11 @@ import           Control.Monad.ST
 
 import           Control.Concurrent.STM
 
-import           Data.Maybe
-import           Data.Foldable
-import           Data.Unique
-import           Data.Text                      ( Text )
-import qualified Data.Text                     as T
-import           Data.ByteString                ( ByteString )
-import qualified Data.ByteString               as B
 import           Data.Hashable
 import qualified Data.HashMap.Strict           as Map
-import           Data.List.NonEmpty             ( NonEmpty(..) )
-import qualified Data.List.NonEmpty            as NE
 import           Data.Vector                    ( Vector )
 import qualified Data.Vector                   as V
 import qualified Data.Vector.Mutable           as MV
-import           Data.Dynamic
 
 
 -- | Mutable dict with insertion order preserved
@@ -85,30 +71,71 @@ iopdInsert
   -> v
   -> IOPD k v
   -> STM ()
-iopdInsert !key !val (IOPD !mv !wpv _nhv !av) =
+iopdInsert !key !val d@(IOPD !mv !wpv _nhv !av) =
   Map.lookup key <$> readTVar mv >>= \case
     Just !i ->
       flip V.unsafeIndex i <$> readTVar av >>= flip writeTVar (Just (key, val))
     Nothing -> do
       entry <- newTVar $ Just (key, val)
-      wp    <- readTVar wpv
-      a     <- readTVar av
-      let cap = V.length a
-      if wp < cap
-        then flip seq (modifyTVar' mv $ Map.insert key wp) $ runST $ do
-          a' <- V.unsafeThaw a
-          MV.unsafeWrite a' wp entry
-        else do
-          -- TODO find and fill holes under certain circumstances
-          let !capNew = (cap +) $ max 7 $ quot cap 2
-          let !aNew = runST $ do
-                a' <- MV.unsafeNew capNew
-                MV.unsafeCopy (MV.unsafeSlice 0 wp a')
-                  =<< V.unsafeThaw (V.slice 0 wp a)
-                MV.unsafeWrite a' wp entry
-                V.unsafeFreeze a'
-          writeTVar av aNew
+      wp0   <- readTVar wpv
+      a0    <- readTVar av
+      if wp0 >= V.length a0 then iopdReserve 7 d else pure ()
+      wp <- readTVar wpv
+      a  <- readTVar av
+      if wp >= V.length a
+        then error "bug: iopd reservation malfunctioned"
+        else pure ()
+      flip seq (modifyTVar' mv $ Map.insert key wp) $ runST $ do
+        a' <- V.unsafeThaw a
+        MV.unsafeWrite a' wp entry
       writeTVar wpv (wp + 1)
+
+iopdReserve
+  :: forall k v
+   . (Eq k, Hashable k, Eq v, Hashable v)
+  => Int
+  -> IOPD k v
+  -> STM ()
+iopdReserve !moreCap (IOPD _mv !wpv _nhv !av) = do
+  wp <- readTVar wpv
+  a  <- readTVar av
+  let !needCap = wp + moreCap
+      !cap     = V.length a
+  if cap >= needCap
+    then return ()
+    else do
+      let !aNew = runST $ do
+            a' <- MV.unsafeNew needCap
+            MV.unsafeCopy (MV.unsafeSlice 0 wp a')
+              =<< V.unsafeThaw (V.slice 0 wp a)
+            V.unsafeFreeze a'
+      writeTVar av aNew
+
+iopdUpdate
+  :: forall k v
+   . (Eq k, Hashable k, Eq v, Hashable v)
+  => [(k, v)]
+  -> IOPD k v
+  -> STM ()
+iopdUpdate !ps !d = if null ps
+  then return ()
+  else do
+    iopdReserve (length ps) d
+    upd ps
+ where
+  upd []                    = return ()
+  upd ((!key, !val) : rest) = do
+    iopdInsert key val d
+    upd rest
+
+-- iopdUnion
+--   :: forall k v
+--    . (Eq k, Hashable k, Eq v, Hashable v)
+--   => IOPD k v
+--   -> IOPD k v
+--   -> STM ()
+-- iopdUnion (IOPD !mvFrom !wpvFrom !nhvFrom !avFrom) (IOPD !mv !wpv !nhv !av) =
+--   undefined
 
 iopdLookup
   :: forall k v
@@ -170,6 +197,20 @@ iopdToList (IOPD _mv !wpv _nhv !av) = do
         Nothing     -> go entries (i - 1)
         Just !entry -> go (entry : entries) (i - 1)
   go [] (wp - 1)
+
+iopdToReverseList
+  :: forall k v
+   . (Eq k, Hashable k, Eq v, Hashable v)
+  => IOPD k v
+  -> STM [(k, v)]
+iopdToReverseList (IOPD _mv !wpv _nhv !av) = do
+  wp <- readTVar wpv
+  a  <- readTVar av
+  let go !entries !i | i >= wp = return entries
+      go !entries !i           = readTVar (V.unsafeIndex a i) >>= \case
+        Nothing     -> go entries (i + 1)
+        Just !entry -> go (entry : entries) (i + 1)
+  go [] 0
 
 iopdFromList
   :: forall k v
@@ -235,6 +276,16 @@ odNull
   -> Bool
 odNull (OrderedDict !m _a) = Map.null m
 
+odLookup
+  :: forall k v
+   . (Eq k, Hashable k, Eq v, Hashable v)
+  => k
+  -> OrderedDict k v
+  -> Maybe v
+odLookup !key (OrderedDict !m !a) = case Map.lookup key m of
+  Nothing -> Nothing
+  Just !i -> snd <$> V.unsafeIndex a i
+
 odTakeOut
   :: forall k v
    . (Eq k, Hashable k, Eq v, Hashable v)
@@ -244,6 +295,13 @@ odTakeOut
 odTakeOut !key od@(OrderedDict !m !a) = case Map.lookup key m of
   Nothing -> (Nothing, od)
   Just !i -> (snd <$> V.unsafeIndex a i, OrderedDict (Map.delete key m) a)
+
+odKeys
+  :: forall k v
+   . (Eq k, Hashable k, Eq v, Hashable v)
+  => OrderedDict k v
+  -> [k]
+odKeys (OrderedDict !m _a) = Map.keys m
 
 odToList
   :: forall k v
@@ -257,4 +315,79 @@ odToList (OrderedDict _m !a) = go [] (V.length a - 1)
   go entries !i         = case V.unsafeIndex a i of
     Nothing     -> go entries (i - 1)
     Just !entry -> go (entry : entries) (i - 1)
+
+odToReverseList
+  :: forall k v
+   . (Eq k, Hashable k, Eq v, Hashable v)
+  => OrderedDict k v
+  -> [(k, v)]
+odToReverseList (OrderedDict _m !a) = go [] 0
+ where
+  !cap = V.length a
+  go :: [(k, v)] -> Int -> [(k, v)]
+  go entries !i | i >= cap = entries
+  go entries !i            = case V.unsafeIndex a i of
+    Nothing     -> go entries (i + 1)
+    Just !entry -> go (entry : entries) (i + 1)
+
+odFromList
+  :: forall k v
+   . (Eq k, Hashable k, Eq v, Hashable v)
+  => [(k, v)]
+  -> OrderedDict k v
+odFromList !entries =
+  let (mNew, aNew) = runST $ do
+        a <- MV.unsafeNew $ length entries
+        let go []                    !m _wp = (m, ) <$> V.unsafeFreeze a
+            go (ev@(!key, _) : rest) !m !wp = case Map.lookup key m of
+              Nothing -> do
+                MV.unsafeWrite a wp $ Just ev
+                go rest (Map.insert key wp m) (wp + 1)
+              Just !i -> do
+                MV.unsafeWrite a i $ Just ev
+                go rest m wp
+        go entries Map.empty 0
+  in  OrderedDict mNew aNew
+
+odMap
+  :: forall k v v'
+   . (Eq k, Hashable k, Eq v, Hashable v, Eq v', Hashable v')
+  => (v -> v')
+  -> OrderedDict k v
+  -> OrderedDict k v'
+odMap _f (OrderedDict !m _a) | Map.null m = OrderedDict Map.empty V.empty
+odMap !f (OrderedDict !m !a) =
+  let !aNew = runST $ do
+        a' <- MV.unsafeNew $ V.length a
+        MV.set a' Nothing
+        let go []                  = V.unsafeFreeze a'
+            go ((!key, !i) : rest) = do
+              case V.unsafeIndex a i of
+                Just (_, !val) -> MV.unsafeWrite a' i $ Just (key, f val)
+                Nothing        -> pure () -- should fail hard in this case?
+              go rest
+        go (Map.toList m)
+  in  OrderedDict m aNew
+
+odMapSTM
+  :: forall k v v'
+   . (Eq k, Hashable k, Eq v, Hashable v, Eq v', Hashable v')
+  => (v -> STM v')
+  -> OrderedDict k v
+  -> STM (OrderedDict k v')
+odMapSTM _f (OrderedDict !m _a) | Map.null m =
+  return $ OrderedDict Map.empty V.empty
+odMapSTM !f (OrderedDict !m !a) =
+  let !aNew = runST $ do
+        a' <- MV.unsafeNew $ V.length a
+        MV.set a' $ return Nothing
+        let go []                  = V.unsafeFreeze a'
+            go ((!key, !i) : rest) = do
+              case V.unsafeIndex a i of
+                Just (_, !val) ->
+                  MV.unsafeWrite a' i $ Just . (key, ) <$> f val
+                Nothing -> pure () -- should fail hard in this case?
+              go rest
+        go (Map.toList m)
+  in  OrderedDict m <$> V.sequence aNew
 

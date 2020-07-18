@@ -7,3 +7,4 @@ conf_forward:
     - -XBangPatterns
     - -XTupleSections
     - -XScopedTypeVariables
+    - -XGADTs

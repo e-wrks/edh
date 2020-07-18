@@ -20,6 +20,7 @@ import qualified Data.Vector.Mutable           as MV
 import qualified Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
+import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
 
@@ -35,7 +36,7 @@ vecHostCtor !pgsCtor (ArgsPack !ctorArgs !ctorKwargs) !ctorExit = do
               _           -> V.fromListN len vs
         !mvec <- unsafeIOToSTM $ V.thaw vec
         ctorExit $ toDyn mvec
-  case iopdLookup (AttrByName "length") ctorKwargs of
+  case odLookup (AttrByName "length") ctorKwargs of
     Nothing              -> doIt (-1) ctorArgs
     Just (EdhDecimal !d) -> case D.decimalToInteger d of
       Just !len | len >= 0 -> doIt (fromInteger len) $ ctorArgs ++ repeat nil
@@ -68,7 +69,7 @@ vecMethods !pgsModule = sequence
   !scope = contextScope $ edh'context pgsModule
 
   vecAppendProc :: EdhProcedure
-  vecAppendProc (ArgsPack !args !kwargs) !exit | iopdNull kwargs = do
+  vecAppendProc (ArgsPack !args !kwargs) !exit | odNull kwargs = do
     pgs <- ask
     let
       !that = thatObject $ contextScope $ edh'context pgs
@@ -84,7 +85,7 @@ vecMethods !pgsModule = sequence
 
   vecEqProc :: EdhProcedure
   vecEqProc (ArgsPack [EdhObject (Object !entOther _ _)] !kwargs) !exit
-    | iopdNull kwargs = withThatEntity $ \ !pgs !mvec ->
+    | odNull kwargs = withThatEntity $ \ !pgs !mvec ->
       fromDynamic <$> readTVar (entity'store entOther) >>= \case
         Nothing                       -> exitEdhSTM pgs exit $ EdhBool False
         Just (mvecOther :: EdhVector) -> do
@@ -99,7 +100,7 @@ vecMethods !pgsModule = sequence
 
 
   vecIdxReadProc :: EdhProcedure
-  vecIdxReadProc (ArgsPack [!idxVal] !kwargs) !exit | iopdNull kwargs =
+  vecIdxReadProc (ArgsPack [!idxVal] !kwargs) !exit | odNull kwargs =
     withThatEntity $ \ !pgs !mvec -> do
       let vecObj = thatObject $ contextScope $ edh'context pgs
           exitWith :: IOVector EdhValue -> STM ()
@@ -138,8 +139,8 @@ vecMethods !pgsModule = sequence
     throwEdh UsageError $ "Invalid index for a Vector: " <> T.pack (show apk)
 
   vecIdxWriteProc :: EdhProcedure
-  vecIdxWriteProc (ArgsPack [!idxVal, !other] !kwargs) !exit
-    | iopdNull kwargs = withThatEntity $ \ !pgs !mvec -> do
+  vecIdxWriteProc (ArgsPack [!idxVal, !other] !kwargs) !exit | odNull kwargs =
+    withThatEntity $ \ !pgs !mvec -> do
       let exitWithRangeAssign :: Int -> Int -> Int -> STM ()
           exitWithRangeAssign !start !stop !step = case edhUltimate other of
             EdhObject !otherObj ->

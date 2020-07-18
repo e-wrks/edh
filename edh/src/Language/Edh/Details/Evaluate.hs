@@ -35,6 +35,8 @@ import           Data.Lossless.Decimal         as D
 import           Language.Edh.Control
 import           Language.Edh.Parser
 import           Language.Edh.Event
+
+import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.PkgMan
@@ -117,7 +119,7 @@ evalEdh' !srcName !lineNo !srcCode !exit = do
       runEdhProc pgs
         $ createEdhObject
             ec
-            (ArgsPack [EdhString $ T.pack $ errorBundlePretty err] iopdEmpty)
+            (ArgsPack [EdhString $ T.pack $ errorBundlePretty err] odEmpty)
         $ \(OriginalValue !exv _ _) -> edhThrow exv
     Right !stmts -> runEdhProc pgs $ evalBlock stmts exit
 
@@ -128,7 +130,7 @@ deParen x = case x of
   _            -> x
 
 deApk :: ArgsPack -> ArgsPack
-deApk (ArgsPack [EdhArgsPack !apk] !kwargs) | iopdNull kwargs = apk
+deApk (ArgsPack [EdhArgsPack !apk] !kwargs) | odNull kwargs = apk
 deApk apk = apk
 
 evalStmt :: StmtSrc -> EdhProcExit -> EdhProc
@@ -198,12 +200,11 @@ evalBlock (ss : rest) !exit = evalStmt ss $ \(OriginalValue !val _ _) ->
 evalExprs :: [Expr] -> EdhProcExit -> EdhProc
 -- here 'EdhArgsPack' is used for intermediate tag,
 -- not intend to return an actual apk value
-evalExprs [] !exit = exitEdhProc exit (EdhArgsPack $ ArgsPack [] iopdEmpty)
+evalExprs []       !exit = exitEdhProc exit (EdhArgsPack $ ArgsPack [] odEmpty)
 evalExprs (x : xs) !exit = evalExpr x $ \(OriginalValue !val _ _) ->
   evalExprs xs $ \(OriginalValue !tv _ _) -> case tv of
-    EdhArgsPack (ArgsPack !l _) -> exitEdhProc
-      exit
-      (EdhArgsPack $ ArgsPack (edhDeCaseClose val : l) iopdEmpty)
+    EdhArgsPack (ArgsPack !l _) ->
+      exitEdhProc exit (EdhArgsPack $ ArgsPack (edhDeCaseClose val : l) odEmpty)
     _ -> error "bug"
 
 
@@ -224,33 +225,28 @@ evalStmt' !stmt !exit = do
         recvEdhArgs ctx argsRcvr (deApk apk) $ \um -> contEdhSTM $ do
           if not (contextEffDefining ctx)
             then -- normal multi-assignment
-                 updateEntityAttrs pgs (scopeEntity scope) $ iopdToList um
+                 updateEntityAttrs pgs (scopeEntity scope) $ odToList um
             else do -- define effectful artifacts by multi-assignment
-              let
-                !effd =
-                  iopdFromList [ (attrKeyValue k, v) | (k, v) <- iopdToList um ]
+              let !effd = [ (attrKeyValue k, v) | (k, v) <- odToList um ]
               lookupEntityAttr pgs
                                (scopeEntity scope)
                                (AttrByName edhEffectsMagicName)
                 >>= \case
-                      EdhDict (Dict _ !effDS) ->
-                        modifyTVar' effDS $ iopdUnion effd
-                      _ -> do
+                      EdhDict (Dict _ !effDS) -> iopdUpdate effd effDS
+                      _                       -> do
                         d <- createEdhDict effd
                         changeEntityAttr pgs
                                          (scopeEntity scope)
                                          (AttrByName edhEffectsMagicName)
                                          d
           when (contextExporting ctx) $ do -- do export what's assigned
-            let !impd =
-                  iopdFromList [ (attrKeyValue k, v) | (k, v) <- iopdToList um ]
+            let !impd = [ (attrKeyValue k, v) | (k, v) <- odToList um ]
             lookupEntityAttr pgs
                              (objEntity this)
                              (AttrByName edhExportsMagicName)
               >>= \case
-                    EdhDict (Dict _ !thisExpDS) ->
-                      modifyTVar' thisExpDS $ iopdUnion impd
-                    _ -> do -- todo warn if of wrong type
+                    EdhDict (Dict _ !thisExpDS) -> iopdUpdate impd thisExpDS
+                    _                           -> do -- todo warn if of wrong type
                       d <- createEdhDict impd
                       changeEntityAttr pgs
                                        (objEntity this)
@@ -433,7 +429,7 @@ evalStmt' !stmt !exit = do
                   runEdhProc pgs
                     $ callEdhMethod this
                                     mth'proc
-                                    (ArgsPack [EdhObject scopeObj] iopdEmpty)
+                                    (ArgsPack [EdhObject scopeObj] odEmpty)
                                     id
                     $ \_ -> contEdhSTM $ exitEdhSTM pgs exit nil
                 _ ->
@@ -498,20 +494,18 @@ importFromApk !tgtEnt !argsRcvr !fromApk !exit = do
   recvEdhArgs ctx argsRcvr fromApk $ \em -> contEdhSTM $ do
     if not (contextEffDefining ctx)
       then -- normal import
-           updateEntityAttrs pgs tgtEnt $ iopdToList em
+           updateEntityAttrs pgs tgtEnt $ odToList em
       else do -- importing effects
-        let !effd =
-              iopdFromList [ (attrKeyValue k, v) | (k, v) <- iopdToList em ]
+        let !effd = [ (attrKeyValue k, v) | (k, v) <- odToList em ]
         lookupEntityAttr pgs tgtEnt (AttrByName edhEffectsMagicName) >>= \case
-          EdhDict (Dict _ !effDS) -> modifyTVar' effDS $ iopdUnion effd
+          EdhDict (Dict _ !effDS) -> iopdUpdate effd effDS
           _                       -> do -- todo warn if of wrong type
             d <- createEdhDict effd
             changeEntityAttr pgs tgtEnt (AttrByName edhEffectsMagicName) d
     when (contextExporting ctx) $ do -- do export what's imported
-      let !impd =
-            iopdFromList [ (attrKeyValue k, v) | (k, v) <- iopdToList em ]
+      let !impd = [ (attrKeyValue k, v) | (k, v) <- odToList em ]
       lookupEntityAttr pgs tgtEnt (AttrByName edhExportsMagicName) >>= \case
-        EdhDict (Dict _ !thisExpDS) -> modifyTVar' thisExpDS $ iopdUnion impd
+        EdhDict (Dict _ !thisExpDS) -> iopdUpdate impd thisExpDS
         _                           -> do -- todo warn if of wrong type
           d <- createEdhDict impd
           changeEntityAttr pgs tgtEnt (AttrByName edhExportsMagicName) d
@@ -523,23 +517,23 @@ edhExportsMagicName = "__exports__"
 importFromObject :: Entity -> ArgsReceiver -> Object -> EdhProcExit -> EdhProc
 importFromObject !tgtEnt !argsRcvr !fromObj !exit = do
   pgs <- ask
-  let withExps :: InsOrderPrsvDict AttrKey -> STM ()
+  let withExps :: [(AttrKey, EdhValue)] -> STM ()
       withExps !exps =
         runEdhProc pgs
-          $ importFromApk tgtEnt argsRcvr (ArgsPack [] exps)
+          $ importFromApk tgtEnt argsRcvr (ArgsPack [] $ odFromList exps)
           $ \_ -> exitEdhProc exit $ EdhObject fromObj
   contEdhSTM
     $ lookupEntityAttr pgs (objEntity fromObj) (AttrByName edhExportsMagicName)
     >>= \case
           EdhNil -> -- nothing exported at all
-            withExps iopdEmpty
-          EdhDict (Dict _ !fromExpDS) -> readTVar fromExpDS >>= \expd ->
-            withExps $ iopdFromList $ catMaybes
+            withExps []
+          EdhDict (Dict _ !fromExpDS) -> iopdToList fromExpDS >>= \ !expl ->
+            withExps $ catMaybes
               [ case k of
                   EdhString !expKey -> Just (AttrByName expKey, v)
                   EdhSymbol !expSym -> Just (AttrBySym expSym, v)
                   _                 -> Nothing -- todo warn about this
-              | (k, v) <- iopdToList expd
+              | (k, v) <- expl
               ]
           badExplVal ->
             throwEdhSTM pgs UsageError $ "bad __exports__ type: " <> T.pack
@@ -683,7 +677,7 @@ loadModule !moduSlot !moduId !moduFile !exit = ask >>= \pgsImporter ->
 createEdhModule' :: EdhWorld -> ModuleId -> String -> STM Object
 createEdhModule' !world !moduId !srcName = do
   -- prepare the module meta data
-  !moduEntity <- createHashEntity $ iopdFromList
+  !moduEntity <- createHashEntity =<< iopdFromList
     [ (AttrByName "__name__", EdhString moduId)
     , (AttrByName "__file__", EdhString $ T.pack srcName)
     , (AttrByName "__repr__", EdhString $ "module:" <> moduId)
@@ -887,7 +881,7 @@ evalDictLit [] !dsl !exit = ask >>= \pgs -> contEdhSTM $ do
   u   <- unsafeIOToSTM newUnique
   -- entry order in DictExpr is reversed as from source, we reversed it again
   -- here, so dsl now is the same order as in source code
-  dsv <- newTVar $ iopdFromList dsl
+  dsv <- iopdFromList dsl
   exitEdhSTM pgs exit $ EdhDict $ Dict u dsv
 evalDictLit ((k, v) : entries) !dsl !exit = case k of
   LitDictKey !lit -> evalExpr v $ \(OriginalValue vVal _ _) -> do
@@ -918,9 +912,9 @@ evalExpr !expr !exit = do
         $ lookupEntityAttr pgs (objEntity this) (AttrByName edhExportsMagicName)
         >>= \case
               EdhDict (Dict _ !thisExpDS) ->
-                modifyTVar' thisExpDS $ iopdInsert (attrKeyValue key) val
+                iopdInsert (attrKeyValue key) val thisExpDS
               _ -> do
-                d <- createEdhDict $ iopdSingleton (attrKeyValue key) val
+                d <- createEdhDict [(attrKeyValue key, val)]
                 changeEntityAttr pgs
                                  (objEntity this)
                                  (AttrByName edhExportsMagicName)
@@ -930,9 +924,9 @@ evalExpr !expr !exit = do
       lookupEntityAttr pgs (scopeEntity scope) (AttrByName edhEffectsMagicName)
         >>= \case
               EdhDict (Dict _ !effDS) ->
-                modifyTVar' effDS $ iopdInsert (attrKeyValue key) val
+                iopdInsert (attrKeyValue key) val effDS
               _ -> do
-                d <- createEdhDict $ iopdSingleton (attrKeyValue key) val
+                d <- createEdhDict [(attrKeyValue key, val)]
                 changeEntityAttr pgs
                                  (scopeEntity scope)
                                  (AttrByName edhEffectsMagicName)
@@ -984,7 +978,7 @@ evalExpr !expr !exit = do
           30
           (Just $ sourcePosPretty srcPos)
           (ArgsPack [EdhString "Standalone guard treated as plain value."]
-                    iopdEmpty
+                    odEmpty
           )
         runEdhProc pgs $ evalExpr expr' exit
 
@@ -1102,9 +1096,8 @@ evalExpr !expr !exit = do
             case edhDeCaseClose tgtV of
 
               -- indexing a dict
-              (EdhDict (Dict _ !d)) -> contEdhSTM $ do
-                ds <- readTVar d
-                case iopdLookup ixVal ds of
+              (EdhDict (Dict _ !d)) ->
+                contEdhSTM $ iopdLookup ixVal d >>= \case
                   Nothing  -> exitEdhSTM pgs exit nil
                   Just val -> exitEdhSTM pgs exit val
 
@@ -1127,7 +1120,7 @@ evalExpr !expr !exit = do
                         EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
                           obj
                           mth'proc
-                          (ArgsPack [ixVal] iopdEmpty)
+                          (ArgsPack [ixVal] odEmpty)
                           id
                           exit
 
@@ -1182,7 +1175,7 @@ evalExpr !expr !exit = do
                           EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
                             rhObj
                             mth'proc
-                            (ArgsPack [lhVal] iopdEmpty)
+                            (ArgsPack [lhVal] odEmpty)
                             id
                             exit
                           !badEqMth ->
@@ -1199,7 +1192,7 @@ evalExpr !expr !exit = do
               EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
                 lhObj
                 mth'proc
-                (ArgsPack [rhVal] iopdEmpty)
+                (ArgsPack [rhVal] odEmpty)
                 id
                 exit
               !badEqMth ->
@@ -1219,7 +1212,7 @@ evalExpr !expr !exit = do
                 EdhMethod !mth'proc -> runEdhProc pgs $ callEdhMethod
                   rhObj
                   mth'proc
-                  (ArgsPack [lhVal] iopdEmpty)
+                  (ArgsPack [lhVal] odEmpty)
                   id
                   exit
                 !badEqMth ->
@@ -1458,29 +1451,27 @@ evalExpr !expr !exit = do
           -- with possibly a different precedence
           Left (StmtSrc (_, ExprStmt (AttrExpr (DirectRef (NamedAttr !origOpSym)))))
             -> contEdhSTM $ do
-              let
-                redeclareOp !origOp = do
-                  unless (contextPure ctx) $ changeEntityAttr
-                    pgs
-                    (scopeEntity scope)
-                    (AttrByName opSym)
-                    origOp
-                  when (contextExporting ctx)
-                    $   lookupEntityAttr pgs
-                                         (objEntity this)
-                                         (AttrByName edhExportsMagicName)
-                    >>= \case
-                          EdhDict (Dict _ !thisExpDS) ->
-                            modifyTVar' thisExpDS
-                              $ iopdInsert (EdhString opSym) origOp
-                          _ -> do
-                            d <- createEdhDict
-                              $ iopdSingleton (EdhString opSym) origOp
-                            changeEntityAttr pgs
-                                             (objEntity this)
-                                             (AttrByName edhExportsMagicName)
-                                             d
-                  exitEdhSTM pgs exit origOp
+              let redeclareOp !origOp = do
+                    unless (contextPure ctx) $ changeEntityAttr
+                      pgs
+                      (scopeEntity scope)
+                      (AttrByName opSym)
+                      origOp
+                    when (contextExporting ctx)
+                      $   lookupEntityAttr pgs
+                                           (objEntity this)
+                                           (AttrByName edhExportsMagicName)
+                      >>= \case
+                            EdhDict (Dict _ !thisExpDS) ->
+                              iopdInsert (EdhString opSym) origOp thisExpDS
+                            _ -> do
+                              d <- createEdhDict [(EdhString opSym, origOp)]
+                              changeEntityAttr
+                                pgs
+                                (objEntity this)
+                                (AttrByName edhExportsMagicName)
+                                d
+                    exitEdhSTM pgs exit origOp
               lookupEdhCtxAttr pgs scope (AttrByName origOpSym) >>= \case
                 EdhNil ->
                   throwEdhSTM pgs EvalError
@@ -1515,9 +1506,9 @@ evalExpr !expr !exit = do
                                    (AttrByName edhExportsMagicName)
               >>= \case
                     EdhDict (Dict _ !thisExpDS) ->
-                      modifyTVar' thisExpDS $ iopdInsert (EdhString opSym) op
+                      iopdInsert (EdhString opSym) op thisExpDS
                     _ -> do
-                      d <- createEdhDict $ iopdSingleton (EdhString opSym) op
+                      d <- createEdhDict [(EdhString opSym, op)]
                       changeEntityAttr pgs
                                        (objEntity this)
                                        (AttrByName edhExportsMagicName)
@@ -1537,7 +1528,7 @@ evalExpr !expr !exit = do
                 -- logger 30 (Just $ sourcePosPretty srcPos)
                 --   $ ArgsPack
                 --       [EdhString "overriding an unavailable operator"]
-                --       iopdEmpty
+                --       odEmpty
                 return Nothing
               op@EdhIntrOp{} -> return $ Just op
               op@EdhOprtor{} -> return $ Just op
@@ -1552,7 +1543,7 @@ evalExpr !expr !exit = do
                         <> ": "
                         <> T.pack (show opVal)
                       ]
-                      iopdEmpty
+                      odEmpty
                 return Nothing
         predecessor <- findPredecessor
         u           <- unsafeIOToSTM newUnique
@@ -1572,9 +1563,9 @@ evalExpr !expr !exit = do
                                (AttrByName edhExportsMagicName)
           >>= \case
                 EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS $ iopdInsert (EdhString opSym) op
+                  iopdInsert (EdhString opSym) op thisExpDS
                 _ -> do
-                  d <- createEdhDict $ iopdSingleton (EdhString opSym) op
+                  d <- createEdhDict [(EdhString opSym, op)]
                   changeEntityAttr pgs
                                    (objEntity this)
                                    (AttrByName edhExportsMagicName)
@@ -1628,7 +1619,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
       chkExit :: Object -> OriginalValue -> STM ()
       chkExit !obj rtn@(OriginalValue !rtnVal _ _) = case rtnVal of
         EdhDescriptor !getter _ -> runEdhProc pgs
-          $ callEdhMethod obj getter (ArgsPack [] iopdEmpty) id exit
+          $ callEdhMethod obj getter (ArgsPack [] odEmpty) id exit
         _ -> exitEdhSTM' pgs exit rtn
       trySelfMagic :: Object -> EdhProc -> EdhProc
       trySelfMagic !obj !noMagic =
@@ -1639,7 +1630,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
               EdhMethod !mth -> runEdhProc pgs $ callEdhMethod
                 obj
                 mth
-                (ArgsPack [attrKeyValue key] iopdEmpty)
+                (ArgsPack [attrKeyValue key] odEmpty)
                 id
                 exit
               !badMth ->
@@ -1715,7 +1706,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit = do
                   "__" <> T.pack (edhTypeNameOf val) <> "_" <> attrName <> "__"
             lookupEdhCtxAttr pgs scope (AttrByName magicName) >>= \case
               EdhMethod !mth -> runEdhProc pgs
-                $ callEdhMethod this mth (ArgsPack [val] iopdEmpty) id exit
+                $ callEdhMethod this mth (ArgsPack [val] odEmpty) id exit
               _ -> runEdhProc pgs $ exitNoAttr fromVal
           _ -> exitNoAttr fromVal
 
@@ -1763,10 +1754,7 @@ getEdhAttrWSM !magicSpell !obj !key !exitNoMagic !exit = do
       withMagicMethod :: Scope -> ProcDefi -> STM ()
       withMagicMethod !magicScope !magicMth =
         runEdhProc pgs
-          $ callEdhMethod obj
-                          magicMth
-                          (ArgsPack [attrKeyValue key] iopdEmpty)
-                          id
+          $ callEdhMethod obj magicMth (ArgsPack [attrKeyValue key] odEmpty) id
           $ \(OriginalValue !magicRtn _ _) -> case magicRtn of
               EdhContinue -> getViaSupers restSupers
               _ -> exitEdhProc' exit $ OriginalValue magicRtn magicScope obj
@@ -1808,7 +1796,7 @@ setEdhAttrWSM !pgsAfter !magicSpell !obj !key !val !exitNoMagic !exit = do
         runEdhProc pgs
           $ callEdhMethod obj
                           magicMth
-                          (ArgsPack [attrKeyValue key, val] iopdEmpty)
+                          (ArgsPack [attrKeyValue key, val] odEmpty)
                           id
           $ \(OriginalValue !magicRtn _ _) -> case magicRtn of
               EdhContinue -> setViaSupers restSupers
@@ -1916,35 +1904,34 @@ edhMakeCall' !pgsCaller !callee'val !callee'that apk@(ArgsPack !args !kwargs) !s
     -- calling a producer procedure
     EdhPrducr !mth'proc -> case procedure'body $ procedure'decl mth'proc of
       Right _ -> throwEdhSTM pgsCaller EvalError "bug: host producer procedure"
-      Left !pb ->
-        case edhUltimate <$> iopdLookup (AttrByName "outlet") kwargs of
-          Nothing -> do
-            outlet <- newEventSink
-            callMaker $ \exit ->
-              launchEventProducer exit outlet $ callEdhMethod'
-                Nothing
-                callee'that
-                mth'proc
-                pb
-                (ArgsPack
-                  args
-                  (iopdInsert (AttrByName "outlet") (EdhSink outlet) kwargs)
-                )
-                scopeMod
-                edhEndOfProc
-          Just (EdhSink !outlet) -> callMaker $ \exit ->
-            launchEventProducer exit outlet $ callEdhMethod'
-              Nothing
-              callee'that
-              mth'proc
-              pb
-              (ArgsPack args kwargs)
-              scopeMod
-              edhEndOfProc
-          Just !badVal ->
-            throwEdhSTM pgsCaller UsageError
-              $  "The value passed to a producer as `outlet` found to be a "
-              <> T.pack (edhTypeNameOf badVal)
+      Left !pb -> case edhUltimate <$> odLookup (AttrByName "outlet") kwargs of
+        Nothing -> do
+          outlet <- newEventSink
+          callMaker $ \exit -> launchEventProducer exit outlet $ callEdhMethod'
+            Nothing
+            callee'that
+            mth'proc
+            pb
+            (  ArgsPack args
+            $  odFromList
+            $  odToList kwargs
+            ++ [(AttrByName "outlet", EdhSink outlet)]
+            )
+            scopeMod
+            edhEndOfProc
+        Just (EdhSink !outlet) -> callMaker $ \exit ->
+          launchEventProducer exit outlet $ callEdhMethod'
+            Nothing
+            callee'that
+            mth'proc
+            pb
+            (ArgsPack args kwargs)
+            scopeMod
+            edhEndOfProc
+        Just !badVal ->
+          throwEdhSTM pgsCaller UsageError
+            $  "The value passed to a producer as `outlet` found to be a "
+            <> T.pack (edhTypeNameOf badVal)
 
     -- calling a generator
     (EdhGnrtor _) -> throwEdhSTM
@@ -2023,7 +2010,7 @@ createEdhError
   -> STM ()
 createEdhError !pgs !et !msg !exit = getEdhErrClass pgs et >>= \ec ->
   runEdhProc pgs
-    $ constructEdhObject ec (ArgsPack [EdhString msg] iopdEmpty)
+    $ constructEdhObject ec (ArgsPack [EdhString msg] odEmpty)
     $ \(OriginalValue !exv _ _) -> case exv of
         EdhObject !exo -> contEdhSTM $ do
           esd <- readTVar $ entity'store $ objEntity exo
@@ -2051,7 +2038,7 @@ fromEdhError !pgs !exv !exit = case exv of
 
 -- | Convert an arbitrary exception to an Edh error
 toEdhError :: EdhProgState -> SomeException -> (EdhValue -> STM ()) -> STM ()
-toEdhError !pgs !e !exit = toEdhError' pgs e (ArgsPack [] iopdEmpty) exit
+toEdhError !pgs !e !exit = toEdhError' pgs e (ArgsPack [] odEmpty) exit
 -- | Convert an arbitrary exception plus details to an Edh error
 toEdhError'
   :: EdhProgState -> SomeException -> ArgsPack -> (EdhValue -> STM ()) -> STM ()
@@ -2119,12 +2106,12 @@ createErrEntManipulater !clsName = do
             Just (e :: SomeException) -> case k of
               AttrByName "__repr__" -> return $ EdhString $ T.pack $ show e
               AttrByName "details" ->
-                return $ EdhArgsPack $ ArgsPack [] iopdEmpty
+                return $ EdhArgsPack $ ArgsPack [] odEmpty
               _ -> return nil
             Nothing -> case k of
               AttrByName "__repr__" -> return $ EdhString $ clsName <> "()"
               AttrByName "details" ->
-                return $ EdhArgsPack $ ArgsPack [] iopdEmpty
+                return $ EdhArgsPack $ ArgsPack [] odEmpty
               _ -> return nil
       the'all'entity'attrs _ _ = return []
       the'change'entity'attr !pgs _ _ _ =
@@ -2152,7 +2139,7 @@ throwEdh !et !msg = ask >>= \pgs -> contEdhSTM $ throwEdhSTM pgs et msg
 throwEdhSTM :: EdhProgState -> EdhErrorTag -> Text -> STM ()
 throwEdhSTM !pgs !et !msg = getEdhErrClass pgs et >>= \ec ->
   runEdhProc pgs
-    $ constructEdhObject ec (ArgsPack [EdhString msg] iopdEmpty)
+    $ constructEdhObject ec (ArgsPack [EdhString msg] odEmpty)
     $ \(OriginalValue !exo _ _) -> ask >>= contEdhSTM . flip edhThrowSTM exo
 
 
@@ -2281,16 +2268,17 @@ constructEdhObject !cls apk@(ArgsPack !args !kwargs) !exit = do
         $   lookupEntityAttr pgsCtor thisEnt (AttrByName "__init__")
         >>= \case
               EdhNil ->
-                if (null args && iopdNull kwargs) -- no ctor arg at all
-                     || -- it's okay for a host class to omit __init__()
+                if (null args && odNull kwargs) -- no ctor arg at all
+                   || -- it's okay for a host class to omit __init__()
                         -- while processes ctor args by the host class proc
-                        isRight (procedure'body $ procedure'decl cls)
-                  then exitEdhSTM pgsCaller exit thisVal
-                  else
-                    throwEdhSTM pgsCaller EvalError
-                    $  "No __init__() defined by class "
-                    <> procedureName cls
-                    <> " to receive argument(s)"
+                      isRight (procedure'body $ procedure'decl cls)
+                then
+                  exitEdhSTM pgsCaller exit thisVal
+                else
+                  throwEdhSTM pgsCaller EvalError
+                  $  "No __init__() defined by class "
+                  <> procedureName cls
+                  <> " to receive argument(s)"
               EdhMethod !initMth ->
                 case procedure'body $ procedure'decl initMth of
                   Right !hp ->
@@ -2357,7 +2345,7 @@ createEdhObject !cls !apk !exit = do
 
     -- calling an Edh namespace/class (constructor) procedure
     Left !pb -> contEdhSTM $ do
-      newEnt  <- createHashEntity iopdEmpty
+      newEnt  <- createHashEntity =<< iopdEmpty
       newThis <- viewAsEdhObject newEnt cls []
       let
         goCtor = do
@@ -2405,7 +2393,7 @@ createEdhObject !cls !apk !exit = do
                 }
           runEdhProc pgsCaller $ recvEdhArgs recvCtx WildReceiver apk $ \oed ->
             contEdhSTM $ do
-              updateEntityAttrs pgsCaller (objEntity newThis) $ iopdToList oed
+              updateEntityAttrs pgsCaller (objEntity newThis) $ odToList oed
               goCtor
         -- a class procedure, should leave ctor args for its __init__ method
         PackReceiver [] -> goCtor
@@ -2446,7 +2434,7 @@ callEdhOperator !mth'that !mth'proc !prede !args !exit = do
           !pgsMth = pgsCaller { edh'context = mthCtx }
       -- push stack for the host procedure
       local (const pgsMth)
-        $ hp (ArgsPack args iopdEmpty)
+        $ hp (ArgsPack args odEmpty)
         $ \(OriginalValue !val _ _) ->
         -- pop stack after host procedure returned
         -- return whatever the result a host procedure returned
@@ -2493,9 +2481,9 @@ callEdhOperator' !gnr'caller !callee'that !mth'proc !prede !mth'body !args !exit
           }
     recvEdhArgs recvCtx
                 (procedure'args $ procedure'decl mth'proc)
-                (ArgsPack args iopdEmpty)
-      $ \ed -> contEdhSTM $ do
-          ent <- createHashEntity ed
+                (ArgsPack args odEmpty)
+      $ \ !ed -> contEdhSTM $ do
+          ent <- createHashEntity =<< iopdFromList (odToList ed)
           let !mthScope = (lexicalScopeOf mth'proc) { scopeEntity = ent
                                                     , thatObject  = callee'that
                                                     , scopeProc   = mth'proc
@@ -2603,7 +2591,7 @@ callEdhMethod' !gnr'caller !callee'that !mth'proc !mth'body !apk !scopeMod !exit
           }
     recvEdhArgs recvCtx (procedure'args $ procedure'decl mth'proc) apk $ \ed ->
       contEdhSTM $ do
-        ent <- createHashEntity ed
+        ent <- createHashEntity =<< iopdFromList (odToList ed)
         let !mthScope = scopeMod $ (lexicalScopeOf mth'proc)
               { scopeEntity = ent
               , thatObject  = callee'that
@@ -2657,10 +2645,10 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                   argsRcvr
                   (case yielded'val of
                     EdhArgsPack apk -> apk
-                    _               -> ArgsPack [yielded'val] iopdEmpty
+                    _               -> ArgsPack [yielded'val] odEmpty
                   )
               $ \em -> contEdhSTM $ do
-                  updateEntityAttrs pgsTry (scopeEntity scope) $ iopdToList em
+                  updateEntityAttrs pgsTry (scopeEntity scope) $ odToList em
                   runEdhProc pgsTry $ evalExpr doExpr exit'
           doneOne (OriginalValue !doResult _ _) =
             case edhDeCaseClose doResult of
@@ -2806,7 +2794,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
           do1 !apk !next =
             runEdhProc pgs $ recvEdhArgs ctx argsRcvr apk $ \em ->
               contEdhSTM $ do
-                updateEntityAttrs pgs (scopeEntity scope) $ iopdToList em
+                updateEntityAttrs pgs (scopeEntity scope) $ odToList em
                 runEdhProc pgs
                   $ evalExpr doExpr
                   $ \(OriginalValue !doResult _ _) -> case doResult of
@@ -2832,7 +2820,7 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
             EdhNil -> -- nil marks end-of-stream from an event sink
               exitEdhProc exit nil -- stop the for-from-do loop
             EdhArgsPack apk -> contEdhSTM $ do1 apk $ iterEvt subChan
-            v -> contEdhSTM $ do1 (ArgsPack [v] iopdEmpty) $ iterEvt subChan
+            v -> contEdhSTM $ do1 (ArgsPack [v] odEmpty) $ iterEvt subChan
 
       case edhUltimate iterVal of
 
@@ -2844,21 +2832,19 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
               EdhNil -> -- this sink is already marked at end-of-stream
                 exitEdhSTM pgs exit nil
               EdhArgsPack apk -> do1 apk $ iterEvt subChan
-              v               -> do1 (ArgsPack [v] iopdEmpty) $ iterEvt subChan
+              v               -> do1 (ArgsPack [v] odEmpty) $ iterEvt subChan
 
         -- loop from a positonal-only args pack
-        (EdhArgsPack (ArgsPack !args !kwargs)) | iopdNull kwargs -> iterThem
+        (EdhArgsPack (ArgsPack !args !kwargs)) | odNull kwargs -> iterThem
           [ case val of
               EdhArgsPack apk' -> apk'
-              _                -> ArgsPack [val] iopdEmpty
+              _                -> ArgsPack [val] odEmpty
           | val <- args
           ]
 
         -- loop from a keyword-only args pack
         (EdhArgsPack (ArgsPack !args !kwargs)) | null args -> iterThem
-          [ ArgsPack [attrKeyValue k, v] iopdEmpty
-          | (k, v) <- iopdToList kwargs
-          ]
+          [ ArgsPack [attrKeyValue k, v] odEmpty | (k, v) <- odToList kwargs ]
 
         -- loop from a list
         (EdhList (List _ !l)) -> do
@@ -2866,16 +2852,16 @@ edhForLoop !pgsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
           iterThem
             [ case val of
                 EdhArgsPack apk' -> apk'
-                _                -> ArgsPack [val] iopdEmpty
+                _                -> ArgsPack [val] odEmpty
             | val <- ll
             ]
 
         -- loop from a dict
         (EdhDict (Dict _ !d)) -> do
-          ds <- readTVar d
+          del <- iopdToList d
           -- don't be tempted to yield pairs from a dict here,
           -- it'll be messy if some entry values are themselves pairs
-          iterThem [ ArgsPack [k, v] iopdEmpty | (k, v) <- iopdToList ds ]
+          iterThem [ ArgsPack [k, v] odEmpty | (k, v) <- del ]
 
         -- TODO define the magic method for an object to be able to respond
         --      to for-from-do looping
@@ -2940,11 +2926,9 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
           $   lookupEntityAttr pgs ent (AttrByName edhExportsMagicName)
           >>= \case
                 EdhDict (Dict _ !thisExpDS) ->
-                  modifyTVar' thisExpDS
-                    $ iopdInsert (attrKeyValue artKey) artVal
+                  iopdInsert (attrKeyValue artKey) artVal thisExpDS
                 _ -> do
-                  d <- createEdhDict
-                    $ iopdSingleton (attrKeyValue artKey) artVal
+                  d <- createEdhDict [(attrKeyValue artKey, artVal)]
                   changeEntityAttr pgs
                                    (objEntity this)
                                    (AttrByName edhExportsMagicName)
@@ -2954,9 +2938,9 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
       defEffectInto !ent !artKey =
         lookupEntityAttr pgs ent (AttrByName edhEffectsMagicName) >>= \case
           EdhDict (Dict _ !effDS) ->
-            modifyTVar' effDS $ iopdInsert (attrKeyValue artKey) rhVal
+            iopdInsert (attrKeyValue artKey) rhVal effDS
           _ -> do
-            d <- createEdhDict $ iopdSingleton (attrKeyValue artKey) rhVal
+            d <- createEdhDict [(attrKeyValue artKey, rhVal)]
             changeEntityAttr pgs ent (AttrByName edhEffectsMagicName) d
   case lhExpr of
     AttrExpr !addr -> case addr of
@@ -3035,10 +3019,7 @@ changeEdhObjAttr !pgs !obj !key !val !exit =
       EdhMethod !mth ->
         -- call magic (@=) method
         runEdhProc pgs
-          $ callEdhMethod obj
-                          mth
-                          (ArgsPack [attrKeyValue key, val] iopdEmpty)
-                          id
+          $ callEdhMethod obj mth (ArgsPack [attrKeyValue key, val] odEmpty) id
           $ \(OriginalValue !rtnVal _ _) -> contEdhSTM $ exit rtnVal
       !badMth ->
         throwEdhSTM pgs UsageError $ "Malformed magic (@=) method of " <> T.pack
@@ -3058,7 +3039,7 @@ changeEdhObjAttr !pgs !obj !key !val !exit =
             EdhNil -> []
             _      -> [val]
       in  runEdhProc pgs
-            $ callEdhMethod obj setter (ArgsPack args iopdEmpty) id
+            $ callEdhMethod obj setter (ArgsPack args odEmpty) id
             $ \(OriginalValue !propRtn _ _) -> contEdhSTM $ exit propRtn
     _ -> do
       changeEntityAttr pgs (objEntity obj) key val
@@ -3094,69 +3075,67 @@ recvEdhArgs
   :: Context
   -> ArgsReceiver
   -> ArgsPack
-  -> (InsOrderPrsvDict AttrKey -> EdhProc)
+  -> (OrderedDict AttrKey EdhValue -> EdhProc)
   -> EdhProc
 recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
   !pgsCaller <- ask
   let -- args receive always done in callee's context with tx on
     !pgsRecv = pgsCaller { edh'in'tx = True, edh'context = recvCtx }
     recvFromPack
-      :: (ArgsPack, InsOrderPrsvDict AttrKey)
+      :: ArgsPack
+      -> IOPD AttrKey EdhValue
       -> ArgReceiver
-      -> ((ArgsPack, InsOrderPrsvDict AttrKey) -> STM ())
+      -> (ArgsPack -> STM ())
       -> STM ()
-    recvFromPack (pk@(ArgsPack posArgs' kwArgs'), em) argRcvr !exit' =
+    recvFromPack pk@(ArgsPack !posArgs' !kwArgs') !em !argRcvr !exit' =
       case argRcvr of
         RecvRestPosArgs "_" ->
           -- silently drop the value to single underscore, while consume the args
           -- from incoming pack
-          exit' (ArgsPack [] kwArgs', em)
-        RecvRestPosArgs restPosArgAttr -> exit'
-          ( ArgsPack [] kwArgs'
-          , iopdInsert (AttrByName restPosArgAttr)
-                       (EdhArgsPack $ ArgsPack posArgs' iopdEmpty)
-                       em
-          )
+          exit' (ArgsPack [] kwArgs')
+        RecvRestPosArgs !restPosArgAttr -> do
+          iopdInsert (AttrByName restPosArgAttr)
+                     (EdhArgsPack $ ArgsPack posArgs' odEmpty)
+                     em
+          exit' (ArgsPack [] kwArgs')
         RecvRestKwArgs "_" ->
           -- silently drop the value to single underscore, while consume the args
           -- from incoming pack
-          exit' (ArgsPack posArgs' iopdEmpty, em)
+          exit' (ArgsPack posArgs' odEmpty)
         RecvRestKwArgs restKwArgAttr -> if T.null restKwArgAttr
-          then exit' (ArgsPack posArgs' iopdEmpty, iopdUnion kwArgs' em)
-          else exit'
-            ( ArgsPack posArgs' iopdEmpty
-            , iopdInsert (AttrByName restKwArgAttr)
-                         (EdhArgsPack $ ArgsPack [] kwArgs')
-                         em
-            )
+          then do
+            iopdUpdate (odToList kwArgs') em
+            exit' (ArgsPack posArgs' odEmpty)
+          else do
+            iopdInsert (AttrByName restKwArgAttr)
+                       (EdhArgsPack $ ArgsPack [] kwArgs')
+                       em
+            exit' (ArgsPack posArgs' odEmpty)
         RecvRestPkArgs "_" ->
           -- silently drop the value to single underscore, while consume the args
           -- from incoming pack
-          exit' (ArgsPack [] iopdEmpty, em)
-        RecvRestPkArgs restPkArgAttr -> exit'
-          ( ArgsPack [] iopdEmpty
-          , iopdInsert (AttrByName restPkArgAttr) (EdhArgsPack pk) em
-          )
+          exit' (ArgsPack [] odEmpty)
+        RecvRestPkArgs restPkArgAttr -> do
+          iopdInsert (AttrByName restPkArgAttr) (EdhArgsPack pk) em
+          exit' (ArgsPack [] odEmpty)
         RecvArg (NamedAttr "_") _ _ ->
           -- silently drop the value to single underscore, while consume the arg
           -- from incoming pack
           resolveArgValue (AttrByName "_") Nothing
-            $ \(_, posArgs'', kwArgs'') ->
-                exit' (ArgsPack posArgs'' kwArgs'', em)
+            $ \(_, posArgs'', kwArgs'') -> exit' (ArgsPack posArgs'' kwArgs'')
         RecvArg !argAddr !argTgtAddr !argDefault ->
           resolveEdhAttrAddr pgsRecv argAddr $ \argKey ->
             resolveArgValue argKey argDefault
               $ \(argVal, posArgs'', kwArgs'') -> case argTgtAddr of
-                  Nothing -> exit'
-                    (ArgsPack posArgs'' kwArgs'', iopdInsert argKey argVal em)
+                  Nothing -> do
+                    iopdInsert argKey argVal em
+                    exit' (ArgsPack posArgs'' kwArgs'')
                   Just (DirectRef addr) -> case addr of
                     NamedAttr "_" -> -- drop
-                      exit' (ArgsPack posArgs'' kwArgs'', em)
-                    NamedAttr attrName -> -- simple rename
-                      exit'
-                        ( ArgsPack posArgs'' kwArgs''
-                        , iopdInsert (AttrByName attrName) argVal em
-                        )
+                      exit' (ArgsPack posArgs'' kwArgs'')
+                    NamedAttr attrName -> do -- simple rename
+                      iopdInsert (AttrByName attrName) argVal em
+                      exit' (ArgsPack posArgs'' kwArgs'')
                     SymbolicAttr symName -> -- todo support this ?
                       throwEdhSTM pgsRecv UsageError
                         $  "Do you mean `this.@"
@@ -3168,7 +3147,7 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
                                                          (AttrExpr addr)
                                                          edhEndOfProc
                                                          argVal
-                    exit' (ArgsPack posArgs'' kwArgs'', em)
+                    exit' (ArgsPack posArgs'' kwArgs'')
                   tgt ->
                     throwEdhSTM pgsRecv UsageError
                       $  "Invalid argument retarget: "
@@ -3177,10 +3156,12 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
       resolveArgValue
         :: AttrKey
         -> Maybe Expr
-        -> ((EdhValue, [EdhValue], InsOrderPrsvDict AttrKey) -> STM ())
+        -> (  (EdhValue, [EdhValue], OrderedDict AttrKey EdhValue)
+           -> STM ()
+           )
         -> STM ()
       resolveArgValue !argKey !argDefault !exit'' = do
-        let (inKwArgs, kwArgs'') = iopdUnsafeTakeOut argKey kwArgs'
+        let (inKwArgs, kwArgs'') = odTakeOut argKey kwArgs'
         case inKwArgs of
           Just argVal -> exit'' (argVal, posArgs', kwArgs'')
           _           -> case posArgs' of
@@ -3200,24 +3181,20 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
                 throwEdhSTM pgsCaller UsageError
                   $  "Missing argument: "
                   <> T.pack (show argKey)
-    woResidual
-      :: ArgsPack
-      -> InsOrderPrsvDict AttrKey
-      -> (InsOrderPrsvDict AttrKey -> STM ())
-      -> STM ()
-    woResidual (ArgsPack !posResidual !kwResidual) !em !exit'
+    woResidual :: ArgsPack -> STM () -> STM ()
+    woResidual (ArgsPack !posResidual !kwResidual) !exit'
       | not (null posResidual)
       = throwEdhSTM pgsCaller UsageError
         $  "Extraneous "
         <> T.pack (show $ length posResidual)
         <> " positional argument(s)"
-      | not (iopdNull kwResidual)
+      | not (odNull kwResidual)
       = throwEdhSTM pgsCaller UsageError
         $  "Extraneous keyword arguments: "
-        <> T.pack (unwords (show <$> iopdKeys kwResidual))
+        <> T.pack (unwords (show <$> odKeys kwResidual))
       | otherwise
-      = exit' em
-    doReturn :: InsOrderPrsvDict AttrKey -> STM ()
+      = exit'
+    doReturn :: OrderedDict AttrKey EdhValue -> STM ()
     doReturn !es =
       -- insert a cycle tick here, so if no tx required for the call
       -- overall, the args receiving tx stops here then the callee
@@ -3227,14 +3204,17 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
   -- execution of the args receiving always in a tx for atomicity, and
   -- in the specified receiving (should be callee's outer) context
   local (const pgsRecv) $ case argsRcvr of
-    PackReceiver argRcvrs -> contEdhSTM $ go argRcvrs apk iopdEmpty     where
-      go :: [ArgReceiver] -> ArgsPack -> InsOrderPrsvDict AttrKey -> STM ()
-      go [] !apk' !em = woResidual apk' em doReturn
-      go (r : rest) !apk' !em =
-        recvFromPack (apk', em) r $ \(apk'', em') -> go rest apk'' em'
-    SingleReceiver argRcvr ->
-      contEdhSTM $ recvFromPack (apk, iopdEmpty) argRcvr $ \(apk', em) ->
-        woResidual apk' em doReturn
+    PackReceiver argRcvrs -> contEdhSTM $ iopdEmpty >>= \ !em ->
+      let
+        go :: [ArgReceiver] -> ArgsPack -> STM ()
+        go [] !apk' = woResidual apk' $ iopdSnapshot em >>= doReturn
+        go (r : rest) !apk' =
+          recvFromPack apk' em r $ \ !apk'' -> go rest apk''
+      in
+        go argRcvrs apk
+    SingleReceiver argRcvr -> contEdhSTM $ iopdEmpty >>= \ !em ->
+      recvFromPack apk em argRcvr
+        $ \ !apk' -> woResidual apk' $ iopdSnapshot em >>= doReturn
     WildReceiver -> contEdhSTM $ if null posArgs
       then doReturn kwArgs
       else
@@ -3247,36 +3227,31 @@ recvEdhArgs !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit = do
 -- | Pack args as expressions, normally in preparation of calling another
 -- interpreter procedure
 packEdhExprs :: ArgsPacker -> (ArgsPack -> EdhProc) -> EdhProc
-packEdhExprs !pkrs !pkExit = pkExprs pkrs iopdEmpty $ pkExit . uncurry ArgsPack
- where
-  pkExprs
-    :: [ArgSender]
-    -> InsOrderPrsvDict AttrKey
-    -> (([EdhValue], InsOrderPrsvDict AttrKey) -> EdhProc)
-    -> EdhProc
-  pkExprs []       !kwargs !exit = exit ([], kwargs)
-  pkExprs (x : xs) !kwArgs !exit = case x of
-    UnpackPosArgs _ -> throwEdh EvalError "unpack to expr not supported yet"
-    UnpackKwArgs _ -> throwEdh EvalError "unpack to expr not supported yet"
-    UnpackPkArgs _ -> throwEdh EvalError "unpack to expr not supported yet"
-    SendPosArg !argExpr -> pkExprs xs kwArgs $ \(!posArgs, !kwArgs') -> do
-      pgs <- ask
-      contEdhSTM $ do
+packEdhExprs !pkrs !pkExit = ask >>= \ !pgs -> contEdhSTM $ do
+  kwIOPD <- iopdEmpty
+  let
+    pkExprs :: [ArgSender] -> ([EdhValue] -> EdhProc) -> EdhProc
+    pkExprs []       !exit = exit []
+    pkExprs (x : xs) !exit = case x of
+      UnpackPosArgs _ -> throwEdh EvalError "unpack to expr not supported yet"
+      UnpackKwArgs _ -> throwEdh EvalError "unpack to expr not supported yet"
+      UnpackPkArgs _ -> throwEdh EvalError "unpack to expr not supported yet"
+      SendPosArg !argExpr -> pkExprs xs $ \ !posArgs -> contEdhSTM $ do
         !xu <- unsafeIOToSTM newUnique
-        runEdhProc pgs $ exit ((EdhExpr xu argExpr "" : posArgs), kwArgs')
-    SendKwArg !kwAddr !argExpr -> do
-      pgs <- ask
-      contEdhSTM $ resolveEdhAttrAddr pgs kwAddr $ \ !kwKey -> do
-        xu <- unsafeIOToSTM newUnique
-        runEdhProc pgs
-          $ pkExprs xs (iopdInsert kwKey (EdhExpr xu argExpr "") kwArgs)
-          $ \(!posArgs, !kwArgs') -> exit (posArgs, kwArgs')
+        runEdhProc pgs $ exit (EdhExpr xu argExpr "" : posArgs)
+      SendKwArg !kwAddr !argExpr ->
+        contEdhSTM $ resolveEdhAttrAddr pgs kwAddr $ \ !kwKey -> do
+          xu <- unsafeIOToSTM newUnique
+          iopdInsert kwKey (EdhExpr xu argExpr "") kwIOPD
+          runEdhProc pgs $ pkExprs xs $ \ !posArgs' -> exit posArgs'
+  runEdhProc pgs $ pkExprs pkrs $ \ !args ->
+    contEdhSTM $ iopdSnapshot kwIOPD >>= \ !kwargs ->
+      runEdhProc pgs $ pkExit $ ArgsPack args kwargs
 
 
 -- | Pack args as caller, normally in preparation of calling another procedure
 packEdhArgs :: ArgsPacker -> (ArgsPack -> EdhProc) -> EdhProc
-packEdhArgs !argSenders !pkExit = do
-  !pgs <- ask
+packEdhArgs !argSenders !pkExit = ask >>= \pgs -> contEdhSTM $ do
   let !pgsPacking = pgs
         {
           -- make sure values in a pack are evaluated in same tx
@@ -3285,113 +3260,106 @@ packEdhArgs !argSenders !pkExit = do
           -- discourage artifact definition during args packing
                                             contextPure = True }
         }
-  local (const pgsPacking)
-    $ pkArgs argSenders iopdEmpty
-    $ \ !posArgs !kwArgs ->
+  !kwIOPD <- iopdEmpty
+  let
+    pkArgs :: [ArgSender] -> ([EdhValue] -> EdhProc) -> EdhProc
+    pkArgs []       !exit = exit []
+    pkArgs (x : xs) !exit = do
+      let
+        edhVal2Kw :: EdhValue -> STM () -> (AttrKey -> STM ()) -> STM ()
+        edhVal2Kw !k !nopExit !exit' = case k of
+          EdhString !name -> exit' $ AttrByName name
+          EdhSymbol !sym  -> exit' $ AttrBySym sym
+          _               -> nopExit
+        dictKvs2Kwl
+          :: [(ItemKey, EdhValue)]
+          -> ([(AttrKey, EdhValue)] -> STM ())
+          -> STM ()
+        dictKvs2Kwl !ps !exit' = go ps []         where
+          go :: [(ItemKey, EdhValue)] -> [(AttrKey, EdhValue)] -> STM ()
+          go [] !kvl = exit' kvl
+          go ((k, v) : rest) !kvl =
+            edhVal2Kw k (go rest kvl) $ \ !k' -> go rest ((k', v) : kvl)
+      case x of
+        UnpackPosArgs !posExpr ->
+          evalExpr posExpr $ \(OriginalValue !val _ _) ->
+            case edhUltimate val of
+              (EdhArgsPack (ArgsPack !posArgs _kwArgs)) ->
+                pkArgs xs $ \ !posArgs' -> exit (posArgs ++ posArgs')
+              (EdhPair !k !v) ->
+                pkArgs xs $ \ !posArgs -> exit ([k, noneNil v] ++ posArgs)
+              (EdhList (List _ !l)) -> pkArgs xs $ \ !posArgs ->
+                contEdhSTM $ do
+                  ll <- readTVar l
+                  runEdhProc pgs $ exit ((noneNil <$> ll) ++ posArgs)
+              _ ->
+                throwEdh EvalError
+                  $  "Can not unpack args from a "
+                  <> T.pack (edhTypeNameOf val)
+                  <> ": "
+                  <> T.pack (show val)
+        UnpackKwArgs !kwExpr -> evalExpr kwExpr $ \(OriginalValue !val _ _) ->
+          case edhUltimate val of
+            EdhArgsPack (ArgsPack _posArgs !kwArgs') -> contEdhSTM $ do
+              iopdUpdate (odToList kwArgs') kwIOPD
+              runEdhProc pgsPacking $ pkArgs xs $ \ !posArgs' -> exit posArgs'
+            (EdhPair !k !v) ->
+              contEdhSTM
+                $ edhVal2Kw
+                    k
+                    (  throwEdhSTM pgs UsageError
+                    $  "Invalid keyword type: "
+                    <> T.pack (edhTypeNameOf k)
+                    )
+                $ \ !kw -> do
+                    iopdInsert kw (noneNil $ edhDeCaseClose v) kwIOPD
+                    runEdhProc pgsPacking $ pkArgs xs $ \ !posArgs ->
+                      exit posArgs
+            (EdhDict (Dict _ !ds)) -> contEdhSTM $ do
+              !dkvl <- iopdToList ds
+              dictKvs2Kwl dkvl $ \ !kvl -> do
+                iopdUpdate kvl kwIOPD
+                runEdhProc pgsPacking $ pkArgs xs $ \ !posArgs -> exit posArgs
+            _ ->
+              throwEdh EvalError
+                $  "Can not unpack kwargs from a "
+                <> T.pack (edhTypeNameOf val)
+                <> ": "
+                <> T.pack (show val)
+        UnpackPkArgs !pkExpr -> evalExpr pkExpr $ \(OriginalValue !val _ _) ->
+          case edhUltimate val of
+            (EdhArgsPack (ArgsPack !posArgs !kwArgs')) -> contEdhSTM $ do
+              iopdUpdate (odToList kwArgs') kwIOPD
+              runEdhProc pgsPacking $ pkArgs xs $ \ !posArgs' ->
+                exit (posArgs ++ posArgs')
+            _ ->
+              throwEdh EvalError
+                $  "Can not unpack apk from a "
+                <> T.pack (edhTypeNameOf val)
+                <> ": "
+                <> T.pack (show val)
+        SendPosArg !argExpr -> evalExpr argExpr $ \(OriginalValue !val _ _) ->
+          pkArgs xs
+            $ \ !posArgs -> exit (noneNil (edhDeCaseClose val) : posArgs)
+        SendKwArg !kwAddr !argExpr ->
+          evalExpr argExpr $ \(OriginalValue !val _ _) -> case kwAddr of
+            NamedAttr "_" ->  -- silently drop the value to keyword of single
+              -- underscore, the user may just want its side-effect
+              pkArgs xs $ \ !posArgs -> exit posArgs
+            _ -> contEdhSTM $ resolveEdhAttrAddr pgs kwAddr $ \ !kwKey -> do
+              iopdInsert kwKey (noneNil $ edhDeCaseClose val) kwIOPD
+              runEdhProc pgs $ pkArgs xs $ \ !posArgs -> exit posArgs
+  runEdhProc pgsPacking $ pkArgs argSenders $ \ !posArgs -> contEdhSTM $ do
+    !kwArgs <- iopdSnapshot kwIOPD
     -- restore original tx state after args packed
-                            local (const pgs) $ pkExit $ ArgsPack posArgs kwArgs
- where
-  pkArgs
-    :: [ArgSender]
-    -> InsOrderPrsvDict AttrKey
-    -> ([EdhValue] -> InsOrderPrsvDict AttrKey -> EdhProc)
-    -> EdhProc
-  pkArgs []       !kwArgs !exit = exit [] kwArgs
-  pkArgs (x : xs) !kwArgs !exit = do
-    !pgs <- ask
-    let
-      edhVal2Kw :: EdhValue -> STM () -> (AttrKey -> STM ()) -> STM ()
-      edhVal2Kw !k !nopExit !exit' = case k of
-        EdhString !name -> exit' $ AttrByName name
-        EdhSymbol !sym  -> exit' $ AttrBySym sym
-        _               -> nopExit
-      dictKvs2Kwl
-        :: [(ItemKey, EdhValue)] -> ([(AttrKey, EdhValue)] -> STM ()) -> STM ()
-      dictKvs2Kwl !ps !exit' = go ps []       where
-        go :: [(ItemKey, EdhValue)] -> [(AttrKey, EdhValue)] -> STM ()
-        go [] !kvl = exit' kvl
-        go ((k, v) : rest) !kvl =
-          edhVal2Kw k (go rest kvl) $ \ !k' -> go rest ((k', v) : kvl)
-    case x of
-      UnpackPosArgs !posExpr ->
-        evalExpr posExpr $ \(OriginalValue !val _ _) -> case edhUltimate val of
-          (EdhArgsPack (ArgsPack !posArgs _kwArgs)) -> pkArgs xs kwArgs
-            $ \ !posArgs' !kwArgs' -> exit (posArgs ++ posArgs') kwArgs'
-          (EdhPair !k !v) -> pkArgs xs kwArgs
-            $ \ !posArgs !kwArgs' -> exit ([k, noneNil v] ++ posArgs) kwArgs'
-          (EdhList (List _ !l)) -> pkArgs xs kwArgs $ \ !posArgs !kwArgs' ->
-            contEdhSTM $ do
-              ll <- readTVar l
-              runEdhProc pgs $ exit ((noneNil <$> ll) ++ posArgs) kwArgs'
-          _ ->
-            throwEdh EvalError
-              $  "Can not unpack args from a "
-              <> T.pack (edhTypeNameOf val)
-              <> ": "
-              <> T.pack (show val)
-      UnpackKwArgs !kwExpr -> evalExpr kwExpr $ \(OriginalValue !val _ _) ->
-        case edhUltimate val of
-          EdhArgsPack (ArgsPack _posArgs !kwArgs') ->
-            pkArgs xs (iopdUnion kwArgs' kwArgs)
-              $ \ !posArgs' !kwArgs'' -> exit posArgs' kwArgs''
-          (EdhPair !k !v) ->
-            contEdhSTM
-              $ edhVal2Kw
-                  k
-                  (  throwEdhSTM pgs UsageError
-                  $  "Invalid keyword type: "
-                  <> T.pack (edhTypeNameOf k)
-                  )
-              $ \ !kw ->
-                  runEdhProc pgs
-                    $ pkArgs
-                        xs
-                        (iopdInsert kw (noneNil $ edhDeCaseClose v) kwArgs)
-                    $ \ !posArgs !kwArgs' -> exit posArgs kwArgs'
-          (EdhDict (Dict _ !ds)) -> contEdhSTM $ do
-            !dm <- readTVar ds
-            dictKvs2Kwl (iopdToList dm) $ \ !kvl ->
-              runEdhProc pgs
-                $ pkArgs xs (iopdUnion kwArgs (iopdFromList kvl))
-                $ \ !posArgs !kwArgs' -> exit posArgs kwArgs'
-          _ ->
-            throwEdh EvalError
-              $  "Can not unpack kwargs from a "
-              <> T.pack (edhTypeNameOf val)
-              <> ": "
-              <> T.pack (show val)
-      UnpackPkArgs !pkExpr -> evalExpr pkExpr $ \(OriginalValue !val _ _) ->
-        case edhUltimate val of
-          (EdhArgsPack (ArgsPack !posArgs !kwArgs')) ->
-            pkArgs xs (iopdUnion kwArgs' kwArgs)
-              $ \ !posArgs' !kwArgs'' -> exit (posArgs ++ posArgs') kwArgs''
-          _ ->
-            throwEdh EvalError
-              $  "Can not unpack apk from a "
-              <> T.pack (edhTypeNameOf val)
-              <> ": "
-              <> T.pack (show val)
-      SendPosArg !argExpr -> evalExpr argExpr $ \(OriginalValue !val _ _) ->
-        pkArgs xs kwArgs $ \ !posArgs !kwArgs' ->
-          exit (noneNil (edhDeCaseClose val) : posArgs) kwArgs'
-      SendKwArg !kwAddr !argExpr ->
-        evalExpr argExpr $ \(OriginalValue !val _ _) -> case kwAddr of
-          NamedAttr "_" ->  -- silently drop the value to keyword of single
-            -- underscore, the user may just want its side-effect
-            pkArgs xs kwArgs $ \ !posArgs !kwArgs' -> exit posArgs kwArgs'
-          _ -> contEdhSTM $ resolveEdhAttrAddr pgs kwAddr $ \ !kwKey ->
-            runEdhProc pgs
-              $ pkArgs
-                  xs
-                  (iopdInsert kwKey (noneNil $ edhDeCaseClose val) kwArgs)
-              $ \ !posArgs !kwArgs' -> exit posArgs kwArgs'
+    runEdhProc pgs $ pkExit $ ArgsPack posArgs kwArgs
 
 
 val2DictEntry
   :: EdhProgState -> EdhValue -> ((ItemKey, EdhValue) -> STM ()) -> STM ()
 val2DictEntry _ (EdhPair !k !v) !exit = exit (k, v)
 val2DictEntry _ (EdhArgsPack (ArgsPack [!k, !v] !kwargs)) !exit
-  | iopdNull kwargs = exit (k, v)
+  | odNull kwargs = exit (k, v)
 val2DictEntry !pgs !val _ = throwEdhSTM
   pgs
   UsageError
@@ -3400,24 +3368,34 @@ val2DictEntry !pgs !val _ = throwEdhSTM
   )
 
 pvlToDict :: EdhProgState -> [EdhValue] -> (DictStore -> STM ()) -> STM ()
-pvlToDict !pgs !pvl !x = go pvl []
- where
-  go :: [EdhValue] -> [(ItemKey, EdhValue)] -> STM ()
-  go []         !ps = x $ iopdFromList ps
-  go (p : rest) ps  = val2DictEntry pgs p $ \t -> go rest (t : ps)
+pvlToDict !pgs !pvl !exit = do
+  !ds <- iopdEmpty
+  let go []         = exit ds
+      go (p : rest) = val2DictEntry pgs p $ \(!key, !val) -> do
+        iopdInsert key val ds
+        go rest
+  go pvl
+
+pvlToDictEntries
+  :: EdhProgState -> [EdhValue] -> ([(ItemKey, EdhValue)] -> STM ()) -> STM ()
+pvlToDictEntries !pgs !pvl !exit = do
+  let go !entries [] = exit entries
+      go !entries (p : rest) =
+        val2DictEntry pgs p $ \ !entry -> go (entry : entries) rest
+  go [] $ reverse pvl
 
 
 edhValueNull :: EdhProgState -> EdhValue -> (Bool -> STM ()) -> STM ()
-edhValueNull _    EdhNil                  !exit = exit True
-edhValueNull !pgs (EdhNamedValue _ v    ) !exit = edhValueNull pgs v exit
+edhValueNull _    EdhNil                   !exit = exit True
+edhValueNull !pgs (EdhNamedValue _ v     ) !exit = edhValueNull pgs v exit
 edhValueNull _ (EdhDecimal d) !exit = exit $ D.decimalIsNaN d || d == 0
-edhValueNull _    (EdhBool    b         ) !exit = exit $ not b
-edhValueNull _    (EdhString  s         ) !exit = exit $ T.null s
-edhValueNull _    (EdhSymbol  _         ) !exit = exit False
-edhValueNull _ (EdhDict (Dict _ d)) !exit = iopdNull <$> readTVar d >>= exit
-edhValueNull _    (EdhList    (List _ l)) !exit = null <$> readTVar l >>= exit
+edhValueNull _    (EdhBool    b          ) !exit = exit $ not b
+edhValueNull _    (EdhString  s          ) !exit = exit $ T.null s
+edhValueNull _    (EdhSymbol  _          ) !exit = exit False
+edhValueNull _    (EdhDict    (Dict _ ds)) !exit = iopdNull ds >>= exit
+edhValueNull _    (EdhList    (List _ l )) !exit = null <$> readTVar l >>= exit
 edhValueNull _ (EdhArgsPack (ArgsPack args kwargs)) !exit =
-  exit $ null args && iopdNull kwargs
+  exit $ null args && odNull kwargs
 edhValueNull _ (EdhExpr _ (LitExpr NilLiteral) _) !exit = exit True
 edhValueNull _ (EdhExpr _ (LitExpr (DecLiteral d)) _) !exit =
   exit $ D.decimalIsNaN d || d == 0
@@ -3429,7 +3407,7 @@ edhValueNull !pgs (EdhObject !o) !exit =
     EdhNil -> exit False
     EdhMethod !nulMth ->
       runEdhProc pgs
-        $ callEdhMethod o nulMth (ArgsPack [] iopdEmpty) id
+        $ callEdhMethod o nulMth (ArgsPack [] odEmpty) id
         $ \(OriginalValue nulVal _ _) -> contEdhSTM $ case nulVal of
             EdhBool isNull -> exit isNull
             _              -> edhValueNull pgs nulVal exit
@@ -3462,33 +3440,40 @@ edhNamelyEqual !pgs !x !y !exit =
 edhValueEqual
   :: EdhProgState -> EdhValue -> EdhValue -> (Maybe Bool -> STM ()) -> STM ()
 edhValueEqual !pgs !lhVal !rhVal !exit =
-  let lhv = edhUltimate lhVal
-      rhv = edhUltimate rhVal
-  in  if lhv == rhv
-        then -- identity equal
-             exit $ Just True
-        else case lhv of
-          EdhList (List _ lhll) -> case rhv of
-            EdhList (List _ rhll) -> do
-              lhl <- readTVar lhll
-              rhl <- readTVar rhll
-              cmp2List lhl rhl $ exit . Just
-            _ -> exit $ Just False
-          EdhDict (Dict _ lhd) -> case rhv of
-            EdhDict (Dict _ rhd) -> do
-              lhm <- readTVar lhd
-              rhm <- readTVar rhd
-              cmp2Map (iopdToList lhm) (iopdToList rhm) $ exit . Just
-            _ -> exit $ Just False
-          -- don't conclude it if either of the two is an object, so magic
-          -- methods can get the chance to be invoked
-          -- there may be some magic to be invoked and some may even return
-          -- vectorized result
+  let
+    lhv = edhUltimate lhVal
+    rhv = edhUltimate rhVal
+  in
+    if lhv == rhv
+      then -- identity equal
+           exit $ Just True
+      else case lhv of
+        EdhList (List _ lhll) -> case rhv of
+          EdhList (List _ rhll) -> do
+            lhl <- readTVar lhll
+            rhl <- readTVar rhll
+            cmp2List lhl rhl $ exit . Just
+          _ -> exit $ Just False
+        EdhDict (Dict _ !lhd) -> case rhv of
+          EdhDict (Dict _ !rhd) -> do
+            lhl <- iopdToList lhd
+            rhl <- iopdToList rhd
+            -- regenerate the entry lists with HashMap to elide diffs in
+            -- entry order
+            cmp2Map (Map.toList $ Map.fromList lhl)
+                    (Map.toList $ Map.fromList rhl)
+              $ exit
+              . Just
+          _ -> exit $ Just False
+        -- don't conclude it if either of the two is an object, so magic
+        -- methods can get the chance to be invoked
+        -- there may be some magic to be invoked and some may even return
+        -- vectorized result
+        EdhObject{} -> exit Nothing
+        _           -> case rhv of
           EdhObject{} -> exit Nothing
-          _           -> case rhv of
-            EdhObject{} -> exit Nothing
-            -- neither is object, not equal for sure
-            _           -> exit $ Just False
+          -- neither is object, not equal for sure
+          _           -> exit $ Just False
  where
   cmp2List :: [EdhValue] -> [EdhValue] -> (Bool -> STM ()) -> STM ()
   cmp2List []      []      !exit' = exit' True
@@ -3525,9 +3510,9 @@ _edhCSR reprs (v : rest) !exit = edhValueRepr v $ \(OriginalValue r _ _) ->
 -- comma separated repr string for kwargs
 _edhKwArgsCSR
   :: [(Text, Text)] -> [(AttrKey, EdhValue)] -> EdhProcExit -> EdhProc
-_edhKwArgsCSR entries [] !exit' = exitEdhProc exit' $ EdhString $ T.concat
-  [ k <> "=" <> v <> ", " | (k, v) <- reverse entries ]
-_edhKwArgsCSR entries ((k, v) : rest) exit' =
+_edhKwArgsCSR !entries [] !exit' = exitEdhProc exit' $ EdhString $ T.concat
+  [ k <> "=" <> v <> ", " | (k, v) <- entries ]
+_edhKwArgsCSR !entries ((k, v) : rest) exit' =
   edhValueRepr v $ \(OriginalValue r _ _) -> case r of
     EdhString repr ->
       _edhKwArgsCSR ((T.pack (show k), repr) : entries) rest exit'
@@ -3536,7 +3521,7 @@ _edhKwArgsCSR entries ((k, v) : rest) exit' =
 _edhDictCSR
   :: [(Text, Text)] -> [(EdhValue, EdhValue)] -> EdhProcExit -> EdhProc
 _edhDictCSR entries [] !exit' = exitEdhProc exit' $ EdhString $ T.concat
-  [ k <> ":" <> v <> ", " | (k, v) <- reverse entries ]
+  [ k <> ":" <> v <> ", " | (k, v) <- entries ]
 _edhDictCSR entries ((k, v) : rest) exit' =
   edhValueRepr k $ \(OriginalValue kr _ _) -> case kr of
     EdhString !kRepr -> do
@@ -3575,14 +3560,14 @@ edhValueRepr (EdhPair v1 v2) !exit =
 
 -- apk repr
 edhValueRepr (EdhArgsPack (ArgsPack !args !kwargs)) !exit
-  | null args && iopdNull kwargs = exitEdhProc exit $ EdhString "()"
+  | null args && odNull kwargs = exitEdhProc exit $ EdhString "()"
   | otherwise = _edhCSR [] args $ \(OriginalValue argsR _ _) -> case argsR of
     EdhString argsCSR ->
-      _edhKwArgsCSR [] (iopdToList kwargs) $ \(OriginalValue kwargsR _ _) ->
-        case kwargsR of
-          EdhString kwargsCSR ->
-            exitEdhProc exit $ EdhString $ "( " <> argsCSR <> kwargsCSR <> ")"
-          _ -> error "bug: edhValueRepr returned non-string in CPS"
+      _edhKwArgsCSR [] (odToReverseList kwargs)
+        $ \(OriginalValue kwargsR _ _) -> case kwargsR of
+            EdhString kwargsCSR ->
+              exitEdhProc exit $ EdhString $ "( " <> argsCSR <> kwargsCSR <> ")"
+            _ -> error "bug: edhValueRepr returned non-string in CPS"
     _ -> error "bug: edhValueRepr returned non-string in CPS"
 
 -- list repr
@@ -3599,15 +3584,14 @@ edhValueRepr (EdhList (List _ ls)) !exit = do
         _ -> error "bug: edhValueRepr returned non-string in CPS"
 
 -- dict repr
-edhValueRepr (EdhDict (Dict _ dsv)) !exit = do
+edhValueRepr (EdhDict (Dict _ !ds)) !exit = do
   pgs <- ask
-  contEdhSTM $ do
-    ds <- readTVar dsv
-    if iopdNull ds
-      then exitEdhSTM pgs exit $ EdhString "{}" -- no space should show in an empty dict
-      else
-        runEdhProc pgs
-        $ _edhDictCSR [] (iopdToList ds)
+  contEdhSTM $ iopdNull ds >>= \case
+    True -> -- no space should show in an empty dict
+      exitEdhSTM pgs exit $ EdhString "{}"
+    False -> iopdToReverseList ds >>= \ !entries ->
+      runEdhProc pgs
+        $ _edhDictCSR [] entries
         $ \(OriginalValue entriesR _ _) -> case entriesR of
             EdhString entriesCSR ->
               exitEdhProc exit $ EdhString $ "{ " <> entriesCSR <> "}"
@@ -3621,7 +3605,7 @@ edhValueRepr (EdhObject !o) !exit = do
     repr@EdhString{} -> exitEdhSTM pgs exit repr
     EdhMethod !reprMth ->
       runEdhProc pgs
-        $ callEdhMethod o reprMth (ArgsPack [] iopdEmpty) id
+        $ callEdhMethod o reprMth (ArgsPack [] odEmpty) id
         $ \(OriginalValue reprVal _ _) -> case reprVal of
             s@EdhString{} -> exitEdhProc exit s
             _             -> edhValueRepr reprVal exit
@@ -3834,7 +3818,7 @@ parseEdhIndex
 parseEdhIndex !pgs !val !exit = case val of
 
   -- empty  
-  EdhArgsPack (ArgsPack [] !kwargs') | iopdNull kwargs' -> exit $ Right EdhAll
+  EdhArgsPack (ArgsPack [] !kwargs') | odNull kwargs' -> exit $ Right EdhAll
 
   -- term
   EdhNamedValue "All" _ -> exit $ Right EdhAll

@@ -24,6 +24,7 @@ import           Text.Megaparsec
 import           Data.Lossless.Decimal          ( decimalToInteger )
 
 import           Language.Edh.Control
+import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Tx
 import           Language.Edh.Details.PkgMan
@@ -34,7 +35,7 @@ createEdhWorld :: MonadIO m => EdhConsole -> m EdhWorld
 createEdhWorld !console = liftIO $ do
 
   -- ultimate global artifacts go into this
-  rootEntity <- atomically $ createHashEntity $ iopdFromList
+  rootEntity <- atomically $ createHashEntity =<< iopdFromList
     [ (AttrByName "__name__", EdhString "<root>")
     , (AttrByName "__file__", EdhString "<genesis>")
     , (AttrByName "__repr__", EdhString "<world>")
@@ -43,7 +44,7 @@ createEdhWorld !console = liftIO $ do
     ]
 
   -- methods supporting reflected scope manipulation go into this
-  scopeManiMethods <- atomically $ createHashEntity iopdEmpty
+  scopeManiMethods <- atomically $ createHashEntity =<< iopdEmpty
 
   -- prepare various pieces of the world
   rootSupers       <- newTVarIO []
@@ -129,9 +130,9 @@ createEdhWorld !console = liftIO $ do
   return world
  where
   edhProgramHalt :: ArgsPack -> EdhCallContext -> EdhError
-  edhProgramHalt (ArgsPack [v] !kwargs) _ | iopdNull kwargs =
+  edhProgramHalt (ArgsPack [v] !kwargs) _ | odNull kwargs =
     ProgramHalt $ toDyn v
-  edhProgramHalt (ArgsPack [] !kwargs) _ | iopdNull kwargs =
+  edhProgramHalt (ArgsPack [] !kwargs) _ | odNull kwargs =
     ProgramHalt $ toDyn nil
   edhProgramHalt !apk _ = ProgramHalt $ toDyn $ EdhArgsPack apk
   fakableErr :: EdhHostCtor
@@ -144,7 +145,7 @@ createEdhWorld !console = liftIO $ do
   -- used to define an error class in Edh
   errCtor :: (ArgsPack -> EdhCallContext -> EdhError) -> EdhHostCtor
   errCtor !hec !pgs apk@(ArgsPack _ !kwargs) !ctorExit = do
-    let !unwind = case iopdLookup (AttrByName "unwind") kwargs of
+    let !unwind = case odLookup (AttrByName "unwind") kwargs of
           Just (EdhDecimal d) -> case decimalToInteger d of
             Just n -> fromIntegral n
             _      -> 1
@@ -296,7 +297,7 @@ performEdhEffect !effKey !args !kwargs !exit = ask >>= \pgs ->
             effVal
             (thisObject $ contextScope $ edh'context pgs)
             ( ArgsPack args
-            $ iopdFromList
+            $ odFromList
             $ [ (AttrByName k, v) | (k, v) <- kwargs ]
             )
             scopeMod
@@ -336,7 +337,7 @@ behaveEdhEffect !effKey !args !kwargs !exit = ask >>= \pgs ->
             effVal
             (thisObject $ contextScope $ edh'context pgs)
             ( ArgsPack args
-            $ iopdFromList
+            $ odFromList
             $ [ (AttrByName k, v) | (k, v) <- kwargs ]
             )
             scopeMod

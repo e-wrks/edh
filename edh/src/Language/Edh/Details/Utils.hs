@@ -10,6 +10,7 @@ import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
 
+import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 
 
@@ -29,7 +30,7 @@ data ArgsPackParser a = ArgsPackParser {
   }
 parseArgsPack :: a -> ArgsPackParser a -> ArgsPack -> Either Text a
 parseArgsPack defVal (ArgsPackParser posParsers kwParsers) (ArgsPack posArgs kwArgs)
-  = go posParsers kwParsers posArgs (iopdToList kwArgs) defVal
+  = go posParsers kwParsers posArgs (odToList kwArgs) defVal
  where
   go
     :: [EdhValue -> a -> Either Text a]

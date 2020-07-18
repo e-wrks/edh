@@ -19,6 +19,7 @@ import           Text.Megaparsec
 import           Data.Lossless.Decimal          ( decimalToInteger )
 
 import           Language.Edh.Control
+import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
 
@@ -30,14 +31,14 @@ ctorProc (ArgsPack !args !kwargs) !exit = do
   let callerCtx   = edh'context pgs
       callerScope = contextScope callerCtx
       !argsCls    = edhClassOf <$> args
-  if iopdNull kwargs
+  if odNull kwargs
     then case argsCls of
       []  -> exitEdhProc exit (EdhClass $ objClass $ thisObject callerScope)
       [t] -> exitEdhProc exit t
-      _   -> exitEdhProc exit $ EdhArgsPack $ ArgsPack argsCls iopdEmpty
+      _   -> exitEdhProc exit $ EdhArgsPack $ ArgsPack argsCls odEmpty
     else exitEdhProc
       exit
-      (EdhArgsPack $ ArgsPack argsCls $ iopdMap edhClassOf kwargs)
+      (EdhArgsPack $ ArgsPack argsCls $ odMap edhClassOf kwargs)
  where
   edhClassOf :: EdhValue -> EdhValue
   edhClassOf (EdhObject o) = EdhClass $ objClass o
@@ -49,29 +50,28 @@ supersProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   let !callerCtx   = edh'context pgs
       !callerScope = contextScope callerCtx
-  if null args && iopdNull kwargs
+  if null args && odNull kwargs
     then contEdhSTM $ do
       supers <-
         map EdhObject <$> (readTVar $ objSupers $ thatObject callerScope)
-      exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack supers iopdEmpty
-    else if iopdNull kwargs
+      exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack supers odEmpty
+    else if odNull kwargs
       then case args of
         [v] -> contEdhSTM $ do
           supers <- supersOf v
           exitEdhSTM pgs exit supers
         _ -> contEdhSTM $ do
           argsSupers <- sequence $ supersOf <$> args
-          exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack argsSupers
-                                                       iopdEmpty
+          exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack argsSupers odEmpty
       else contEdhSTM $ do
         argsSupers   <- sequence $ supersOf <$> args
-        kwargsSupers <- iopdMapSTM supersOf kwargs
+        kwargsSupers <- odMapSTM supersOf kwargs
         exitEdhSTM pgs exit (EdhArgsPack $ ArgsPack argsSupers kwargsSupers)
  where
   supersOf :: EdhValue -> STM EdhValue
   supersOf v = case v of
     EdhObject o -> map EdhObject <$> readTVar (objSupers o) >>= \supers ->
-      return $ EdhArgsPack $ ArgsPack supers iopdEmpty
+      return $ EdhArgsPack $ ArgsPack supers odEmpty
     _ -> return nil
 
 
@@ -81,13 +81,13 @@ scopeObtainProc :: EdhProcedure
 scopeObtainProc (ArgsPack _args !kwargs) !exit = do
   !pgs <- ask
   let !ctx = edh'context pgs
-  case iopdLookup (AttrByName "ofObj") kwargs of
+  case odLookup (AttrByName "ofObj") kwargs of
     Just (EdhObject ofObj) -> contEdhSTM $ do
       wrapperObj <- mkScopeWrapper ctx $ objectScope ctx ofObj
       exitEdhSTM pgs exit $ EdhObject wrapperObj
     _ -> do
       let unwind :: Int
-          !unwind = case iopdLookup (AttrByName "unwind") kwargs of
+          !unwind = case odLookup (AttrByName "unwind") kwargs of
             Just (EdhDecimal d) -> case decimalToInteger d of
               Just n  -> fromIntegral n
               Nothing -> 0
@@ -111,7 +111,7 @@ scopeAttrsProc _ !exit = do
   let !that = thatObject $ contextScope $ edh'context pgs
   contEdhSTM $ do
     ps <- allEntityAttrs pgs $ scopeEntity $ wrappedScopeOf that
-    exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack [] $ iopdFromList ps
+    exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack [] $ odFromList ps
 
 
 -- | repr of a scope
@@ -191,11 +191,11 @@ scopeGetProc (ArgsPack !args !kwargs) !exit = do
         attrKeyFrom pgs v $ \k -> do
           attrVal <- lookupEntityAttr pgs ent k
           lookupAttrs (attrVal : rtnArgs) rtnKwArgs restArgs kwargs' exit'
-  contEdhSTM $ lookupAttrs [] [] args (iopdToList kwargs) $ \case
+  contEdhSTM $ lookupAttrs [] [] args (odToList kwargs) $ \case
     ([v]    , []       ) -> exitEdhSTM pgs exit v
     (rtnArgs, rtnKwArgs) -> exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack
       (reverse rtnArgs)
-      (iopdFromList rtnKwArgs)
+      (odFromList rtnKwArgs)
  where
   attrKeyFrom :: EdhProgState -> EdhValue -> (AttrKey -> STM ()) -> STM ()
   attrKeyFrom _ (EdhString attrName) !exit' = exit' $ AttrByName attrName
@@ -214,7 +214,7 @@ scopePutProc (ArgsPack !args !kwargs) !exit = do
       !that      = thatObject $ contextScope callerCtx
       !ent       = scopeEntity $ wrappedScopeOf that
   contEdhSTM $ putAttrs pgs args [] $ \attrs -> do
-    updateEntityAttrs pgs ent $ attrs ++ iopdToList kwargs
+    updateEntityAttrs pgs ent $ attrs ++ odToList kwargs
     exitEdhSTM pgs exit nil
  where
   putAttrs
@@ -240,63 +240,56 @@ scopePutProc (ArgsPack !args !kwargs) !exit = do
 scopeEvalProc :: EdhProcedure
 scopeEvalProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
-  let
-    !callerCtx      = edh'context pgs
-    !that           = thatObject $ contextScope callerCtx
-    !theScope       = wrappedScopeOf that
-    -- eval all exprs with the original scope as the only scope in call stack
-    !scopeCallStack = theScope <| callStack callerCtx
-    evalThePack
-      :: [EdhValue]
-      -> InsOrderPrsvDict AttrKey
-      -> [EdhValue]
-      -> [(AttrKey, EdhValue)]
-      -> EdhProc
-    evalThePack !argsValues !kwargsValues [] [] =
-      contEdhSTM
-        -- restore original program state and return the eval-ed values
-        $ exitEdhSTM pgs exit
-        $ case argsValues of
-            [val] | iopdNull kwargsValues -> val
-            _ -> EdhArgsPack $ ArgsPack (reverse argsValues) kwargsValues
-    evalThePack !argsValues !kwargsValues [] (kwExpr : kwargsExprs') =
-      case kwExpr of
-        (!kw, EdhExpr _ !expr _) ->
-          evalExpr expr $ \(OriginalValue !val _ _) -> evalThePack
-            argsValues
-            (iopdInsert kw (edhDeCaseClose val) kwargsValues)
-            []
-            kwargsExprs'
-        v -> throwEdh EvalError $ "Not an expr: " <> T.pack (show v)
-    evalThePack !argsValues !kwargsValues (!argExpr : argsExprs') !kwargsExprs
-      = case argExpr of
-        EdhExpr _ !expr _ -> evalExpr expr $ \(OriginalValue !val _ _) ->
-          evalThePack (edhDeCaseClose val : argsValues)
-                      kwargsValues
-                      argsExprs'
-                      kwargsExprs
-        v -> throwEdh EvalError $ "Not an expr: " <> T.pack (show v)
-  if iopdNull kwargs && null args
+  let !callerCtx      = edh'context pgs
+      !that           = thatObject $ contextScope callerCtx
+      !theScope       = wrappedScopeOf that
+      -- eval all exprs with the original scope on top of current call stack
+      !scopeCallStack = theScope <| callStack callerCtx
+  if odNull kwargs && null args
     then exitEdhProc exit nil
-    else
-      contEdhSTM
-      $ runEdhProc pgs
-          { edh'context = callerCtx { callStack        = scopeCallStack
-                                    , generatorCaller  = Nothing
-                                    , contextMatch     = true
-                                    , contextPure      = False
-                                    , contextExporting = False
-                                    }
-          }
-      $ evalThePack [] iopdEmpty args
-      $ iopdToList kwargs
+    else contEdhSTM $ do
+      let !pgsEval = pgs
+            { edh'context = callerCtx { callStack        = scopeCallStack
+                                      , generatorCaller  = Nothing
+                                      , contextMatch     = true
+                                      , contextPure      = False
+                                      , contextExporting = False
+                                      }
+            }
+      kwIOPD <- iopdEmpty
+      let
+        evalThePack
+          :: [EdhValue] -> [EdhValue] -> [(AttrKey, EdhValue)] -> STM ()
+        evalThePack !argsValues [] [] =
+          iopdToList kwIOPD >>= \ !kwargsValues ->
+            -- restore original program state and return the eval-ed values
+            exitEdhSTM pgs exit $ case argsValues of
+              [val] | null kwargsValues -> val
+              _ -> EdhArgsPack $ ArgsPack (reverse argsValues) $ odFromList
+                kwargsValues
+        evalThePack !argsValues [] (kwExpr : kwargsExprs') = case kwExpr of
+          (!kw, EdhExpr _ !expr _) ->
+            runEdhProc pgsEval $ evalExpr expr $ \(OriginalValue !val _ _) ->
+              contEdhSTM $ do
+                iopdInsert kw (edhDeCaseClose val) kwIOPD
+                evalThePack argsValues [] kwargsExprs'
+          v -> throwEdhSTM pgs EvalError $ "Not an expr: " <> T.pack (show v)
+        evalThePack !argsValues (!argExpr : argsExprs') !kwargsExprs =
+          case argExpr of
+            EdhExpr _ !expr _ ->
+              runEdhProc pgsEval $ evalExpr expr $ \(OriginalValue !val _ _) ->
+                contEdhSTM $ evalThePack (edhDeCaseClose val : argsValues)
+                                         argsExprs'
+                                         kwargsExprs
+            v -> throwEdhSTM pgs EvalError $ "Not an expr: " <> T.pack (show v)
+      evalThePack [] args $ odToList kwargs
 
 
 -- | utility makeOp(lhExpr, opSym, rhExpr)
 makeOpProc :: EdhProcedure
 makeOpProc (ArgsPack !args !kwargs) !exit = do
   pgs <- ask
-  if (not $ iopdNull kwargs)
+  if (not $ odNull kwargs)
     then throwEdh EvalError "No kwargs accepted by makeOp"
     else case args of
       [(EdhExpr _ !lhe _), EdhString op, (EdhExpr _ !rhe _)] -> contEdhSTM $ do

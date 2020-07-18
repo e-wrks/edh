@@ -47,6 +47,8 @@ import           Language.Edh.Batteries.Ctrl
 import           Language.Edh.Batteries.Console
 import           Language.Edh.Batteries.Evt
 import           Language.Edh.Batteries.Vector
+
+import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
 
@@ -105,7 +107,7 @@ defaultEdhConsole !inputSettings = do
     logger !level !srcLoc !logArgs = do
       void $ tryTakeTMVar logIdle
       case logArgs of
-        ArgsPack [!argVal] !kwargs | iopdNull kwargs ->
+        ArgsPack [!argVal] !kwargs | odNull kwargs ->
           writeTBQueue logQueue $! T.pack logPrefix <> logString argVal <> "\n"
         _ -> -- todo: format structured log record,
              -- with some log parsers in mind
@@ -621,7 +623,7 @@ installEdhBatteries world = liftIO $ do
            ]
 
 
-      !conEntity <- createHashEntity $ iopdFromList
+      !conEntity <- createHashEntity =<< iopdFromList
         [ (AttrByName "__repr__", EdhString "<console>")
         , (AttrByName "debug"   , EdhDecimal 10)
         , (AttrByName "info"    , EdhDecimal 20)

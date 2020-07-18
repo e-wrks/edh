@@ -213,7 +213,6 @@ module Language.Edh.EHI
   , symbolName
   , Dict(..)
   , ItemKey
-  , showEdhDict
   , setDictItem
   , List(..)
   , ArgsPack(..)
@@ -235,6 +234,9 @@ module Language.Edh.EHI
   , parseEdhIndex
   , edhRegulateSlice
   , edhRegulateIndex
+
+    -- * standalone modules
+  , module Language.Edh.Details.IOPD
   )
 where
 
@@ -250,6 +252,7 @@ import           Language.Edh.Control
 import           Language.Edh.Batteries
 import           Language.Edh.Runtime
 import           Language.Edh.Event
+import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.PkgMan
 import           Language.Edh.Details.CoreLang

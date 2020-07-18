@@ -6,12 +6,11 @@ import           Prelude
 
 import           Control.Monad.Reader
 
-import           Control.Concurrent.STM
-
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 
 import           Language.Edh.Control
+import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
@@ -39,8 +38,8 @@ assignProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                 case edhUltimate tgtVal of
 
                     -- indexing assign to a dict
-                  EdhDict (Dict _ !d) -> contEdhSTM $ do
-                    modifyTVar' d $ setDictItem ixVal rhVal
+                  EdhDict (Dict _ !ds) -> contEdhSTM $ do
+                    setDictItem ixVal rhVal ds
                     exitEdhSTM pgs exit rhVal
 
                   -- indexing assign to an object, by calling its ([=])
@@ -59,7 +58,7 @@ assignProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                               runEdhProc pgs $ callEdhMethod
                                 obj
                                 mth'proc
-                                (ArgsPack [ixVal, rhVal] iopdEmpty)
+                                (ArgsPack [ixVal, rhVal] odEmpty)
                                 id
                                 exit
                             !badIndexer ->
@@ -109,14 +108,15 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                 case edhUltimate tgtVal of
 
                   -- indexing assign to a dict
-                  EdhDict (Dict _ !d) -> contEdhSTM $ readTVar d >>= \ !ds ->
-                    runEdhProc pgs
-                      $ withOp
-                          (IntplSubs $ iopdLookupDefault EdhNil ixVal ds)
-                          (IntplSubs rhVal)
-                      $ \(OriginalValue !opRtnV _ _) -> contEdhSTM $ do
-                          writeTVar d $ setDictItem ixVal opRtnV ds
-                          exitEdhSTM pgs exit opRtnV
+                  EdhDict (Dict _ !ds) ->
+                    contEdhSTM
+                      $   iopdLookupDefault EdhNil ixVal ds
+                      >>= \ !dVal ->
+                            runEdhProc pgs
+                              $ withOp (IntplSubs dVal) (IntplSubs rhVal)
+                              $ \(OriginalValue !opRtnV _ _) -> contEdhSTM $ do
+                                  setDictItem ixVal opRtnV ds
+                                  exitEdhSTM pgs exit opRtnV
 
                   -- indexing assign to an object, by calling its ([op=])
                   EdhObject obj -> -- method with ixVal and rhVal as the args
@@ -135,7 +135,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                               runEdhProc pgs $ callEdhMethod
                                 obj
                                 mth'proc
-                                (ArgsPack [ixVal, rhVal] iopdEmpty)
+                                (ArgsPack [ixVal, rhVal] odEmpty)
                                 id
                                 exit
                             !badIndexer ->

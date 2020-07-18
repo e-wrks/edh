@@ -23,6 +23,7 @@ import           Text.Megaparsec
 import           Data.Lossless.Decimal          ( decimalToInteger )
 
 import           Language.Edh.Control
+import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
 import           Language.Edh.Details.Utils
@@ -86,7 +87,7 @@ loggingProc !lhExpr !rhExpr !exit = do
                     logger logLevel srcLoc apk
                     exitEdhSTM pgs exit nil
                   _ -> do
-                    logger logLevel srcLoc $ ArgsPack [rhVal] iopdEmpty
+                    logger logLevel srcLoc $ ArgsPack [rhVal] odEmpty
                     exitEdhSTM pgs exit nil
       _ -> throwEdh EvalError $ "Invalid log target: " <> T.pack (show lhVal)
 
@@ -270,7 +271,7 @@ conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
               writeTBQueue ioQ $ ConsoleOut $ s <> "\n"
               printVS rest kvs
             _ -> error "bug"
-  printVS args $ iopdToList kwargs
+  printVS args $ odToList kwargs
 
 
 conNowProc :: EdhProcedure

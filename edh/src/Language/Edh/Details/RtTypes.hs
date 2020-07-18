@@ -1,7 +1,3 @@
-{-# LANGUAGE
-    GADTs
-  , TypeApplications
-#-}
 
 module Language.Edh.Details.RtTypes where
 
@@ -11,14 +7,12 @@ import           Prelude
 import           GHC.Conc                       ( unsafeIOToSTM )
 import           System.IO.Unsafe               ( unsafePerformIO )
 
-import           Control.Monad.ST
 import           Control.Monad.Except
 import           Control.Monad.Reader
 
 -- import           Control.Concurrent
 import           Control.Concurrent.STM
 
-import           Data.Maybe
 import           Data.Foldable
 import           Data.Unique
 import           Data.Text                      ( Text )
@@ -29,10 +23,7 @@ import           Data.Hashable
 import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
-import           Data.Vector                    ( Vector )
-import qualified Data.Vector                   as V
 import           Data.Vector.Mutable            ( IOVector )
-import qualified Data.Vector.Mutable           as MV
 import           Data.Dynamic
 
 import           Text.Megaparsec
@@ -84,29 +75,31 @@ instance Show Dict where
 type ItemKey = EdhValue
 type DictStore = IOPD EdhValue EdhValue
 
--- | create a new Edh dict from a properly typed hash map
-createEdhDict :: [(EdhValue, EdhValue)] -> STM EdhValue
+-- | create a new Edh dict from a list of entries
+--
+-- nil keys and nil values are filtered out so have no effect
+createEdhDict :: [(ItemKey, EdhValue)] -> STM EdhValue
 createEdhDict !entries = do
   u <- unsafeIOToSTM newUnique
   EdhDict . Dict u <$> iopdFromList
     [ e | e@(key, val) <- entries, key /= EdhNil && val /= EdhNil ]
 
 -- | setting to `nil` value means deleting the item by the specified key
-setDictItem :: ItemKey -> EdhValue -> DictStore -> DictStore
-setDictItem !k v !ds = case v of
-  EdhNil -> iopdDelete k ds
-  _      -> iopdInsert k v ds
+setDictItem :: ItemKey -> EdhValue -> DictStore -> STM ()
+setDictItem !k !v !d = case v of
+  EdhNil -> iopdDelete k d
+  _      -> iopdInsert k v d
 
-dictEntryList :: DictStore -> [EdhValue]
-dictEntryList d =
-  (<$> iopdToList d) $ \(k, v) -> EdhArgsPack $ ArgsPack [k, v] iopdEmpty
+dictEntryList :: DictStore -> STM [EdhValue]
+dictEntryList !d =
+  (<$> iopdToList d) $ fmap $ \(k, v) -> EdhArgsPack $ ArgsPack [k, v] odEmpty
 
 
 edhDictFromEntity :: EdhProgState -> Entity -> STM Dict
-edhDictFromEntity pgs ent = do
+edhDictFromEntity !pgs !ent = do
   u  <- unsafeIOToSTM newUnique
   ps <- allEntityAttrs pgs ent
-  (Dict u <$>) $ newTVar $ iopdFromList [ (attrKeyValue k, v) | (k, v) <- ps ]
+  (Dict u <$>) $ iopdFromList [ (attrKeyValue k, v) | (k, v) <- ps ]
 
 -- | An entity in Edh is the backing storage for a scope, with possibly 
 -- an object (actually more objects still possible, but god forbid it)
@@ -213,9 +206,9 @@ maoEntityManipulater = EntityManipulater the'lookup'entity'attr
 -- | Create an entity with an in-band 'Data.HashMap.Strict.HashMap'
 -- as backing storage
 createHashEntity :: IOPD AttrKey EdhValue -> STM Entity
-createHashEntity !m = do
+createHashEntity !d = do
   u  <- unsafeIOToSTM newUnique
-  es <- newTVar $ toDyn m
+  es <- newTVar $ toDyn d
   return $ Entity u es hashEntityManipulater
 
 hashEntityManipulater :: EntityManipulater
@@ -224,16 +217,19 @@ hashEntityManipulater = EntityManipulater the'lookup'entity'attr
                                           the'change'entity'attr
                                           the'update'entity'attrs
  where
-  hm = flip fromDyn iopdEmpty
-  the'lookup'entity'attr _ !k = return . fromMaybe EdhNil . iopdLookup k . hm
-  the'all'entity'attrs _ = return . iopdToList . hm
-  the'change'entity'attr _ !k !v !d =
-    let !ds = fromDyn d iopdEmpty
-    in  return $ toDyn $ case v of
-          EdhNil -> iopdDelete k ds
-          _      -> iopdInsert k v ds
-  the'update'entity'attrs _ !ps =
-    return . toDyn . iopdUnion (iopdFromList ps) . hm
+  hm !dd = case fromDynamic dd of
+    Nothing -> iopdEmpty
+    Just !d -> return d
+  the'lookup'entity'attr _ !k = (iopdLookupDefault EdhNil k =<<) . hm
+  the'all'entity'attrs _ = (iopdToList =<<) . hm
+  the'change'entity'attr _ !k !v !dd = hm dd >>= \ !d -> case v of
+    EdhNil -> iopdDelete k d >> return dd
+    _      -> iopdInsert k v d >> return dd
+  the'update'entity'attrs _ !ps !dd = case fromDynamic dd of
+    Nothing -> return dd
+    Just !d -> do
+      iopdUpdate ps d
+      return dd
 
 
 -- | Create an entity with an out-of-band storage manipulater and an in-band
@@ -249,17 +245,16 @@ createSideEntity !manip !esd = do
 createSideEntityManipulater
   :: Bool -> [(AttrKey, EdhValue)] -> STM EntityManipulater
 createSideEntityManipulater !writeProtected !arts = do
-  obs <- newTVar $ iopdFromList arts
-  let the'lookup'entity'attr _ !k _ =
-        fromMaybe EdhNil . iopdLookup k <$> readTVar obs
-      the'all'entity'attrs _ _ = iopdToList <$> readTVar obs
+  obs <- iopdFromList arts
+  let the'lookup'entity'attr _ !k _ = iopdLookupDefault EdhNil k obs
+      the'all'entity'attrs _ _ = iopdToList obs
       the'change'entity'attr pgs !k !v inband = if writeProtected
         then
           throwSTM
           $ EdhError UsageError "Writing a protected entity"
           $ getEdhCallContext 0 pgs
         else do
-          modifyTVar' obs $ iopdInsert k v
+          iopdInsert k v obs
           return inband
       the'update'entity'attrs pgs !ps inband = if writeProtected
         then
@@ -267,7 +262,7 @@ createSideEntityManipulater !writeProtected !arts = do
           $ EdhError UsageError "Writing a protected entity"
           $ getEdhCallContext 0 pgs
         else do
-          modifyTVar' obs $ iopdUnion (iopdFromList ps)
+          iopdUpdate ps obs
           return inband
   return $ EntityManipulater the'lookup'entity'attr
                              the'all'entity'attrs

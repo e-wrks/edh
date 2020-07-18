@@ -10,6 +10,7 @@ import           Control.Concurrent.STM
 import           Data.Text                      ( Text )
 import           Data.Unique
 
+import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 
 
@@ -52,12 +53,10 @@ resolveEffectfulAttr _ [] _ = return Nothing
 resolveEffectfulAttr pgs (scope : rest) !key =
   lookupEntityAttr pgs (scopeEntity scope) (AttrByName edhEffectsMagicName)
     >>= \case
-          EdhNil               -> resolveEffectfulAttr pgs rest key
-          EdhDict (Dict _ !ds) -> do
-            d <- readTVar ds
-            case iopdLookup key d of
-              Just val -> return $ Just (val, rest)
-              Nothing  -> resolveEffectfulAttr pgs rest key
+          EdhNil              -> resolveEffectfulAttr pgs rest key
+          EdhDict (Dict _ !d) -> iopdLookup key d >>= \case
+            Just val -> return $ Just (val, rest)
+            Nothing  -> resolveEffectfulAttr pgs rest key
   -- todo crash in this case? warning may be more proper but in what way?
           _ -> resolveEffectfulAttr pgs rest key
 {-# INLINE resolveEffectfulAttr #-}
