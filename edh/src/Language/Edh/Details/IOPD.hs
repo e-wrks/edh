@@ -128,15 +128,6 @@ iopdUpdate !ps !d = if null ps
     iopdInsert key val d
     upd rest
 
--- iopdUnion
---   :: forall k v
---    . (Eq k, Hashable k, Eq v, Hashable v)
---   => IOPD k v
---   -> IOPD k v
---   -> STM ()
--- iopdUnion (IOPD !mvFrom !wpvFrom !nhvFrom !avFrom) (IOPD !mv !wpv !nhv !av) =
---   undefined
-
 iopdLookup
   :: forall k v
    . (Eq k, Hashable k, Eq v, Hashable v)

@@ -2836,7 +2836,7 @@ edhValueNull (EdhDict    (Dict _ d)) = Map.null <$> readTVar d
 edhValueNull (EdhList    (List _ l)) = null <$> readTVar l
 edhValueNull (EdhTuple   l         ) = return $ null l
 edhValueNull (EdhArgsPack (ArgsPack args kwargs)) =
-  return $ null args && Map.null kwargs
+  return $ null args && odNull kwargs
 edhValueNull (EdhExpr _ (LitExpr NilLiteral) _) = return True
 edhValueNull (EdhExpr _ (LitExpr (DecLiteral d)) _) =
   return $ D.decimalIsNaN d || d == 0
