@@ -417,3 +417,21 @@ odMapSTM !f (OrderedDict !m !a) =
         go (Map.toList m)
   in  OrderedDict m <$> V.sequence aNew
 
+odMapContSTM
+  :: forall k v v'
+   . (Eq k, Hashable k)
+  => (v -> (v' -> STM ()) -> STM ())
+  -> OrderedDict k v
+  -> (OrderedDict k v' -> STM ())
+  -> STM ()
+odMapContSTM _f (OrderedDict !m _a) !exit | Map.null m =
+  exit $ OrderedDict Map.empty V.empty
+odMapContSTM !f (OrderedDict _m !a) !exit = toList (V.length a - 1) []
+ where
+  toList :: Int -> [(k, v')] -> STM ()
+  toList !i !entries | i < 0 = exit $ odFromList entries
+  toList !i !entries         = case V.unsafeIndex a i of
+    Nothing -> toList (i - 1) entries
+    Just (!key, !val) ->
+      f val $ \ !val' -> toList (i - 1) $ (key, val') : entries
+
