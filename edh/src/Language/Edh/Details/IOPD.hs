@@ -21,15 +21,14 @@ import qualified Data.Vector.Mutable           as MV
 -- An iopd can only be mutated through STM monad, conflicts wrt concurrent
 -- modifications are resolved automatically by STM retry
 data IOPD k v where
-  IOPD ::(Eq k, Hashable k, Eq v, Hashable v) =>  {
+  IOPD ::(Eq k, Hashable k) =>  {
       iopd'map :: {-# UNPACK #-} !(TVar (Map.HashMap k Int))
     , iopd'write'pos :: {-# UNPACK #-} !(TVar Int)
     , iopd'num'holes :: {-# UNPACK #-} !(TVar Int)
     , iopd'array :: {-# UNPACK #-} !(TVar (Vector (TVar (Maybe (k, v)))))
     } -> IOPD k v
 
-iopdEmpty
-  :: forall k v . (Eq k, Hashable k, Eq v, Hashable v) => STM (IOPD k v)
+iopdEmpty :: forall k v . (Eq k, Hashable k) => STM (IOPD k v)
 iopdEmpty = do
   mv  <- newTVar Map.empty
   wpv <- newTVar 0
@@ -37,26 +36,19 @@ iopdEmpty = do
   av  <- newTVar V.empty
   return $ IOPD mv wpv nhv av
 
-iopdNull
-  :: forall k v . (Eq k, Hashable k, Eq v, Hashable v) => IOPD k v -> STM Bool
+iopdNull :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM Bool
 iopdNull (IOPD _mv !wpv !nhv _av) = do
   wp <- readTVar wpv
   nh <- readTVar nhv
   return (wp - nh <= 0)
 
-iopdSize
-  :: forall k v . (Eq k, Hashable k, Eq v, Hashable v) => IOPD k v -> STM Int
+iopdSize :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM Int
 iopdSize (IOPD _mv !wpv !nhv _av) = do
   wp <- readTVar wpv
   nh <- readTVar nhv
   return $ wp - nh
 
-iopdSingleton
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => k
-  -> v
-  -> STM (IOPD k v)
+iopdSingleton :: forall k v . (Eq k, Hashable k) => k -> v -> STM (IOPD k v)
 iopdSingleton !key !val = do
   mv  <- newTVar $ Map.singleton key 0
   wpv <- newTVar 1
@@ -64,13 +56,7 @@ iopdSingleton !key !val = do
   av  <- newTVar . V.singleton =<< newTVar (Just (key, val))
   return $ IOPD mv wpv nhv av
 
-iopdInsert
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => k
-  -> v
-  -> IOPD k v
-  -> STM ()
+iopdInsert :: forall k v . (Eq k, Hashable k) => k -> v -> IOPD k v -> STM ()
 iopdInsert !key !val d@(IOPD !mv !wpv _nhv !av) =
   Map.lookup key <$> readTVar mv >>= \case
     Just !i ->
@@ -90,12 +76,7 @@ iopdInsert !key !val d@(IOPD !mv !wpv _nhv !av) =
         MV.unsafeWrite a' wp entry
       writeTVar wpv (wp + 1)
 
-iopdReserve
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => Int
-  -> IOPD k v
-  -> STM ()
+iopdReserve :: forall k v . (Eq k, Hashable k) => Int -> IOPD k v -> STM ()
 iopdReserve !moreCap (IOPD _mv !wpv _nhv !av) = do
   wp <- readTVar wpv
   a  <- readTVar av
@@ -111,12 +92,7 @@ iopdReserve !moreCap (IOPD _mv !wpv _nhv !av) = do
             V.unsafeFreeze a'
       writeTVar av aNew
 
-iopdUpdate
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => [(k, v)]
-  -> IOPD k v
-  -> STM ()
+iopdUpdate :: forall k v . (Eq k, Hashable k) => [(k, v)] -> IOPD k v -> STM ()
 iopdUpdate !ps !d = if null ps
   then return ()
   else do
@@ -128,12 +104,7 @@ iopdUpdate !ps !d = if null ps
     iopdInsert key val d
     upd rest
 
-iopdLookup
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => k
-  -> IOPD k v
-  -> STM (Maybe v)
+iopdLookup :: forall k v . (Eq k, Hashable k) => k -> IOPD k v -> STM (Maybe v)
 iopdLookup !key (IOPD !mv _wpv _nhv !av) =
   Map.lookup key <$> readTVar mv >>= \case
     Nothing -> return Nothing
@@ -141,22 +112,12 @@ iopdLookup !key (IOPD !mv _wpv _nhv !av) =
       (fmap snd <$>) $ flip V.unsafeIndex i <$> readTVar av >>= readTVar
 
 iopdLookupDefault
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => v
-  -> k
-  -> IOPD k v
-  -> STM v
+  :: forall k v . (Eq k, Hashable k) => v -> k -> IOPD k v -> STM v
 iopdLookupDefault !defaultVal !key !iopd = iopdLookup key iopd >>= \case
   Nothing   -> return defaultVal
   Just !val -> return val
 
-iopdDelete
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => k
-  -> IOPD k v
-  -> STM ()
+iopdDelete :: forall k v . (Eq k, Hashable k) => k -> IOPD k v -> STM ()
 iopdDelete !key (IOPD !mv _wpv !nhv !av) =
   Map.lookup key <$> readTVar mv >>= \case
     Nothing -> return ()
@@ -164,8 +125,7 @@ iopdDelete !key (IOPD !mv _wpv !nhv !av) =
       flip V.unsafeIndex i <$> readTVar av >>= flip writeTVar Nothing
       modifyTVar' nhv (+ 1)
 
-iopdKeys
-  :: forall k v . (Eq k, Hashable k, Eq v, Hashable v) => IOPD k v -> STM [k]
+iopdKeys :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM [k]
 iopdKeys (IOPD _mv !wpv _nhv !av) = do
   wp <- readTVar wpv
   a  <- readTVar av
@@ -175,8 +135,7 @@ iopdKeys (IOPD _mv !wpv _nhv !av) = do
         Just (!key, _val) -> go (key : keys) (i - 1)
   go [] (wp - 1)
 
-iopdValues
-  :: forall k v . (Eq k, Hashable k, Eq v, Hashable v) => IOPD k v -> STM [v]
+iopdValues :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM [v]
 iopdValues (IOPD _mv !wpv _nhv !av) = do
   wp <- readTVar wpv
   a  <- readTVar av
@@ -186,11 +145,7 @@ iopdValues (IOPD _mv !wpv _nhv !av) = do
         Just (_key, !val) -> go (val : vals) (i - 1)
   go [] (wp - 1)
 
-iopdToList
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => IOPD k v
-  -> STM [(k, v)]
+iopdToList :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM [(k, v)]
 iopdToList (IOPD _mv !wpv _nhv !av) = do
   wp <- readTVar wpv
   a  <- readTVar av
@@ -201,10 +156,7 @@ iopdToList (IOPD _mv !wpv _nhv !av) = do
   go [] (wp - 1)
 
 iopdToReverseList
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => IOPD k v
-  -> STM [(k, v)]
+  :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM [(k, v)]
 iopdToReverseList (IOPD _mv !wpv _nhv !av) = do
   wp <- readTVar wpv
   a  <- readTVar av
@@ -214,11 +166,7 @@ iopdToReverseList (IOPD _mv !wpv _nhv !av) = do
         Just !entry -> go (entry : entries) (i + 1)
   go [] 0
 
-iopdFromList
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => [(k, v)]
-  -> STM (IOPD k v)
+iopdFromList :: forall k v . (Eq k, Hashable k) => [(k, v)] -> STM (IOPD k v)
 iopdFromList !entries = do
   tves <- sequence $ [ (key, ) <$> newTVar (Just e) | e@(!key, _) <- entries ]
   let (mNew, wpNew, nhNew, aNew) = runST $ do
@@ -242,10 +190,7 @@ iopdFromList !entries = do
 
 
 iopdSnapshot
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => IOPD k v
-  -> STM (OrderedDict k v)
+  :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM (OrderedDict k v)
 iopdSnapshot (IOPD !mv !wpv _nhv !av) = do
   m  <- readTVar mv
   wp <- readTVar wpv
@@ -258,7 +203,7 @@ iopdSnapshot (IOPD !mv !wpv _nhv !av) = do
 --
 -- can be created either by 'odFromList', or taken as a snapshot of an IOPD
 data OrderedDict k v where
-  OrderedDict ::(Eq k, Hashable k, Eq v, Hashable v) => {
+  OrderedDict ::(Eq k, Hashable k) => {
       od'map :: !(Map.HashMap k Int)
     , od'array :: !(Vector (Maybe (k, v)))
     } -> OrderedDict k v
@@ -268,40 +213,26 @@ instance (Eq k, Hashable k, Eq v, Hashable v) => Hashable (OrderedDict k v) wher
   hashWithSalt s od@(OrderedDict m _a) =
     s `hashWithSalt` m `hashWithSalt` odToList od
 
-odEmpty :: forall k v . (Eq k, Hashable k, Eq v, Hashable v) => OrderedDict k v
+odEmpty :: forall k v . (Eq k, Hashable k) => OrderedDict k v
 odEmpty = OrderedDict Map.empty V.empty
 
-odNull
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => OrderedDict k v
-  -> Bool
+odNull :: forall k v . (Eq k, Hashable k) => OrderedDict k v -> Bool
 odNull (OrderedDict !m _a) = Map.null m
 
-odLookup
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => k
-  -> OrderedDict k v
-  -> Maybe v
+odLookup :: forall k v . (Eq k, Hashable k) => k -> OrderedDict k v -> Maybe v
 odLookup !key (OrderedDict !m !a) = case Map.lookup key m of
   Nothing -> Nothing
   Just !i -> snd <$> V.unsafeIndex a i
 
 odLookupDefault
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => v
-  -> k
-  -> OrderedDict k v
-  -> v
+  :: forall k v . (Eq k, Hashable k) => v -> k -> OrderedDict k v -> v
 odLookupDefault !defaultVal !key !d = case odLookup key d of
   Nothing   -> defaultVal
   Just !val -> val
 
 odTakeOut
   :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
+   . (Eq k, Hashable k)
   => k
   -> OrderedDict k v
   -> (Maybe v, OrderedDict k v)
@@ -309,18 +240,10 @@ odTakeOut !key od@(OrderedDict !m !a) = case Map.lookup key m of
   Nothing -> (Nothing, od)
   Just !i -> (snd <$> V.unsafeIndex a i, OrderedDict (Map.delete key m) a)
 
-odKeys
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => OrderedDict k v
-  -> [k]
+odKeys :: forall k v . (Eq k, Hashable k) => OrderedDict k v -> [k]
 odKeys (OrderedDict !m _a) = Map.keys m
 
-odValues
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => OrderedDict k v
-  -> [v]
+odValues :: forall k v . (Eq k, Hashable k) => OrderedDict k v -> [v]
 odValues (OrderedDict _m !a) = go [] (V.length a - 1)
  where
   go :: [v] -> Int -> [v]
@@ -329,11 +252,7 @@ odValues (OrderedDict _m !a) = go [] (V.length a - 1)
     Nothing           -> go vals (i - 1)
     Just (_key, !val) -> go (val : vals) (i - 1)
 
-odToList
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => OrderedDict k v
-  -> [(k, v)]
+odToList :: forall k v . (Eq k, Hashable k) => OrderedDict k v -> [(k, v)]
 odToList (OrderedDict _m !a) = go [] (V.length a - 1)
  where
   go :: [(k, v)] -> Int -> [(k, v)]
@@ -343,10 +262,7 @@ odToList (OrderedDict _m !a) = go [] (V.length a - 1)
     Just !entry -> go (entry : entries) (i - 1)
 
 odToReverseList
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => OrderedDict k v
-  -> [(k, v)]
+  :: forall k v . (Eq k, Hashable k) => OrderedDict k v -> [(k, v)]
 odToReverseList (OrderedDict _m !a) = go [] 0
  where
   !cap = V.length a
@@ -356,11 +272,7 @@ odToReverseList (OrderedDict _m !a) = go [] 0
     Nothing     -> go entries (i + 1)
     Just !entry -> go (entry : entries) (i + 1)
 
-odFromList
-  :: forall k v
-   . (Eq k, Hashable k, Eq v, Hashable v)
-  => [(k, v)]
-  -> OrderedDict k v
+odFromList :: forall k v . (Eq k, Hashable k) => [(k, v)] -> OrderedDict k v
 odFromList !entries =
   let (mNew, aNew) = runST $ do
         a <- MV.unsafeNew $ length entries
@@ -377,7 +289,7 @@ odFromList !entries =
 
 odMap
   :: forall k v v'
-   . (Eq k, Hashable k, Eq v, Hashable v, Eq v', Hashable v')
+   . (Eq k, Hashable k)
   => (v -> v')
   -> OrderedDict k v
   -> OrderedDict k v'
@@ -397,7 +309,7 @@ odMap !f (OrderedDict !m !a) =
 
 odMapSTM
   :: forall k v v'
-   . (Eq k, Hashable k, Eq v, Hashable v, Eq v', Hashable v')
+   . (Eq k, Hashable k)
   => (v -> STM v')
   -> OrderedDict k v
   -> STM (OrderedDict k v')
