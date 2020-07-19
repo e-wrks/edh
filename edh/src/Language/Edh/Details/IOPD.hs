@@ -175,6 +175,17 @@ iopdKeys (IOPD _mv !wpv _nhv !av) = do
         Just (!key, _val) -> go (key : keys) (i - 1)
   go [] (wp - 1)
 
+iopdValues
+  :: forall k v . (Eq k, Hashable k, Eq v, Hashable v) => IOPD k v -> STM [v]
+iopdValues (IOPD _mv !wpv _nhv !av) = do
+  wp <- readTVar wpv
+  a  <- readTVar av
+  let go !vals !i | i < 0 = return vals
+      go !vals !i         = readTVar (V.unsafeIndex a i) >>= \case
+        Nothing           -> go vals (i - 1)
+        Just (_key, !val) -> go (val : vals) (i - 1)
+  go [] (wp - 1)
+
 iopdToList
   :: forall k v
    . (Eq k, Hashable k, Eq v, Hashable v)
@@ -305,6 +316,19 @@ odKeys
   -> [k]
 odKeys (OrderedDict !m _a) = Map.keys m
 
+odValues
+  :: forall k v
+   . (Eq k, Hashable k, Eq v, Hashable v)
+  => OrderedDict k v
+  -> [v]
+odValues (OrderedDict _m !a) = go [] (V.length a - 1)
+ where
+  go :: [v] -> Int -> [v]
+  go !vals !i | i < 0 = vals
+  go !vals !i         = case V.unsafeIndex a i of
+    Nothing           -> go vals (i - 1)
+    Just (_key, !val) -> go (val : vals) (i - 1)
+
 odToList
   :: forall k v
    . (Eq k, Hashable k, Eq v, Hashable v)
@@ -313,8 +337,8 @@ odToList
 odToList (OrderedDict _m !a) = go [] (V.length a - 1)
  where
   go :: [(k, v)] -> Int -> [(k, v)]
-  go entries !i | i < 0 = entries
-  go entries !i         = case V.unsafeIndex a i of
+  go !entries !i | i < 0 = entries
+  go !entries !i         = case V.unsafeIndex a i of
     Nothing     -> go entries (i - 1)
     Just !entry -> go (entry : entries) (i - 1)
 
@@ -327,8 +351,8 @@ odToReverseList (OrderedDict _m !a) = go [] 0
  where
   !cap = V.length a
   go :: [(k, v)] -> Int -> [(k, v)]
-  go entries !i | i >= cap = entries
-  go entries !i            = case V.unsafeIndex a i of
+  go !entries !i | i >= cap = entries
+  go !entries !i            = case V.unsafeIndex a i of
     Nothing     -> go entries (i + 1)
     Just !entry -> go (entry : entries) (i + 1)
 
