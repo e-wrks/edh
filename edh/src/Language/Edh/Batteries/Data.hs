@@ -156,8 +156,13 @@ fapProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                 _ -> exitEdhProc exit $ EdhArgsPack $ ArgsPack
                   (args ++ [rhVal])
                   kwargs
-          _ -> edhMakeCall pgs callee'val callee'that argsPkr scopeMod
-            $ \mkCall -> runEdhProc pgs (mkCall exit)
+          _ -> runEdhProc pgs $ packEdhArgs argsPkr $ \ !apk ->
+            let !apk' = case apk of
+                  ArgsPack [EdhArgsPack !apk''] !kwargs | odNull kwargs -> apk''
+                  _ -> apk
+            in  contEdhSTM
+                  $ edhMakeCall' pgs callee'val callee'that apk' scopeMod
+                  $ \mkCall -> runEdhProc pgs (mkCall exit)
  where
   argsPkr :: ArgsPacker
   argsPkr = case rhExpr of
@@ -185,8 +190,13 @@ ffapProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                 _ -> exitEdhProc exit $ EdhArgsPack $ ArgsPack
                   (args ++ [lhVal])
                   kwargs
-          _ -> edhMakeCall pgs callee'val callee'that argsPkr scopeMod
-            $ \mkCall -> runEdhProc pgs (mkCall exit)
+          _ -> runEdhProc pgs $ packEdhArgs argsPkr $ \ !apk ->
+            let !apk' = case apk of
+                  ArgsPack [EdhArgsPack !apk''] !kwargs | odNull kwargs -> apk''
+                  _ -> apk
+            in  contEdhSTM
+                  $ edhMakeCall' pgs callee'val callee'that apk' scopeMod
+                  $ \mkCall -> runEdhProc pgs (mkCall exit)
  where
   argsPkr :: ArgsPacker
   argsPkr = case lhExpr of
