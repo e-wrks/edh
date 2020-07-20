@@ -14,6 +14,8 @@ import qualified Data.Text                     as T
 import qualified Data.Text.Encoding            as TE
 import qualified Data.HashMap.Strict           as Map
 
+import           Data.Lossless.Decimal         as D
+
 import           Language.Edh.Control
 import           Language.Edh.Event
 import           Language.Edh.Details.IOPD
@@ -343,17 +345,114 @@ reprProc (ArgsPack !args !kwargs) !exit = do
           contEdhSTM $ go reprs ((k, r) : kwReprs) [] rest
   contEdhSTM $ go [] [] args (odToList kwargs)
 
+
+capProc :: EdhProcedure
+capProc (ArgsPack [!v] !kwargs) !exit = do
+  !pgs <- ask
+  contEdhSTM $ case edhUltimate v of
+    EdhObject !o -> lookupEdhObjAttr pgs o (AttrByName "__cap__") >>= \case
+      EdhNil -> exitEdhSTM pgs exit $ EdhDecimal D.nan
+      EdhMethod !mth ->
+        runEdhProc pgs $ callEdhMethod o mth (ArgsPack [] kwargs) id exit
+      !badMagic ->
+        throwEdhSTM pgs UsageError
+          $  "Bad magic __cap__ of "
+          <> T.pack (edhTypeNameOf badMagic)
+          <> " on class "
+          <> procedureName (objClass o)
+    _ -> exitEdhSTM pgs exit $ EdhDecimal D.nan
+capProc _ _ = throwEdh UsageError "Please get capacity of one value at a time"
+
+growProc :: EdhProcedure
+growProc (ArgsPack [!v, newCap@EdhDecimal{}] !kwargs) !exit = do
+  !pgs <- ask
+  contEdhSTM $ case edhUltimate v of
+    EdhObject !o -> lookupEdhObjAttr pgs o (AttrByName "__grow__") >>= \case
+      EdhNil ->
+        throwEdhSTM pgs UsageError
+          $  "grow() not supported by the object of class "
+          <> procedureName (objClass o)
+      EdhMethod !mth ->
+        runEdhProc pgs $ callEdhMethod o mth (ArgsPack [newCap] kwargs) id exit
+      !badMagic ->
+        throwEdhSTM pgs UsageError
+          $  "Bad magic __grow__ of "
+          <> T.pack (edhTypeNameOf badMagic)
+          <> " on class "
+          <> procedureName (objClass o)
+    !badVal ->
+      throwEdhSTM pgs UsageError
+        $  "grow() not supported by a value of "
+        <> T.pack (edhTypeNameOf badVal)
+growProc _ _ =
+  throwEdh UsageError "Invalid args to grow(container, newCapacity)"
+
+lenProc :: EdhProcedure
+lenProc (ArgsPack [!v] !kwargs) !exit = do
+  !pgs <- ask
+  contEdhSTM $ case edhUltimate v of
+    EdhObject !o -> lookupEdhObjAttr pgs o (AttrByName "__len__") >>= \case
+      EdhNil -> exitEdhSTM pgs exit $ EdhDecimal D.nan
+      EdhMethod !mth ->
+        runEdhProc pgs $ callEdhMethod o mth (ArgsPack [] kwargs) id exit
+      !badMagic ->
+        throwEdhSTM pgs UsageError
+          $  "Bad magic __len__ of "
+          <> T.pack (edhTypeNameOf badMagic)
+          <> " on class "
+          <> procedureName (objClass o)
+    EdhList (List _ !lv) -> length <$> readTVar lv >>= \ !llen ->
+      exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral llen
+    EdhDict (Dict _ !ds) -> iopdSize ds
+      >>= \ !dlen -> exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral dlen
+    EdhArgsPack (ArgsPack !posArgs !kwArgs) | odNull kwArgs ->
+      -- no keyword arg, assuming tuple semantics
+      exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral $ length posArgs
+    EdhArgsPack (ArgsPack !posArgs !kwArgs) | null posArgs ->
+      -- no positional arg, assuming named tuple semantics
+      exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral $ odSize kwArgs
+    EdhArgsPack{} -> throwEdhSTM
+      pgs
+      UsageError
+      "Unresonable to get length of an apk with both positional and keyword args"
+    _ -> exitEdhSTM pgs exit $ EdhDecimal D.nan
+lenProc _ _ = throwEdh UsageError "Please get length of one value at a time"
+
+markProc :: EdhProcedure
+markProc (ArgsPack [!v, newLen@EdhDecimal{}] !kwargs) !exit = do
+  !pgs <- ask
+  contEdhSTM $ case edhUltimate v of
+    EdhObject !o -> lookupEdhObjAttr pgs o (AttrByName "__mark__") >>= \case
+      EdhNil ->
+        throwEdhSTM pgs UsageError
+          $  "mark() not supported by the object of class "
+          <> procedureName (objClass o)
+      EdhMethod !mth ->
+        runEdhProc pgs $ callEdhMethod o mth (ArgsPack [newLen] kwargs) id exit
+      !badMagic ->
+        throwEdhSTM pgs UsageError
+          $  "Bad magic __mark__ of "
+          <> T.pack (edhTypeNameOf badMagic)
+          <> " on class "
+          <> procedureName (objClass o)
+    !badVal ->
+      throwEdhSTM pgs UsageError
+        $  "mark() not supported by a value of "
+        <> T.pack (edhTypeNameOf badVal)
+markProc _ _ = throwEdh UsageError "Invalid args to mark(container, newLength)"
+
+
 showProc :: EdhProcedure
-showProc (ArgsPack [v] _) !exit = do
+showProc (ArgsPack [!v] !kwargs) !exit = do
   !pgs <- ask
   let -- todo specialize more informative show for intrinsic types of values
     showWithNoMagic = edhValueReprSTM pgs v $ \ !r ->
       exitEdhSTM pgs exit $ EdhString $ T.pack (edhTypeNameOf v) <> ": " <> r
-  contEdhSTM $ case v of
+  contEdhSTM $ case edhUltimate v of
     EdhObject !o -> lookupEdhObjAttr pgs o (AttrByName "__show__") >>= \case
       EdhNil -> showWithNoMagic
       EdhMethod !mth ->
-        runEdhProc pgs $ callEdhMethod o mth (ArgsPack [] odEmpty) id exit
+        runEdhProc pgs $ callEdhMethod o mth (ArgsPack [] kwargs) id exit
       !badMagic ->
         throwEdhSTM pgs UsageError
           $  "Bad magic __show__ of "
@@ -364,7 +463,7 @@ showProc (ArgsPack [v] _) !exit = do
 showProc _ _ = throwEdh UsageError "Please show one value at a time"
 
 descProc :: EdhProcedure
-descProc (ArgsPack [v] _) !exit = do
+descProc (ArgsPack [!v] !kwargs) !exit = do
   !pgs <- ask
   let -- TODO specialize more informative description (statistical wise) for
       --      intrinsic types of values
@@ -383,11 +482,11 @@ descProc (ArgsPack [v] _) !exit = do
             <> T.pack (edhTypeNameOf v)
             <> ", having representation:\n"
             <> r
-  contEdhSTM $ case v of
+  contEdhSTM $ case edhUltimate v of
     EdhObject !o -> lookupEdhObjAttr pgs o (AttrByName "__desc__") >>= \case
       EdhNil -> descWithNoMagic
       EdhMethod !mth ->
-        runEdhProc pgs $ callEdhMethod o mth (ArgsPack [] odEmpty) id exit
+        runEdhProc pgs $ callEdhMethod o mth (ArgsPack [] kwargs) id exit
       !badMagic ->
         throwEdhSTM pgs UsageError
           $  "Bad magic __desc__ of "

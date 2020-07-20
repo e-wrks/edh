@@ -219,6 +219,9 @@ odEmpty = OrderedDict Map.empty V.empty
 odNull :: forall k v . (Eq k, Hashable k) => OrderedDict k v -> Bool
 odNull (OrderedDict !m _a) = Map.null m
 
+odSize :: forall k v . (Eq k, Hashable k) => OrderedDict k v -> Int
+odSize (OrderedDict !m _a) = Map.size m
+
 odLookup :: forall k v . (Eq k, Hashable k) => k -> OrderedDict k v -> Maybe v
 odLookup !key (OrderedDict !m !a) = case Map.lookup key m of
   Nothing -> Nothing

@@ -523,9 +523,31 @@ installEdhBatteries world = liftIO $ do
                , apkKwrgsProc
                , PackReceiver [mandatoryArg "apk"]
                )
-             , (EdhMethod, "repr", reprProc  , WildReceiver)
-             , (EdhMethod, "show", showProc  , WildReceiver)
-             , (EdhMethod, "desc", descProc  , WildReceiver)
+             , (EdhMethod, "repr", reprProc, WildReceiver)
+             , ( EdhMethod
+               , "cap"
+               , capProc
+               , PackReceiver [mandatoryArg "container"]
+               )
+             , ( EdhMethod
+               , "grow"
+               , growProc
+               , PackReceiver
+                 [mandatoryArg "container", mandatoryArg "newCapacity"]
+               )
+             , ( EdhMethod
+               , "len"
+               , lenProc
+               , PackReceiver [mandatoryArg "container"]
+               )
+             , ( EdhMethod
+               , "mark"
+               , markProc
+               , PackReceiver
+                 [mandatoryArg "container", mandatoryArg "newLength"]
+               )
+             , (EdhMethod, "show", showProc, PackReceiver [mandatoryArg "val"])
+             , (EdhMethod, "desc", descProc, PackReceiver [mandatoryArg "val"])
              , (EdhMethod, "dict", dictProc  , WildReceiver)
              , (EdhMethod, "null", isNullProc, WildReceiver)
              , (EdhMethod, "type", typeProc  , WildReceiver)

@@ -61,7 +61,7 @@ vecMethods !pgsModule = sequence
       , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
       )
     , ("__null__", EdhMethod, vecNullProc, PackReceiver [])
-    , ("length"  , EdhMethod, vecLenProc , PackReceiver [])
+    , ("__len__" , EdhMethod, vecLenProc , PackReceiver [])
     , ("__repr__", EdhMethod, vecReprProc, PackReceiver [])
     ]
   ]
