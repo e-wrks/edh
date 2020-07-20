@@ -233,6 +233,31 @@ odLookupDefault !defaultVal !key !d = case odLookup key d of
   Nothing   -> defaultVal
   Just !val -> val
 
+odLookupDefault'
+  :: forall k v v'
+   . (Eq k, Hashable k)
+  => v'
+  -> (v -> v')
+  -> k
+  -> OrderedDict k v
+  -> v'
+odLookupDefault' !defaultVal !f !key !d = case odLookup key d of
+  Nothing   -> defaultVal
+  Just !val -> f val
+
+odLookupContSTM
+  :: forall k v v'
+   . (Eq k, Hashable k)
+  => v'
+  -> (v -> (v' -> STM ()) -> STM ())
+  -> k
+  -> OrderedDict k v
+  -> (v' -> STM ())
+  -> STM ()
+odLookupContSTM !defaultVal !f !key !d !exit = case odLookup key d of
+  Nothing   -> exit defaultVal
+  Just !val -> f val exit
+
 odTakeOut
   :: forall k v
    . (Eq k, Hashable k)
