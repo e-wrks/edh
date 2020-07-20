@@ -24,6 +24,18 @@ f1( 3 )
 f2( 5 )
 f3( 7 )
 
+{
+  # args fusion
+
+  # with respecting to functional application via ($) or (|), if an ArgsPack
+  # takes the place of a procedure (the callee), it just absorbs the other
+  # positional argument or a whole arguments pack, to form a new ArgsPack
+
+  ( 2, 11, n=3 ) $ ( 9, 7, m=5 ) | console.print
+
+  ( 9, 7, m=5 ) | ( 2, 11, n=3 ) | console.print
+
+}
 
 {
   # decorator

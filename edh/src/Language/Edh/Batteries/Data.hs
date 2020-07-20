@@ -143,8 +143,21 @@ fapProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
   contEdhSTM
     $ resolveEdhCallee pgs lhExpr
     $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
-        edhMakeCall pgs callee'val callee'that argsPkr scopeMod
-          $ \mkCall -> runEdhProc pgs (mkCall exit)
+        case callee'val of
+          EdhArgsPack (ArgsPack !args !kwargs) ->
+            runEdhProc pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+              case edhUltimate rhVal of
+                EdhArgsPack (ArgsPack !args' !kwargs') -> contEdhSTM $ do
+                  !kwIOPD <- iopdFromList $ odToList kwargs
+                  iopdUpdate (odToList kwargs') kwIOPD
+                  !kwargs'' <- iopdSnapshot kwIOPD
+                  exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack (args ++ args')
+                                                               kwargs''
+                _ -> exitEdhProc exit $ EdhArgsPack $ ArgsPack
+                  (args ++ [rhVal])
+                  kwargs
+          _ -> edhMakeCall pgs callee'val callee'that argsPkr scopeMod
+            $ \mkCall -> runEdhProc pgs (mkCall exit)
  where
   argsPkr :: ArgsPacker
   argsPkr = case rhExpr of
@@ -159,8 +172,21 @@ ffapProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
   contEdhSTM
     $ resolveEdhCallee pgs rhExpr
     $ \(OriginalValue !callee'val _ !callee'that, scopeMod) ->
-        edhMakeCall pgs callee'val callee'that argsPkr scopeMod
-          $ \mkCall -> runEdhProc pgs (mkCall exit)
+        case callee'val of
+          EdhArgsPack (ArgsPack !args !kwargs) ->
+            runEdhProc pgs $ evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
+              case edhUltimate lhVal of
+                EdhArgsPack (ArgsPack !args' !kwargs') -> contEdhSTM $ do
+                  !kwIOPD <- iopdFromList $ odToList kwargs
+                  iopdUpdate (odToList kwargs') kwIOPD
+                  !kwargs'' <- iopdSnapshot kwIOPD
+                  exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack (args ++ args')
+                                                               kwargs''
+                _ -> exitEdhProc exit $ EdhArgsPack $ ArgsPack
+                  (args ++ [lhVal])
+                  kwargs
+          _ -> edhMakeCall pgs callee'val callee'that argsPkr scopeMod
+            $ \mkCall -> runEdhProc pgs (mkCall exit)
  where
   argsPkr :: ArgsPacker
   argsPkr = case lhExpr of
