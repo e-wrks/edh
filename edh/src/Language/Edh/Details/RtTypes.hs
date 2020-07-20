@@ -78,10 +78,10 @@ type DictStore = IOPD EdhValue EdhValue
 -- | create a new Edh dict from a list of entries
 --
 -- nil keys and nil values are filtered out so have no effect
-createEdhDict :: [(ItemKey, EdhValue)] -> STM EdhValue
+createEdhDict :: [(ItemKey, EdhValue)] -> STM Dict
 createEdhDict !entries = do
   u <- unsafeIOToSTM newUnique
-  EdhDict . Dict u <$> iopdFromList
+  Dict u <$> iopdFromList
     [ e | e@(key, val) <- entries, key /= EdhNil && val /= EdhNil ]
 
 -- | setting to `nil` value means deleting the item by the specified key

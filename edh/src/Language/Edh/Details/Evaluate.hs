@@ -234,7 +234,7 @@ evalStmt' !stmt !exit = do
                 >>= \case
                       EdhDict (Dict _ !effDS) -> iopdUpdate effd effDS
                       _                       -> do
-                        d <- createEdhDict effd
+                        d <- EdhDict <$> createEdhDict effd
                         changeEntityAttr pgs
                                          (scopeEntity scope)
                                          (AttrByName edhEffectsMagicName)
@@ -247,7 +247,7 @@ evalStmt' !stmt !exit = do
               >>= \case
                     EdhDict (Dict _ !thisExpDS) -> iopdUpdate impd thisExpDS
                     _                           -> do -- todo warn if of wrong type
-                      d <- createEdhDict impd
+                      d <- EdhDict <$> createEdhDict impd
                       changeEntityAttr pgs
                                        (objEntity this)
                                        (AttrByName edhExportsMagicName)
@@ -500,14 +500,14 @@ importFromApk !tgtEnt !argsRcvr !fromApk !exit = do
         lookupEntityAttr pgs tgtEnt (AttrByName edhEffectsMagicName) >>= \case
           EdhDict (Dict _ !effDS) -> iopdUpdate effd effDS
           _                       -> do -- todo warn if of wrong type
-            d <- createEdhDict effd
+            d <- EdhDict <$> createEdhDict effd
             changeEntityAttr pgs tgtEnt (AttrByName edhEffectsMagicName) d
     when (contextExporting ctx) $ do -- do export what's imported
       let !impd = [ (attrKeyValue k, v) | (k, v) <- odToList em ]
       lookupEntityAttr pgs tgtEnt (AttrByName edhExportsMagicName) >>= \case
         EdhDict (Dict _ !thisExpDS) -> iopdUpdate impd thisExpDS
         _                           -> do -- todo warn if of wrong type
-          d <- createEdhDict impd
+          d <- EdhDict <$> createEdhDict impd
           changeEntityAttr pgs tgtEnt (AttrByName edhExportsMagicName) d
     exitEdhSTM pgs exit $ EdhArgsPack fromApk
 
@@ -914,7 +914,7 @@ evalExpr !expr !exit = do
               EdhDict (Dict _ !thisExpDS) ->
                 iopdInsert (attrKeyValue key) val thisExpDS
               _ -> do
-                d <- createEdhDict [(attrKeyValue key, val)]
+                d <- EdhDict <$> createEdhDict [(attrKeyValue key, val)]
                 changeEntityAttr pgs
                                  (objEntity this)
                                  (AttrByName edhExportsMagicName)
@@ -926,7 +926,7 @@ evalExpr !expr !exit = do
               EdhDict (Dict _ !effDS) ->
                 iopdInsert (attrKeyValue key) val effDS
               _ -> do
-                d <- createEdhDict [(attrKeyValue key, val)]
+                d <- EdhDict <$> createEdhDict [(attrKeyValue key, val)]
                 changeEntityAttr pgs
                                  (scopeEntity scope)
                                  (AttrByName edhEffectsMagicName)
@@ -1469,27 +1469,28 @@ evalExpr !expr !exit = do
           -- with possibly a different precedence
           Left (StmtSrc (_, ExprStmt (AttrExpr (DirectRef (NamedAttr !origOpSym)))))
             -> contEdhSTM $ do
-              let redeclareOp !origOp = do
-                    unless (contextPure ctx) $ changeEntityAttr
-                      pgs
-                      (scopeEntity scope)
-                      (AttrByName opSym)
-                      origOp
-                    when (contextExporting ctx)
-                      $   lookupEntityAttr pgs
-                                           (objEntity this)
-                                           (AttrByName edhExportsMagicName)
-                      >>= \case
-                            EdhDict (Dict _ !thisExpDS) ->
-                              iopdInsert (EdhString opSym) origOp thisExpDS
-                            _ -> do
-                              d <- createEdhDict [(EdhString opSym, origOp)]
-                              changeEntityAttr
-                                pgs
-                                (objEntity this)
-                                (AttrByName edhExportsMagicName)
-                                d
-                    exitEdhSTM pgs exit origOp
+              let
+                redeclareOp !origOp = do
+                  unless (contextPure ctx) $ changeEntityAttr
+                    pgs
+                    (scopeEntity scope)
+                    (AttrByName opSym)
+                    origOp
+                  when (contextExporting ctx)
+                    $   lookupEntityAttr pgs
+                                         (objEntity this)
+                                         (AttrByName edhExportsMagicName)
+                    >>= \case
+                          EdhDict (Dict _ !thisExpDS) ->
+                            iopdInsert (EdhString opSym) origOp thisExpDS
+                          _ -> do
+                            d <- EdhDict
+                              <$> createEdhDict [(EdhString opSym, origOp)]
+                            changeEntityAttr pgs
+                                             (objEntity this)
+                                             (AttrByName edhExportsMagicName)
+                                             d
+                  exitEdhSTM pgs exit origOp
               lookupEdhCtxAttr pgs scope (AttrByName origOpSym) >>= \case
                 EdhNil ->
                   throwEdhSTM pgs EvalError
@@ -1526,7 +1527,7 @@ evalExpr !expr !exit = do
                     EdhDict (Dict _ !thisExpDS) ->
                       iopdInsert (EdhString opSym) op thisExpDS
                     _ -> do
-                      d <- createEdhDict [(EdhString opSym, op)]
+                      d <- EdhDict <$> createEdhDict [(EdhString opSym, op)]
                       changeEntityAttr pgs
                                        (objEntity this)
                                        (AttrByName edhExportsMagicName)
@@ -1583,7 +1584,7 @@ evalExpr !expr !exit = do
                 EdhDict (Dict _ !thisExpDS) ->
                   iopdInsert (EdhString opSym) op thisExpDS
                 _ -> do
-                  d <- createEdhDict [(EdhString opSym, op)]
+                  d <- EdhDict <$> createEdhDict [(EdhString opSym, op)]
                   changeEntityAttr pgs
                                    (objEntity this)
                                    (AttrByName edhExportsMagicName)
@@ -2945,7 +2946,7 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
                 EdhDict (Dict _ !thisExpDS) ->
                   iopdInsert (attrKeyValue artKey) artVal thisExpDS
                 _ -> do
-                  d <- createEdhDict [(attrKeyValue artKey, artVal)]
+                  d <- EdhDict <$> createEdhDict [(attrKeyValue artKey, artVal)]
                   changeEntityAttr pgs
                                    (objEntity this)
                                    (AttrByName edhExportsMagicName)
@@ -2957,7 +2958,7 @@ assignEdhTarget !pgsAfter !lhExpr !exit !rhVal = do
           EdhDict (Dict _ !effDS) ->
             iopdInsert (attrKeyValue artKey) rhVal effDS
           _ -> do
-            d <- createEdhDict [(attrKeyValue artKey, rhVal)]
+            d <- EdhDict <$> createEdhDict [(attrKeyValue artKey, rhVal)]
             changeEntityAttr pgs ent (AttrByName edhEffectsMagicName) d
   case lhExpr of
     AttrExpr !addr -> case addr of

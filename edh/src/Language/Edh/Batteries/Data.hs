@@ -224,7 +224,7 @@ defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
                   EdhDict (Dict _ !thisExpDS) ->
                     iopdInsert (EdhString valName) nv thisExpDS
                   _ -> do
-                    d <- createEdhDict [(EdhString valName, nv)]
+                    d <- EdhDict <$> createEdhDict [(EdhString valName, nv)]
                     changeEntityAttr pgs
                                      (objEntity this)
                                      (AttrByName edhExportsMagicName)
