@@ -2208,10 +2208,10 @@ edhCatch !tryAct !exit !passOn = ask >>= \pgsOuter ->
     $ edhCatchSTM pgsOuter
                   (\pgsTry exit' -> runEdhProc pgsTry (tryAct exit'))
                   exit
-    $ \pgsThrower exv recover rethrow -> do
+    $ \ _pgsThrower !exv recover rethrow -> do
         let !ctxOuter = edh'context pgsOuter
             !ctxHndl  = ctxOuter { contextMatch = exv }
-            !pgsHndl  = pgsThrower { edh'context = ctxHndl }
+            !pgsHndl  = pgsOuter { edh'context = ctxHndl }
         runEdhProc pgsHndl $ passOn recover $ contEdhSTM rethrow
 edhCatchSTM
   :: EdhProgState
@@ -2235,22 +2235,22 @@ edhCatchSTM !pgsOuter !tryAct !exit !passOn = do
     hndlr :: EdhExcptHndlr
     hndlr !exv !rethrow = do
       pgsThrower <- ask
-      let goRecover :: EdhProcExit
-          goRecover !result = ask >>= \pgs ->
-            -- an exception handler provided another result value to recover
-            contEdhSTM $ fromEdhError pgs exv $ \ex -> case fromException ex of
-              Just ProgramHalt{} -> goRethrow -- never recover from ProgramHalt
-              _                  -> do
-                -- do recover from the exception
-                rcvrTh <- unsafeIOToSTM myThreadId
-                if rcvrTh /= hndlrTh
-                  then -- just skip the action if from a different thread
-                       return () -- other than the handler installer
-                  else runEdhProc pgsOuter $ exit result
-          goRethrow :: STM ()
-          goRethrow =
-            runEdhProc pgsThrower { edh'context = edh'context pgsOuter }
-              $ exceptionHandler scopeOuter exv rethrow
+      let
+        goRecover :: EdhProcExit
+        goRecover !result = ask >>= \pgs ->
+          -- an exception handler provided another result value to recover
+          contEdhSTM $ fromEdhError pgs exv $ \ex -> case fromException ex of
+            Just ProgramHalt{} -> goRethrow -- never recover from ProgramHalt
+            _                  -> do
+              -- do recover from the exception
+              rcvrTh <- unsafeIOToSTM myThreadId
+              if rcvrTh /= hndlrTh
+                then -- just skip the action if from a different thread
+                     return () -- other than the handler installer
+                else runEdhProc pgsOuter $ exit result
+        goRethrow :: STM ()
+        goRethrow =
+          runEdhProc pgsOuter $ exceptionHandler scopeOuter exv rethrow
       contEdhSTM $ passOn pgsThrower exv goRecover goRethrow
   tryAct pgsTry $ \tryResult -> contEdhSTM $ do
     -- no exception occurred, go trigger finally block
