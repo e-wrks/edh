@@ -2018,6 +2018,10 @@ edhPerformIO !pgs !act !exit = if edh'in'tx pgs
   then throwEdhSTM pgs UsageError "You don't perform IO within a transaction"
   else writeTBQueue (edh'task'queue pgs) $ EdhIOTask pgs act exit
 
+edhForkIO :: EdhProgState -> IO () -> STM ()
+edhForkIO !pgs !act = writeTBQueue (edh'task'queue pgs)
+  $ EdhIOTask pgs (forkIO act) (\_thId -> contEdhSTM $ return ())
+
 
 -- | Create an Edh error as both an Edh exception value and a host exception
 createEdhError
@@ -2208,7 +2212,7 @@ edhCatch !tryAct !exit !passOn = ask >>= \pgsOuter ->
     $ edhCatchSTM pgsOuter
                   (\pgsTry exit' -> runEdhProc pgsTry (tryAct exit'))
                   exit
-    $ \ _pgsThrower !exv recover rethrow -> do
+    $ \_pgsThrower !exv recover rethrow -> do
         let !ctxOuter = edh'context pgsOuter
             !ctxHndl  = ctxOuter { contextMatch = exv }
             !pgsHndl  = pgsOuter { edh'context = ctxHndl }
