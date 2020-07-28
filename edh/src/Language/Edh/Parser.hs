@@ -655,21 +655,11 @@ parseDictOrBlock !si0 = symbol "{"
       (e, si') <- nextEntry
       parseDictEntries si' (e : es)
    where
-    nextEntry, litEntry, addrEntry, exprEntry
-      :: Parser ((DictKeyExpr, Expr), IntplSrcInfo)
-    nextEntry = (litEntry <|> addrEntry <|> exprEntry) <* optionalComma
-    litEntry  = try $ do
-      k <- parseLitExpr
-      void $ symbol ":"
-      (v, si') <- parseExpr si
-      return ((LitDictKey k, v), si')
-    addrEntry = try $ do
-      k <- parseAttrAddr
-      void $ symbol ":"
-      (v, si') <- parseExpr si
-      return ((AddrDictKey k, v), si')
+    nextEntry, exprEntry :: Parser ((DictKeyExpr, Expr), IntplSrcInfo)
+    nextEntry = exprEntry <* optionalComma
     exprEntry = try $ do
-      (k, si') <- between (symbol "(") (symbol ")") $ parseExpr si
+      -- assuming (:) has precedence of 2
+      (k, si') <- parseExprPrec 2 si
       void $ symbol ":"
       (v, si'') <- parseExpr si'
       return ((ExprDictKey k, v), si'')
