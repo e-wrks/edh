@@ -514,6 +514,11 @@ installEdhBatteries world = liftIO $ do
                , PackReceiver [mandatoryArg "repr", RecvRestPosArgs "reprs"]
                )
              , ( EdhMethod
+               , "UUID"
+               , uuidCtorProc
+               , PackReceiver [mandatoryArg "uuidText"]
+               )
+             , ( EdhMethod
                , "__ArgsPackType_args__"
                , apkArgsProc
                , PackReceiver [mandatoryArg "apk"]

@@ -78,6 +78,7 @@ library edh-internal
         haskeline -any,
         lossless-decimal -any,
         scientific -any,
+        uuid -any,
         filepath -any,
         directory -any,
         bytestring -any,

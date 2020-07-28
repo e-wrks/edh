@@ -26,6 +26,9 @@ import qualified Data.List.NonEmpty            as NE
 import           Data.Vector.Mutable            ( IOVector )
 import           Data.Dynamic
 
+import qualified Data.UUID                     as UUID
+import qualified Data.UUID.V4                  as UUID
+
 import           Text.Megaparsec
 
 import           Data.Lossless.Decimal         as D
@@ -304,6 +307,10 @@ mkSymbol :: Text -> STM Symbol
 mkSymbol !description = do
   !u <- unsafeIOToSTM newUnique
   return $ Symbol u description
+
+
+mkUUID :: STM UUID.UUID
+mkUUID = unsafeIOToSTM UUID.nextRandom
 
 
 -- | A list in Edh is a multable, singly-linked, prepend list.
@@ -780,6 +787,7 @@ data EdhValue =
     | EdhBlob !ByteString
     | EdhString !Text
     | EdhSymbol !Symbol
+    | EdhUUID !UUID.UUID
 
   -- | direct pointer (to entities) values
     | EdhObject !Object
@@ -847,6 +855,7 @@ instance Show EdhValue where
   show (EdhBlob    b ) = "<blob#" <> show (B.length b) <> ">"
   show (EdhString  v ) = show v
   show (EdhSymbol  v ) = show v
+  show (EdhUUID    v ) = "UUID('" <> UUID.toString v <> "')"
 
   show (EdhObject  v ) = show v
 
@@ -910,6 +919,7 @@ instance Eq EdhValue where
   EdhBlob    x    == EdhBlob    y    = x == y
   EdhString  x    == EdhString  y    = x == y
   EdhSymbol  x    == EdhSymbol  y    = x == y
+  EdhUUID    x    == EdhUUID    y    = x == y
 
   EdhObject  x    == EdhObject  y    = x == y
 
@@ -963,6 +973,7 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhBlob    x                      ) = hashWithSalt s x
   hashWithSalt s (EdhString  x                      ) = hashWithSalt s x
   hashWithSalt s (EdhSymbol  x                      ) = hashWithSalt s x
+  hashWithSalt s (EdhUUID    x                      ) = hashWithSalt s x
   hashWithSalt s (EdhObject  x                      ) = hashWithSalt s x
 
   hashWithSalt s (EdhDict    x                      ) = hashWithSalt s x
@@ -1362,6 +1373,7 @@ data EdhTypeValue = TypeType
     | StringType
     | BlobType
     | SymbolType
+    | UUIDType
     | ObjectType
     | DictType
     | ListType
@@ -1419,6 +1431,7 @@ edhTypeOf EdhBool{}                = BoolType
 edhTypeOf EdhBlob{}                = BlobType
 edhTypeOf EdhString{}              = StringType
 edhTypeOf EdhSymbol{}              = SymbolType
+edhTypeOf EdhUUID{}                = UUIDType
 edhTypeOf EdhObject{}              = ObjectType
 edhTypeOf EdhDict{}                = DictType
 edhTypeOf EdhList{}                = ListType

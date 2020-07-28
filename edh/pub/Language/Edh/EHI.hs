@@ -221,6 +221,7 @@ module Language.Edh.EHI
   , EdhGenrCaller
   , globalSymbol
   , mkSymbol
+  , mkUUID
   , mkHostProc
   , mkSymbolicHostProc
   , mkIntrinsicOp

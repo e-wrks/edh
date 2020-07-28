@@ -14,6 +14,8 @@ import qualified Data.Text                     as T
 import qualified Data.Text.Encoding            as TE
 import qualified Data.HashMap.Strict           as Map
 
+import qualified Data.UUID                     as UUID
+
 import           Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
@@ -339,6 +341,18 @@ symbolCtorProc (ArgsPack !reprs _) !exit = ask >>= \pgs -> contEdhSTM $ do
     [sym] -> exitEdhSTM pgs exit $ EdhSymbol sym
     syms ->
       exitEdhSTM pgs exit $ EdhArgsPack $ ArgsPack (EdhSymbol <$> syms) odEmpty
+
+
+uuidCtorProc :: EdhProcedure
+uuidCtorProc (ArgsPack [] !kwargs) !exit | odNull kwargs =
+  ask >>= \ !pgs -> contEdhSTM $ EdhUUID <$> mkUUID >>= exitEdhSTM pgs exit
+uuidCtorProc (ArgsPack [EdhString !uuidTxt] !kwargs) !exit | odNull kwargs =
+  case UUID.fromText uuidTxt of
+    Just !uuid -> exitEdhProc exit $ EdhUUID uuid
+    _          -> throwEdh UsageError $ "Invalid uuid string: " <> uuidTxt
+-- todo support more forms of UUID ctor args
+uuidCtorProc _ _ = throwEdh UsageError "Invalid args to UUID()"
+
 
 apkArgsProc :: EdhProcedure
 apkArgsProc (ArgsPack _ !kwargs) _ | not $ odNull kwargs =
