@@ -16,6 +16,11 @@ dist/
 dist-newstyle/
 .ghc.environment*
 cabal.project.local
+# GHC profiling output
+*.prof
+*.hp
+*.eventlog
+*.aux
 
 # Nix
 result

@@ -1,0 +1,4 @@
+
+for _ from range( 60000 ) do nil; 'busy loop done'
+
+quit
