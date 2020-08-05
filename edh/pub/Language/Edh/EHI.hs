@@ -114,7 +114,7 @@ module Language.Edh.EHI
   , forkEdh
   , edhPerformSTM
   , edhPerformIO
-  , edhForkIO
+  , edhContIO
   , edhNop
   , edhEndOfProc
     -- ** Reflective manipulation
