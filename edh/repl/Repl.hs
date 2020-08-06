@@ -4,8 +4,6 @@ module Repl where
 import           Prelude
 -- import           Debug.Trace
 
-import           Control.Monad.Reader
-
 import           Control.Concurrent.STM
 
 import qualified Data.Text                     as T
