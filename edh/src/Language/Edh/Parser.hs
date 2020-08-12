@@ -632,7 +632,6 @@ parseOpLit = choice
   [ lexeme $ takeWhile1P (Just "operator symbol") isOperatorChar
   , keyword "is not"
   , keyword "is"
-  , keyword "not is"
   ]
 
 parseDictOrBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -701,6 +700,7 @@ parseIndexer !si = symbol "[" *> parseApkRest si "]" False
 --  * (+)/(-) prefix should have highest precedence below Call/Index
 --  * (not) should have a precedence slightly higher than (&&) (||)
 --  * guard (|) should have a precedence no smaller than the branch op (->)
+--  * default seem can just have normal precedence
 
 parsePrefixExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parsePrefixExpr !si = choice
@@ -716,6 +716,9 @@ parsePrefixExpr !si = choice
   , (symbol "|" >> notFollowedBy (satisfy isOperatorChar)) >> do
     (x, si') <- parseExprPrec 1 si
     return (PrefixExpr Guard x, si')
+  , keyword "default" >> do
+    (x, si') <- parseExpr si
+    return (DefaultExpr x, si')
   ]
 
 

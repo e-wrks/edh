@@ -344,9 +344,6 @@ installEdhBatteries world = liftIO $ do
         , ( "is"
           , 4
           ) -- identity-wise equality test
-        , ( "not is"
-          , 4
-          ) -- another form of `is not`
         , (">" , 4)
         , (">=", 4)
         , ("<" , 4)
@@ -468,7 +465,6 @@ installEdhBatteries world = liftIO $ do
           , ("=="    , valEqProc)
           , ("is not", idNotEqProc)
           , ("is"    , idEqProc)
-          , ("not is", idNotEqProc)
           , ("!="    , idNeProc)
           , (">"     , isGtProc)
           , (">="    , isGeProc)

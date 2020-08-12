@@ -7,10 +7,6 @@ import           Prelude
 import           GHC.Conc                       ( unsafeIOToSTM )
 import           System.IO.Unsafe               ( unsafePerformIO )
 
-import           Control.Monad.Except
-import           Control.Monad.Reader
-
--- import           Control.Concurrent
 import           Control.Concurrent.STM
 
 import           Data.Foldable
@@ -23,7 +19,6 @@ import           Data.Hashable
 import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
-import           Data.Vector.Mutable            ( IOVector )
 import           Data.Dynamic
 
 import qualified Data.UUID                     as UUID
@@ -36,10 +31,6 @@ import           Data.Lossless.Decimal         as D
 import           Language.Edh.Control
 
 import           Language.Edh.Details.IOPD
-
-
--- Boxed Vector for Edh values, non-transactional, mutable anytime
-type EdhVector = IOVector EdhValue
 
 
 -- | A pack of evaluated argument values with positional/keyword origin,
@@ -58,7 +49,7 @@ instance Show ArgsPack where
     then "()"
     else
       "( "
-      ++ concat [ show i ++ ", " | i <- args ]
+      ++ concat [ show p ++ ", " | p <- args ]
       ++ concat
            [ show kw ++ "=" ++ show v ++ ", " | (kw, v) <- odToList kwargs ]
       ++ ")"
@@ -98,76 +89,8 @@ dictEntryList !d =
   (<$> iopdToList d) $ fmap $ \(k, v) -> EdhArgsPack $ ArgsPack [k, v] odEmpty
 
 
-edhDictFromEntity :: EdhProgState -> Entity -> STM Dict
-edhDictFromEntity !pgs !ent = do
-  u  <- unsafeIOToSTM newUnique
-  ps <- allEntityAttrs pgs ent
-  (Dict u <$>) $ iopdFromList [ (attrKeyValue k, v) | (k, v) <- ps ]
-
--- | An entity in Edh is the backing storage for a scope, with possibly 
--- an object (actually more objects still possible, but god forbid it)
--- mounted to it with one class and many supers.
---
--- An entity has attributes associated by 'AttrKey'.
-data Entity = Entity {
-    entity'ident :: !Unique
-    , entity'store :: !(TVar Dynamic)
-    , entity'man :: !EntityManipulater
-  }
-instance Eq Entity where
-  Entity x'u _ _ == Entity y'u _ _ = x'u == y'u
-instance Ord Entity where
-  compare (Entity x'u _ _) (Entity y'u _ _) = compare x'u y'u
-instance Hashable Entity where
-  hashWithSalt s (Entity u _ _) = hashWithSalt s u
-
--- | Backing storage manipulation interface for entities
---
--- Arbitrary resources (esp. statically typed artifacts bearing high machine
--- performance purpose) can be wrapped as virtual entities through this interface.
-data EntityManipulater = EntityManipulater {
-    -- a result of `EdhNil` (i.e. `nil`) means no such attr, should usually lead
-    -- to error;
-    -- while an `EdhExpr _ (LitExpr NilLiteral) _` (i.e. `None` or `Nothing`)
-    -- means knowingly absent, usually be okay and handled via pattern matching
-    -- or equality test.
-    lookup'entity'attr :: !(EdhProgState -> AttrKey -> Dynamic -> STM EdhValue)
-
-    -- enumeration of attrs (this better be lazy)
-    , all'entity'attrs :: !(EdhProgState -> Dynamic -> STM [(AttrKey, EdhValue)])
-
-    -- single attr change
-    , change'entity'attr :: !(EdhProgState -> AttrKey -> EdhValue -> Dynamic ->  STM Dynamic)
-
-    -- bulk attr change
-    , update'entity'attrs :: !(EdhProgState -> [(AttrKey, EdhValue)] -> Dynamic -> STM Dynamic)
-  }
-
-lookupEntityAttr :: EdhProgState -> Entity -> AttrKey -> STM EdhValue
-lookupEntityAttr pgs (Entity _ !es !em) !k = do
-  esd <- readTVar es
-  lookup'entity'attr em pgs k esd
-{-# INLINE lookupEntityAttr #-}
-
-allEntityAttrs :: EdhProgState -> Entity -> STM [(AttrKey, EdhValue)]
-allEntityAttrs pgs (Entity _ !es !em) = do
-  esd <- readTVar es
-  all'entity'attrs em pgs esd
-{-# INLINE allEntityAttrs #-}
-
-changeEntityAttr :: EdhProgState -> Entity -> AttrKey -> EdhValue -> STM ()
-changeEntityAttr pgs (Entity _ !es !em) !k !v = do
-  esd  <- readTVar es
-  esd' <- change'entity'attr em pgs k v esd
-  writeTVar es esd'
-{-# INLINE changeEntityAttr #-}
-
-updateEntityAttrs :: EdhProgState -> Entity -> [(AttrKey, EdhValue)] -> STM ()
-updateEntityAttrs pgs (Entity _ !es !em) !ps = do
-  esd  <- readTVar es
-  esd' <- update'entity'attrs em pgs ps esd
-  writeTVar es esd'
-{-# INLINE updateEntityAttrs #-}
+-- | Backing storage for a scope or a hash object
+type EntityStore = IOPD AttrKey EdhValue
 
 data AttrKey = AttrByName !AttrName | AttrBySym !Symbol
     deriving (Eq, Ord)
@@ -185,92 +108,6 @@ type AttrName = Text
 attrKeyValue :: AttrKey -> EdhValue
 attrKeyValue (AttrByName nm ) = EdhString nm
 attrKeyValue (AttrBySym  sym) = EdhSymbol sym
-
-
--- | Create a constantly empty entity - 冇
-createMaoEntity :: STM Entity
-createMaoEntity = do
-  u  <- unsafeIOToSTM newUnique
-  es <- newTVar $ toDyn EdhNil
-  return $ Entity u es maoEntityManipulater
-
-maoEntityManipulater :: EntityManipulater
-maoEntityManipulater = EntityManipulater the'lookup'entity'attr
-                                         the'all'entity'attrs
-                                         the'change'entity'attr
-                                         the'update'entity'attrs
- where
-  the'lookup'entity'attr _ _ _ = return EdhNil
-  the'all'entity'attrs _ _ = return []
-  the'change'entity'attr _ _ _ = return  -- TODO raise error instead ?
-  the'update'entity'attrs _ _ = return  -- TODO raise error instead ?
-
-
--- | Create an entity with an in-band 'Data.HashMap.Strict.HashMap'
--- as backing storage
-createHashEntity :: IOPD AttrKey EdhValue -> STM Entity
-createHashEntity !d = do
-  u  <- unsafeIOToSTM newUnique
-  es <- newTVar $ toDyn d
-  return $ Entity u es hashEntityManipulater
-
-hashEntityManipulater :: EntityManipulater
-hashEntityManipulater = EntityManipulater the'lookup'entity'attr
-                                          the'all'entity'attrs
-                                          the'change'entity'attr
-                                          the'update'entity'attrs
- where
-  hm !dd = case fromDynamic dd of
-    Nothing -> iopdEmpty
-    Just !d -> return d
-  the'lookup'entity'attr _ !k = (iopdLookupDefault EdhNil k =<<) . hm
-  the'all'entity'attrs _ = (iopdToList =<<) . hm
-  the'change'entity'attr _ !k !v !dd = hm dd >>= \ !d -> case v of
-    EdhNil -> iopdDelete k d >> return dd
-    _      -> iopdInsert k v d >> return dd
-  the'update'entity'attrs _ !ps !dd = case fromDynamic dd of
-    Nothing -> return dd
-    Just !d -> do
-      iopdUpdate ps d
-      return dd
-
-
--- | Create an entity with an out-of-band storage manipulater and an in-band
--- 'Dynamic' storage
-createSideEntity :: EntityManipulater -> Dynamic -> STM Entity
-createSideEntity !manip !esd = do
-  u  <- unsafeIOToSTM newUnique
-  es <- newTVar esd
-  return $ Entity u es manip
-
--- | Create an entity manipulater with an out-of-band
--- 'Data.HashMap.Strict.HashMap' as backing storage
-createSideEntityManipulater
-  :: Bool -> [(AttrKey, EdhValue)] -> STM EntityManipulater
-createSideEntityManipulater !writeProtected !arts = do
-  obs <- iopdFromList arts
-  let the'lookup'entity'attr _ !k _ = iopdLookupDefault EdhNil k obs
-      the'all'entity'attrs _ _ = iopdToList obs
-      the'change'entity'attr pgs !k !v inband = if writeProtected
-        then
-          throwSTM
-          $ EdhError UsageError "Writing a protected entity"
-          $ getEdhCallContext 0 pgs
-        else do
-          iopdInsert k v obs
-          return inband
-      the'update'entity'attrs pgs !ps inband = if writeProtected
-        then
-          throwSTM
-          $ EdhError UsageError "Writing a protected entity"
-          $ getEdhCallContext 0 pgs
-        else do
-          iopdUpdate ps obs
-          return inband
-  return $ EntityManipulater the'lookup'entity'attr
-                             the'all'entity'attrs
-                             the'change'entity'attr
-                             the'update'entity'attrs
 
 
 -- | A symbol can stand in place of an alphanumeric name, used to
@@ -333,22 +170,22 @@ data Context = Context {
     -- | the Edh world in context
     contextWorld :: !EdhWorld
     -- | the call stack frames of Edh procedures
-    , callStack :: !(NonEmpty Scope)
+  , callStack :: !(NonEmpty Scope)
     -- | the direct generator caller
-    , generatorCaller :: !(Maybe EdhGenrCaller)
+  , generatorCaller :: !(Maybe EdhGenrCaller)
     -- | the match target value in context, normally be `true`, or the
     -- value from `x` in a `case x of` block
-    , contextMatch :: EdhValue
+  , contextMatch :: EdhValue
     -- | currently executing statement
-    , contextStmt :: !StmtSrc
+  , contextStmt :: !StmtSrc
     -- | whether it's discouraged for procedure definitions or similar
     -- expressions from installing their results as attributes into the
     -- context scope, i.e. the top of current call stack
-    , contextPure :: !Bool
+  , contextPure :: !Bool
     -- | whether running within an exporting stmt
-    , contextExporting :: !Bool
+  , contextExporting :: !Bool
     -- | whether running within an effect stmt
-    , contextEffDefining :: !Bool
+  , contextEffDefining :: !Bool
   }
 contextScope :: Context -> Scope
 contextScope = NE.head . callStack
@@ -363,7 +200,7 @@ contextFrame !ctx !unwind = unwindStack (NE.head stack) (NE.tail stack) unwind
 
 type EdhGenrCaller
   = ( -- the caller's state
-       EdhProgState
+       EdhThreadState
       -- the yield receiver, a.k.a. the caller's continuation
     ,  EdhValue -- one value yielded from the generator
     -> ( -- continuation of the genrator
@@ -371,15 +208,15 @@ type EdhGenrCaller
         --   exception to be thrown from that `yield` expr
         -- Right yieldedValue
         --   value given to that `yield` expr
-        Either (EdhProgState, EdhValue) EdhValue -> STM ())
-    -> EdhProc
+        Either (EdhThreadState, EdhValue) EdhValue -> STM ())
+    -> STM ()
     )
 
 
 type EdhExcptHndlr
   =  EdhValue -- ^ the error value to handle
-  -> (EdhValue -> EdhProc) -- ^ action to re-throw if not recovered
-  -> EdhProc
+  -> (EdhValue -> STM ()) -- ^ action to re-throw if not recovered
+  -> STM ()
 
 defaultEdhExcptHndlr :: EdhExcptHndlr
 defaultEdhExcptHndlr !exv !rethrow = rethrow exv
@@ -387,38 +224,32 @@ defaultEdhExcptHndlr !exv !rethrow = rethrow exv
 
 -- Especially note that Edh has no block scope as in C
 -- family languages, JavaScript neither does before ES6,
--- Python neither does until now (2020).
+-- Python neither does until now (3.8).
 --
 -- There is only `procedure scope` in Edh
 -- also see https://github.com/e-wrks/edh/Tour/#procedure
 data Scope = Scope {
-    -- | the entity of this scope, it's unique in a method procedure,
-    -- and is the underlying entity of 'thisObject' in a class procedure.
-    scopeEntity :: !Entity
+    -- | the backing storage of this scope, it's unique in a method procedure,
+    -- and is the underlying hash store of 'thisObject' in a class procedure.
+    scopeEntity :: !EntityStore
     -- | `this` object in this scope
-    , thisObject :: !Object
+  , thisObject :: !Object
     -- | `that` object in this scope
-    , thatObject :: !Object
+  , thatObject :: !Object
     -- | the exception handler, `catch`/`finally` should capture the
     -- outer scope, and run its *tried* block with a new stack whose
     -- top frame is a scope all same but the `exceptionHandler` field,
     -- which executes its handling logics appropriately.
-    , exceptionHandler :: !EdhExcptHndlr
+  , exceptionHandler :: !EdhExcptHndlr
     -- | the Edh procedure holding this scope
-    , scopeProc :: !ProcDefi
+  , scopeProc :: !ProcDefi
     -- | the Edh stmt caused creation of this scope
-    , scopeCaller :: !StmtSrc
+  , scopeCaller :: !StmtSrc
     -- | when this scope is of an effectful procedure as called, this is the
     -- outer call stack from which (but not including the) scope the
     -- procedure is addressed of
-    , effectsStack :: [Scope]
+  , effectsStack :: [Scope]
   }
-instance Eq Scope where
-  x == y = scopeEntity x == scopeEntity y
-instance Ord Scope where
-  compare x y = compare (scopeEntity x) (scopeEntity y)
-instance Hashable Scope where
-  hashWithSalt s x = hashWithSalt s (scopeEntity x)
 instance Show Scope where
   show (Scope _ _ _ _ (ProcDefi _ _ _ (ProcDecl !addr _ !procBody)) (StmtSrc (!cPos, _)) _)
     = "📜 " ++ show addr ++ " 🔎 " ++ defLoc ++ " 👈 " ++ sourcePosPretty cPos
@@ -430,48 +261,42 @@ instance Show Scope where
 outerScopeOf :: Scope -> Maybe Scope
 outerScopeOf = procedure'lexi . scopeProc
 
-objectScope :: Context -> Object -> Scope
-objectScope ctx obj = Scope { scopeEntity      = objEntity obj
-                            , thisObject       = obj
-                            , thatObject       = obj
-                            , exceptionHandler = defaultEdhExcptHndlr
-                            , scopeProc        = objClass obj
-                            , scopeCaller      = contextStmt ctx
-                            , effectsStack     = []
-                            }
 
 -- | An object views an entity, with inheritance relationship 
 -- to any number of super objects.
 data Object = Object {
+    -- | identifier of an Edh object
+    objIdent :: !Unique
     -- | the entity stores attribute set of the object
-      objEntity :: !Entity
+  , objStore :: !ObjectStore
     -- | the class (a.k.a constructor) procedure of the object
-    , objClass :: !ProcDefi
+  , objClass :: !Class
     -- | up-links for object inheritance hierarchy
-    , objSupers :: !(TVar [Object])
+  , objSupers :: !(TVar [Object])
   }
 instance Eq Object where
-  Object x'u _ _ == Object y'u _ _ = x'u == y'u
+  Object x'u _ _ _ == Object y'u _ _ _ = x'u == y'u
 instance Ord Object where
-  compare (Object x'u _ _) (Object y'u _ _) = compare x'u y'u
+  compare (Object x'u _ _ _) (Object y'u _ _ _) = compare x'u y'u
 instance Hashable Object where
-  hashWithSalt s (Object u _ _) = hashWithSalt s u
+  hashWithSalt s (Object u _ _ _) = hashWithSalt s u
 instance Show Object where
   -- it's not right to call 'atomically' here to read 'objSupers' for
   -- the show, as 'show' may be called from an stm transaction, stm
   -- will fail hard on encountering of nested 'atomically' calls.
-  show (Object _ pd _) = "<object: " ++ T.unpack (procedureName pd) ++ ">"
+  show (Object _ _ !pd _) = "<object: " ++ T.unpack (procedureName pd) ++ ">"
 
-
--- | Read the entity store underlying an object
-objStore :: Object -> STM Dynamic
-objStore = readTVar . entity'store . objEntity
+data ObjectStore =
+    HashStore !EntityStore
+  | HostStore !(TVar Dynamic)
 
 -- | Try cast and unveil an Object's storage of a known type
 castObjectStore :: forall a . (Typeable a) => Object -> STM (Maybe a)
-castObjectStore !obj = fromDynamic <$> objStore obj >>= \case
-  Nothing  -> return Nothing
-  Just !sv -> return $ Just sv
+castObjectStore !obj = case objStore obj of
+  HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+    Just (d :: a) -> return $ Just d
+    Nothing       -> return Nothing
+  _ -> return Nothing
 -- | Try cast and unveil a possible Object's storage of a known type
 castObjectStore' :: forall a . (Typeable a) => EdhValue -> STM (Maybe a)
 castObjectStore' !val = case edhUltimate val of
@@ -479,29 +304,24 @@ castObjectStore' !val = case edhUltimate val of
   _              -> return Nothing
 
 
--- | View an entity as object of specified class with specified ancestors
--- this is the black magic you want to avoid
-viewAsEdhObject :: Entity -> Class -> [Object] -> STM Object
-viewAsEdhObject !ent !cls !supers = Object ent cls <$> newTVar supers
-
--- | Clone an Edh object, with the specified function to clone the 'Dynamic'
--- entity store, while the 'EntityManipulater' is inherited.
+-- | Clone a host data object, with the specified function to clone the
+-- 'Dynamic' data store
 --
 -- CAVEATS:
---  *) the out-of-band storage if present, is referenced (via inherited 
---     'EntityManipulater') rather than copied
 --  *) all super objects are referenced rather than deep copied
-cloneEdhObject
+cloneHostObject
   :: Object
   -> (Dynamic -> (Dynamic -> STM ()) -> STM ())
   -> (Object -> STM ())
   -> STM ()
-cloneEdhObject (Object (Entity _ !esv !esm) !cls !supers) !esClone !exit =
-  (readTVar esv >>=) $ flip esClone $ \ !esd' -> do
-    !esv'    <- newTVar esd'
-    !supers' <- newTVar =<< readTVar supers
-    !u       <- unsafeIOToSTM newUnique
-    exit $ Object (Entity u esv' esm) cls supers'
+cloneHostObject (Object _ !os !cls !supers) !dsClone !exit = do
+  !oid     <- unsafeIOToSTM newUnique
+  !supers' <- newTVar =<< readTVar supers
+  case os of
+    HostStore !dsv -> readTVar dsv >>= \ !ds -> dsClone ds $ \ !ds' -> do
+      !dsv' <- newTVar ds'
+      exit $ Object oid (HostStore dsv') cls supers'
+    _ -> error "not a data object"
 
 
 -- | A world for Edh programs to change
@@ -514,20 +334,20 @@ data EdhWorld = EdhWorld {
     -- `this` object of that scope, thus an attr addressor can be
     -- used to read the attribute value out of the wrapped scope, when
     -- the attr name does not conflict with scope wrapper methods
-    , scopeSuper :: !Object
+  , scopeSuper :: !Object
     -- | all operators declared in this world, this also used as the
     -- _world lock_ in parsing source code to be executed in this world
-    , worldOperators :: !(TMVar OpPrecDict)
+  , worldOperators :: !(TMVar OpPrecDict)
     -- | all modules loaded or being loaded into this world, for each
     -- entry, will be a transient entry containing an error value (that
     -- appears as an EdhNamedValue) if failed loading, or a permanent
     -- entry containing the module object if successfully loaded
-    , worldModules :: !(TMVar (Map.HashMap ModuleId (TMVar EdhValue)))
+  , worldModules :: !(TMVar (Map.HashMap ModuleId (TMVar EdhValue)))
     -- | for console logging, input and output
-    , worldConsole :: !EdhConsole
+  , worldConsole :: !EdhConsole
   }
 instance Eq EdhWorld where
-  EdhWorld x'root _ _ _ _ == EdhWorld y'root _ _ _ _ = x'root == y'root
+  EdhWorld _ x'ss _ _ _ == EdhWorld _ y'ss _ _ _ = x'ss == y'ss
 
 type ModuleId = Text
 
@@ -575,136 +395,21 @@ type EdhLogger = LogLevel -> Maybe String -> ArgsPack -> STM ()
 type LogLevel = Int
 
 
--- | The ultimate nothingness (Chinese 无极/無極), i.e. <nothing> out of <chaos>
-wuji :: EdhProgState -> OriginalValue
-wuji !pgs = OriginalValue nil rootScope $ thisObject rootScope
-  where rootScope = worldScope $ contextWorld $ edh'context pgs
-{-# INLINE wuji #-}
-
-
--- | The monad for running of an Edh program
-type EdhMonad = ReaderT EdhProgState STM
-type EdhProc = EdhMonad (STM ())
-
--- | The states of a program
-data EdhProgState = EdhProgState {
-      edh'fork'queue :: !(TBQueue (EdhProgState, EdhProc))
-    , edh'task'queue :: !(TBQueue EdhTask)
-    , edh'perceivers :: !(TVar [PerceiveRecord])
-    , edh'defers :: !(TVar [DeferRecord])
-    , edh'in'tx :: !Bool
-    , edh'context :: !Context
+-- | The states of a thread of an Edh program
+data EdhThreadState = EdhThreadState {
+    edh'in'tx :: !Bool
+  , edh'task'queue :: !(TBQueue (Either (IO ()) (STM ())))
+  , edh'perceivers :: !(TVar [PerceiveRecord])
+  , edh'defers :: !(TVar [DeferRecord])
+  , edh'context :: !Context
+  , edh'fork'queue :: !(TBQueue (EdhThreadState -> IO ()))
   }
 
-type PerceiveRecord = (TChan EdhValue, EdhProgState, Expr)
-type DeferRecord = (EdhProgState, EdhProc)
+type PerceiveRecord = (TChan EdhValue, EdhValue -> STM ())
+type DeferRecord = EdhThreadState -> STM ()
 
--- | Run an Edh proc from within STM monad
-runEdhProc :: EdhProgState -> EdhProc -> STM ()
-runEdhProc !pgs !p = join $ runReaderT p pgs
-{-# INLINE runEdhProc #-}
-
--- | Continue an Edh proc with stm computation, there must be NO further
--- action following this statement, or the stm computation is just lost.
---
--- Note: this is just `return`, but procedures writen in the host language
--- (i.e. Haskell) with this instead of `return` will be more readable.
-contEdhSTM :: STM () -> EdhProc
-contEdhSTM = return
-{-# INLINE contEdhSTM #-}
-
--- | Convenient function to be used as short-hand to return from an Edh
--- procedure (or functions with similar signature), this sets transaction
--- boundaries wrt tx stated in the program's current state.
-exitEdhProc :: EdhProcExit -> EdhValue -> EdhProc
-exitEdhProc !exit !val = ask >>= \pgs -> contEdhSTM $ exitEdhSTM pgs exit val
-{-# INLINE exitEdhProc #-}
-exitEdhProc' :: EdhProcExit -> OriginalValue -> EdhProc
-exitEdhProc' !exit !result =
-  ask >>= \pgs -> contEdhSTM $ exitEdhSTM' pgs exit result
-{-# INLINE exitEdhProc' #-}
-
--- | Exit an stm computation to the specified Edh continuation
-exitEdhSTM :: EdhProgState -> EdhProcExit -> EdhValue -> STM ()
-exitEdhSTM !pgs !exit !val =
-  let !scope  = contextScope $ edh'context pgs
-      !result = OriginalValue { valueFromOrigin = val
-                              , originScope     = scope
-                              , originObject    = thatObject scope
-                              }
-  in  exitEdhSTM' pgs exit result
-{-# INLINE exitEdhSTM #-}
-exitEdhSTM' :: EdhProgState -> EdhProcExit -> OriginalValue -> STM ()
-exitEdhSTM' !pgs !exit !result = if edh'in'tx pgs
-  then join $ runReaderT (exit result) pgs
-  else writeTBQueue (edh'task'queue pgs) $ EdhTxTask pgs result exit
-{-# INLINE exitEdhSTM' #-}
-
--- | An Edh task record
-data EdhTask where
-  EdhTxTask ::{
-      edh'task'pgs :: !EdhProgState
-    , edh'task'input :: !OriginalValue
-    , edh'task'job :: !(OriginalValue -> EdhProc)
-    } -> EdhTask
-  EdhSTMTask ::{
-      edh'stm'pgs :: !EdhProgState
-    , edh'stm'act :: !(STM a)
-    , edh'stm'job :: !(a -> EdhProc)
-    } -> EdhTask
-  EdhIOTask ::{
-      edh'io'pgs :: !EdhProgState
-    , edh'io'act :: !(IO a)
-    , edh'io'job :: !(a -> EdhProc)
-    } -> EdhTask
-
--- | Type of an intrinsic infix operator in host language.
---
--- Note no stack frame is created/pushed when an intrinsic operator is called.
-type EdhIntrinsicOp = Expr -> Expr -> EdhProcExit -> EdhProc
-
-data IntrinOpDefi = IntrinOpDefi {
-      intrinsic'op'uniq :: !Unique
-    , intrinsic'op'symbol :: !AttrName
-    , intrinsic'op :: EdhIntrinsicOp
-  }
-
--- | Type of a procedure in host language that can be called from Edh code.
---
--- Note the top frame of the call stack from program state is the one for the
--- callee, that scope should have mounted the caller's scope entity, not a new
--- entity in contrast to when an Edh procedure as the callee.
-type EdhProcedure -- such a procedure servs as the callee
-  =  ArgsPack    -- ^ the pack of arguments
-  -> EdhProcExit -- ^ the CPS exit to return a value from this procedure
-  -> EdhProc
-
--- | The type for an Edh procedure's return, in continuation passing style.
-type EdhProcExit = OriginalValue -> EdhProc
-
--- | An Edh value with the origin where it came from
-data OriginalValue = OriginalValue {
-    valueFromOrigin :: !EdhValue
-    -- | the scope from which this value is addressed off
-    , originScope :: !Scope
-    -- | the attribute resolution target object in obtaining this value
-    , originObject :: !Object
-  }
-
-
--- | A no-operation as an Edh procedure, ignoring any arg
-edhNop :: EdhProcedure
-edhNop _ !exit = do
-  pgs <- ask
-  let scope = contextScope $ edh'context pgs
-  exit $ OriginalValue nil scope $ thisObject scope
-
--- | A CPS exit serving end-of-procedure
-edhEndOfProc :: EdhProcExit
-edhEndOfProc _ = return $ return ()
-
--- | Construct an call context from program state
-getEdhCallContext :: Int -> EdhProgState -> EdhCallContext
+-- | Construct an call context from thread state
+getEdhCallContext :: Int -> EdhThreadState -> EdhCallContext
 getEdhCallContext !unwind !pgs = EdhCallContext
   (T.pack $ sourcePosPretty tip)
   frames
@@ -731,6 +436,46 @@ getEdhCallContext !unwind !pgs = EdhCallContext
   procSrcLoc !procBody = case procBody of
     Left  (StmtSrc (spos, _)) -> T.pack (sourcePosPretty spos)
     Right _                   -> "<host-code>"
+
+
+type EdhProc = EdhThreadState -> STM ()
+type EdhExit = EdhValue -> STM ()
+
+-- | A CPS exit serving end-of-procedure
+edhEndOfProc :: EdhExit
+edhEndOfProc _ = return ()
+
+exitEdh :: EdhThreadState -> EdhExit -> EdhValue -> STM ()
+exitEdh !ets !exit !val = if edh'in'tx ets
+  then exit val
+  else writeTBQueue (edh'task'queue ets) $ Right $ exit val
+
+
+-- | Type of a procedure in host language that can be called from Edh code.
+--
+-- Note the top frame of the call stack from thread state is the one for the
+-- callee, that scope should have mounted the caller's scope entity, not a new
+-- entity in contrast to when an Edh procedure as the callee.
+type EdhProcedure -- such a procedure servs as the callee
+  =  ArgsPack    -- ^ the pack of arguments
+  -> EdhExit -- ^ the CPS exit to return a value from this procedure
+  -> EdhProc
+
+-- | A no-operation as an Edh procedure, ignoring any arg
+edhNop :: EdhProcedure
+edhNop _ !exit !ets = exitEdh ets exit nil
+
+
+-- | Type of an intrinsic infix operator in host language.
+--
+-- Note no stack frame is created/pushed when an intrinsic operator is called.
+type EdhIntrinsicOp = Expr -> Expr -> EdhExit -> EdhProc
+
+data IntrinOpDefi = IntrinOpDefi {
+    intrinsic'op'uniq :: !Unique
+  , intrinsic'op'symbol :: !AttrName
+  , intrinsic'op :: EdhIntrinsicOp
+  }
 
 
 -- | An event sink is similar to a Go channel, but is broadcast
@@ -780,7 +525,8 @@ instance Show EventSink where
 data EdhValue =
   -- | type itself is a kind of (immutable) value
       EdhType !EdhTypeValue
-  -- | end values (immutable)
+
+  -- * term values (immutable)
     | EdhNil
     | EdhDecimal !Decimal
     | EdhBool !Bool
@@ -789,19 +535,20 @@ data EdhValue =
     | EdhSymbol !Symbol
     | EdhUUID !UUID.UUID
 
-  -- | direct pointer (to entities) values
-    | EdhObject !Object
+  -- * immutable containers
+  --   the elements may still pointer to mutable data
+    | EdhPair !EdhValue !EdhValue
+    | EdhArgsPack ArgsPack
 
   -- | mutable containers
     | EdhDict !Dict
     | EdhList !List
 
-  -- | immutable containers
-  --   the elements may still pointer to mutable data
-    | EdhPair !EdhValue !EdhValue
-    | EdhArgsPack ArgsPack
+  -- | an Edh object can either be an entity backed by a hash store, or
+  -- wraps some host data dynamically mutable
+    | EdhObject !Object
 
-  -- executable precedures
+  -- * executable precedures
     | EdhIntrOp !Precedence !IntrinOpDefi
     | EdhClass !ProcDefi
     | EdhMethod !ProcDefi
@@ -825,18 +572,18 @@ data EdhValue =
     | EdhRethrow
     | EdhYield !EdhValue
     | EdhReturn !EdhValue
-  -- | prefer better efforted result, but can default to the specified value
-  -- if none applicable
-  -- TODO use this in place of { continue } to signal try-next-impl semantics
-  --      similar to NotImplemented in Python. may enable the syntax of
-  --  `return default <expr>` for impls as Edh procedures, i.e. `default` to
-  --      be a keyword forming `DefaultExpr !Expr` expression.
+
+  -- | prefer better efforted result, but can default to the specified expr
+  -- if there's no better result applicable
+  -- 
+  -- this is used to signal try-next-impl semantics similar to NotImplemented
+  -- in Python.
   --
-  --      then `return default { continue }` can be used to signal that it's
-  --      not implemented at all, as current semantic, after that the branch
-  --      will be able to eval to `{ continue }` without rendering the (->)
-  --      operator as considered not implemented.
-    | EdhDefault !EdhValue
+  -- `return default { throw xxx }` can be used to signal that it has to have
+  -- some more concrete implementation;
+  -- and `return default { pass }` can be used to prefer an even more deferred
+  -- default if any exists, or `nil` if none.
+    | EdhDefault !Unique !Expr !(Maybe EdhThreadState)
 
   -- | event sink
     | EdhSink !EventSink
@@ -880,17 +627,17 @@ instance Show EdhValue where
       Nothing -> "<readonly property "
       Just _  -> "<property "
 
-  show EdhBreak         = "<break>"
-  show EdhContinue      = "<continue>"
-  show (EdhCaseClose v) = "<caseclose: " ++ show v ++ ">"
-  show EdhCaseOther     = "<caseother>"
-  show EdhFallthrough   = "<fallthrough>"
-  show EdhRethrow       = "<rethrow>"
-  show (EdhYield   v)   = "<yield: " ++ show v ++ ">"
-  show (EdhReturn  v)   = "<return: " ++ show v ++ ">"
-  show (EdhDefault v)   = "<default: " ++ show v ++ ">"
+  show EdhBreak           = "<break>"
+  show EdhContinue        = "<continue>"
+  show (EdhCaseClose v)   = "<caseclose: " ++ show v ++ ">"
+  show EdhCaseOther       = "<caseother>"
+  show EdhFallthrough     = "<fallthrough>"
+  show EdhRethrow         = "<rethrow>"
+  show (EdhYield  v     ) = "<yield: " ++ show v ++ ">"
+  show (EdhReturn v     ) = "<return: " ++ show v ++ ">"
+  show (EdhDefault _ x _) = "<default: " ++ show x ++ ">"
 
-  show (EdhSink    v)   = show v
+  show (EdhSink v       ) = show v
 
   show (EdhNamedValue n v@EdhNamedValue{}) =
     -- Edh operators are all left-associative, parenthesis needed
@@ -947,11 +694,11 @@ instance Eq EdhValue where
   EdhFallthrough              == EdhFallthrough              = True
   EdhRethrow                  == EdhRethrow                  = True
 -- todo: regard a yielded/returned value equal to the value itself ?
-  EdhYield   x'v              == EdhYield   y'v              = x'v == y'v
-  EdhReturn  x'v              == EdhReturn  y'v              = x'v == y'v
-  EdhDefault x'v              == EdhDefault y'v              = x'v == y'v
+  EdhYield  x'v               == EdhYield  y'v               = x'v == y'v
+  EdhReturn x'v               == EdhReturn y'v               = x'v == y'v
+  EdhDefault x'u _ _          == EdhDefault y'u _ _          = x'u == y'u
 
-  EdhSink    x                == EdhSink    y                = x == y
+  EdhSink x                   == EdhSink y                   = x == y
 
   EdhNamedValue _ x'v         == EdhNamedValue _ y'v         = x'v == y'v
   EdhNamedValue _ x'v         == y                           = x'v == y
@@ -996,14 +743,15 @@ instance Hashable EdhValue where
   hashWithSalt s EdhContinue = hashWithSalt s (-2 :: Int)
   hashWithSalt s (EdhCaseClose v) =
     s `hashWithSalt` (-3 :: Int) `hashWithSalt` v
-  hashWithSalt s EdhCaseOther              = hashWithSalt s (-4 :: Int)
-  hashWithSalt s EdhFallthrough            = hashWithSalt s (-5 :: Int)
-  hashWithSalt s EdhRethrow                = hashWithSalt s (-6 :: Int)
-  hashWithSalt s (EdhYield v) = s `hashWithSalt` (-7 :: Int) `hashWithSalt` v
-  hashWithSalt s (EdhReturn v) = s `hashWithSalt` (-8 :: Int) `hashWithSalt` v
-  hashWithSalt s (EdhDefault v) = s `hashWithSalt` (-9 :: Int) `hashWithSalt` v
+  hashWithSalt s EdhCaseOther   = hashWithSalt s (-4 :: Int)
+  hashWithSalt s EdhFallthrough = hashWithSalt s (-5 :: Int)
+  hashWithSalt s EdhRethrow     = hashWithSalt s (-6 :: Int)
+  hashWithSalt s (EdhYield  v)  = s `hashWithSalt` (-7 :: Int) `hashWithSalt` v
+  hashWithSalt s (EdhReturn v)  = s `hashWithSalt` (-8 :: Int) `hashWithSalt` v
+  hashWithSalt s (EdhDefault u _ _) =
+    s `hashWithSalt` (-9 :: Int) `hashWithSalt` u
 
-  hashWithSalt s (EdhSink    x           ) = hashWithSalt s x
+  hashWithSalt s (EdhSink x              ) = hashWithSalt s x
 
   hashWithSalt s (EdhNamedValue _ v      ) = hashWithSalt s v
 
@@ -1017,9 +765,8 @@ edhDeCaseClose !val                = val
 
 edhUltimate :: EdhValue -> EdhValue
 edhUltimate (EdhNamedValue _ v) = edhDeCaseClose v
-edhUltimate (EdhReturn  v     ) = edhDeCaseClose v
-edhUltimate (EdhDefault v     ) = edhDeCaseClose v
-edhUltimate (EdhYield   v     ) = edhDeCaseClose v
+edhUltimate (EdhReturn v      ) = edhDeCaseClose v
+edhUltimate (EdhYield  v      ) = edhDeCaseClose v
 edhUltimate v                   = edhDeCaseClose v
 
 
@@ -1233,8 +980,7 @@ instance Eq ProcDefi where
 instance Ord ProcDefi where
   compare (ProcDefi x'u _ _ _) (ProcDefi y'u _ _ _) = compare x'u y'u
 instance Hashable ProcDefi where
-  hashWithSalt s (ProcDefi u _ scope _) =
-    s `hashWithSalt` u `hashWithSalt` scope
+  hashWithSalt s (ProcDefi u _ _ _) = s `hashWithSalt` u
 instance Show ProcDefi where
   show (ProcDefi _ !name _ (ProcDecl !addr _ !pb)) = case pb of
     Left  _ -> "<edh-proc " <> show name <> " : " <> show addr <> ">"
@@ -1339,6 +1085,9 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
     | CallExpr !Expr !ArgsPacker
 
     | InfixExpr !OpSymbol !Expr !Expr
+
+    -- specify a default by Edh code
+    | DefaultExpr !Expr
 
     -- to support interpolation within expressions, with source form
     | ExprWithSrc !Expr ![SourceSeg]
@@ -1555,39 +1304,56 @@ mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
 
 
 type EdhHostCtor
-  =  EdhProgState
-  -- | ctor args, if __init__() is provided, will go there too
-  -> ArgsPack
-  -- | exit for in-band data to be written to entity store
-  -> (Dynamic -> STM ())
-  -> STM ()
+  -- | ctor args
+  =  ArgsPack
+  -- | exit with host data and supers on ctor
+  -> (  Dynamic -- ^ host data
+     -> [Object] -- ^ super objects
+     -> STM ()
+     )
+  -> EdhProc
 
--- | Make a host class with a 'EdhHostCtor' and custom entity manipulater
+-- | Make a host class with a 'EdhHostCtor', and an optional factory function
+-- to create shared methods residing within a common super object.
 --
--- The entity manipulater is responsible to manage all kinds of instance
--- attributes, including methods and mutable ones.
---
--- Note that even as an object method procedure, a host procedure's contextual
--- `this` instance is the enclosed this object at the time it's defined (i.e.
--- `this` in the scope passed to 'mkHostProc' that produced the host procedure,
--- which is normally a host module), so such host methods normally operate
--- against `that` instance's in-band storage.
---
--- `that` object is always the final instance down to the inheritance
--- hierarchy, will be an Edh object if it extended such a host class instance,
--- and will definitely not carrying the entity store produced by the
--- 'EdhHostCtor' here. Use 'mkExtHostClass' to create host methods resolving
--- the host class instance against `that`, to operate properly.
---
--- See: 'withThatEntity'
+-- Note that even as an instance method procedure, a host procedure's
+-- contextual `this` instance is the enclosed this object at the time it's
+-- defined (i.e. `this` in the scope passed to 'mkHostProc' that produced the
+-- host procedure, which is normally a host module), so such host methods
+-- should normally locate a proper instance to operate on, along `that`
+-- object's inheritance chain, whose class is identified by the uid passed to
+-- the factory function.
 mkHostClass
-  :: Scope -- ^ outer lexical scope
+  :: Scope -- ^ outer lexical scope to define the class
   -> Text  -- ^ class name
   -> EdhHostCtor -- ^ instance constructor
-  -> EntityManipulater -- ^ custom entity storage manipulater
+  -- | an optional factory function taking the class uid, to create an entity
+  -- store containing various host methods, to appear as a super object, which
+  -- will have the same class. such a super object is an efficient way to share
+  -- instance/static methods among all object instances of the created class.
+  -> Maybe (Unique -> STM EntityStore)
   -> STM EdhValue
-mkHostClass !scope !nm !hc !esm = do
-  classUniq <- unsafeIOToSTM newUnique
+mkHostClass !scope !nm !hc !maybeSuperCtor =
+  EdhClass <$> mkHostClass' scope nm hc maybeSuperCtor
+mkHostClass'
+  :: Scope -- ^ outer lexical scope to define the class
+  -> Text  -- ^ class name
+  -> EdhHostCtor -- ^ instance constructor
+  -- | an optional factory function taking the class uid, to create an entity
+  -- store containing various host methods, to appear as a super object, which
+  -- will have the same class. such a super object is an efficient way to share
+  -- instance/static methods among all object instances of the created class.
+  -> Maybe (Unique -> STM EntityStore)
+  -> STM Class
+mkHostClass' !scope !nm !hc !maybeSuperCtor = do
+  !classUniq  <- unsafeIOToSTM newUnique
+  !maybeSuper <- case maybeSuperCtor of
+    Nothing         -> return Nothing
+    Just !superCtor -> do
+      !oidSuper <- unsafeIOToSTM newUnique
+      !esSuper  <- superCtor classUniq
+      !slSuper  <- newTVar []
+      return $ Just (oidSuper, esSuper, slSuper)
   let !cls = ProcDefi
         { procedure'uniq = classUniq
         , procedure'name = AttrByName nm
@@ -1598,51 +1364,17 @@ mkHostClass !scope !nm !hc !esm = do
                                     }
         }
       ctor :: EdhProcedure
-      ctor !apk !exit = ask >>= \ !pgs -> contEdhSTM $ hc pgs apk $ \ !esd ->
-        do
-          !ent     <- createSideEntity esm esd
-          !newThis <- viewAsEdhObject ent cls []
-          exitEdhSTM pgs exit $ EdhObject newThis
-  return $ EdhClass cls
-
--- | Make an extensible (by Edh objects) host class with a 'EdhHostCtor' and
--- custom entity manipulater
---
--- When a host object carries some method operating against `that` instance,
--- it won't be properly extended by other Edh objects, because `that` will 
--- refer to that final Edh instance instead. Here the entity manipulater 
--- creator is passed a unique identifier of the host class to be created, so
--- you should let your host methods to 'resolveEdhInstance' of this class id
--- agsinst `that` instance, to obtain the correct instance with entity store
--- created by your 'EdhHostCtor' passed here.
---
--- See: 'withEntityOfClass'
-mkExtHostClass
-  :: Scope -- ^ outer lexical scope
-  -> Text  -- ^ class name
-  -> EdhHostCtor -- ^ instance constructor
-  -- | custom entity storage manipulater creator
-  -> (Unique -> STM EntityManipulater)
-  -> STM EdhValue
-mkExtHostClass !scope !nm !hc !esmCtor = do
-  classUniq <- unsafeIOToSTM newUnique
-  esm       <- esmCtor classUniq
-  let !cls = ProcDefi
-        { procedure'uniq = classUniq
-        , procedure'name = AttrByName nm
-        , procedure'lexi = Just scope
-        , procedure'decl = ProcDecl { procedure'addr = NamedAttr nm
-                                    , procedure'args = PackReceiver []
-                                    , procedure'body = Right ctor
-                                    }
-        }
-      ctor :: EdhProcedure
-      ctor !apk !exit = ask >>= \ !pgs -> contEdhSTM $ hc pgs apk $ \ !esd ->
-        do
-          !ent     <- createSideEntity esm esd
-          !newThis <- viewAsEdhObject ent cls []
-          exitEdhSTM pgs exit $ EdhObject newThis
-  return $ EdhClass cls
+      ctor !apk !exit !ets = flip (hc apk) ets $ \ !hd !supers -> do
+        !hdv <- newTVar hd
+        !oid <- unsafeIOToSTM newUnique
+        !sl  <- case maybeSuper of
+          Nothing -> newTVar supers
+          Just (!oidSuper, !esSuper, !slSuper) ->
+            newTVar
+              $  supers
+              ++ [Object oidSuper (HashStore esSuper) cls slSuper]
+        exitEdh ets exit $ EdhObject $ Object oid (HostStore hdv) cls sl
+  return cls
 
 
 data EdhIndex = EdhIndex !Int | EdhAny | EdhAll | EdhSlice {
