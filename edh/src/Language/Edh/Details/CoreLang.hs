@@ -16,28 +16,28 @@ import           Language.Edh.Details.RtTypes
 
 -- * Edh lexical attribute resolution
 
-lookupEdhCtxAttr :: EdhProgState -> Scope -> AttrKey -> STM EdhValue
-lookupEdhCtxAttr pgs !fromScope !addr =
-  resolveEdhCtxAttr pgs fromScope addr >>= \case
+lookupEdhCtxAttr :: EdhThreadState -> Scope -> AttrKey -> STM EdhValue
+lookupEdhCtxAttr ets !fromScope !key =
+  resolveEdhCtxAttr ets fromScope key >>= \case
     Nothing        -> return EdhNil
     Just (!val, _) -> return val
 {-# INLINE lookupEdhCtxAttr #-}
 
 resolveEdhCtxAttr
-  :: EdhProgState -> Scope -> AttrKey -> STM (Maybe (EdhValue, Scope))
-resolveEdhCtxAttr pgs !scope !addr =
-  lookupEntityAttr pgs (scopeEntity scope) addr >>= \case
-    EdhNil -> resolveLexicalAttr pgs (outerScopeOf scope) addr
-    val    -> return $ Just (val, scope)
+  :: EdhThreadState -> Scope -> AttrKey -> STM (Maybe (EdhValue, Scope))
+resolveEdhCtxAttr ets !scope !key =
+  iopdLookup key (scopeEntity scope) >>= \case
+    Nothing   -> resolveLexicalAttr ets (outerScopeOf scope) key
+    Just !val -> return $ Just (val, scope)
 {-# INLINE resolveEdhCtxAttr #-}
 
 resolveLexicalAttr
-  :: EdhProgState -> Maybe Scope -> AttrKey -> STM (Maybe (EdhValue, Scope))
+  :: EdhThreadState -> Maybe Scope -> AttrKey -> STM (Maybe (EdhValue, Scope))
 resolveLexicalAttr _ Nothing _ = return Nothing
-resolveLexicalAttr pgs (Just !scope) !addr =
-  lookupEntityAttr pgs (scopeEntity scope) addr >>= \case
-    EdhNil -> resolveLexicalAttr pgs (outerScopeOf scope) addr
-    !val   -> return $ Just (val, scope)
+resolveLexicalAttr ets (Just !scope) !key =
+  iopdLookup key (scopeEntity scope) >>= \case
+    Nothing   -> resolveLexicalAttr ets (outerScopeOf scope) key
+    Just !val -> return $ Just (val, scope)
 {-# INLINE resolveLexicalAttr #-}
 
 
@@ -48,57 +48,60 @@ edhEffectsMagicName :: Text
 edhEffectsMagicName = "__effects__"
 
 resolveEffectfulAttr
-  :: EdhProgState -> [Scope] -> EdhValue -> STM (Maybe (EdhValue, [Scope]))
+  :: EdhThreadState -> [Scope] -> EdhValue -> STM (Maybe (EdhValue, [Scope]))
 resolveEffectfulAttr _ [] _ = return Nothing
-resolveEffectfulAttr pgs (scope : rest) !key =
-  lookupEntityAttr pgs (scopeEntity scope) (AttrByName edhEffectsMagicName)
-    >>= \case
-          EdhNil              -> resolveEffectfulAttr pgs rest key
-          EdhDict (Dict _ !d) -> iopdLookup key d >>= \case
-            Just val -> return $ Just (val, rest)
-            Nothing  -> resolveEffectfulAttr pgs rest key
-  -- todo crash in this case? warning may be more proper but in what way?
-          _ -> resolveEffectfulAttr pgs rest key
+resolveEffectfulAttr ets (scope : rest) !key =
+  iopdLookup (AttrByName edhEffectsMagicName) (scopeEntity scope) >>= \case
+    Nothing                    -> resolveEffectfulAttr ets rest key
+    Just (EdhDict (Dict _ !d)) -> iopdLookup key d >>= \case
+      Just val -> return $ Just (val, rest)
+      Nothing  -> resolveEffectfulAttr ets rest key
+-- todo crash in this case? warning may be more proper but in what way?
+    _ -> resolveEffectfulAttr ets rest key
 {-# INLINE resolveEffectfulAttr #-}
 
 
 -- * Edh object attribute resolution
 
 
-lookupEdhObjAttr :: EdhProgState -> Object -> AttrKey -> STM EdhValue
-lookupEdhObjAttr pgs !this !addr = lookupEdhObjAttr' pgs addr [this]
+lookupEdhObjAttr :: EdhThreadState -> Object -> AttrKey -> STM EdhValue
+lookupEdhObjAttr ets !this !key = lookupEdhObjAttr' ets key [this]
 {-# INLINE lookupEdhObjAttr #-}
 
-lookupEdhSuperAttr :: EdhProgState -> Object -> AttrKey -> STM EdhValue
-lookupEdhSuperAttr pgs !this !addr =
-  readTVar (objSupers this) >>= lookupEdhObjAttr' pgs addr
+lookupEdhSuperAttr :: EdhThreadState -> Object -> AttrKey -> STM EdhValue
+lookupEdhSuperAttr ets !this !key =
+  readTVar (objSupers this) >>= lookupEdhObjAttr' ets key
 {-# INLINE lookupEdhSuperAttr #-}
 
 
-lookupEdhObjAttr' :: EdhProgState -> AttrKey -> [Object] -> STM EdhValue
-lookupEdhObjAttr' _ _ [] = return EdhNil
-lookupEdhObjAttr' pgs !addr (obj : rest) =
-  lookupEntityAttr pgs (objEntity obj) addr >>= \case
-    EdhNil -> do
-      supers <- readTVar (objSupers obj)
-      lookupEdhObjAttr' pgs
-                        addr -- go depth first
-                        (supers ++ rest)
-    v -> return v
+lookupEdhObjAttr' :: EdhThreadState -> AttrKey -> [Object] -> STM EdhValue
+lookupEdhObjAttr' _   _    []           = return EdhNil
+lookupEdhObjAttr' ets !key (obj : rest) = case objStore obj of
+  HashStore !es -> iopdLookup key es >>= \case
+    Just !v -> return v
+    Nothing -> lookupRest
+  HostStore{} -> lookupRest
+ where
+  lookupRest = do
+    supers <- readTVar (objSupers obj)
+    lookupEdhObjAttr' ets
+                      key -- go depth first
+                      (supers ++ rest)
 {-# INLINE lookupEdhObjAttr' #-}
 
 
 -- * Edh inheritance resolution
 
 
-resolveEdhInstance :: EdhProgState -> Unique -> Object -> STM (Maybe Object)
-resolveEdhInstance pgs !classUniq !this =
-  resolveEdhInstance' pgs classUniq [this]
+resolveEdhInstance :: EdhThreadState -> Unique -> Object -> STM (Maybe Object)
+resolveEdhInstance ets !classUniq !that =
+  resolveEdhInstance' ets classUniq [that]
 {-# INLINE resolveEdhInstance #-}
-resolveEdhInstance' :: EdhProgState -> Unique -> [Object] -> STM (Maybe Object)
+resolveEdhInstance'
+  :: EdhThreadState -> Unique -> [Object] -> STM (Maybe Object)
 resolveEdhInstance' _ _ [] = return Nothing
-resolveEdhInstance' pgs !classUniq (obj : rest)
+resolveEdhInstance' ets !classUniq (obj : rest)
   | procedure'uniq (objClass obj) == classUniq = return (Just obj)
-  | otherwise = resolveEdhInstance' pgs classUniq . (rest ++) =<< readTVar
+  | otherwise = resolveEdhInstance' ets classUniq . (rest ++) =<< readTVar
     (objSupers obj)
 {-# INLINE resolveEdhInstance' #-}
