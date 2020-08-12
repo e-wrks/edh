@@ -398,15 +398,21 @@ type LogLevel = Int
 -- | The states of a thread of an Edh program
 data EdhThreadState = EdhThreadState {
     edh'in'tx :: !Bool
-  , edh'task'queue :: !(TBQueue (Either (IO ()) (STM ())))
+  , edh'task'queue :: !(TBQueue EdhTask)
   , edh'perceivers :: !(TVar [PerceiveRecord])
   , edh'defers :: !(TVar [DeferRecord])
   , edh'context :: !Context
-  , edh'fork'queue :: !(TBQueue (EdhThreadState -> IO ()))
+  , edh'fork'queue :: !(TBQueue (EdhThreadState, EdhThreadState -> IO ()))
   }
 
-type PerceiveRecord = (TChan EdhValue, EdhValue -> STM ())
-type DeferRecord = EdhThreadState -> STM ()
+type EdhTask = Either (EdhThreadState, IO ()) (EdhThreadState, STM ())
+type PerceiveRecord = (
+    TChan EdhValue -- ^ chan subscribed to source event sink
+  , EdhThreadState -- ^ origin ets upon the perceiver is armed
+  -- | reacting action per event received, event value is context match
+  , EdhThreadState -> TVar Bool -> STM () 
+  )
+type DeferRecord = (EdhThreadState, EdhThreadState -> STM ())
 
 -- | Construct an call context from thread state
 getEdhCallContext :: Int -> EdhThreadState -> EdhCallContext

@@ -1,5 +1,3 @@
-{-# LANGUAGE  ScopedTypeVariables #-}
-
 module Language.Edh.Details.Utils where
 
 import           Prelude
