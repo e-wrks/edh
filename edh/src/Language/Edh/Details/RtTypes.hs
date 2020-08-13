@@ -402,7 +402,7 @@ data EdhThreadState = EdhThreadState {
   , edh'perceivers :: !(TVar [PerceiveRecord])
   , edh'defers :: !(TVar [DeferRecord])
   , edh'context :: !Context
-  , edh'fork'queue :: !(TBQueue (EdhThreadState, EdhThreadState -> IO ()))
+  , edh'fork'queue :: !(TBQueue (EdhThreadState, EdhThreadState -> STM ()))
   }
 
 -- | The task to be queued for execution of an Edh thread
@@ -471,6 +471,13 @@ exitEdh :: EdhThreadState -> EdhExit -> EdhValue -> STM ()
 exitEdh !ets !exit !val = if edh'in'tx ets
   then exit val
   else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets $ exit val
+
+-- | Schedule forking of a GHC thread for an Edh thread
+--
+-- NOTE this happens as part of an STM tx, the actual fork won't happen if the
+--      enclosing Edh tx throws
+forkEdh :: EdhThreadState -> EdhProc -> STM ()
+forkEdh !etsForker !p = writeTBQueue (edh'fork'queue etsForker) (etsForker, p)
 
 -- | Schedule an IO action to be performed in current Edh thread, but after
 -- current (and possibly some currently scheduled subsequent) STM tx finishes

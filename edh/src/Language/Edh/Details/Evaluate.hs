@@ -43,11 +43,6 @@ import           Language.Edh.Details.PkgMan
 import           Language.Edh.Details.Utils
 
 
--- | Fork a GHC thread to run the specified Edh proc concurrently
-forkEdh :: EdhProgState -> EdhProc -> STM ()
-forkEdh !pgs !p = writeTBQueue (edh'fork'queue pgs) (pgs, p)
-
-
 -- | Fork a new Edh thread to run the specified event producer, but hold the 
 -- production until current thread has later started consuming events from the
 -- sink returned here.

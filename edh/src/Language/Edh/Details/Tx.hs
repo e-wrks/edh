@@ -55,7 +55,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
                 -- bootstrap on the descendant thread
                 atomically
                   $ writeTBQueue (edh'task'queue etsForkee)
-                  $ EdhDoIO etsForkee
+                  $ EdhDoSTM etsForkee
                   $ actForkee etsForkee
                 void $ mask_ $ forkIOWithUnmask $ \unmask -> catch
                   (unmask $ driveEdhThread (edh'defers etsForkee)
