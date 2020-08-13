@@ -16,10 +16,8 @@ import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
 
 
--- | Edh follows GHC's program termination criteria that the main thread
--- decides all. see:
---   https://hackage.haskell.org/package/base/docs/Control-Concurrent.html
--- description at:
+-- | Uncaught exception in any thread (main or a descendant) will terminate the
+-- whole Edh program, see:
 --   https://github.com/e-wrks/edh/tree/master/Tour#program--threading-model
 driveEdhProgram
   :: TMVar (Either SomeException EdhValue) -> Context -> EdhProc -> IO ()
@@ -55,8 +53,10 @@ driveEdhProgram !haltResult !progCtx !prog = do
               Just (!etsForker, !actForkee) -> do
                 etsForkee <- deriveState etsForker
                 -- bootstrap on the descendant thread
-                atomically $ writeTBQueue (edh'task'queue etsForkee) $ Left
-                  (etsForkee, actForkee etsForkee)
+                atomically
+                  $ writeTBQueue (edh'task'queue etsForkee)
+                  $ EdhDoIO etsForkee
+                  $ actForkee etsForkee
                 void $ mask_ $ forkIOWithUnmask $ \unmask -> catch
                   (unmask $ driveEdhThread (edh'defers etsForkee)
                                            (edh'task'queue etsForkee)
@@ -123,7 +123,8 @@ driveEdhProgram !haltResult !progCtx !prog = do
                                         , edh'fork'queue = forkQueue
                                         }
         -- bootstrap the program on main Edh thread
-        atomically $ writeTBQueue mainQueue $ Right (etsAtBoot, prog etsAtBoot)
+        atomically $ writeTBQueue mainQueue $ EdhDoSTM etsAtBoot $ prog
+          etsAtBoot
         -- drive the main Edh thread
         driveEdhThread defers mainQueue
 
@@ -134,23 +135,21 @@ driveEdhProgram !haltResult !progCtx !prog = do
 
   driveDefers :: [DeferRecord] -> IO ()
   driveDefers [] = return ()
-  driveDefers ((!etsDefer, !deferredProc) : restDefers) = do
+  driveDefers ((DeferRecord !etsDefer !deferredProc) : restDefers) = do
     !deferPerceivers <- newTVarIO []
     !deferDefers     <- newTVarIO []
     !deferTaskQueue  <- newTBQueueIO 100
-    atomically $ writeTBQueue deferTaskQueue $ Right
-      ( etsDefer
-      , deferredProc etsDefer { edh'in'tx      = False
-                              , edh'task'queue = deferTaskQueue
-                              , edh'perceivers = deferPerceivers
-                              , edh'defers     = deferDefers
-                              }
-      )
+    atomically $ writeTBQueue deferTaskQueue $ EdhDoSTM etsDefer $ deferredProc
+      etsDefer { edh'in'tx      = False
+               , edh'task'queue = deferTaskQueue
+               , edh'perceivers = deferPerceivers
+               , edh'defers     = deferDefers
+               }
     driveEdhThread deferDefers deferTaskQueue
     driveDefers restDefers
 
   drivePerceiver :: EdhValue -> PerceiveRecord -> IO Bool
-  drivePerceiver !ev (_, !etsOrigin, !reaction) = do
+  drivePerceiver !ev (PerceiveRecord _ !etsOrigin !reaction) = do
     !breakThread     <- newTVarIO False
     !reactPerceivers <- newTVarIO []
     !reactDefers     <- newTVarIO []
@@ -162,8 +161,9 @@ driveEdhProgram !haltResult !progCtx !prog = do
           , edh'defers     = reactDefers
           , edh'context    = (edh'context etsOrigin) { contextMatch = ev }
           }
-    atomically $ writeTBQueue reactTaskQueue $ Right
-      (etsPerceiver, reaction etsPerceiver breakThread)
+    atomically $ writeTBQueue reactTaskQueue $ EdhDoSTM etsPerceiver $ reaction
+      etsPerceiver
+      breakThread
     driveEdhThread reactDefers reactTaskQueue
     atomically $ readTVar breakThread
   drivePerceivers :: [(EdhValue, PerceiveRecord)] -> IO Bool
@@ -176,14 +176,14 @@ driveEdhProgram !haltResult !progCtx !prog = do
   driveEdhThread !defers !tq = atomically (nextTaskFromQueue tq) >>= \case
     Nothing -> -- this thread is done, run defers lastly
       readTVarIO defers >>= driveDefers
-    Just (Left (!ets, !actIO)) -> do
+    Just (EdhDoIO !ets !actIO) -> do
       -- during actIO, perceivers won't fire, program termination won't stop
       -- this thread
       catch actIO $ \(e :: SomeException) ->
         atomically $ toEdhError ets e $ \ !exv ->
-          writeTBQueue tq $ Right (ets, edhThrow ets exv)
+          writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets exv
       driveEdhThread defers tq -- loop another iteration for the thread
-    Just (Right (!ets, !actSTM)) -> do
+    Just (EdhDoSTM !ets !actSTM) -> do
       let doIt = goSTM ets actSTM >>= \case
             True -> -- terminate this thread, after running defers lastly
               readTVarIO defers >>= driveDefers
@@ -191,7 +191,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
               driveEdhThread defers tq
       catch doIt $ \(e :: SomeException) ->
         atomically $ toEdhError ets e $ \ !exv ->
-          writeTBQueue tq $ Right (ets, edhThrow ets exv)
+          writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets exv
       driveEdhThread defers tq -- loop another iteration for the thread
 
   goSTM :: EdhThreadState -> STM () -> IO Bool
@@ -230,7 +230,8 @@ driveEdhProgram !haltResult !progCtx !prog = do
       :: [(EdhValue, PerceiveRecord)]
       -> [PerceiveRecord]
       -> STM [(EdhValue, PerceiveRecord)]
-    perceiverChk !gotevl []                     = return gotevl
-    perceiverChk !gotevl (r@(evc, _, _) : rest) = tryReadTChan evc >>= \case
-      Just !ev -> perceiverChk ((ev, r) : gotevl) rest
-      Nothing  -> perceiverChk gotevl rest
+    perceiverChk !gotevl [] = return gotevl
+    perceiverChk !gotevl (r@(PerceiveRecord !evc _ _) : rest) =
+      tryReadTChan evc >>= \case
+        Just !ev -> perceiverChk ((ev, r) : gotevl) rest
+        Nothing  -> perceiverChk gotevl rest

@@ -405,14 +405,26 @@ data EdhThreadState = EdhThreadState {
   , edh'fork'queue :: !(TBQueue (EdhThreadState, EdhThreadState -> IO ()))
   }
 
-type EdhTask = Either (EdhThreadState, IO ()) (EdhThreadState, STM ())
-type PerceiveRecord = (
-    TChan EdhValue -- ^ chan subscribed to source event sink
-  , EdhThreadState -- ^ origin ets upon the perceiver is armed
+-- | The task to be queued for execution of an Edh thread
+--
+-- the thread state provides the context, into which an exception should be
+-- thrown, if one ever occurs during the action
+data EdhTask =
+    EdhDoIO  !EdhThreadState !(IO ())
+  | EdhDoSTM !EdhThreadState !(STM ())
+data PerceiveRecord  = PerceiveRecord
+  -- | chan subscribed to source event sink
+  !(TChan EdhValue)
+  -- | origin ets upon the perceiver is armed
+  !EdhThreadState
   -- | reacting action per event received, event value is context match
-  , EdhThreadState -> TVar Bool -> STM () 
-  )
-type DeferRecord = (EdhThreadState, EdhThreadState -> STM ())
+  !(EdhThreadState -> TVar Bool -> STM ())
+data DeferRecord = DeferRecord
+  -- | origin ets upon the deferred action is scheduled
+  !EdhThreadState
+  -- | deferred action to be performed upon termination of the target Edh
+  -- thread
+  !(EdhThreadState -> STM ())
 
 -- | Construct an call context from thread state
 getEdhCallContext :: Int -> EdhThreadState -> EdhCallContext
@@ -451,10 +463,22 @@ type EdhExit = EdhValue -> STM ()
 edhEndOfProc :: EdhExit
 edhEndOfProc _ = return ()
 
+-- | Exit an Edh proc in CPS
+--
+-- @edh'in'tx ets@ is normally controlled by the `ai` keyword at scripting
+-- level, this implements the semantics of it
 exitEdh :: EdhThreadState -> EdhExit -> EdhValue -> STM ()
 exitEdh !ets !exit !val = if edh'in'tx ets
   then exit val
-  else writeTBQueue (edh'task'queue ets) $ Right $ exit val
+  else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets $ exit val
+
+-- | Schedule an IO action to be performed in current Edh thread, but after
+-- current (and possibly some currently scheduled subsequent) STM tx finishes
+--
+-- CAVEAT pay special attention in using this, to not break the semantics of
+--       `ai` keyword at scripting level
+edhContIO :: EdhThreadState -> IO () -> STM ()
+edhContIO !ets !actIO = writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
 
 
 -- | Type of a procedure in host language that can be called from Edh code.
