@@ -7,6 +7,7 @@ import           Prelude
 import           GHC.Conc                       ( unsafeIOToSTM )
 import           System.IO.Unsafe               ( unsafePerformIO )
 
+import           Control.Monad
 import           Control.Concurrent.STM
 
 import           Data.Foldable
@@ -540,6 +541,19 @@ instance Hashable EventSink where
   hashWithSalt s (EventSink s'u _ _ _ _) = hashWithSalt s s'u
 instance Show EventSink where
   show EventSink{} = "<sink>"
+
+-- | Fork a new Edh thread to run the specified event producer, but hold the 
+-- production until current thread has later started consuming events from the
+-- sink returned here.
+launchEventProducer :: EdhExit -> EventSink -> EdhProc -> EdhProc
+launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerProg !etsConsumer
+  = do
+    subcBefore <- readTVar subc
+    forkEdh etsConsumer $ \ !etsProducer -> do
+      subcNow <- readTVar subc
+      when (subcNow == subcBefore) retry
+      producerProg etsProducer
+    exitEdh etsConsumer exit $ EdhSink sink
 
 
 -- Atop Haskell, most types in Edh the surface language, are for
