@@ -759,7 +759,7 @@ installEdhBatteries world = liftIO $ do
       runEdhProc pgs $ importEdhModule' rootEntity
                                         WildReceiver
                                         "batteries/root"
-                                        edhEndOfProc
+                                        endOfEdh
 
  where
   !rootScope     = worldScope world

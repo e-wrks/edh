@@ -116,7 +116,7 @@ module Language.Edh.EHI
   , edhPerformIO
   , edhContIO
   , edhNop
-  , edhEndOfProc
+  , endOfEdh
     -- ** Reflective manipulation
   , StmtSrc(..)
   , Stmt(..)

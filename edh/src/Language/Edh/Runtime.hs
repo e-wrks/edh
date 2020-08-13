@@ -113,7 +113,7 @@ createEdhWorld !console = liftIO $ do
         -- leave the out-of-band entity store open so Edh code can
         -- assign arbitrary attrs to exceptions for informative
         [ (AttrByName nm, )
-            <$> (mkHostClass rootScope nm hc =<< createErrEntManipulater nm)
+            <$> (mkHostClass rootScope nm hc =<< createErrorObjSuper nm)
         | (nm, hc) <- -- cross check with 'throwEdhSTM' for type safety
           [ ("ProgramHalt" , errCtor edhProgramHalt)
           , ("IOError"     , fakableErr)
@@ -273,7 +273,7 @@ runEdhModule' !world !impPath !preRun = liftIO $ do
             !pgsModu = pgs { edh'context = moduCtx }
         preRun pgsModu $ runEdhProc pgsModu $ evalEdh moduFile
                                                       moduSource
-                                                      edhEndOfProc
+                                                      endOfEdh
 
 
 -- | perform an effectful call from current Edh context

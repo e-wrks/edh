@@ -34,6 +34,13 @@ import           Language.Edh.Control
 import           Language.Edh.Details.IOPD
 
 
+
+-- TODO rm this after refactor done
+lexicalScopeOf :: ProcDefi -> Scope
+lexicalScopeOf = edh'procedure'lexi
+
+
+
 -- | A pack of evaluated argument values with positional/keyword origin,
 -- this works in places of tuples in other languages, apk in Edh can be
 -- considered a tuple if only positional arguments inside.
@@ -169,31 +176,31 @@ instance Show List where
 -- | The execution context of an Edh thread
 data Context = Context {
     -- | the Edh world in context
-    contextWorld :: !EdhWorld
+    edh'ctx'world :: !EdhWorld
     -- | the call stack frames of Edh procedures
-  , callStack :: !(NonEmpty Scope)
+  , edh'ctx'stack :: !(NonEmpty Scope)
     -- | the direct generator caller
-  , generatorCaller :: !(Maybe EdhGenrCaller)
+  , edh'ctx'genr'caller :: !(Maybe EdhGenrCaller)
     -- | the match target value in context, normally be `true`, or the
     -- value from `x` in a `case x of` block
-  , contextMatch :: EdhValue
+  , edh'ctx'match :: EdhValue
     -- | currently executing statement
-  , contextStmt :: !StmtSrc
+  , edh'ctx'stmt :: !StmtSrc
     -- | whether it's discouraged for procedure definitions or similar
     -- expressions from installing their results as attributes into the
     -- context scope, i.e. the top of current call stack
-  , contextPure :: !Bool
+  , edh'ctx'pure :: !Bool
     -- | whether running within an exporting stmt
-  , contextExporting :: !Bool
+  , edh'ctx'exporting :: !Bool
     -- | whether running within an effect stmt
-  , contextEffDefining :: !Bool
+  , edh'ctx'eff'defining :: !Bool
   }
 contextScope :: Context -> Scope
-contextScope = NE.head . callStack
+contextScope = NE.head . edh'ctx'stack
 contextFrame :: Context -> Int -> Scope
 contextFrame !ctx !unwind = unwindStack (NE.head stack) (NE.tail stack) unwind
  where
-  !stack = callStack ctx
+  !stack = edh'ctx'stack ctx
   unwindStack :: Scope -> [Scope] -> Int -> Scope
   unwindStack !s _ !c | c <= 0 = s
   unwindStack !s []         _  = s
@@ -231,25 +238,25 @@ defaultEdhExcptHndlr !exv !rethrow = rethrow exv
 -- also see https://github.com/e-wrks/edh/Tour/#procedure
 data Scope = Scope {
     -- | the backing storage of this scope, it's unique in a method procedure,
-    -- and is the underlying hash store of 'thisObject' in a class procedure.
-    scopeEntity :: !EntityStore
+    -- and is the underlying hash store of 'edh'scope'this' in a class procedure.
+    edh'scope'entity :: !EntityStore
     -- | `this` object in this scope
-  , thisObject :: !Object
+  , edh'scope'this :: !Object
     -- | `that` object in this scope
-  , thatObject :: !Object
+  , edh'scope'that :: !Object
     -- | the exception handler, `catch`/`finally` should capture the
     -- outer scope, and run its *tried* block with a new stack whose
-    -- top frame is a scope all same but the `exceptionHandler` field,
+    -- top frame is a scope all same but the `edh'excpt'hndlr` field,
     -- which executes its handling logics appropriately.
-  , exceptionHandler :: !EdhExcptHndlr
+  , edh'excpt'hndlr :: !EdhExcptHndlr
     -- | the Edh procedure holding this scope
-  , scopeProc :: !ProcDefi
+  , edh'scope'proc :: !ProcDefi
     -- | the Edh stmt caused creation of this scope
-  , scopeCaller :: !StmtSrc
+  , edh'scope'caller :: !StmtSrc
     -- | when this scope is of an effectful procedure as called, this is the
     -- outer call stack from which (but not including the) scope the
     -- procedure is addressed of
-  , effectsStack :: [Scope]
+  , edh'effects'stack :: [Scope]
   }
 instance Show Scope where
   show (Scope _ _ _ _ (ProcDefi _ _ _ (ProcDecl !addr _ !procBody)) (StmtSrc (!cPos, _)) _)
@@ -260,20 +267,45 @@ instance Show Scope where
       Left  (StmtSrc (dPos, _)) -> sourcePosPretty dPos
 
 outerScopeOf :: Scope -> Maybe Scope
-outerScopeOf = procedure'lexi . scopeProc
+outerScopeOf !scope =
+  if edh'obj'ident this == edh'procedure'ident (edh'scope'proc scope)
+    then Nothing -- already at world root scope
+    else Just $ edh'procedure'lexi $ edh'scope'proc scope
+  where this = edh'scope'this scope
+
+
+-- | A class is wrapped as an object per se, the object's storage structure is
+-- here:
+-- - the procedure created the class, from which the class name, the lexical
+--   scope and other information can be obtained
+-- - a hash storage of (so called static) attributes shared by all object
+--   instances of the class
+-- - the storage allocator for new objects of the class to be created
+data Class = Class {
+    edh'class'proc :: !ProcDefi
+  , edh'class'store :: !EntityStore
+  , edh'class'allocator :: !EdhObjectAllocator
+  }
+instance Eq Class where
+  Class x'p _ _ == Class y'p _ _ = x'p == y'p
+instance Hashable Class where
+  hashWithSalt s (Class p _ _) = hashWithSalt s p
+
+type EdhObjectAllocator
+  = EdhThreadState -> ArgsPack -> (ObjectStore -> STM ()) -> STM ()
 
 
 -- | An object views an entity, with inheritance relationship 
 -- to any number of super objects.
 data Object = Object {
-    -- | identifier of an Edh object
-    objIdent :: !Unique
-    -- | the entity stores attribute set of the object
-  , objStore :: !ObjectStore
-    -- | the class (a.k.a constructor) procedure of the object
-  , objClass :: !Class
+    -- | unique identifier of an Edh object
+    edh'obj'ident :: !Unique
+    -- | the storage for entity attributes of the object
+  , edh'obj'store :: !ObjectStore
+    -- | the class object must have a 'ClassStore' storage
+  , edh'obj'class :: !Object
     -- | up-links for object inheritance hierarchy
-  , objSupers :: !(TVar [Object])
+  , edh'obj'supers :: !(TVar [Object])
   }
 instance Eq Object where
   Object x'u _ _ _ == Object y'u _ _ _ = x'u == y'u
@@ -282,18 +314,22 @@ instance Ord Object where
 instance Hashable Object where
   hashWithSalt s (Object u _ _ _) = hashWithSalt s u
 instance Show Object where
-  -- it's not right to call 'atomically' here to read 'objSupers' for
+  -- it's not right to call 'atomically' here to read 'edh'obj'supers' for
   -- the show, as 'show' may be called from an stm transaction, stm
   -- will fail hard on encountering of nested 'atomically' calls.
-  show (Object _ _ !pd _) = "<object: " ++ T.unpack (procedureName pd) ++ ">"
+  show obj = case edh'obj'store $ edh'obj'class obj of
+    ClassStore (Class !pd _ _) ->
+      "<object: " ++ T.unpack (procedureName pd) ++ ">"
+    _ -> "<bogus-object>"
 
 data ObjectStore =
     HashStore !EntityStore
+  | ClassStore !Class -- in case this is a class object
   | HostStore !(TVar Dynamic)
 
 -- | Try cast and unveil an Object's storage of a known type
 castObjectStore :: forall a . (Typeable a) => Object -> STM (Maybe a)
-castObjectStore !obj = case objStore obj of
+castObjectStore !obj = case edh'obj'store obj of
   HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
     Just (d :: a) -> return $ Just d
     Nothing       -> return Nothing
@@ -325,49 +361,103 @@ cloneHostObject (Object _ !os !cls !supers) !dsClone !exit = do
     _ -> error "not a data object"
 
 
+edhCreateWorldRoot :: STM Scope
+edhCreateWorldRoot = do
+  !rootIdent   <- unsafeIOToSTM newUnique
+  !hsMetaClass <- iopdEmpty
+  !ssMetaClass <- newTVar []
+  !hsRootClass <- iopdEmpty
+  !ssRootClass <- newTVar []
+  !hsRoot      <- iopdEmpty
+  !ssRoot      <- newTVar []
+  let
+    metaClassProc =
+      ProcDefi rootIdent (AttrByName "class") rootScope
+        $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right edhNop)
+    metaClass = Class metaClassProc hsMetaClass metaAllocator
+    metaClassObj =
+      Object rootIdent (ClassStore metaClass) rootClassObj ssMetaClass
+    rootClassProc =
+      ProcDefi rootIdent (AttrByName "<root>") rootScope
+        $ ProcDecl (NamedAttr "<root>") (PackReceiver []) (Right edhNop)
+    rootClass = Class rootClassProc hsRootClass rootAllocator
+    rootClassObj =
+      Object rootIdent (ClassStore rootClass) metaClassObj ssRootClass
+    rootObj   = Object rootIdent (HashStore hsRoot) rootClassObj ssRoot
+
+    rootScope = Scope hsRoot
+                      rootObj
+                      rootObj
+                      defaultEdhExcptHndlr
+                      rootClassProc
+                      rootCaller
+                      []
+
+  !metaClassMethods <- sequence
+    [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm hp args
+    | (nm, hp, args) <- [("__repr__", hpClassRepr, PackReceiver [])
+-- TODO more methods for class objects here
+                                                                   ]
+    ]
+  iopdUpdate metaClassMethods hsMetaClass
+
+  return rootScope
+ where
+  metaAllocator _ _ _ = error "bug: allocating class object from Edh code"
+  rootAllocator _ _ !exit = iopdEmpty >>= exit . HashStore
+  rootCaller = StmtSrc
+    ( SourcePos { sourceName   = "<world-genesis>"
+                , sourceLine   = mkPos 1
+                , sourceColumn = mkPos 1
+                }
+    , VoidStmt
+    )
+
+  hpClassRepr :: EdhProcedure
+  hpClassRepr _apk !exit !ets = case edh'obj'store clsObj of
+    ClassStore (Class !pd _ _) ->
+      exitEdh ets exit $ EdhString $ procedureName pd
+    _ -> exitEdh ets exit $ EdhString "<bogus-class>"
+    where clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+
 -- | A world for Edh programs to change
 data EdhWorld = EdhWorld {
     -- | root scope of this world
-    worldScope :: !Scope
-    -- | all scope wrapper objects in this world belong to the same
-    -- class as 'scopeSuper' and have it as the top most super,
-    -- the bottom super of a scope wraper object is the original
-    -- `this` object of that scope, thus an attr addressor can be
-    -- used to read the attribute value out of the wrapped scope, when
-    -- the attr name does not conflict with scope wrapper methods
-  , scopeSuper :: !Object
+    edh'world'root :: !Scope
     -- | all operators declared in this world, this also used as the
     -- _world lock_ in parsing source code to be executed in this world
-  , worldOperators :: !(TMVar OpPrecDict)
+  , edh'world'operators :: !(TMVar OpPrecDict)
     -- | all modules loaded or being loaded into this world, for each
     -- entry, will be a transient entry containing an error value (that
     -- appears as an EdhNamedValue) if failed loading, or a permanent
     -- entry containing the module object if successfully loaded
-  , worldModules :: !(TMVar (Map.HashMap ModuleId (TMVar EdhValue)))
+  , edh'world'modules :: !(TMVar (Map.HashMap ModuleId (TMVar EdhValue)))
     -- | for console logging, input and output
-  , worldConsole :: !EdhConsole
+  , edh'world'console :: !EdhConsole
   }
 instance Eq EdhWorld where
-  EdhWorld _ x'ss _ _ _ == EdhWorld _ y'ss _ _ _ = x'ss == y'ss
+  EdhWorld x'root _ _ _ == EdhWorld y'root _ _ _ =
+    edh'scope'this x'root == edh'scope'this y'root
 
 type ModuleId = Text
 
 worldContext :: EdhWorld -> Context
 worldContext !world = Context
-  { contextWorld       = world
-  , callStack          = worldScope world :| []
-  , generatorCaller    = Nothing
-  , contextMatch       = true
-  , contextStmt        = StmtSrc
-                           ( SourcePos { sourceName   = "<genesis>"
-                                       , sourceLine   = mkPos 1
-                                       , sourceColumn = mkPos 1
-                                       }
-                           , VoidStmt
-                           )
-  , contextPure        = False
-  , contextExporting   = False
-  , contextEffDefining = False
+  { edh'ctx'world        = world
+  , edh'ctx'stack        = edh'world'root world :| []
+  , edh'ctx'genr'caller  = Nothing
+  , edh'ctx'match        = true
+  , edh'ctx'stmt         = StmtSrc
+                             ( SourcePos { sourceName   = "<genesis>"
+                                         , sourceLine   = mkPos 1
+                                         , sourceColumn = mkPos 1
+                                         }
+                             , VoidStmt
+                             )
+  , edh'ctx'pure         = False
+  , edh'ctx'exporting    = False
+  , edh'ctx'eff'defining = False
   }
 {-# INLINE worldContext #-}
 
@@ -439,7 +529,7 @@ getEdhCallContext !unwind !pgs = EdhCallContext
   unwindStack _ [f    ]    = [f]
   unwindStack c (_ : s)    = unwindStack (c - 1) s
   !ctx                = edh'context pgs
-  (StmtSrc (!tip, _)) = contextStmt ctx
+  (StmtSrc (!tip, _)) = edh'ctx'stmt ctx
   !frames =
     foldl'
         (\sfs (Scope _ _ _ _ pd@(ProcDefi _ _ _ (ProcDecl _ _ !procBody)) (StmtSrc (!callerPos, _)) _) ->
@@ -450,19 +540,17 @@ getEdhCallContext !unwind !pgs = EdhCallContext
         )
         []
       $ unwindStack unwind
-      $ NE.init (callStack ctx)
+      $ NE.init (edh'ctx'stack ctx)
   procSrcLoc :: Either StmtSrc EdhProcedure -> Text
   procSrcLoc !procBody = case procBody of
     Left  (StmtSrc (spos, _)) -> T.pack (sourcePosPretty spos)
     Right _                   -> "<host-code>"
 
 
-type EdhProc = EdhThreadState -> STM ()
 type EdhExit = EdhValue -> STM ()
 
--- | A CPS exit serving end-of-procedure
-edhEndOfProc :: EdhExit
-edhEndOfProc _ = return ()
+endOfEdh :: EdhExit
+endOfEdh _ = return ()
 
 -- | Exit an Edh proc in CPS
 --
@@ -472,6 +560,20 @@ exitEdh :: EdhThreadState -> EdhExit -> EdhValue -> STM ()
 exitEdh !ets !exit !val = if edh'in'tx ets
   then exit val
   else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets $ exit val
+
+
+-- | Somewhat similar to @ 'ReaderT' 'EdhThreadState' 'STM' @, but not
+-- monadic
+type EdhProc = EdhThreadState -> STM ()
+
+exitEdhProc :: EdhExit -> EdhValue -> EdhProc
+exitEdhProc !exit !val !ets = if edh'in'tx ets
+  then exit val
+  else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets $ exit val
+
+runEdhProc :: EdhThreadState -> EdhProc -> STM ()
+runEdhProc !ets !p = p ets
+
 
 -- | Schedule forking of a GHC thread for an Edh thread
 --
@@ -489,7 +591,7 @@ edhContIO :: EdhThreadState -> IO () -> STM ()
 edhContIO !ets !actIO = writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
 
 
--- | Type of a procedure in host language that can be called from Edh code.
+-- | Type for a procedure in host language that can be called from Edh code.
 --
 -- Note the top frame of the call stack from thread state is the one for the
 -- callee, that scope should have mounted the caller's scope entity, not a new
@@ -601,7 +703,7 @@ data EdhValue =
 
   -- * executable precedures
     | EdhIntrOp !Precedence !IntrinOpDefi
-    | EdhClass !ProcDefi
+    | EdhClass !Class
     | EdhMethod !ProcDefi
     | EdhOprtor !Precedence !(Maybe EdhValue) !ProcDefi
     | EdhGnrtor !ProcDefi
@@ -665,8 +767,8 @@ instance Show EdhValue where
 
   show (EdhIntrOp !preced (IntrinOpDefi _ !opSym _)) =
     "<intrinsic: (" ++ T.unpack opSym ++ ") " ++ show preced ++ ">"
-  show (EdhClass  !pd) = T.unpack (procedureName pd)
-  show (EdhMethod !pd) = T.unpack (procedureName pd)
+  show (EdhClass  (Class !pd _ _)) = T.unpack (procedureName pd)
+  show (EdhMethod !pd            ) = T.unpack (procedureName pd)
   show (EdhOprtor !preced _ !pd) =
     "<operator: (" ++ T.unpack (procedureName pd) ++ ") " ++ show preced ++ ">"
   show (EdhGnrtor !pd) = T.unpack (procedureName pd)
@@ -1007,9 +1109,9 @@ data ArgSender = UnpackPosArgs !Expr
 
 -- | Procedure declaration, result of parsing
 data ProcDecl = ProcDecl {
-      procedure'addr :: !AttrAddressor
-    , procedure'args :: !ArgsReceiver
-    , procedure'body :: !(Either StmtSrc EdhProcedure)
+    edh'procedure'addr :: !AttrAddressor
+  , edh'procedure'args :: !ArgsReceiver
+  , edh'procedure'body :: !(Either StmtSrc EdhProcedure)
   }
 instance Eq ProcDecl where
   ProcDecl{} == ProcDecl{} = False
@@ -1021,10 +1123,10 @@ instance Show ProcDecl where
 
 -- | Procedure definition, result of execution of the declaration
 data ProcDefi = ProcDefi {
-    procedure'uniq :: !Unique
-    , procedure'name :: !AttrKey
-    , procedure'lexi :: !(Maybe Scope)
-    , procedure'decl :: {-# UNPACK #-} !ProcDecl
+    edh'procedure'ident :: !Unique
+  , edh'procedure'name :: !AttrKey
+  , edh'procedure'lexi :: !Scope
+  , edh'procedure'decl :: {-# UNPACK #-} !ProcDecl
   }
 instance Eq ProcDefi where
   ProcDefi x'u _ _ _ == ProcDefi y'u _ _ _ = x'u == y'u
@@ -1038,16 +1140,9 @@ instance Show ProcDefi where
     Right _ -> "<host-proc " <> show name <> " : " <> show addr <> ">"
 
 procedureName :: ProcDefi -> Text
-procedureName (ProcDefi _ !name _ _) = T.pack $ show name
-
-lexicalScopeOf :: ProcDefi -> Scope
-lexicalScopeOf (ProcDefi _ _ (Just scope) _) = scope
-lexicalScopeOf (ProcDefi _ _ Nothing _) =
-  error "bug: asking for scope of world root"
-
-
--- | The Edh class is a special type of procedure, receives no argument.
-type Class = ProcDefi
+procedureName !pd = case edh'procedure'name pd of
+  AttrByName !n            -> n
+  AttrBySym  (Symbol _ !r) -> r
 
 
 data Prefix = PrefixPlus | PrefixMinus | Not
@@ -1239,9 +1334,10 @@ edhTypeOf EdhPair{}                = PairType
 edhTypeOf EdhArgsPack{}            = ArgsPackType
 
 edhTypeOf EdhIntrOp{}              = IntrinsicType
-edhTypeOf (EdhClass (ProcDefi _ _ _ (ProcDecl _ _ pb))) = case pb of
-  Left  _ -> ClassType
-  Right _ -> HostClassType
+edhTypeOf (EdhClass (Class (ProcDefi _ _ _ (ProcDecl _ _ pb)) _ _)) =
+  case pb of
+    Left  _ -> ClassType
+    Right _ -> HostClassType
 edhTypeOf (EdhMethod (ProcDefi _ _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> MethodType
   Right _ -> HostMethodType
@@ -1273,7 +1369,7 @@ edhTypeOf EdhExpr{}           = ExprType
 mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
 mkIntrinsicOp !world !opSym !iop = do
   u <- unsafeIOToSTM newUnique
-  Map.lookup opSym <$> readTMVar (worldOperators world) >>= \case
+  Map.lookup opSym <$> readTMVar (edh'world'operators world) >>= \case
     Nothing ->
       throwSTM
         $ EdhError
@@ -1293,13 +1389,13 @@ mkHostProc
 mkHostProc !scope !vc !nm !p !args = do
   u <- unsafeIOToSTM newUnique
   return $ vc ProcDefi
-    { procedure'uniq = u
-    , procedure'name = AttrByName nm
-    , procedure'lexi = Just scope
-    , procedure'decl = ProcDecl { procedure'addr = NamedAttr nm
-                                , procedure'args = args
-                                , procedure'body = Right p
-                                }
+    { edh'procedure'ident = u
+    , edh'procedure'name  = AttrByName nm
+    , edh'procedure'lexi  = scope
+    , edh'procedure'decl  = ProcDecl { edh'procedure'addr = NamedAttr nm
+                                     , edh'procedure'args = args
+                                     , edh'procedure'body = Right p
+                                     }
     }
 
 mkSymbolicHostProc
@@ -1312,13 +1408,15 @@ mkSymbolicHostProc
 mkSymbolicHostProc !scope !vc !sym !p !args = do
   u <- unsafeIOToSTM newUnique
   return $ vc ProcDefi
-    { procedure'uniq = u
-    , procedure'name = AttrBySym sym
-    , procedure'lexi = Just scope
-    , procedure'decl = ProcDecl { procedure'addr = SymbolicAttr $ symbolName sym
-                                , procedure'args = args
-                                , procedure'body = Right p
-                                }
+    { edh'procedure'ident = u
+    , edh'procedure'name  = AttrBySym sym
+    , edh'procedure'lexi  = scope
+    , edh'procedure'decl  = ProcDecl
+                              { edh'procedure'addr = SymbolicAttr
+                                                       $ symbolName sym
+                              , edh'procedure'args = args
+                              , edh'procedure'body = Right p
+                              }
     }
 
 
@@ -1328,104 +1426,104 @@ mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
   getter <- do
     u <- unsafeIOToSTM newUnique
     return $ ProcDefi
-      { procedure'uniq = u
-      , procedure'name = AttrByName nm
-      , procedure'lexi = Just scope
-      , procedure'decl = ProcDecl { procedure'addr = NamedAttr nm
-                                  , procedure'args = PackReceiver []
-                                  , procedure'body = Right getterProc
-                                  }
+      { edh'procedure'ident = u
+      , edh'procedure'name  = AttrByName nm
+      , edh'procedure'lexi  = scope
+      , edh'procedure'decl  = ProcDecl { edh'procedure'addr = NamedAttr nm
+                                       , edh'procedure'args = PackReceiver []
+                                       , edh'procedure'body = Right getterProc
+                                       }
       }
   setter <- case maybeSetterProc of
     Nothing          -> return Nothing
     Just !setterProc -> do
       u <- unsafeIOToSTM newUnique
       return $ Just $ ProcDefi
-        { procedure'uniq = u
-        , procedure'name = AttrByName nm
-        , procedure'lexi = Just scope
-        , procedure'decl = ProcDecl
-          { procedure'addr = NamedAttr nm
-          , procedure'args = PackReceiver
-                               [optionalArg "newValue" $ LitExpr NilLiteral]
-          , procedure'body = Right setterProc
+        { edh'procedure'ident = u
+        , edh'procedure'name  = AttrByName nm
+        , edh'procedure'lexi  = scope
+        , edh'procedure'decl  = ProcDecl
+          { edh'procedure'addr = NamedAttr nm
+          , edh'procedure'args = PackReceiver
+                                   [optionalArg "newValue" $ LitExpr NilLiteral]
+          , edh'procedure'body = Right setterProc
           }
         }
   return $ EdhDescriptor getter setter
 
 
-type EdhHostCtor
-  -- | ctor args
-  =  ArgsPack
-  -- | exit with host data and supers on ctor
-  -> (  Dynamic -- ^ host data
-     -> [Object] -- ^ super objects
-     -> STM ()
-     )
-  -> EdhProc
+-- type EdhHostCtor
+--   -- | ctor args
+--   =  ArgsPack
+--   -- | exit with host data and supers on ctor
+--   -> (  Dynamic -- ^ host data
+--      -> [Object] -- ^ super objects
+--      -> STM ()
+--      )
+--   -> EdhProc
 
--- | Make a host class with a 'EdhHostCtor', and an optional factory function
--- to create shared methods residing within a common super object.
---
--- Note that even as an instance method procedure, a host procedure's
--- contextual `this` instance is the enclosed this object at the time it's
--- defined (i.e. `this` in the scope passed to 'mkHostProc' that produced the
--- host procedure, which is normally a host module), so such host methods
--- should normally locate a proper instance to operate on, along `that`
--- object's inheritance chain, whose class is identified by the uid passed to
--- the factory function.
-mkHostClass
-  :: Scope -- ^ outer lexical scope to define the class
-  -> Text  -- ^ class name
-  -> EdhHostCtor -- ^ instance constructor
-  -- | an optional factory function taking the class uid, to create an entity
-  -- store containing various host methods, to appear as a super object, which
-  -- will have the same class. such a super object is an efficient way to share
-  -- instance/static methods among all object instances of the created class.
-  -> Maybe (Unique -> STM EntityStore)
-  -> STM EdhValue
-mkHostClass !scope !nm !hc !maybeSuperCtor =
-  EdhClass <$> mkHostClass' scope nm hc maybeSuperCtor
-mkHostClass'
-  :: Scope -- ^ outer lexical scope to define the class
-  -> Text  -- ^ class name
-  -> EdhHostCtor -- ^ instance constructor
-  -- | an optional factory function taking the class uid, to create an entity
-  -- store containing various host methods, to appear as a super object, which
-  -- will have the same class. such a super object is an efficient way to share
-  -- instance/static methods among all object instances of the created class.
-  -> Maybe (Unique -> STM EntityStore)
-  -> STM Class
-mkHostClass' !scope !nm !hc !maybeSuperCtor = do
-  !classUniq  <- unsafeIOToSTM newUnique
-  !maybeSuper <- case maybeSuperCtor of
-    Nothing         -> return Nothing
-    Just !superCtor -> do
-      !oidSuper <- unsafeIOToSTM newUnique
-      !esSuper  <- superCtor classUniq
-      !slSuper  <- newTVar []
-      return $ Just (oidSuper, esSuper, slSuper)
-  let !cls = ProcDefi
-        { procedure'uniq = classUniq
-        , procedure'name = AttrByName nm
-        , procedure'lexi = Just scope
-        , procedure'decl = ProcDecl { procedure'addr = NamedAttr nm
-                                    , procedure'args = PackReceiver []
-                                    , procedure'body = Right ctor
-                                    }
-        }
-      ctor :: EdhProcedure
-      ctor !apk !exit !ets = flip (hc apk) ets $ \ !hd !supers -> do
-        !hdv <- newTVar hd
-        !oid <- unsafeIOToSTM newUnique
-        !sl  <- case maybeSuper of
-          Nothing -> newTVar supers
-          Just (!oidSuper, !esSuper, !slSuper) ->
-            newTVar
-              $  supers
-              ++ [Object oidSuper (HashStore esSuper) cls slSuper]
-        exitEdh ets exit $ EdhObject $ Object oid (HostStore hdv) cls sl
-  return cls
+-- -- | Make a host class with a 'EdhHostCtor', and an optional factory function
+-- -- to create shared methods residing within a common super object.
+-- --
+-- -- Note that even as an instance method procedure, a host edh'procedure's
+-- -- contextual `this` instance is the enclosed this object at the time it's
+-- -- defined (i.e. `this` in the scope passed to 'mkHostProc' that produced the
+-- -- host procedure, which is normally a host module), so such host methods
+-- -- should normally locate a proper instance to operate on, along `that`
+-- -- object's inheritance chain, whose class is identified by the uid passed to
+-- -- the factory function.
+-- mkHostClass
+--   :: Scope -- ^ outer lexical scope to define the class
+--   -> Text  -- ^ class name
+--   -> EdhHostCtor -- ^ instance constructor
+--   -- | an optional factory function taking the class uid, to create an entity
+--   -- store containing various host methods, to appear as a super object, which
+--   -- will have the same class. such a super object is an efficient way to share
+--   -- instance/static methods among all object instances of the created class.
+--   -> Maybe (Unique -> STM EntityStore)
+--   -> STM EdhValue
+-- mkHostClass !scope !nm !hc !maybeSuperCtor =
+--   EdhClass <$> mkHostClass' scope nm hc maybeSuperCtor
+-- mkHostClass'
+--   :: Scope -- ^ outer lexical scope to define the class
+--   -> Text  -- ^ class name
+--   -> EdhHostCtor -- ^ instance constructor
+--   -- | an optional factory function taking the class uid, to create an entity
+--   -- store containing various host methods, to appear as a super object, which
+--   -- will have the same class. such a super object is an efficient way to share
+--   -- instance/static methods among all object instances of the created class.
+--   -> Maybe (Unique -> STM EntityStore)
+--   -> STM Class
+-- mkHostClass' !scope !nm !hc !maybeSuperCtor = do
+--   !classUniq  <- unsafeIOToSTM newUnique
+--   !maybeSuper <- case maybeSuperCtor of
+--     Nothing         -> return Nothing
+--     Just !superCtor -> do
+--       !oidSuper <- unsafeIOToSTM newUnique
+--       !esSuper  <- superCtor classUniq
+--       !slSuper  <- newTVar []
+--       return $ Just (oidSuper, esSuper, slSuper)
+--   let !cls = ProcDefi
+--         { edh'procedure'ident = classUniq
+--         , edh'procedure'name = AttrByName nm
+--         , edh'procedure'lexi = scope
+--         , edh'procedure'decl = ProcDecl { edh'procedure'addr = NamedAttr nm
+--                                     , edh'procedure'args = PackReceiver []
+--                                     , edh'procedure'body = Right ctor
+--                                     }
+--         }
+--       ctor :: EdhProcedure
+--       ctor !apk !exit !ets = flip (hc apk) ets $ \ !hd !supers -> do
+--         !hdv <- newTVar hd
+--         !oid <- unsafeIOToSTM newUnique
+--         !sl  <- case maybeSuper of
+--           Nothing -> newTVar supers
+--           Just (!oidSuper, !esSuper, !slSuper) ->
+--             newTVar
+--               $  supers
+--               ++ [Object oidSuper (HashStore esSuper) cls slSuper]
+--         exitEdh ets exit $ EdhObject $ Object oid (HostStore hdv) cls sl
+--   return cls
 
 
 data EdhIndex = EdhIndex !Int | EdhAny | EdhAll | EdhSlice {
