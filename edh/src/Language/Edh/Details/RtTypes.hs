@@ -269,11 +269,10 @@ instance Show Scope where
       Left  (StmtSrc (dPos, _)) -> sourcePosPretty dPos
 
 outerScopeOf :: Scope -> Maybe Scope
-outerScopeOf !scope =
-  if edh'obj'ident this == edh'procedure'ident (edh'scope'proc scope)
-    then Nothing -- already at world root scope
-    else Just $ edh'procedure'lexi $ edh'scope'proc scope
-  where this = edh'scope'this scope
+outerScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
+  then Nothing -- already at world root scope
+  else Just outerScope
+  where !outerScope = edh'procedure'lexi $ edh'scope'proc scope
 
 
 -- | A class is wrapped as an object per se, the object's storage structure is
@@ -365,43 +364,28 @@ cloneHostObject (Object _ !os !cls !supers) !dsClone !exit = do
 
 edhCreateWorldRoot :: STM Scope
 edhCreateWorldRoot = do
-  !rootIdent   <- unsafeIOToSTM newUnique
+  !idMeta <- unsafeIOToSTM newUnique
+  !hsMeta <- iopdEmpty
+  !ssMeta <- newTVar []
 
-  !hsMetaClass <- iopdEmpty
-  !ssMetaClass <- newTVar []
-
-  !hsRootClass <- iopdEmpty
-  !ssRootClass <- newTVar []
-
-  !hsRoot      <- iopdEmpty
-  !ssRoot      <- newTVar []
+  !idRoot <- unsafeIOToSTM newUnique
+  !hsRoot <- iopdEmpty
+  !ssRoot <- newTVar []
 
   let
-    metaClassProc =
-      ProcDefi rootIdent (AttrByName "class") rootScope
-        $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right edhNop)
-    metaClass = Class metaClassProc hsMetaClass metaAllocator
-    metaClassObj =
-      Object rootIdent (ClassStore metaClass) metaClassObj ssMetaClass
+    metaProc = ProcDefi idMeta (AttrByName "class") rootScope
+      $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right edhNop)
+    metaClass    = Class metaProc hsMeta metaAllocator
+    metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
 
-    rootClassProc =
-      ProcDefi rootIdent (AttrByName "<root>") rootScope
-        $ ProcDecl (NamedAttr "<root>") (PackReceiver []) (Right edhNop)
-    rootClass = Class rootClassProc hsRootClass rootAllocator
-    rootClassObj =
-      Object rootIdent (ClassStore rootClass) metaClassObj ssRootClass
+    rootObj      = Object idRoot (HashStore hsRoot) metaClassObj ssRoot
+    rootProc     = ProcDefi idRoot (AttrByName "<root>") rootScope
+      $ ProcDecl (NamedAttr "<root>") (PackReceiver []) (Right edhNop)
 
-    rootObj   = Object rootIdent (HashStore hsRoot) rootClassObj ssRoot
+    rootScope =
+      Scope hsRoot rootObj rootObj defaultEdhExcptHndlr rootProc genesisStmt []
 
-    rootScope = Scope hsRoot
-                      rootObj
-                      rootObj
-                      defaultEdhExcptHndlr
-                      rootClassProc
-                      rootCaller
-                      []
-
-  !metaClassArts <- -- todo more static attrs for class objects here
+  !metaArts <- -- todo more static attrs for class objects here
     sequence
     $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm hp args
        | (nm, hp, args) <- [("__repr__", hpClassRepr, PackReceiver [])]
@@ -409,19 +393,11 @@ edhCreateWorldRoot = do
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
        | (nm, getter, setter) <- [("name", hpClassNameGetter, Nothing)]
        ]
-  iopdUpdate metaClassArts hsMetaClass
+  iopdUpdate metaArts hsMeta
 
   return rootScope
  where
-  metaAllocator _ _ _ = error "bug: allocating class object"
-  rootAllocator _ _ !exit = iopdEmpty >>= exit . HashStore
-  rootCaller = StmtSrc
-    ( SourcePos { sourceName   = "<world-genesis>"
-                , sourceLine   = mkPos 1
-                , sourceColumn = mkPos 1
-                }
-    , VoidStmt
-    )
+  metaAllocator _ _ _ = error "bug: allocating root object"
 
   hpClassRepr :: EdhProcedure
   hpClassRepr _apk !exit !ets = case edh'obj'store clsObj of
@@ -436,6 +412,15 @@ edhCreateWorldRoot = do
       exitEdh ets exit $ attrKeyValue $ edh'procedure'name pd
     _ -> exitEdh ets exit nil
     where clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+  genesisStmt :: StmtSrc
+  genesisStmt = StmtSrc
+    ( SourcePos { sourceName   = "<genesis>"
+                , sourceLine   = mkPos 1
+                , sourceColumn = mkPos 1
+                }
+    , VoidStmt
+    )
 
 
 -- | A world for Edh programs to change
