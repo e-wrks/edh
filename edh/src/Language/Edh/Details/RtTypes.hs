@@ -18,7 +18,9 @@ import           Data.ByteString                ( ByteString )
 import qualified Data.ByteString               as B
 import           Data.Hashable
 import qualified Data.HashMap.Strict           as Map
-import           Data.List.NonEmpty             ( NonEmpty(..) )
+import           Data.List.NonEmpty             ( NonEmpty(..)
+                                                , (<|)
+                                                )
 import qualified Data.List.NonEmpty            as NE
 import           Data.Dynamic
 
@@ -364,25 +366,31 @@ cloneHostObject (Object _ !os !cls !supers) !dsClone !exit = do
 edhCreateWorldRoot :: STM Scope
 edhCreateWorldRoot = do
   !rootIdent   <- unsafeIOToSTM newUnique
+
   !hsMetaClass <- iopdEmpty
   !ssMetaClass <- newTVar []
+
   !hsRootClass <- iopdEmpty
   !ssRootClass <- newTVar []
+
   !hsRoot      <- iopdEmpty
   !ssRoot      <- newTVar []
+
   let
     metaClassProc =
       ProcDefi rootIdent (AttrByName "class") rootScope
         $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right edhNop)
     metaClass = Class metaClassProc hsMetaClass metaAllocator
     metaClassObj =
-      Object rootIdent (ClassStore metaClass) rootClassObj ssMetaClass
+      Object rootIdent (ClassStore metaClass) metaClassObj ssMetaClass
+
     rootClassProc =
       ProcDefi rootIdent (AttrByName "<root>") rootScope
         $ ProcDecl (NamedAttr "<root>") (PackReceiver []) (Right edhNop)
     rootClass = Class rootClassProc hsRootClass rootAllocator
     rootClassObj =
       Object rootIdent (ClassStore rootClass) metaClassObj ssRootClass
+
     rootObj   = Object rootIdent (HashStore hsRoot) rootClassObj ssRoot
 
     rootScope = Scope hsRoot
@@ -393,17 +401,19 @@ edhCreateWorldRoot = do
                       rootCaller
                       []
 
-  !metaClassMethods <- sequence
-    [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm hp args
-    | (nm, hp, args) <- [("__repr__", hpClassRepr, PackReceiver [])
--- TODO more methods for class objects here
-                                                                   ]
-    ]
-  iopdUpdate metaClassMethods hsMetaClass
+  !metaClassArts <- -- todo more static attrs for class objects here
+    sequence
+    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm hp args
+       | (nm, hp, args) <- [("__repr__", hpClassRepr, PackReceiver [])]
+       ]
+    ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
+       | (nm, getter, setter) <- [("name", hpClassNameGetter, Nothing)]
+       ]
+  iopdUpdate metaClassArts hsMetaClass
 
   return rootScope
  where
-  metaAllocator _ _ _ = error "bug: allocating class object from Edh code"
+  metaAllocator _ _ _ = error "bug: allocating class object"
   rootAllocator _ _ !exit = iopdEmpty >>= exit . HashStore
   rootCaller = StmtSrc
     ( SourcePos { sourceName   = "<world-genesis>"
@@ -418,6 +428,13 @@ edhCreateWorldRoot = do
     ClassStore (Class !pd _ _) ->
       exitEdh ets exit $ EdhString $ procedureName pd
     _ -> exitEdh ets exit $ EdhString "<bogus-class>"
+    where clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+  hpClassNameGetter :: EdhProcedure
+  hpClassNameGetter _apk !exit !ets = case edh'obj'store clsObj of
+    ClassStore (Class !pd _ _) ->
+      exitEdh ets exit $ attrKeyValue $ edh'procedure'name pd
+    _ -> exitEdh ets exit nil
     where clsObj = edh'scope'this $ contextScope $ edh'context ets
 
 
@@ -547,10 +564,47 @@ getEdhCallContext !unwind !pgs = EdhCallContext
     Right _                   -> "<host-code>"
 
 
+-- | Schedule forking of a GHC thread for an Edh thread
+--
+-- NOTE this happens as part of current STM tx, the actual fork won't happen if
+--      any subsequent Edh code within the tx throws without recovered
+forkEdh :: EdhThreadState -> EdhProc -> STM ()
+forkEdh !etsForker !p = writeTBQueue (edh'fork'queue etsForker) (etsForker, p)
+{-# INLINE forkEdh #-}
+
+-- | Schedule an STM action to be performed in current Edh thread, but after
+-- current STM tx committed, and after some txs, those possibly already
+-- scheduled
+--
+-- NOTE this happens as part of current STM tx, so the actual action won't be
+--      scheduled if any subsequent Edh code within the tx throws without
+--      recovered
+-- CAVEAT pay special attention in using this, to not break the semantics of
+--       `ai` keyword at scripting level
+edhContSTM :: EdhThreadState -> STM () -> STM ()
+edhContSTM !ets !actSTM =
+  writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets actSTM
+{-# INLINE edhContSTM #-}
+
+-- | Schedule an IO action to be performed in current Edh thread, but after
+-- current STM tx committed, and after some txs, those possibly already
+-- scheduled
+--
+-- NOTE this happens as part of current STM tx, so the actual action won't be
+--      scheduled if any subsequent Edh code within the tx throws without
+--      recovered
+-- CAVEAT pay special attention in using this, to not break the semantics of
+--       `ai` keyword at scripting level
+edhContIO :: EdhThreadState -> IO () -> STM ()
+edhContIO !ets !actIO = writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
+{-# INLINE edhContIO #-}
+
+
 type EdhExit = EdhValue -> STM ()
 
 endOfEdh :: EdhExit
 endOfEdh _ = return ()
+{-# INLINE endOfEdh #-}
 
 -- | Exit an Edh proc in CPS
 --
@@ -560,6 +614,7 @@ exitEdh :: EdhThreadState -> EdhExit -> EdhValue -> STM ()
 exitEdh !ets !exit !val = if edh'in'tx ets
   then exit val
   else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets $ exit val
+{-# INLINE exitEdh #-}
 
 
 -- | Somewhat similar to @ 'ReaderT' 'EdhThreadState' 'STM' @, but not
@@ -570,25 +625,11 @@ exitEdhProc :: EdhExit -> EdhValue -> EdhProc
 exitEdhProc !exit !val !ets = if edh'in'tx ets
   then exit val
   else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets $ exit val
+{-# INLINE exitEdhProc #-}
 
 runEdhProc :: EdhThreadState -> EdhProc -> STM ()
 runEdhProc !ets !p = p ets
-
-
--- | Schedule forking of a GHC thread for an Edh thread
---
--- NOTE this happens as part of an STM tx, the actual fork won't happen if the
---      enclosing Edh tx throws
-forkEdh :: EdhThreadState -> EdhProc -> STM ()
-forkEdh !etsForker !p = writeTBQueue (edh'fork'queue etsForker) (etsForker, p)
-
--- | Schedule an IO action to be performed in current Edh thread, but after
--- current (and possibly some currently scheduled subsequent) STM tx finishes
---
--- CAVEAT pay special attention in using this, to not break the semantics of
---       `ai` keyword at scripting level
-edhContIO :: EdhThreadState -> IO () -> STM ()
-edhContIO !ets !actIO = writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
+{-# INLINE runEdhProc #-}
 
 
 -- | Type for a procedure in host language that can be called from Edh code.
@@ -604,6 +645,7 @@ type EdhProcedure -- such a procedure servs as the callee
 -- | A no-operation as an Edh procedure, ignoring any arg
 edhNop :: EdhProcedure
 edhNop _ !exit !ets = exitEdh ets exit nil
+{-# INLINE edhNop #-}
 
 
 -- | Type of an intrinsic infix operator in host language.
@@ -703,7 +745,6 @@ data EdhValue =
 
   -- * executable precedures
     | EdhIntrOp !Precedence !IntrinOpDefi
-    | EdhClass !Class
     | EdhMethod !ProcDefi
     | EdhOprtor !Precedence !(Maybe EdhValue) !ProcDefi
     | EdhGnrtor !ProcDefi
@@ -767,8 +808,7 @@ instance Show EdhValue where
 
   show (EdhIntrOp !preced (IntrinOpDefi _ !opSym _)) =
     "<intrinsic: (" ++ T.unpack opSym ++ ") " ++ show preced ++ ">"
-  show (EdhClass  (Class !pd _ _)) = T.unpack (procedureName pd)
-  show (EdhMethod !pd            ) = T.unpack (procedureName pd)
+  show (EdhMethod !pd) = T.unpack (procedureName pd)
   show (EdhOprtor !preced _ !pd) =
     "<operator: (" ++ T.unpack (procedureName pd) ++ ") " ++ show preced ++ ">"
   show (EdhGnrtor !pd) = T.unpack (procedureName pd)
@@ -830,7 +870,6 @@ instance Eq EdhValue where
 
   EdhIntrOp _ (IntrinOpDefi x'u _ _) == EdhIntrOp _ (IntrinOpDefi y'u _ _) =
     x'u == y'u
-  EdhClass  x     == EdhClass  y     = x == y
   EdhMethod x     == EdhMethod y     = x == y
   EdhOprtor _ _ x == EdhOprtor _ _ y = x == y
   EdhGnrtor x     == EdhGnrtor y     = x == y
@@ -882,7 +921,6 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhArgsPack x                     ) = hashWithSalt s x
 
   hashWithSalt s (EdhIntrOp _ (IntrinOpDefi x'u _ _)) = hashWithSalt s x'u
-  hashWithSalt s (EdhClass  x                       ) = hashWithSalt s x
   hashWithSalt s (EdhMethod x                       ) = hashWithSalt s x
   hashWithSalt s (EdhOprtor _ _ x                   ) = hashWithSalt s x
   hashWithSalt s (EdhGnrtor x                       ) = hashWithSalt s x
@@ -1327,17 +1365,19 @@ edhTypeOf EdhBlob{}                = BlobType
 edhTypeOf EdhString{}              = StringType
 edhTypeOf EdhSymbol{}              = SymbolType
 edhTypeOf EdhUUID{}                = UUIDType
-edhTypeOf EdhObject{}              = ObjectType
-edhTypeOf EdhDict{}                = DictType
-edhTypeOf EdhList{}                = ListType
-edhTypeOf EdhPair{}                = PairType
-edhTypeOf EdhArgsPack{}            = ArgsPackType
+edhTypeOf (EdhObject o)            = case edh'obj'store o of
+  HashStore{} -> ObjectType
+  ClassStore (Class pd _ _) ->
+    case edh'procedure'body $ edh'procedure'decl pd of
+      Left{}  -> ClassType
+      Right{} -> HostClassType
+  HostStore{} -> ObjectType -- TODO add a @HostObjectType@ to distinguish?
+edhTypeOf EdhDict{}     = DictType
+edhTypeOf EdhList{}     = ListType
+edhTypeOf EdhPair{}     = PairType
+edhTypeOf EdhArgsPack{} = ArgsPackType
 
-edhTypeOf EdhIntrOp{}              = IntrinsicType
-edhTypeOf (EdhClass (Class (ProcDefi _ _ _ (ProcDecl _ _ pb)) _ _)) =
-  case pb of
-    Left  _ -> ClassType
-    Right _ -> HostClassType
+edhTypeOf EdhIntrOp{}   = IntrinsicType
 edhTypeOf (EdhMethod (ProcDefi _ _ _ (ProcDecl _ _ pb))) = case pb of
   Left  _ -> MethodType
   Right _ -> HostMethodType
@@ -1452,78 +1492,49 @@ mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
   return $ EdhDescriptor getter setter
 
 
--- type EdhHostCtor
---   -- | ctor args
---   =  ArgsPack
---   -- | exit with host data and supers on ctor
---   -> (  Dynamic -- ^ host data
---      -> [Object] -- ^ super objects
---      -> STM ()
---      )
---   -> EdhProc
+-- | A host class procedure run with the class object's static store as
+-- contextual scope entity, and the class object as @this/that@ object,
+-- it should populate the static attributes for the class, mostly methods,
+-- and possibly shared static values for object instances of the class.
+--
+-- NOTE the class name is available from the contextual procedure definition,
+--      which is also the @edh'class'proc@ in the 'Class' record.
+type EdhHostClass = STM () -> EdhProc
 
--- -- | Make a host class with a 'EdhHostCtor', and an optional factory function
--- -- to create shared methods residing within a common super object.
--- --
--- -- Note that even as an instance method procedure, a host edh'procedure's
--- -- contextual `this` instance is the enclosed this object at the time it's
--- -- defined (i.e. `this` in the scope passed to 'mkHostProc' that produced the
--- -- host procedure, which is normally a host module), so such host methods
--- -- should normally locate a proper instance to operate on, along `that`
--- -- object's inheritance chain, whose class is identified by the uid passed to
--- -- the factory function.
--- mkHostClass
---   :: Scope -- ^ outer lexical scope to define the class
---   -> Text  -- ^ class name
---   -> EdhHostCtor -- ^ instance constructor
---   -- | an optional factory function taking the class uid, to create an entity
---   -- store containing various host methods, to appear as a super object, which
---   -- will have the same class. such a super object is an efficient way to share
---   -- instance/static methods among all object instances of the created class.
---   -> Maybe (Unique -> STM EntityStore)
---   -> STM EdhValue
--- mkHostClass !scope !nm !hc !maybeSuperCtor =
---   EdhClass <$> mkHostClass' scope nm hc maybeSuperCtor
--- mkHostClass'
---   :: Scope -- ^ outer lexical scope to define the class
---   -> Text  -- ^ class name
---   -> EdhHostCtor -- ^ instance constructor
---   -- | an optional factory function taking the class uid, to create an entity
---   -- store containing various host methods, to appear as a super object, which
---   -- will have the same class. such a super object is an efficient way to share
---   -- instance/static methods among all object instances of the created class.
---   -> Maybe (Unique -> STM EntityStore)
---   -> STM Class
--- mkHostClass' !scope !nm !hc !maybeSuperCtor = do
---   !classUniq  <- unsafeIOToSTM newUnique
---   !maybeSuper <- case maybeSuperCtor of
---     Nothing         -> return Nothing
---     Just !superCtor -> do
---       !oidSuper <- unsafeIOToSTM newUnique
---       !esSuper  <- superCtor classUniq
---       !slSuper  <- newTVar []
---       return $ Just (oidSuper, esSuper, slSuper)
---   let !cls = ProcDefi
---         { edh'procedure'ident = classUniq
---         , edh'procedure'name = AttrByName nm
---         , edh'procedure'lexi = scope
---         , edh'procedure'decl = ProcDecl { edh'procedure'addr = NamedAttr nm
---                                     , edh'procedure'args = PackReceiver []
---                                     , edh'procedure'body = Right ctor
---                                     }
---         }
---       ctor :: EdhProcedure
---       ctor !apk !exit !ets = flip (hc apk) ets $ \ !hd !supers -> do
---         !hdv <- newTVar hd
---         !oid <- unsafeIOToSTM newUnique
---         !sl  <- case maybeSuper of
---           Nothing -> newTVar supers
---           Just (!oidSuper, !esSuper, !slSuper) ->
---             newTVar
---               $  supers
---               ++ [Object oidSuper (HashStore esSuper) cls slSuper]
---         exitEdh ets exit $ EdhObject $ Object oid (HostStore hdv) cls sl
---   return cls
+mkHostClass
+  :: EdhThreadState
+  -> Text
+  -> EdhHostClass
+  -> EdhObjectAllocator
+  -> (Object -> STM ())
+  -> STM ()
+mkHostClass !ets !className !hostCtor !allocator !exit = do
+  !clsIdent <- unsafeIOToSTM newUnique
+  !hsCls    <- iopdEmpty
+  !ssCls    <- newTVar []
+  let
+    clsProc = ProcDefi clsIdent (AttrByName className) scope
+      $ ProcDecl (NamedAttr className) (PackReceiver []) (Right edhNop)
+    cls      = Class clsProc hsCls allocator
+    clsObj   = Object clsIdent (ClassStore cls) metaClassObj ssCls
+
+    clsScope = Scope hsCls
+                     clsObj
+                     clsObj
+                     defaultEdhExcptHndlr
+                     clsProc
+                     (edh'ctx'stmt ctx)
+                     []
+
+    etsCtor = ets
+      { edh'context = ctx { edh'ctx'stack = clsScope <| edh'ctx'stack ctx }
+      }
+  runEdhProc etsCtor $ hostCtor $ exit clsObj
+ where
+  !ctx   = edh'context ets
+  !scope = contextScope ctx
+  !metaClassObj =
+    edh'obj'class $ edh'scope'this $ edh'world'root $ edh'ctx'world ctx
 
 
 data EdhIndex = EdhIndex !Int | EdhAny | EdhAll | EdhSlice {
