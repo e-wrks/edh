@@ -78,8 +78,8 @@ driveEdhProgram !haltResult !progCtx !prog = do
           , edh'defers     = defers
           -- forkee inherits call stack etc in the context from forker, so
           -- effect resolution and far-reaching exception handlers can work.
-          , edh'context    = fromCtx { contextExporting   = False
-                                     , contextEffDefining = False
+          , edh'context    = fromCtx { edh'ctx'exporting    = False
+                                     , edh'ctx'eff'defining = False
                                      }
           , edh'fork'queue = edh'fork'queue etsForker
           }
@@ -159,7 +159,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
           , edh'task'queue = reactTaskQueue
           , edh'perceivers = reactPerceivers
           , edh'defers     = reactDefers
-          , edh'context    = (edh'context etsOrigin) { contextMatch = ev }
+          , edh'context    = (edh'context etsOrigin) { edh'ctx'match = ev }
           }
     atomically $ writeTBQueue reactTaskQueue $ EdhDoSTM etsPerceiver $ reaction
       etsPerceiver

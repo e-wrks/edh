@@ -32,9 +32,9 @@ type ParserError = ParseErrorBundle Text Void
 
 
 data EdhCallFrame = EdhCallFrame {
-      edhCalleeProcName :: !Text
-    , edhCalleeDefiLoca :: !Text
-    , edhCallerFromLoca :: !Text
+    edh'callee'proc'name :: !Text
+  , edh'callee'defi'loca :: !Text
+  , edh'caller'from'loca :: !Text
   } deriving (Eq, Typeable)
 instance Show EdhCallFrame where
   show = T.unpack . dispEdhCallFrame
@@ -43,8 +43,8 @@ dispEdhCallFrame (EdhCallFrame !pname !pdefi !pcaller) =
   "📜 " <> pname <> " 🔎 " <> pdefi <> " 👈 " <> pcaller
 
 data EdhCallContext = EdhCallContext {
-      edhCallTipLoca :: !Text
-    , edhCallFrames :: ![EdhCallFrame]
+    edh'call'tip'loca :: !Text
+  , edh'call'frames   :: ![EdhCallFrame]
   } deriving (Eq, Typeable)
 instance Show EdhCallContext where
   show = T.unpack . dispEdhCallContext
@@ -95,10 +95,10 @@ instance Exception EdhError
 
 
 edhKnownError :: SomeException -> Maybe EdhError
-edhKnownError err = case fromException err :: Maybe EdhError of
-  Just e  -> Just e
-  Nothing -> case fromException err :: Maybe ParserError of
-    Just e ->
+edhKnownError err = case fromException err of
+  Just (e :: EdhError) -> Just e
+  Nothing              -> case fromException err of
+    Just (e :: ParserError) ->
       Just $ EdhError ParseError (T.pack $ errorBundlePretty e) $ EdhCallContext
         "<parsing>"
         []

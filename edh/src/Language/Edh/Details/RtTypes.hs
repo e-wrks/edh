@@ -214,7 +214,7 @@ type EdhGenrCaller
       -- the yield receiver, a.k.a. the caller's continuation
     ,  EdhValue -- one value yielded from the generator
     -> ( -- continuation of the genrator
-        -- Left (pgsThrower, exv)
+        -- Left (etsThrower, exv)
         --   exception to be thrown from that `yield` expr
         -- Right yieldedValue
         --   value given to that `yield` expr
@@ -230,6 +230,36 @@ type EdhExcptHndlr
 
 defaultEdhExcptHndlr :: EdhExcptHndlr
 defaultEdhExcptHndlr !exv !rethrow = rethrow exv
+
+
+-- | Construct an call context from thread state
+getEdhCallContext :: Int -> EdhThreadState -> EdhCallContext
+getEdhCallContext !unwind !ets = EdhCallContext
+  (T.pack $ sourcePosPretty tip)
+  frames
+ where
+  unwindStack :: Int -> [Scope] -> [Scope]
+  unwindStack c s | c <= 0 = s
+  unwindStack _ []         = []
+  unwindStack _ [f    ]    = [f]
+  unwindStack c (_ : s)    = unwindStack (c - 1) s
+  !ctx                = edh'context ets
+  (StmtSrc (!tip, _)) = edh'ctx'stmt ctx
+  !frames =
+    foldl'
+        (\sfs (Scope _ _ _ _ pd@(ProcDefi _ _ _ (ProcDecl _ _ !procBody)) (StmtSrc (!callerPos, _)) _) ->
+          EdhCallFrame (procedureName pd)
+                       (procSrcLoc procBody)
+                       (T.pack $ sourcePosPretty callerPos)
+            : sfs
+        )
+        []
+      $ unwindStack unwind
+      $ NE.init (edh'ctx'stack ctx)
+  procSrcLoc :: Either StmtSrc EdhProcedure -> Text
+  procSrcLoc !procBody = case procBody of
+    Left  (StmtSrc (spos, _)) -> T.pack (sourcePosPretty spos)
+    Right _                   -> "<host-code>"
 
 
 -- Especially note that Edh has no block scope as in C
@@ -375,12 +405,15 @@ edhCreateWorldRoot = do
   let
     metaProc = ProcDefi idMeta (AttrByName "class") rootScope
       $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right edhNop)
-    metaClass    = Class metaProc hsMeta metaAllocator
+    metaClass    = Class metaProc hsMeta rootAllocator
     metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
 
-    rootObj      = Object idRoot (HashStore hsRoot) metaClassObj ssRoot
     rootProc     = ProcDefi idRoot (AttrByName "<root>") rootScope
       $ ProcDecl (NamedAttr "<root>") (PackReceiver []) (Right edhNop)
+    rootClass    = Class rootProc hsRoot rootAllocator
+    rootClassObj = Object idRoot (ClassStore rootClass) metaClassObj ssRoot
+
+    rootObj      = Object idRoot (HashStore hsRoot) rootClassObj ssRoot
 
     rootScope =
       Scope hsRoot rootObj rootObj defaultEdhExcptHndlr rootProc genesisStmt []
@@ -397,7 +430,7 @@ edhCreateWorldRoot = do
 
   return rootScope
  where
-  metaAllocator _ _ _ = error "bug: allocating root object"
+  rootAllocator _ _ _ = error "bug: allocating root object"
 
   hpClassRepr :: EdhProcedure
   hpClassRepr _apk !exit !ets = case edh'obj'store clsObj of
@@ -518,35 +551,6 @@ data DeferRecord = DeferRecord
   -- | deferred action to be performed upon termination of the target Edh
   -- thread
   !(EdhThreadState -> STM ())
-
--- | Construct an call context from thread state
-getEdhCallContext :: Int -> EdhThreadState -> EdhCallContext
-getEdhCallContext !unwind !pgs = EdhCallContext
-  (T.pack $ sourcePosPretty tip)
-  frames
- where
-  unwindStack :: Int -> [Scope] -> [Scope]
-  unwindStack c s | c <= 0 = s
-  unwindStack _ []         = []
-  unwindStack _ [f    ]    = [f]
-  unwindStack c (_ : s)    = unwindStack (c - 1) s
-  !ctx                = edh'context pgs
-  (StmtSrc (!tip, _)) = edh'ctx'stmt ctx
-  !frames =
-    foldl'
-        (\sfs (Scope _ _ _ _ pd@(ProcDefi _ _ _ (ProcDecl _ _ !procBody)) (StmtSrc (!callerPos, _)) _) ->
-          EdhCallFrame (procedureName pd)
-                       (procSrcLoc procBody)
-                       (T.pack $ sourcePosPretty callerPos)
-            : sfs
-        )
-        []
-      $ unwindStack unwind
-      $ NE.init (edh'ctx'stack ctx)
-  procSrcLoc :: Either StmtSrc EdhProcedure -> Text
-  procSrcLoc !procBody = case procBody of
-    Left  (StmtSrc (spos, _)) -> T.pack (sourcePosPretty spos)
-    Right _                   -> "<host-code>"
 
 
 -- | Schedule forking of a GHC thread for an Edh thread
@@ -1519,7 +1523,11 @@ mkHostClass !ets !className !hostCtor !allocator !exit = do
   !ctx   = edh'context ets
   !scope = contextScope ctx
   !metaClassObj =
-    edh'obj'class $ edh'scope'this $ edh'world'root $ edh'ctx'world ctx
+    edh'obj'class
+      $ edh'obj'class
+      $ edh'scope'this
+      $ edh'world'root
+      $ edh'ctx'world ctx
 
 
 data EdhIndex = EdhIndex !Int | EdhAny | EdhAll | EdhSlice {
