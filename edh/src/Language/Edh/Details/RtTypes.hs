@@ -7,6 +7,7 @@ import           Prelude
 import           GHC.Conc                       ( unsafeIOToSTM )
 import           System.IO.Unsafe               ( unsafePerformIO )
 
+import           Control.Exception
 import           Control.Monad
 import           Control.Concurrent.STM
 
@@ -304,6 +305,12 @@ outerScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
   else Just outerScope
   where !outerScope = edh'procedure'lexi $ edh'scope'proc scope
 
+rootScopeOf :: Scope -> Scope
+rootScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
+  then scope -- found world root scope
+  else rootScopeOf outerScope
+  where !outerScope = edh'procedure'lexi $ edh'scope'proc scope
+
 
 -- | A class is wrapped as an object per se, the object's storage structure is
 -- here:
@@ -325,6 +332,10 @@ instance Hashable Class where
 type EdhObjectAllocator
   = EdhThreadState -> ArgsPack -> (ObjectStore -> STM ()) -> STM ()
 
+objClassName :: Object -> (Text -> STM ()) -> STM ()
+objClassName !obj !exit = case edh'obj'store $ edh'obj'class obj of
+  ClassStore (Class !pd _ _) -> exit $ procedureName pd
+  _                          -> exit "<bogus-class>"
 
 -- | An object views an entity, with inheritance relationship 
 -- to any number of super objects.
@@ -420,31 +431,72 @@ edhCreateWorldRoot = do
 
   !metaArts <- -- todo more static attrs for class objects here
     sequence
-    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm hp args
-       | (nm, hp, args) <- [("__repr__", hpClassRepr, PackReceiver [])]
+    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
+       | (nm, mth, args) <- [("__repr__", mthClassRepr, PackReceiver [])]
        ]
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
-       | (nm, getter, setter) <- [("name", hpClassNameGetter, Nothing)]
+       | (nm, getter, setter) <- [("name", mthClassNameGetter, Nothing)]
        ]
   iopdUpdate metaArts hsMeta
+
+  hsExc <-
+    (iopdFromList =<<)
+    $  sequence
+    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
+       | (nm, mth, args) <- [("__repr__", mthErrRepr, PackReceiver [])]
+       ]
+    ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
+       | (nm, getter, setter) <- [("details", mthErrDetailsGetter, Nothing)]
+       ]
+  clsException    <- mkHostClass rootScope "Exception" excAllocator hsExc []
+  clsPackageError <- mkHostClass rootScope "PackageError" excAllocator hsExc []
+  clsParseError   <- mkHostClass rootScope "ParseError" excAllocator hsExc []
+  clsEvalError    <- mkHostClass rootScope "EvalError" excAllocator hsExc []
+  clsUsageError   <- mkHostClass rootScope "UsageError" excAllocator hsExc []
+
+  let edhWrapException :: SomeException -> STM Object
+      edhWrapException !exc = case edhKnownError exc of
+        Just !err -> undefined
+        Nothing   -> throwSTM exc
 
   return rootScope
  where
   rootAllocator _ _ _ = error "bug: allocating root object"
+  -- if created by Edh code, record the apk as @details@ of the error
+  excAllocator _ !apk !exit = exit =<< HostStore <$> newTVar (toDyn apk)
 
-  hpClassRepr :: EdhProcedure
-  hpClassRepr _apk !exit !ets = case edh'obj'store clsObj of
+  mthClassRepr :: EdhProcedure
+  mthClassRepr _apk !exit !ets = case edh'obj'store clsObj of
     ClassStore (Class !pd _ _) ->
       exitEdh ets exit $ EdhString $ procedureName pd
     _ -> exitEdh ets exit $ EdhString "<bogus-class>"
     where clsObj = edh'scope'this $ contextScope $ edh'context ets
 
-  hpClassNameGetter :: EdhProcedure
-  hpClassNameGetter _apk !exit !ets = case edh'obj'store clsObj of
+  mthClassNameGetter :: EdhProcedure
+  mthClassNameGetter _apk !exit !ets = case edh'obj'store clsObj of
     ClassStore (Class !pd _ _) ->
       exitEdh ets exit $ attrKeyValue $ edh'procedure'name pd
     _ -> exitEdh ets exit nil
     where clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+  mthErrRepr :: EdhProcedure
+  mthErrRepr _ !exit !ets = objClassName errObj $ \ !errClsName ->
+    case edh'obj'store errObj of
+      HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+        Just apk@ArgsPack{} ->
+          -- TODO use apk's repr after edhValueRepr works
+          exitEdh ets exit $ EdhString $ errClsName <> T.pack (show apk)
+        _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
+      _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
+    where errObj = edh'scope'this $ contextScope $ edh'context ets
+
+  mthErrDetailsGetter :: EdhProcedure
+  mthErrDetailsGetter _ !exit !ets = case edh'obj'store errObj of
+    HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+      Just apk@ArgsPack{} -> exitEdh ets exit $ EdhArgsPack apk
+      _                   -> exitEdh ets exit nil
+    _ -> exitEdh ets exit nil
+    where errObj = edh'scope'this $ contextScope $ edh'context ets
 
   genesisStmt :: StmtSrc
   genesisStmt = StmtSrc
@@ -484,7 +536,7 @@ worldContext !world = Context
   , edh'ctx'genr'caller  = Nothing
   , edh'ctx'match        = true
   , edh'ctx'stmt         = StmtSrc
-                             ( SourcePos { sourceName   = "<genesis>"
+                             ( SourcePos { sourceName   = "<world>"
                                          , sourceLine   = mkPos 1
                                          , sourceColumn = mkPos 1
                                          }
@@ -1481,6 +1533,26 @@ mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
   return $ EdhDescriptor getter setter
 
 
+mkHostClass
+  :: Scope
+  -> Text
+  -> EdhObjectAllocator
+  -> EntityStore
+  -> [Object]
+  -> STM Object
+mkHostClass !scope !className !allocator !classStore !superClasses = do
+  !clsIdent <- unsafeIOToSTM newUnique
+  !ssCls    <- newTVar superClasses
+  let clsProc = ProcDefi clsIdent (AttrByName className) scope
+        $ ProcDecl (NamedAttr className) (PackReceiver []) (Right edhNop)
+      cls    = Class clsProc classStore allocator
+      clsObj = Object clsIdent (ClassStore cls) metaClassObj ssCls
+  return clsObj
+ where
+  !metaClassObj =
+    edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
+
+
 -- | A host class procedure run with the class object's static store as
 -- contextual scope entity, and the class object as @this/that@ object,
 -- it should populate the static attributes for the class, mostly methods,
@@ -1488,30 +1560,27 @@ mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
 --
 -- NOTE the class name is available from the contextual procedure definition,
 --      which is also the @edh'class'proc@ in the 'Class' record.
-type EdhHostClass = STM () -> EdhProc
+type EdhHostClassProc = STM () -> EdhProc
 
-mkHostClass
+defineHostClass
   :: EdhThreadState
   -> Text
-  -> EdhHostClass
   -> EdhObjectAllocator
+  -> EdhHostClassProc
   -> (Object -> STM ())
   -> STM ()
-mkHostClass !ets !className !hostCtor !allocator !exit = do
-  !clsIdent <- unsafeIOToSTM newUnique
-  !hsCls    <- iopdEmpty
-  !ssCls    <- newTVar []
+defineHostClass !ets !className !allocator !hostCtor !exit = do
+  !hsCls  <- iopdEmpty
+  !clsObj <- mkHostClass scope className allocator hsCls []
   let
-    clsProc = ProcDefi clsIdent (AttrByName className) scope
-      $ ProcDecl (NamedAttr className) (PackReceiver []) (Right edhNop)
-    cls      = Class clsProc hsCls allocator
-    clsObj   = Object clsIdent (ClassStore cls) metaClassObj ssCls
-
+    !cls = case edh'obj'store clsObj of
+      ClassStore !c -> c
+      _             -> error "bug: mkHostClass gave non-class object"
     clsScope = Scope hsCls
                      clsObj
                      clsObj
                      defaultEdhExcptHndlr
-                     clsProc
+                     (edh'class'proc cls)
                      (edh'ctx'stmt ctx)
                      []
 
@@ -1522,12 +1591,6 @@ mkHostClass !ets !className !hostCtor !allocator !exit = do
  where
   !ctx   = edh'context ets
   !scope = contextScope ctx
-  !metaClassObj =
-    edh'obj'class
-      $ edh'obj'class
-      $ edh'scope'this
-      $ edh'world'root
-      $ edh'ctx'world ctx
 
 
 data EdhIndex = EdhIndex !Int | EdhAny | EdhAll | EdhSlice {

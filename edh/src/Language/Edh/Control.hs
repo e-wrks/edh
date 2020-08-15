@@ -7,7 +7,6 @@ import           Control.Exception
 import           Control.Monad.State.Strict
 
 import           Data.Void
-import           Data.Typeable
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.HashMap.Strict           as Map
@@ -35,7 +34,7 @@ data EdhCallFrame = EdhCallFrame {
     edh'callee'proc'name :: !Text
   , edh'callee'defi'loca :: !Text
   , edh'caller'from'loca :: !Text
-  } deriving (Eq, Typeable)
+  } deriving (Eq)
 instance Show EdhCallFrame where
   show = T.unpack . dispEdhCallFrame
 dispEdhCallFrame :: EdhCallFrame -> Text
@@ -45,7 +44,7 @@ dispEdhCallFrame (EdhCallFrame !pname !pdefi !pcaller) =
 data EdhCallContext = EdhCallContext {
     edh'call'tip'loca :: !Text
   , edh'call'frames   :: ![EdhCallFrame]
-  } deriving (Eq, Typeable)
+  } deriving (Eq)
 instance Show EdhCallContext where
   show = T.unpack . dispEdhCallContext
 dispEdhCallContext :: EdhCallContext -> Text
@@ -53,29 +52,30 @@ dispEdhCallContext (EdhCallContext !tip !frames) =
   T.unlines $ (dispEdhCallFrame <$> frames) ++ ["👉 " <> tip]
 
 
-data EdhErrorTag = EdhException -- for root class of Edh exceptions
-    | PackageError
-    | ParseError
-    | EvalError
-    | UsageError
-  deriving (Eq,Show,Typeable)
+data EdhErrorTag =
+    EdhException -- for root class of Edh exceptions
+  | PackageError
+  | ParseError
+  | EvalError
+  | UsageError
+  deriving (Eq, Show)
 
 data EdhError =
-    -- | halt result in the dynamic is either an 'EdhValue' or an
-    -- arbitrary exception.
+    -- | thrown to halt the whole Edh program with a result, this is not
+    -- catchable by Edh code
     ProgramHalt !Dynamic
 
-    -- | arbitrary realworld error happened in IO monad, propagated
-    -- into the Edh world
-    | EdhIOError !Dynamic
+    -- | arbitrary realworld error happened in IO, propagated into the Edh
+    -- world
+  | EdhIOError !SomeException
 
-    -- | error occurred remotely, detailed text captured for display
-    -- on local site
-    | EdhPeerError !Text !Text
+    -- | error occurred remotely, detailed text captured for display on the
+    -- throwing site
+  | EdhPeerError !Text !Text
 
-    -- | tagged error with msg and ctx
-    | EdhError !EdhErrorTag !Text !EdhCallContext
-  deriving (Typeable)
+    -- | tagged error, with a msg and context information of the throwing Edh
+    -- thread
+  | EdhError !EdhErrorTag !Text !EdhCallContext
 instance Show EdhError where
   show (ProgramHalt _  ) = "Edh⏹️Halt"
   show (EdhIOError  ioe) = show ioe
@@ -95,12 +95,12 @@ instance Exception EdhError
 
 
 edhKnownError :: SomeException -> Maybe EdhError
-edhKnownError err = case fromException err of
-  Just (e :: EdhError) -> Just e
-  Nothing              -> case fromException err of
-    Just (e :: ParserError) ->
-      Just $ EdhError ParseError (T.pack $ errorBundlePretty e) $ EdhCallContext
-        "<parsing>"
-        []
+edhKnownError exc = case fromException exc of
+  Just (err :: EdhError) -> Just err
+  Nothing                -> case fromException exc of
+    Just (err :: ParserError) ->
+      Just
+        $ EdhError ParseError (T.pack $ errorBundlePretty err)
+        $ EdhCallContext "<parsing>" []
     Nothing -> Nothing
 
