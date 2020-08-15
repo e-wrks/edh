@@ -332,10 +332,13 @@ instance Hashable Class where
 type EdhObjectAllocator
   = EdhThreadState -> ArgsPack -> (ObjectStore -> STM ()) -> STM ()
 
-objClassName :: Object -> (Text -> STM ()) -> STM ()
-objClassName !obj !exit = case edh'obj'store $ edh'obj'class obj of
-  ClassStore (Class !pd _ _) -> exit $ procedureName pd
-  _                          -> exit "<bogus-class>"
+edhClassName :: Object -> Text
+edhClassName !clsObj = case edh'obj'store clsObj of
+  ClassStore !cls -> procedureName $ edh'class'proc cls
+  _               -> "<bogus-class>"
+
+objClassName :: Object -> Text
+objClassName = edhClassName . edh'obj'class
 
 -- | An object views an entity, with inheritance relationship 
 -- to any number of super objects.
@@ -403,111 +406,6 @@ cloneHostObject (Object _ !os !cls !supers) !dsClone !exit = do
     _ -> error "not a data object"
 
 
-edhCreateWorldRoot :: STM Scope
-edhCreateWorldRoot = do
-  !idMeta <- unsafeIOToSTM newUnique
-  !hsMeta <- iopdEmpty
-  !ssMeta <- newTVar []
-
-  !idRoot <- unsafeIOToSTM newUnique
-  !hsRoot <- iopdEmpty
-  !ssRoot <- newTVar []
-
-  let
-    metaProc = ProcDefi idMeta (AttrByName "class") rootScope
-      $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right edhNop)
-    metaClass    = Class metaProc hsMeta rootAllocator
-    metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
-
-    rootProc     = ProcDefi idRoot (AttrByName "<root>") rootScope
-      $ ProcDecl (NamedAttr "<root>") (PackReceiver []) (Right edhNop)
-    rootClass    = Class rootProc hsRoot rootAllocator
-    rootClassObj = Object idRoot (ClassStore rootClass) metaClassObj ssRoot
-
-    rootObj      = Object idRoot (HashStore hsRoot) rootClassObj ssRoot
-
-    rootScope =
-      Scope hsRoot rootObj rootObj defaultEdhExcptHndlr rootProc genesisStmt []
-
-  !metaArts <- -- todo more static attrs for class objects here
-    sequence
-    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
-       | (nm, mth, args) <- [("__repr__", mthClassRepr, PackReceiver [])]
-       ]
-    ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
-       | (nm, getter, setter) <- [("name", mthClassNameGetter, Nothing)]
-       ]
-  iopdUpdate metaArts hsMeta
-
-  hsExc <-
-    (iopdFromList =<<)
-    $  sequence
-    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
-       | (nm, mth, args) <- [("__repr__", mthErrRepr, PackReceiver [])]
-       ]
-    ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
-       | (nm, getter, setter) <- [("details", mthErrDetailsGetter, Nothing)]
-       ]
-  clsException    <- mkHostClass rootScope "Exception" excAllocator hsExc []
-  clsPackageError <- mkHostClass rootScope "PackageError" excAllocator hsExc []
-  clsParseError   <- mkHostClass rootScope "ParseError" excAllocator hsExc []
-  clsEvalError    <- mkHostClass rootScope "EvalError" excAllocator hsExc []
-  clsUsageError   <- mkHostClass rootScope "UsageError" excAllocator hsExc []
-
-  let edhWrapException :: SomeException -> STM Object
-      edhWrapException !exc = case edhKnownError exc of
-        Just !err -> undefined
-        Nothing   -> throwSTM exc
-
-  return rootScope
- where
-  rootAllocator _ _ _ = error "bug: allocating root object"
-  -- if created by Edh code, record the apk as @details@ of the error
-  excAllocator _ !apk !exit = exit =<< HostStore <$> newTVar (toDyn apk)
-
-  mthClassRepr :: EdhProcedure
-  mthClassRepr _apk !exit !ets = case edh'obj'store clsObj of
-    ClassStore (Class !pd _ _) ->
-      exitEdh ets exit $ EdhString $ procedureName pd
-    _ -> exitEdh ets exit $ EdhString "<bogus-class>"
-    where clsObj = edh'scope'this $ contextScope $ edh'context ets
-
-  mthClassNameGetter :: EdhProcedure
-  mthClassNameGetter _apk !exit !ets = case edh'obj'store clsObj of
-    ClassStore (Class !pd _ _) ->
-      exitEdh ets exit $ attrKeyValue $ edh'procedure'name pd
-    _ -> exitEdh ets exit nil
-    where clsObj = edh'scope'this $ contextScope $ edh'context ets
-
-  mthErrRepr :: EdhProcedure
-  mthErrRepr _ !exit !ets = objClassName errObj $ \ !errClsName ->
-    case edh'obj'store errObj of
-      HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
-        Just apk@ArgsPack{} ->
-          -- TODO use apk's repr after edhValueRepr works
-          exitEdh ets exit $ EdhString $ errClsName <> T.pack (show apk)
-        _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
-      _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
-    where errObj = edh'scope'this $ contextScope $ edh'context ets
-
-  mthErrDetailsGetter :: EdhProcedure
-  mthErrDetailsGetter _ !exit !ets = case edh'obj'store errObj of
-    HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
-      Just apk@ArgsPack{} -> exitEdh ets exit $ EdhArgsPack apk
-      _                   -> exitEdh ets exit nil
-    _ -> exitEdh ets exit nil
-    where errObj = edh'scope'this $ contextScope $ edh'context ets
-
-  genesisStmt :: StmtSrc
-  genesisStmt = StmtSrc
-    ( SourcePos { sourceName   = "<genesis>"
-                , sourceLine   = mkPos 1
-                , sourceColumn = mkPos 1
-                }
-    , VoidStmt
-    )
-
-
 -- | A world for Edh programs to change
 data EdhWorld = EdhWorld {
     -- | root scope of this world
@@ -522,9 +420,11 @@ data EdhWorld = EdhWorld {
   , edh'world'modules :: !(TMVar (Map.HashMap ModuleId (TMVar EdhValue)))
     -- | for console logging, input and output
   , edh'world'console :: !EdhConsole
+    -- wrapping a host exceptin as an Edh object
+  , edh'exception'wrapper :: !(SomeException -> STM Object)
   }
 instance Eq EdhWorld where
-  EdhWorld x'root _ _ _ == EdhWorld y'root _ _ _ =
+  EdhWorld x'root _ _ _ _ == EdhWorld y'root _ _ _ _ =
     edh'scope'this x'root == edh'scope'this y'root
 
 type ModuleId = Text

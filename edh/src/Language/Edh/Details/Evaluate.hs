@@ -83,10 +83,12 @@ throwEdhProc !et !msg !ets = throwEdh ets et msg
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent actions following it, be cautious.
 throwEdh :: EdhThreadState -> EdhErrorTag -> Text -> STM ()
-throwEdh !ets !et !msg = getEdhErrClass ets et >>= \ec ->
-  runEdhProc ets
-    $ constructEdhObject ec (ArgsPack [EdhString msg] odEmpty)
-    $ \ !exo -> edhThrow ets exo
+throwEdh !ets !tag !msg = edhWrapException edhErr
+  >>= \ !exo -> edhThrow ets $ EdhObject exo
+ where
+  !edhWrapException = edh'exception'wrapper (edh'ctx'world $ edh'context ets)
+  !cc              = getEdhCallContext 0 ets
+  !edhErr          = EdhError tag msg cc
 
 
 edhThrowProc :: EdhValue -> EdhProc
@@ -163,15 +165,15 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
         goRecover :: EdhExit
         goRecover !result = ask >>= \ets ->
           -- an exception handler provided another result value to recover
-          const $ fromEdhError ets exv $ \ex -> case fromException ex of
-            Just ProgramHalt{} -> goRethrow -- never recover from ProgramHalt
-            _                  -> do
-              -- do recover from the exception
-              rcvrTh <- unsafeIOToSTM myThreadId
-              if rcvrTh /= hndlrTh
-                then -- just skip the action if from a different thread
-                     return () -- other than the handler installer
-                else runEdhProc etsOuter $ exit result
+                                            const $ isProgramHalt exv >>= \case
+          Just ProgramHalt{} -> goRethrow -- never recover from ProgramHalt
+          _                  -> do
+            -- do recover from the exception
+            rcvrTh <- unsafeIOToSTM myThreadId
+            if rcvrTh /= hndlrTh
+              then -- just skip the action if from a different thread
+                   return () -- other than the handler installer
+              else runEdhProc etsOuter $ exit result
         goRethrow :: STM ()
         goRethrow =
           runEdhProc etsOuter $ edh'excpt'hndlr scopeOuter exv rethrow
@@ -185,142 +187,13 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
       else
         passOn etsOuter nil (error "bug: recovering from finally block")
           $ exitEdhSTM' etsOuter exit tryResult
-
-
--- | Create a tagged Edh error as both an Edh exception value and a host
--- exception value
-createEdhError
-  :: EdhThreadState
-  -> EdhErrorTag
-  -> Text
-  -> (EdhValue -> SomeException -> STM ())
-  -> STM ()
-createEdhError !ets !et !msg !exit = getEdhErrClass ets et >>= \ !ec ->
-  runEdhProc ets
-    $ constructEdhObject ec (ArgsPack [EdhString msg] odEmpty)
-    $ \ !exv -> case exv of
-        EdhObject !exo -> castObjectStore exo >>= \case
-          Just (e :: SomeException, _details :: ArgsPack) -> exit exv e
-          Nothing -> castObjectStore exo >>= \case
-            Just (e :: SomeException) -> exit exv e
-            Nothing -> error "bug: error class gave no host exception"
-        _ -> error "bug: error class returned non-object"
-
--- | Convert an arbitrary Edh error to host exception
-fromEdhError
-  :: EdhThreadState -> EdhValue -> (SomeException -> STM ()) -> STM ()
-fromEdhError !ets !exv !exit = case exv of
-  EdhNil ->
-    throwSTM
-      $ EdhError UsageError "false Edh error to fromEdhError"
-      $ getEdhCallContext 0 ets
-  EdhObject !exo -> castObjectStore exo >>= \case
-    Just (e :: SomeException, _details :: ArgsPack) -> exit e
-    Nothing -> castObjectStore exo >>= \case
-      Just (e :: SomeException) -> exit e
-      Nothing                   -> ioErr
-  _ -> ioErr
  where
-  ioErr = edhValueRepr ets exv $ \ !exr ->
-    exit $ toException $ EdhError EvalError exr $ getEdhCallContext 0 ets
-
--- | Convert an arbitrary exception to an Edh error
-toEdhError :: EdhThreadState -> SomeException -> (EdhValue -> STM ()) -> STM ()
-toEdhError !ets !e !exit = toEdhError' ets e (ArgsPack [] odEmpty) exit
--- | Convert an arbitrary exception plus details to an Edh error
-toEdhError'
-  :: EdhThreadState
-  -> SomeException
-  -> ArgsPack
-  -> (EdhValue -> STM ())
-  -> STM ()
-toEdhError' !ets !e !details !exit = case fromException e of
-  Just (err :: EdhError) -> case err of
-    EdhError !et _ _ -> getEdhErrClass ets et >>= withErrCls
-    EdhPeerError{} ->
-      _getEdhErrClass ets (AttrByName "PeerError") >>= withErrCls
-    EdhIOError{} -> _getEdhErrClass ets (AttrByName "IOError") >>= withErrCls
-    ProgramHalt{} ->
-      _getEdhErrClass ets (AttrByName "ProgramHalt") >>= withErrCls
-  Nothing -> _getEdhErrClass ets (AttrByName "IOError") >>= withErrCls
- where
-  withErrCls :: Class -> STM ()
-  withErrCls !ec = do
-    !oid <- unsafeIOToSTM newUnique
-    !hsv <- newTVar $ toDyn (e, details)
-    !ss  <- newTVar []
-    let !exo = Object oid (HostStore hsv) ec ss
-    exit $ EdhObject exo
-
--- | Get Edh class for an error tag
-getEdhErrClass :: EdhThreadState -> EdhErrorTag -> STM Class
-getEdhErrClass !ets !et = _getEdhErrClass ets eck
- where
-  eck = AttrByName $ ecn et
-  ecn :: EdhErrorTag -> Text
-  ecn = \case -- cross check with 'createEdhWorld' for type safety
-    EdhException -> "Exception"
-    PackageError -> "PackageError"
-    ParseError   -> "ParseError"
-    EvalError    -> "EvalError"
-    UsageError   -> "UsageError"
-_getEdhErrClass :: EdhThreadState -> AttrKey -> STM Class
-_getEdhErrClass !ets !eck =
-  lookupEntityAttr ets
-                   (scopeEntity $ worldScope $ contextWorld $ edh'context ets)
-                   eck
-    >>= \case
-          EdhClass !ec -> return ec
-          badVal ->
-            throwSTM
-              $ EdhError
-                  UsageError
-                  (  "Edh error class "
-                  <> T.pack (show eck)
-                  <> " in the world found to be a "
-                  <> T.pack (edhTypeNameOf badVal)
-                  )
-              $ getEdhCallContext 0 ets
-
-createErrorObjSuper :: Text -> Unique -> STM EntityStore
-createErrorObjSuper !clsName !clsUniq = do
-  let the'lookup'entity'attr _ !k !esd = case fromDynamic esd of
-        Just (e :: SomeException, apk :: ArgsPack) -> case k of
-          AttrByName "__repr__" -> return $ EdhString $ T.pack $ show e
-          AttrByName "details"  -> return $ EdhArgsPack apk
-          _                     -> return nil
-        Nothing -> case fromDynamic esd of
-          Just (apk :: ArgsPack) -> case k of
-            AttrByName "__repr__" ->
-              return $ EdhString $ clsName <> T.pack (show apk)
-            AttrByName "details" -> return $ EdhArgsPack apk
-            _                    -> return nil
-          Nothing -> case fromDynamic esd of
-            Just (e :: SomeException) -> case k of
-              AttrByName "__repr__" -> return $ EdhString $ T.pack $ show e
-              AttrByName "details" ->
-                return $ EdhArgsPack $ ArgsPack [] odEmpty
-              _ -> return nil
-            Nothing -> case k of
-              AttrByName "__repr__" -> return $ EdhString $ clsName <> "()"
-              AttrByName "details" ->
-                return $ EdhArgsPack $ ArgsPack [] odEmpty
-              _ -> return nil
-      the'all'entity'attrs _ _ = return []
-      the'change'entity'attr !ets _ _ _ =
-        throwSTM
-          $ EdhError UsageError "Edh error object not changable"
-          $ getEdhCallContext 0 ets
-      the'update'entity'attrs !ets _ _ =
-        throwSTM
-          $ EdhError UsageError "Edh error object not changable"
-          $ getEdhCallContext 0 ets
-  return $ EntityManipulater the'lookup'entity'attr
-                             the'all'entity'attrs
-                             the'change'entity'attr
-                             the'update'entity'attrs
-
-
+  isProgramHalt !exv = case exv of
+    EdhObject !exo -> case edh'obj'store exo of
+      HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+        Just ProgramHalt{} -> return True
+        _                  -> return False
+      _ -> return False
 
 
 parseEdh :: EdhWorld -> String -> Text -> STM (Either ParserError [StmtSrc])
@@ -536,9 +409,9 @@ evalStmt' !stmt !exit = do
           doFork ets' !ctxMod !prog = do
             forkEdh
               ets'
-                { edh'context = ctxMod ctx { edh'ctx'match      = true
-                                           , edh'ctx'pure        = False
-                                           , edh'ctx'exporting   = False
+                { edh'context = ctxMod ctx { edh'ctx'match        = true
+                                           , edh'ctx'pure         = False
+                                           , edh'ctx'exporting    = False
                                            , edh'ctx'eff'defining = False
                                            }
                 }
@@ -576,9 +449,9 @@ evalStmt' !stmt !exit = do
               (edh'defers ets)
               (( ets'
                  { edh'context = ctxMod $ (edh'context ets')
-                                   { edh'ctx'match      = true
-                                   , edh'ctx'pure        = False
-                                   , edh'ctx'exporting   = False
+                                   { edh'ctx'match        = true
+                                   , edh'ctx'pure         = False
+                                   , edh'ctx'exporting    = False
                                    , edh'ctx'eff'defining = False
                                    }
                  }
@@ -620,7 +493,7 @@ evalStmt' !stmt !exit = do
               (edh'perceivers ets)
               (( perceiverChan
                , ets
-                 { edh'context = ctx { edh'ctx'exporting   = False
+                 { edh'context = ctx { edh'ctx'exporting    = False
                                      , edh'ctx'eff'defining = False
                                      }
                  }
@@ -917,8 +790,8 @@ loadModule !moduSlot !moduId !moduFile !exit = ask >>= \etsImporter ->
           modu <- createEdhModule' world moduId moduFile
           let !loadScope = objectScope importerCtx modu
               !loadCtx   = importerCtx
-                { edh'ctx'stack      = loadScope <| edh'ctx'stack importerCtx
-                , edh'ctx'exporting   = False
+                { edh'ctx'stack        = loadScope <| edh'ctx'stack importerCtx
+                , edh'ctx'exporting    = False
                 , edh'ctx'eff'defining = False
                 }
               !etsLoad = etsImporter { edh'context = loadCtx }
@@ -963,8 +836,8 @@ createEdhModule' !world !moduId !srcName = do
 
 moduleContext :: EdhWorld -> Object -> Context
 moduleContext !world !modu = worldCtx
-  { edh'ctx'stack      = objectScope worldCtx modu <| edh'ctx'stack worldCtx
-  , edh'ctx'exporting   = False
+  { edh'ctx'stack        = objectScope worldCtx modu <| edh'ctx'stack worldCtx
+  , edh'ctx'exporting    = False
   , edh'ctx'eff'defining = False
   }
   where !worldCtx = worldContext world
@@ -2245,8 +2118,8 @@ constructEdhObject !cls apk@(ArgsPack !args !kwargs) !exit = do
                                     , scopeCaller = edh'ctx'stmt callerCtx
                                     }
           ctorCtx = callerCtx
-            { edh'ctx'stack      = initScope <| edh'ctx'stack callerCtx
-            , edh'ctx'exporting   = False
+            { edh'ctx'stack        = initScope <| edh'ctx'stack callerCtx
+            , edh'ctx'exporting    = False
             , edh'ctx'eff'defining = False
             }
           etsCtor = etsCaller { edh'context = ctorCtx }
@@ -2319,11 +2192,11 @@ createEdhObject !cls !apk !exit = do
                                      , scopeCaller = edh'ctx'stmt callerCtx
                                      }
           !calleeCtx = callerCtx
-            { edh'ctx'stack      = calleeScope <| edh'ctx'stack callerCtx
-            , generatorCaller    = Nothing
-            , edh'ctx'match      = true
-            , edh'ctx'pure        = False
-            , edh'ctx'exporting   = False
+            { edh'ctx'stack        = calleeScope <| edh'ctx'stack callerCtx
+            , generatorCaller      = Nothing
+            , edh'ctx'match        = true
+            , edh'ctx'pure         = False
+            , edh'ctx'exporting    = False
             , edh'ctx'eff'defining = False
             }
           !etsCallee = etsCaller { edh'context = calleeCtx }
@@ -2338,12 +2211,12 @@ createEdhObject !cls !apk !exit = do
         goCtor = do
           let !ctorScope = objectScope callerCtx newThis
               !ctorCtx   = callerCtx
-                { edh'ctx'stack      = ctorScope <| edh'ctx'stack callerCtx
-                , generatorCaller    = Nothing
-                , edh'ctx'match      = true
-                , edh'ctx'pure        = False
-                , edh'ctx'stmt       = pb
-                , edh'ctx'exporting   = False
+                { edh'ctx'stack        = ctorScope <| edh'ctx'stack callerCtx
+                , generatorCaller      = Nothing
+                , edh'ctx'match        = true
+                , edh'ctx'pure         = False
+                , edh'ctx'stmt         = pb
+                , edh'ctx'exporting    = False
                 , edh'ctx'eff'defining = False
                 }
               !etsCtor = etsCaller { edh'context = ctorCtx }
@@ -2371,11 +2244,11 @@ createEdhObject !cls !apk !exit = do
                                                        , thatObject = newThis
                                                        }
                                     :| []
-                , generatorCaller    = Nothing
-                , edh'ctx'match      = true
-                , edh'ctx'pure        = False
-                , edh'ctx'stmt       = pb
-                , edh'ctx'exporting   = False
+                , generatorCaller      = Nothing
+                , edh'ctx'match        = true
+                , edh'ctx'pure         = False
+                , edh'ctx'stmt         = pb
+                , edh'ctx'exporting    = False
                 , edh'ctx'eff'defining = False
                 }
           runEdhProc etsCaller $ recvEdhArgs recvCtx WildReceiver apk $ \oed ->
@@ -2407,11 +2280,11 @@ callEdhOperator !mth'that !mth'proc !prede !args !exit = do
                                                   callerCtx
                                                 }
           !mthCtx = callerCtx
-            { edh'ctx'stack      = mthScope <| edh'ctx'stack callerCtx
-            , generatorCaller    = Nothing
-            , edh'ctx'match      = true
-            , edh'ctx'pure        = False
-            , edh'ctx'exporting   = False
+            { edh'ctx'stack        = mthScope <| edh'ctx'stack callerCtx
+            , generatorCaller      = Nothing
+            , edh'ctx'match        = true
+            , edh'ctx'pure         = False
+            , edh'ctx'exporting    = False
             , edh'ctx'eff'defining = False
             }
           !etsMth = etsCaller { edh'context = mthCtx }
@@ -2456,11 +2329,11 @@ callEdhOperator' !gnr'caller !callee'that !mth'proc !prede !mth'body !args !exit
       !recvCtx   = callerCtx
         { edh'ctx'stack = (lexicalScopeOf mth'proc) { thatObject = callee'that }
                             :| []
-        , generatorCaller    = Nothing
-        , edh'ctx'match      = true
-        , edh'ctx'stmt       = mth'body
-        , edh'ctx'pure        = False
-        , edh'ctx'exporting   = False
+        , generatorCaller      = Nothing
+        , edh'ctx'match        = true
+        , edh'ctx'stmt         = mth'body
+        , edh'ctx'pure         = False
+        , edh'ctx'exporting    = False
         , edh'ctx'eff'defining = False
         }
     recvEdhArgs recvCtx
@@ -2475,12 +2348,12 @@ callEdhOperator' !gnr'caller !callee'that !mth'proc !prede !mth'body !args !exit
                 , scopeCaller = edh'ctx'stmt callerCtx
                 }
               !mthCtx = callerCtx
-                { edh'ctx'stack      = mthScope <| edh'ctx'stack callerCtx
-                , generatorCaller    = gnr'caller
-                , edh'ctx'match      = true
-                , edh'ctx'stmt       = mth'body
-                , edh'ctx'pure        = False
-                , edh'ctx'exporting   = False
+                { edh'ctx'stack        = mthScope <| edh'ctx'stack callerCtx
+                , generatorCaller      = gnr'caller
+                , edh'ctx'match        = true
+                , edh'ctx'stmt         = mth'body
+                , edh'ctx'pure         = False
+                , edh'ctx'exporting    = False
                 , edh'ctx'eff'defining = False
                 }
               !etsMth = etsCaller { edh'context = mthCtx }
@@ -2517,11 +2390,11 @@ callEdhMethod !mth'that !mth'proc !apk !scopeMod !exit = do
             , scopeCaller = edh'ctx'stmt callerCtx
             }
           !mthCtx = callerCtx
-            { edh'ctx'stack      = mthScope <| edh'ctx'stack callerCtx
-            , generatorCaller    = Nothing
-            , edh'ctx'match      = true
-            , edh'ctx'pure        = False
-            , edh'ctx'exporting   = False
+            { edh'ctx'stack        = mthScope <| edh'ctx'stack callerCtx
+            , generatorCaller      = Nothing
+            , edh'ctx'match        = true
+            , edh'ctx'pure         = False
+            , edh'ctx'exporting    = False
             , edh'ctx'eff'defining = False
             }
           !etsMth = etsCaller { edh'context = mthCtx }
@@ -2564,11 +2437,11 @@ callEdhMethod' !gnr'caller !callee'that !mth'proc !mth'body !apk !scopeMod !exit
       !recvCtx   = callerCtx
         { edh'ctx'stack = (lexicalScopeOf mth'proc) { thatObject = callee'that }
                             :| []
-        , generatorCaller    = Nothing
-        , edh'ctx'match      = true
-        , edh'ctx'stmt       = mth'body
-        , edh'ctx'pure        = False
-        , edh'ctx'exporting   = False
+        , generatorCaller      = Nothing
+        , edh'ctx'match        = true
+        , edh'ctx'stmt         = mth'body
+        , edh'ctx'pure         = False
+        , edh'ctx'exporting    = False
         , edh'ctx'eff'defining = False
         }
     recvEdhArgs recvCtx (procedure'args $ procedure'decl mth'proc) apk $ \ed ->
@@ -2581,12 +2454,12 @@ callEdhMethod' !gnr'caller !callee'that !mth'proc !mth'body !apk !scopeMod !exit
               , scopeCaller = edh'ctx'stmt callerCtx
               }
             !mthCtx = callerCtx
-              { edh'ctx'stack      = mthScope <| edh'ctx'stack callerCtx
-              , generatorCaller    = gnr'caller
-              , edh'ctx'match      = true
-              , edh'ctx'stmt       = mth'body
-              , edh'ctx'pure        = False
-              , edh'ctx'exporting   = False
+              { edh'ctx'stack        = mthScope <| edh'ctx'stack callerCtx
+              , generatorCaller      = gnr'caller
+              , edh'ctx'match        = true
+              , edh'ctx'stmt         = mth'body
+              , edh'ctx'pure         = False
+              , edh'ctx'exporting    = False
               , edh'ctx'eff'defining = False
               }
             !etsMth = etsCaller { edh'context = mthCtx }
@@ -2705,10 +2578,10 @@ edhForLoop !etsLooper !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                               }
                             !calleeCtx = ctx
                               { edh'ctx'stack = calleeScope <| edh'ctx'stack ctx
-                              , generatorCaller    = Just (ets, recvYield exit)
-                              , edh'ctx'match      = true
-                              , edh'ctx'pure        = False
-                              , edh'ctx'exporting   = False
+                              , generatorCaller = Just (ets, recvYield exit)
+                              , edh'ctx'match = true
+                              , edh'ctx'pure = False
+                              , edh'ctx'exporting = False
                               , edh'ctx'eff'defining = False
                               }
                             !etsCallee = ets { edh'context = calleeCtx }

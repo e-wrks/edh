@@ -52,14 +52,6 @@ dispEdhCallContext (EdhCallContext !tip !frames) =
   T.unlines $ (dispEdhCallFrame <$> frames) ++ ["👉 " <> tip]
 
 
-data EdhErrorTag =
-    EdhException -- for root class of Edh exceptions
-  | PackageError
-  | ParseError
-  | EvalError
-  | UsageError
-  deriving (Eq, Show)
-
 data EdhError =
     -- | thrown to halt the whole Edh program with a result, this is not
     -- catchable by Edh code
@@ -92,6 +84,14 @@ instance Show EdhError where
   show (EdhError UsageError !msg !cc) = --
     "💔\n" <> show cc <> "🙈 " <> T.unpack msg
 instance Exception EdhError
+
+data EdhErrorTag =
+    EdhException -- for root class of custom Edh exceptions
+  | PackageError
+  | ParseError
+  | EvalError
+  | UsageError
+  deriving (Eq, Show)
 
 
 edhKnownError :: SomeException -> Maybe EdhError

@@ -33,126 +33,340 @@ import           Language.Edh.Details.Evaluate
 
 createEdhWorld :: MonadIO m => EdhConsole -> m EdhWorld
 createEdhWorld !console = liftIO $ do
+  !idMeta <- newUnique
+  !hsMeta <- atomically iopdEmpty
+  !ssMeta <- newTVarIO []
 
-  -- ultimate global artifacts go into this
-  rootEntity <- atomically $ createHashEntity =<< iopdFromList
-    [ (AttrByName "__name__", EdhString "<root>")
-    , (AttrByName "__file__", EdhString "<genesis>")
-    , (AttrByName "__repr__", EdhString "<world>")
-    , (AttrByName "None"    , edhNone)
-    , (AttrByName "Nothing" , edhNothing)
+  !idRoot <- newUnique
+  !hsRoot <- atomically $ iopdFromList
+    [(AttrByName "None", edhNone), (AttrByName "Nothing", edhNothing)]
+  !ssRoot <- newTVarIO []
+
+  let
+    metaProc = ProcDefi idMeta (AttrByName "class") rootScope
+      $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right edhNop)
+    metaClass    = Class metaProc hsMeta rootAllocator
+    metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
+
+    rootProc     = ProcDefi idRoot (AttrByName "<root>") rootScope
+      $ ProcDecl (NamedAttr "<root>") (PackReceiver []) (Right edhNop)
+    rootClass    = Class rootProc hsRoot rootAllocator
+    rootClassObj = Object idRoot (ClassStore rootClass) metaClassObj ssRoot
+
+    rootObj      = Object idRoot (HashStore hsRoot) rootClassObj ssRoot
+
+    rootScope =
+      Scope hsRoot rootObj rootObj defaultEdhExcptHndlr rootProc genesisStmt []
+
+    scopeProc = ProcDefi idScope (AttrByName "scope") rootScope
+      $ ProcDecl (NamedAttr "scope") (PackReceiver []) (Right edhNop)
+    scopeClass    = Class scopeProc hsScope scopeAllocator
+    scopeClassObj = Object idScope (ClassStore scopeClass) metaClassObj ssScope
+
+  atomically
+    $  (flip iopdUpdate hsMeta =<<)
+    $  sequence
+    -- todo more static attrs for class objects here
+    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
+       | (nm, mth, args) <- [("__repr__", mthClassRepr, PackReceiver [])]
+       ]
+    ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
+       | (nm, getter, setter) <- [("name", mthClassNameGetter, Nothing)]
+       ]
+
+  !hsScope <-
+    -- TODO port eval/get/put/attrs methods
+    atomically
+    $  (iopdFromList =<<)
+    $  sequence
+    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
+       | (nm, mth, args) <-
+         [ ("__repr__", mthScopeRepr, PackReceiver [])
+         , ("__show__", mthScopeShow, PackReceiver [])
+         ]
+       ]
+    ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
+       | (nm, getter, setter) <- [("outer", mthScopeOuterGetter, Nothing)]
+       ]
+  !clsScope <- atomically
+    $ mkHostClass rootScope "scope" scopeAllocator hsScope []
+  atomically $ iopdUpdate [(AttrByName "scope", EdhObject clsScope)] hsRoot
+
+  !hsErrCls <-
+    atomically
+    $  (iopdFromList =<<)
+    $  sequence
+    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
+       | (nm, mth, args) <-
+         [ ("__repr__", mthErrRepr, PackReceiver [])
+         , ("__show__", mthErrShow, PackReceiver [])
+         ]
+       ]
+    ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
+       | (nm, getter, setter) <- [("stack", mthErrStackGetter, Nothing)]
+       ]
+  clsProgramHalt <- atomically
+    $ mkHostClass rootScope "ProgramHalt" haltAllocator hsErrCls []
+  clsIOError <- atomically
+    $ mkHostClass rootScope "IOError" ioErrAllocator hsErrCls []
+  clsPeerError <- atomically
+    $ mkHostClass rootScope "PeerError" peerErrAllocator hsErrCls []
+  clsException <- atomically
+    $ mkHostClass rootScope "Exception" (errAllocator EdhException) hsErrCls []
+  clsPackageError <- atomically $ mkHostClass rootScope
+                                              "PackageError"
+                                              (errAllocator PackageError)
+                                              hsErrCls
+                                              []
+  clsParseError <- atomically
+    $ mkHostClass rootScope "ParseError" (errAllocator ParseError) hsErrCls []
+  clsEvalError <- atomically
+    $ mkHostClass rootScope "EvalError" (errAllocator EvalError) hsErrCls []
+  clsUsageError <- atomically
+    $ mkHostClass rootScope "UsageError" (errAllocator UsageError) hsErrCls []
+
+  let edhWrapException :: SomeException -> STM Object
+      edhWrapException !exc = do
+        !uidErr    <- unsafeIOToSTM newUnique
+        !supersErr <- newTVar []
+        case edhKnownError exc of
+          Just !err -> do
+            !hsv <- newTVar $ toDyn err
+            let !clsErr = case err of
+                  ProgramHalt{}    -> clsProgramHalt
+                  EdhIOError{}     -> clsIOError
+                  EdhPeerError{}   -> clsPeerError
+                  EdhError !et _ _ -> case et of
+                    EdhException -> clsException
+                    PackageError -> clsPackageError
+                    ParseError   -> clsParseError
+                    EvalError    -> clsEvalError
+                    UsageError   -> clsUsageError
+            return $ Object uidErr (HostStore hsv) clsErr supersErr
+          Nothing -> do
+            !hsv <- newTVar $ toDyn $ EdhIOError exc
+            return $ Object uidErr (HostStore hsv) clsIOError supersErr
+
+  atomically $ iopdUpdate
+    [ (AttrByName (className clsObj), EdhObject clsObj)
+    | clsObj <-
+      [ clsProgramHalt
+      , clsIOError
+      , clsPeerError
+      , clsException
+      , clsPackageError
+      , clsParseError
+      , clsEvalError
+      , clsUsageError
+      ]
     ]
+    hsRoot
 
-  -- methods supporting reflected scope manipulation go into this
-  scopeManiMethods <- atomically $ createHashEntity =<< iopdEmpty
-
-  -- prepare various pieces of the world
-  rootSupers       <- newTVarIO []
-  rootClassUniq    <- newUnique
-  scopeClassUniq   <- newUnique
-  let !rootClass = ProcDefi
-        { procedure'uniq = rootClassUniq
-        , procedure'name = AttrByName "<root>"
-        , procedure'lexi = Nothing
-        , procedure'decl = ProcDecl { procedure'addr = NamedAttr "<root>"
-                                    , procedure'args = PackReceiver []
-                                    , procedure'body = Right edhNop
-                                    }
-        }
-      !root = Object { objEntity = rootEntity
-                     , objClass  = rootClass
-                     , objSupers = rootSupers
-                     }
-      !rootScope = Scope
-        { scopeEntity      = rootEntity
-        , thisObject       = root
-        , thatObject       = root
-        , exceptionHandler = defaultEdhExcptHndlr
-        , scopeProc        = rootClass
-        , scopeCaller      = StmtSrc
-                               ( SourcePos { sourceName   = "<world-root>"
-                                           , sourceLine   = mkPos 1
-                                           , sourceColumn = mkPos 1
-                                           }
-                               , VoidStmt
-                               )
-        , effectsStack     = []
-        }
-      !scopeClass = ProcDefi
-        { procedure'uniq = scopeClassUniq
-        , procedure'name = AttrByName "<scope>"
-        , procedure'lexi = Just rootScope
-        , procedure'decl = ProcDecl { procedure'addr = NamedAttr "<scope>"
-                                    , procedure'args = PackReceiver []
-                                    , procedure'body = Right edhNop
-                                    }
-        }
   -- operator precedence dict
-  opPD  <- newTMVarIO $ Map.empty
+  opPD  <- newTMVarIO Map.empty
+
   -- the container of loaded modules
   modus <- newTMVarIO Map.empty
 
   -- assembly the world with pieces prepared above
-  let world = EdhWorld
-        { worldScope     = rootScope
-        , scopeSuper     = Object { objEntity = scopeManiMethods
-                                  , objClass  = scopeClass
-                                  , objSupers = rootSupers
-                                  }
-        , worldOperators = opPD
-        , worldModules   = modus
-        , worldConsole   = console
-        }
-
-  -- install host error classes, among which is "Exception" for Edh
-  -- exception root class
-  void $ runEdhProgram' (worldContext world) $ do
-    pgs <- ask
-    contEdhSTM $ do
-      errClasses <- sequence
-        -- leave the out-of-band entity store open so Edh code can
-        -- assign arbitrary attrs to exceptions for informative
-        [ (AttrByName nm, )
-            <$> (mkHostClass rootScope nm hc =<< createErrorObjSuper nm)
-        | (nm, hc) <- -- cross check with 'throwEdhSTM' for type safety
-          [ ("ProgramHalt" , errCtor edhProgramHalt)
-          , ("IOError"     , fakableErr)
-          , ("PeerError"   , fakableErr)
-          , ("Exception"   , errCtor $ edhSomeErr EdhException)
-          , ("PackageError", errCtor $ edhSomeErr PackageError)
-          , ("ParseError"  , errCtor $ edhSomeErr ParseError)
-          , ("EvalError"   , errCtor $ edhSomeErr EvalError)
-          , ("UsageError"  , errCtor $ edhSomeErr UsageError)
-          ]
-        ]
-      updateEntityAttrs pgs rootEntity errClasses
+  let world = EdhWorld { edh'world'root        = rootScope
+                       , edh'world'operators   = opPD
+                       , edh'world'modules     = modus
+                       , edh'world'console     = console
+                       , edh'exception'wrapper = edhWrapException
+                       }
 
   return world
  where
-  edhProgramHalt :: ArgsPack -> EdhCallContext -> EdhError
-  edhProgramHalt (ArgsPack [v] !kwargs) _ | odNull kwargs =
-    ProgramHalt $ toDyn v
-  edhProgramHalt (ArgsPack [] !kwargs) _ | odNull kwargs =
-    ProgramHalt $ toDyn nil
-  edhProgramHalt !apk _ = ProgramHalt $ toDyn $ EdhArgsPack apk
-  fakableErr :: EdhHostCtor
-  fakableErr _ !apk !exit = exit $ toDyn apk
-  edhSomeErr :: EdhErrorTag -> ArgsPack -> EdhCallContext -> EdhError
-  edhSomeErr !et (ArgsPack [] _) !cc = EdhError et "❌" cc
-  edhSomeErr !et (ArgsPack (EdhString msg : _) _) !cc = EdhError et msg cc
-  edhSomeErr !et (ArgsPack (v : _) _) !cc = EdhError et (T.pack $ show v) cc
-  -- wrap a Haskell error data constructor as a host error object contstructor,
-  -- used to define an error class in Edh
-  errCtor :: (ArgsPack -> EdhCallContext -> EdhError) -> EdhHostCtor
-  errCtor !hec !pgs apk@(ArgsPack _ !kwargs) !ctorExit = do
-    let !unwind = case odLookup (AttrByName "unwind") kwargs of
-          Just (EdhDecimal d) -> case decimalToInteger d of
-            Just n -> fromIntegral n
-            _      -> 1
-          _ -> 1
-        !cc = getEdhCallContext unwind pgs
-        !he = hec apk cc
-    ctorExit $ toDyn (toException he, apk)
+  genesisStmt :: StmtSrc
+  genesisStmt = StmtSrc
+    ( SourcePos { sourceName   = "<genesis>"
+                , sourceLine   = mkPos 1
+                , sourceColumn = mkPos 1
+                }
+    , VoidStmt
+    )
+
+  rootAllocator _ _ _ = error "bug: allocating root object"
+
+  mthClassRepr :: EdhProcedure
+  mthClassRepr _apk !exit !ets = case edh'obj'store clsObj of
+    ClassStore (Class !pd _ _) ->
+      exitEdh ets exit $ EdhString $ procedureName pd
+    _ -> exitEdh ets exit $ EdhString "<bogus-class>"
+    where clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+  mthClassNameGetter :: EdhProcedure
+  mthClassNameGetter _apk !exit !ets = case edh'obj'store clsObj of
+    ClassStore (Class !pd _ _) ->
+      exitEdh ets exit $ attrKeyValue $ edh'procedure'name pd
+    _ -> exitEdh ets exit nil
+    where clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+  scopeAllocator !ets (ArgsPack _args !kwargs) !exit =
+    case odLookup (AttrByName "ofObj") kwargs of
+      Just !val -> case val of
+        EdhObject !obj -> case edh'obj'store of
+          HashStore !hs -> exit =<< HostStore <$> newTVar
+            (toDyn $ (edh'world'root $ edh'ctx'world ctx) { edh'scope'entity = hs
+                                                          , edh'scope'this = obj
+                                                          , edh'scope'that = obj
+                                                          }
+            )
+          ClassStore !cs -> exit =<< HostStore <$> newTVar
+            (toDyn $ (edh'world'root $ edh'ctx'world ctx) { edh'scope'entity = cs
+                                                          , edh'scope'this = obj
+                                                          , edh'scope'that = obj
+                                                          }
+            )
+          _ -> exit =<< HostStore <$> newTVar (toDyn nil)
+        _ -> exit =<< HostStore <$> newTVar (toDyn nil)
+      Nothing -> exit =<< HostStore <$> newTVar (toDyn $ contextScope ctx)
+    where ctx = edh'context ets
+
+  mthScopeRepr :: EdhProcedure
+  mthScopeRepr _ !exit _ = exitEdh exit $ EdhString "<scope>"
+
+  mthScopeShow :: EdhProcedure
+  mthScopeShow _ !exit !ets =
+    case edh'obj'store $ edh'scope'this $ contextScope $ edh'context ets of
+      HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+        Just (scope :: Scope) -> do
+          let !pd      = edh'scope'proc scope
+              !pb      = edh'procedure'body $ edh'procedure'decl pd
+              !lexiLoc = case pb of
+                Left  (StmtSrc (srcLoc, _)) -> T.pack $ sourcePosPretty srcLoc
+                Right _                     -> "<host-code>"
+              StmtSrc (!callerSrcLoc, _) = edh'scope'caller scope
+          exitEdh ets exit
+            $  EdhString
+            $  "#scope@ "
+            <> lexiLoc
+            <> "\n#called by: " T.pack (sourcePosPretty callerSrcLoc)
+        Nothing -> exitEdh ets exit $ EdhString $ "bogus scope object"
+      _ -> exitEdh ets exit $ EdhString $ "bogus scope object"
+
+  mthScopeOuterGetter :: EdhProcedure
+  mthScopeOuterGetter _ !exit !ets = case edh'obj'store this of
+    HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+      Just (scope :: Scope) -> do
+        let !outerScope = edh'procedure'lexi $ edh'scope'proc scope
+        if edh'scope'proc outerScope == edh'scope'proc scope
+          then exitEdh ets exit nil
+          else do
+            !oid  <- unsafeIOToSTM newUnique
+            !hsv' <- newTVar $ toDyn outerScope
+            !ss   <- newTVar []
+            exitEdh ets exit $ EdhObject $ Object oid
+                                                  (HostStore hsv')
+                                                  (edh'obj'class this)
+                                                  ss
+    where !this = edh'scope'this $ contextScope $ edh'context ets
+
+  -- this is called in case a ProgramHalt is constructed by Edh code
+  haltAllocator _ !apk !exit = case apk of
+    ArgsPack [v] !kwargs | odNull kwargs ->
+      exit =<< HostStore <$> newTVar (toDyn $ ProgramHalt $ toDyn v)
+    _ -> exit =<< HostStore <$> newTVar
+      (toDyn $ ProgramHalt $ toDyn $ EdhArgsPack apk)
+
+  -- creating an IOError from Edh code
+  ioErrAllocator _ apk@(ArgsPack !args !kwargs) !exit =
+    exit =<< HostStore <$> newTVar
+      (toDyn $ EdhIOError $ SomeException $ userError msg)
+   where
+    !msg = case args of
+      [EdhString !msg] | odNull kwargs -> T.unpack msg
+      -- TODO use apk's repr once edhValueRepr works
+      _ -> show apk
+
+  -- a peer error is most prolly created from Edh code
+  peerErrAllocator _ !apk !exit = exit =<< HostStore <$> newTVar
+    (toDyn peerError)
+   where
+    peerError = case apk of
+      (ArgsPack [EdhString !peerSite, EdhString !details] !kwargs)
+        | odNull kwargs -> EdhPeerError peerSite details
+      _ -> EdhPeerError "<bogus-peer>" $ T.pack $ show apk
+
+  -- creating a tagged Edh error from Edh code
+  errAllocator !tag !ets apk@(ArgsPack !args !kwargs) !exit =
+    exit =<< HostStore <$> newTVar (toDyn $ EdhError et msg cc)
+   where
+    (!maybeUnwind, !kwargs') = odTakeOut (AttrByName "unwind") kwargs
+    !unwind                  = case maybeUnwind of
+      Just (EdhDecimal d) -> case decimalToInteger d of
+        Just !n -> fromIntegral n
+        _       -> 1
+      _ -> 1
+    !cc  = getEdhCallContext unwind ets
+    !msg = case args of
+      [] | odNull kwargs' -> ""
+      [EdhString !msg] | odNull kwargs' -> msg
+      -- TODO use apk's repr once edhValueRepr works
+      _                   -> T.pack (show $ ArgsPack args kwargs')
+
+  mthErrShow :: EdhProcedure
+  mthErrShow _ !exit !ets = case edh'obj'store errObj of
+    HostStore !hsv -> readTVar hsv >>= \ !hsd -> case fromDynamic hsd of
+      Just (err :: EdhError) ->
+        exitEdh ets exit $ EdhString $ T.pack (show err)
+      Nothing -> case hsd of
+        Just (exc :: SomeException) ->
+          exitEdh ets exit $ EdhString $ errClsName <> ": " <> T.pack (show exc)
+        Nothing ->
+          exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
+    _ -> exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
+
+  mthErrRepr :: EdhProcedure
+  mthErrRepr _ !exit !ets = case edh'obj'store errObj of
+    HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+      ProgramHalt !dhv -> case fromDynamic dhv of
+        -- TODO use repr of val once edhValueRepr works
+        (val :: EdhValue) ->
+          exitEdh ets exit
+            $  EdhString
+            $  errClsName
+            <> "("
+            <> T.pack (show val)
+            <> ")"
+        _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
+      EdhIOError !exc ->
+        exitEdh ets exit
+          $  EdhString
+          $  errClsName
+          <> "("
+          <> T.pack (show $ show exc)
+          <> ")"
+      EdhPeerError !peerSite !details ->
+        -- TODO use repr of peerSite/details once edhValueRepr works
+        exitEdh ets exit
+          $  EdhString
+          $  errClsName
+          <> "("
+          <> T.pack (show peerSite)
+          <> ","
+          <> T.pack (show details)
+          <> ")"
+      EdhError _tag !msg _cc -> if T.null msg
+        then exitEdh ets exit $ EdhString $ errClsName <> "()"
+        else exitEdh ets exit $ EdhString $ errClsName <> "(`" <> msg <> "`)"
+      _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
+    _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
+   where
+    !errObj     = edh'scope'this $ contextScope $ edh'context ets
+    !errClsName = objClassName errObj
+
+  mthErrStackGetter :: EdhProcedure
+  mthErrStackGetter _ !exit !ets = case edh'obj'store errObj of
+    HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+      Just (EdhError _errTag _errMsg (EdhCallContext !tip !frames)) ->
+        exitEdh ets exit $ EdhArgsPack $ ArgsPack
+          (EdhString . dispEdhCallFrame <$> frames)
+          (odFromList [(AttrByName "tip", EdhString tip)])
+      _ -> exitEdh ets exit nil
+    _ -> exitEdh ets exit nil
+    where errObj = edh'scope'this $ contextScope $ edh'context ets
 
 
 declareEdhOperators :: EdhWorld -> Text -> [(OpSymbol, Precedence)] -> STM ()
