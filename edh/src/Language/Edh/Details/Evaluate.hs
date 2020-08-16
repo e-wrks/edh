@@ -61,7 +61,7 @@ resolveEdhAttrAddr !ets (SymbolicAttr !symName) !exit =
           (EdhSymbol !symVal ) -> exit (AttrBySym symVal)
           (EdhString !nameVal) -> exit (AttrByName nameVal)
           _ ->
-            throwEdh ets EvalError
+            throwEdhSTM ets EvalError
               $  "Not a symbol/string as "
               <> symName
               <> ", it is a "
@@ -69,88 +69,92 @@ resolveEdhAttrAddr !ets (SymbolicAttr !symName) !exit =
               <> ": "
               <> T.pack (show val)
         Nothing ->
-          throwEdh ets EvalError
+          throwEdhSTM ets EvalError
             $  "No symbol/string named "
             <> T.pack (show symName)
             <> " available"
 {-# INLINE resolveEdhAttrAddr #-}
 
 
-throwEdhTx :: EdhErrorTag -> Text -> EdhTx
-throwEdhTx !et !msg !ets = throwEdh ets et msg
--- | Throw a tagged error from Edh
+-- | Throw a tagged error from Edh computation
 --
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent actions following it, be cautious.
-throwEdh :: EdhThreadState -> EdhErrorTag -> Text -> STM ()
-throwEdh !ets !tag !msg = edhWrapException edhErr
-  >>= \ !exo -> edhThrow ets $ EdhObject exo
+throwEdhTx :: EdhErrorTag -> Text -> EdhTx
+throwEdhTx !et !msg !ets = throwEdhSTM ets et msg
+-- | Throw a tagged error from STM monad running Edh computation
+--
+-- a bit similar to `return` in Haskell, this doesn't cease the execution
+-- of subsequent actions following it, be cautious.
+throwEdhSTM :: EdhThreadState -> EdhErrorTag -> Text -> STM ()
+throwEdhSTM !ets !tag !msg = edhWrapException (toException edhErr)
+  >>= \ !exo -> edhThrowSTM ets $ EdhObject exo
  where
   !edhWrapException = edh'exception'wrapper (edh'ctx'world $ edh'context ets)
   !cc               = getEdhCallContext 0 ets
   !edhErr           = EdhError tag msg cc
 
 
-edhThrowProc :: EdhValue -> EdhTx
-edhThrowProc = flip edhThrow
+edhThrowTx :: EdhValue -> EdhTx
+edhThrowTx = flip edhThrowSTM
 -- | Throw arbitrary value from Edh
 --
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent actions following it, be cautious.
-edhThrow :: EdhThreadState -> EdhValue -> STM ()
-edhThrow !ets !exv = do
-  let
-    propagateExc :: EdhValue -> [Scope] -> STM ()
-    propagateExc exv' [] = edhErrorUncaught ets exv'
-    propagateExc exv' (frame : stack) =
-      runEdhTx ets $ edh'excpt'hndlr frame exv' $ \exv'' ->
-        propagateExc exv'' stack
+edhThrowSTM :: EdhThreadState -> EdhValue -> STM ()
+edhThrowSTM !ets !exv = do
+  let propagateExc :: EdhValue -> [Scope] -> STM ()
+      propagateExc exv' [] = edhErrorUncaught ets exv'
+      propagateExc exv' (frame : stack) =
+        edh'excpt'hndlr frame exv' $ \exv'' -> propagateExc exv'' stack
   propagateExc exv $ NE.toList $ edh'ctx'stack $ edh'context ets
 
 edhErrorUncaught :: EdhThreadState -> EdhValue -> STM ()
 edhErrorUncaught !ets !exv = case exv of
-  EdhObject exo -> do
-    esd <- readTVar $ entity'store $ objEntity exo
-    case fromDynamic esd :: Maybe SomeException of
-      Just !e -> throwSTM e -- TODO replace cc in err if is empty here ?
-      Nothing -> edhValueRepr ets exv
-        -- TODO support magic method to coerce as exception ?
+  EdhObject exo -> case edh'obj'store exo of
+    HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+      -- TODO replace cc in err if is empty here ?
+      Just (exc :: SomeException) -> throwSTM exc
+      -- TODO support magic method to coerce object as exception ?
+      Nothing                     -> edhValueRepr ets exv
         $ \msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
+    -- TODO support magic method to coerce object as exception ?
+    _ -> edhValueRepr ets exv
+      $ \msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
   EdhString !msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
+  -- coerce arbitrary value to EdhError
   _              -> edhValueRepr ets exv
-    -- coerce arbitrary value to EdhError
     $ \msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
 
 
-edhCatchProc
+edhCatchTx
   :: (EdhTxExit -> EdhTx) -- ^ tryAct
   -> EdhTxExit -- ^ normal/recovered exit
-  -> (  -- edh'ctx'match of this proc will the thrown value or nil
+  -> (  -- edh'ctx'match of this Edh tx will the thrown value or nil
         EdhTxExit  -- ^ recover exit
-     -> EdhTx  -- ^ rethrow exit
+     -> EdhTx      -- ^ rethrow exit
      -> EdhTx
      )
   -> EdhTx
-edhCatchProc !tryAct !exit !passOn !etsOuter =
-  edhCatch etsOuter (\ !etsTry exit' -> runEdhTx etsTry (tryAct exit')) exit
-    $ \_etsThrower !exv recover rethrow -> do
+edhCatchTx !tryAct !exit !passOn !etsOuter =
+  edhCatchSTM etsOuter (\ !etsTry exit' -> runEdhTx etsTry (tryAct exit')) exit
+    $ \ !exv recover rethrow -> do
         let !ctxOuter = edh'context etsOuter
             !ctxHndl  = ctxOuter { edh'ctx'match = exv }
             !etsHndl  = etsOuter { edh'context = ctxHndl }
-        runEdhTx etsHndl $ passOn recover $ const rethrow
+        runEdhTx etsHndl $ passOn (const . recover) (const rethrow)
 -- | Catch possible throw from the specified try action
-edhCatch
+edhCatchSTM
   :: EdhThreadState
   -> (EdhThreadState -> EdhTxExit -> STM ()) -- ^ tryAct
   -> EdhTxExit -- ^ normal/recovered exit
-  -> (  EdhThreadState -- ^ thrower's ets, the task queue is important
-     -> EdhValue       -- ^ exception value or nil
-     -> EdhTxExit        -- ^ recover exit
-     -> STM ()         -- ^ rethrow exit
+  -> (  EdhValue              -- ^ exception value or nil
+     -> (EdhValue -> STM ())  -- ^ recover exit
+     -> STM ()                -- ^ rethrow exit
      -> STM ()
      )
   -> STM ()
-edhCatch !etsOuter !tryAct !exit !passOn = do
+edhCatchSTM !etsOuter !tryAct !exit !passOn = do
   hndlrTh <- unsafeIOToSTM myThreadId
   let
     !ctxOuter   = edh'context etsOuter
@@ -161,32 +165,28 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
     !etsTry = etsOuter { edh'context = tryCtx }
     hndlr :: EdhExcptHndlr
     hndlr !exv !rethrow = do
-      etsThrower <- ask
-      let
-        goRecover :: EdhTxExit
-        goRecover !result = ask >>= \ets ->
+      let goRecover :: EdhValue -> STM ()
           -- an exception handler provided another result value to recover
-                                            const $ isProgramHalt exv >>= \case
-          Just ProgramHalt{} -> goRethrow -- never recover from ProgramHalt
-          _                  -> do
-            -- do recover from the exception
-            rcvrTh <- unsafeIOToSTM myThreadId
-            if rcvrTh /= hndlrTh
-              then -- just skip the action if from a different thread
-                   return () -- other than the handler installer
-              else runEdhTx etsOuter $ exit result
-        goRethrow :: STM ()
-        goRethrow = runEdhTx etsOuter $ edh'excpt'hndlr scopeOuter exv rethrow
-      const $ passOn etsThrower exv goRecover goRethrow
+          goRecover !result = isProgramHalt exv >>= \case
+            True  -> goRethrow -- never recover from ProgramHalt
+            False -> do
+              -- do recover from the exception
+              rcvrTh <- unsafeIOToSTM myThreadId
+              if rcvrTh /= hndlrTh
+                then -- just skip the action if from a different thread
+                     return () -- other than the handler installer
+                else runEdhTx etsOuter $ exit result
+          goRethrow :: STM ()
+          goRethrow = edh'excpt'hndlr scopeOuter exv rethrow
+      passOn exv goRecover goRethrow
   tryAct etsTry $ \ !tryResult -> const $ do
     -- no exception occurred, go trigger finally block
     rcvrTh <- unsafeIOToSTM myThreadId
     if rcvrTh /= hndlrTh
       then -- just skip the action if from a different thread
            return () -- other than the handler installer
-      else
-        passOn etsOuter nil (error "bug: recovering from finally block")
-          $ exitEdh' etsOuter exit tryResult
+      else passOn nil (error "bug: recovering from finally block")
+        $ exitEdhSTM etsOuter exit tryResult
  where
   isProgramHalt !exv = case exv of
     EdhObject !exo -> case edh'obj'store exo of
@@ -241,12 +241,14 @@ evalEdh' !srcName !lineNo !srcCode !exit !ets = do
   let ctx   = edh'context ets
       world = edh'ctx'world ctx
   parseEdh' world srcName lineNo srcCode >>= \case
-    Left !err -> getEdhErrClass ets ParseError >>= \ !ec ->
-      runEdhTx ets
-        $ createEdhObject
-            ec
-            (ArgsPack [EdhString $ T.pack $ errorBundlePretty err] odEmpty)
-        $ \ !exv -> edhThrowProc exv
+    Left !err -> do
+      let !msg = T.pack $ errorBundlePretty err
+          !edhWrapException =
+            edh'exception'wrapper (edh'ctx'world $ edh'context ets)
+          !cc     = getEdhCallContext 0 ets
+          !edhErr = EdhError ParseError msg cc
+      edhWrapException (toException edhErr)
+        >>= \ !exo -> edhThrowSTM ets (EdhObject exo)
     Right !stmts -> runEdhTx ets $ evalBlock stmts exit
 
 
@@ -502,7 +504,7 @@ evalStmt' !stmt !exit = do
 
 
     ThrowStmt excExpr ->
-      evalExpr excExpr $ \ !exv -> edhThrowProc $ edhDeCaseClose exv
+      evalExpr excExpr $ \ !exv -> edhThrowTx $ edhDeCaseClose exv
 
 
     WhileStmt !cndExpr !bodyStmt -> do
@@ -712,7 +714,7 @@ importEdhModule !impSpec !exit = do
                   EdhNamedValue _ !importError ->
                     -- the first importer failed loading it,
                     -- replicate the error in this thread
-                    edhThrowProc importError
+                    edhThrowTx importError
                   !modu -> exitEdhTx exit modu
               Nothing -> do -- we are the first importer
                 -- allocate an empty slot
@@ -722,7 +724,7 @@ importEdhModule !impSpec !exit = do
                   $ Map.insert moduId moduSlot moduMap'
                 -- try load the module
                 runEdhTx ets
-                  $ edhCatchProc (loadModule moduSlot moduId moduFile) exit
+                  $ edhCatchTx (loadModule moduSlot moduId moduFile) exit
                   $ \_ !rethrow -> ask >>= \etsPassOn ->
                       case edh'ctx'match $ edh'context etsPassOn of
                         EdhNil      -> rethrow -- no error occurred
@@ -747,10 +749,9 @@ importEdhModule !impSpec !exit = do
         -- attempt the import specification as direct module id first
         Just !moduSlot -> readTMVar moduSlot >>= \case
           -- import error has been encountered, propagate the error
-          EdhNamedValue _ !importError ->
-            runEdhTx ets $ edhThrowProc importError
+          EdhNamedValue _ !importError -> runEdhTx ets $ edhThrowTx importError
           -- module already imported, got it as is
-          !modu -> exitEdh ets exit modu
+          !modu                        -> exitEdh ets exit modu
         -- resolving to `.edh` source files from local filesystem
         Nothing -> importFromFS
  where
