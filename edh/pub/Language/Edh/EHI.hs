@@ -80,13 +80,13 @@ module Language.Edh.EHI
   , packEdhExprs
   , packEdhArgs
   , OriginalValue(..)
-  , EdhProc
+  , EdhTx
   , EdhProgState(..)
   , EdhTask(..)
   , Context(..)
   , Scope(..)
-  , EdhProcedure
-  , EdhProcExit
+  , EdhHostProc
+  , EdhTxExit
     -- ** Edh Runtime error
   , getEdhCallContext
   , edhThrow
@@ -101,21 +101,16 @@ module Language.Edh.EHI
   , fromEdhError
   , getEdhErrClass
     -- ** CPS helpers
-  , runEdhProc
-  , contEdhSTM
-  , exitEdhSTM
-  , exitEdhSTM'
-  , exitEdhProc
-  , exitEdhProc'
+  , exitEdh
+  , runEdhTx
+  , exitEdhTx
   , seqcontSTM
   , foldl'contSTM
   , mapcontSTM
     -- ** Sync utilities
   , forkEdh
-  , edhPerformSTM
-  , edhPerformIO
+  , edhContSTM
   , edhContIO
-  , edhNop
   , endOfEdh
     -- ** Reflective manipulation
   , StmtSrc(..)

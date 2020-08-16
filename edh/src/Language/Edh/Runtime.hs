@@ -44,12 +44,12 @@ createEdhWorld !console = liftIO $ do
 
   let
     metaProc = ProcDefi idMeta (AttrByName "class") rootScope
-      $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right edhNop)
+      $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right fakeHostProc)
     metaClass    = Class metaProc hsMeta rootAllocator
     metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
 
     rootProc     = ProcDefi idRoot (AttrByName "<root>") rootScope
-      $ ProcDecl (NamedAttr "<root>") (PackReceiver []) (Right edhNop)
+      $ ProcDecl (NamedAttr "<root>") (PackReceiver []) (Right fakeHostProc)
     rootClass    = Class rootProc hsRoot rootAllocator
     rootClassObj = Object idRoot (ClassStore rootClass) metaClassObj ssRoot
 
@@ -59,7 +59,7 @@ createEdhWorld !console = liftIO $ do
       Scope hsRoot rootObj rootObj defaultEdhExcptHndlr rootProc genesisStmt []
 
     scopeProc = ProcDefi idScope (AttrByName "scope") rootScope
-      $ ProcDecl (NamedAttr "scope") (PackReceiver []) (Right edhNop)
+      $ ProcDecl (NamedAttr "scope") (PackReceiver []) (Right fakeHostProc)
     scopeClass    = Class scopeProc hsScope scopeAllocator
     scopeClassObj = Object idScope (ClassStore scopeClass) metaClassObj ssScope
 
@@ -178,6 +178,9 @@ createEdhWorld !console = liftIO $ do
 
   return world
  where
+  fakeHostProc :: EdhHostProc
+  fakeHostProc _ !exit !ets = exitEdh ets exit nil
+
   genesisStmt :: StmtSrc
   genesisStmt = StmtSrc
     ( SourcePos { sourceName   = "<genesis>"
@@ -189,14 +192,14 @@ createEdhWorld !console = liftIO $ do
 
   rootAllocator _ _ _ = error "bug: allocating root object"
 
-  mthClassRepr :: EdhProcedure
+  mthClassRepr :: EdhHostProc
   mthClassRepr _apk !exit !ets = case edh'obj'store clsObj of
     ClassStore (Class !pd _ _) ->
       exitEdh ets exit $ EdhString $ procedureName pd
     _ -> exitEdh ets exit $ EdhString "<bogus-class>"
     where clsObj = edh'scope'this $ contextScope $ edh'context ets
 
-  mthClassNameGetter :: EdhProcedure
+  mthClassNameGetter :: EdhHostProc
   mthClassNameGetter _apk !exit !ets = case edh'obj'store clsObj of
     ClassStore (Class !pd _ _) ->
       exitEdh ets exit $ attrKeyValue $ edh'procedure'name pd
@@ -224,10 +227,10 @@ createEdhWorld !console = liftIO $ do
       Nothing -> exit =<< HostStore <$> newTVar (toDyn $ contextScope ctx)
     where ctx = edh'context ets
 
-  mthScopeRepr :: EdhProcedure
+  mthScopeRepr :: EdhHostProc
   mthScopeRepr _ !exit _ = exitEdh exit $ EdhString "<scope>"
 
-  mthScopeShow :: EdhProcedure
+  mthScopeShow :: EdhHostProc
   mthScopeShow _ !exit !ets =
     case edh'obj'store $ edh'scope'this $ contextScope $ edh'context ets of
       HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
@@ -246,7 +249,7 @@ createEdhWorld !console = liftIO $ do
         Nothing -> exitEdh ets exit $ EdhString $ "bogus scope object"
       _ -> exitEdh ets exit $ EdhString $ "bogus scope object"
 
-  mthScopeOuterGetter :: EdhProcedure
+  mthScopeOuterGetter :: EdhHostProc
   mthScopeOuterGetter _ !exit !ets = case edh'obj'store this of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
       Just (scope :: Scope) -> do
@@ -306,7 +309,7 @@ createEdhWorld !console = liftIO $ do
       -- TODO use apk's repr once edhValueRepr works
       _                   -> T.pack (show $ ArgsPack args kwargs')
 
-  mthErrShow :: EdhProcedure
+  mthErrShow :: EdhHostProc
   mthErrShow _ !exit !ets = case edh'obj'store errObj of
     HostStore !hsv -> readTVar hsv >>= \ !hsd -> case fromDynamic hsd of
       Just (err :: EdhError) ->
@@ -318,7 +321,7 @@ createEdhWorld !console = liftIO $ do
           exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
     _ -> exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
 
-  mthErrRepr :: EdhProcedure
+  mthErrRepr :: EdhHostProc
   mthErrRepr _ !exit !ets = case edh'obj'store errObj of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
       ProgramHalt !dhv -> case fromDynamic dhv of
@@ -357,7 +360,7 @@ createEdhWorld !console = liftIO $ do
     !errObj     = edh'scope'this $ contextScope $ edh'context ets
     !errClsName = objClassName errObj
 
-  mthErrStackGetter :: EdhProcedure
+  mthErrStackGetter :: EdhHostProc
   mthErrStackGetter _ !exit !ets = case edh'obj'store errObj of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
       Just (EdhError _errTag _errMsg (EdhCallContext !tip !frames)) ->
@@ -414,11 +417,11 @@ haltEdhProgram !pgs !hv = toEdhError pgs (toException $ ProgramHalt $ toDyn hv)
   $ \exv -> edhThrowSTM pgs exv
 
 
-runEdhProgram :: MonadIO m => Context -> EdhProc -> m (Either EdhError EdhValue)
+runEdhProgram :: MonadIO m => Context -> EdhTx -> m (Either EdhError EdhValue)
 runEdhProgram !ctx !prog =
   liftIO $ tryJust edhKnownError $ runEdhProgram' ctx prog
 
-runEdhProgram' :: MonadIO m => Context -> EdhProc -> m EdhValue
+runEdhProgram' :: MonadIO m => Context -> EdhTx -> m EdhValue
 runEdhProgram' !ctx !prog = liftIO $ do
   haltResult <- atomically newEmptyTMVar
   driveEdhProgram haltResult ctx prog
@@ -485,9 +488,7 @@ runEdhModule' !world !impPath !preRun = liftIO $ do
         modu <- createEdhModule' world moduId moduFile
         let !moduCtx = moduleContext world modu
             !pgsModu = pgs { edh'context = moduCtx }
-        preRun pgsModu $ runEdhProc pgsModu $ evalEdh moduFile
-                                                      moduSource
-                                                      endOfEdh
+        preRun pgsModu $ runEdhTx pgsModu $ evalEdh moduFile moduSource endOfEdh
 
 
 -- | perform an effectful call from current Edh context
@@ -500,8 +501,8 @@ performEdhEffect
   :: AttrKey
   -> [EdhValue]
   -> [(AttrName, EdhValue)]
-  -> (EdhValue -> EdhProc)
-  -> EdhProc
+  -> (EdhValue -> EdhTx)
+  -> EdhTx
 performEdhEffect !effKey !args !kwargs !exit = ask >>= \pgs ->
   contEdhSTM
     $ resolveEdhEffCallee pgs effKey edhTargetStackForPerform
@@ -515,9 +516,8 @@ performEdhEffect !effKey !args !kwargs !exit = ask >>= \pgs ->
             $ [ (AttrByName k, v) | (k, v) <- kwargs ]
             )
             scopeMod
-          $ \mkCall ->
-              runEdhProc pgs $ mkCall $ \(OriginalValue !rtnVal _ _) ->
-                exit rtnVal
+          $ \mkCall -> runEdhTx pgs $ mkCall $ \(OriginalValue !rtnVal _ _) ->
+              exit rtnVal
 
 -- | obtain an effectful value from current Edh context
 --
@@ -525,9 +525,9 @@ performEdhEffect !effKey !args !kwargs !exit = ask >>= \pgs ->
 -- that call in effect resolution
 --
 -- otherwise this is the same as 'behaveEdhEffect''
-performEdhEffect' :: AttrKey -> (EdhValue -> EdhProc) -> EdhProc
+performEdhEffect' :: AttrKey -> (EdhValue -> EdhTx) -> EdhTx
 performEdhEffect' !effKey !exit = ask >>= \ !pgs ->
-  contEdhSTM $ resolveEdhPerform pgs effKey $ runEdhProc pgs . exit
+  contEdhSTM $ resolveEdhPerform pgs effKey $ runEdhTx pgs . exit
 
 
 -- | perform an effectful call from current Edh context
@@ -540,8 +540,8 @@ behaveEdhEffect
   :: AttrKey
   -> [EdhValue]
   -> [(AttrName, EdhValue)]
-  -> (EdhValue -> EdhProc)
-  -> EdhProc
+  -> (EdhValue -> EdhTx)
+  -> EdhTx
 behaveEdhEffect !effKey !args !kwargs !exit = ask >>= \pgs ->
   contEdhSTM
     $ resolveEdhEffCallee pgs effKey edhTargetStackForBehave
@@ -555,14 +555,13 @@ behaveEdhEffect !effKey !args !kwargs !exit = ask >>= \pgs ->
             $ [ (AttrByName k, v) | (k, v) <- kwargs ]
             )
             scopeMod
-          $ \mkCall ->
-              runEdhProc pgs $ mkCall $ \(OriginalValue !rtnVal _ _) ->
-                exit rtnVal
+          $ \mkCall -> runEdhTx pgs $ mkCall $ \(OriginalValue !rtnVal _ _) ->
+              exit rtnVal
 
 -- | obtain an effectful value from current Edh context
 --
 -- use full stack in effect resolution
-behaveEdhEffect' :: AttrKey -> (EdhValue -> EdhProc) -> EdhProc
-behaveEdhEffect' !effKey !exit = ask >>= \ !pgs ->
-  contEdhSTM $ resolveEdhBehave pgs effKey $ runEdhProc pgs . exit
+behaveEdhEffect' :: AttrKey -> (EdhValue -> EdhTx) -> EdhTx
+behaveEdhEffect' !effKey !exit = ask
+  >>= \ !pgs -> contEdhSTM $ resolveEdhBehave pgs effKey $ runEdhTx pgs . exit
 

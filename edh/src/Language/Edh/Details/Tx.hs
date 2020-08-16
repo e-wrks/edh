@@ -20,7 +20,7 @@ import           Language.Edh.Details.RtTypes
 -- whole Edh program, see:
 --   https://github.com/e-wrks/edh/tree/master/Tour#program--threading-model
 driveEdhProgram
-  :: TMVar (Either SomeException EdhValue) -> Context -> EdhProc -> IO ()
+  :: TMVar (Either SomeException EdhValue) -> Context -> EdhTx -> IO ()
 driveEdhProgram !haltResult !progCtx !prog = do
   -- check async exception mask state
   getMaskingState >>= \case

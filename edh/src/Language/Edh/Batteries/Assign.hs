@@ -55,7 +55,7 @@ assignProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                             EdhMethod !mth'proc ->
                               -- enforced tx boundary cut just before
                               -- magic method call, after args prepared
-                              runEdhProc pgs $ callEdhMethod
+                              runEdhTx pgs $ callEdhMethod
                                 obj
                                 mth'proc
                                 (ArgsPack [ixVal, rhVal] odEmpty)
@@ -112,7 +112,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                     contEdhSTM
                       $   iopdLookupDefault EdhNil ixVal ds
                       >>= \ !dVal ->
-                            runEdhProc pgs
+                            runEdhTx pgs
                               $ withOp (IntplSubs dVal) (IntplSubs rhVal)
                               $ \(OriginalValue !opRtnV _ _) -> contEdhSTM $ do
                                   setDictItem ixVal opRtnV ds
@@ -132,7 +132,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                             EdhMethod !mth'proc ->
                               -- enforced tx boundary cut just before
                               -- magic method call, after args prepared
-                              runEdhProc pgs $ callEdhMethod
+                              runEdhTx pgs $ callEdhMethod
                                 obj
                                 mth'proc
                                 (ArgsPack [ixVal, rhVal] odEmpty)
@@ -165,7 +165,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
           evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
             withOp (IntplSubs lhVal) (IntplSubs $ edhDeCaseClose rhVal)
               $ \opRtn@(OriginalValue !opRtnV _ _) -> case edhUltimate opRtnV of
-                  EdhContinue -> exitEdhProc' exit opRtn
+                  EdhContinue -> exitEdhTx' exit opRtn
                   !opRtnVal   -> assignEdhTarget pgs lhExpr exit opRtnVal
   where magicMthName = "[" <> withOpSym <> "=]"
 
@@ -187,7 +187,7 @@ assignMissingProc (AttrExpr (DirectRef !addr)) !rhExpr !exit = ask >>= \pgs ->
           }
     lookupEntityAttr pgsAssign ent key >>= \case
       EdhNil ->
-        runEdhProc pgsAssign $ evalExpr rhExpr $ \(OriginalValue !rhV _ _) ->
+        runEdhTx pgsAssign $ evalExpr rhExpr $ \(OriginalValue !rhV _ _) ->
           let !rhVal = edhDeCaseClose rhV
           in  contEdhSTM $ do
                 changeEntityAttr pgsAssign ent key rhVal

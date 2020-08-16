@@ -23,12 +23,12 @@ addProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \(OriginalValue !lhv _ _) ->
   case edhUltimate lhv of
     EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
-        EdhDecimal !rhNum -> exitEdhProc exit (EdhDecimal $ lhNum + rhNum)
-        _                 -> exitEdhProc exit EdhContinue
+        EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum + rhNum)
+        _                 -> exitEdhTx exit EdhContinue
     EdhBlob !lhb -> evalExpr rhExpr $ \(OriginalValue !rhv _ _) ->
       case edhUltimate rhv of
-        EdhBlob   !rhb -> exitEdhProc exit (EdhBlob $ lhb <> rhb)
-        EdhString !rhs -> exitEdhProc exit (EdhBlob $ lhb <> TE.encodeUtf8 rhs)
+        EdhBlob   !rhb -> exitEdhTx exit (EdhBlob $ lhb <> rhb)
+        EdhString !rhs -> exitEdhTx exit (EdhBlob $ lhb <> TE.encodeUtf8 rhs)
         rhVal ->
           throwEdh UsageError
             $  "Should not (+) a "
@@ -37,9 +37,9 @@ addProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \(OriginalValue !lhv _ _) ->
     EdhString !lhs -> evalExpr rhExpr $ \(OriginalValue !rhv _ _) ->
       edhValueStr (edhUltimate rhv) $ \(OriginalValue rhStr _ _) ->
         case rhStr of
-          EdhString !rhs -> exitEdhProc exit (EdhString $ lhs <> rhs)
+          EdhString !rhs -> exitEdhTx exit (EdhString $ lhs <> rhs)
           _              -> error "bug: edhValueStr returned non-string"
-    _ -> exitEdhProc exit EdhContinue
+    _ -> exitEdhTx exit EdhContinue
 
 
 -- | operator (-)
@@ -48,9 +48,9 @@ subsProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
-        EdhDecimal !rhNum -> exitEdhProc exit (EdhDecimal $ lhNum - rhNum)
-        _                 -> exitEdhProc exit EdhContinue
-    _ -> exitEdhProc exit EdhContinue
+        EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum - rhNum)
+        _                 -> exitEdhTx exit EdhContinue
+    _ -> exitEdhTx exit EdhContinue
 
 
 -- | operator (*)
@@ -59,9 +59,9 @@ mulProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
-        EdhDecimal !rhNum -> exitEdhProc exit (EdhDecimal $ lhNum * rhNum)
-        _                 -> exitEdhProc exit EdhContinue
-    _ -> exitEdhProc exit EdhContinue
+        EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum * rhNum)
+        _                 -> exitEdhTx exit EdhContinue
+    _ -> exitEdhTx exit EdhContinue
 
 
 -- | operator (/)
@@ -70,9 +70,9 @@ divProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
-        EdhDecimal !rhNum -> exitEdhProc exit (EdhDecimal $ lhNum / rhNum)
-        _                 -> exitEdhProc exit EdhContinue
-    _ -> exitEdhProc exit EdhContinue
+        EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum / rhNum)
+        _                 -> exitEdhTx exit EdhContinue
+    _ -> exitEdhTx exit EdhContinue
 
 -- | operator (//) integer division, following Python 
 -- http://python-history.blogspot.com/2010/08/why-pythons-integer-division-floors.html
@@ -92,9 +92,9 @@ divIntProc !lhExpr !rhExpr !exit =
                 $  "Not an integer as right-hand value for (//) operation: "
                 <> T.pack (show rhNum)
             Just !rhi ->
-              exitEdhProc exit $ EdhDecimal $ Decimal 1 0 $ lhi `div` rhi
-          _ -> exitEdhProc exit EdhContinue
-    _ -> exitEdhProc exit EdhContinue
+              exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `div` rhi
+          _ -> exitEdhTx exit EdhContinue
+    _ -> exitEdhTx exit EdhContinue
 
 -- | operator (%) modulus of integer division, following Python 
 -- http://python-history.blogspot.com/2010/08/why-pythons-integer-division-floors.html
@@ -114,9 +114,9 @@ modIntProc !lhExpr !rhExpr !exit =
                 $  "Not an integer as right-hand value for (%) operation: "
                 <> T.pack (show rhNum)
             Just rhi ->
-              exitEdhProc exit $ EdhDecimal $ Decimal 1 0 $ lhi `mod` rhi
-          _ -> exitEdhProc exit EdhContinue
-    _ -> exitEdhProc exit EdhContinue
+              exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `mod` rhi
+          _ -> exitEdhTx exit EdhContinue
+    _ -> exitEdhTx exit EdhContinue
 
 
 -- | operator (**)
@@ -126,10 +126,10 @@ powProc !lhExpr !rhExpr !exit =
     EdhDecimal !lhNum -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
         EdhDecimal (Decimal rh'd rh'e rh'n) -> if rh'd /= 1
-          then exitEdhProc exit EdhContinue
-          else exitEdhProc exit (EdhDecimal $ lhNum ^^ (rh'n * 10 ^ rh'e))
-        _ -> exitEdhProc exit EdhContinue
-    _ -> exitEdhProc exit EdhContinue
+          then exitEdhTx exit EdhContinue
+          else exitEdhTx exit (EdhDecimal $ lhNum ^^ (rh'n * 10 ^ rh'e))
+        _ -> exitEdhTx exit EdhContinue
+    _ -> exitEdhTx exit EdhContinue
 
 
 -- | operator (&&)
@@ -138,9 +138,9 @@ logicalAndProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhBool lhBool -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
-        EdhBool rhBool -> exitEdhProc exit (EdhBool $ lhBool && rhBool)
-        _              -> exitEdhProc exit EdhContinue
-    _ -> exitEdhProc exit EdhContinue
+        EdhBool rhBool -> exitEdhTx exit (EdhBool $ lhBool && rhBool)
+        _              -> exitEdhTx exit EdhContinue
+    _ -> exitEdhTx exit EdhContinue
 
 -- | operator (||)
 logicalOrProc :: EdhIntrinsicOp
@@ -148,9 +148,9 @@ logicalOrProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) -> case edhUltimate lhVal of
     EdhBool lhBool -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
       case edhUltimate rhVal of
-        EdhBool rhBool -> exitEdhProc exit (EdhBool $ lhBool || rhBool)
-        _              -> exitEdhProc exit EdhContinue
-    _ -> exitEdhProc exit EdhContinue
+        EdhBool rhBool -> exitEdhTx exit (EdhBool $ lhBool || rhBool)
+        _              -> exitEdhTx exit EdhContinue
+    _ -> exitEdhTx exit EdhContinue
 
 
 -- | operator (==)
@@ -179,14 +179,14 @@ idEqProc :: EdhIntrinsicOp
 idEqProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      exitEdhProc exit (EdhBool $ edhIdentEqual lhVal rhVal)
+      exitEdhTx exit (EdhBool $ edhIdentEqual lhVal rhVal)
 
 -- | operator (is not) (not is)
 idNotEqProc :: EdhIntrinsicOp
 idNotEqProc !lhExpr !rhExpr !exit =
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      exitEdhProc exit (EdhBool $ not $ edhIdentEqual lhVal rhVal)
+      exitEdhTx exit (EdhBool $ not $ edhIdentEqual lhVal rhVal)
 
 
 -- | operator (>)
@@ -234,7 +234,7 @@ isLeProc !lhExpr !rhExpr !exit = do
 
 doEdhComparison
   :: EdhProgState
-  -> EdhProcExit
+  -> EdhTxExit
   -> EdhValue
   -> EdhValue
   -> (Ordering -> Bool)

@@ -25,7 +25,7 @@ import           Language.Edh.Details.Evaluate
 
 
 -- | utility constructor(*args,**kwargs)
-ctorProc :: EdhProcedure
+ctorProc :: EdhHostProc
 ctorProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   let callerCtx   = edh'context pgs
@@ -33,10 +33,10 @@ ctorProc (ArgsPack !args !kwargs) !exit = do
       !argsCls    = edhClassOf <$> args
   if odNull kwargs
     then case argsCls of
-      []  -> exitEdhProc exit (EdhClass $ objClass $ thisObject callerScope)
-      [t] -> exitEdhProc exit t
-      _   -> exitEdhProc exit $ EdhArgsPack $ ArgsPack argsCls odEmpty
-    else exitEdhProc
+      []  -> exitEdhTx exit (EdhClass $ objClass $ thisObject callerScope)
+      [t] -> exitEdhTx exit t
+      _   -> exitEdhTx exit $ EdhArgsPack $ ArgsPack argsCls odEmpty
+    else exitEdhTx
       exit
       (EdhArgsPack $ ArgsPack argsCls $ odMap edhClassOf kwargs)
  where
@@ -45,7 +45,7 @@ ctorProc (ArgsPack !args !kwargs) !exit = do
   edhClassOf _             = nil
 
 -- | utility supers(*args,**kwargs)
-supersProc :: EdhProcedure
+supersProc :: EdhHostProc
 supersProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   let !callerCtx   = edh'context pgs
@@ -77,7 +77,7 @@ supersProc (ArgsPack !args !kwargs) !exit = do
 
 -- | utility scope()
 -- obtain current scope as reflected object
-scopeObtainProc :: EdhProcedure
+scopeObtainProc :: EdhHostProc
 scopeObtainProc (ArgsPack _args !kwargs) !exit = do
   !pgs <- ask
   let !ctx = edh'context pgs
@@ -105,7 +105,7 @@ scopeObtainProc (ArgsPack _args !kwargs) !exit = do
 
 -- | utility scope.attrs()
 -- get attribute types in the scope
-scopeAttrsProc :: EdhProcedure
+scopeAttrsProc :: EdhHostProc
 scopeAttrsProc _ !exit = do
   !pgs <- ask
   let !that = thatObject $ contextScope $ edh'context pgs
@@ -116,7 +116,7 @@ scopeAttrsProc _ !exit = do
 
 -- | utility scope.get(k1, k2, n1=k3, n2=k4, ...)
 -- get attribute values from the wrapped scope
-scopeGetProc :: EdhProcedure
+scopeGetProc :: EdhHostProc
 scopeGetProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   let !callerCtx = edh'context pgs
@@ -154,7 +154,7 @@ scopeGetProc (ArgsPack !args !kwargs) !exit = do
 
 -- | utility scope.put(k1:v1, k2:v2, n3=v3, n4=v4, ...)
 -- put attribute values into the wrapped scope
-scopePutProc :: EdhProcedure
+scopePutProc :: EdhHostProc
 scopePutProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   let !callerCtx = edh'context pgs
@@ -184,7 +184,7 @@ scopePutProc (ArgsPack !args !kwargs) !exit = do
 
 -- | utility scope.eval(expr1, expr2, kw3=expr3, kw4=expr4, ...)
 -- evaluate expressions in this scope
-scopeEvalProc :: EdhProcedure
+scopeEvalProc :: EdhHostProc
 scopeEvalProc (ArgsPack !args !kwargs) !exit = do
   !pgs <- ask
   let !callerCtx      = edh'context pgs
@@ -193,7 +193,7 @@ scopeEvalProc (ArgsPack !args !kwargs) !exit = do
       -- eval all exprs with the original scope on top of current call stack
       !scopeCallStack = theScope <| callStack callerCtx
   if odNull kwargs && null args
-    then exitEdhProc exit nil
+    then exitEdhTx exit nil
     else contEdhSTM $ do
       let !pgsEval = pgs
             { edh'context = callerCtx { callStack        = scopeCallStack
@@ -216,7 +216,7 @@ scopeEvalProc (ArgsPack !args !kwargs) !exit = do
                 kwargsValues
         evalThePack !argsValues [] (kwExpr : kwargsExprs') = case kwExpr of
           (!kw, EdhExpr _ !expr _) ->
-            runEdhProc pgsEval $ evalExpr expr $ \(OriginalValue !val _ _) ->
+            runEdhTx pgsEval $ evalExpr expr $ \(OriginalValue !val _ _) ->
               contEdhSTM $ do
                 iopdInsert kw (edhDeCaseClose val) kwIOPD
                 evalThePack argsValues [] kwargsExprs'
@@ -224,7 +224,7 @@ scopeEvalProc (ArgsPack !args !kwargs) !exit = do
         evalThePack !argsValues (!argExpr : argsExprs') !kwargsExprs =
           case argExpr of
             EdhExpr _ !expr _ ->
-              runEdhProc pgsEval $ evalExpr expr $ \(OriginalValue !val _ _) ->
+              runEdhTx pgsEval $ evalExpr expr $ \(OriginalValue !val _ _) ->
                 contEdhSTM $ evalThePack (edhDeCaseClose val : argsValues)
                                          argsExprs'
                                          kwargsExprs
@@ -233,7 +233,7 @@ scopeEvalProc (ArgsPack !args !kwargs) !exit = do
 
 
 -- | utility makeOp(lhExpr, opSym, rhExpr)
-makeOpProc :: EdhProcedure
+makeOpProc :: EdhHostProc
 makeOpProc (ArgsPack !args !kwargs) !exit = do
   pgs <- ask
   if (not $ odNull kwargs)

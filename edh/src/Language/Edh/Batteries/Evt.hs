@@ -23,7 +23,7 @@ import           Language.Edh.Details.Evaluate
 -- this can't tell a sink's state as marked end-of-stream by a nil data,
 -- or no event has ever been posted into it, in both cases `mre()` will
 -- return nil
-mreProc :: EdhProcedure
+mreProc :: EdhHostProc
 mreProc (ArgsPack !args !kwargs) !exit = case args of
   [v] | odNull kwargs -> case edhUltimate v of
     EdhSink !sink -> ask >>= \pgs ->
@@ -38,7 +38,7 @@ mreProc (ArgsPack !args !kwargs) !exit = case args of
 --
 -- check whether an event sink is already at end-of-stream, which is marked
 -- by a nil data
-eosProc :: EdhProcedure
+eosProc :: EdhHostProc
 eosProc (ArgsPack !args !kwargs) !exit = case args of
   [v] | odNull kwargs -> case edhUltimate v of
     EdhSink !sink -> ask >>= \pgs ->

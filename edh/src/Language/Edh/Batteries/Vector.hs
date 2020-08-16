@@ -72,7 +72,7 @@ vecMethods !pgsModule = sequence
  where
   !scope = contextScope $ edh'context pgsModule
 
-  vecAppendProc :: EdhProcedure
+  vecAppendProc :: EdhHostProc
   vecAppendProc (ArgsPack !args !kwargs) !exit | odNull kwargs = do
     pgs <- ask
     let
@@ -87,7 +87,7 @@ vecMethods !pgsModule = sequence
     contEdhSTM $ cloneEdhObject that esClone $ exitEdhSTM pgs exit . EdhObject
   vecAppendProc _ _ = throwEdh UsageError "Invalid args to Vector.append()"
 
-  vecEqProc :: EdhProcedure
+  vecEqProc :: EdhHostProc
   vecEqProc (ArgsPack [EdhObject (Object !entOther _ _)] !kwargs) !exit
     | odNull kwargs = withThatEntity $ \ !pgs !mvec ->
       fromDynamic <$> readTVar (entity'store entOther) >>= \case
@@ -100,10 +100,10 @@ vecMethods !pgsModule = sequence
             vecOther <- V.unsafeFreeze mvecOther
             return $ vec == vecOther
           exitEdhSTM pgs exit $ EdhBool conclusion
-  vecEqProc _ !exit = exitEdhProc exit $ EdhBool False
+  vecEqProc _ !exit = exitEdhTx exit $ EdhBool False
 
 
-  vecIdxReadProc :: EdhProcedure
+  vecIdxReadProc :: EdhHostProc
   vecIdxReadProc (ArgsPack [!idxVal] !kwargs) !exit | odNull kwargs =
     withThatEntity $ \ !pgs !mvec -> do
       let vecObj = thatObject $ contextScope $ edh'context pgs
@@ -142,7 +142,7 @@ vecMethods !pgsModule = sequence
   vecIdxReadProc !apk _ =
     throwEdh UsageError $ "Invalid index for a Vector: " <> T.pack (show apk)
 
-  vecIdxWriteProc :: EdhProcedure
+  vecIdxWriteProc :: EdhHostProc
   vecIdxWriteProc (ArgsPack [!idxVal, !other] !kwargs) !exit | odNull kwargs =
     withThatEntity $ \ !pgs !mvec -> do
       let exitWithRangeAssign :: Int -> Int -> Int -> STM ()
@@ -202,15 +202,15 @@ vecMethods !pgsModule = sequence
       (show apk)
 
 
-  vecNullProc :: EdhProcedure
+  vecNullProc :: EdhHostProc
   vecNullProc _ !exit = withThatEntity $ \ !pgs (mvec :: EdhVector) ->
     exitEdhSTM pgs exit $ EdhBool $ MV.length mvec <= 0
 
-  vecLenProc :: EdhProcedure
+  vecLenProc :: EdhHostProc
   vecLenProc _ !exit = withThatEntity $ \ !pgs (mvec :: EdhVector) ->
     exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral $ MV.length mvec
 
-  vecReprProc :: EdhProcedure
+  vecReprProc :: EdhHostProc
   vecReprProc _ !exit = withThatEntity $ \ !pgs !mvec -> do
     let go :: [EdhValue] -> [Text] -> STM ()
         go [] !rs =

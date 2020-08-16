@@ -667,7 +667,7 @@ installEdhBatteries world = liftIO $ do
             , procedure'lexi = Just rootScope
             , procedure'decl = ProcDecl { procedure'addr = NamedAttr "<console>"
                                         , procedure'args = PackReceiver []
-                                        , procedure'body = Right edhNop
+                                        , procedure'body = Right fakeHostProc
                                         }
             }
           , objSupers = conSupers
@@ -756,12 +756,13 @@ installEdhBatteries world = liftIO $ do
       updateEntityAttrs pgs (objEntity scopeSuperObj) scopeSuperMethods
 
       -- import the parts written in Edh 
-      runEdhProc pgs $ importEdhModule' rootEntity
-                                        WildReceiver
-                                        "batteries/root"
-                                        endOfEdh
+      runEdhTx pgs
+        $ importEdhModule' rootEntity WildReceiver "batteries/root" endOfEdh
 
  where
+  fakeHostProc :: EdhHostProc
+  fakeHostProc _ !exit !ets = exitEdh ets exit nil
+
   !rootScope     = worldScope world
   !rootEntity    = objEntity $ thisObject rootScope
   !scopeSuperObj = scopeSuper world

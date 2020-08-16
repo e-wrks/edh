@@ -35,7 +35,7 @@ import           Language.Edh.Details.Evaluate
 --   x = 'Hello'
 --
 annoProc :: EdhIntrinsicOp
-annoProc _ _ !exit = exitEdhProc exit nil
+annoProc _ _ !exit = exitEdhTx exit nil
 
 
 -- | operator ($=>) - the `catch`
@@ -58,10 +58,10 @@ catchProc !tryExpr !catchExpr !exit =
             EdhRethrow -> rethrow -- not to recover
             EdhCaseClose val ->
               -- don't bubble up the close-of-case, as `catch` is not a branch 
-              exitEdhProc' recover recoverResult { valueFromOrigin = val }
+              exitEdhTx' recover recoverResult { valueFromOrigin = val }
             EdhCaseOther   -> rethrow -- not to recover
             EdhFallthrough -> rethrow -- not to recover
-            _              -> exitEdhProc' recover recoverResult
+            _              -> exitEdhTx' recover recoverResult
 
 -- | operator (@=>) - the `finally`
 --
@@ -75,7 +75,7 @@ finallyProc :: EdhIntrinsicOp
 finallyProc !tryExpr !finallyExpr !exit = ask >>= \pgs -> contEdhSTM $ do
   hndlrTh <- unsafeIOToSTM myThreadId
   edhCatchSTM pgs
-              (\ !pgsTry !exit' -> runEdhProc pgsTry $ evalExpr tryExpr exit')
+              (\ !pgsTry !exit' -> runEdhTx pgsTry $ evalExpr tryExpr exit')
               exit
     $ \pgsThrower !exv _recover !rethrow -> do
         fnlyTh <- unsafeIOToSTM myThreadId
@@ -84,7 +84,7 @@ finallyProc !tryExpr !finallyExpr !exit = ask >>= \pgs -> contEdhSTM $ do
                -- than the handler installer
                rethrow
           else
-            runEdhProc pgsThrower
+            runEdhTx pgsThrower
               { edh'context = (edh'context pgs) { contextMatch = exv }
               }
             $ evalExpr finallyExpr
@@ -110,8 +110,8 @@ branchProc !lhExpr !rhExpr !exit = do
       branchMatched :: [(AttrName, EdhValue)] -> STM ()
       branchMatched !ps = do
         updAttrs [ (AttrByName n, noneNil v) | (n, v) <- ps, n /= "_" ]
-        runEdhProc pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-          exitEdhProc exit $ case rhVal of
+        runEdhTx pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+          exitEdhTx exit $ case rhVal of
             -- a nested branch matched, the outer branch eval to its final
             -- value with case closed
             EdhCaseClose !nestedMatch ->
@@ -129,14 +129,14 @@ branchProc !lhExpr !rhExpr !exit = do
           Nothing -> throwEdh EvalError $ "Invalid pair pattern: " <> T.pack
             (show pairPattern)
           Just (_, []) -> -- valid pattern, no match
-            exitEdhProc exit EdhCaseOther
+            exitEdhTx exit EdhCaseOther
           Just (resi, mps) -> case maybeName1 of
             Just !name1 -> case resi of
-              Nothing    -> exitEdhProc exit EdhCaseOther
+              Nothing    -> exitEdhTx exit EdhCaseOther
               Just !val1 -> contEdhSTM $ branchMatched $ (name1, val1) : mps
             Nothing -> case resi of
               Nothing -> contEdhSTM $ branchMatched mps
-              Just{}  -> exitEdhProc exit EdhCaseOther
+              Just{}  -> exitEdhTx exit EdhCaseOther
 
   case lhExpr of
     -- recognize `_` as similar to the wildcard pattern match in Haskell,
@@ -162,7 +162,7 @@ branchProc !lhExpr !rhExpr !exit = do
         -> case ctxMatch of
           EdhArgsPack (ArgsPack [argVal] !kwargs) | odNull kwargs ->
             contEdhSTM $ branchMatched [(attrName, argVal)]
-          _ -> exitEdhProc exit EdhCaseOther
+          _ -> exitEdhTx exit EdhCaseOther
 
       -- {( x:y:z:... )} -- parenthesised pair pattern
       [StmtSrc (_, ExprStmt (ParenExpr pairPattern@(InfixExpr ":" _ _)))] ->
@@ -171,36 +171,36 @@ branchProc !lhExpr !rhExpr !exit = do
       -- { continue } -- match with continue
       [StmtSrc (_, ContinueStmt)] -> case ctxMatch of
         EdhContinue -> contEdhSTM $ branchMatched []
-        _           -> exitEdhProc exit EdhCaseOther
+        _           -> exitEdhTx exit EdhCaseOther
 
       -- { break } -- match with break
       [StmtSrc (_, BreakStmt)] -> case ctxMatch of
         EdhBreak -> contEdhSTM $ branchMatched []
-        _        -> exitEdhProc exit EdhCaseOther
+        _        -> exitEdhTx exit EdhCaseOther
 
       -- { fallthrough } -- match with fallthrough
       [StmtSrc (_, FallthroughStmt)] -> case ctxMatch of
         EdhFallthrough -> contEdhSTM $ branchMatched []
-        _              -> exitEdhProc exit EdhCaseOther
+        _              -> exitEdhTx exit EdhCaseOther
 
       -- { return nil } -- match with nil return
       [StmtSrc (_, ReturnStmt (LitExpr NilLiteral))] -> case ctxMatch of
         EdhReturn EdhNil -> contEdhSTM $ branchMatched []
-        _                -> exitEdhProc exit EdhCaseOther
+        _                -> exitEdhTx exit EdhCaseOther
 
       -- { return xx } -- match with value return
       [StmtSrc (_, ReturnStmt (AttrExpr (DirectRef (NamedAttr attrName))))] ->
         case ctxMatch of
           EdhReturn !rtnVal | rtnVal /= EdhNil ->
             contEdhSTM $ branchMatched [(attrName, rtnVal)]
-          _ -> exitEdhProc exit EdhCaseOther
+          _ -> exitEdhTx exit EdhCaseOther
 
       -- { val } -- wild capture pattern, used to capture a non-nil result as
       -- an attribute.
       -- Note: a raw nil value should be value-matched explicitly
       [StmtSrc (_, ExprStmt (AttrExpr (DirectRef (NamedAttr attrName))))] ->
         case ctxMatch of -- don't match raw nil here, 
-          EdhNil -> exitEdhProc exit EdhCaseOther
+          EdhNil -> exitEdhTx exit EdhCaseOther
           -- but a named nil (i.e. None/Nothing etc.) should be matched
           _      -> contEdhSTM $ branchMatched [(attrName, ctxMatch)]
 
@@ -246,9 +246,9 @@ branchProc !lhExpr !rhExpr !exit = do
                                   [ (prefixName, EdhString prefix)
                                   , (suffixName, EdhString suffix)
                                   ]
-                          _ -> exitEdhProc exit EdhCaseOther
+                          _ -> exitEdhTx exit EdhCaseOther
                   _ -> error "bug: edhValueStr returned non-string"
-          _ -> exitEdhProc exit EdhCaseOther
+          _ -> exitEdhTx exit EdhCaseOther
 
       -- { match >@ suffix } -- prefix cut pattern
       [StmtSrc (_, ExprStmt (InfixExpr ">@" prefixExpr (AttrExpr (DirectRef (NamedAttr suffixName)))))]
@@ -260,9 +260,9 @@ branchProc !lhExpr !rhExpr !exit = do
                     EdhString !lhStr -> case T.stripPrefix lhStr fullStr of
                       Just !suffix -> contEdhSTM
                         $ branchMatched [(suffixName, EdhString suffix)]
-                      _ -> exitEdhProc exit EdhCaseOther
+                      _ -> exitEdhTx exit EdhCaseOther
                     _ -> error "bug: edhValueStr returned non-string"
-          _ -> exitEdhProc exit EdhCaseOther
+          _ -> exitEdhTx exit EdhCaseOther
 
       -- { prefix @< match } -- suffix cut pattern
       [StmtSrc (_, ExprStmt (InfixExpr "@<" (AttrExpr (DirectRef (NamedAttr prefixName))) suffixExpr))]
@@ -274,9 +274,9 @@ branchProc !lhExpr !rhExpr !exit = do
                     EdhString !rhStr -> case T.stripSuffix rhStr fullStr of
                       Just !prefix -> contEdhSTM
                         $ branchMatched [(prefixName, EdhString prefix)]
-                      _ -> exitEdhProc exit EdhCaseOther
+                      _ -> exitEdhTx exit EdhCaseOther
                     _ -> error "bug: edhValueStr returned non-string"
-          _ -> exitEdhProc exit EdhCaseOther
+          _ -> exitEdhTx exit EdhCaseOther
 
       -- {( x,y,z,... )} -- pattern matching number of positional args
       [StmtSrc (_, ExprStmt (ArgsPackExpr !argSenders))] ->
@@ -314,7 +314,7 @@ branchProc !lhExpr !rhExpr !exit = do
           EdhObject ctxObj ->
             evalAttrAddr clsAddr $ \(OriginalValue !clsVal _ _) ->
               case clsVal of
-                EdhNil -> exitEdhProc exit EdhCaseOther
+                EdhNil -> exitEdhTx exit EdhCaseOther
                 EdhClass !cls ->
                   contEdhSTM
                     $   resolveEdhInstance pgs (procedure'uniq cls) ctxObj
@@ -331,16 +331,16 @@ branchProc !lhExpr !rhExpr !exit = do
                     <> edhTypeNameOf clsVal
                     <> ": "
                     <> show clsVal
-          _ -> exitEdhProc exit EdhCaseOther
+          _ -> exitEdhTx exit EdhCaseOther
 
       -- {[ x,y,z,... ]} -- any-of pattern
       [StmtSrc (_, ExprStmt (ListExpr vExprs))] -> if null vExprs
-        then exitEdhProc exit EdhCaseOther
+        then exitEdhTx exit EdhCaseOther
         else evalExprs vExprs $ \(OriginalValue matchVals _ _) ->
           case matchVals of
             EdhArgsPack (ArgsPack !l _) -> if ctxMatch `elem` l
               then contEdhSTM $ branchMatched []
-              else exitEdhProc exit EdhCaseOther
+              else exitEdhTx exit EdhCaseOther
             _ -> error "bug: evalExprs returned non-apk"
 
 
@@ -354,7 +354,7 @@ branchProc !lhExpr !rhExpr !exit = do
     PrefixExpr Guard guardedExpr ->
       evalExpr guardedExpr $ \(OriginalValue !predValue _ _) ->
         if edhDeCaseClose predValue /= true
-          then exitEdhProc exit EdhCaseOther
+          then exitEdhTx exit EdhCaseOther
           else contEdhSTM $ branchMatched []
 
     -- value-wise matching against the target in context
