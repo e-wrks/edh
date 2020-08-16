@@ -761,7 +761,7 @@ installEdhBatteries world = liftIO $ do
 
  where
   fakeHostProc :: EdhHostProc
-  fakeHostProc _ !exit !ets = exitEdh ets exit nil
+  fakeHostProc _ !exit = exitEdhTx exit nil
 
   !rootScope     = worldScope world
   !rootEntity    = objEntity $ thisObject rootScope

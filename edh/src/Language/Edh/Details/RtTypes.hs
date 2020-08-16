@@ -483,7 +483,7 @@ data EdhThreadState = EdhThreadState {
   , edh'fork'queue :: !(TBQueue (EdhThreadState, EdhThreadState -> STM ()))
   }
 
--- | The task to be queued for execution of an Edh thread
+-- | The task to be queued for execution of an Edh thread.
 --
 -- the thread state provides the context, into which an exception should be
 -- thrown, if one ever occurs during the action
@@ -505,12 +505,13 @@ data DeferRecord = DeferRecord
   !(EdhThreadState -> STM ())
 
 
--- | Schedule forking of a GHC thread for an Edh thread
+-- | Schedule forking of a GHC thread for an Edh thread to run the specified 
+-- procedure.
 --
 -- NOTE this happens as part of current STM tx, the actual fork won't happen if
 --      any subsequent Edh code within the tx throws without recovered
-forkEdh :: EdhThreadState -> EdhTx -> STM ()
-forkEdh !etsForker !p = writeTBQueue (edh'fork'queue etsForker) (etsForker, p)
+forkEdh :: EdhTx -> EdhTx
+forkEdh !p !etsForker = writeTBQueue (edh'fork'queue etsForker) (etsForker, p)
 {-# INLINE forkEdh #-}
 
 -- | Schedule an STM action to be performed in current Edh thread, but after
@@ -522,44 +523,31 @@ forkEdh !etsForker !p = writeTBQueue (edh'fork'queue etsForker) (etsForker, p)
 --      recovered
 -- CAVEAT pay special attention in using this, to not break the semantics of
 --       `ai` keyword at scripting level
-edhContSTM :: EdhThreadState -> STM () -> STM ()
-edhContSTM !ets !actSTM =
+edhContSTM :: STM () -> EdhTx
+edhContSTM !actSTM !ets =
   writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets actSTM
 {-# INLINE edhContSTM #-}
 
 -- | Schedule an IO action to be performed in current Edh thread, but after
 -- current STM tx committed, and after some txs, those possibly already
--- scheduled
+-- scheduled.
 --
 -- NOTE this happens as part of current STM tx, so the actual action won't be
 --      scheduled if any subsequent Edh code within the tx throws without
 --      recovered
 -- CAVEAT pay special attention in using this, to not break the semantics of
 --       `ai` keyword at scripting level
-edhContIO :: EdhThreadState -> IO () -> STM ()
-edhContIO !ets !actIO = writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
+edhContIO :: IO () -> EdhTx
+edhContIO !actIO !ets = writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
 {-# INLINE edhContIO #-}
 
-
--- | The commonplace type of CPS exit for transactional Edh computations
-type EdhExit = EdhValue -> STM ()
-
-endOfEdh :: EdhExit
-endOfEdh _ = return ()
-{-# INLINE endOfEdh #-}
-
--- | Exit an Edh computation in CPS
---
--- @edh'in'tx ets@ is normally controlled by the `ai` keyword at scripting
--- level, this implements the semantics of it
-exitEdh :: EdhThreadState -> EdhExit -> EdhValue -> STM ()
-exitEdh !ets !exit !val = if edh'in'tx ets
-  then exit val
-  else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets $ exit val
-{-# INLINE exitEdh #-}
+-- | Perform the specified STM action within current Edh transaction
+edhInTxDo :: STM () -> EdhTx
+edhInTxDo !actSTM = const actSTM
+{-# INLINE edhInTxDo #-}
 
 
--- | Composable transactional computation, to be performed in an Edh thread
+-- | Composable transactional computation, to be performed in an Edh thread.
 --
 -- Note such an computation can write subsequent STM actions into the task
 --      queue of the thread state, so as to schedule some more computation
@@ -569,32 +557,56 @@ exitEdh !ets !exit !val = if edh'in'tx ets
 -- monadic
 type EdhTx = EdhThreadState -> STM ()
 
-exitEdhTx :: EdhExit -> EdhValue -> EdhTx
+-- | The commonplace type of CPS exit for transactional Edh computations
+type EdhTxExit = EdhValue -> EdhTx
+
+endOfEdh :: EdhTxExit
+endOfEdh _ _ = return ()
+{-# INLINE endOfEdh #-}
+
+-- | Exit an Edh computation from STM monad in CPS.
+--
+-- @edh'in'tx ets@ is normally controlled by the `ai` keyword at scripting
+-- level, this implements the semantics of it
+exitEdhSTM :: EdhThreadState -> EdhTxExit -> EdhValue -> STM ()
+exitEdhSTM !ets !exit !val = if edh'in'tx ets
+  then exit val ets
+  else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets $ exit val ets
+{-# INLINE exitEdhSTM #-}
+
+-- | Exit an Edh computation in CPS.
+--
+-- @edh'in'tx ets@ is normally controlled by the `ai` keyword at scripting
+-- level, this implements the semantics of it
+exitEdhTx :: EdhTxExit -> EdhValue -> EdhTx
 exitEdhTx !exit !val !ets = if edh'in'tx ets
-  then exit val
-  else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets $ exit val
+  then exit val ets
+  else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets $ exit val ets
 {-# INLINE exitEdhTx #-}
 
+-- | Start the specified Edh computation for running in the specified Edh
+-- thread.
 runEdhTx :: EdhThreadState -> EdhTx -> STM ()
 runEdhTx !ets !p = p ets
 {-# INLINE runEdhTx #-}
 
 
--- | Type for a procedure in host language that can be called from Edh code.
+-- | Type for a procedure in the host language (which is Haskell) that can be
+-- called from Edh code.
 --
 -- Note the top frame of the call stack from thread state is the one for the
 -- callee, that scope should have mounted the caller's scope entity, not a new
 -- entity in contrast to when an Edh procedure as the callee.
 type EdhHostProc -- such a procedure servs as the callee
   =  ArgsPack    -- ^ the pack of arguments
-  -> EdhExit -- ^ the CPS exit to return a value from this procedure
+  -> EdhTxExit -- ^ the CPS exit to return a value from this procedure
   -> EdhTx
 
 
--- | Type of an intrinsic infix operator in host language.
+-- | Type of an intrinsic infix operator in the host language (Haskell).
 --
 -- Note no stack frame is created/pushed when an intrinsic operator is called.
-type EdhIntrinsicOp = Expr -> Expr -> EdhExit -> EdhTx
+type EdhIntrinsicOp = Expr -> Expr -> EdhTxExit -> EdhTx
 
 data IntrinOpDefi = IntrinOpDefi {
     intrinsic'op'uniq :: !Unique
@@ -632,15 +644,15 @@ instance Show EventSink where
 -- | Fork a new Edh thread to run the specified event producer, but hold the 
 -- production until current thread has later started consuming events from the
 -- sink returned here.
-launchEventProducer :: EdhExit -> EventSink -> EdhTx -> EdhTx
-launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerProg !etsConsumer
+launchEventProducer :: EdhTxExit -> EventSink -> EdhTx -> EdhTx
+launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerTx !etsConsumer
   = do
     subcBefore <- readTVar subc
-    forkEdh etsConsumer $ \ !etsProducer -> do
+    runEdhTx etsConsumer $ forkEdh $ \ !etsProducer -> do
       subcNow <- readTVar subc
       when (subcNow == subcBefore) retry
-      producerProg etsProducer
-    exitEdh etsConsumer exit $ EdhSink sink
+      producerTx etsProducer
+    exitEdhSTM etsConsumer exit $ EdhSink sink
 
 
 -- Atop Haskell, most types in Edh the surface language, are for
@@ -1501,7 +1513,7 @@ mkHostClass !scope !className !allocator !classStore !superClasses = do
   return clsObj
  where
   fakeHostProc :: EdhHostProc
-  fakeHostProc _ !exit !ets = exitEdh ets exit nil
+  fakeHostProc _ !exit = exitEdhTx exit nil
 
   !metaClassObj =
     edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope

@@ -179,7 +179,7 @@ createEdhWorld !console = liftIO $ do
   return world
  where
   fakeHostProc :: EdhHostProc
-  fakeHostProc _ !exit !ets = exitEdh ets exit nil
+  fakeHostProc _ !exit = exitEdhTx exit nil
 
   genesisStmt :: StmtSrc
   genesisStmt = StmtSrc
