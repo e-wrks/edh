@@ -536,13 +536,15 @@ endOfEdh :: EdhTxExit
 endOfEdh _ _ = return ()
 {-# INLINE endOfEdh #-}
 
--- | Schedule forking of a GHC thread for an Edh thread to run the specified 
--- procedure.
+-- | Schedule forking of a GHC thread to bootstrap an Edh thread to run the
+-- specified Edh computation, with the specified thread state modifer applied
+-- before the computation is stated in the descendant thread.
 --
 -- NOTE this happens as part of current STM tx, the actual fork won't happen if
 --      any subsequent Edh code within the tx throws without recovered
-forkEdh :: EdhTx -> EdhTx
-forkEdh !p !etsForker = writeTBQueue (edh'fork'queue etsForker) (etsForker, p)
+forkEdh :: (EdhThreadState -> EdhThreadState) -> EdhTx -> EdhTx
+forkEdh !bootMod !p !etsForker =
+  writeTBQueue (edh'fork'queue etsForker) (etsForker, p . bootMod)
 {-# INLINE forkEdh #-}
 
 -- | Schedule an STM action to be performed in current Edh thread, but after
@@ -658,28 +660,11 @@ launchEventProducer :: EdhTxExit -> EventSink -> EdhTx -> EdhTx
 launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerTx !etsConsumer
   = do
     subcBefore <- readTVar subc
-    runEdhTx etsConsumer $ forkEdh $ \ !etsProducer -> do
+    runEdhTx etsConsumer $ forkEdh id $ \ !etsProducer -> do
       subcNow <- readTVar subc
       when (subcNow == subcBefore) retry
       producerTx etsProducer
     exitEdhSTM etsConsumer exit $ EdhSink sink
-
-
--- Atop Haskell, most types in Edh the surface language, are for
--- immutable values, besides dict and list, the only other mutable
--- data structure in Edh, is the entity, an **entity** is a set of
--- mutable attributes.
---
--- After applied a set of rules/constraints about how attributes
--- of an entity can be retrived and altered, it becomes an object.
---
--- Theoretically an entity is not necessarily mandated to have an
--- `identity` attribute among others, while practically the memory
--- address for physical storage of the attribute set, naturally
--- serves an `identity` attribute in single-process + single-run
--- scenario. Distributed programs, especially using a separate
--- database for storage, will tend to define a generated UUID 
--- attribute or the like.
 
 
 -- | executable precedures
@@ -738,6 +723,25 @@ instance Hashable EdhCallable where
     s `hashWithSalt` getter `hashWithSalt` setter
 
 
+-- Atop Haskell, most types in Edh the surface language, are for
+-- immutable values, besides dict and list, the only other mutable
+-- data structure in Edh, is 'EntityStore', an **entity** is a set
+-- of mutable attributes.
+--
+-- After applied a set of rules/constraints about how attributes
+-- of an entity can be retrived and altered, it becomes an object,
+-- while a class is just an object with a little more special
+-- semantics.
+--
+-- Theoretically an entity is not necessarily mandated to have an
+-- `identity` attribute among others, while practically the memory
+-- address for physical storage of the attribute set, naturally
+-- serves an `identity` attribute in single-process + single-run
+-- scenario. Distributed programs, especially using a separate
+-- database for storage, will tend to define a generated UUID 
+-- attribute or the like.
+
+
 -- | everything in Edh is a value
 data EdhValue =
   -- | type itself is a kind of (immutable) value
@@ -769,9 +773,11 @@ data EdhValue =
   | EdhObject !Object
 
   -- | a callable procedure
-  | EdhProcedure !EdhCallable
+  -- with the effect outer stack if resolved as an effectful artifact
+  | EdhProcedure !EdhCallable !(Maybe [Scope])
   -- | a callable procedure bound to a specific this object and that object
-  | EdhBoundProc !EdhCallable !Object !Object
+  -- with the effect outer stack if resolved as an effectful artifact
+  | EdhBoundProc !EdhCallable !Object !Object !(Maybe [Scope])
 
   -- * flow control
   | EdhBreak
@@ -805,37 +811,37 @@ data EdhValue =
   | EdhExpr !Unique !Expr !Text
 
 instance Show EdhValue where
-  show (EdhType t)                    = show t
-  show EdhNil                         = "nil"
-  show (EdhDecimal v                ) = showDecimal v
-  show (EdhBool    v                ) = if v then "true" else "false"
-  show (EdhBlob    b                ) = "<blob#" <> show (B.length b) <> ">"
-  show (EdhString  v                ) = show v
-  show (EdhSymbol  v                ) = show v
-  show (EdhUUID    v                ) = "UUID('" <> UUID.toString v <> "')"
+  show (EdhType t)              = show t
+  show EdhNil                   = "nil"
+  show (EdhDecimal v          ) = showDecimal v
+  show (EdhBool    v          ) = if v then "true" else "false"
+  show (EdhBlob    b          ) = "<blob#" <> show (B.length b) <> ">"
+  show (EdhString  v          ) = show v
+  show (EdhSymbol  v          ) = show v
+  show (EdhUUID    v          ) = "UUID('" <> UUID.toString v <> "')"
 
-  show (EdhPair k v                 ) = show k <> ":" <> show v
-  show (EdhArgsPack  v              ) = show v
+  show (EdhPair k v           ) = show k <> ":" <> show v
+  show (EdhArgsPack v         ) = show v
 
-  show (EdhDict      v              ) = show v
-  show (EdhList      v              ) = show v
+  show (EdhDict     v         ) = show v
+  show (EdhList     v         ) = show v
 
-  show (EdhObject    v              ) = show v
+  show (EdhObject   v         ) = show v
 
-  show (EdhProcedure !pc            ) = "<" ++ show pc ++ ">"
-  show (EdhBoundProc !pc _this _that) = "<bound:" ++ show pc ++ ">"
+  show (EdhProcedure !pc _    ) = "<" ++ show pc ++ ">"
+  show (EdhBoundProc !pc _ _ _) = "<bound:" ++ show pc ++ ">"
 
-  show EdhBreak                       = "<break>"
-  show EdhContinue                    = "<continue>"
-  show (EdhCaseClose v)               = "<caseclose: " ++ show v ++ ">"
-  show EdhCaseOther                   = "<caseother>"
-  show EdhFallthrough                 = "<fallthrough>"
-  show EdhRethrow                     = "<rethrow>"
-  show (EdhYield  v     )             = "<yield: " ++ show v ++ ">"
-  show (EdhReturn v     )             = "<return: " ++ show v ++ ">"
-  show (EdhDefault _ x _)             = "<default: " ++ show x ++ ">"
+  show EdhBreak                 = "<break>"
+  show EdhContinue              = "<continue>"
+  show (EdhCaseClose v)         = "<caseclose: " ++ show v ++ ">"
+  show EdhCaseOther             = "<caseother>"
+  show EdhFallthrough           = "<fallthrough>"
+  show EdhRethrow               = "<rethrow>"
+  show (EdhYield  v     )       = "<yield: " ++ show v ++ ">"
+  show (EdhReturn v     )       = "<return: " ++ show v ++ ">"
+  show (EdhDefault _ x _)       = "<default: " ++ show x ++ ">"
 
-  show (EdhSink v       )             = show v
+  show (EdhSink v       )       = show v
 
   show (EdhNamedValue n v@EdhNamedValue{}) =
     -- Edh operators are all left-associative, parenthesis needed
@@ -857,25 +863,25 @@ instance Show EdhValue where
 -- for types of:  object/dict/list
 
 instance Eq EdhValue where
-  EdhType x       == EdhType y       = x == y
-  EdhNil          == EdhNil          = True
-  EdhDecimal x    == EdhDecimal y    = x == y
-  EdhBool    x    == EdhBool    y    = x == y
-  EdhBlob    x    == EdhBlob    y    = x == y
-  EdhString  x    == EdhString  y    = x == y
-  EdhSymbol  x    == EdhSymbol  y    = x == y
-  EdhUUID    x    == EdhUUID    y    = x == y
+  EdhType x        == EdhType y        = x == y
+  EdhNil           == EdhNil           = True
+  EdhDecimal x     == EdhDecimal y     = x == y
+  EdhBool    x     == EdhBool    y     = x == y
+  EdhBlob    x     == EdhBlob    y     = x == y
+  EdhString  x     == EdhString  y     = x == y
+  EdhSymbol  x     == EdhSymbol  y     = x == y
+  EdhUUID    x     == EdhUUID    y     = x == y
 
-  EdhPair x'k x'v == EdhPair y'k y'v = x'k == y'k && x'v == y'v
-  EdhArgsPack  x  == EdhArgsPack  y  = x == y
+  EdhPair x'k x'v  == EdhPair y'k y'v  = x'k == y'k && x'v == y'v
+  EdhArgsPack x    == EdhArgsPack y    = x == y
 
-  EdhDict      x  == EdhDict      y  = x == y
-  EdhList      x  == EdhList      y  = x == y
+  EdhDict     x    == EdhDict     y    = x == y
+  EdhList     x    == EdhList     y    = x == y
 
-  EdhObject    x  == EdhObject    y  = x == y
+  EdhObject   x    == EdhObject   y    = x == y
 
-  EdhProcedure x  == EdhProcedure y  = x == y
-  EdhBoundProc x x'this x'that == EdhBoundProc y y'this y'that =
+  EdhProcedure x _ == EdhProcedure y _ = x == y
+  EdhBoundProc x x'this x'that _ == EdhBoundProc y y'this y'that _ =
     x == y && x'this == y'this && x'that == y'that
 
 
@@ -905,25 +911,25 @@ instance Eq EdhValue where
   _                           == _                           = False
 
 instance Hashable EdhValue where
-  hashWithSalt s (EdhType x)      = hashWithSalt s $ 1 + fromEnum x
-  hashWithSalt s EdhNil           = hashWithSalt s (0 :: Int)
-  hashWithSalt s (EdhDecimal x  ) = hashWithSalt s x
-  hashWithSalt s (EdhBool    x  ) = hashWithSalt s x
-  hashWithSalt s (EdhBlob    x  ) = hashWithSalt s x
-  hashWithSalt s (EdhString  x  ) = hashWithSalt s x
-  hashWithSalt s (EdhSymbol  x  ) = hashWithSalt s x
-  hashWithSalt s (EdhUUID    x  ) = hashWithSalt s x
+  hashWithSalt s (EdhType x)        = hashWithSalt s $ 1 + fromEnum x
+  hashWithSalt s EdhNil             = hashWithSalt s (0 :: Int)
+  hashWithSalt s (EdhDecimal x    ) = hashWithSalt s x
+  hashWithSalt s (EdhBool    x    ) = hashWithSalt s x
+  hashWithSalt s (EdhBlob    x    ) = hashWithSalt s x
+  hashWithSalt s (EdhString  x    ) = hashWithSalt s x
+  hashWithSalt s (EdhSymbol  x    ) = hashWithSalt s x
+  hashWithSalt s (EdhUUID    x    ) = hashWithSalt s x
 
-  hashWithSalt s (EdhPair k v   ) = s `hashWithSalt` k `hashWithSalt` v
-  hashWithSalt s (EdhArgsPack  x) = hashWithSalt s x
+  hashWithSalt s (EdhPair k v     ) = s `hashWithSalt` k `hashWithSalt` v
+  hashWithSalt s (EdhArgsPack x   ) = hashWithSalt s x
 
-  hashWithSalt s (EdhDict      x) = hashWithSalt s x
-  hashWithSalt s (EdhList      x) = hashWithSalt s x
+  hashWithSalt s (EdhDict     x   ) = hashWithSalt s x
+  hashWithSalt s (EdhList     x   ) = hashWithSalt s x
 
-  hashWithSalt s (EdhObject    x) = hashWithSalt s x
+  hashWithSalt s (EdhObject   x   ) = hashWithSalt s x
 
-  hashWithSalt s (EdhProcedure x) = hashWithSalt s x
-  hashWithSalt s (EdhBoundProc x this that) =
+  hashWithSalt s (EdhProcedure x _) = hashWithSalt s x
+  hashWithSalt s (EdhBoundProc x this that _) =
     s `hashWithSalt` x `hashWithSalt` this `hashWithSalt` that
 
   hashWithSalt s EdhBreak    = hashWithSalt s (-1 :: Int)
@@ -1378,47 +1384,37 @@ edhTypeOf (EdhObject o)            = case edh'obj'store o of
       Right{} -> HostClassType
   HostStore{} -> ObjectType -- TODO add a @HostObjectType@ to distinguish?
 
-edhTypeOf (EdhProcedure pc) = case pc of
-  EdhIntrOp{} -> IntrinsicType
-  EdhOprtor _ _ (ProcDefi _ _ _ (ProcDecl _ _ pb)) -> case pb of
-    Left  _ -> OperatorType
-    Right _ -> HostOperType
-  EdhMethod (ProcDefi _ _ _ (ProcDecl _ _ pb)) -> case pb of
-    Left  _ -> MethodType
-    Right _ -> HostMethodType
-  EdhGnrtor (ProcDefi _ _ _ (ProcDecl _ _ pb)) -> case pb of
-    Left  _ -> GeneratorType
-    Right _ -> HostGenrType
-  EdhIntrpr{}     -> InterpreterType
-  EdhPrducr{}     -> ProducerType
-  EdhDescriptor{} -> DescriptorType
-edhTypeOf (EdhBoundProc pc _this _that) = case pc of
-  EdhIntrOp{} -> IntrinsicType
-  EdhOprtor _ _ (ProcDefi _ _ _ (ProcDecl _ _ pb)) -> case pb of
-    Left  _ -> OperatorType
-    Right _ -> HostOperType
-  EdhMethod (ProcDefi _ _ _ (ProcDecl _ _ pb)) -> case pb of
-    Left  _ -> MethodType
-    Right _ -> HostMethodType
-  EdhGnrtor (ProcDefi _ _ _ (ProcDecl _ _ pb)) -> case pb of
-    Left  _ -> GeneratorType
-    Right _ -> HostGenrType
-  EdhIntrpr{}     -> InterpreterType
-  EdhPrducr{}     -> ProducerType
-  EdhDescriptor{} -> DescriptorType
+edhTypeOf (EdhProcedure pc _    ) = edhProcTypeOf pc
+edhTypeOf (EdhBoundProc pc _ _ _) = edhProcTypeOf pc
 
-edhTypeOf EdhBreak            = BreakType
-edhTypeOf EdhContinue         = ContinueType
-edhTypeOf EdhCaseClose{}      = CaseCloseType
-edhTypeOf EdhCaseOther        = CaseOtherType
-edhTypeOf EdhFallthrough      = FallthroughType
-edhTypeOf EdhRethrow          = RethrowType
-edhTypeOf EdhYield{}          = YieldType
-edhTypeOf EdhReturn{}         = ReturnType
-edhTypeOf EdhDefault{}        = DefaultType
-edhTypeOf EdhSink{}           = SinkType
-edhTypeOf (EdhNamedValue _ v) = edhTypeOf v
-edhTypeOf EdhExpr{}           = ExprType
+edhTypeOf EdhBreak                = BreakType
+edhTypeOf EdhContinue             = ContinueType
+edhTypeOf EdhCaseClose{}          = CaseCloseType
+edhTypeOf EdhCaseOther            = CaseOtherType
+edhTypeOf EdhFallthrough          = FallthroughType
+edhTypeOf EdhRethrow              = RethrowType
+edhTypeOf EdhYield{}              = YieldType
+edhTypeOf EdhReturn{}             = ReturnType
+edhTypeOf EdhDefault{}            = DefaultType
+edhTypeOf EdhSink{}               = SinkType
+edhTypeOf (EdhNamedValue _ v)     = edhTypeOf v
+edhTypeOf EdhExpr{}               = ExprType
+
+edhProcTypeOf :: EdhCallable -> EdhTypeValue
+edhProcTypeOf = \case
+  EdhIntrOp{} -> IntrinsicType
+  EdhOprtor _ _ (ProcDefi _ _ _ (ProcDecl _ _ pb)) -> case pb of
+    Left  _ -> OperatorType
+    Right _ -> HostOperType
+  EdhMethod (ProcDefi _ _ _ (ProcDecl _ _ pb)) -> case pb of
+    Left  _ -> MethodType
+    Right _ -> HostMethodType
+  EdhGnrtor (ProcDefi _ _ _ (ProcDecl _ _ pb)) -> case pb of
+    Left  _ -> GeneratorType
+    Right _ -> HostGenrType
+  EdhIntrpr{}     -> InterpreterType
+  EdhPrducr{}     -> ProducerType
+  EdhDescriptor{} -> DescriptorType
 
 
 mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
@@ -1431,8 +1427,8 @@ mkIntrinsicOp !world !opSym !iop = do
             UsageError
             ("No precedence declared in the world for operator: " <> opSym)
         $ EdhCallContext "<edh>" []
-    Just (preced, _) ->
-      return $ EdhProcedure $ EdhIntrOp preced $ IntrinOpDefi u opSym iop
+    Just (preced, _) -> return
+      $ EdhProcedure (EdhIntrOp preced $ IntrinOpDefi u opSym iop) Nothing
 
 
 mkHostProc
@@ -1444,15 +1440,18 @@ mkHostProc
   -> STM EdhValue
 mkHostProc !scope !vc !nm !p !args = do
   u <- unsafeIOToSTM newUnique
-  return $ EdhProcedure $ vc ProcDefi
-    { edh'procedure'ident = u
-    , edh'procedure'name  = AttrByName nm
-    , edh'procedure'lexi  = scope
-    , edh'procedure'decl  = ProcDecl { edh'procedure'addr = NamedAttr nm
-                                     , edh'procedure'args = args
-                                     , edh'procedure'body = Right p
-                                     }
-    }
+  return $ EdhProcedure
+    (vc ProcDefi
+      { edh'procedure'ident = u
+      , edh'procedure'name  = AttrByName nm
+      , edh'procedure'lexi  = scope
+      , edh'procedure'decl  = ProcDecl { edh'procedure'addr = NamedAttr nm
+                                       , edh'procedure'args = args
+                                       , edh'procedure'body = Right p
+                                       }
+      }
+    )
+    Nothing
 
 mkSymbolicHostProc
   :: Scope
@@ -1463,17 +1462,20 @@ mkSymbolicHostProc
   -> STM EdhValue
 mkSymbolicHostProc !scope !vc !sym !p !args = do
   u <- unsafeIOToSTM newUnique
-  return $ EdhProcedure $ vc ProcDefi
-    { edh'procedure'ident = u
-    , edh'procedure'name  = AttrBySym sym
-    , edh'procedure'lexi  = scope
-    , edh'procedure'decl  = ProcDecl
-                              { edh'procedure'addr = SymbolicAttr
-                                                       $ symbolName sym
-                              , edh'procedure'args = args
-                              , edh'procedure'body = Right p
-                              }
-    }
+  return $ EdhProcedure
+    (vc ProcDefi
+      { edh'procedure'ident = u
+      , edh'procedure'name  = AttrBySym sym
+      , edh'procedure'lexi  = scope
+      , edh'procedure'decl  = ProcDecl
+                                { edh'procedure'addr = SymbolicAttr
+                                                         $ symbolName sym
+                                , edh'procedure'args = args
+                                , edh'procedure'body = Right p
+                                }
+      }
+    )
+    Nothing
 
 
 mkHostProperty
@@ -1505,7 +1507,7 @@ mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
           , edh'procedure'body = Right setterProc
           }
         }
-  return $ EdhProcedure $ EdhDescriptor getter setter
+  return $ EdhProcedure (EdhDescriptor getter setter) Nothing
 
 
 mkHostClass

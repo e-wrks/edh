@@ -49,9 +49,10 @@ driveEdhProgram !haltResult !progCtx !prog = do
           `orElse` (Just <$> readTBQueue forkQueue)
           )
         >>= \case
-              Nothing                       -> return () -- Edh program halted, done
+              -- Edh program halted, done
+              Nothing                       -> return ()
               Just (!etsForker, !actForkee) -> do
-                etsForkee <- deriveState etsForker
+                etsForkee <- deriveForkeeState etsForker
                 -- bootstrap on the descendant thread
                 atomically
                   $ writeTBQueue (edh'task'queue etsForkee)
@@ -66,8 +67,8 @@ driveEdhProgram !haltResult !progCtx !prog = do
                 forkDescendants
      where
       -- derive thread state for the descendant thread
-      deriveState :: EdhThreadState -> IO EdhThreadState
-      deriveState !etsForker = do
+      deriveForkeeState :: EdhThreadState -> IO EdhThreadState
+      deriveForkeeState !etsForker = do
         !descQueue  <- newTBQueueIO 200
         !perceivers <- newTVarIO []
         !defers     <- newTVarIO []
@@ -78,7 +79,9 @@ driveEdhProgram !haltResult !progCtx !prog = do
           , edh'defers     = defers
           -- forkee inherits call stack etc in the context from forker, so
           -- effect resolution and far-reaching exception handlers can work.
-          , edh'context    = fromCtx { edh'ctx'exporting    = False
+          , edh'context    = fromCtx { edh'ctx'match        = true
+                                     , edh'ctx'pure         = False
+                                     , edh'ctx'exporting    = False
                                      , edh'ctx'eff'defining = False
                                      }
           , edh'fork'queue = edh'fork'queue etsForker
