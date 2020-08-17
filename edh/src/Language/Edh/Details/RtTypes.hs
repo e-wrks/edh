@@ -505,6 +505,37 @@ data DeferRecord = DeferRecord
   !(EdhThreadState -> STM ())
 
 
+-- | Perform a subsquent STM action within an Edh thread, honoring 
+-- @edh'in'tx ets@ in deciding whether to do it in current STM transaction, or
+-- to do it in a separate, later STM transaction, which is scheduled by putting
+-- the action into the Edh thread's task queue.
+--
+-- @edh'in'tx ets@ is normally controlled by the `ai` keyword at scripting
+-- level, this implements the semantics of it
+edhDoSTM :: EdhThreadState -> STM () -> STM ()
+edhDoSTM !ets !act = if edh'in'tx ets
+  then act
+  else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets act
+{-# INLINE edhDoSTM #-}
+
+
+-- | Composable transactional computation, to be performed in an Edh thread.
+--
+-- Note such an computation can write subsequent STM actions into the task
+--      queue of the thread state, so as to schedule some more computation
+--      to be performed in subsequent, separate STM transactions
+--
+-- this is somewhat similar to @ 'ReaderT' 'EdhThreadState' 'STM' @, but not
+-- monadic
+type EdhTx = EdhThreadState -> STM ()
+
+-- | The commonplace type of CPS exit for transactional Edh computations
+type EdhTxExit = EdhValue -> EdhTx
+
+endOfEdh :: EdhTxExit
+endOfEdh _ _ = return ()
+{-# INLINE endOfEdh #-}
+
 -- | Schedule forking of a GHC thread for an Edh thread to run the specified 
 -- procedure.
 --
@@ -541,54 +572,33 @@ edhContIO :: IO () -> EdhTx
 edhContIO !actIO !ets = writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
 {-# INLINE edhContIO #-}
 
--- | Perform the specified STM action within current Edh transaction
-edhInTxDo :: STM () -> EdhTx
-edhInTxDo !actSTM = const actSTM
-{-# INLINE edhInTxDo #-}
+-- | Start the specified Edh computation for running in current Edh thread with
+-- the specified state.
+runEdhTx :: EdhThreadState -> EdhTx -> STM ()
+runEdhTx !ets !p = p ets
+{-# INLINE runEdhTx #-}
 
-
--- | Composable transactional computation, to be performed in an Edh thread.
---
--- Note such an computation can write subsequent STM actions into the task
---      queue of the thread state, so as to schedule some more computation
---      to be performed in subsequent, separate STM transactions
---
--- this is somewhat similar to @ 'ReaderT' 'EdhThreadState' 'STM' @, but not
--- monadic
-type EdhTx = EdhThreadState -> STM ()
-
--- | The commonplace type of CPS exit for transactional Edh computations
-type EdhTxExit = EdhValue -> EdhTx
-
-endOfEdh :: EdhTxExit
-endOfEdh _ _ = return ()
-{-# INLINE endOfEdh #-}
-
--- | Exit an Edh computation from STM monad in CPS.
---
--- @edh'in'tx ets@ is normally controlled by the `ai` keyword at scripting
--- level, this implements the semantics of it
-exitEdhSTM :: EdhThreadState -> EdhTxExit -> EdhValue -> STM ()
-exitEdhSTM !ets !exit !val = if edh'in'tx ets
-  then exit val ets
-  else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets $ exit val ets
-{-# INLINE exitEdhSTM #-}
+-- | Augment the specified Edh computation, to run in the specified state,
+-- regardless of whatever previous state the thread has.
+edhSwitchState :: EdhThreadState -> EdhTx -> EdhTx
+edhSwitchState !ets !etx = const $ edhDoSTM ets $ etx ets
+{-# INLINE edhSwitchState #-}
 
 -- | Exit an Edh computation in CPS.
 --
 -- @edh'in'tx ets@ is normally controlled by the `ai` keyword at scripting
 -- level, this implements the semantics of it
 exitEdhTx :: EdhTxExit -> EdhValue -> EdhTx
-exitEdhTx !exit !val !ets = if edh'in'tx ets
-  then exit val ets
-  else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets $ exit val ets
+exitEdhTx !exit !val !ets = edhDoSTM ets $ exit val ets
 {-# INLINE exitEdhTx #-}
 
--- | Start the specified Edh computation for running in the specified Edh
--- thread.
-runEdhTx :: EdhThreadState -> EdhTx -> STM ()
-runEdhTx !ets !p = p ets
-{-# INLINE runEdhTx #-}
+-- | Exit an Edh computation from STM monad in CPS.
+--
+-- @edh'in'tx ets@ is normally controlled by the `ai` keyword at scripting
+-- level, this implements the semantics of it
+exitEdhSTM :: EdhThreadState -> EdhTxExit -> EdhValue -> STM ()
+exitEdhSTM !ets !exit !val = edhDoSTM ets $ exit val ets
+{-# INLINE exitEdhSTM #-}
 
 
 -- | Type for a procedure in the host language (which is Haskell) that can be
@@ -938,6 +948,8 @@ instance Hashable EdhValue where
 
 edhDeCaseClose :: EdhValue -> EdhValue
 edhDeCaseClose (EdhCaseClose !val) = edhDeCaseClose val
+edhDeCaseClose EdhCaseOther        = nil
+edhDeCaseClose EdhFallthrough      = nil
 edhDeCaseClose !val                = val
 
 edhUltimate :: EdhValue -> EdhValue
