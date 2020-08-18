@@ -794,13 +794,15 @@ data EdhValue =
   -- | prefer better efforted result, but can default to the specified expr
   -- if there's no better result applicable
   -- 
-  -- this is used to signal try-next-impl semantics similar to NotImplemented
-  -- in Python.
+  -- similar to NotImplemented as in Python, this is used to signal
+  -- try-next-impl semantics:
   --
-  -- `return default { throw xxx }` can be used to signal that it has to have
-  -- some more concrete implementation;
-  -- and `return default { pass }` can be used to prefer an even more deferred
-  -- default if any exists, or `nil` if none.
+  -- - @return default { throw xxx }@ can be used to signal that it has to have
+  --   some more concrete implementation
+  --
+  -- - @return default nil@ can be used to prefer an even more deferred default
+  --   if any exists, then an all-nil default chain will finally result in
+  --   @nil@, i.e. non-exist
   | EdhDefault !Unique !Expr !(Maybe EdhThreadState)
 
   -- | event sink
@@ -961,10 +963,10 @@ edhDeCaseClose EdhFallthrough      = nil
 edhDeCaseClose !val                = val
 
 edhUltimate :: EdhValue -> EdhValue
-edhUltimate (EdhNamedValue _ v) = edhDeCaseClose v
-edhUltimate (EdhReturn v      ) = edhDeCaseClose v
-edhUltimate (EdhYield  v      ) = edhDeCaseClose v
-edhUltimate v                   = edhDeCaseClose v
+edhUltimate (EdhNamedValue _ !v) = edhUltimate v
+edhUltimate (EdhReturn !v      ) = edhUltimate v
+edhUltimate (EdhYield  !v      ) = edhUltimate v
+edhUltimate !v                   = edhDeCaseClose v
 
 
 nil :: EdhValue
