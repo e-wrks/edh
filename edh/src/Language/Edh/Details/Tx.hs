@@ -79,7 +79,8 @@ driveEdhProgram !haltResult !progCtx !prog = do
           , edh'defers     = defers
           -- forkee inherits call stack etc in the context from forker, so
           -- effect resolution and far-reaching exception handlers can work.
-          , edh'context    = fromCtx { edh'ctx'match        = true
+          , edh'context    = fromCtx { edh'ctx'genr'caller  = Nothing
+                                     , edh'ctx'match        = true
                                      , edh'ctx'pure         = False
                                      , edh'ctx'exporting    = False
                                      , edh'ctx'eff'defining = False
@@ -157,16 +158,23 @@ driveEdhProgram !haltResult !progCtx !prog = do
     !reactPerceivers <- newTVarIO []
     !reactDefers     <- newTVarIO []
     !reactTaskQueue  <- newTBQueueIO 100
-    let !etsPerceiver = etsOrigin
-          { edh'in'tx      = False
-          , edh'task'queue = reactTaskQueue
-          , edh'perceivers = reactPerceivers
-          , edh'defers     = reactDefers
-          , edh'context    = (edh'context etsOrigin) { edh'ctx'match = ev }
-          }
+    let
+      !etsPerceiver = etsOrigin
+        { edh'in'tx      = False
+        , edh'task'queue = reactTaskQueue
+        , edh'perceivers = reactPerceivers
+        , edh'defers     = reactDefers
+        , edh'context = (edh'context etsOrigin) { edh'ctx'genr'caller  = Nothing
+                                                , edh'ctx'match        = ev
+          -- todo should set pure to True or False here? or just inherit as is?
+                                             -- , edh'ctx'pure         = True
+                                                , edh'ctx'exporting    = False
+                                                , edh'ctx'eff'defining = False
+                                                }
+        }
     atomically $ writeTBQueue reactTaskQueue $ EdhDoSTM etsPerceiver $ reaction
-      etsPerceiver
       breakThread
+      etsPerceiver
     driveEdhThread reactDefers reactTaskQueue
     atomically $ readTVar breakThread
   drivePerceivers :: [(EdhValue, PerceiveRecord)] -> IO Bool

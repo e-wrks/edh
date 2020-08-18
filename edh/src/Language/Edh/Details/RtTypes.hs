@@ -420,11 +420,13 @@ data EdhWorld = EdhWorld {
   , edh'world'modules :: !(TMVar (Map.HashMap ModuleId (TMVar EdhValue)))
     -- | for console logging, input and output
   , edh'world'console :: !EdhConsole
+    -- wrapping a scope as object for reflective purpose
+  , edh'scope'wrapper :: !(Scope -> STM Object)
     -- wrapping a host exceptin as an Edh object
   , edh'exception'wrapper :: !(SomeException -> STM Object)
   }
 instance Eq EdhWorld where
-  EdhWorld x'root _ _ _ _ == EdhWorld y'root _ _ _ _ =
+  EdhWorld x'root _ _ _ _ _ == EdhWorld y'root _ _ _ _ _ =
     edh'scope'this x'root == edh'scope'this y'root
 
 type ModuleId = Text
@@ -496,7 +498,7 @@ data PerceiveRecord  = PerceiveRecord
   -- | origin ets upon the perceiver is armed
   !EdhThreadState
   -- | reacting action per event received, event value is context match
-  !(EdhThreadState -> TVar Bool -> STM ())
+  !(TVar Bool -> EdhTx)
 data DeferRecord = DeferRecord
   -- | origin ets upon the deferred action is scheduled
   !EdhThreadState
@@ -1518,12 +1520,12 @@ mkHostClass
   -> [Object]
   -> STM Object
 mkHostClass !scope !className !allocator !classStore !superClasses = do
-  !clsIdent <- unsafeIOToSTM newUnique
-  !ssCls    <- newTVar superClasses
-  let clsProc = ProcDefi clsIdent (AttrByName className) scope
+  !idCls <- unsafeIOToSTM newUnique
+  !ssCls <- newTVar superClasses
+  let !clsProc = ProcDefi idCls (AttrByName className) scope
         $ ProcDecl (NamedAttr className) (PackReceiver []) (Right fakeHostProc)
-      cls    = Class clsProc classStore allocator
-      clsObj = Object clsIdent (ClassStore cls) metaClassObj ssCls
+      !cls    = Class clsProc classStore allocator
+      !clsObj = Object idCls (ClassStore cls) metaClassObj ssCls
   return clsObj
  where
   fakeHostProc :: EdhHostProc
@@ -1533,44 +1535,53 @@ mkHostClass !scope !className !allocator !classStore !superClasses = do
     edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
 
 
--- | A host class procedure run with the class object's static store as
--- contextual scope entity, and the class object as @this/that@ object,
--- it should populate the static attributes for the class, mostly methods,
--- and possibly shared static values for object instances of the class.
---
--- NOTE the class name is available from the contextual procedure definition,
---      which is also the @edh'class'proc@ in the 'Class' record.
-type EdhHostClassProc = STM () -> EdhTx
-
-defineHostClass
-  :: EdhThreadState
-  -> Text
-  -> EdhObjectAllocator
-  -> EdhHostClassProc
-  -> (Object -> STM ())
-  -> STM ()
-defineHostClass !ets !className !allocator !hostCtor !exit = do
-  !hsCls  <- iopdEmpty
-  !clsObj <- mkHostClass scope className allocator hsCls []
-  let
-    !cls = case edh'obj'store clsObj of
-      ClassStore !c -> c
-      _             -> error "bug: mkHostClass gave non-class object"
-    clsScope = Scope hsCls
-                     clsObj
-                     clsObj
-                     defaultEdhExcptHndlr
-                     (edh'class'proc cls)
-                     (edh'ctx'stmt ctx)
-                     []
-
-    etsCtor = ets
-      { edh'context = ctx { edh'ctx'stack = clsScope <| edh'ctx'stack ctx }
-      }
-  runEdhTx etsCtor $ hostCtor $ exit clsObj
+objectScope :: Object -> (Scope -> STM ()) -> STM ()
+objectScope !obj !exit = do
+  !es <- case edh'obj'store obj of
+    HashStore  !hs             -> return hs
+    ClassStore (Class _ !cs _) -> return cs
+    HostStore  _               -> iopdEmpty -- todo should err out instead?
+  let scope = Scope { edh'scope'entity  = es
+                    , edh'scope'this    = obj
+                    , edh'scope'that    = obj
+                    , edh'excpt'hndlr   = defaultEdhExcptHndlr
+                    , edh'scope'proc    = clsProc
+                    , edh'scope'caller  = objCreStmt
+                    , edh'effects'stack = []
+                    }
+      clsObj  = edh'obj'class obj
+      clsProc = case edh'obj'store clsObj of
+        ClassStore (Class !cp _ _) -> cp
+        _ -> -- todo should err out instead?
+          ProcDefi (edh'obj'ident clsObj) (AttrByName "<bogus-class>") scope
+            $ ProcDecl
+                (NamedAttr "<bogus-class>")
+                (PackReceiver [])
+                (Right fakeHostProc)
+  exit scope
  where
-  !ctx   = edh'context ets
-  !scope = contextScope ctx
+  fakeHostProc :: EdhHostProc
+  fakeHostProc _ !exit' = exitEdhTx exit' nil
+  objCreStmt :: StmtSrc
+  objCreStmt = StmtSrc
+    ( SourcePos { sourceName   = "<creation>"
+                , sourceLine   = mkPos 1
+                , sourceColumn = mkPos 1
+                }
+    , VoidStmt
+    )
+
+
+-- | Create a reflective object capturing the specified scope as from the
+-- specified context
+--
+-- todo currently only lexical context is recorded, the call frames may
+--      be needed in the future
+mkScopeWrapper :: Context -> Scope -> STM Object
+mkScopeWrapper !ctx !scope = edhWrapScope scope
+ where
+  !world       = edh'ctx'world ctx
+  edhWrapScope = edh'scope'wrapper world
 
 
 data EdhIndex = EdhIndex !Int | EdhAny | EdhAll | EdhSlice {

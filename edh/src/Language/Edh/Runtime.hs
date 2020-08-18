@@ -58,11 +58,6 @@ createEdhWorld !console = liftIO $ do
     rootScope =
       Scope hsRoot rootObj rootObj defaultEdhExcptHndlr rootProc genesisStmt []
 
-    scopeProc = ProcDefi idScope (AttrByName "scope") rootScope
-      $ ProcDecl (NamedAttr "scope") (PackReceiver []) (Right fakeHostProc)
-    scopeClass    = Class scopeProc hsScope scopeAllocator
-    scopeClassObj = Object idScope (ClassStore scopeClass) metaClassObj ssScope
-
   atomically
     $  (flip iopdUpdate hsMeta =<<)
     $  sequence
@@ -74,8 +69,7 @@ createEdhWorld !console = liftIO $ do
        | (nm, getter, setter) <- [("name", mthClassNameGetter, Nothing)]
        ]
 
-  !hsScope <-
-    -- TODO port eval/get/put/attrs methods
+  !hsScope <- -- TODO port eval/get/put/attrs methods
     atomically
     $  (iopdFromList =<<)
     $  sequence
@@ -88,8 +82,28 @@ createEdhWorld !console = liftIO $ do
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
        | (nm, getter, setter) <- [("outer", mthScopeOuterGetter, Nothing)]
        ]
+  let
+    scopeAllocator !ets (ArgsPack _args !kwargs) !exit =
+      case odLookup (AttrByName "ofObj") kwargs of
+        Just !val -> case val of
+          EdhObject !obj -> objectScope obj
+            $ \ !objScope -> exit =<< HostStore <$> newTVar (toDyn objScope)
+          _ -> throwEdhSTM ets UsageError $ "not an object but a " <> T.pack
+            (edhTypeNameOf val)
+        Nothing -> exit =<< HostStore <$> newTVar
+          (toDyn $ contextScope $ edh'context ets)
   !clsScope <- atomically
     $ mkHostClass rootScope "scope" scopeAllocator hsScope []
+  let edhWrapScope :: Scope -> STM Object
+      edhWrapScope !scope = do
+        !idScope <- unsafeIOToSTM newUnique
+        !hs      <- newTVar $ toDyn scope
+        !ss      <- newTVar []
+        return Object { edh'obj'ident  = idScope
+                      , edh'obj'store  = HostStore hs
+                      , edh'obj'class  = clsScope
+                      , edh'obj'supers = ss
+                      }
   atomically $ iopdUpdate [(AttrByName "scope", EdhObject clsScope)] hsRoot
 
   !hsErrCls <-
@@ -173,6 +187,7 @@ createEdhWorld !console = liftIO $ do
                        , edh'world'operators   = opPD
                        , edh'world'modules     = modus
                        , edh'world'console     = console
+                       , edh'scope'wrapper     = edhWrapScope
                        , edh'exception'wrapper = edhWrapException
                        }
 
@@ -205,27 +220,6 @@ createEdhWorld !console = liftIO $ do
       exitEdh ets exit $ attrKeyValue $ edh'procedure'name pd
     _ -> exitEdh ets exit nil
     where clsObj = edh'scope'this $ contextScope $ edh'context ets
-
-  scopeAllocator !ets (ArgsPack _args !kwargs) !exit =
-    case odLookup (AttrByName "ofObj") kwargs of
-      Just !val -> case val of
-        EdhObject !obj -> case edh'obj'store of
-          HashStore !hs -> exit =<< HostStore <$> newTVar
-            (toDyn $ (edh'world'root $ edh'ctx'world ctx) { edh'scope'entity = hs
-                                                          , edh'scope'this = obj
-                                                          , edh'scope'that = obj
-                                                          }
-            )
-          ClassStore !cs -> exit =<< HostStore <$> newTVar
-            (toDyn $ (edh'world'root $ edh'ctx'world ctx) { edh'scope'entity = cs
-                                                          , edh'scope'this = obj
-                                                          , edh'scope'that = obj
-                                                          }
-            )
-          _ -> exit =<< HostStore <$> newTVar (toDyn nil)
-        _ -> exit =<< HostStore <$> newTVar (toDyn nil)
-      Nothing -> exit =<< HostStore <$> newTVar (toDyn $ contextScope ctx)
-    where ctx = edh'context ets
 
   mthScopeRepr :: EdhHostProc
   mthScopeRepr _ !exit _ = exitEdh exit $ EdhString "<scope>"
