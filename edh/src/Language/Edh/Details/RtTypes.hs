@@ -215,11 +215,11 @@ type EdhGenrCaller
       -- the yield receiver, a.k.a. the caller's continuation
     ,  EdhValue -- one value yielded from the generator
     -> ( -- continuation of the genrator
-        -- Left (etsThrower, exv)
-        --   exception to be thrown from that `yield` expr
-        -- Right yieldedValue
-        --   value given to that `yield` expr
-        Either (EdhThreadState, EdhValue) EdhValue -> STM ())
+        --  - Left exv
+        --    exception to be thrown from that `yield` expr
+        -- -  Right yieldedValue
+        --    value given to that `yield` expr
+        Either EdhValue EdhValue -> STM ())
     -> STM ()
     )
 
