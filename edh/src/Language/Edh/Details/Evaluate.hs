@@ -348,9 +348,12 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
       if edh'ctx'eff'defining ctx
         then defEffectInto esScope key
         else iopdInsert key rhVal esScope
-      -- exporting within a method procedure actually adds the artifact to its
-      -- owning object's export table, besides changing the mth proc's scope
+
       exitWithChkExportTo (edh'scope'this scope) key rhVal
+      -- ^ exporting within a method procedure actually adds the artifact to
+      -- its owning object's export table, besides changing the mth proc's
+      -- scope, maybe confusing in some cases, need more thoughts on it
+
     -- special case, assigning with `this.v=x` `that.v=y`, handle exports and
     -- effect definition
     IndirectRef (AttrExpr ThisRef) !addr' ->
@@ -435,156 +438,86 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
         iopdInsert (AttrByName edhEffectsMagicName) d es
 
 
--- | Construct an Edh object from a class
-constructEdhObject :: Class -> ArgsPack -> EdhTxExit -> EdhTx
-constructEdhObject !cls apk@(ArgsPack !args !kwargs) !exit = do
-  etsCaller <- ask
-  createEdhObject cls apk $ \ !thisVal -> case thisVal of
-    EdhObject !this -> do
-      let thisEnt     = objEntity this
-          callerCtx   = edh'context etsCaller
-          callerScope = contextScope callerCtx
-          initScope   = callerScope { edh'scope'this   = this
-                                    , edh'scope'that   = this
-                                    , edh'scope'proc   = cls
-                                    , edh'scope'caller = edh'ctx'stmt callerCtx
-                                    }
-          ctorCtx = callerCtx
-            { edh'ctx'stack        = initScope <| edh'ctx'stack callerCtx
-            , edh'ctx'exporting    = False
-            , edh'ctx'eff'defining = False
-            }
-          etsCtor = etsCaller { edh'context = ctorCtx }
-      contEdhSTM
-        $   lookupEdhSelfAttrCtor thisEnt (AttrByName "__init__")
-        >>= \case
-              EdhNil ->
-                if (null args && odNull kwargs) -- no ctor arg at all
-                     || -- it's okay for a host class to omit __init__()
-                        -- while processes ctor args by the host class proc
-                        isRight (procedure'body $ edh'procedure'decl cls)
-                  then exitEdhSTM etsCaller exit thisVal
-                  else
-                    throwEdh etsCaller EvalError
-                    $  "No __init__() defined by class "
-                    <> procedureName cls
-                    <> " to receive argument(s)"
-              EdhMethod !initMth ->
-                case edh'procedure'body $ edh'procedure'decl initMth of
-                  Right !hp -> runEdhTx etsCtor $ hp apk $ \ !hostInitRtn ->
-                          -- a host __init__() method is responsible to return new
-                          -- `this` explicitly, or another value as appropriate
-                    exitEdhSTM etsCaller exit hostInitRtn
-                  Left !pb ->
-                    runEdhTx etsCaller
-                      $ local (const etsCtor)
-                      $ callEdhMethod' Nothing this initMth pb apk id
-                      $ \ !initRtn -> local (const etsCaller) $ case initRtn of
-                              -- allow a __init__() procedure to explicitly return other
-                              -- value than newly constructed `this` object
-                              -- it can still `return this` to early stop the proc
-                              -- which is magically an advanced feature
-                          EdhReturn !rtnVal -> exitEdhTx exit rtnVal
-                          EdhContinue       -> throwEdhTx
-                            EvalError
-                            "Unexpected continue from __init__()"
-                          -- allow the use of `break` to early stop a __init__() 
-                          -- procedure with nil result
-                          EdhBreak -> exitEdhTx exit nil
-                          -- no explicit return from __init__() procedure, return the
-                          -- newly constructed this object, throw away the last
-                          -- value from the procedure execution
-                          _        -> exitEdhTx exit thisVal
-              badInitMth ->
-                throwEdh etsCaller EvalError
-                  $  "Invalid __init__() method type from class - "
-                  <> T.pack (edhTypeNameOf badInitMth)
-    _ -> -- return whatever the constructor returned if not an object
-      exitEdhTx exit thisVal
+-- | Creating an Edh object from a class, without calling any `__init__()`
+-- method.
+--
+-- Note no duplicate object instance will be created even if the class
+-- inheritance hierarchy forms diamond shapes.
+createEdhObject
+  :: EdhThreadState -> Object -> ArgsPack -> (Object -> STM ()) -> STM ()
+createEdhObject !ets !clsObj !apk !exitEnd = do
+  !mroEnd <- iopdEmpty
+  createOne mroEnd clsObj exitEnd
+ where
 
--- | Creating an Edh object from a class, without calling its `__init__()` method
-createEdhObject :: Class -> ArgsPack -> EdhTxExit -> EdhTx
-createEdhObject !cls !apk !exit = do
-  etsCaller <- ask
-  let !callerCtx   = edh'context etsCaller
-      !callerScope = contextScope callerCtx
-  case edh'procedure'body $ edh'procedure'decl cls of
+  createOne :: IOPD Object Object -> Object -> (Object -> STM ()) -> STM ()
+  createOne !mroEnd !clsCurr !exit = iopdLookup clsCurr mroEnd >>= \case
+    Just !objCurr -> exit objCurr
+    Nothing       -> case edh'obj'store clsCurr of
+      ClassStore (Class _ _ !allocator) -> allocator ets apk $ \ !es -> do
+        !oid       <- unsafeIOToSTM newUnique
+        !supersVar <- newTVar []
+        let !objCurr = Object oid es clsCurr supersVar
+        iopdInsert clsCurr objCurr mroEnd
 
-    -- calling a host class (constructor) procedure
-    Right !hp -> do
-      -- note: cross check logic here with `mkHostClass`
-      -- the host ctor procedure is responsible for instance creation, so the
-      -- scope entiy, `this` and `that` are not changed for its call frame
-      let !calleeScope = callerScope
-            { edh'scope'proc   = cls
-            , edh'scope'caller = edh'ctx'stmt callerCtx
-            }
-          !calleeCtx = callerCtx
-            { edh'ctx'stack        = calleeScope <| edh'ctx'stack callerCtx
-            , edh'ctx'genr'caller  = Nothing
-            , edh'ctx'match        = true
-            , edh'ctx'pure         = False
-            , edh'ctx'exporting    = False
-            , edh'ctx'eff'defining = False
-            }
-          !etsCallee = etsCaller { edh'context = calleeCtx }
-      runEdhTx etsCallee $ hp apk $ \ !val -> exitEdhSTM etsCaller exit val
+        !mroSupers    <- iopdEmpty
+        !superClasses <- readTVar $ edh'obj'supers clsCurr
+        createSupers mroEnd mroSupers superClasses $ do
+          fmap snd <$> iopdToList mroSupers >>= writeTVar supersVar
+          exit objCurr
+      _ ->
+        throwEdhSTM ets UsageError
+          $  "can not create object from an object of class "
+          <> objClassName clsCurr
 
-    -- calling an Edh namespace/class (constructor) procedure
-    Left !pb -> do
-      newEnt  <- createHashEntity =<< iopdEmpty
-      newThis <- viewAsEdhObject newEnt cls []
-      let
-        goCtor = do
-          let !ctorScope = objectScope callerCtx newThis
-              !ctorCtx   = callerCtx
-                { edh'ctx'stack        = ctorScope <| edh'ctx'stack callerCtx
-                , edh'ctx'genr'caller  = Nothing
-                , edh'ctx'match        = true
-                , edh'ctx'pure         = False
-                , edh'ctx'stmt         = pb
-                , edh'ctx'exporting    = False
-                , edh'ctx'eff'defining = False
-                }
-              !etsCtor = etsCaller { edh'context = ctorCtx }
-          runEdhTx etsCtor $ evalStmt pb $ \ !ctorRtn ->
-            local (const etsCaller) $ case ctorRtn of
-              -- allow a class procedure to explicitly return other
-              -- value than newly constructed `this` object
-              -- it can still `return this` to early stop the proc
-              -- which is magically an advanced feature
-              EdhReturn !rtnVal -> exitEdhTx exit rtnVal
-              EdhContinue ->
-                throwEdhTx EvalError "Unexpected continue from constructor"
-              -- allow the use of `break` to early stop a constructor 
-              -- procedure with nil result
-              EdhBreak -> exitEdhTx exit nil
-              -- no explicit return from class procedure, return the
-              -- newly constructed this object, throw away the last
-              -- value from the procedure execution
-              _        -> exitEdhTx exit (EdhObject newThis)
-      case edh'procedure'args $ edh'procedure'decl cls of
-        -- a namespace procedure, should pass ctor args to it
-        WildReceiver -> do
-          let
-            !recvCtx = callerCtx
-              { edh'ctx'stack = (lexicalScopeOf cls) { edh'scope'this = newThis
-                                                     , edh'scope'that = newThis
-                                                     }
-                                  :| []
-              , edh'ctx'genr'caller  = Nothing
-              , edh'ctx'match        = true
-              , edh'ctx'pure         = False
-              , edh'ctx'stmt         = pb
-              , edh'ctx'exporting    = False
-              , edh'ctx'eff'defining = False
-              }
-          runEdhTx etsCaller $ recvEdhArgs recvCtx WildReceiver apk $ \oed -> do
-            updateEntityAttrs etsCaller (objEntity newThis) $ odToList oed
-            goCtor
-        -- a class procedure, should leave ctor args for its __init__ method
-        PackReceiver [] -> goCtor
-        _               -> error "bug: imposible constructor procedure args"
+  createSupers
+    :: IOPD Object Object -> IOPD Object Object -> [Object] -> STM () -> STM ()
+  createSupers _ _ [] !exit = exit
+  createSupers !mroEnd !mroSupers (superCls : restSupers) !exit =
+    createOne mroEnd superCls $ \ !superObj -> do
+      iopdInsert superCls superObj mroSupers
+      createSupers mroEnd mroSupers restSupers exit
+
+
+-- | Construct an Edh object from a class.
+--
+-- All `__init__()` methods provided by the specified class, and its super
+-- classes will be called with the specified apk, and for each call:
+--
+-- - contextual `that` will always be the end object just created, unless
+--   one `__init__()` method itself being already bound to sth else, which
+--   is unusual
+--
+-- - contextual `this` will be the object instance corresponding to the class
+--   providing the respective `__init__()` method, unless the provided 
+--   `__init__()` method itself being already bound to sth else, which is
+--   unusual
+--
+-- Note no duplicate object instance will be created even if the class
+-- inheritance hierarchy forms diamond shapes.
+constructEdhObject :: Object -> ArgsPack -> (Object -> EdhTx) -> EdhTx
+constructEdhObject !clsObj !apk !exit !ets =
+  createEdhObject ets clsObj apk $ \ !obj -> do
+    let
+      callInit :: [Object] -> STM ()
+      callInit [] = runEdhTx ets $ exit obj
+      callInit (o : rest) =
+        lookupEdhSelfAttr o (AttrByName "__init__") >>= \case
+          EdhNil -> callInit rest
+          EdhProcedure (EdhMethod !mthInit) _ ->
+            runEdhTx ets
+              $ callEdhMethod o obj mthInit apk id
+              $ \_initResult _ets -> callInit rest
+          EdhBoundProc (EdhMethod !mthInit) !this !that _ ->
+            runEdhTx ets
+              $ callEdhMethod this that mthInit apk id
+              $ \_initResult _ets -> callInit rest
+          !badInitMth ->
+            throwEdhSTM ets UsageError
+              $  "invalid __init__ method of type: "
+              <> T.pack (edhTypeNameOf badInitMth)
+    callInit =<< (obj :) <$> readTVar (edh'obj'supers obj)
+
 
 
 callEdhOperator
