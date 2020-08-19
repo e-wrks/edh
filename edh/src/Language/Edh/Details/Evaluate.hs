@@ -1889,42 +1889,66 @@ evalStmt' !stmt !exit = case stmt of
               <> T.pack (show cndVal)
     doWhile
 
+
   ExtendsStmt !superExpr -> evalExpr superExpr $ \ !superVal !ets ->
     case edhDeCaseClose superVal of
-      EdhObject !superObj -> do
+      EdhObject !superObj ->
         let
+          !magicSpell = AttrByName "<-^"
+
           !ctx        = edh'context ets
           !this       = edh'scope'this $ contextScope ctx
-          !magicSpell = AttrByName "<-^"
-          noMagic :: STM ()
-          noMagic = lookupEdhSelfAttr superObj magicSpell >>= \case
+
+          noMetaMagic :: EdhTx
+          noMetaMagic _ets = lookupEdhSelfAttr superObj magicSpell >>= \case
             EdhNil    -> exitEdhSTM ets exit nil
-            !magicMth -> withMagicMethod magicMth
-          withMagicMethod :: EdhValue -> STM ()
-          withMagicMethod !magicMth = case magicMth of
-            EdhNil                               -> exitEdhSTM ets exit nil
-            EdhProcedure (EdhMethod !mth'proc) _ -> do
-              scopeObj <- mkScopeWrapper ctx =<< objectScope this
+            !magicMth -> runEdhTx ets $ withMagicMethod magicMth
+          callMagicMethod !mthThis !mthThat !mth =
+            objectScope this $ \ !objScope -> do
+              !scopeObj <- mkScopeWrapper ctx objScope
               runEdhTx ets
-                $ callEdhMethod this
-                                mth'proc
+                $ callEdhMethod mthThis
+                                mthThat
+                                mth
                                 (ArgsPack [EdhObject scopeObj] odEmpty)
                                 id
-                $ \_ -> exitEdhSTM ets exit nil
+                $ \_magicRtn _ets -> exitEdhSTM ets exit nil
+          withMagicMethod :: EdhValue -> EdhTx
+          withMagicMethod !magicMth _ets = case magicMth of
+            EdhNil -> exitEdhSTM ets exit nil
+            EdhProcedure (EdhMethod !mth) _ ->
+              callMagicMethod superObj this mth
+            -- even if it's already bound, should use `this` here as
+            -- contextual `that` there
+            EdhBoundProc (EdhMethod !mth) !mthThis _mthThat _ ->
+              callMagicMethod mthThis this mth
             _ ->
-              throwEdh ets EvalError
+              throwEdhSTM ets EvalError
                 $  "Invalid magic (<-^) method type: "
                 <> T.pack (edhTypeNameOf magicMth)
-        modifyTVar' (edh'obj'supers this) (superObj :)
-        runEdhTx ets
-          $ getObjAttrWSM edhMetaMagicSpell superObj magicSpell noMagic
-          $ \ !magicMth -> withMagicMethod magicMth
+
+          doExtends = do
+            modifyTVar' (edh'obj'supers this) (++ [superObj])
+            runEdhTx ets $ getObjAttrWSM edhMetaMagicSpell
+                                         superObj
+                                         magicSpell
+                                         noMetaMagic
+                                         withMagicMethod
+        in
+          case edh'obj'store this of
+            ClassStore{} -> case edh'obj'store superObj of
+              ClassStore{} -> doExtends
+              _ -> throwEdhSTM ets
+                               UsageError
+                               "can not extend a non-class by a class object"
+            _ -> doExtends
       _ ->
-        throwEdhSTM ets EvalError
-          $  "Can only extends an object, not a "
+        throwEdhSTM ets UsageError
+          $  "can only extends an object, not a "
           <> T.pack (edhTypeNameOf superVal)
           <> ": "
           <> T.pack (show superVal)
+
 
   EffectStmt !effs -> \ !ets ->
     runEdhTx ets
@@ -1932,6 +1956,7 @@ evalStmt' !stmt !exit = case stmt of
         }
       $ evalExpr effs
       $ \ !rtn -> edhSwitchState ets $ exit rtn
+
 
   VoidStmt -> exitEdhTx exit nil
 
