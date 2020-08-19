@@ -13,7 +13,6 @@ import           Control.Concurrent.STM
 
 import           Data.Unique
 import           Data.Maybe
-import           Data.Either
 import qualified Data.ByteString               as B
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
@@ -519,58 +518,49 @@ constructEdhObject !clsObj !apk !exit !ets =
     callInit =<< (obj :) <$> readTVar (edh'obj'supers obj)
 
 
-
 callEdhOperator
-  :: Object -> ProcDefi -> Maybe EdhValue -> [EdhValue] -> EdhTxExit -> EdhTx
-callEdhOperator !mth'that !mth'proc !prede !args !exit = do
-  etsCaller <- ask
-  let callerCtx   = edh'context etsCaller
-      callerScope = contextScope callerCtx
+  :: Object
+  -> Object
+  -> ProcDefi
+  -> Maybe EdhValue
+  -> [EdhValue]
+  -> EdhTxExit
+  -> EdhTx
+callEdhOperator !this !that !mth'proc !prede !args !exit =
   case edh'procedure'body $ edh'procedure'decl mth'proc of
 
     -- calling a host operator procedure
-    Right !hp -> do
+    Right !hp -> \ !ets -> do
       -- a host procedure views the same scope entity as of the caller's
       -- call frame
-      let !mthScope = (lexicalScopeOf mth'proc)
-            { edh'scope'entity = edh'scope'entity callerScope
-            , edh'scope'that   = mth'that
+      let ctx       = edh'context ets
+          scope     = contextScope ctx
+
+          !mthScope = (lexicalScopeOf mth'proc)
+            { edh'scope'entity = edh'scope'entity scope
+            , edh'scope'this   = this
+            , edh'scope'that   = that
             , edh'scope'proc   = mth'proc
-            , edh'scope'caller = edh'ctx'stmt callerCtx
+            , edh'scope'caller = edh'ctx'stmt ctx
             }
-          !mthCtx = callerCtx
-            { edh'ctx'stack        = mthScope <| edh'ctx'stack callerCtx
-            , edh'ctx'genr'caller  = Nothing
-            , edh'ctx'match        = true
-            , edh'ctx'pure         = False
-            , edh'ctx'exporting    = False
-            , edh'ctx'eff'defining = False
-            }
-          !etsMth = etsCaller { edh'context = mthCtx }
-      -- push stack for the host procedure
-      local (const etsMth) $ hp (ArgsPack args odEmpty) $ \ !val ->
-        -- pop stack after host procedure returned
-        -- return whatever the result a host procedure returned
-        exitEdhSTM etsCaller exit val
+          !mthCtx = ctx { edh'ctx'stack        = mthScope <| edh'ctx'stack ctx
+                        , edh'ctx'genr'caller  = Nothing
+                        , edh'ctx'match        = true
+                        , edh'ctx'pure         = False
+                        , edh'ctx'exporting    = False
+                        , edh'ctx'eff'defining = False
+                        }
+          !etsMth = ets { edh'context = mthCtx }
+      runEdhTx etsMth $ hp (ArgsPack args odEmpty) $ \ !hpRtn ->
+        -- a host operator is responsible to not return meaningless values
+        -- like return wrapper, or e.g. continue/break etc.
+        edhSwitchState ets $ exitEdhTx exit hpRtn
 
     -- calling an Edh operator procedure
-    Left !pb ->
-      callEdhOperator' Nothing mth'that mth'proc prede pb args $ \ !mthRtn ->
-        case mthRtn of
-            -- allow continue to be return from a operator proc,
-            -- to carry similar semantics like `NotImplemented` in Python
-          EdhContinue      -> exitEdhTx exit EdhContinue
-          -- allow the use of `break` to early stop a operator 
-          -- procedure with nil result
-          EdhBreak         -> exitEdhTx exit nil
-          -- explicit return
-          EdhReturn rtnVal -> exitEdhTx exit rtnVal
-          -- no explicit return, assuming it returns the last
-          -- value from procedure execution
-          _                -> exitEdhTx exit mthRtn
+    Left !pb -> callEdhOperator' this that mth'proc prede pb args $ exit
 
 callEdhOperator'
-  :: Maybe EdhGenrCaller
+  :: Object
   -> Object
   -> ProcDefi
   -> Maybe EdhValue
@@ -578,52 +568,53 @@ callEdhOperator'
   -> [EdhValue]
   -> EdhTxExit
   -> EdhTx
-callEdhOperator' !gnr'caller !callee'that !mth'proc !prede !mth'body !args !exit
-  = do
-    !etsCaller <- ask
-    let
-      !callerCtx = edh'context etsCaller
-      !recvCtx   = callerCtx
-        { edh'ctx'stack        =
-          (lexicalScopeOf mth'proc) { edh'scope'that = callee'that } :| []
-        , edh'ctx'genr'caller  = Nothing
-        , edh'ctx'match        = true
-        , edh'ctx'stmt         = mth'body
-        , edh'ctx'pure         = False
-        , edh'ctx'exporting    = False
-        , edh'ctx'eff'defining = False
-        }
-    recvEdhArgs recvCtx
-                (procedure'args $ edh'procedure'decl mth'proc)
-                (ArgsPack args odEmpty)
-      $ \ !ed -> do
-          ent <- createHashEntity =<< iopdFromList (odToList ed)
-          let !mthScope = (lexicalScopeOf mth'proc)
-                { edh'scope'entity = ent
-                , edh'scope'that   = callee'that
-                , edh'scope'proc   = mth'proc
-                , edh'scope'caller = edh'ctx'stmt callerCtx
-                }
-              !mthCtx = callerCtx
-                { edh'ctx'stack        = mthScope <| edh'ctx'stack callerCtx
-                , edh'ctx'genr'caller  = gnr'caller
-                , edh'ctx'match        = true
-                , edh'ctx'stmt         = mth'body
-                , edh'ctx'pure         = False
-                , edh'ctx'exporting    = False
-                , edh'ctx'eff'defining = False
-                }
-              !etsMth = etsCaller { edh'context = mthCtx }
-          case prede of
-            Nothing -> pure ()
-            -- put the overridden predecessor operator in scope of the overriding
-            -- op proc's run ctx
-            Just !predOp ->
-              changeEntityAttr etsMth ent (procedure'name mth'proc) predOp
-          -- push stack for the Edh procedure
-          runEdhTx etsMth $ evalStmt mth'body $ \ !mthRtn ->
-            -- pop stack after Edh procedure returned
-            local (const etsCaller) $ exitEdhTx exit mthRtn
+callEdhOperator' !this !that !mth'proc !prede !mth'body !args !exit !ets =
+  recvEdhArgs ets
+              recvCtx
+              (edh'procedure'args $ edh'procedure'decl mth'proc)
+              (ArgsPack args odEmpty)
+    $ \ !ed -> do
+        !es <- iopdFromList $ odToList ed
+        let !mthScope = (lexicalScopeOf mth'proc) { edh'scope'entity = es
+                                                  , edh'scope'this   = this
+                                                  , edh'scope'that   = that
+                                                  , edh'scope'proc   = mth'proc
+                                                  , edh'scope'caller = edh'ctx'stmt
+                                                    ctx
+                                                  }
+            !mthCtx = ctx { edh'ctx'stack        = mthScope <| edh'ctx'stack ctx
+                          , edh'ctx'genr'caller  = Nothing
+                          , edh'ctx'match        = true
+                          , edh'ctx'stmt         = mth'body
+                          , edh'ctx'pure         = False
+                          , edh'ctx'exporting    = False
+                          , edh'ctx'eff'defining = False
+                          }
+            !etsMth = ets { edh'context = mthCtx }
+        case prede of
+          Nothing      -> pure ()
+          -- put the overridden predecessor operator into the overriding
+          -- operator procedure's runtime scope
+          Just !predOp -> iopdInsert (edh'procedure'name mth'proc) predOp es
+        runEdhTx etsMth $ evalStmt mth'body $ \ !mthRtn ->
+          edhSwitchState ets $ exitEdhTx exit $ case edhDeCaseClose mthRtn of
+            EdhReturn !rtnVal -> rtnVal
+            -- todo translate break/continue to nil here?
+            !rtnVal           -> rtnVal
+ where
+  !ctx     = edh'context ets
+  !recvCtx = ctx
+    { edh'ctx'stack        = (lexicalScopeOf mth'proc) { edh'scope'this = this
+                                                       , edh'scope'that = that
+                                                       }
+                               :| []
+    , edh'ctx'genr'caller  = Nothing
+    , edh'ctx'match        = true
+    , edh'ctx'stmt         = mth'body
+    , edh'ctx'pure         = False
+    , edh'ctx'exporting    = False
+    , edh'ctx'eff'defining = False
+    }
 
 
 -- The Edh call convention is so called call-by-repacking, i.e. a new pack of
@@ -966,7 +957,8 @@ edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker
 
     (EdhObject !obj) -> case edh'obj'store obj of
       -- calling a class
-      ClassStore !cls -> callMaker $ \ !exit -> constructEdhObject cls apk exit
+      ClassStore{} -> callMaker $ \ !exit -> constructEdhObject obj apk
+        $ \ !instObj !ets -> exitEdhSTM ets exit $ EdhObject instObj
       -- calling an object
       _ -> lookupEdhObjAttr obj (AttrByName "__call__") >>= \(!this', !mth) ->
         case mth of
@@ -1067,44 +1059,43 @@ callEdhMethod
   -> (Scope -> Scope)
   -> EdhTxExit
   -> EdhTx
-callEdhMethod !mth'this !mth'that !mth'proc !apk !scopeMod !exit !etsCaller =
-  do
-    let callerCtx   = edh'context etsCaller
-        callerScope = contextScope callerCtx
-    case edh'procedure'body $ edh'procedure'decl mth'proc of
+callEdhMethod !this !that !mth'proc !apk !scopeMod !exit !etsCaller = do
+  let callerCtx   = edh'context etsCaller
+      callerScope = contextScope callerCtx
+  case edh'procedure'body $ edh'procedure'decl mth'proc of
 
-      -- calling a host method procedure
-      Right !hp -> do
-        -- a host procedure views the same scope entity as of the caller's
-        -- call frame
-        let !mthScope = scopeMod $ (lexicalScopeOf mth'proc)
-              { edh'scope'entity = edh'scope'entity callerScope
-              , edh'scope'this   = mth'this
-              , edh'scope'that   = mth'that
-              , edh'scope'proc   = mth'proc
-              , edh'scope'caller = edh'ctx'stmt callerCtx
-              }
-            !mthCtx = callerCtx
-              { edh'ctx'stack        = mthScope <| edh'ctx'stack callerCtx
-              , edh'ctx'genr'caller  = Nothing
-              , edh'ctx'match        = true
-              , edh'ctx'pure         = False
-              , edh'ctx'exporting    = False
-              , edh'ctx'eff'defining = False
-              }
-            !etsMth = etsCaller { edh'context = mthCtx }
-        runEdhTx etsMth $ hp apk $ \ !val -> edhSwitchState etsCaller $ exit val
-        -- return whatever the result a host procedure returned
+    -- calling a host method procedure
+    Right !hp -> do
+      -- a host procedure views the same scope entity as of the caller's
+      -- call frame
+      let !mthScope = scopeMod $ (lexicalScopeOf mth'proc)
+            { edh'scope'entity = edh'scope'entity callerScope
+            , edh'scope'this   = this
+            , edh'scope'that   = that
+            , edh'scope'proc   = mth'proc
+            , edh'scope'caller = edh'ctx'stmt callerCtx
+            }
+          !mthCtx = callerCtx
+            { edh'ctx'stack        = mthScope <| edh'ctx'stack callerCtx
+            , edh'ctx'genr'caller  = Nothing
+            , edh'ctx'match        = true
+            , edh'ctx'pure         = False
+            , edh'ctx'exporting    = False
+            , edh'ctx'eff'defining = False
+            }
+          !etsMth = etsCaller { edh'context = mthCtx }
+      runEdhTx etsMth $ hp apk $ \ !val -> edhSwitchState etsCaller $ exit val
+      -- return whatever the result a host procedure returned
 
-      -- calling an Edh method procedure
-      Left !pb ->
-        runEdhTx etsCaller
-          $ callEdhMethod' Nothing mth'this mth'that mth'proc pb apk scopeMod
-          $ \ !mthRtn -> case mthRtn of
-            -- explicit return
-              EdhReturn rtnVal -> exitEdhTx exit rtnVal
-              -- no explicit return
-              _                -> exitEdhTx exit mthRtn
+    -- calling an Edh method procedure
+    Left !pb ->
+      runEdhTx etsCaller
+        $ callEdhMethod' Nothing this that mth'proc pb apk scopeMod
+        $ \ !mthRtn -> case mthRtn of
+          -- explicit return
+            EdhReturn rtnVal -> exitEdhTx exit rtnVal
+            -- no explicit return
+            _                -> exitEdhTx exit mthRtn
 
 callEdhMethod'
   :: Maybe EdhGenrCaller
@@ -1116,7 +1107,7 @@ callEdhMethod'
   -> (Scope -> Scope)
   -> EdhTxExit
   -> EdhTx
-callEdhMethod' !gnr'caller !callee'this !callee'that !mth'proc !mth'body !apk !scopeMod !exit !etsCaller
+callEdhMethod' !gnr'caller !this !that !mth'proc !mth'body !apk !scopeMod !exit !etsCaller
   = recvEdhArgs etsCaller
                 recvCtx
                 (edh'procedure'args $ edh'procedure'decl mth'proc)
@@ -1125,8 +1116,8 @@ callEdhMethod' !gnr'caller !callee'this !callee'that !mth'proc !mth'body !apk !s
         ent <- iopdFromList (odToList ed)
         let !mthScope = scopeMod $ (lexicalScopeOf mth'proc)
               { edh'scope'entity = ent
-              , edh'scope'this   = callee'this
-              , edh'scope'that   = callee'that
+              , edh'scope'this   = this
+              , edh'scope'that   = that
               , edh'scope'proc   = mth'proc
               , edh'scope'caller = edh'ctx'stmt callerCtx
               }
@@ -1147,8 +1138,10 @@ callEdhMethod' !gnr'caller !callee'this !callee'that !mth'proc !mth'body !apk !s
  where
   !callerCtx = edh'context etsCaller
   !recvCtx   = callerCtx
-    { edh'ctx'stack = (lexicalScopeOf mth'proc) { edh'scope'that = callee'that }
-                        :| []
+    { edh'ctx'stack        = (lexicalScopeOf mth'proc) { edh'scope'this = this
+                                                       , edh'scope'that = that
+                                                       }
+                               :| []
     , edh'ctx'genr'caller  = Nothing
     , edh'ctx'match        = true
     , edh'ctx'stmt         = mth'body
