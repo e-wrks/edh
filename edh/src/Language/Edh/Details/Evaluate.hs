@@ -46,129 +46,78 @@ import           Language.Edh.Details.Utils
 -- The target would be an object in most common cases, but can be some type of
 -- value with virtual attributes, then one can be get as well.
 getEdhAttr :: Expr -> AttrKey -> EdhTxExit -> EdhTxExit -> EdhTx
-getEdhAttr !fromExpr !key !exitNoAttr !exit !ets = do
-  let ctx   = edh'context ets
-      scope = contextScope ctx
-
-      chkExit :: Object -> Object -> EdhValue -> STM ()
-      chkExit !rtnThis !rtnThat !rtnVal = case rtnVal of
-        EdhBoundProc (EdhDescriptor !getter _) !this !that _ ->
-          runEdhTx ets
-            $ callEdhMethod this that getter (ArgsPack [] odEmpty) id exit
-        EdhProcedure (EdhDescriptor !getter _) _ ->
-          runEdhTx ets $ callEdhMethod rtnThis
-                                       rtnThat
-                                       getter
-                                       (ArgsPack [] odEmpty)
-                                       id
-                                       exit
-        EdhProcedure !callable !effOuter ->
-          -- bind an unbound procedure to inferred `this` and `that`
-          exitEdhSTM ets exit $ EdhBoundProc callable rtnThis rtnThat effOuter
-        _ -> exitEdhSTM ets exit rtnVal
-
-  case fromExpr of
+getEdhAttr !fromExpr !key !exitNoAttr !exit !ets = case fromExpr of
 
     -- give super objects the magical power to intercept
     -- attribute access on descendant objects, via `this` ref
-    AttrExpr ThisRef ->
-      let !this = edh'scope'this scope
-          noMagic :: EdhTx
-          noMagic _ets = lookupEdhObjAttr this key >>= \case
-            (_    , EdhNil) -> exitEdhSTM ets exitNoAttr $ EdhObject this
-            (this', !val  ) -> chkExit this' this val
-      in  runEdhTx ets $ getObjAttrWSM (AttrByName "@<-") this key noMagic exit
+  AttrExpr ThisRef ->
+    let !this = edh'scope'this scope
+        noMagic :: EdhTx
+        noMagic _ets = lookupEdhObjAttr this key >>= \case
+          (_    , EdhNil) -> exitEdhSTM ets exitNoAttr $ EdhObject this
+          (this', !val  ) -> chkExit this' this val
+    in  runEdhTx ets $ getObjAttrWSM (AttrByName "@<-") this key noMagic exit
 
-    -- no super magic layer laid over access via `that` ref
-    AttrExpr ThatRef ->
-      let !that = edh'scope'that scope
-      in  lookupEdhObjAttr that key >>= \case
-            (_   , EdhNil) -> exitEdhSTM ets exitNoAttr $ EdhObject that
-            (this, !val  ) -> chkExit this that val
+  -- no super magic layer laid over access via `that` ref
+  AttrExpr ThatRef ->
+    let !that = edh'scope'that scope
+    in  lookupEdhObjAttr that key >>= \case
+          (_   , EdhNil) -> exitEdhSTM ets exitNoAttr $ EdhObject that
+          (this, !val  ) -> chkExit this that val
 
-    -- no super magic layer laid over access via `super` ref
-    AttrExpr SuperRef ->
-      let !this = edh'scope'this scope
-      in  lookupEdhSuperAttr this key >>= \case
-            (_    , EdhNil) -> exitEdhSTM ets exitNoAttr $ EdhObject this
-            (this', !val  ) -> chkExit this' this' val
+  -- no super magic layer laid over access via `super` ref
+  AttrExpr SuperRef ->
+    let !this = edh'scope'this scope
+    in  lookupEdhSuperAttr this key >>= \case
+          (_    , EdhNil) -> exitEdhSTM ets exitNoAttr $ EdhObject this
+          (this', !val  ) -> chkExit this' this' val
 
-    _ -> runEdhTx ets $ evalExpr fromExpr $ \ !fromVal _ets -> case fromVal of
+  _ -> runEdhTx ets $ evalExpr fromExpr $ \ !fromVal _ets -> case fromVal of
 
-      -- give super objects the magical power to intercept
-      -- attribute access on descendant objects, via obj ref
-      EdhObject !obj ->
-        let noMagic :: EdhTx
-            noMagic _ets = lookupEdhObjAttr obj key >>= \case
-              (_    , EdhNil) -> exitEdhSTM ets exitNoAttr $ EdhObject obj
-              (this', !val  ) -> chkExit this' obj val
-        in  runEdhTx ets
-              $ getObjAttrWSM (AttrByName "@<-*") obj key noMagic exit
+    -- give super objects the magical power to intercept
+    -- attribute access on descendant objects, via obj ref
+    EdhObject !obj ->
+      let noMagic :: EdhTx
+          noMagic _ets = lookupEdhObjAttr obj key >>= \case
+            (_    , EdhNil) -> exitEdhSTM ets exitNoAttr $ EdhObject obj
+            (this', !val  ) -> chkExit this' obj val
+      in  runEdhTx ets $ getObjAttrWSM (AttrByName "@<-*") obj key noMagic exit
 
-      -- getting attr from an apk
-      EdhArgsPack (ArgsPack _ !kwargs) ->
-        exitEdhSTM ets exit $ odLookupDefault EdhNil key kwargs
+    -- getting attr from an apk
+    EdhArgsPack (ArgsPack _ !kwargs) ->
+      exitEdhSTM ets exit $ odLookupDefault EdhNil key kwargs
 
-      -- virtual attrs by magic method from context
-      _ -> case key of
-        AttrByName !attrName -> do
-          let
-            !magicName =
+    -- virtual attrs by magic method from context
+    _ -> case key of
+      AttrByName !attrName -> do
+        let !magicName =
               "__" <> T.pack (edhTypeNameOf fromVal) <> "_" <> attrName <> "__"
-          lookupEdhCtxAttr scope (AttrByName magicName) >>= \case
-            EdhProcedure (EdhMethod !mth) _ -> runEdhTx ets $ callEdhMethod
-              (edh'scope'this scope)
-              (edh'scope'that scope)
-              mth
-              (ArgsPack [fromVal] odEmpty)
-              id
-              exit
-            _ -> exitEdhSTM ets exitNoAttr fromVal
-        _ -> exitEdhSTM ets exitNoAttr fromVal
+        lookupEdhCtxAttr scope (AttrByName magicName) >>= \case
+          EdhProcedure (EdhMethod !mth) _ -> runEdhTx ets $ callEdhMethod
+            (edh'scope'this scope)
+            (edh'scope'that scope)
+            mth
+            (ArgsPack [fromVal] odEmpty)
+            id
+            exit
+          _ -> exitEdhSTM ets exitNoAttr fromVal
+      _ -> exitEdhSTM ets exitNoAttr fromVal
 
-
-changeEdhObjAttr
-  :: EdhThreadState
-  -> Object
-  -> AttrKey
-  -> EdhValue
-  -> (EdhValue -> STM ())
-  -> STM ()
-changeEdhObjAttr !ets !obj !key !val !exit =
-  -- don't shadow overwriting to a directly existing attr
-  lookupEdhSelfAttr obj key >>= \case
-    EdhNil -> lookupEdhSelfAttr obj (AttrByName "@=") >>= \case
-      EdhNil ->
-        -- normal attr lookup with supers involved
-        lookupEdhObjAttr obj key >>= chkProperty
-      EdhMethod !mth ->
-        -- call magic (@=) method
-        runEdhTx ets
-          $ callEdhMethod obj mth (ArgsPack [attrKeyValue key, val] odEmpty) id
-          $ \ !rtnVal -> exit rtnVal
-      !badMth ->
-        throwEdh ets UsageError $ "Malformed magic (@=) method of " <> T.pack
-          (edhTypeNameOf badMth)
-    !existingVal ->
-      -- a directly existing attr, bypassed magic (@=) method
-      chkProperty existingVal
  where
-  chkProperty = \case
-    EdhDescriptor !getter Nothing ->
-      throwEdh ets UsageError
-        $  "Property "
-        <> T.pack (show $ edh'procedure'name getter)
-        <> " is readonly"
-    EdhDescriptor _ (Just !setter) ->
-      let !args = case val of
-            EdhNil -> []
-            _      -> [val]
-      in  runEdhTx ets
-            $ callEdhMethod obj setter (ArgsPack args odEmpty) id
-            $ \ !propRtn -> exit propRtn
-    _ -> do
-      changeEntityAttr ets obj key val
-      exit val
+  ctx   = edh'context ets
+  scope = contextScope ctx
+
+  chkExit :: Object -> Object -> EdhValue -> STM ()
+  chkExit !rtnThis !rtnThat !rtnVal = case rtnVal of
+    EdhBoundProc (EdhDescriptor !getter _) !this !that _ ->
+      runEdhTx ets
+        $ callEdhMethod this that getter (ArgsPack [] odEmpty) id exit
+    EdhProcedure (EdhDescriptor !getter _) _ -> runEdhTx ets
+      $ callEdhMethod rtnThis rtnThat getter (ArgsPack [] odEmpty) id exit
+    EdhProcedure !callable !effOuter ->
+      -- bind an unbound procedure to inferred `this` and `that`
+      exitEdhSTM ets exit $ EdhBoundProc callable rtnThis rtnThat effOuter
+    _ -> exitEdhSTM ets exit rtnVal
 
 
 -- There're 2 tiers of magic happen during object attribute resolution in Edh.
@@ -223,104 +172,164 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
                         (ArgsPack [attrKeyValue key] odEmpty)
                         id
         $ \ !magicRtn _ets -> case magicRtn of
-            EdhProcedure !callable !effOuter ->
-              -- bind an unbound procedure to this super as `this`,
-              -- and the obj as `that`
-              exit $ EdhBoundProc callable super obj effOuter
             EdhDefault _ !defExpr !etsDef -> getViaSupers restSupers $ \case
               EdhNil ->
                 runEdhTx (fromMaybe ets etsDef)
                   $ evalExpr defExpr
                   $ \ !defVal _ets -> exit defVal
               !betterEffVal -> exit betterEffVal
+            EdhProcedure !callable !effOuter ->
+              -- bind an unbound procedure to this super as `this`,
+              -- and the obj as `that`
+              exit $ EdhBoundProc callable super obj effOuter
             _ -> exit magicRtn
-
 
 
 -- | Try set an attribute into an object, with super magic
 setObjAttrWSM
+  :: AttrKey -> Object -> AttrKey -> EdhValue -> EdhTx -> EdhTxExit -> EdhTx
+setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
+  (readTVar (edh'obj'supers obj) >>=) $ flip setViaSupers $ \case
+    EdhNil -> runEdhTx ets exitNoMagic
+    !rtn   -> exitEdhSTM ets exitWithMagic rtn
+ where
+
+  setViaSupers :: [Object] -> (EdhValue -> STM ()) -> STM ()
+  setViaSupers [] !exit = exit nil
+  setViaSupers (super : restSupers) !exit =
+    runEdhTx ets
+      $ getObjAttrWSM edhMetaMagicSpell super magicSpell noMetamagic
+      $ \ !magicVal _ets -> case magicVal of
+          EdhBoundProc (EdhMethod !magicMth) !this !that _ ->
+            withMagicMethod magicMth this that
+          EdhProcedure (EdhMethod !magicMth) _ ->
+            withMagicMethod magicMth super super
+          _ ->
+            throwEdhSTM ets EvalError $ "Invalid magic method type: " <> T.pack
+              (edhTypeNameOf magicVal)
+   where
+
+    noMetamagic :: EdhTx
+    noMetamagic _ets = lookupEdhObjAttr super magicSpell >>= \case
+      (_, EdhNil) -> setViaSupers restSupers exit
+      (!super', EdhProcedure (EdhMethod !magicMth) _) ->
+        withMagicMethod magicMth super' super
+      (_, EdhBoundProc (EdhMethod !magicMth) !this !that _) ->
+        withMagicMethod magicMth this that
+      (_, !magicVal) ->
+        throwEdhSTM ets EvalError $ "Invalid magic method type: " <> T.pack
+          (edhTypeNameOf magicVal)
+
+    withMagicMethod :: ProcDefi -> Object -> Object -> STM ()
+    withMagicMethod !magicMth !this !that =
+      runEdhTx ets
+        $ callEdhMethod this
+                        that
+                        magicMth
+                        (ArgsPack [attrKeyValue key, val] odEmpty)
+                        id
+        $ \ !magicRtn _ets -> case magicRtn of
+            EdhDefault _ !defExpr !etsDef -> setViaSupers restSupers $ \case
+              EdhNil ->
+                runEdhTx (fromMaybe ets etsDef)
+                  $ evalExpr defExpr
+                  $ \ !defVal _ets -> exit defVal
+              !betterEffVal -> exit betterEffVal
+            -- nil return value implies no magic, it doesn't mean that
+            EdhNil -> exit (EdhNamedValue "<magic-set>" EdhNil)
+            _      -> exit magicRtn
+
+
+-- | Set an attribute value to a target expression.
+--
+-- The target would be an object in most common cases, but can be some type of
+-- value with virtual attributes, but currently all virtual attributes are
+-- readonly, not mutable virtual attribute supported yet.
+setEdhAttr :: Expr -> AttrKey -> EdhValue -> EdhTxExit -> EdhTx
+setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
+
+  -- give super objects the magical power to intercept
+  -- attribute assignment to descendant objects, via `this` ref
+  AttrExpr ThisRef ->
+    let !this = edh'scope'this scope
+        noMagic :: EdhTx
+        noMagic _ets = setObjAttr ets this key val
+          $ \ !valSet -> exitEdhSTM ets exit valSet
+    in  runEdhTx ets
+          $ setObjAttrWSM (AttrByName "<-@") this key val noMagic exit
+
+  -- no magic layer laid over assignment via `that` ref
+  AttrExpr ThatRef ->
+    let !that = edh'scope'that scope
+    in  setObjAttr ets that key val $ \ !valSet -> exitEdhSTM ets exit valSet
+
+  -- not allowing assignment via super
+  AttrExpr SuperRef -> throwEdhSTM ets EvalError "can not assign via super"
+
+  _ -> runEdhTx ets $ evalExpr tgtExpr $ \ !tgtVal _ets -> case tgtVal of
+
+    -- give super objects the magical power to intercept
+    -- attribute assignment to descendant objects, via obj ref
+    EdhObject !tgtObj ->
+      let noMagic :: EdhTx
+          noMagic _ets = setObjAttr ets tgtObj key val
+            $ \ !valSet -> exitEdhSTM ets exit valSet
+      in  runEdhTx ets
+            $ setObjAttrWSM (AttrByName "*<-@") tgtObj key val noMagic exit
+
+    -- no virtual attribute supported yet
+    _ ->
+      throwEdhSTM ets EvalError
+        $  "Invalid assignment target, it's a "
+        <> T.pack (edhTypeNameOf tgtVal)
+        <> ": "
+        <> T.pack (show tgtVal)
+
+ where
+  ctx   = edh'context ets
+  scope = contextScope ctx
+
+
+setObjAttr
   :: EdhThreadState
-  -> AttrKey
   -> Object
   -> AttrKey
   -> EdhValue
-  -> EdhTx
-  -> EdhTxExit
-  -> EdhTx
-setObjAttrWSM !etsAfter !magicSpell !obj !key !val !exitNoMagic !exit = do
-  !ets <- ask
-  readTVar (edh'obj'supers obj) >>= runEdhTx ets . setViaSupers
+  -> (EdhValue -> STM ())
+  -> STM ()
+setObjAttr !ets !obj !key !val !exit = lookupEdhObjAttr obj key >>= \case
+  (_, EdhNil) -> writeAttr
+  (!this', EdhProcedure (EdhDescriptor _getter (Just !setter)) _) ->
+    callSetter this' obj setter
+  (_, EdhBoundProc (EdhDescriptor _getter (Just !setter)) this that _) ->
+    callSetter this that setter
+  (_, EdhProcedure (EdhDescriptor !getter Nothing) _) -> readonly getter
+  (_, EdhBoundProc (EdhDescriptor !getter Nothing) _ _ _) -> readonly getter
+  _ -> writeAttr
  where
-  setViaSupers :: [Object] -> EdhTx
-  setViaSupers []                   = exitNoMagic
-  setViaSupers (super : restSupers) = do
-    !ets <- ask
-    let
-      noMetamagic :: EdhTx
-      noMetamagic =
-        contEdhSTM $ edhUltimate <$> lookupEdhObjAttr super magicSpell >>= \case
-          EdhNil              -> runEdhTx ets $ setViaSupers restSupers
-          EdhMethod !magicMth -> withMagicMethod magicMth
-          magicVal ->
-            throwEdh ets EvalError $ "Invalid magic method type: " <> T.pack
-              (edhTypeNameOf magicVal)
-      withMagicMethod :: ProcDefi -> STM ()
-      withMagicMethod !magicMth =
-        runEdhTx ets
-          $ callEdhMethod obj
-                          magicMth
-                          (ArgsPack [attrKeyValue key, val] odEmpty)
-                          id
-          $ \ !magicRtn -> case magicRtn of
-              EdhContinue -> setViaSupers restSupers
-              _           -> local (const etsAfter) $ exitEdhTx exit magicRtn
-    getObjAttrWSM edhMetaMagicSpell super magicSpell noMetamagic
-      $ \ !magicVal -> case edhUltimate magicVal of
-          EdhMethod !magicMth -> withMagicMethod magicMth
-          _ -> throwEdhTx EvalError $ "Invalid magic method type: " <> T.pack
-            (edhTypeNameOf magicVal)
-
-
-setEdhAttr
-  :: EdhThreadState -> Expr -> AttrKey -> EdhValue -> EdhTxExit -> EdhTx
-setEdhAttr !etsAfter !tgtExpr !key !val !exit = do
-  !ets <- ask
-  let !scope = contextScope $ edh'context ets
-      !this  = edh'scope'this scope
-      !that  = edh'scope'that scope
-  case tgtExpr of
-    -- give super objects the magical power to intercept
-    -- attribute assignment to descendant objects, via `this` ref
-    AttrExpr ThisRef ->
-      let noMagic :: EdhTx
-          noMagic = changeEdhObjAttr ets this key val
-            $ \ !valSet -> runEdhTx etsAfter $ exitEdhTx exit valSet
-      in  setObjAttrWSM etsAfter (AttrByName "<-@") this key val noMagic exit
-    -- no magic layer laid over assignment via `that` ref
-    AttrExpr ThatRef -> changeEdhObjAttr ets that key val
-      $ \ !valSet -> runEdhTx etsAfter $ exitEdhTx exit valSet
-    -- not allowing assignment via super
-    AttrExpr SuperRef -> throwEdhTx EvalError "Can not assign via super"
-    -- give super objects the magical power to intercept
-    -- attribute assignment to descendant objects, via obj ref
-    _ -> evalExpr tgtExpr $ \ !tgtVal -> case edhUltimate tgtVal of
-      EdhObject !tgtObj ->
-        let noMagic :: EdhTx
-            noMagic = changeEdhObjAttr ets tgtObj key val
-              $ \ !valSet -> runEdhTx etsAfter $ exitEdhTx exit valSet
-        in  setObjAttrWSM etsAfter
-                          (AttrByName "*<-@")
-                          tgtObj
-                          key
-                          val
-                          noMagic
-                          exit
-      _ ->
-        throwEdhTx EvalError
-          $  "Invalid assignment target, it's a "
-          <> T.pack (edhTypeNameOf tgtVal)
-          <> ": "
-          <> T.pack (show tgtVal)
+  callSetter !this !that !setter =
+    let !args = case val of
+          EdhNil -> []
+          _      -> [val]
+    in  runEdhTx ets
+          $ callEdhMethod this that setter (ArgsPack args odEmpty) id
+          $ \ !propRtn _ets -> exit propRtn
+  writeAttr = case edh'obj'store obj of
+    HashStore  !hs             -> iopdInsert key val hs >> exit val
+    ClassStore (Class _ !cs _) -> iopdInsert key val cs >> exit val
+    HostStore _ ->
+      throwEdhSTM ets UsageError
+        $  "no such property `"
+        <> T.pack (show key)
+        <> "` on host object of class "
+        <> objClassName obj
+  readonly !getter =
+    throwEdhSTM ets UsageError
+      $  "property `"
+      <> T.pack (show $ edh'procedure'name getter)
+      <> "` of class "
+      <> objClassName obj
+      <> " is readonly"
 
 
 -- | Assign an evaluated value to a target expression
@@ -329,88 +338,101 @@ setEdhAttr !etsAfter !tgtExpr !key !val !exit = do
 -- right-handle value as well as running this, so the evaluation of the
 -- right-hand value as well as the writting to the target entity are done
 -- within the same tx, thus for atomicity of the whole assignment.
-assignEdhTarget :: EdhThreadState -> Expr -> EdhTxExit -> EdhValue -> EdhTx
-assignEdhTarget !etsAfter !lhExpr !exit !rhVal = do
-  !ets <- ask
-  let !ctx  = edh'context ets
-      scope = contextScope ctx
-      this  = edh'scope'this scope
-      that  = edh'scope'that scope
-      exitWithChkExportTo :: EntityStore -> AttrKey -> EdhValue -> STM ()
-      exitWithChkExportTo !ent !artKey !artVal = do
-        when (edh'ctx'exporting ctx)
-          $   lookupEdhSelfAttr ent (AttrByName edhExportsMagicName)
-          >>= \case
-                EdhDict (Dict _ !thisExpDS) ->
-                  iopdInsert (attrKeyValue artKey) artVal thisExpDS
-                _ -> do
-                  d <- EdhDict <$> createEdhDict [(attrKeyValue artKey, artVal)]
-                  changeEntityAttr ets
-                                   (objEntity this)
-                                   (AttrByName edhExportsMagicName)
-                                   d
-        runEdhTx etsAfter $ exitEdhTx exit artVal
-      defEffectInto :: EntityStore -> AttrKey -> STM ()
-      defEffectInto !ent !artKey =
-        lookupEdhSelfAttr ent (AttrByName edhEffectsMagicName) >>= \case
-          EdhDict (Dict _ !effDS) ->
-            iopdInsert (attrKeyValue artKey) rhVal effDS
-          _ -> do
-            d <- EdhDict <$> createEdhDict [(attrKeyValue artKey, rhVal)]
-            changeEntityAttr ets ent (AttrByName edhEffectsMagicName) d
-  case lhExpr of
-    AttrExpr !addr -> case addr of
-      -- silently drop value assigned to single underscore
-      DirectRef (NamedAttr "_") -> runEdhTx etsAfter $ exitEdhTx exit nil
-      -- no magic imposed to direct assignment in a (possibly class) proc
-      DirectRef !addr'          -> resolveEdhAttrAddr ets addr' $ \key -> do
-        if edh'ctx'eff'defining ctx
-          then defEffectInto (edh'scope'entity scope) key
-          else changeEntityAttr ets (edh'scope'entity scope) key rhVal
-        exitWithChkExportTo (objEntity this) key rhVal
-      -- special case, assigning with `this.v=x` `that.v=y`, handle exports and
-      -- effect definition
-      IndirectRef (AttrExpr ThisRef) addr' ->
-        resolveEdhAttrAddr ets addr' $ \key -> do
-          let !thisEnt = objEntity this
-          if edh'ctx'eff'defining ctx
+assignEdhTarget :: Expr -> EdhValue -> EdhTxExit -> EdhTx
+assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
+  AttrExpr !addr -> case addr of
+    -- silently drop value assigned to single underscore
+    DirectRef (NamedAttr "_") -> exitEdhSTM ets exit nil
+    -- no magic imposed to direct assignment in a (possibly class) proc
+    DirectRef !addr'          -> resolveEdhAttrAddr ets addr' $ \ !key -> do
+      if edh'ctx'eff'defining ctx
+        then defEffectInto esScope key
+        else iopdInsert key rhVal esScope
+      -- exporting within a method procedure actually adds the artifact to its
+      -- owning object's export table, besides changing the mth proc's scope
+      exitWithChkExportTo (edh'scope'this scope) key rhVal
+    -- special case, assigning with `this.v=x` `that.v=y`, handle exports and
+    -- effect definition
+    IndirectRef (AttrExpr ThisRef) !addr' ->
+      let this = edh'scope'this scope
+      in  resolveEdhAttrAddr ets addr' $ \ !key -> if edh'ctx'eff'defining ctx
             then do
-              defEffectInto thisEnt key
-              exitWithChkExportTo thisEnt key rhVal
-            else changeEdhObjAttr ets this key rhVal
-              $ \ !valSet -> exitWithChkExportTo thisEnt key valSet
-      IndirectRef (AttrExpr ThatRef) addr' ->
-        resolveEdhAttrAddr ets addr' $ \key -> do
-          let !thatEnt = objEntity $ edh'scope'that scope
-          if edh'ctx'eff'defining ctx
+              defEffIntoObj this key
+              exitWithChkExportTo this key rhVal
+            else setObjAttr ets this key rhVal
+              $ \ !valSet -> exitWithChkExportTo this key valSet
+    IndirectRef (AttrExpr ThatRef) !addr' ->
+      let that = edh'scope'that scope
+      in  resolveEdhAttrAddr ets addr' $ \ !key -> if edh'ctx'eff'defining ctx
             then do
-              defEffectInto thatEnt key
-              exitWithChkExportTo thatEnt key rhVal
-            else changeEdhObjAttr ets that key rhVal
-              $ \ !valSet -> exitWithChkExportTo thatEnt key valSet
-      -- assign to an addressed attribute
-      IndirectRef !tgtExpr !addr' -> resolveEdhAttrAddr ets addr'
-        $ \key -> runEdhTx ets $ setEdhAttr etsAfter tgtExpr key rhVal exit
-      -- god forbidden things
-      ThisRef  -> throwEdhTx EvalError "Can not assign to this"
-      ThatRef  -> throwEdhTx EvalError "Can not assign to that"
-      SuperRef -> throwEdhTx EvalError "Can not assign to super"
-    -- dereferencing attribute assignment
-    InfixExpr "@" !tgtExpr !addrRef -> evalExpr addrRef $ \ !addrVal ->
+              defEffIntoObj that key
+              exitWithChkExportTo that key rhVal
+            else setObjAttr ets that key rhVal
+              $ \ !valSet -> exitWithChkExportTo that key valSet
+    -- assign to an addressed attribute
+    IndirectRef !tgtExpr !addr' -> resolveEdhAttrAddr ets addr'
+      $ \ !key -> runEdhTx ets $ setEdhAttr tgtExpr key rhVal exit
+    -- god forbidden things
+    ThisRef  -> throwEdhSTM ets EvalError "can not assign to this"
+    ThatRef  -> throwEdhSTM ets EvalError "can not assign to that"
+    SuperRef -> throwEdhSTM ets EvalError "can not assign to super"
+  -- dereferencing attribute assignment
+  InfixExpr "@" !tgtExpr !addrRef ->
+    runEdhTx ets $ evalExpr addrRef $ \ !addrVal _ets ->
       case edhUltimate addrVal of
         EdhExpr _ (AttrExpr (DirectRef !addr)) _ -> resolveEdhAttrAddr ets addr
-          $ \key -> runEdhTx ets $ setEdhAttr etsAfter tgtExpr key rhVal exit
+          $ \ !key -> runEdhTx ets $ setEdhAttr tgtExpr key rhVal exit
         EdhString !attrName ->
-          setEdhAttr etsAfter tgtExpr (AttrByName attrName) rhVal exit
+          runEdhTx ets $ setEdhAttr tgtExpr (AttrByName attrName) rhVal exit
         EdhSymbol !sym ->
-          setEdhAttr etsAfter tgtExpr (AttrBySym sym) rhVal exit
+          runEdhTx ets $ setEdhAttr tgtExpr (AttrBySym sym) rhVal exit
         _ ->
-          throwEdhTx EvalError $ "Invalid attribute reference type - " <> T.pack
-            (edhTypeNameOf addrVal)
-    x ->
-      throwEdhTx EvalError
-        $  "Invalid left hand expression for assignment: "
-        <> T.pack (show x)
+          throwEdhSTM ets EvalError
+            $  "invalid attribute reference type - "
+            <> T.pack (edhTypeNameOf addrVal)
+  !x ->
+    throwEdhSTM ets EvalError
+      $  "invalid left hand expression for assignment: "
+      <> T.pack (show x)
+ where
+  !ctx    = edh'context ets
+  scope   = contextScope ctx
+  esScope = edh'scope'entity scope
+
+  exitWithChkExportTo :: Object -> AttrKey -> EdhValue -> STM ()
+  exitWithChkExportTo !obj !artKey !artVal = do
+    when (edh'ctx'exporting ctx) $ case edh'obj'store obj of
+      HashStore  !hs             -> expInto hs artKey artVal
+      ClassStore (Class _ !cs _) -> expInto cs artKey artVal
+      HostStore _ ->
+        throwEdhSTM ets UsageError
+          $  "no way exporting to a host object of class "
+          <> objClassName obj
+    exitEdhSTM ets exit artVal
+  expInto :: EntityStore -> AttrKey -> EdhValue -> STM ()
+  expInto !es !artKey !artVal =
+    iopdLookup (AttrByName edhExportsMagicName) es >>= \case
+      Just (EdhDict (Dict _ !ds)) -> iopdInsert (attrKeyValue artKey) artVal ds
+      _                           -> do
+        d <- EdhDict <$> createEdhDict [(attrKeyValue artKey, artVal)]
+        iopdInsert (AttrByName edhExportsMagicName) d es
+
+  defEffIntoObj :: Object -> AttrKey -> STM ()
+  defEffIntoObj !obj !key = case edh'obj'store obj of
+    HashStore  !hs             -> defEffectInto hs key
+    ClassStore (Class _ !cs _) -> defEffectInto cs key
+    HostStore _ ->
+      throwEdhSTM ets UsageError
+        $  "no way defining effects into a host object of class "
+        <> objClassName obj
+  defEffectInto :: EntityStore -> AttrKey -> STM ()
+  defEffectInto !es !artKey =
+    iopdLookup (AttrByName edhEffectsMagicName) es >>= \case
+      Just (EdhDict (Dict _ !effDS)) ->
+        iopdInsert (attrKeyValue artKey) rhVal effDS
+      _ -> do
+        !d <- EdhDict <$> createEdhDict [(attrKeyValue artKey, rhVal)]
+        iopdInsert (AttrByName edhEffectsMagicName) d es
 
 
 -- | Construct an Edh object from a class
@@ -779,13 +801,13 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
               Nothing -> do
                 iopdInsert argKey argVal em
                 exit' (ArgsPack posArgs'' kwArgs'')
-              Just (DirectRef addr) -> case addr of
+              Just (DirectRef !addr) -> case addr of
                 NamedAttr "_" -> -- drop
                   exit' (ArgsPack posArgs'' kwArgs'')
-                NamedAttr attrName -> do -- simple rename
+                NamedAttr !attrName -> do -- simple rename
                   iopdInsert (AttrByName attrName) argVal em
                   exit' (ArgsPack posArgs'' kwArgs'')
-                SymbolicAttr symName -> -- todo support this ?
+                SymbolicAttr !symName -> -- todo support this ?
                   throwEdhSTM etsCaller UsageError
                     $  "Do you mean `this.@"
                     <> symName
@@ -793,9 +815,9 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
               Just addr@(IndirectRef _ _) -> do
                 -- do assignment in callee's context, and return to caller's afterwards
                 runEdhTx etsRecv
-                  $ assignEdhTarget etsCaller (AttrExpr addr) endOfEdh argVal
-                exit' (ArgsPack posArgs'' kwArgs'')
-              tgt ->
+                  $ assignEdhTarget (AttrExpr addr) argVal
+                  $ \_assignResult _ets -> exit' (ArgsPack posArgs'' kwArgs'')
+              !tgt ->
                 throwEdhSTM etsCaller UsageError
                   $  "Invalid argument retarget: "
                   <> T.pack (show tgt)
