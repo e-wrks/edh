@@ -38,14 +38,14 @@ edhPkgPathFrom !fromPath = if "<" `isPrefixOf` fromPath
 -- e.g. in case an `__init__.edh` for a package, where nominal path will 
 -- point to the root directory
 locateEdhModule :: FilePath -> FilePath -> IO (FilePath, FilePath)
-locateEdhModule !pkgPath !importPath = case splitExtension importPath of
+locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
   (_, ".edh") ->
     throwPkgError
       $  "You don't include the `.edh` file extension in the import: "
-      <> T.pack importPath
+      <> T.pack nomSpec
   _ -> doesPathExist pkgPath >>= \case
     False -> throwPkgError $ "Path does not exist: " <> T.pack pkgPath
-    True  -> case stripPrefix "./" importPath of
+    True  -> case stripPrefix "./" nomSpec of
       Just !relImp -> resolveRelImport relImp
       Nothing      -> canonicalizePath "." >>= resolveAbsImport
  where
@@ -64,11 +64,11 @@ locateEdhModule !pkgPath !importPath = case splitExtension importPath of
           False ->
             -- do
             --   trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $  return ()
-            throwPkgError $ "No such module: " <> T.pack importPath
+            throwPkgError $ "No such module: " <> T.pack nomSpec
 
   resolveAbsImport :: FilePath -> IO (FilePath, FilePath)
   resolveAbsImport !caniPkgPath = do
-    let !nomPath     = caniPkgPath </> "edh_modules" </> importPath
+    let !nomPath     = caniPkgPath </> "edh_modules" </> nomSpec
         !edhFilePath = nomPath ++ ".edh"
     -- trace (" ** no hit: " <> edhFilePath <> " ** " <> nomPath) $ return ()
     doesFileExist edhFilePath >>= \case
@@ -82,7 +82,7 @@ locateEdhModule !pkgPath !importPath = case splitExtension importPath of
             -- trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $ return ()
             let !parentPkgPath = takeDirectory caniPkgPath
             if equalFilePath parentPkgPath caniPkgPath
-              then throwPkgError $ "No such module: " <> T.pack importPath
+              then throwPkgError $ "No such module: " <> T.pack nomSpec
               else resolveAbsImport parentPkgPath
 
 

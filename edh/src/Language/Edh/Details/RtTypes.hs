@@ -424,10 +424,12 @@ data EdhWorld = EdhWorld {
   , edh'scope'wrapper :: !(Scope -> STM Object)
     -- wrapping a host exceptin as an Edh object
   , edh'exception'wrapper :: !(SomeException -> STM Object)
+    -- create a new module object
+  , edh'module'creator :: !(ModuleId -> String -> STM Object)
   }
 instance Eq EdhWorld where
-  EdhWorld x'root _ _ _ _ _ == EdhWorld y'root _ _ _ _ _ =
-    edh'scope'this x'root == edh'scope'this y'root
+  x == y =
+    edh'scope'this (edh'world'root x) == edh'scope'this (edh'world'root y)
 
 type ModuleId = Text
 
@@ -1537,36 +1539,37 @@ mkHostClass !scope !className !allocator !classStore !superClasses = do
     edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
 
 
-objectScope :: Object -> (Scope -> STM ()) -> STM ()
-objectScope !obj !exit = do
-  !es <- case edh'obj'store obj of
-    HashStore  !hs             -> return hs
-    ClassStore (Class _ !cs _) -> return cs
-    HostStore  _               -> iopdEmpty -- todo should err out instead?
-  let scope = Scope { edh'scope'entity  = es
-                    , edh'scope'this    = obj
-                    , edh'scope'that    = obj
-                    , edh'excpt'hndlr   = defaultEdhExcptHndlr
-                    , edh'scope'proc    = clsProc
-                    , edh'scope'caller  = objCreStmt
-                    , edh'effects'stack = []
-                    }
-      clsObj  = edh'obj'class obj
-      clsProc = case edh'obj'store clsObj of
-        ClassStore (Class !cp _ _) -> cp
-        _ -> -- todo should err out instead?
-          ProcDefi (edh'obj'ident clsObj) (AttrByName "<bogus-class>") scope
-            $ ProcDecl
-                (NamedAttr "<bogus-class>")
-                (PackReceiver [])
-                (Right fakeHostProc)
-  exit scope
+objectScope :: Object -> Maybe Scope
+objectScope !obj = case edh'obj'store obj of
+  HashStore  !hs             -> Just $ scopeOf hs
+  ClassStore (Class _ !cs _) -> Just $ scopeOf cs
+  HostStore  _               -> Nothing
  where
+  scopeOf :: EntityStore -> Scope
+  scopeOf !es =
+    let scope = Scope { edh'scope'entity  = es
+                      , edh'scope'this    = obj
+                      , edh'scope'that    = obj
+                      , edh'excpt'hndlr   = defaultEdhExcptHndlr
+                      , edh'scope'proc    = clsProc
+                      , edh'scope'caller  = objCreStmt
+                      , edh'effects'stack = []
+                      }
+        clsObj  = edh'obj'class obj
+        clsProc = case edh'obj'store clsObj of
+          ClassStore (Class !cp _ _) -> cp
+          _ -> -- todo should err out instead?
+            ProcDefi (edh'obj'ident clsObj) (AttrByName "<bogus-class>") scope
+              $ ProcDecl
+                  (NamedAttr "<bogus-class>")
+                  (PackReceiver [])
+                  (Right fakeHostProc)
+    in  scope
   fakeHostProc :: EdhHostProc
   fakeHostProc _ !exit' = exitEdhTx exit' nil
   objCreStmt :: StmtSrc
   objCreStmt = StmtSrc
-    ( SourcePos { sourceName   = "<creation>"
+    ( SourcePos { sourceName   = "<obj-cre>"
                 , sourceLine   = mkPos 1
                 , sourceColumn = mkPos 1
                 }

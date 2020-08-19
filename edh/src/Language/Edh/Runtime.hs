@@ -33,6 +33,8 @@ import           Language.Edh.Details.Evaluate
 
 createEdhWorld :: MonadIO m => EdhConsole -> m EdhWorld
 createEdhWorld !console = liftIO $ do
+
+  -- * the meta class and root class
   !idMeta <- newUnique
   !hsMeta <- atomically iopdEmpty
   !ssMeta <- newTVarIO []
@@ -69,6 +71,7 @@ createEdhWorld !console = liftIO $ do
        | (nm, getter, setter) <- [("name", mthClassNameGetter, Nothing)]
        ]
 
+  -- * the `scope` class
   !hsScope <- -- TODO port eval/get/put/attrs methods
     atomically
     $  (iopdFromList =<<)
@@ -106,6 +109,7 @@ createEdhWorld !console = liftIO $ do
                       }
   atomically $ iopdUpdate [(AttrByName "scope", EdhObject clsScope)] hsRoot
 
+  -- * error classes
   !hsErrCls <-
     atomically
     $  (iopdFromList =<<)
@@ -176,10 +180,36 @@ createEdhWorld !console = liftIO $ do
     ]
     hsRoot
 
-  -- operator precedence dict
+  -- * the `module` class
+  !hsModuCls <-
+    atomically
+    $ (iopdFromList =<<)
+    $ sequence
+    $ [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
+      | (nm, mth, args) <-
+        [ ("__repr__", mthModuClsRepr, PackReceiver [])
+        , ("__show__", mthModuClsShow, PackReceiver [])
+        ]
+      ]
+  !clsModule <- atomically
+    $ mkHostClass rootScope "module" moduleAllocator hsModuCls []
+  let edhCreateModule :: ModuleId -> String -> STM Object
+      edhCreateModule moduId srcName = do
+        !idModu <- unsafeIOToSTM newUnique
+        !hs     <- iopdEmpty
+        !ss     <- newTVar []
+        return Object { edh'obj'ident  = idModu
+                      , edh'obj'store  = HashStore hs
+                      , edh'obj'class  = clsModule
+                      , edh'obj'supers = ss
+                      }
+  atomically $ iopdUpdate [(AttrByName "module", EdhObject clsModule)] hsRoot
+
+
+  -- * operator precedence dict
   opPD  <- newTMVarIO Map.empty
 
-  -- the container of loaded modules
+  -- * the container of loaded modules
   modus <- newTMVarIO Map.empty
 
   -- assembly the world with pieces prepared above
@@ -189,6 +219,7 @@ createEdhWorld !console = liftIO $ do
                        , edh'world'console     = console
                        , edh'scope'wrapper     = edhWrapScope
                        , edh'exception'wrapper = edhWrapException
+                       , edh'module'creator    = edhCreateModule
                        }
 
   return world
@@ -365,6 +396,35 @@ createEdhWorld !console = liftIO $ do
     _ -> exitEdh ets exit nil
     where errObj = edh'scope'this $ contextScope $ edh'context ets
 
+  moduleAllocator !ets !apk !exit = case apk of
+    (ArgsPack [moduId] !kwargs) | odNull kwargs ->
+      exit . HashStore <$> iopdFromList
+        [ (AttrByName "__path__", moduId)
+        , (AttrByName "__file__", EdhString "<on-the-fly>")
+        ]
+    _ -> throwEdhSTM ets UsageError "invalid args to module()"
+
+  mthModuClsRepr :: EdhHostProc
+  mthModuClsRepr _ !exit !ets = do
+    !path <- lookupEdhSelfAttr this (AttrByName "__path__")
+    runEdhTx ets $ edhValueStr path $ \ !pathStr ->
+      exitEdh exit $ EdhString $ "<module: " <> pathStr <> ">"
+    where !this = edh'scope'this $ contextScope $ edh'context ets
+
+  mthModuClsShow :: EdhHostProc
+  mthModuClsShow _ !exit !ets = do
+    !path <- lookupEdhSelfAttr this (AttrByName "__path__")
+    !file <- lookupEdhSelfAttr this (AttrByName "__file__")
+    runEdhTx ets $ edhValueStr path $ \ !pathStr ->
+      edhValueStr file $ \ !fileStr ->
+        exitEdhSTM ets exit
+          $  EdhString
+          $  " ** module: "
+          <> pathStr
+          <> "\n  * loaded from: "
+          <> fileStr
+    where !this = edh'scope'this $ contextScope $ edh'context ets
+
 
 declareEdhOperators :: EdhWorld -> Text -> [(OpSymbol, Precedence)] -> STM ()
 declareEdhOperators world declLoc opps = do
@@ -427,7 +487,7 @@ runEdhProgram' !ctx !prog = liftIO $ do
 
 createEdhModule :: MonadIO m => EdhWorld -> ModuleId -> String -> m Object
 createEdhModule !world !moduId !srcName =
-  liftIO $ atomically $ createEdhModule' world moduId srcName
+  liftIO $ atomically $ edh'module'creator world moduId srcName
 
 
 type EdhModulePreparation = EdhProgState -> STM () -> STM ()

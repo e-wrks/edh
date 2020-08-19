@@ -1279,7 +1279,7 @@ edhForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
     :: EdhTxExit -> EdhValue -> (Either EdhValue EdhValue -> STM ()) -> STM ()
   recvYield !exit !yielded'val !genrCont = do
     let
-      doOne !etsTry !exit' =
+      doOne !exitOne !etsTry =
         recvEdhArgs
             etsTry
             (edh'context etsTry)
@@ -1290,7 +1290,7 @@ edhForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
             )
           $ \ !em -> do
               iopdUpdate (odToList em) (edh'scope'entity scopeLooper)
-              runEdhTx etsTry $ evalExpr doExpr exit'
+              runEdhTx etsTry $ evalExpr doExpr exitOne
       doneOne !doResult = case edhDeCaseClose doResult of
         EdhContinue ->
           -- send nil to generator on continue
@@ -1502,18 +1502,15 @@ edhErrorUncaught !ets !exv = case exv of
 
 -- | Catch possible throw from the specified try action
 edhCatchTx
-  :: (EdhTxExit -> EdhTx) -- ^ tryAct
-  -> EdhTxExit -- ^ normal/recovered exit
-  -> (  -- edh'ctx'match of this Edh tx being the thrown value or nil
-        EdhTxExit  -- ^ recover exit
-     -> EdhTx      -- ^ rethrow exit
+  :: (EdhTxExit -> EdhTx)     -- ^ tryAct
+  -> EdhTxExit                -- ^ normal/recovered exit
+  -> (  EdhTxExit             -- ^ recover exit
+     -> EdhTx                 -- ^ rethrow exit
      -> EdhTx
-     )
+     ) -- edh'ctx'match of this Edh tx being the thrown value or nil
   -> EdhTx
 edhCatchTx !tryAct !exit !passOn !etsOuter =
-  edhCatchSTM etsOuter
-              (\ !etsTry exit' -> runEdhTx etsTry (tryAct exit'))
-              (runEdhTx etsOuter . exit)
+  edhCatchSTM etsOuter tryAct (runEdhTx etsOuter . exit)
     $ \ !exv recover rethrow -> do
         let !ctxOuter = edh'context etsOuter
             !ctxHndl  = ctxOuter { edh'ctx'match = exv }
@@ -1522,7 +1519,7 @@ edhCatchTx !tryAct !exit !passOn !etsOuter =
 -- | Catch possible throw from the specified try action
 edhCatchSTM
   :: EdhThreadState
-  -> (EdhThreadState -> EdhTxExit -> STM ()) -- ^ tryAct
+  -> (EdhTxExit -> EdhTx)     -- ^ tryAct
   -> (EdhValue -> STM ())     -- ^ normal/recovered exit
   -> (  EdhValue              -- ^ thrown value or nil
      -> (EdhValue -> STM ())  -- ^ recover exit
@@ -1555,7 +1552,7 @@ edhCatchSTM !etsOuter !tryAct !exit !passOn = do
           goRethrow :: STM ()
           goRethrow = edh'excpt'hndlr scopeOuter exv rethrow
       passOn exv goRecover goRethrow
-  tryAct etsTry $ \ !tryResult -> const $ do
+  runEdhTx etsTry $ tryAct $ \ !tryResult _ets -> do
     -- no exception occurred, go trigger finally block
     rcvrTh <- unsafeIOToSTM myThreadId
     if rcvrTh /= hndlrTh
@@ -1903,8 +1900,16 @@ evalStmt' !stmt !exit = case stmt of
           noMetaMagic _ets = lookupEdhSelfAttr superObj magicSpell >>= \case
             EdhNil    -> exitEdhSTM ets exit nil
             !magicMth -> runEdhTx ets $ withMagicMethod magicMth
-          callMagicMethod !mthThis !mthThat !mth =
-            objectScope this $ \ !objScope -> do
+          callMagicMethod !mthThis !mthThat !mth = case objectScope this of
+            Nothing ->
+              runEdhTx ets
+                $ callEdhMethod mthThis
+                                mthThat
+                                mth
+                                (ArgsPack [edhNone] odEmpty)
+                                id
+                $ \_magicRtn _ets -> exitEdhSTM ets exit nil
+            Just !objScope -> do
               !scopeObj <- mkScopeWrapper ctx objScope
               runEdhTx ets
                 $ callEdhMethod mthThis
@@ -1985,238 +1990,218 @@ importInto !tgtEnt !argsRcvr !srcExpr !exit = case srcExpr of
         <> T.pack (show srcVal)
 
 
-importFromApk :: EntityStore -> ArgsReceiver -> ArgsPack -> EdhTxExit -> EdhTx
-importFromApk !tgtEnt !argsRcvr !fromApk !exit = do
-  ets <- ask
-  let !ctx = edh'context ets
-  recvEdhArgs ctx argsRcvr fromApk $ \em -> do
-    if not (edh'ctx'eff'defining ctx)
-      then -- normal import
-           updateEntityAttrs ets tgtEnt $ odToList em
-      else do -- importing effects
-        let !effd = [ (attrKeyValue k, v) | (k, v) <- odToList em ]
-        lookupEdhSelfAttr tgtEnt (AttrByName edhEffectsMagicName) >>= \case
-          EdhDict (Dict _ !effDS) -> iopdUpdate effd effDS
-          _                       -> do -- todo warn if of wrong type
-            d <- EdhDict <$> createEdhDict effd
-            changeEntityAttr ets tgtEnt (AttrByName edhEffectsMagicName) d
-    when (edh'ctx'exporting ctx) $ do -- do export what's imported
-      let !impd = [ (attrKeyValue k, v) | (k, v) <- odToList em ]
-      lookupEdhSelfAttr tgtEnt (AttrByName edhExportsMagicName) >>= \case
-        EdhDict (Dict _ !thisExpDS) -> iopdUpdate impd thisExpDS
-        _                           -> do -- todo warn if of wrong type
-          d <- EdhDict <$> createEdhDict impd
-          changeEntityAttr ets tgtEnt (AttrByName edhExportsMagicName) d
-    exitEdhSTM ets exit $ EdhArgsPack fromApk
-
 edhExportsMagicName :: Text
 edhExportsMagicName = "__exports__"
 
+importFromApk :: EntityStore -> ArgsReceiver -> ArgsPack -> EdhTxExit -> EdhTx
+importFromApk !tgtEnt !argsRcvr !fromApk !exit !ets =
+  recvEdhArgs ets ctx argsRcvr fromApk $ \ !em -> do
+    if not (edh'ctx'eff'defining ctx)
+      then -- normal import
+           iopdUpdate (odToList em) tgtEnt
+      else do -- importing effects
+        let !effd = [ (attrKeyValue k, v) | (k, v) <- odToList em ]
+        iopdLookup (AttrByName edhEffectsMagicName) tgtEnt >>= \case
+          Just (EdhDict (Dict _ !dsEff)) -> iopdUpdate effd dsEff
+          _                              -> do -- todo warn if of wrong type
+            d <- EdhDict <$> createEdhDict effd
+            iopdInsert (AttrByName edhEffectsMagicName) d tgtEnt
+    when (edh'ctx'exporting ctx) $ do -- do export what's imported
+      let !impd = [ (attrKeyValue k, v) | (k, v) <- odToList em ]
+      iopdLookup (AttrByName edhExportsMagicName) tgtEnt >>= \case
+        Just (EdhDict (Dict _ !dsExp)) -> iopdUpdate impd dsExp
+        _                              -> do -- todo warn if of wrong type
+          d <- EdhDict <$> createEdhDict impd
+          iopdInsert (AttrByName edhExportsMagicName) d tgtEnt
+    exitEdhSTM ets exit $ EdhArgsPack fromApk
+  where !ctx = edh'context ets
+
 importFromObject :: EntityStore -> ArgsReceiver -> Object -> EdhTxExit -> EdhTx
-importFromObject !tgtEnt !argsRcvr !fromObj !exit = do
-  ets <- ask
-  let withExps :: [(AttrKey, EdhValue)] -> STM ()
-      withExps !exps =
-        runEdhTx ets
-          $ importFromApk tgtEnt argsRcvr (ArgsPack [] $ odFromList exps)
-          $ \_ -> exitEdhTx exit $ EdhObject fromObj
-  contEdhSTM
-    $   lookupEdhSelfAttr (objEntity fromObj) (AttrByName edhExportsMagicName)
-    >>= \case
-          EdhNil -> -- nothing exported at all
-            withExps []
-          EdhDict (Dict _ !fromExpDS) -> iopdToList fromExpDS >>= \ !expl ->
-            withExps $ catMaybes
-              [ case k of
-                  EdhString !expKey -> Just (AttrByName expKey, v)
-                  EdhSymbol !expSym -> Just (AttrBySym expSym, v)
-                  _                 -> Nothing -- todo warn about this
-              | (k, v) <- expl
-              ]
-          badExplVal ->
-            throwEdhSTM ets UsageError $ "bad __exports__ type: " <> T.pack
-              (edhTypeNameOf badExplVal)
+importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
+  case edh'obj'store fromObj of
+    HashStore  !hs             -> doImp hs
+    ClassStore (Class _ !cs _) -> doImp cs
+    _ ->
+      throwEdhSTM ets UsageError
+        $  "can not import from a host object of class "
+        <> objClassName fromObj
+ where
+  doImp :: EntityStore -> STM ()
+  doImp !esFrom = iopdLookup (AttrByName edhExportsMagicName) esFrom >>= \case
+    Nothing                            -> withExps [] -- nothing exported at all
+    Just (EdhDict (Dict _ !dsExpFrom)) -> iopdToList dsExpFrom >>= \ !expl ->
+      withExps $ catMaybes
+        [ case k of
+            EdhString !expKey -> Just (AttrByName expKey, v)
+            EdhSymbol !expSym -> Just (AttrBySym expSym, v)
+            _                 -> Nothing -- todo warn about this
+        | (k, v) <- expl
+        ]
+    Just !badExplVal ->
+      throwEdhSTM ets UsageError $ "bad __exports__ type: " <> T.pack
+        (edhTypeNameOf badExplVal)
+
+  withExps :: [(AttrKey, EdhValue)] -> STM ()
+  withExps !exps =
+    runEdhTx ets
+      $ importFromApk tgtEnt argsRcvr (ArgsPack [] $ odFromList exps)
+      $ \_ -> exitEdhTx exit $ EdhObject fromObj
 
 importEdhModule' :: EntityStore -> ArgsReceiver -> Text -> EdhTxExit -> EdhTx
 importEdhModule' !tgtEnt !argsRcvr !importSpec !exit =
   importEdhModule importSpec $ \ !moduVal -> case moduVal of
     EdhObject !modu -> importFromObject tgtEnt argsRcvr modu exit
-    _               -> error "bug"
+    _               -> error "bug: imported module not an object"
 
 importEdhModule :: Text -> EdhTxExit -> EdhTx
-importEdhModule !impSpec !exit = do
-  ets <- ask
-  let
-    !ctx   = edh'context ets
-    !world = contextWorld ctx
-    !scope = contextScope ctx
-    locateModuInFS :: ((FilePath, FilePath) -> STM ()) -> STM ()
-    locateModuInFS !exit' =
-      lookupEdhCtxAttr ets scope (AttrByName "__path__") >>= \case
-        EdhString !moduName ->
-          lookupEdhCtxAttr ets scope (AttrByName "__file__") >>= \case
-            EdhString !fromModuPath -> do
-              let !importPath = case normalizedSpec of
-      -- special case for `import * '.'`, 2 possible use cases:
-      --
-      --  *) from an entry module (i.e. __main__.edh), to import artifacts
-      --     from its respective persistent module
-      --
-      --  *) from a persistent module, to re-populate the module scope with
-      --     its own exports (i.e. the dict __exports__ in its scope), in
-      --     case the module scope possibly altered after initialization
-                    "." -> T.unpack moduName
-                    _   -> T.unpack normalizedSpec
-              (nomPath, moduFile) <- unsafeIOToSTM $ locateEdhModule
-                (edhPkgPathFrom $ T.unpack fromModuPath)
-                importPath
-              exit' (nomPath, moduFile)
-            _ -> error "bug: no valid `__file__` in context"
-        _ -> error "bug: no valid `__name__` in context"
-    importFromFS :: STM ()
-    importFromFS =
-      flip
-          catchSTM
-          (\(e :: EdhError) -> case e of
-            EdhError !et !msg _ -> throwEdhSTM ets et msg
-            _                   -> throwSTM e
-          )
-        $ locateModuInFS
-        $ \(nomPath, moduFile) -> do
-            let !moduId = T.pack nomPath
-            moduMap' <- takeTMVar (worldModules world)
-            case Map.lookup moduId moduMap' of
-              Just !moduSlot -> do
-                -- put back immediately
-                putTMVar (worldModules world) moduMap'
-                -- blocking wait the target module loaded
-                edhPerformSTM ets (readTMVar moduSlot) $ \case
-                  -- TODO GHC should be able to detect cyclic imports as 
-                  --      deadlock, better to report that more friendly,
-                  --      and more importantly, to prevent the crash.
-                  EdhNamedValue _ !importError ->
-                    -- the first importer failed loading it,
-                    -- replicate the error in this thread
-                    edhThrowTx importError
-                  !modu -> exitEdhTx exit modu
-              Nothing -> do -- we are the first importer
-                -- allocate an empty slot
-                moduSlot <- newEmptyTMVar
-                -- put it for global visibility
-                putTMVar (worldModules world)
-                  $ Map.insert moduId moduSlot moduMap'
-                -- try load the module
-                runEdhTx ets
-                  $ edhCatchTx (loadModule moduSlot moduId moduFile) exit
-                  $ \_ !rethrow -> ask >>= \etsPassOn ->
-                      case edh'ctx'match $ edh'context etsPassOn of
-                        EdhNil      -> rethrow -- no error occurred
-                        importError -> do
-                          void $ tryPutTMVar moduSlot $ EdhNamedValue
-                            "importError"
-                            importError
-                          -- cleanup on loading error
-                          moduMap'' <- takeTMVar (worldModules world)
-                          case Map.lookup moduId moduMap'' of
-                            Nothing -> putTMVar (worldModules world) moduMap''
-                            Just moduSlot' -> if moduSlot' == moduSlot
-                              then putTMVar (worldModules world)
-                                $ Map.delete moduId moduMap''
-                              else putTMVar (worldModules world) moduMap''
-                          runEdhTx etsPassOn rethrow
-  if edh'in'tx ets
-    then throwEdhTx UsageError "you don't import from within a transaction"
-    else do
-      moduMap <- readTMVar (worldModules world)
-      case Map.lookup normalizedSpec moduMap of
-        -- attempt the import specification as direct module id first
-        Just !moduSlot -> readTMVar moduSlot >>= \case
-          -- import error has been encountered, propagate the error
-          EdhNamedValue _ !importError -> runEdhTx ets $ edhThrowTx importError
-          -- module already imported, got it as is
-          !modu                        -> exitEdhSTM ets exit modu
-        -- resolving to `.edh` source files from local filesystem
-        Nothing -> importFromFS
+importEdhModule !impSpec !exit !ets = if edh'in'tx ets
+  then throwEdhSTM ets UsageError "you don't import from within a transaction"
+  else do
+    moduMap <- readTMVar worldModules
+    case Map.lookup normalizedSpec moduMap of
+      -- attempt the import specification as direct module id first
+      Just !moduSlot -> readTMVar moduSlot >>= \case
+        -- import error has been encountered, propagate the error
+        EdhNamedValue _ !importError -> edhThrowSTM ets importError
+        -- module already imported, got it as is
+        !modu                        -> exitEdhSTM ets exit modu
+      -- resolving to `.edh` source files from local filesystem
+      Nothing -> importFromFS
  where
+  !ctx           = edh'context ets
+  !worldModules  = edh'world'modules $ edh'ctx'world ctx
+  !scope         = contextScope ctx
+
   normalizedSpec = normalizeImpSpec impSpec
   normalizeImpSpec :: Text -> Text
   normalizeImpSpec = withoutLeadingSlash . withoutTrailingSlash
   withoutLeadingSlash spec = fromMaybe spec $ T.stripPrefix "/" spec
   withoutTrailingSlash spec = fromMaybe spec $ T.stripSuffix "/" spec
 
-loadModule :: TMVar EdhValue -> ModuleId -> FilePath -> EdhTxExit -> EdhTx
-loadModule !moduSlot !moduId !moduFile !exit = ask >>= \etsImporter ->
-  if edh'in'tx etsImporter
-    then throwEdhTx UsageError
-                    "you don't load a module from within a transaction"
-    else do
-      let !importerCtx = edh'context etsImporter
-          !world       = contextWorld importerCtx
-      fileContent <-
-        unsafeIOToSTM
-        $   streamDecodeUtf8With lenientDecode
-        <$> B.readFile moduFile
-      case fileContent of
-        Some !moduSource _ _ -> do
-          modu <- createEdhModule' world moduId moduFile
-          let !loadScope = objectScope importerCtx modu
-              !loadCtx   = importerCtx
-                { edh'ctx'stack        = loadScope <| edh'ctx'stack importerCtx
-                , edh'ctx'exporting    = False
-                , edh'ctx'eff'defining = False
-                }
-              !etsLoad = etsImporter { edh'context = loadCtx }
-          runEdhTx etsLoad $ evalEdh moduFile moduSource $ \_ -> do
-              -- arm the successfully loaded module
-            void $ tryPutTMVar moduSlot $ EdhObject modu
-            -- switch back to module importer's scope and continue
-            exitEdhSTM etsImporter exit $ EdhObject modu
+  locateModuInFS :: ((FilePath, FilePath) -> STM ()) -> STM ()
+  locateModuInFS !exit' =
+    lookupEdhCtxAttr scope (AttrByName "__path__") >>= \case
+      EdhString !fromPath ->
+        lookupEdhCtxAttr scope (AttrByName "__file__") >>= \case
+          EdhString !fromFile -> do
+            let !nomSpec = case normalizedSpec of
+    -- special case for `import * '.'`, 2 possible use cases:
+    --
+    --  *) from an entry module (i.e. __main__.edh), to import artifacts
+    --     from its respective persistent module
+    --
+    --  *) from a persistent module, to re-populate the module scope with
+    --     its own exports (i.e. the dict __exports__ in its scope), in
+    --     case the module scope possibly altered after initialization
+                  "." -> T.unpack fromPath
+                  _   -> T.unpack normalizedSpec
+            (nomPath, moduFile) <- unsafeIOToSTM
+              $ locateEdhModule (edhPkgPathFrom $ T.unpack fromFile) nomSpec
+            exit' (nomPath, moduFile)
+          _ -> error "bug: no valid `__file__` in context"
+      _ -> error "bug: no valid `__path__` in context"
 
-createEdhModule' :: EdhWorld -> ModuleId -> String -> STM Object
-createEdhModule' !world !moduId !srcName = do
-  -- prepare the module meta data
-  !moduEntity <- createHashEntity =<< iopdFromList
-    [ (AttrByName "__path__", EdhString moduId)
-    , (AttrByName "__file__", EdhString $ T.pack srcName)
-    , (AttrByName "__repr__", EdhString $ "module:" <> moduId)
-    ]
-  !moduSupers    <- newTVar []
-  !moduClassUniq <- unsafeIOToSTM newUnique
-  return undefined
-  --  Object
-  --   { edh'obj'store  = moduEntity
-  --   , edh'obj'class  = ProcDefi
-  --     { edh'procedure'ident = moduClassUniq
-  --     , edh'procedure'name  = AttrByName $ "module:" <> moduId
-  --     , edh'procedure'lexi  = edh'world'root world
-  --     , edh'procedure'decl  = ProcDecl
-  --       { edh'procedure'addr = NamedAttr $ "module:" <> moduId
-  --       , edh'procedure'args = PackReceiver []
-  --       , edh'procedure'body = Left $ StmtSrc
-  --                                ( SourcePos { sourceName   = srcName
-  --                                            , sourceLine   = mkPos 1
-  --                                            , sourceColumn = mkPos 1
-  --                                            }
-  --                                , VoidStmt
-  --                                )
-  --       }
-  --     }
-  --   , edh'obj'supers = moduSupers
-  --   }
+  importFromFS :: STM ()
+  importFromFS =
+    flip
+        catchSTM
+        (\(e :: EdhError) -> case e of
+          EdhError !et !msg _ -> throwEdhSTM ets et msg
+          _                   -> throwSTM e
+        )
+      $ locateModuInFS
+      $ \(nomPath, moduFile) -> do
+          let !moduId = T.pack nomPath
+          moduMap' <- takeTMVar worldModules
+          case Map.lookup moduId moduMap' of
+            Just !moduSlot -> do
+              -- put back immediately
+              putTMVar worldModules moduMap'
+              -- blocking wait the target module loaded
+              runEdhTx ets $ edhContSTM $ readTMVar moduSlot >>= \case
+                -- TODO GHC should be able to detect cyclic imports as 
+                --      deadlock, better to report that more friendly,
+                --      and more importantly, to prevent the crash.
+                EdhNamedValue _ !importError ->
+                  -- the first importer failed loading it,
+                  -- replicate the error in this thread
+                  edhThrowSTM ets importError
+                !modu -> exitEdhSTM ets exit modu
+            Nothing -> do -- we are the first importer
+              -- allocate an empty slot
+              moduSlot <- newEmptyTMVar
+              -- put it for global visibility
+              putTMVar worldModules $ Map.insert moduId moduSlot moduMap'
+              -- try load the module
+              edhCatchSTM ets
+                          (loadModule moduSlot moduId moduFile)
+                          (exitEdhSTM ets exit)
+                $ \ !exv _recover !rethrow -> case exv of
+                    EdhNil -> rethrow -- no error occurred
+                    _      -> do
+                      void $ tryPutTMVar moduSlot $ EdhNamedValue
+                        "<import-error>"
+                        exv
+                      -- cleanup on loading error
+                      moduMap'' <- takeTMVar worldModules
+                      case Map.lookup moduId moduMap'' of
+                        Nothing        -> putTMVar worldModules moduMap''
+                        Just moduSlot' -> if moduSlot' == moduSlot
+                          then putTMVar worldModules
+                            $ Map.delete moduId moduMap''
+                          else putTMVar worldModules moduMap''
+                      rethrow
+
+
+loadModule :: TMVar EdhValue -> ModuleId -> FilePath -> EdhTxExit -> EdhTx
+loadModule !moduSlot !moduId !moduFile !exit !ets = if edh'in'tx ets
+  then throwEdhSTM ets
+                   UsageError
+                   "you don't load a module from within a transaction"
+  else
+    (unsafeIOToSTM $ streamDecodeUtf8With lenientDecode <$> B.readFile moduFile)
+      >>= \case
+            Some !moduSource _ _ -> do
+              !modu <- edhCreateModule moduId moduFile
+              case objectScope modu of
+                Nothing -> error "bug: module object has no scope"
+                Just !scopeLoad ->
+                  let !ctxLoad = ctx
+                        { edh'ctx'stack        = scopeLoad <| edh'ctx'stack ctx
+                        , edh'ctx'pure         = False
+                        , edh'ctx'exporting    = False
+                        , edh'ctx'eff'defining = False
+                        }
+                      !etsLoad = ets { edh'context = ctxLoad }
+                  in  runEdhTx etsLoad
+                        $ evalEdh moduFile moduSource
+                        $ \_moduResult _ets -> do
+                            -- arm the successfully loaded module
+                            void $ tryPutTMVar moduSlot $ EdhObject modu
+                            -- switch back to module importer's scope and continue
+                            exitEdhSTM ets exit $ EdhObject modu
+ where
+  !ctx            = edh'context ets
+  !world          = edh'ctx'world ctx
+
+  edhCreateModule = edh'module'creator world
 
 
 moduleContext :: EdhWorld -> Object -> Context
-moduleContext !world !modu = worldCtx
-  { edh'ctx'stack        = objectScope worldCtx modu <| edh'ctx'stack worldCtx
-  , edh'ctx'exporting    = False
-  , edh'ctx'eff'defining = False
-  }
+moduleContext !world !modu = case objectScope modu of
+  Nothing         -> error "bug: module object has no scope"
+  Just !moduScope -> worldCtx
+    { edh'ctx'stack        = moduScope <| edh'ctx'stack worldCtx
+    , edh'ctx'exporting    = False
+    , edh'ctx'eff'defining = False
+    }
   where !worldCtx = worldContext world
 
 
 intplExpr :: EdhThreadState -> Expr -> (Expr -> STM ()) -> STM ()
 intplExpr !ets !x !exit = case x of
-  IntplExpr !x' -> runEdhTx ets $ evalExpr x' $ \ !val -> exit $ IntplSubs val
+  IntplExpr !x' ->
+    runEdhTx ets $ evalExpr x' $ \ !val _ets -> exit $ IntplSubs val
   PrefixExpr !pref !x' -> intplExpr ets x' $ \x'' -> exit $ PrefixExpr pref x''
   IfExpr !cond !cons !alt -> intplExpr ets cond $ \cond' ->
     intplExpr ets cons $ \cons' -> case alt of
