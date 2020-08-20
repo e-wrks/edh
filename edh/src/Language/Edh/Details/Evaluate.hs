@@ -3237,7 +3237,7 @@ val2DictEntry
 val2DictEntry _ (EdhPair !k !v) !exit = exit (k, v)
 val2DictEntry _ (EdhArgsPack (ArgsPack [!k, !v] !kwargs)) !exit
   | odNull kwargs = exit (k, v)
-val2DictEntry !ets !val _ = throwEdh
+val2DictEntry !ets !val _ = throwEdhSTM
   ets
   UsageError
   ("invalid entry for dict " <> T.pack (edhTypeNameOf val) <> ": " <> T.pack
@@ -3281,15 +3281,21 @@ edhValueNull _ (EdhExpr _ (LitExpr (StringLiteral s)) _) !exit =
   exit $ T.null s
 edhValueNull !ets (EdhObject !o) !exit =
   lookupEdhObjAttr o (AttrByName "__null__") >>= \case
-    EdhNil -> exit False
-    EdhMethod !nulMth ->
+    (_, EdhNil) -> exit False
+    (!this', EdhProcedure (EdhMethod !nulMth) _) ->
       runEdhTx ets
-        $ callEdhMethod o nulMth (ArgsPack [] odEmpty) id
-        $ \ !nulVal -> case nulVal of
+        $ callEdhMethod this' o nulMth (ArgsPack [] odEmpty) id
+        $ \ !nulVal _ets -> case nulVal of
             EdhBool isNull -> exit isNull
             _              -> edhValueNull ets nulVal exit
-    EdhBool !b -> exit b
-    badVal ->
+    (_, EdhBoundProc (EdhMethod !nulMth) !this !that _) ->
+      runEdhTx ets
+        $ callEdhMethod this that nulMth (ArgsPack [] odEmpty) id
+        $ \ !nulVal _ets -> case nulVal of
+            EdhBool isNull -> exit isNull
+            _              -> edhValueNull ets nulVal exit
+    (_, EdhBool !b) -> exit b
+    (_, !badVal) ->
       throwEdhSTM ets UsageError
         $  "invalid value type from __null__: "
         <> T.pack (edhTypeNameOf badVal)
@@ -3378,14 +3384,13 @@ edhValueEqual !ets !lhVal !rhVal !exit =
 
 resolveEdhPerform :: EdhThreadState -> AttrKey -> (EdhValue -> STM ()) -> STM ()
 resolveEdhPerform !ets !effKey !exit =
-  resolveEffectfulAttr ets (edhTargetStackForPerform ets) (attrKeyValue effKey)
-    >>= \case
-          Just (!effArt, _) -> exit effArt
-          Nothing -> throwEdhSTM ets UsageError $ "no such effect: " <> T.pack
-            (show effKey)
+  resolveEffectfulAttr edhTargetStackForPerform (attrKeyValue effKey) >>= \case
+    Just (!effArt, _) -> exit effArt
+    Nothing ->
+      throwEdhSTM ets UsageError $ "no such effect: " <> T.pack (show effKey)
  where
-  edhTargetStackForPerform :: EdhThreadState -> [Scope]
-  edhTargetStackForPerform !ets = case edh'effects'stack scope of
+  edhTargetStackForPerform :: [Scope]
+  edhTargetStackForPerform = case edh'effects'stack scope of
     []         -> NE.tail $ edh'ctx'stack ctx
     outerStack -> outerStack
    where
@@ -3394,14 +3399,13 @@ resolveEdhPerform !ets !effKey !exit =
 
 resolveEdhBehave :: EdhThreadState -> AttrKey -> (EdhValue -> STM ()) -> STM ()
 resolveEdhBehave !ets !effKey !exit =
-  resolveEffectfulAttr ets (edhTargetStackForBehave ets) (attrKeyValue effKey)
-    >>= \case
-          Just (!effArt, _) -> exit effArt
-          Nothing -> throwEdhSTM ets UsageError $ "no such effect: " <> T.pack
-            (show effKey)
+  resolveEffectfulAttr edhTargetStackForBehave (attrKeyValue effKey) >>= \case
+    Just (!effArt, _) -> exit effArt
+    Nothing ->
+      throwEdhSTM ets UsageError $ "no such effect: " <> T.pack (show effKey)
  where
-  edhTargetStackForBehave :: EdhThreadState -> [Scope]
-  edhTargetStackForBehave !ets = NE.tail $ edh'ctx'stack ctx
+  edhTargetStackForBehave :: [Scope]
+  edhTargetStackForBehave = NE.tail $ edh'ctx'stack ctx
     where !ctx = edh'context ets
 
 
