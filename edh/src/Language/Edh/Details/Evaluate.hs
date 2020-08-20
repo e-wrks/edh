@@ -3130,49 +3130,33 @@ evalExpr (ProducerExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
     defineScopeAttr ets name mthVal
     exitEdhSTM ets exit mthVal
 
-
-
-evalExpr !expr !exit = \ !ets -> case expr of
-
-
-  OpDeclExpr !opSym !opPrec opProc@(ProcDecl _ _ !pb) ->
+evalExpr (OpDeclExpr !opSym !opPrec opProc@(ProcDecl _ _ !pb)) !exit =
+  \ !ets -> do
+    let !ctx   = edh'context ets
+        !scope = contextScope ctx
     if edh'ctx'eff'defining ctx
-      then throwEdhTx UsageError "why should an operator be effectful?"
+      then throwEdhSTM ets UsageError "why should an operator be effectful?"
       else case pb of
         -- support re-declaring an existing operator to another name,
         -- with possibly a different precedence
         Left (StmtSrc (_, ExprStmt (AttrExpr (DirectRef (NamedAttr !origOpSym)))))
           -> do
-            let
-              redeclareOp !origOp = do
-                unless (edh'ctx'pure ctx) $ changeEntityAttr
-                  ets
-                  (edh'scope'entity scope)
-                  (AttrByName opSym)
-                  origOp
-                when (edh'ctx'exporting ctx)
-                  $   lookupEdhSelfAttr (objEntity this)
-                                        (AttrByName edhExportsMagicName)
-                  >>= \case
-                        EdhDict (Dict _ !thisExpDS) ->
-                          iopdInsert (EdhString opSym) origOp thisExpDS
-                        _ -> do
-                          d <- EdhDict
-                            <$> createEdhDict [(EdhString opSym, origOp)]
-                          changeEntityAttr ets
-                                           (objEntity this)
-                                           (AttrByName edhExportsMagicName)
-                                           d
-                exitEdhSTM ets exit origOp
-            lookupEdhCtxAttr ets scope (AttrByName origOpSym) >>= \case
+            let redeclareOp !origOp = do
+                  defineScopeAttr ets (AttrByName opSym) origOp
+                  exitEdhSTM ets exit origOp
+
+
+            lookupEdhCtxAttr scope (AttrByName origOpSym) >>= \case
               EdhNil ->
                 throwEdhSTM ets EvalError
                   $  "original operator ("
                   <> origOpSym
                   <> ") not in scope"
-              origOp@EdhIntrOp{} -> redeclareOp origOp
-              origOp@EdhOprtor{} -> redeclareOp origOp
-              val ->
+              origOp@(EdhProcedure EdhIntrOp{} _    ) -> redeclareOp origOp
+              origOp@(EdhProcedure EdhOprtor{} _    ) -> redeclareOp origOp
+              origOp@(EdhBoundProc EdhIntrOp{} _ _ _) -> redeclareOp origOp
+              origOp@(EdhBoundProc EdhOprtor{} _ _ _) -> redeclareOp origOp
+              !val ->
                 throwEdhSTM ets EvalError
                   $  "can not re-declare a "
                   <> T.pack (edhTypeNameOf val)
@@ -3181,53 +3165,36 @@ evalExpr !expr !exit = \ !ets -> case expr of
                   <> " as an operator"
         _ -> do
           validateOperDecl ets opProc
-          u <- unsafeIOToSTM newUnique
-          let op = EdhOprtor
+          !idProc <- unsafeIOToSTM newUnique
+          let !op = EdhOprtor
                 opPrec
                 Nothing
-                ProcDefi { edh'procedure'ident = u
+                ProcDefi { edh'procedure'ident = idProc
                          , edh'procedure'name  = AttrByName opSym
                          , edh'procedure'lexi  = scope
                          , edh'procedure'decl  = opProc
                          }
-          unless (edh'ctx'pure ctx) $ changeEntityAttr
-            ets
-            (edh'scope'entity scope)
-            (AttrByName opSym)
-            op
-          when (edh'ctx'exporting ctx)
-            $   lookupEdhSelfAttr (objEntity this)
-                                  (AttrByName edhExportsMagicName)
-            >>= \case
-                  EdhDict (Dict _ !thisExpDS) ->
-                    iopdInsert (EdhString opSym) op thisExpDS
-                  _ -> do
-                    d <- EdhDict <$> createEdhDict [(EdhString opSym, op)]
-                    changeEntityAttr ets
-                                     (objEntity this)
-                                     (AttrByName edhExportsMagicName)
-                                     d
-          exitEdhSTM ets exit op
+              !opVal = EdhProcedure op Nothing
+          defineScopeAttr ets (AttrByName opSym) opVal
+          exitEdhSTM ets exit opVal
 
-  OpOvrdExpr !opSym !opProc !opPrec -> if edh'ctx'eff'defining ctx
-    then throwEdhTx UsageError "why should an operator be effectful?"
+evalExpr (OpOvrdExpr !opSym !opProc !opPrec) !exit = \ !ets -> do
+  let !ctx                   = edh'context ets
+      !scope                 = contextScope ctx
+      (StmtSrc (!srcPos, _)) = edh'ctx'stmt ctx
+  if edh'ctx'eff'defining ctx
+    then throwEdhSTM ets UsageError "why should an operator be effectful?"
     else do
       validateOperDecl ets opProc
-      let
-        findPredecessor :: STM (Maybe EdhValue)
-        findPredecessor =
-          lookupEdhCtxAttr ets scope (AttrByName opSym) >>= \case
-            EdhNil -> -- do
-              -- (EdhConsole logger _) <- readTMVar $ worldConsole world
-              -- logger 30 (Just $ sourcePosPretty srcPos)
-              --   $ ArgsPack
-              --       [EdhString "overriding an unavailable operator"]
-              --       odEmpty
-              return Nothing
-            op@EdhIntrOp{} -> return $ Just op
-            op@EdhOprtor{} -> return $ Just op
-            opVal          -> do
-              (consoleLogger $ worldConsole world)
+      let findPredecessor :: STM (Maybe EdhValue)
+          findPredecessor = lookupEdhCtxAttr scope (AttrByName opSym) >>= \case
+            EdhNil                              -> return Nothing
+            op@(EdhProcedure EdhIntrOp{} _    ) -> return $ Just op
+            op@(EdhProcedure EdhOprtor{} _    ) -> return $ Just op
+            op@(EdhBoundProc EdhIntrOp{} _ _ _) -> return $ Just op
+            op@(EdhBoundProc EdhOprtor{} _ _ _) -> return $ Just op
+            !opVal                              -> do
+              (consoleLogger $ edh'world'console $ edh'ctx'world ctx)
                   30
                   (Just $ sourcePosPretty srcPos)
                 $ ArgsPack
@@ -3239,30 +3206,19 @@ evalExpr !expr !exit = \ !ets -> case expr of
                     ]
                     odEmpty
               return Nothing
-      predecessor <- findPredecessor
-      u           <- unsafeIOToSTM newUnique
-      let op = EdhOprtor
+      !predecessor <- findPredecessor
+      !idProc      <- unsafeIOToSTM newUnique
+      let !op = EdhOprtor
             opPrec
             predecessor
-            ProcDefi { edh'procedure'ident = u
+            ProcDefi { edh'procedure'ident = idProc
                      , edh'procedure'name  = AttrByName opSym
                      , edh'procedure'lexi  = scope
                      , edh'procedure'decl  = opProc
                      }
-      unless (edh'ctx'pure ctx)
-        $ changeEntityAttr ets (edh'scope'entity scope) (AttrByName opSym) op
-      when (edh'ctx'exporting ctx)
-        $   lookupEdhSelfAttr (objEntity this) (AttrByName edhExportsMagicName)
-        >>= \case
-              EdhDict (Dict _ !thisExpDS) ->
-                iopdInsert (EdhString opSym) op thisExpDS
-              _ -> do
-                d <- EdhDict <$> createEdhDict [(EdhString opSym, op)]
-                changeEntityAttr ets
-                                 (objEntity this)
-                                 (AttrByName edhExportsMagicName)
-                                 d
-      exitEdhSTM ets exit op
+          !opVal = EdhProcedure op Nothing
+      defineScopeAttr ets (AttrByName opSym) opVal
+      exitEdhSTM ets exit opVal
 
 
 validateOperDecl :: EdhThreadState -> ProcDecl -> STM ()
