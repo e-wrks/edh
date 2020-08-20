@@ -45,8 +45,13 @@ resolveEffectfulAttr (scope : rest) !key =
   iopdLookup (AttrByName edhEffectsMagicName) (edh'scope'entity scope) >>= \case
     Nothing                    -> resolveEffectfulAttr rest key
     Just (EdhDict (Dict _ !d)) -> iopdLookup key d >>= \case
-      Just val -> return $ Just (val, rest)
-      Nothing  -> resolveEffectfulAttr rest key
+      Just !val -> case val of
+        EdhProcedure !callable _origEffOuterStack ->
+          return $ Just (EdhProcedure callable (Just rest), rest)
+        EdhBoundProc !callable !this !that _origEffOuterStack ->
+          return $ Just (EdhBoundProc callable this that (Just rest), rest)
+        _ -> return $ Just (val, rest)
+      Nothing -> resolveEffectfulAttr rest key
 -- todo crash in this case? warning may be more proper but in what way?
     _ -> resolveEffectfulAttr rest key
 {-# INLINE resolveEffectfulAttr #-}
