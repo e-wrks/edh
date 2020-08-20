@@ -3023,38 +3023,65 @@ evalExpr (ClassExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
       -- calling an Edh class definition
       Left  !pb -> runEdhTx etsCls $ evalStmt pb doExit
 
+-- defining an Edh namespace
+--
+-- todo for now a namespace is implemented just as a class receiving kwargs
+--      into its static attr scope initially, need sth different?
+evalExpr (NamespaceExpr pd@(ProcDecl !addr _ _) !argsSndr) !exit = \ !ets ->
+  packEdhArgs ets argsSndr $ \(ArgsPack !args !kwargs) -> if not (null args)
+    then throwEdhSTM ets
+                     UsageError
+                     "you don't pass positional args to a namespace"
+    else resolveEdhAttrAddr ets addr $ \ !name -> do
+      let !ctx       = edh'context ets
+          !scope     = contextScope ctx
+          !rootScope = edh'world'root $ edh'ctx'world ctx
+          !rootClass = edh'obj'class $ edh'scope'this rootScope
+          !metaClass = edh'obj'class rootClass
+
+      !idCls <- unsafeIOToSTM newUnique
+      !cs    <- iopdFromList $ odToList kwargs
+      !ss    <- newTVar []
+      let allocator :: EdhObjectAllocator
+          allocator _etsCtor _apkCtor !exitCtor =
+            exitCtor =<< HashStore <$> iopdEmpty
+
+          !clsProc = ProcDefi { edh'procedure'ident = idCls
+                              , edh'procedure'name  = name
+                              , edh'procedure'lexi  = scope
+                              , edh'procedure'decl  = pd
+                              }
+          !cls    = Class clsProc cs allocator
+          !clsObj = Object idCls (ClassStore cls) metaClass ss
+
+          doExit _rtn _ets = do
+            defineScopeAttr ets name $ EdhObject clsObj
+            exitEdhSTM ets exit $ EdhObject clsObj
+
+      let !clsScope = scope { edh'scope'entity = cs
+                            , edh'scope'this   = clsObj
+                            , edh'scope'that   = clsObj
+                            , edh'scope'proc   = clsProc
+                            }
+          !clsCtx = ctx { edh'ctx'stack        = clsScope <| edh'ctx'stack ctx
+                        , edh'ctx'genr'caller  = Nothing
+                        , edh'ctx'match        = true
+                        , edh'ctx'pure         = False
+                        , edh'ctx'exporting    = False
+                        , edh'ctx'eff'defining = False
+                        }
+          !etsCls = ets { edh'context = clsCtx }
+
+      case edh'procedure'body pd of
+        -- calling a host class definition
+        Right !hp -> runEdhTx etsCls $ hp (ArgsPack [] odEmpty) doExit
+        -- calling an Edh class definition
+        Left  !pb -> runEdhTx etsCls $ evalStmt pb doExit
+
 
 
 
 evalExpr !expr !exit = \ !ets -> case expr of
-
-  NamespaceExpr pd@(ProcDecl !addr _ _) !argsSndr ->
-    packEdhArgs argsSndr $ \apk -> resolveEdhAttrAddr ets addr $ \name -> do
-      u <- unsafeIOToSTM newUnique
-      let !cls = ProcDefi { edh'procedure'ident = u
-                          , edh'procedure'name  = name
-                          , edh'procedure'lexi  = scope
-                          , edh'procedure'decl  = pd
-                          }
-      runEdhTx ets $ createEdhObject cls apk $ \ !nsv -> case nsv of
-        EdhObject !nso -> do
-          lookupEdhObjAttr nso (AttrByName "__repr__") >>= \case
-            EdhNil ->
-              changeEntityAttr ets (objEntity nso) (AttrByName "__repr__")
-                $  EdhString
-                $  "namespace:"
-                <> if addr == NamedAttr "_"
-                     then "<anonymous>"
-                     else T.pack $ show addr
-            _ -> pure ()
-          when (addr /= NamedAttr "_") $ do
-            if edh'ctx'eff'defining ctx
-              then defEffect name nsv
-              else unless (edh'ctx'pure ctx)
-                $ changeEntityAttr ets (edh'scope'entity scope) name nsv
-            chkExport name nsv
-          exitEdhSTM ets exit nsv
-        _ -> error "bug: createEdhObject returned non-object"
 
   MethodExpr pd@(ProcDecl !addr _ _) -> resolveEdhAttrAddr ets addr $ \name ->
     do
