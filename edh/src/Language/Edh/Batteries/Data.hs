@@ -97,7 +97,7 @@ setterProc (ArgsPack [EdhMethod !setter] !kwargs) !exit | odNull kwargs =
         !this = thisObject $ contextFrame ctx 1
         !name = procedure'name setter
     if name == AttrByName "_"
-      then throwEdhSTM pgs UsageError "Why you want a setter named `_` ?"
+      then throwEdh pgs UsageError "Why you want a setter named `_` ?"
       else lookupEdhObjAttr pgs this name >>= \case
         EdhDescriptor !getter _ -> do
           let !pd = EdhDescriptor getter $ Just setter
@@ -105,7 +105,7 @@ setterProc (ArgsPack [EdhMethod !setter] !kwargs) !exit | odNull kwargs =
             $ changeEntityAttr pgs (objEntity this) name pd
           exitEdhSTM pgs exit pd
         _ ->
-          throwEdhSTM pgs UsageError $ "Missing property getter " <> T.pack
+          throwEdh pgs UsageError $ "Missing property getter " <> T.pack
             (show name)
 setterProc _ _ = throwEdh EvalError "Invalid args to setter"
 
@@ -336,7 +336,7 @@ symbolCtorProc (ArgsPack _ !kwargs) _ | not $ odNull kwargs =
 symbolCtorProc (ArgsPack !reprs _) !exit = ask >>= \pgs -> contEdhSTM $ do
   let ctorSym :: EdhValue -> (Symbol -> STM ()) -> STM ()
       ctorSym (EdhString !repr) !exit' = mkSymbol repr >>= exit'
-      ctorSym _ _ = throwEdhSTM pgs EvalError "Invalid arg to Symbol()"
+      ctorSym _ _ = throwEdh pgs EvalError "Invalid arg to Symbol()"
   seqcontSTM (ctorSym <$> reprs) $ \case
     [sym] -> exitEdhSTM pgs exit $ EdhSymbol sym
     syms ->
@@ -405,7 +405,7 @@ capProc (ArgsPack [!v] !kwargs) !exit = do
       EdhMethod !mth ->
         runEdhTx pgs $ callEdhMethod o mth (ArgsPack [] kwargs) id exit
       !badMagic ->
-        throwEdhSTM pgs UsageError
+        throwEdh pgs UsageError
           $  "Bad magic __cap__ of "
           <> T.pack (edhTypeNameOf badMagic)
           <> " on class "
@@ -419,19 +419,19 @@ growProc (ArgsPack [!v, newCap@EdhDecimal{}] !kwargs) !exit = do
   contEdhSTM $ case edhUltimate v of
     EdhObject !o -> lookupEdhObjAttr pgs o (AttrByName "__grow__") >>= \case
       EdhNil ->
-        throwEdhSTM pgs UsageError
+        throwEdh pgs UsageError
           $  "grow() not supported by the object of class "
           <> procedureName (objClass o)
       EdhMethod !mth ->
         runEdhTx pgs $ callEdhMethod o mth (ArgsPack [newCap] kwargs) id exit
       !badMagic ->
-        throwEdhSTM pgs UsageError
+        throwEdh pgs UsageError
           $  "Bad magic __grow__ of "
           <> T.pack (edhTypeNameOf badMagic)
           <> " on class "
           <> procedureName (objClass o)
     !badVal ->
-      throwEdhSTM pgs UsageError
+      throwEdh pgs UsageError
         $  "grow() not supported by a value of "
         <> T.pack (edhTypeNameOf badVal)
 growProc _ _ =
@@ -446,7 +446,7 @@ lenProc (ArgsPack [!v] !kwargs) !exit = do
       EdhMethod !mth ->
         runEdhTx pgs $ callEdhMethod o mth (ArgsPack [] kwargs) id exit
       !badMagic ->
-        throwEdhSTM pgs UsageError
+        throwEdh pgs UsageError
           $  "Bad magic __len__ of "
           <> T.pack (edhTypeNameOf badMagic)
           <> " on class "
@@ -461,7 +461,7 @@ lenProc (ArgsPack [!v] !kwargs) !exit = do
     EdhArgsPack (ArgsPack !posArgs !kwArgs) | null posArgs ->
       -- no positional arg, assuming named tuple semantics
       exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral $ odSize kwArgs
-    EdhArgsPack{} -> throwEdhSTM
+    EdhArgsPack{} -> throwEdh
       pgs
       UsageError
       "Unresonable to get length of an apk with both positional and keyword args"
@@ -474,19 +474,19 @@ markProc (ArgsPack [!v, newLen@EdhDecimal{}] !kwargs) !exit = do
   contEdhSTM $ case edhUltimate v of
     EdhObject !o -> lookupEdhObjAttr pgs o (AttrByName "__mark__") >>= \case
       EdhNil ->
-        throwEdhSTM pgs UsageError
+        throwEdh pgs UsageError
           $  "mark() not supported by the object of class "
           <> procedureName (objClass o)
       EdhMethod !mth ->
         runEdhTx pgs $ callEdhMethod o mth (ArgsPack [newLen] kwargs) id exit
       !badMagic ->
-        throwEdhSTM pgs UsageError
+        throwEdh pgs UsageError
           $  "Bad magic __mark__ of "
           <> T.pack (edhTypeNameOf badMagic)
           <> " on class "
           <> procedureName (objClass o)
     !badVal ->
-      throwEdhSTM pgs UsageError
+      throwEdh pgs UsageError
         $  "mark() not supported by a value of "
         <> T.pack (edhTypeNameOf badVal)
 markProc _ _ = throwEdh UsageError "Invalid args to mark(container, newLength)"
@@ -504,7 +504,7 @@ showProc (ArgsPack [!v] !kwargs) !exit = do
       EdhMethod !mth ->
         runEdhTx pgs $ callEdhMethod o mth (ArgsPack [] kwargs) id exit
       !badMagic ->
-        throwEdhSTM pgs UsageError
+        throwEdh pgs UsageError
           $  "Bad magic __show__ of "
           <> T.pack (edhTypeNameOf badMagic)
           <> " on class "
@@ -538,7 +538,7 @@ descProc (ArgsPack [!v] !kwargs) !exit = do
       EdhMethod !mth ->
         runEdhTx pgs $ callEdhMethod o mth (ArgsPack [] kwargs) id exit
       !badMagic ->
-        throwEdhSTM pgs UsageError
+        throwEdh pgs UsageError
           $  "Bad magic __desc__ of "
           <> T.pack (edhTypeNameOf badMagic)
           <> " on class "

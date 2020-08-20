@@ -45,11 +45,11 @@ vecHostCtor !pgsCtor (ArgsPack !ctorArgs !ctorKwargs) !ctorExit = do
     Just (EdhDecimal !d) -> case D.decimalToInteger d of
       Just !len | len >= 0 -> doIt (fromInteger len) $ ctorArgs ++ repeat nil
       _ ->
-        throwEdhSTM pgsCtor UsageError
+        throwEdh pgsCtor UsageError
           $  "Length not an positive integer: "
           <> T.pack (show d)
     Just !badLenVal ->
-      throwEdhSTM pgsCtor UsageError $ "Invalid length: " <> T.pack
+      throwEdh pgsCtor UsageError $ "Invalid length: " <> T.pack
         (show badLenVal)
 
 vecMethods :: EdhProgState -> STM [(AttrKey, EdhValue)]
@@ -128,7 +128,7 @@ vecMethods !pgsModule = sequence
             exitWith newVec
 
       parseEdhIndex pgs idxVal $ \case
-        Left !err -> throwEdhSTM pgs UsageError err
+        Left !err -> throwEdh pgs UsageError err
         Right (EdhIndex !i) ->
           unsafeIOToSTM (MV.read mvec i) >>= exitEdhSTM pgs exit
         Right EdhAny -> exitEdhSTM pgs exit $ EdhObject vecObj
@@ -168,7 +168,7 @@ vecMethods !pgsModule = sequence
                 unsafeIOToSTM $ assignWithList start $ take len ls
                 exitEdhSTM pgs exit other
               !badList ->
-                throwEdhSTM pgs UsageError
+                throwEdh pgs UsageError
                   $  "Not assignable to indexed vector: "
                   <> T.pack (edhTypeNameOf badList)
             assignWithList :: Int -> [EdhValue] -> IO ()
@@ -184,7 +184,7 @@ vecMethods !pgsModule = sequence
                 assignWithVec (n + step) (i + 1) mvec'
 
       parseEdhIndex pgs idxVal $ \case
-        Left  !err          -> throwEdhSTM pgs UsageError err
+        Left  !err          -> throwEdh pgs UsageError err
         Right (EdhIndex !i) -> do
           unsafeIOToSTM $ MV.unsafeWrite mvec i other
           exitEdhSTM pgs exit other

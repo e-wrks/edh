@@ -4,9 +4,10 @@ module Language.Edh.Runtime where
 import           Prelude
 -- import           Debug.Trace
 
+import           GHC.Conc                       ( unsafeIOToSTM )
+
 import           Control.Exception
 import           Control.Monad.Except
-import           Control.Monad.Reader
 
 import           Control.Concurrent.STM
 
@@ -28,6 +29,7 @@ import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Tx
 import           Language.Edh.Details.PkgMan
+import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
 
 
@@ -85,16 +87,19 @@ createEdhWorld !console = liftIO $ do
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
        | (nm, getter, setter) <- [("outer", mthScopeOuterGetter, Nothing)]
        ]
-  let
-    scopeAllocator !ets (ArgsPack _args !kwargs) !exit =
-      case odLookup (AttrByName "ofObj") kwargs of
-        Just !val -> case val of
-          EdhObject !obj -> objectScope obj
-            $ \ !objScope -> exit =<< HostStore <$> newTVar (toDyn objScope)
-          _ -> throwEdhSTM ets UsageError $ "not an object but a " <> T.pack
-            (edhTypeNameOf val)
-        Nothing -> exit =<< HostStore <$> newTVar
-          (toDyn $ contextScope $ edh'context ets)
+  let scopeAllocator !ets (ArgsPack _args !kwargs) !exit =
+        case odLookup (AttrByName "ofObj") kwargs of
+          Just !val -> case val of
+            EdhObject !obj -> case objectScope obj of
+              Nothing ->
+                throwEdh ets UsageError
+                  $  "no scope from a host object of class: "
+                  <> objClassName obj
+              Just !objScope -> exit =<< HostStore <$> newTVar (toDyn objScope)
+            _ -> throwEdh ets UsageError $ "not an object but a " <> T.pack
+              (edhTypeNameOf val)
+          Nothing -> exit =<< HostStore <$> newTVar
+            (toDyn $ contextScope $ edh'context ets)
   !clsScope <- atomically
     $ mkHostClass rootScope "scope" scopeAllocator hsScope []
   let edhWrapScope :: Scope -> STM Object
@@ -166,7 +171,7 @@ createEdhWorld !console = liftIO $ do
             return $ Object uidErr (HostStore hsv) clsIOError supersErr
 
   atomically $ iopdUpdate
-    [ (AttrByName (className clsObj), EdhObject clsObj)
+    [ (AttrByName $ edhClassName clsObj, EdhObject clsObj)
     | clsObj <-
       [ clsProgramHalt
       , clsIOError
@@ -196,8 +201,11 @@ createEdhWorld !console = liftIO $ do
   let edhCreateModule :: ModuleId -> String -> STM Object
       edhCreateModule moduId srcName = do
         !idModu <- unsafeIOToSTM newUnique
-        !hs     <- iopdEmpty
-        !ss     <- newTVar []
+        !hs     <- iopdFromList
+          [ (AttrByName "__path__", EdhString moduId)
+          , (AttrByName "__file__", EdhString $ T.pack srcName)
+          ]
+        !ss <- newTVar []
         return Object { edh'obj'ident  = idModu
                       , edh'obj'store  = HashStore hs
                       , edh'obj'class  = clsModule
@@ -241,24 +249,25 @@ createEdhWorld !console = liftIO $ do
   mthClassRepr :: EdhHostProc
   mthClassRepr _apk !exit !ets = case edh'obj'store clsObj of
     ClassStore (Class !pd _ _) ->
-      exitEdh ets exit $ EdhString $ procedureName pd
-    _ -> exitEdh ets exit $ EdhString "<bogus-class>"
+      exitEdhSTM ets exit $ EdhString $ procedureName pd
+    _ -> exitEdhSTM ets exit $ EdhString "<bogus-class>"
     where clsObj = edh'scope'this $ contextScope $ edh'context ets
 
   mthClassNameGetter :: EdhHostProc
   mthClassNameGetter _apk !exit !ets = case edh'obj'store clsObj of
     ClassStore (Class !pd _ _) ->
-      exitEdh ets exit $ attrKeyValue $ edh'procedure'name pd
-    _ -> exitEdh ets exit nil
+      exitEdhSTM ets exit $ attrKeyValue $ edh'procedure'name pd
+    _ -> exitEdhSTM ets exit nil
     where clsObj = edh'scope'this $ contextScope $ edh'context ets
 
   mthScopeRepr :: EdhHostProc
-  mthScopeRepr _ !exit _ = exitEdh exit $ EdhString "<scope>"
+  mthScopeRepr _ !exit = exitEdhTx exit $ EdhString "<scope>"
 
   mthScopeShow :: EdhHostProc
   mthScopeShow _ !exit !ets =
     case edh'obj'store $ edh'scope'this $ contextScope $ edh'context ets of
       HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+        Nothing -> exitEdhSTM ets exit $ EdhString $ "bogus scope object"
         Just (scope :: Scope) -> do
           let !pd      = edh'scope'proc scope
               !pb      = edh'procedure'body $ edh'procedure'decl pd
@@ -266,29 +275,31 @@ createEdhWorld !console = liftIO $ do
                 Left  (StmtSrc (srcLoc, _)) -> T.pack $ sourcePosPretty srcLoc
                 Right _                     -> "<host-code>"
               StmtSrc (!callerSrcLoc, _) = edh'scope'caller scope
-          exitEdh ets exit
+          exitEdhSTM ets exit
             $  EdhString
             $  "#scope@ "
             <> lexiLoc
-            <> "\n#called by: " T.pack (sourcePosPretty callerSrcLoc)
-        Nothing -> exitEdh ets exit $ EdhString $ "bogus scope object"
-      _ -> exitEdh ets exit $ EdhString $ "bogus scope object"
+            <> "\n#called by: "
+            <> T.pack (sourcePosPretty callerSrcLoc)
+      _ -> exitEdhSTM ets exit $ EdhString $ "bogus scope object"
 
   mthScopeOuterGetter :: EdhHostProc
   mthScopeOuterGetter _ !exit !ets = case edh'obj'store this of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+      Nothing -> exitEdhSTM ets exit $ EdhString $ "bogus scope object"
       Just (scope :: Scope) -> do
         let !outerScope = edh'procedure'lexi $ edh'scope'proc scope
         if edh'scope'proc outerScope == edh'scope'proc scope
-          then exitEdh ets exit nil
+          then exitEdhSTM ets exit nil
           else do
             !oid  <- unsafeIOToSTM newUnique
             !hsv' <- newTVar $ toDyn outerScope
             !ss   <- newTVar []
-            exitEdh ets exit $ EdhObject $ Object oid
-                                                  (HostStore hsv')
-                                                  (edh'obj'class this)
-                                                  ss
+            exitEdhSTM ets exit $ EdhObject $ Object oid
+                                                     (HostStore hsv')
+                                                     (edh'obj'class this)
+                                                     ss
+    _ -> exitEdhSTM ets exit $ EdhString $ "bogus scope object"
     where !this = edh'scope'this $ contextScope $ edh'context ets
 
   -- this is called in case a ProgramHalt is constructed by Edh code
@@ -299,14 +310,13 @@ createEdhWorld !console = liftIO $ do
       (toDyn $ ProgramHalt $ toDyn $ EdhArgsPack apk)
 
   -- creating an IOError from Edh code
-  ioErrAllocator _ apk@(ArgsPack !args !kwargs) !exit =
-    exit =<< HostStore <$> newTVar
-      (toDyn $ EdhIOError $ SomeException $ userError msg)
+  ioErrAllocator !ets apk@(ArgsPack !args !kwargs) !exit = case args of
+    [EdhString !m] | odNull kwargs -> createErr $ T.unpack m
+    _                              -> edhValueRepr ets (EdhArgsPack apk)
+      $ \ !repr -> createErr $ T.unpack repr
    where
-    !msg = case args of
-      [EdhString !msg] | odNull kwargs -> T.unpack msg
-      -- TODO use apk's repr once edhValueRepr works
-      _ -> show apk
+    createErr !msg = exit =<< HostStore <$> newTVar
+      (toDyn $ EdhIOError $ SomeException $ userError msg)
 
   -- a peer error is most prolly created from Edh code
   peerErrAllocator _ !apk !exit = exit =<< HostStore <$> newTVar
@@ -318,57 +328,57 @@ createEdhWorld !console = liftIO $ do
       _ -> EdhPeerError "<bogus-peer>" $ T.pack $ show apk
 
   -- creating a tagged Edh error from Edh code
-  errAllocator !tag !ets apk@(ArgsPack !args !kwargs) !exit =
-    exit =<< HostStore <$> newTVar (toDyn $ EdhError et msg cc)
+  errAllocator !tag !ets apk@(ArgsPack !args !kwargs) !exit = case args of
+    [] | odNull kwargs' -> createErr ""
+    [EdhString !m] | odNull kwargs' -> createErr m
+    _ -> edhValueRepr ets (EdhArgsPack apk) $ \ !repr -> createErr repr
    where
+    createErr msg =
+      exit =<< HostStore <$> newTVar (toDyn $ EdhError tag msg cc)
     (!maybeUnwind, !kwargs') = odTakeOut (AttrByName "unwind") kwargs
     !unwind                  = case maybeUnwind of
       Just (EdhDecimal d) -> case decimalToInteger d of
         Just !n -> fromIntegral n
         _       -> 1
       _ -> 1
-    !cc  = getEdhCallContext unwind ets
-    !msg = case args of
-      [] | odNull kwargs' -> ""
-      [EdhString !msg] | odNull kwargs' -> msg
-      -- TODO use apk's repr once edhValueRepr works
-      _                   -> T.pack (show $ ArgsPack args kwargs')
+    !cc = getEdhCallContext unwind ets
 
   mthErrShow :: EdhHostProc
   mthErrShow _ !exit !ets = case edh'obj'store errObj of
     HostStore !hsv -> readTVar hsv >>= \ !hsd -> case fromDynamic hsd of
       Just (err :: EdhError) ->
-        exitEdh ets exit $ EdhString $ T.pack (show err)
-      Nothing -> case hsd of
+        exitEdhSTM ets exit $ EdhString $ T.pack (show err)
+      Nothing -> case fromDynamic hsd of
         Just (exc :: SomeException) ->
-          exitEdh ets exit $ EdhString $ errClsName <> ": " <> T.pack (show exc)
+          exitEdhSTM ets exit $ EdhString $ errClsName <> ": " <> T.pack
+            (show exc)
         Nothing ->
-          exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
-    _ -> exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
+          exitEdhSTM ets exit
+            $  EdhString
+            $  "bogus error object of: "
+            <> errClsName
+    _ ->
+      exitEdhSTM ets exit $ EdhString $ "bogus error object of: " <> errClsName
+   where
+    !errObj     = edh'scope'this $ contextScope $ edh'context ets
+    !errClsName = objClassName errObj
 
   mthErrRepr :: EdhHostProc
   mthErrRepr _ !exit !ets = case edh'obj'store errObj of
-    HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
-      ProgramHalt !dhv -> case fromDynamic dhv of
-        -- TODO use repr of val once edhValueRepr works
-        (val :: EdhValue) ->
-          exitEdh ets exit
-            $  EdhString
-            $  errClsName
-            <> "("
-            <> T.pack (show val)
-            <> ")"
-        _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
-      EdhIOError !exc ->
-        exitEdh ets exit
+    HostStore !hsv -> readTVar hsv >>= \ !hsd -> case fromDynamic hsd of
+      Just (ProgramHalt !dhv) -> case fromDynamic dhv of
+        Just (val :: EdhValue) -> edhValueRepr ets val $ \ !repr ->
+          exitEdhSTM ets exit $ EdhString $ errClsName <> "(" <> repr <> ")"
+        Nothing -> exitEdhSTM ets exit $ EdhString $ errClsName <> "()"
+      Just (EdhIOError !exc) ->
+        exitEdhSTM ets exit
           $  EdhString
           $  errClsName
           <> "("
           <> T.pack (show $ show exc)
           <> ")"
-      EdhPeerError !peerSite !details ->
-        -- TODO use repr of peerSite/details once edhValueRepr works
-        exitEdh ets exit
+      Just (EdhPeerError !peerSite !details) ->
+        exitEdhSTM ets exit
           $  EdhString
           $  errClsName
           <> "("
@@ -376,11 +386,11 @@ createEdhWorld !console = liftIO $ do
           <> ","
           <> T.pack (show details)
           <> ")"
-      EdhError _tag !msg _cc -> if T.null msg
-        then exitEdh ets exit $ EdhString $ errClsName <> "()"
-        else exitEdh ets exit $ EdhString $ errClsName <> "(`" <> msg <> "`)"
-      _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
-    _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
+      Just (EdhError _tag !msg _cc) -> if T.null msg
+        then exitEdhSTM ets exit $ EdhString $ errClsName <> "()"
+        else exitEdhSTM ets exit $ EdhString $ errClsName <> "(`" <> msg <> "`)"
+      _ -> exitEdhSTM ets exit $ EdhString $ errClsName <> "()"
+    _ -> exitEdhSTM ets exit $ EdhString $ errClsName <> "()"
    where
     !errObj     = edh'scope'this $ contextScope $ edh'context ets
     !errClsName = objClassName errObj
@@ -389,40 +399,40 @@ createEdhWorld !console = liftIO $ do
   mthErrStackGetter _ !exit !ets = case edh'obj'store errObj of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
       Just (EdhError _errTag _errMsg (EdhCallContext !tip !frames)) ->
-        exitEdh ets exit $ EdhArgsPack $ ArgsPack
+        exitEdhSTM ets exit $ EdhArgsPack $ ArgsPack
           (EdhString . dispEdhCallFrame <$> frames)
           (odFromList [(AttrByName "tip", EdhString tip)])
-      _ -> exitEdh ets exit nil
-    _ -> exitEdh ets exit nil
+      _ -> exitEdhSTM ets exit nil
+    _ -> exitEdhSTM ets exit nil
     where errObj = edh'scope'this $ contextScope $ edh'context ets
 
+  moduleAllocator :: EdhObjectAllocator
   moduleAllocator !ets !apk !exit = case apk of
     (ArgsPack [moduId] !kwargs) | odNull kwargs ->
-      exit . HashStore <$> iopdFromList
+      exit =<< HashStore <$> iopdFromList
         [ (AttrByName "__path__", moduId)
         , (AttrByName "__file__", EdhString "<on-the-fly>")
         ]
-    _ -> throwEdhSTM ets UsageError "invalid args to module()"
+    _ -> throwEdh ets UsageError "invalid args to module()"
 
   mthModuClsRepr :: EdhHostProc
   mthModuClsRepr _ !exit !ets = do
     !path <- lookupEdhSelfAttr this (AttrByName "__path__")
-    runEdhTx ets $ edhValueStr path $ \ !pathStr ->
-      exitEdh exit $ EdhString $ "<module: " <> pathStr <> ">"
+    edhValueStr ets path $ \ !pathStr ->
+      exitEdhSTM ets exit $ EdhString $ "<module: " <> pathStr <> ">"
     where !this = edh'scope'this $ contextScope $ edh'context ets
 
   mthModuClsShow :: EdhHostProc
   mthModuClsShow _ !exit !ets = do
     !path <- lookupEdhSelfAttr this (AttrByName "__path__")
     !file <- lookupEdhSelfAttr this (AttrByName "__file__")
-    runEdhTx ets $ edhValueStr path $ \ !pathStr ->
-      edhValueStr file $ \ !fileStr ->
-        exitEdhSTM ets exit
-          $  EdhString
-          $  " ** module: "
-          <> pathStr
-          <> "\n  * loaded from: "
-          <> fileStr
+    edhValueStr ets path $ \ !pathStr -> edhValueStr ets file $ \ !fileStr ->
+      exitEdhSTM ets exit
+        $  EdhString
+        $  " ** module: "
+        <> pathStr
+        <> "\n  * loaded from: "
+        <> fileStr
     where !this = edh'scope'this $ contextScope $ edh'context ets
 
 
@@ -437,7 +447,7 @@ declareEdhOperators world declLoc opps = do
     $ \(op, p) -> (op, return (p, declLoc))
   putTMVar wops opPD'
  where
-  !wops = worldOperators world
+  !wops = edh'world'operators world
   chkCompatible
     :: OpSymbol
     -> STM (Precedence, Text)
@@ -466,9 +476,12 @@ declareEdhOperators world declLoc opps = do
       else return (prevPrec, prevDeclLoc)
 
 
-haltEdhProgram :: EdhProgState -> EdhValue -> STM ()
-haltEdhProgram !pgs !hv = toEdhError pgs (toException $ ProgramHalt $ toDyn hv)
-  $ \exv -> edhThrowSTM pgs exv
+haltEdhProgram :: EdhThreadState -> EdhValue -> STM ()
+haltEdhProgram !ets !hv =
+  edhWrapException (toException $ ProgramHalt $ toDyn hv)
+    >>= \ !exo -> edhThrow ets $ EdhObject exo
+ where
+  !edhWrapException = edh'exception'wrapper (edh'ctx'world $ edh'context ets)
 
 
 runEdhProgram :: MonadIO m => Context -> EdhTx -> m (Either EdhError EdhValue)
@@ -490,28 +503,27 @@ createEdhModule !world !moduId !srcName =
   liftIO $ atomically $ edh'module'creator world moduId srcName
 
 
-type EdhModulePreparation = EdhProgState -> STM () -> STM ()
+type EdhModulePreparation = EdhThreadState -> STM () -> STM ()
 edhModuleAsIs :: EdhModulePreparation
-edhModuleAsIs _pgs !exit = exit
+edhModuleAsIs _ets !exit = exit
 
 
 installEdhModule
   :: MonadIO m => EdhWorld -> ModuleId -> EdhModulePreparation -> m Object
 installEdhModule !world !moduId !preInstall = liftIO $ do
   modu <- createEdhModule world moduId "<host-code>"
-  void $ runEdhProgram' (worldContext world) $ do
-    pgs <- ask
+  void $ runEdhProgram' (worldContext world) $ \ !ets -> do
     let !moduCtx = moduleContext world modu
-        !pgsModu = pgs { edh'context = moduCtx }
-    contEdhSTM $ preInstall pgsModu $ do
+        !etsModu = ets { edh'context = moduCtx }
+    preInstall etsModu $ do
       moduSlot <- newTMVar $ EdhObject modu
-      moduMap  <- takeTMVar (worldModules world)
-      putTMVar (worldModules world) $ Map.insert moduId moduSlot moduMap
+      moduMap  <- takeTMVar (edh'world'modules world)
+      putTMVar (edh'world'modules world) $ Map.insert moduId moduSlot moduMap
   return modu
 
 installedEdhModule :: MonadIO m => EdhWorld -> ModuleId -> m (Maybe Object)
 installedEdhModule !world !moduId =
-  liftIO $ atomically $ tryReadTMVar (worldModules world) >>= \case
+  liftIO $ atomically $ tryReadTMVar (edh'world'modules world) >>= \case
     Nothing  -> return Nothing
     Just !mm -> case Map.lookup moduId mm of
       Nothing        -> return Nothing
@@ -535,14 +547,12 @@ runEdhModule' !world !impPath !preRun = liftIO $ do
   (nomPath, moduFile) <- locateEdhMainModule impPath
   fileContent <- streamDecodeUtf8With lenientDecode <$> B.readFile moduFile
   case fileContent of
-    Some !moduSource _ _ -> runEdhProgram' (worldContext world) $ do
-      pgs <- ask
-      contEdhSTM $ do
-        let !moduId = T.pack nomPath
-        modu <- createEdhModule' world moduId moduFile
-        let !moduCtx = moduleContext world modu
-            !pgsModu = pgs { edh'context = moduCtx }
-        preRun pgsModu $ runEdhTx pgsModu $ evalEdh moduFile moduSource endOfEdh
+    Some !moduSource _ _ -> runEdhProgram' (worldContext world) $ \ !ets -> do
+      let !moduId = T.pack nomPath
+      !modu <- edh'module'creator world moduId moduFile
+      let !moduCtx = moduleContext world modu
+          !etsModu = ets { edh'context = moduCtx }
+      preRun etsModu $ runEdhTx etsModu $ evalEdh moduFile moduSource endOfEdh
 
 
 -- | perform an effectful call from current Edh context
@@ -557,21 +567,13 @@ performEdhEffect
   -> [(AttrName, EdhValue)]
   -> (EdhValue -> EdhTx)
   -> EdhTx
-performEdhEffect !effKey !args !kwargs !exit = ask >>= \pgs ->
-  contEdhSTM
-    $ resolveEdhEffCallee pgs effKey edhTargetStackForPerform
-    $ \(OriginalValue !effVal _ _, scopeMod) ->
-        edhMakeCall'
-            pgs
-            effVal
-            (thisObject $ contextScope $ edh'context pgs)
-            ( ArgsPack args
-            $ odFromList
-            $ [ (AttrByName k, v) | (k, v) <- kwargs ]
-            )
-            scopeMod
-          $ \mkCall -> runEdhTx pgs $ mkCall $ \(OriginalValue !rtnVal _ _) ->
-              exit rtnVal
+performEdhEffect !effKey !args !kwargs !exit !ets =
+  resolveEdhPerform ets effKey $ \ !effVal ->
+    edhPrepareCall'
+        ets
+        effVal
+        (ArgsPack args $ odFromList $ [ (AttrByName k, v) | (k, v) <- kwargs ])
+      $ \ !mkCall -> runEdhTx ets $ mkCall exit
 
 -- | obtain an effectful value from current Edh context
 --
@@ -580,8 +582,8 @@ performEdhEffect !effKey !args !kwargs !exit = ask >>= \pgs ->
 --
 -- otherwise this is the same as 'behaveEdhEffect''
 performEdhEffect' :: AttrKey -> (EdhValue -> EdhTx) -> EdhTx
-performEdhEffect' !effKey !exit = ask >>= \ !pgs ->
-  contEdhSTM $ resolveEdhPerform pgs effKey $ runEdhTx pgs . exit
+performEdhEffect' !effKey !exit !ets =
+  resolveEdhPerform ets effKey $ runEdhTx ets . exit
 
 
 -- | perform an effectful call from current Edh context
@@ -596,26 +598,18 @@ behaveEdhEffect
   -> [(AttrName, EdhValue)]
   -> (EdhValue -> EdhTx)
   -> EdhTx
-behaveEdhEffect !effKey !args !kwargs !exit = ask >>= \pgs ->
-  contEdhSTM
-    $ resolveEdhEffCallee pgs effKey edhTargetStackForBehave
-    $ \(OriginalValue !effVal _ _, scopeMod) ->
-        edhMakeCall'
-            pgs
-            effVal
-            (thisObject $ contextScope $ edh'context pgs)
-            ( ArgsPack args
-            $ odFromList
-            $ [ (AttrByName k, v) | (k, v) <- kwargs ]
-            )
-            scopeMod
-          $ \mkCall -> runEdhTx pgs $ mkCall $ \(OriginalValue !rtnVal _ _) ->
-              exit rtnVal
+behaveEdhEffect !effKey !args !kwargs !exit !ets =
+  resolveEdhBehave ets effKey $ \ !effVal ->
+    edhPrepareCall'
+        ets
+        effVal
+        (ArgsPack args $ odFromList $ [ (AttrByName k, v) | (k, v) <- kwargs ])
+      $ \ !mkCall -> runEdhTx ets $ mkCall exit
 
 -- | obtain an effectful value from current Edh context
 --
 -- use full stack in effect resolution
 behaveEdhEffect' :: AttrKey -> (EdhValue -> EdhTx) -> EdhTx
-behaveEdhEffect' !effKey !exit = ask
-  >>= \ !pgs -> contEdhSTM $ resolveEdhBehave pgs effKey $ runEdhTx pgs . exit
+behaveEdhEffect' !effKey !exit !ets =
+  resolveEdhBehave ets effKey $ runEdhTx ets . exit
 

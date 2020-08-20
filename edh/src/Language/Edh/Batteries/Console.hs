@@ -298,7 +298,7 @@ timelyNotify !pgs (PeriodicArgs !delayMicros !wait1st) (!pgs', !iter'cb) !exit
     nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ getTime Realtime
     runEdhTx pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \case
       Left (pgsThrower, exv) ->
-        edhThrowSTM pgsThrower { edh'context = edh'context pgs } exv
+        edhThrow pgsThrower { edh'context = edh'context pgs } exv
       Right EdhBreak         -> exitEdhSTM pgs exit nil
       Right (EdhReturn !rtn) -> exitEdhSTM pgs exit rtn
       _ ->

@@ -93,7 +93,7 @@ scopeObtainProc (ArgsPack _args !kwargs) !exit = do
               Nothing -> 0
             _ -> 0
           scopeFromStack :: Int -> [Scope] -> (Scope -> STM ()) -> STM ()
-          scopeFromStack _ [] _ = throwEdhSTM pgs UsageError "stack underflow"
+          scopeFromStack _ [] _ = throwEdh pgs UsageError "stack underflow"
           scopeFromStack c (f : _) !exit' | c <= 0 = exit' f
           scopeFromStack c (_ : s) !exit' = scopeFromStack (c - 1) s exit'
       contEdhSTM
@@ -148,7 +148,7 @@ scopeGetProc (ArgsPack !args !kwargs) !exit = do
   attrKeyFrom _ (EdhString attrName) !exit' = exit' $ AttrByName attrName
   attrKeyFrom _ (EdhSymbol sym     ) !exit' = exit' $ AttrBySym sym
   attrKeyFrom pgs badVal _ =
-    throwEdhSTM pgs UsageError $ "Invalid attribute reference type - " <> T.pack
+    throwEdh pgs UsageError $ "Invalid attribute reference type - " <> T.pack
       (edhTypeNameOf badVal)
 
 
@@ -177,7 +177,7 @@ scopePutProc (ArgsPack !args !kwargs) !exit = do
     EdhPair (EdhSymbol !k) !v ->
       putAttrs pgs rest ((AttrBySym k, v) : cumu) exit'
     _ ->
-      throwEdhSTM pgs UsageError
+      throwEdh pgs UsageError
         $  "Invalid key/value type to put into a scope - "
         <> T.pack (edhTypeNameOf arg)
 
@@ -220,7 +220,7 @@ scopeEvalProc (ArgsPack !args !kwargs) !exit = do
               contEdhSTM $ do
                 iopdInsert kw (edhDeCaseClose val) kwIOPD
                 evalThePack argsValues [] kwargsExprs'
-          v -> throwEdhSTM pgs EvalError $ "Not an expr: " <> T.pack (show v)
+          v -> throwEdh pgs EvalError $ "Not an expr: " <> T.pack (show v)
         evalThePack !argsValues (!argExpr : argsExprs') !kwargsExprs =
           case argExpr of
             EdhExpr _ !expr _ ->
@@ -228,7 +228,7 @@ scopeEvalProc (ArgsPack !args !kwargs) !exit = do
                 contEdhSTM $ evalThePack (edhDeCaseClose val : argsValues)
                                          argsExprs'
                                          kwargsExprs
-            v -> throwEdhSTM pgs EvalError $ "Not an expr: " <> T.pack (show v)
+            v -> throwEdh pgs EvalError $ "Not an expr: " <> T.pack (show v)
       evalThePack [] args $ odToList kwargs
 
 

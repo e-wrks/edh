@@ -49,7 +49,7 @@ assignProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                       $   lookupEdhObjAttr pgs obj (AttrByName "[=]")
                       >>= \case
                             EdhNil ->
-                              throwEdhSTM pgs EvalError
+                              throwEdh pgs EvalError
                                 $  "No magic ([=]) method from: "
                                 <> T.pack (show obj)
                             EdhMethod !mth'proc ->
@@ -62,7 +62,7 @@ assignProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                                 id
                                 exit
                             !badIndexer ->
-                              throwEdhSTM pgs EvalError
+                              throwEdh pgs EvalError
                                 $  "Malformed magic method ([=]) on "
                                 <> T.pack (show obj)
                                 <> " - "
@@ -124,7 +124,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                       $   lookupEdhObjAttr pgs obj (AttrByName magicMthName)
                       >>= \case
                             EdhNil ->
-                              throwEdhSTM pgs EvalError
+                              throwEdh pgs EvalError
                                 $  "No magic ("
                                 <> magicMthName
                                 <> ") method from: "
@@ -139,7 +139,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                                 id
                                 exit
                             !badIndexer ->
-                              throwEdhSTM pgs EvalError
+                              throwEdh pgs EvalError
                                 $  "Malformed magic method ("
                                 <> magicMthName
                                 <> ") on "

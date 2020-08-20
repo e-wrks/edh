@@ -146,9 +146,8 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
             withMagicMethod magicMth this that
           EdhProcedure (EdhMethod !magicMth) _ ->
             withMagicMethod magicMth super super
-          _ ->
-            throwEdhSTM ets EvalError $ "Invalid magic method type: " <> T.pack
-              (edhTypeNameOf magicVal)
+          _ -> throwEdh ets EvalError $ "Invalid magic method type: " <> T.pack
+            (edhTypeNameOf magicVal)
    where
 
     noMetamagic :: EdhTx
@@ -159,7 +158,7 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
       (_, EdhBoundProc (EdhMethod !magicMth) !this !that _) ->
         withMagicMethod magicMth this that
       (_, !magicVal) ->
-        throwEdhSTM ets EvalError $ "Invalid magic method type: " <> T.pack
+        throwEdh ets EvalError $ "Invalid magic method type: " <> T.pack
           (edhTypeNameOf magicVal)
 
     withMagicMethod :: ProcDefi -> Object -> Object -> STM ()
@@ -203,9 +202,8 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
             withMagicMethod magicMth this that
           EdhProcedure (EdhMethod !magicMth) _ ->
             withMagicMethod magicMth super super
-          _ ->
-            throwEdhSTM ets EvalError $ "Invalid magic method type: " <> T.pack
-              (edhTypeNameOf magicVal)
+          _ -> throwEdh ets EvalError $ "Invalid magic method type: " <> T.pack
+            (edhTypeNameOf magicVal)
    where
 
     noMetamagic :: EdhTx
@@ -216,7 +214,7 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
       (_, EdhBoundProc (EdhMethod !magicMth) !this !that _) ->
         withMagicMethod magicMth this that
       (_, !magicVal) ->
-        throwEdhSTM ets EvalError $ "Invalid magic method type: " <> T.pack
+        throwEdh ets EvalError $ "Invalid magic method type: " <> T.pack
           (edhTypeNameOf magicVal)
 
     withMagicMethod :: ProcDefi -> Object -> Object -> STM ()
@@ -263,7 +261,7 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
     in  setObjAttr ets that key val $ \ !valSet -> exitEdhSTM ets exit valSet
 
   -- not allowing assignment via super
-  AttrExpr SuperRef -> throwEdhSTM ets EvalError "can not assign via super"
+  AttrExpr SuperRef -> throwEdh ets EvalError "can not assign via super"
 
   _ -> runEdhTx ets $ evalExpr tgtExpr $ \ !tgtVal _ets -> case tgtVal of
 
@@ -278,7 +276,7 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
 
     -- no virtual attribute supported yet
     _ ->
-      throwEdhSTM ets EvalError
+      throwEdh ets EvalError
         $  "Invalid assignment target, it's a "
         <> T.pack (edhTypeNameOf tgtVal)
         <> ": "
@@ -317,13 +315,13 @@ setObjAttr !ets !obj !key !val !exit = lookupEdhObjAttr obj key >>= \case
     HashStore  !hs             -> iopdInsert key val hs >> exit val
     ClassStore (Class _ !cs _) -> iopdInsert key val cs >> exit val
     HostStore _ ->
-      throwEdhSTM ets UsageError
+      throwEdh ets UsageError
         $  "no such property `"
         <> T.pack (show key)
         <> "` on host object of class "
         <> objClassName obj
   readonly !getter =
-    throwEdhSTM ets UsageError
+    throwEdh ets UsageError
       $  "property `"
       <> T.pack (show $ edh'procedure'name getter)
       <> "` of class "
@@ -375,9 +373,9 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     IndirectRef !tgtExpr !addr' -> resolveEdhAttrAddr ets addr'
       $ \ !key -> runEdhTx ets $ setEdhAttr tgtExpr key rhVal exit
     -- god forbidden things
-    ThisRef  -> throwEdhSTM ets EvalError "can not assign to this"
-    ThatRef  -> throwEdhSTM ets EvalError "can not assign to that"
-    SuperRef -> throwEdhSTM ets EvalError "can not assign to super"
+    ThisRef  -> throwEdh ets EvalError "can not assign to this"
+    ThatRef  -> throwEdh ets EvalError "can not assign to that"
+    SuperRef -> throwEdh ets EvalError "can not assign to super"
   -- dereferencing attribute assignment
   InfixExpr "@" !tgtExpr !addrRef ->
     runEdhTx ets $ evalExpr addrRef $ \ !addrVal _ets ->
@@ -389,11 +387,11 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
         EdhSymbol !sym ->
           runEdhTx ets $ setEdhAttr tgtExpr (AttrBySym sym) rhVal exit
         _ ->
-          throwEdhSTM ets EvalError
+          throwEdh ets EvalError
             $  "invalid attribute reference type - "
             <> T.pack (edhTypeNameOf addrVal)
   !x ->
-    throwEdhSTM ets EvalError
+    throwEdh ets EvalError
       $  "invalid left hand expression for assignment: "
       <> T.pack (show x)
  where
@@ -407,7 +405,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
       HashStore  !hs             -> expInto hs artKey artVal
       ClassStore (Class _ !cs _) -> expInto cs artKey artVal
       HostStore _ ->
-        throwEdhSTM ets UsageError
+        throwEdh ets UsageError
           $  "no way exporting to a host object of class "
           <> objClassName obj
     exitEdhSTM ets exit artVal
@@ -424,7 +422,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     HashStore  !hs             -> defEffectInto hs key
     ClassStore (Class _ !cs _) -> defEffectInto cs key
     HostStore _ ->
-      throwEdhSTM ets UsageError
+      throwEdh ets UsageError
         $  "no way defining effects into a host object of class "
         <> objClassName obj
   defEffectInto :: EntityStore -> AttrKey -> STM ()
@@ -465,7 +463,7 @@ createEdhObject !ets !clsObj !apk !exitEnd = do
           fmap snd <$> iopdToList mroSupers >>= writeTVar supersVar
           exit objCurr
       _ ->
-        throwEdhSTM ets UsageError
+        throwEdh ets UsageError
           $  "can not create object from an object of class "
           <> objClassName clsCurr
 
@@ -512,7 +510,7 @@ constructEdhObject !clsObj !apk !exit !ets =
               $ callEdhMethod this that mthInit apk id
               $ \_initResult _ets -> callInit rest
           !badInitMth ->
-            throwEdhSTM ets UsageError
+            throwEdh ets UsageError
               $  "invalid __init__ method of type: "
               <> T.pack (edhTypeNameOf badInitMth)
     callInit =<< (obj :) <$> readTVar (edh'obj'supers obj)
@@ -665,7 +663,7 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
     WildReceiver -> if null posArgs
       then edhDoSTM etsCaller $ exit kwArgs
       else
-        throwEdhSTM etsCaller EvalError
+        throwEdh etsCaller EvalError
         $  "Unexpected "
         <> T.pack (show $ length posArgs)
         <> " positional argument(s) to wild receiver"
@@ -732,17 +730,17 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
                   iopdInsert (AttrByName attrName) argVal em
                   exit' (ArgsPack posArgs'' kwArgs'')
                 SymbolicAttr !symName -> -- todo support this ?
-                  throwEdhSTM etsCaller UsageError
+                  throwEdh etsCaller UsageError
                     $  "Do you mean `this.@"
                     <> symName
                     <> "` instead ?"
-              Just addr@(IndirectRef _ _) -> do
+              Just addr@(IndirectRef _ _) ->
                 -- do assignment in callee's context, and return to caller's afterwards
                 runEdhTx etsRecv
                   $ assignEdhTarget (AttrExpr addr) argVal
                   $ \_assignResult _ets -> exit' (ArgsPack posArgs'' kwArgs'')
               !tgt ->
-                throwEdhSTM etsCaller UsageError
+                throwEdh etsCaller UsageError
                   $  "Invalid argument retarget: "
                   <> T.pack (show tgt)
    where
@@ -763,19 +761,18 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
               runEdhTx etsRecv $ evalExpr defaultExpr $ \ !val _ets ->
                 exit'' (edhDeCaseClose val, posArgs', kwArgs'')
             _ ->
-              throwEdhSTM etsCaller UsageError $ "Missing argument: " <> T.pack
+              throwEdh etsCaller UsageError $ "Missing argument: " <> T.pack
                 (show argKey)
   woResidual :: ArgsPack -> STM () -> STM ()
   woResidual (ArgsPack !posResidual !kwResidual) !exit'
     | not (null posResidual)
-    = throwEdhSTM etsCaller UsageError
+    = throwEdh etsCaller UsageError
       $  "Extraneous "
       <> T.pack (show $ length posResidual)
       <> " positional argument(s)"
     | not (odNull kwResidual)
-    = throwEdhSTM etsCaller UsageError
-      $  "Extraneous keyword arguments: "
-      <> T.pack (unwords (show <$> odKeys kwResidual))
+    = throwEdh etsCaller UsageError $ "Extraneous keyword arguments: " <> T.pack
+      (unwords (show <$> odKeys kwResidual))
     | otherwise
     = exit'
 
@@ -790,11 +787,11 @@ packEdhExprs !ets !pkrs !pkExit = do
     pkExprs []       !exit = exit []
     pkExprs (x : xs) !exit = case x of
       UnpackPosArgs _ ->
-        throwEdhSTM ets EvalError "unpack to expr not supported yet"
+        throwEdh ets EvalError "unpack to expr not supported yet"
       UnpackKwArgs _ ->
-        throwEdhSTM ets EvalError "unpack to expr not supported yet"
+        throwEdh ets EvalError "unpack to expr not supported yet"
       UnpackPkArgs _ ->
-        throwEdhSTM ets EvalError "unpack to expr not supported yet"
+        throwEdh ets EvalError "unpack to expr not supported yet"
       SendPosArg !argExpr -> pkExprs xs $ \ !posArgs -> do
         !xu <- unsafeIOToSTM newUnique
         exit (EdhExpr xu argExpr "" : posArgs)
@@ -842,7 +839,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                 ll <- readTVar l
                 exit ((noneNil <$> ll) ++ posArgs)
               _ ->
-                throwEdhSTM ets EvalError
+                throwEdh ets EvalError
                   $  "Can not unpack args from a "
                   <> T.pack (edhTypeNameOf val)
                   <> ": "
@@ -856,7 +853,7 @@ packEdhArgs !ets !argSenders !pkExit = do
               (EdhPair !k !v) ->
                 edhVal2Kw
                     k
-                    (  throwEdhSTM ets UsageError
+                    (  throwEdh ets UsageError
                     $  "Invalid keyword type: "
                     <> T.pack (edhTypeNameOf k)
                     )
@@ -869,7 +866,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                   iopdUpdate kvl kwIOPD
                   pkArgs xs $ \ !posArgs -> exit posArgs
               _ ->
-                throwEdhSTM ets EvalError
+                throwEdh ets EvalError
                   $  "Can not unpack kwargs from a "
                   <> T.pack (edhTypeNameOf val)
                   <> ": "
@@ -881,7 +878,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                 iopdUpdate (odToList kwArgs') kwIOPD
                 pkArgs xs $ \ !posArgs' -> exit (posArgs ++ posArgs')
               _ ->
-                throwEdhSTM ets EvalError
+                throwEdh ets EvalError
                   $  "Can not unpack apk from a "
                   <> T.pack (edhTypeNameOf val)
                   <> ": "
@@ -970,10 +967,10 @@ edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker
             callCallable callee this' obj
               $ flip (maybe id) effOuter
               $ \ !outerScope !s -> s { edh'effects'stack = outerScope }
-          _ -> throwEdhSTM etsCallPrep EvalError "No __call__ method on object"
+          _ -> throwEdh etsCallPrep EvalError "No __call__ method on object"
 
     _ ->
-      throwEdhSTM etsCallPrep EvalError
+      throwEdh etsCallPrep EvalError
         $  "Can not call a "
         <> T.pack (edhTypeNameOf calleeVal)
         <> ": "
@@ -1003,9 +1000,8 @@ edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker
 
     -- calling a producer procedure
     EdhPrducr !mth -> case edh'procedure'body $ edh'procedure'decl mth of
-      Right _ ->
-        throwEdhSTM etsCallPrep EvalError "bug: host producer procedure"
-      Left !pb -> case edhUltimate <$> odLookup (AttrByName "outlet") kwargs of
+      Right _   -> throwEdh etsCallPrep EvalError "bug: host producer procedure"
+      Left  !pb -> case edhUltimate <$> odLookup (AttrByName "outlet") kwargs of
         Nothing -> do
           outlet <- newEventSink
           callMaker $ \exit -> launchEventProducer exit outlet $ callEdhMethod'
@@ -1032,18 +1028,18 @@ edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker
             scopeMod
             endOfEdh
         Just !badVal ->
-          throwEdhSTM etsCallPrep UsageError
+          throwEdh etsCallPrep UsageError
             $  "The value passed to a producer as `outlet` found to be a "
             <> T.pack (edhTypeNameOf badVal)
 
     -- calling a generator
-    (EdhGnrtor _) -> throwEdhSTM
+    (EdhGnrtor _) -> throwEdh
       etsCallPrep
       EvalError
       "Can only call a generator method by for-from-do loop"
 
     _ ->
-      throwEdhSTM etsCallPrep EvalError
+      throwEdh etsCallPrep EvalError
         $  "`edhPrepareCall` can not be used to call a "
         <> T.pack (show callee)
 
@@ -1263,7 +1259,7 @@ edhForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
                 _ -> exitEdhTx exit gnrRtn
 
   loopCallGenr _ !callee _ _ _ =
-    throwEdhSTM etsLoopPrep EvalError $ "bug: unexpected generator: " <> T.pack
+    throwEdh etsLoopPrep EvalError $ "bug: unexpected generator: " <> T.pack
       (show callee)
 
   -- receive one yielded value from the generator, the 'genrCont' here is
@@ -1273,56 +1269,54 @@ edhForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
   recvYield
     :: EdhTxExit -> EdhValue -> (Either EdhValue EdhValue -> STM ()) -> STM ()
   recvYield !exit !yielded'val !genrCont = do
-    let
-      doOne !exitOne !etsTry =
-        recvEdhArgs
-            etsTry
-            (edh'context etsTry)
-            argsRcvr
-            (case yielded'val of
-              EdhArgsPack apk -> apk
-              _               -> ArgsPack [yielded'val] odEmpty
-            )
-          $ \ !em -> do
-              iopdUpdate (odToList em) (edh'scope'entity scopeLooper)
-              runEdhTx etsTry $ evalExpr doExpr exitOne
-      doneOne !doResult = case edhDeCaseClose doResult of
-        EdhContinue ->
-          -- send nil to generator on continue
-          genrCont $ Right nil
-        EdhBreak ->
-          -- break out of the for-from-do loop,
-          -- the generator on <break> yielded will return
-          -- nil, effectively have the for loop eval to nil
-          genrCont $ Right EdhBreak
-        EdhCaseOther ->
-          -- send nil to generator on no-match of a branch
-          genrCont $ Right nil
-        EdhFallthrough ->
-          -- send nil to generator on fallthrough
-          genrCont $ Right nil
-        EdhReturn EdhReturn{} -> -- this has special meaning
-          -- Edh code should not use this pattern
-          throwEdhSTM etsLoopPrep UsageError "double return from do-of-for?"
-        EdhReturn !rtnVal ->
-          -- early return from for-from-do, the geneerator on
-          -- double wrapped return yielded, will unwrap one
-          -- level and return the result, effectively have the
-          -- for loop eval to return that 
-          genrCont $ Right $ EdhReturn $ EdhReturn rtnVal
-        !val -> do
-          -- vanilla val from do, send to generator
-          iterCollector val
-          genrCont $ Right val
+    let doOne !exitOne !etsTry =
+          recvEdhArgs
+              etsTry
+              (edh'context etsTry)
+              argsRcvr
+              (case yielded'val of
+                EdhArgsPack apk -> apk
+                _               -> ArgsPack [yielded'val] odEmpty
+              )
+            $ \ !em -> do
+                iopdUpdate (odToList em) (edh'scope'entity scopeLooper)
+                runEdhTx etsTry $ evalExpr doExpr exitOne
+        doneOne !doResult = case edhDeCaseClose doResult of
+          EdhContinue ->
+            -- send nil to generator on continue
+            genrCont $ Right nil
+          EdhBreak ->
+            -- break out of the for-from-do loop,
+            -- the generator on <break> yielded will return
+            -- nil, effectively have the for loop eval to nil
+            genrCont $ Right EdhBreak
+          EdhCaseOther ->
+            -- send nil to generator on no-match of a branch
+            genrCont $ Right nil
+          EdhFallthrough ->
+            -- send nil to generator on fallthrough
+            genrCont $ Right nil
+          EdhReturn EdhReturn{} -> -- this has special meaning
+            -- Edh code should not use this pattern
+            throwEdh etsLoopPrep UsageError "double return from do-of-for?"
+          EdhReturn !rtnVal ->
+            -- early return from for-from-do, the geneerator on
+            -- double wrapped return yielded, will unwrap one
+            -- level and return the result, effectively have the
+            -- for loop eval to return that 
+            genrCont $ Right $ EdhReturn $ EdhReturn rtnVal
+          !val -> do
+            -- vanilla val from do, send to generator
+            iterCollector val
+            genrCont $ Right val
     case yielded'val of
       EdhNil -> -- nil yielded from a generator effectively early stops
         exitEdhSTM etsLoopPrep exit nil
       EdhContinue ->
-        throwEdhSTM etsLoopPrep EvalError "generator yielded continue"
-      EdhBreak -> throwEdhSTM etsLoopPrep EvalError "generator yielded break"
-      EdhReturn{} ->
-        throwEdhSTM etsLoopPrep EvalError "generator yielded return"
-      _ -> edhCatchSTM etsLoopPrep doOne doneOne $ \ !exv _recover rethrow ->
+        throwEdh etsLoopPrep EvalError "generator yielded continue"
+      EdhBreak -> throwEdh etsLoopPrep EvalError "generator yielded break"
+      EdhReturn{} -> throwEdh etsLoopPrep EvalError "generator yielded return"
+      _ -> edhCatch etsLoopPrep doOne doneOne $ \ !exv _recover rethrow ->
         case exv of
           EdhNil -> rethrow -- no exception occurred in do block
           _ -> -- exception uncaught in do block
@@ -1408,7 +1402,7 @@ edhForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
       --      to for-from-do looping
 
       _ ->
-        throwEdhSTM ets EvalError
+        throwEdh ets EvalError
           $  "can not do a for loop from "
           <> T.pack (edhTypeNameOf iterVal)
           <> ": "
@@ -1429,7 +1423,7 @@ resolveEdhAttrAddr !ets (SymbolicAttr !symName) !exit =
           (EdhSymbol !symVal ) -> exit (AttrBySym symVal)
           (EdhString !nameVal) -> exit (AttrByName nameVal)
           _ ->
-            throwEdhSTM ets EvalError
+            throwEdh ets EvalError
               $  "not a symbol/string as "
               <> symName
               <> ", it is a "
@@ -1437,7 +1431,7 @@ resolveEdhAttrAddr !ets (SymbolicAttr !symName) !exit =
               <> ": "
               <> T.pack (show val)
         Nothing ->
-          throwEdhSTM ets EvalError
+          throwEdh ets EvalError
             $  "no symbol/string named "
             <> T.pack (show symName)
             <> " available"
@@ -1449,14 +1443,14 @@ resolveEdhAttrAddr !ets (SymbolicAttr !symName) !exit =
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent actions following it, be cautious.
 throwEdhTx :: EdhErrorTag -> Text -> EdhTx
-throwEdhTx !et !msg !ets = throwEdhSTM ets et msg
+throwEdhTx !et !msg !ets = throwEdh ets et msg
 -- | Throw a tagged error from STM monad running Edh computation
 --
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent actions following it, be cautious.
-throwEdhSTM :: EdhThreadState -> EdhErrorTag -> Text -> STM ()
-throwEdhSTM !ets !tag !msg = edhWrapException (toException edhErr)
-  >>= \ !exo -> edhThrowSTM ets $ EdhObject exo
+throwEdh :: EdhThreadState -> EdhErrorTag -> Text -> STM ()
+throwEdh !ets !tag !msg = edhWrapException (toException edhErr)
+  >>= \ !exo -> edhThrow ets $ EdhObject exo
  where
   !edhWrapException = edh'exception'wrapper (edh'ctx'world $ edh'context ets)
   !cc               = getEdhCallContext 0 ets
@@ -1464,13 +1458,13 @@ throwEdhSTM !ets !tag !msg = edhWrapException (toException edhErr)
 
 
 edhThrowTx :: EdhValue -> EdhTx
-edhThrowTx = flip edhThrowSTM
+edhThrowTx = flip edhThrow
 -- | Throw arbitrary value from Edh
 --
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent actions following it, be cautious.
-edhThrowSTM :: EdhThreadState -> EdhValue -> STM ()
-edhThrowSTM !ets !exv = do
+edhThrow :: EdhThreadState -> EdhValue -> STM ()
+edhThrow !ets !exv = do
   let propagateExc :: EdhValue -> [Scope] -> STM ()
       propagateExc exv' [] = edhErrorUncaught ets exv'
       propagateExc exv' (frame : stack) =
@@ -1505,14 +1499,14 @@ edhCatchTx
      ) -- edh'ctx'match of this Edh tx being the thrown value or nil
   -> EdhTx
 edhCatchTx !tryAct !exit !passOn !etsOuter =
-  edhCatchSTM etsOuter tryAct (runEdhTx etsOuter . exit)
+  edhCatch etsOuter tryAct (runEdhTx etsOuter . exit)
     $ \ !exv recover rethrow -> do
         let !ctxOuter = edh'context etsOuter
             !ctxHndl  = ctxOuter { edh'ctx'match = exv }
             !etsHndl  = etsOuter { edh'context = ctxHndl }
         runEdhTx etsHndl $ passOn (const . recover) (const rethrow)
 -- | Catch possible throw from the specified try action
-edhCatchSTM
+edhCatch
   :: EdhThreadState
   -> (EdhTxExit -> EdhTx)     -- ^ tryAct
   -> (EdhValue -> STM ())     -- ^ normal/recovered exit
@@ -1522,7 +1516,7 @@ edhCatchSTM
      -> STM ()
      )
   -> STM ()
-edhCatchSTM !etsOuter !tryAct !exit !passOn = do
+edhCatch !etsOuter !tryAct !exit !passOn = do
   hndlrTh <- unsafeIOToSTM myThreadId
   let
     !ctxOuter   = edh'context etsOuter
@@ -1616,7 +1610,7 @@ evalEdh' !srcName !lineNo !srcCode !exit !ets = do
           !cc     = getEdhCallContext 0 ets
           !edhErr = EdhError ParseError msg cc
       edhWrapException (toException edhErr)
-        >>= \ !exo -> edhThrowSTM ets (EdhObject exo)
+        >>= \ !exo -> edhThrow ets (EdhObject exo)
     Right !stmts -> runEdhTx ets $ evalBlock stmts exit
 
 
@@ -1849,7 +1843,7 @@ evalStmt' !stmt !exit = case stmt of
                     (PerceiveRecord perceiverChan ets reactor :)
         exitEdhSTM ets exit nil
       _ ->
-        throwEdhSTM ets EvalError
+        throwEdh ets EvalError
           $  "can only perceive from an event sink, not a "
           <> T.pack (edhTypeNameOf sinkVal)
           <> ": "
@@ -1923,7 +1917,7 @@ evalStmt' !stmt !exit = case stmt of
             EdhBoundProc (EdhMethod !mth) !mthThis _mthThat _ ->
               callMagicMethod mthThis this mth
             _ ->
-              throwEdhSTM ets EvalError
+              throwEdh ets EvalError
                 $  "invalid magic (<-^) method type: "
                 <> T.pack (edhTypeNameOf magicMth)
 
@@ -1938,12 +1932,12 @@ evalStmt' !stmt !exit = case stmt of
           case edh'obj'store this of
             ClassStore{} -> case edh'obj'store superObj of
               ClassStore{} -> doExtends
-              _ -> throwEdhSTM ets
-                               UsageError
-                               "can not extend a non-class by a class object"
+              _ -> throwEdh ets
+                            UsageError
+                            "can not extend a non-class by a class object"
             _ -> doExtends
       _ ->
-        throwEdhSTM ets UsageError
+        throwEdh ets UsageError
           $  "can only extends an object, not a "
           <> T.pack (edhTypeNameOf superVal)
           <> ": "
@@ -2017,7 +2011,7 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
     HashStore  !hs             -> doImp hs
     ClassStore (Class _ !cs _) -> doImp cs
     _ ->
-      throwEdhSTM ets UsageError
+      throwEdh ets UsageError
         $  "can not import from a host object of class "
         <> objClassName fromObj
  where
@@ -2033,7 +2027,7 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
         | (k, v) <- expl
         ]
     Just !badExplVal ->
-      throwEdhSTM ets UsageError $ "bad __exports__ type: " <> T.pack
+      throwEdh ets UsageError $ "bad __exports__ type: " <> T.pack
         (edhTypeNameOf badExplVal)
 
   withExps :: [(AttrKey, EdhValue)] -> STM ()
@@ -2050,14 +2044,14 @@ importEdhModule' !tgtEnt !argsRcvr !importSpec !exit =
 
 importEdhModule :: Text -> EdhTxExit -> EdhTx
 importEdhModule !impSpec !exit !ets = if edh'in'tx ets
-  then throwEdhSTM ets UsageError "you don't import from within a transaction"
+  then throwEdh ets UsageError "you don't import from within a transaction"
   else do
     moduMap <- readTMVar worldModules
     case Map.lookup normalizedSpec moduMap of
       -- attempt the import specification as direct module id first
       Just !moduSlot -> readTMVar moduSlot >>= \case
         -- import error has been encountered, propagate the error
-        EdhNamedValue _ !importError -> edhThrowSTM ets importError
+        EdhNamedValue _ !importError -> edhThrow ets importError
         -- module already imported, got it as is
         !modu                        -> exitEdhSTM ets exit modu
       -- resolving to `.edh` source files from local filesystem
@@ -2101,7 +2095,7 @@ importEdhModule !impSpec !exit !ets = if edh'in'tx ets
     flip
         catchSTM
         (\(e :: EdhError) -> case e of
-          EdhError !et !msg _ -> throwEdhSTM ets et msg
+          EdhError !et !msg _ -> throwEdh ets et msg
           _                   -> throwSTM e
         )
       $ locateModuInFS
@@ -2120,7 +2114,7 @@ importEdhModule !impSpec !exit !ets = if edh'in'tx ets
                 EdhNamedValue _ !importError ->
                   -- the first importer failed loading it,
                   -- replicate the error in this thread
-                  edhThrowSTM ets importError
+                  edhThrow ets importError
                 !modu -> exitEdhSTM ets exit modu
             Nothing -> do -- we are the first importer
               -- allocate an empty slot
@@ -2128,9 +2122,9 @@ importEdhModule !impSpec !exit !ets = if edh'in'tx ets
               -- put it for global visibility
               putTMVar worldModules $ Map.insert moduId moduSlot moduMap'
               -- try load the module
-              edhCatchSTM ets
-                          (loadModule moduSlot moduId moduFile)
-                          (exitEdhSTM ets exit)
+              edhCatch ets
+                       (loadModule moduSlot moduId moduFile)
+                       (exitEdhSTM ets exit)
                 $ \ !exv _recover !rethrow -> case exv of
                     EdhNil -> rethrow -- no error occurred
                     _      -> do
@@ -2150,9 +2144,9 @@ importEdhModule !impSpec !exit !ets = if edh'in'tx ets
 
 loadModule :: TMVar EdhValue -> ModuleId -> FilePath -> EdhTxExit -> EdhTx
 loadModule !moduSlot !moduId !moduFile !exit !ets = if edh'in'tx ets
-  then throwEdhSTM ets
-                   UsageError
-                   "you don't load a module from within a transaction"
+  then throwEdh ets
+                UsageError
+                "you don't load a module from within a transaction"
   else
     (unsafeIOToSTM $ streamDecodeUtf8With lenientDecode <$> B.readFile moduFile)
       >>= \case
@@ -2328,11 +2322,11 @@ evalAttrAddr :: AttrAddr -> EdhTxExit -> EdhTx
 evalAttrAddr !addr !exit !ets = case addr of
   ThisRef          -> exitEdhSTM ets exit (EdhObject $ edh'scope'this scope)
   ThatRef          -> exitEdhSTM ets exit (EdhObject $ edh'scope'that scope)
-  SuperRef -> throwEdhSTM ets UsageError "can not address a single super alone"
+  SuperRef -> throwEdh ets UsageError "can not address a single super alone"
   DirectRef !addr' -> resolveEdhAttrAddr ets addr' $ \ !key ->
     lookupEdhCtxAttr scope key >>= \case
       EdhNil ->
-        throwEdhSTM ets EvalError $ "not in scope: " <> T.pack (show addr')
+        throwEdh ets EvalError $ "not in scope: " <> T.pack (show addr')
       !val -> exitEdhSTM ets exit val
   IndirectRef !tgtExpr !addr' -> resolveEdhAttrAddr ets addr' $ \ !key ->
     runEdhTx ets $ getEdhAttr
@@ -2622,18 +2616,16 @@ evalExpr (CaseExpr !tgtExpr !branchesExpr) !exit =
 evalExpr (YieldExpr !yieldExpr) !exit =
   evalExpr yieldExpr $ \ !valToYield !ets ->
     case edh'ctx'genr'caller $ edh'context ets of
-      Nothing -> throwEdhSTM ets UsageError "unexpected yield"
+      Nothing -> throwEdh ets UsageError "unexpected yield"
       Just (!etsGenrCaller, !yieldVal) ->
         yieldVal (edhDeCaseClose valToYield) $ \case
           -- give the generator procedure the chance to handle the error
-          Left  !exv      -> edhThrowSTM ets exv
+          Left  !exv      -> edhThrow ets exv
           -- no exception occurred in the `do` block, check its intent
           Right !doResult -> case edhDeCaseClose doResult of
             EdhContinue -> -- for loop should send nil here instead in
               -- case continue issued from the do block
-                           throwEdhSTM etsGenrCaller
-                                       EvalError
-                                       "bug: <continue> reached yield"
+              throwEdh etsGenrCaller EvalError "bug: <continue> reached yield"
             EdhBreak -> -- for loop is breaking, let the generator
               -- return nil
               -- the generator can intervene the return, that'll be
@@ -2649,7 +2641,7 @@ evalExpr (YieldExpr !yieldExpr) !exit =
             EdhReturn{} -> -- for loop should have double-wrapped the
               -- return, which is handled above, in case its do block
               -- issued a return
-              throwEdhSTM etsGenrCaller EvalError "bug: <return> reached yield"
+              throwEdh etsGenrCaller EvalError "bug: <return> reached yield"
             !val -> exitEdhSTM ets exit val
 
 evalExpr (ForExpr !argsRcvr !iterExpr !doExpr) !exit = \ !ets ->
@@ -2708,7 +2700,7 @@ evalExpr (IndexExpr !ixExpr !tgtExpr) !exit = evalExpr ixExpr $ \ !ixV ->
         lookupEdhObjAttr obj (AttrByName "[]") >>= \case
 
           (_, EdhNil) ->
-            throwEdhSTM ets EvalError $ "no ([]) method from: " <> T.pack
+            throwEdh ets EvalError $ "no ([]) method from: " <> T.pack
               (show obj)
 
           (!this', EdhProcedure (EdhMethod !mth) _) ->
@@ -2720,7 +2712,7 @@ evalExpr (IndexExpr !ixExpr !tgtExpr) !exit = evalExpr ixExpr $ \ !ixV ->
               $ callEdhMethod this that mth (ArgsPack [ixVal] odEmpty) id exit
 
           (_, !badIndexer) ->
-            throwEdhSTM ets EvalError
+            throwEdh ets EvalError
               $  "malformed index method ([]) on "
               <> T.pack (show obj)
               <> " - "
@@ -2771,7 +2763,7 @@ evalExpr (DefaultExpr !exprDef) !exit = \ !ets -> do
 evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
   let
     notApplicable !lhVal !rhVal =
-      throwEdhSTM ets EvalError
+      throwEdh ets EvalError
         $  "operator ("
         <> opSym
         <> ") not applicable to "
@@ -2801,7 +2793,7 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
                                              id
                                              chkExitMagic
               (_, !badEqMth) ->
-                throwEdhSTM ets UsageError
+                throwEdh ets UsageError
                   $  "malformed magic method ("
                   <> opSym
                   <> "@) on "
@@ -2826,7 +2818,7 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
                                        id
                                        chkExitMagic
         (_, !badEqMth) ->
-          throwEdhSTM ets UsageError
+          throwEdh ets UsageError
             $  "malformed magic method ("
             <> opSym
             <> ") on "
@@ -2854,7 +2846,7 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
                                            id
                                            chkExitMagic
             (_, !badEqMth) ->
-              throwEdhSTM ets UsageError
+              throwEdh ets UsageError
                 $  "malformed magic method ("
                 <> opSym
                 <> "@) on "
@@ -2945,12 +2937,11 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
                   _ -> edhSwitchState ets $ exitEdhTx exit rtnVal
 
           _ ->
-            throwEdhSTM ets UsageError
-              $  "invalid operator signature: "
-              <> T.pack (show $ edh'procedure'args $ edh'procedure'decl op'proc)
+            throwEdh ets UsageError $ "invalid operator signature: " <> T.pack
+              (show $ edh'procedure'args $ edh'procedure'decl op'proc)
 
-      _ -> throwEdhSTM ets UsageError $ "invalid operator: " <> T.pack
-        (show callable)
+      _ ->
+        throwEdh ets UsageError $ "invalid operator: " <> T.pack (show callable)
 
     !ctx   = edh'context ets
     !scope = contextScope ctx
@@ -2967,7 +2958,7 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
               EdhBoundProc !callable !this' !that' _ ->
                 callCallable this' that' callable
               _ ->
-                throwEdhSTM ets EvalError
+                throwEdh ets EvalError
                   $  "not callable "
                   <> T.pack (edhTypeNameOf opVal)
                   <> ": "
@@ -3029,9 +3020,7 @@ evalExpr (ClassExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
 --      into its static attr scope initially, need sth different?
 evalExpr (NamespaceExpr pd@(ProcDecl !addr _ _) !argsSndr) !exit = \ !ets ->
   packEdhArgs ets argsSndr $ \(ArgsPack !args !kwargs) -> if not (null args)
-    then throwEdhSTM ets
-                     UsageError
-                     "you don't pass positional args to a namespace"
+    then throwEdh ets UsageError "you don't pass positional args to a namespace"
     else resolveEdhAttrAddr ets addr $ \ !name -> do
       let !ctx       = edh'context ets
           !scope     = contextScope ctx
@@ -3135,7 +3124,7 @@ evalExpr (OpDeclExpr !opSym !opPrec opProc@(ProcDecl _ _ !pb)) !exit =
     let !ctx   = edh'context ets
         !scope = contextScope ctx
     if edh'ctx'eff'defining ctx
-      then throwEdhSTM ets UsageError "why should an operator be effectful?"
+      then throwEdh ets UsageError "why should an operator be effectful?"
       else case pb of
         -- support re-declaring an existing operator to another name,
         -- with possibly a different precedence
@@ -3148,7 +3137,7 @@ evalExpr (OpDeclExpr !opSym !opPrec opProc@(ProcDecl _ _ !pb)) !exit =
 
             lookupEdhCtxAttr scope (AttrByName origOpSym) >>= \case
               EdhNil ->
-                throwEdhSTM ets EvalError
+                throwEdh ets EvalError
                   $  "original operator ("
                   <> origOpSym
                   <> ") not in scope"
@@ -3157,7 +3146,7 @@ evalExpr (OpDeclExpr !opSym !opPrec opProc@(ProcDecl _ _ !pb)) !exit =
               origOp@(EdhBoundProc EdhIntrOp{} _ _ _) -> redeclareOp origOp
               origOp@(EdhBoundProc EdhOprtor{} _ _ _) -> redeclareOp origOp
               !val ->
-                throwEdhSTM ets EvalError
+                throwEdh ets EvalError
                   $  "can not re-declare a "
                   <> T.pack (edhTypeNameOf val)
                   <> ": "
@@ -3183,7 +3172,7 @@ evalExpr (OpOvrdExpr !opSym !opProc !opPrec) !exit = \ !ets -> do
       !scope                 = contextScope ctx
       (StmtSrc (!srcPos, _)) = edh'ctx'stmt ctx
   if edh'ctx'eff'defining ctx
-    then throwEdhSTM ets UsageError "why should an operator be effectful?"
+    then throwEdh ets UsageError "why should an operator be effectful?"
     else do
       validateOperDecl ets opProc
       let findPredecessor :: STM (Maybe EdhValue)
@@ -3229,7 +3218,7 @@ validateOperDecl !ets (ProcDecl _ !op'args _) = case op'args of
   -- 3 pos-args - caller scope + lh/rh expr receiving operator
   (PackReceiver [RecvArg _scopeName Nothing Nothing, RecvArg _lhName Nothing Nothing, RecvArg _rhName Nothing Nothing])
     -> return ()
-  _ -> throwEdhSTM ets EvalError "invalid operator signature"
+  _ -> throwEdh ets EvalError "invalid operator signature"
 
 
 val2DictEntry
@@ -3237,7 +3226,7 @@ val2DictEntry
 val2DictEntry _ (EdhPair !k !v) !exit = exit (k, v)
 val2DictEntry _ (EdhArgsPack (ArgsPack [!k, !v] !kwargs)) !exit
   | odNull kwargs = exit (k, v)
-val2DictEntry !ets !val _ = throwEdhSTM
+val2DictEntry !ets !val _ = throwEdh
   ets
   UsageError
   ("invalid entry for dict " <> T.pack (edhTypeNameOf val) <> ": " <> T.pack
@@ -3296,9 +3285,8 @@ edhValueNull !ets (EdhObject !o) !exit =
             _              -> edhValueNull ets nulVal exit
     (_, EdhBool !b) -> exit b
     (_, !badVal) ->
-      throwEdhSTM ets UsageError
-        $  "invalid value type from __null__: "
-        <> T.pack (edhTypeNameOf badVal)
+      throwEdh ets UsageError $ "invalid value type from __null__: " <> T.pack
+        (edhTypeNameOf badVal)
 edhValueNull _ _ !exit = exit False
 
 
@@ -3387,7 +3375,7 @@ resolveEdhPerform !ets !effKey !exit =
   resolveEffectfulAttr edhTargetStackForPerform (attrKeyValue effKey) >>= \case
     Just (!effArt, _) -> exit effArt
     Nothing ->
-      throwEdhSTM ets UsageError $ "no such effect: " <> T.pack (show effKey)
+      throwEdh ets UsageError $ "no such effect: " <> T.pack (show effKey)
  where
   edhTargetStackForPerform :: [Scope]
   edhTargetStackForPerform = case edh'effects'stack scope of
@@ -3402,7 +3390,7 @@ resolveEdhBehave !ets !effKey !exit =
   resolveEffectfulAttr edhTargetStackForBehave (attrKeyValue effKey) >>= \case
     Just (!effArt, _) -> exit effArt
     Nothing ->
-      throwEdhSTM ets UsageError $ "no such effect: " <> T.pack (show effKey)
+      throwEdh ets UsageError $ "no such effect: " <> T.pack (show effKey)
  where
   edhTargetStackForBehave :: [Scope]
   edhTargetStackForBehave = NE.tail $ edh'ctx'stack ctx
@@ -3485,7 +3473,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
           let iStop' = len + iStop
           in  if iStop' < 0
                 then
-                  throwEdhSTM ets UsageError
+                  throwEdh ets UsageError
                   $  "stop index out of bounds: "
                   <> T.pack (show iStop)
                   <> " vs "
@@ -3493,7 +3481,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
                 else exit (0, iStop', 1)
         else if iStop > len
           then
-            throwEdhSTM ets EvalError
+            throwEdh ets EvalError
             $  "stop index out of bounds: "
             <> T.pack (show iStop)
             <> " vs "
@@ -3508,7 +3496,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
           let iStart' = len + iStart
           in  if iStart' < 0
                 then
-                  throwEdhSTM ets UsageError
+                  throwEdh ets UsageError
                   $  "start index out of bounds: "
                   <> T.pack (show iStart)
                   <> " vs "
@@ -3516,7 +3504,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
                 else exit (iStart', len, 1)
         else if iStart > len
           then
-            throwEdhSTM ets UsageError
+            throwEdh ets UsageError
             $  "start index out of bounds: "
             <> T.pack (show iStart)
             <> " vs "
@@ -3529,14 +3517,14 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
             !iStop'  = if iStop < 0 then len + iStop else iStop
         if iStart' < 0
           then
-            throwEdhSTM ets UsageError
+            throwEdh ets UsageError
             $  "start index out of bounds: "
             <> T.pack (show iStart)
             <> " vs "
             <> T.pack (show len)
           else if iStop' < 0
             then
-              throwEdhSTM ets EvalError
+              throwEdh ets EvalError
               $  "stop index out of bounds: "
               <> T.pack (show iStop)
               <> " vs "
@@ -3545,14 +3533,14 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
               then
                 (if iStop' > len
                   then
-                    throwEdhSTM ets EvalError
+                    throwEdh ets EvalError
                     $  "stop index out of bounds: "
                     <> T.pack (show iStop)
                     <> " vs "
                     <> T.pack (show len)
                   else if iStart' >= len
                     then
-                      throwEdhSTM ets UsageError
+                      throwEdh ets UsageError
                       $  "start index out of bounds: "
                       <> T.pack (show iStart)
                       <> " vs "
@@ -3562,14 +3550,14 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
               else
                 (if iStop' >= len
                   then
-                    throwEdhSTM ets EvalError
+                    throwEdh ets EvalError
                     $  "stop index out of bounds: "
                     <> T.pack (show iStop)
                     <> " vs "
                     <> T.pack (show len)
                   else if iStart' > len
                     then
-                      throwEdhSTM ets UsageError
+                      throwEdh ets UsageError
                       $  "start index out of bounds: "
                       <> T.pack (show iStart)
                       <> " vs "
@@ -3578,7 +3566,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
                 )
 
   Just !iStep -> if iStep == 0
-    then throwEdhSTM ets UsageError "step can not be zero in slice"
+    then throwEdh ets UsageError "step can not be zero in slice"
     else if iStep < 0
       then
         (case start of
@@ -3594,7 +3582,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
                 let !iStop' = if iStop < 0 then len + iStop else iStop
                 if iStop' < -1 || iStop' >= len - 1
                   then
-                    throwEdhSTM ets EvalError
+                    throwEdh ets EvalError
                     $  "Backward stop index out of bounds: "
                     <> T.pack (show iStop)
                     <> " vs "
@@ -3608,7 +3596,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
               let !iStart' = if iStart < 0 then len + iStart else iStart
               if iStart' < 0 || iStart' >= len
                 then
-                  throwEdhSTM ets UsageError
+                  throwEdh ets UsageError
                   $  "Backward start index out of bounds: "
                   <> T.pack (show iStart)
                   <> " vs "
@@ -3620,7 +3608,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
               let !iStart' = if iStart < 0 then len + iStart else iStart
               if iStart' < 0 || iStart' >= len
                 then
-                  throwEdhSTM ets UsageError
+                  throwEdh ets UsageError
                   $  "Backward start index out of bounds: "
                   <> T.pack (show iStart)
                   <> " vs "
@@ -3631,14 +3619,14 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
                     let !iStop' = if iStop < 0 then len + iStop else iStop
                     if iStop' < -1 || iStop >= len - 1
                       then
-                        throwEdhSTM ets EvalError
+                        throwEdh ets EvalError
                         $  "Backward stop index out of bounds: "
                         <> T.pack (show iStop)
                         <> " vs "
                         <> T.pack (show len)
                       else if iStart' < iStop'
                         then
-                          throwEdhSTM ets EvalError
+                          throwEdh ets EvalError
                           $  "Can not step backward from "
                           <> T.pack (show iStart)
                           <> " to "
@@ -3657,7 +3645,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
               let !iStop' = if iStop < 0 then len + iStop else iStop
               if iStop' < 0 || iStop' > len
                 then
-                  throwEdhSTM ets EvalError
+                  throwEdh ets EvalError
                   $  "stop index out of bounds: "
                   <> T.pack (show iStop)
                   <> " vs "
@@ -3671,7 +3659,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
               let !iStart' = if iStart < 0 then len + iStart else iStart
               if iStart' < 0 || iStart' >= len
                 then
-                  throwEdhSTM ets UsageError
+                  throwEdh ets UsageError
                   $  "start index out of bounds: "
                   <> T.pack (show iStart)
                   <> " vs "
@@ -3684,7 +3672,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
               let !iStop'  = if iStop < 0 then len + iStop else iStop
               if iStart' > iStop'
                 then
-                  throwEdhSTM ets EvalError
+                  throwEdh ets EvalError
                   $  "Can not step from "
                   <> T.pack (show iStart)
                   <> " to "
@@ -3700,7 +3688,7 @@ edhRegulateIndex !ets !len !idx !exit =
         else idx
   in  if posIdx < 0 || posIdx >= len
         then
-          throwEdhSTM ets EvalError
+          throwEdh ets EvalError
           $  "Index out of bounds: "
           <> T.pack (show idx)
           <> " vs "

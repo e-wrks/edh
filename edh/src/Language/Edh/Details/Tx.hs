@@ -14,6 +14,7 @@ import           Data.Dynamic
 
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
+import           Language.Edh.Details.Evaluate
 
 
 -- | Uncaught exception in any thread (main or a descendant) will terminate the
@@ -21,7 +22,7 @@ import           Language.Edh.Details.RtTypes
 --   https://github.com/e-wrks/edh/tree/master/Tour#program--threading-model
 driveEdhProgram
   :: TMVar (Either SomeException EdhValue) -> Context -> EdhTx -> IO ()
-driveEdhProgram !haltResult !progCtx !prog = do
+driveEdhProgram !haltResult !bootCtx !prog = do
   -- check async exception mask state
   getMaskingState >>= \case
     Unmasked -> return ()
@@ -123,7 +124,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
                                         , edh'task'queue = mainQueue
                                         , edh'perceivers = perceivers
                                         , edh'defers     = defers
-                                        , edh'context    = progCtx
+                                        , edh'context    = bootCtx
                                         , edh'fork'queue = forkQueue
                                         }
         -- bootstrap the program on main Edh thread
@@ -133,6 +134,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
         driveEdhThread defers mainQueue
 
  where
+  !edhWrapException = edh'exception'wrapper (edh'ctx'world bootCtx)
 
   nextTaskFromQueue :: TBQueue EdhTask -> STM (Maybe EdhTask)
   nextTaskFromQueue = orElse (Nothing <$ readTMVar haltResult) . tryReadTBQueue
@@ -176,7 +178,7 @@ driveEdhProgram !haltResult !progCtx !prog = do
       breakThread
       etsPerceiver
     driveEdhThread reactDefers reactTaskQueue
-    atomically $ readTVar breakThread
+    readTVarIO breakThread
   drivePerceivers :: [(EdhValue, PerceiveRecord)] -> IO Bool
   drivePerceivers []               = return False
   drivePerceivers ((ev, r) : rest) = drivePerceiver ev r >>= \case
@@ -191,8 +193,8 @@ driveEdhProgram !haltResult !progCtx !prog = do
       -- during actIO, perceivers won't fire, program termination won't stop
       -- this thread
       catch actIO $ \(e :: SomeException) ->
-        atomically $ toEdhError ets e $ \ !exv ->
-          writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets exv
+        atomically $ edhWrapException e >>= \ !exo ->
+          writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets $ EdhObject exo
       driveEdhThread defers tq -- loop another iteration for the thread
     Just (EdhDoSTM !ets !actSTM) -> do
       let doIt = goSTM ets actSTM >>= \case
@@ -201,8 +203,8 @@ driveEdhProgram !haltResult !progCtx !prog = do
             False -> -- loop another iteration for the thread
               driveEdhThread defers tq
       catch doIt $ \(e :: SomeException) ->
-        atomically $ toEdhError ets e $ \ !exv ->
-          writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets exv
+        atomically $ edhWrapException e >>= \ !exo ->
+          writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets $ EdhObject exo
       driveEdhThread defers tq -- loop another iteration for the thread
 
   goSTM :: EdhThreadState -> STM () -> IO Bool

@@ -74,7 +74,7 @@ catchProc !tryExpr !catchExpr !exit =
 finallyProc :: EdhIntrinsicOp
 finallyProc !tryExpr !finallyExpr !exit = ask >>= \pgs -> contEdhSTM $ do
   hndlrTh <- unsafeIOToSTM myThreadId
-  edhCatchSTM pgs
+  edhCatch pgs
               (\ !pgsTry !exit' -> runEdhTx pgsTry $ evalExpr tryExpr exit')
               exit
     $ \pgsThrower !exv _recover !rethrow -> do
@@ -297,7 +297,7 @@ branchProc !lhExpr !rhExpr !exit = do
                 return $ Just vAttr
               _ -> return Nothing
             if length attrNames /= length argSenders
-              then throwEdhSTM
+              then throwEdh
                 pgs
                 UsageError
                 ("Invalid element in apk pattern: " <> T.pack (show argSenders))

@@ -92,13 +92,9 @@ module Language.Edh.EHI
   , edhThrow
   , edhCatch
   , throwEdh
-  , edhThrowSTM
-  , edhCatchSTM
-  , throwEdhSTM
-  , createEdhError
-  , toEdhError
-  , toEdhError'
-  , fromEdhError
+  , edhThrow
+  , edhCatch
+  , throwEdh
   , getEdhErrClass
     -- ** CPS helpers
   , exitEdh
