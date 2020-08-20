@@ -67,6 +67,7 @@ data EdhError =
 
     -- | tagged error, with a msg and context information of the throwing Edh
     -- thread
+    -- TODO add details :: !(OrderedDict AttrKey EdhValue)
   | EdhError !EdhErrorTag !Text !EdhCallContext
 instance Show EdhError where
   show (ProgramHalt _  ) = "Edh⏹️Halt"

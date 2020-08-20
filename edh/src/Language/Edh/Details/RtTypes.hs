@@ -19,9 +19,7 @@ import           Data.ByteString                ( ByteString )
 import qualified Data.ByteString               as B
 import           Data.Hashable
 import qualified Data.HashMap.Strict           as Map
-import           Data.List.NonEmpty             ( NonEmpty(..)
-                                                , (<|)
-                                                )
+import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.List.NonEmpty            as NE
 import           Data.Dynamic
 

@@ -2376,19 +2376,125 @@ evalDictLit ((k, v) : entries) !dsl !exit !ets = case k of
     evalExpr v $ \ !vVal -> evalDictLit entries ((kVal, vVal) : dsl) exit
 
 
+edhValueRepr :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
+edhValueRepr !ets !val !exitRepr = case val of
+
+  -- pair repr
+  EdhPair !v1 !v2 -> edhValueRepr ets v1 $ \ !repr1 ->
+    edhValueRepr ets v2 $ \ !repr2 -> exitRepr $ repr1 <> ":" <> repr2
+
+  -- apk repr
+  EdhArgsPack (ArgsPack !args !kwargs) -> if null args && odNull kwargs
+    then exitRepr "()"
+    else reprCSR [] args $ \ !argsCSR ->
+      reprKwArgsCSR [] (odToReverseList kwargs)
+        $ \ !kwargsCSR -> exitRepr $ "( " <> argsCSR <> kwargsCSR <> ")"
+
+  -- list repr
+  EdhList (List _ !ls) -> readTVar ls >>= \ !vs -> if null vs
+    then exitRepr "[]"
+    else reprCSR [] vs $ \ !csRepr -> exitRepr $ "[ " <> csRepr <> "]"
+
+  -- dict repr
+  EdhDict (Dict _ !ds) -> iopdToReverseList ds >>= \case
+    []       -> exitRepr "{}"
+    !entries -> reprDictCSR [] entries
+      $ \ !entriesCSR -> exitRepr $ "{ " <> entriesCSR <> "}"
+
+  -- object repr
+  EdhObject !o -> lookupEdhObjAttr o (AttrByName "__repr__") >>= \case
+    (_, EdhNil        ) -> exitRepr $ T.pack (show o)
+    (_, EdhString repr) -> exitRepr repr
+    (!this', EdhProcedure (EdhMethod !mth) _) ->
+      runEdhTx ets
+        $ callEdhMethod this' o mth (ArgsPack [] odEmpty) id
+        $ \ !mthRtn _ets -> case mthRtn of
+            EdhString !repr -> exitRepr repr
+            _               -> edhValueRepr ets mthRtn exitRepr
+    (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+      runEdhTx ets
+        $ callEdhMethod this that mth (ArgsPack [] odEmpty) id
+        $ \ !mthRtn _ets -> case mthRtn of
+            EdhString !repr -> exitRepr repr
+            _               -> edhValueRepr ets mthRtn exitRepr
+    (_, reprVal) -> edhValueRepr ets reprVal exitRepr
+
+  -- repr of named value
+  EdhNamedValue !n v@EdhNamedValue{} ->
+    edhValueRepr ets v $ \ !repr ->
+    -- Edh operators are all left-associative, parenthesis needed
+                                    exitRepr $ n <> " := (" <> repr <> ")"
+  EdhNamedValue !n !v ->
+    edhValueRepr ets v $ \ !repr -> exitRepr $ n <> " := " <> repr <> ""
+
+  -- TODO handle Text repr with more performant impl. falling onto show atm.
+
+  -- todo specially handle return/default etc. ?
+
+  -- repr of other values simply as to show itself
+  _ -> exitRepr $ T.pack $ show val
+
+ where
+
+  -- comma separated repr string
+  reprCSR :: [Text] -> [EdhValue] -> (Text -> STM ()) -> STM ()
+  reprCSR reprs [] !exit = exit $ T.concat [ i <> ", " | i <- reverse reprs ]
+  reprCSR reprs (v : rest) !exit =
+    edhValueRepr ets v $ \ !repr -> reprCSR (repr : reprs) rest exit
+  -- comma separated repr string for kwargs
+  reprKwArgsCSR
+    :: [(Text, Text)] -> [(AttrKey, EdhValue)] -> (Text -> STM ()) -> STM ()
+  reprKwArgsCSR !entries [] !exit' =
+    exit' $ T.concat [ k <> "=" <> v <> ", " | (k, v) <- entries ]
+  reprKwArgsCSR !entries ((k, v) : rest) exit' = edhValueRepr ets v
+    $ \ !repr -> reprKwArgsCSR ((T.pack (show k), repr) : entries) rest exit'
+  -- comma separated repr string for dict entries
+  reprDictCSR
+    :: [(Text, Text)] -> [(EdhValue, EdhValue)] -> (Text -> STM ()) -> STM ()
+  reprDictCSR entries [] !exit' =
+    exit' $ T.concat [ k <> ":" <> v <> ", " | (k, v) <- entries ]
+  reprDictCSR entries ((k, v) : rest) exit' = edhValueRepr ets k $ \ !kRepr ->
+    do
+      let krDecor :: Text -> Text
+          krDecor = case k of
+            -- quote the key repr in the entry if it's a term
+            -- bcoz (:=) precedence is 1, less than (:)'s 2
+            EdhNamedValue{} -> \r -> "(" <> r <> ")"
+            _               -> id
+          vrDecor :: Text -> Text
+          vrDecor = case v of
+            -- quote the value repr in the entry if it's a pair
+            EdhPair{} -> \r -> "(" <> r <> ")"
+            _         -> id
+      edhValueRepr ets v $ \ !vRepr ->
+        reprDictCSR ((krDecor kRepr, vrDecor vRepr) : entries) rest exit'
+
+edhValueReprTx :: EdhValue -> EdhTxExit -> EdhTx
+edhValueReprTx !val !exit !ets =
+  edhValueRepr ets val $ \ !repr -> exitEdhSTM ets exit $ EdhString repr
+
+
+edhValueStr :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
+edhValueStr _    (EdhString !s) !exit = exit s
+edhValueStr !ets !v             !exit = edhValueRepr ets v exit
+
+edhValueStrTx :: EdhValue -> EdhTxExit -> EdhTx
+edhValueStrTx !v !exit !ets =
+  edhValueStr ets v $ \ !s -> exitEdhSTM ets exit $ EdhString s
+
+
 evalExpr :: Expr -> EdhTxExit -> EdhTx
 evalExpr !expr !exit !ets = case expr of
 
-  IntplSubs !val -> exitEdhTx exit val
-  IntplExpr _ -> throwEdhTx UsageError "interpolating out side of expr range."
+  IntplSubs !val -> exitEdhSTM ets exit val
+  IntplExpr _ ->
+    throwEdhSTM ets UsageError "interpolating out side of expr range."
   ExprWithSrc !x !sss -> intplExpr ets x $ \x' -> do
     let intplSrc :: SourceSeg -> (Text -> STM ()) -> STM ()
         intplSrc !ss !exit' = case ss of
           SrcSeg   !s  -> exit' s
-          IntplSeg !sx -> runEdhTx ets $ evalExpr sx $ \ !val ->
-            edhValueReprProc (edhDeCaseClose val) $ \ !rv -> case rv of
-              EdhString !rs -> exit' rs
-              _             -> error "bug: edhValueReprProc returned non-string"
+          IntplSeg !sx -> runEdhTx ets $ evalExpr sx $ \ !val _ets ->
+            edhValueRepr ets (edhDeCaseClose val) $ \ !rs -> exit' rs
     seqcontSTM (intplSrc <$> sss) $ \ssl -> do
       u <- unsafeIOToSTM newUnique
       exitEdhSTM ets exit $ EdhExpr u x' $ T.concat ssl
@@ -3205,130 +3311,6 @@ edhValueEqual !ets !lhVal !rhVal !exit =
       else edhValueEqual ets lhVal' rhVal' $ \case
         Just True -> cmp2Map lhRest rhRest exit'
         _         -> exit' False
-
-
--- comma separated repr string
-_edhCSR :: [Text] -> [EdhValue] -> EdhTxExit -> EdhTx
-_edhCSR reprs [] !exit =
-  exitEdhTx exit $ EdhString $ T.concat [ i <> ", " | i <- reverse reprs ]
-_edhCSR reprs (v : rest) !exit = edhValueReprProc v $ \ !r -> case r of
-  EdhString repr -> _edhCSR (repr : reprs) rest exit
-  _              -> error "bug: edhValueReprProc returned non-string in CPS"
--- comma separated repr string for kwargs
-_edhKwArgsCSR :: [(Text, Text)] -> [(AttrKey, EdhValue)] -> EdhTxExit -> EdhTx
-_edhKwArgsCSR !entries [] !exit' = exitEdhTx exit' $ EdhString $ T.concat
-  [ k <> "=" <> v <> ", " | (k, v) <- entries ]
-_edhKwArgsCSR !entries ((k, v) : rest) exit' = edhValueReprProc v $ \ !r ->
-  case r of
-    EdhString repr ->
-      _edhKwArgsCSR ((T.pack (show k), repr) : entries) rest exit'
-    _ -> error "bug: edhValueReprProc returned non-string in CPS"
--- comma separated repr string for dict entries
-_edhDictCSR :: [(Text, Text)] -> [(EdhValue, EdhValue)] -> EdhTxExit -> EdhTx
-_edhDictCSR entries [] !exit' = exitEdhTx exit' $ EdhString $ T.concat
-  [ k <> ":" <> v <> ", " | (k, v) <- entries ]
-_edhDictCSR entries ((k, v) : rest) exit' = edhValueReprProc k $ \ !kr ->
-  case kr of
-    EdhString !kRepr -> do
-      let krDecor :: Text -> Text
-          krDecor = case k of
-            -- quote the key repr in the entry if it's a term
-            -- bcoz (:=) precedence is 1, less than (:)'s 2
-            EdhNamedValue{} -> \r -> "(" <> r <> ")"
-            _               -> id
-          vrDecor :: Text -> Text
-          vrDecor = case v of
-            -- quote the value repr in the entry if it's a pair
-            EdhPair{} -> \r -> "(" <> r <> ")"
-            _         -> id
-      edhValueReprProc v $ \ !vr -> case vr of
-        EdhString !vRepr ->
-          _edhDictCSR ((krDecor kRepr, vrDecor vRepr) : entries) rest exit'
-        _ -> error "bug: edhValueReprProc returned non-string in CPS"
-    _ -> error "bug: edhValueReprProc returned non-string in CPS"
-
-edhValueRepr :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
-edhValueRepr !ets !val !exit = runEdhTx ets $ edhValueReprProc val $ \ !vr ->
-  case vr of
-    EdhString !r -> exit r
-    _            -> error "bug: edhValueReprProc returned non-string"
-
-edhValueReprProc :: EdhValue -> EdhTxExit -> EdhTx
-
--- pair repr
-edhValueReprProc (EdhPair v1 v2) !exit = edhValueReprProc v1 $ \ !r1 ->
-  case r1 of
-    EdhString repr1 -> edhValueReprProc v2 $ \ !r2 -> case r2 of
-      EdhString repr2 -> exitEdhTx exit $ EdhString $ repr1 <> ":" <> repr2
-      _ -> error "bug: edhValueReprProc returned non-string in CPS"
-    _ -> error "bug: edhValueReprProc returned non-string in CPS"
-
--- apk repr
-edhValueReprProc (EdhArgsPack (ArgsPack !args !kwargs)) !exit
-  | null args && odNull kwargs = exitEdhTx exit $ EdhString "()"
-  | otherwise = _edhCSR [] args $ \ !argsR -> case argsR of
-    EdhString argsCSR ->
-      _edhKwArgsCSR [] (odToReverseList kwargs) $ \ !kwargsR -> case kwargsR of
-        EdhString kwargsCSR ->
-          exitEdhTx exit $ EdhString $ "( " <> argsCSR <> kwargsCSR <> ")"
-        _ -> error "bug: edhValueReprProc returned non-string in CPS"
-    _ -> error "bug: edhValueReprProc returned non-string in CPS"
-
--- list repr
-edhValueReprProc (EdhList (List _ ls)) !exit = do
-  ets <- ask
-  readTVar ls >>= \vs -> if null vs
-    then -- no space should show in an empty list
-         exitEdhSTM ets exit $ EdhString "[]"
-    else runEdhTx ets $ _edhCSR [] vs $ \ !csr -> case csr of
-        -- advocate trailing comma here
-      EdhString !csRepr -> exitEdhTx exit $ EdhString $ "[ " <> csRepr <> "]"
-      _ -> error "bug: edhValueReprProc returned non-string in CPS"
-
--- dict repr
-edhValueReprProc (EdhDict (Dict _ !ds)) !exit = do
-  ets <- ask
-  iopdNull ds >>= \case
-    True -> -- no space should show in an empty dict
-      exitEdhSTM ets exit $ EdhString "{}"
-    False -> iopdToReverseList ds >>= \ !entries ->
-      runEdhTx ets $ _edhDictCSR [] entries $ \ !entriesR -> case entriesR of
-        EdhString entriesCSR ->
-          exitEdhTx exit $ EdhString $ "{ " <> entriesCSR <> "}"
-        _ -> error "bug: edhValueReprProc returned non-string in CPS"
-
--- object repr
-edhValueReprProc (EdhObject !o) !exit = do
-  ets <- ask
-  lookupEdhObjAttr o (AttrByName "__repr__") >>= \case
-    EdhNil           -> exitEdhSTM ets exit $ EdhString $ T.pack $ show o
-    repr@EdhString{} -> exitEdhSTM ets exit repr
-    EdhMethod !reprMth ->
-      runEdhTx ets
-        $ callEdhMethod o reprMth (ArgsPack [] odEmpty) id
-        $ \ !reprVal -> case reprVal of
-            s@EdhString{} -> exitEdhTx exit s
-            _             -> edhValueReprProc reprVal exit
-    reprVal -> runEdhTx ets $ edhValueReprProc reprVal exit
-
--- repr of named value
-edhValueReprProc (EdhNamedValue !n v@EdhNamedValue{}) !exit =
-  -- Edh operators are all left-associative, parenthesis needed
-  edhValueReprProc v $ \ !r -> case r of
-    EdhString repr -> exitEdhTx exit $ EdhString $ n <> " := (" <> repr <> ")"
-    _              -> error "bug: edhValueReprProc returned non-string in CPS"
-edhValueReprProc (EdhNamedValue !n !v) !exit = edhValueReprProc v $ \ !r ->
-  case r of
-    EdhString repr -> exitEdhTx exit $ EdhString $ n <> " := " <> repr
-    _              -> error "bug: edhValueReprProc returned non-string in CPS"
-
--- repr of other values simply as to show itself
-edhValueReprProc !v !exit = exitEdhTx exit $ EdhString $ T.pack $ show v
-
-
-edhValueStr :: EdhValue -> EdhTxExit -> EdhTx
-edhValueStr s@EdhString{} !exit' = exitEdhTx exit' s
-edhValueStr !v            !exit' = edhValueReprProc v exit'
 
 
 resolveEdhPerform :: EdhThreadState -> AttrKey -> (EdhValue -> STM ()) -> STM ()
