@@ -3078,78 +3078,62 @@ evalExpr (NamespaceExpr pd@(ProcDecl !addr _ _) !argsSndr) !exit = \ !ets ->
         -- calling an Edh class definition
         Left  !pb -> runEdhTx etsCls $ evalStmt pb doExit
 
+evalExpr (MethodExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
+  resolveEdhAttrAddr ets addr $ \ !name -> do
+    !idProc <- unsafeIOToSTM newUnique
+    let !mth = EdhMethod ProcDefi
+          { edh'procedure'ident = idProc
+          , edh'procedure'name  = name
+          , edh'procedure'lexi  = contextScope $ edh'context ets
+          , edh'procedure'decl  = pd
+          }
+        !mthVal = EdhProcedure mth Nothing
+    defineScopeAttr ets name mthVal
+    exitEdhSTM ets exit mthVal
+
+evalExpr (GeneratorExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
+  resolveEdhAttrAddr ets addr $ \ !name -> do
+    !idProc <- unsafeIOToSTM newUnique
+    let !mth = EdhGnrtor ProcDefi
+          { edh'procedure'ident = idProc
+          , edh'procedure'name  = name
+          , edh'procedure'lexi  = contextScope $ edh'context ets
+          , edh'procedure'decl  = pd
+          }
+        !mthVal = EdhProcedure mth Nothing
+    defineScopeAttr ets name mthVal
+    exitEdhSTM ets exit mthVal
+
+evalExpr (InterpreterExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
+  resolveEdhAttrAddr ets addr $ \ !name -> do
+    !idProc <- unsafeIOToSTM newUnique
+    let !mth = EdhIntrpr ProcDefi
+          { edh'procedure'ident = idProc
+          , edh'procedure'name  = name
+          , edh'procedure'lexi  = contextScope $ edh'context ets
+          , edh'procedure'decl  = pd
+          }
+        !mthVal = EdhProcedure mth Nothing
+    defineScopeAttr ets name mthVal
+    exitEdhSTM ets exit mthVal
+
+evalExpr (ProducerExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
+  resolveEdhAttrAddr ets addr $ \ !name -> do
+    !idProc <- unsafeIOToSTM newUnique
+    let !mth = EdhPrducr ProcDefi
+          { edh'procedure'ident = idProc
+          , edh'procedure'name  = name
+          , edh'procedure'lexi  = contextScope $ edh'context ets
+          , edh'procedure'decl  = pd
+          }
+        !mthVal = EdhProcedure mth Nothing
+    defineScopeAttr ets name mthVal
+    exitEdhSTM ets exit mthVal
 
 
 
 evalExpr !expr !exit = \ !ets -> case expr of
 
-  MethodExpr pd@(ProcDecl !addr _ _) -> resolveEdhAttrAddr ets addr $ \name ->
-    do
-      u <- unsafeIOToSTM newUnique
-      let mth = EdhMethod ProcDefi { edh'procedure'ident = u
-                                   , edh'procedure'name  = name
-                                   , edh'procedure'lexi  = scope
-                                   , edh'procedure'decl  = pd
-                                   }
-      when (addr /= NamedAttr "_") $ do
-        if edh'ctx'eff'defining ctx
-          then defEffect name mth
-          else unless (edh'ctx'pure ctx)
-            $ changeEntityAttr ets (edh'scope'entity scope) name mth
-        chkExport name mth
-      exitEdhSTM ets exit mth
-
-  GeneratorExpr pd@(ProcDecl !addr _ _) ->
-    resolveEdhAttrAddr ets addr $ \name -> do
-      u <- unsafeIOToSTM newUnique
-      let gdf = EdhGnrtor ProcDefi { edh'procedure'ident = u
-                                   , edh'procedure'name  = name
-                                   , edh'procedure'lexi  = scope
-                                   , edh'procedure'decl  = pd
-                                   }
-      when (addr /= NamedAttr "_") $ do
-        if edh'ctx'eff'defining ctx
-          then defEffect name gdf
-          else unless (edh'ctx'pure ctx)
-            $ changeEntityAttr ets (edh'scope'entity scope) name gdf
-        chkExport name gdf
-      exitEdhSTM ets exit gdf
-
-  InterpreterExpr pd@(ProcDecl !addr _ _) ->
-    resolveEdhAttrAddr ets addr $ \name -> do
-      u <- unsafeIOToSTM newUnique
-      let mth = EdhIntrpr ProcDefi { edh'procedure'ident = u
-                                   , edh'procedure'name  = name
-                                   , edh'procedure'lexi  = scope
-                                   , edh'procedure'decl  = pd
-                                   }
-      when (addr /= NamedAttr "_") $ do
-        if edh'ctx'eff'defining ctx
-          then defEffect name mth
-          else unless (edh'ctx'pure ctx)
-            $ changeEntityAttr ets (edh'scope'entity scope) name mth
-        chkExport name mth
-      exitEdhSTM ets exit mth
-
-  ProducerExpr pd@(ProcDecl !addr !args _) ->
-    resolveEdhAttrAddr ets addr $ \name -> do
-      u <- unsafeIOToSTM newUnique
-      let mth = EdhPrducr ProcDefi { edh'procedure'ident = u
-                                   , edh'procedure'name  = name
-                                   , edh'procedure'lexi  = scope
-                                   , edh'procedure'decl  = pd
-                                   }
-      unless (receivesNamedArg "outlet" args) $ throwEdh
-        ets
-        EvalError
-        "a producer procedure should receive a `outlet` keyword argument"
-      when (addr /= NamedAttr "_") $ do
-        if edh'ctx'eff'defining ctx
-          then defEffect name mth
-          else unless (edh'ctx'pure ctx)
-            $ changeEntityAttr ets (edh'scope'entity scope) name mth
-        chkExport name mth
-      exitEdhSTM ets exit mth
 
   OpDeclExpr !opSym !opPrec opProc@(ProcDecl _ _ !pb) ->
     if edh'ctx'eff'defining ctx
