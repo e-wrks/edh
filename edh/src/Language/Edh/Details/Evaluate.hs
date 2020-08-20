@@ -526,8 +526,8 @@ callEdhOperator
   -> [EdhValue]
   -> EdhTxExit
   -> EdhTx
-callEdhOperator !this !that !mth'proc !prede !args !exit =
-  case edh'procedure'body $ edh'procedure'decl mth'proc of
+callEdhOperator !this !that !mth !prede !args !exit =
+  case edh'procedure'body $ edh'procedure'decl mth of
 
     -- calling a host operator procedure
     Right !hp -> \ !ets -> do
@@ -536,11 +536,11 @@ callEdhOperator !this !that !mth'proc !prede !args !exit =
       let ctx       = edh'context ets
           scope     = contextScope ctx
 
-          !mthScope = (lexicalScopeOf mth'proc)
+          !mthScope = (lexicalScopeOf mth)
             { edh'scope'entity = edh'scope'entity scope
             , edh'scope'this   = this
             , edh'scope'that   = that
-            , edh'scope'proc   = mth'proc
+            , edh'scope'proc   = mth
             , edh'scope'caller = edh'ctx'stmt ctx
             }
           !mthCtx = ctx { edh'ctx'stack        = mthScope <| edh'ctx'stack ctx
@@ -557,7 +557,7 @@ callEdhOperator !this !that !mth'proc !prede !args !exit =
         edhSwitchState ets $ exitEdhTx exit hpRtn
 
     -- calling an Edh operator procedure
-    Left !pb -> callEdhOperator' this that mth'proc prede pb args $ exit
+    Left !pb -> callEdhOperator' this that mth prede pb args $ exit
 
 callEdhOperator'
   :: Object
@@ -568,20 +568,20 @@ callEdhOperator'
   -> [EdhValue]
   -> EdhTxExit
   -> EdhTx
-callEdhOperator' !this !that !mth'proc !prede !mth'body !args !exit !ets =
+callEdhOperator' !this !that !mth !prede !mth'body !args !exit !ets =
   recvEdhArgs ets
               recvCtx
-              (edh'procedure'args $ edh'procedure'decl mth'proc)
+              (edh'procedure'args $ edh'procedure'decl mth)
               (ArgsPack args odEmpty)
     $ \ !ed -> do
         !es <- iopdFromList $ odToList ed
-        let !mthScope = (lexicalScopeOf mth'proc) { edh'scope'entity = es
-                                                  , edh'scope'this   = this
-                                                  , edh'scope'that   = that
-                                                  , edh'scope'proc   = mth'proc
-                                                  , edh'scope'caller = edh'ctx'stmt
-                                                    ctx
-                                                  }
+        let !mthScope = (lexicalScopeOf mth) { edh'scope'entity = es
+                                             , edh'scope'this   = this
+                                             , edh'scope'that   = that
+                                             , edh'scope'proc   = mth
+                                             , edh'scope'caller = edh'ctx'stmt
+                                               ctx
+                                             }
             !mthCtx = ctx { edh'ctx'stack        = mthScope <| edh'ctx'stack ctx
                           , edh'ctx'genr'caller  = Nothing
                           , edh'ctx'match        = true
@@ -595,7 +595,7 @@ callEdhOperator' !this !that !mth'proc !prede !mth'body !args !exit !ets =
           Nothing      -> pure ()
           -- put the overridden predecessor operator into the overriding
           -- operator procedure's runtime scope
-          Just !predOp -> iopdInsert (edh'procedure'name mth'proc) predOp es
+          Just !predOp -> iopdInsert (edh'procedure'name mth) predOp es
         runEdhTx etsMth $ evalStmt mth'body $ \ !mthRtn ->
           edhSwitchState ets $ exitEdhTx exit $ case edhDeCaseClose mthRtn of
             EdhReturn !rtnVal -> rtnVal
@@ -604,9 +604,9 @@ callEdhOperator' !this !that !mth'proc !prede !mth'body !args !exit !ets =
  where
   !ctx     = edh'context ets
   !recvCtx = ctx
-    { edh'ctx'stack        = (lexicalScopeOf mth'proc) { edh'scope'this = this
-                                                       , edh'scope'that = that
-                                                       }
+    { edh'ctx'stack        = (lexicalScopeOf mth) { edh'scope'this = this
+                                                  , edh'scope'that = that
+                                                  }
                                :| []
     , edh'ctx'genr'caller  = Nothing
     , edh'ctx'match        = true
@@ -986,58 +986,55 @@ edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker
   callCallable !callee !this !that !scopeMod = case callee of
 
     -- calling a method procedure
-    EdhMethod !mth'proc ->
-      callMaker $ \ !exit -> callEdhMethod this that mth'proc apk scopeMod exit
+    EdhMethod !mth ->
+      callMaker $ \ !exit -> callEdhMethod this that mth apk scopeMod exit
 
     -- calling an interpreter procedure
-    EdhIntrpr !mth'proc -> do
+    EdhIntrpr !mth -> do
       -- an Edh interpreter proc needs a `callerScope` as its 1st arg,
       -- while a host interpreter proc doesn't.
-      apk' <- case edh'procedure'body $ edh'procedure'decl mth'proc of
+      apk' <- case edh'procedure'body $ edh'procedure'decl mth of
         Right _ -> return apk
         Left  _ -> do
           let callerCtx = edh'context etsCallPrep
           !argCallerScope <- mkScopeWrapper callerCtx $ contextScope callerCtx
           return $ ArgsPack (EdhObject argCallerScope : args) kwargs
-      callMaker $ \ !exit -> callEdhMethod this that mth'proc apk' scopeMod exit
+      callMaker $ \ !exit -> callEdhMethod this that mth apk' scopeMod exit
 
     -- calling a producer procedure
-    EdhPrducr !mth'proc ->
-      case edh'procedure'body $ edh'procedure'decl mth'proc of
-        Right _ ->
-          throwEdhSTM etsCallPrep EvalError "bug: host producer procedure"
-        Left !pb ->
-          case edhUltimate <$> odLookup (AttrByName "outlet") kwargs of
-            Nothing -> do
-              outlet <- newEventSink
-              callMaker $ \exit ->
-                launchEventProducer exit outlet $ callEdhMethod'
-                  Nothing
-                  this
-                  that
-                  mth'proc
-                  pb
-                  (  ArgsPack args
-                  $  odFromList
-                  $  odToList kwargs
-                  ++ [(AttrByName "outlet", EdhSink outlet)]
-                  )
-                  scopeMod
-                  endOfEdh
-            Just (EdhSink !outlet) -> callMaker $ \exit ->
-              launchEventProducer exit outlet $ callEdhMethod'
-                Nothing
-                this
-                that
-                mth'proc
-                pb
-                (ArgsPack args kwargs)
-                scopeMod
-                endOfEdh
-            Just !badVal ->
-              throwEdhSTM etsCallPrep UsageError
-                $  "The value passed to a producer as `outlet` found to be a "
-                <> T.pack (edhTypeNameOf badVal)
+    EdhPrducr !mth -> case edh'procedure'body $ edh'procedure'decl mth of
+      Right _ ->
+        throwEdhSTM etsCallPrep EvalError "bug: host producer procedure"
+      Left !pb -> case edhUltimate <$> odLookup (AttrByName "outlet") kwargs of
+        Nothing -> do
+          outlet <- newEventSink
+          callMaker $ \exit -> launchEventProducer exit outlet $ callEdhMethod'
+            Nothing
+            this
+            that
+            mth
+            pb
+            (  ArgsPack args
+            $  odFromList
+            $  odToList kwargs
+            ++ [(AttrByName "outlet", EdhSink outlet)]
+            )
+            scopeMod
+            endOfEdh
+        Just (EdhSink !outlet) -> callMaker $ \exit ->
+          launchEventProducer exit outlet $ callEdhMethod'
+            Nothing
+            this
+            that
+            mth
+            pb
+            (ArgsPack args kwargs)
+            scopeMod
+            endOfEdh
+        Just !badVal ->
+          throwEdhSTM etsCallPrep UsageError
+            $  "The value passed to a producer as `outlet` found to be a "
+            <> T.pack (edhTypeNameOf badVal)
 
     -- calling a generator
     (EdhGnrtor _) -> throwEdhSTM
@@ -1059,20 +1056,20 @@ callEdhMethod
   -> (Scope -> Scope)
   -> EdhTxExit
   -> EdhTx
-callEdhMethod !this !that !mth'proc !apk !scopeMod !exit !etsCaller = do
+callEdhMethod !this !that !mth !apk !scopeMod !exit !etsCaller = do
   let callerCtx   = edh'context etsCaller
       callerScope = contextScope callerCtx
-  case edh'procedure'body $ edh'procedure'decl mth'proc of
+  case edh'procedure'body $ edh'procedure'decl mth of
 
     -- calling a host method procedure
     Right !hp -> do
       -- a host procedure views the same scope entity as of the caller's
       -- call frame
-      let !mthScope = scopeMod $ (lexicalScopeOf mth'proc)
+      let !mthScope = scopeMod $ (lexicalScopeOf mth)
             { edh'scope'entity = edh'scope'entity callerScope
             , edh'scope'this   = this
             , edh'scope'that   = that
-            , edh'scope'proc   = mth'proc
+            , edh'scope'proc   = mth
             , edh'scope'caller = edh'ctx'stmt callerCtx
             }
           !mthCtx = callerCtx
@@ -1090,7 +1087,7 @@ callEdhMethod !this !that !mth'proc !apk !scopeMod !exit !etsCaller = do
     -- calling an Edh method procedure
     Left !pb ->
       runEdhTx etsCaller
-        $ callEdhMethod' Nothing this that mth'proc pb apk scopeMod
+        $ callEdhMethod' Nothing this that mth pb apk scopeMod
         $ \ !mthRtn -> case mthRtn of
           -- explicit return
             EdhReturn rtnVal -> exitEdhTx exit rtnVal
@@ -1107,18 +1104,18 @@ callEdhMethod'
   -> (Scope -> Scope)
   -> EdhTxExit
   -> EdhTx
-callEdhMethod' !gnr'caller !this !that !mth'proc !mth'body !apk !scopeMod !exit !etsCaller
+callEdhMethod' !gnr'caller !this !that !mth !mth'body !apk !scopeMod !exit !etsCaller
   = recvEdhArgs etsCaller
                 recvCtx
-                (edh'procedure'args $ edh'procedure'decl mth'proc)
+                (edh'procedure'args $ edh'procedure'decl mth)
                 apk
     $ \ !ed -> do
-        ent <- iopdFromList (odToList ed)
-        let !mthScope = scopeMod $ (lexicalScopeOf mth'proc)
-              { edh'scope'entity = ent
+        !esScope <- iopdFromList (odToList ed)
+        let !mthScope = scopeMod $ (lexicalScopeOf mth)
+              { edh'scope'entity = esScope
               , edh'scope'this   = this
               , edh'scope'that   = that
-              , edh'scope'proc   = mth'proc
+              , edh'scope'proc   = mth
               , edh'scope'caller = edh'ctx'stmt callerCtx
               }
             !mthCtx = callerCtx
@@ -1131,16 +1128,14 @@ callEdhMethod' !gnr'caller !this !that !mth'proc !mth'body !apk !scopeMod !exit 
               , edh'ctx'eff'defining = False
               }
             !etsMth = etsCaller { edh'context = mthCtx }
-        -- push stack for the Edh procedure
         runEdhTx etsMth $ evalStmt mth'body $ \ !mthRtn ->
-          -- pop stack after Edh procedure returned
           edhSwitchState etsCaller $ exit mthRtn
  where
   !callerCtx = edh'context etsCaller
   !recvCtx   = callerCtx
-    { edh'ctx'stack        = (lexicalScopeOf mth'proc) { edh'scope'this = this
-                                                       , edh'scope'that = that
-                                                       }
+    { edh'ctx'stack        = (lexicalScopeOf mth) { edh'scope'this = this
+                                                  , edh'scope'that = that
+                                                  }
                                :| []
     , edh'ctx'genr'caller  = Nothing
     , edh'ctx'match        = true
@@ -2483,6 +2478,36 @@ edhValueStrTx !v !exit !ets =
   edhValueStr ets v $ \ !s -> exitEdhSTM ets exit $ EdhString s
 
 
+defineScopeAttr :: EdhThreadState -> AttrKey -> EdhValue -> STM ()
+defineScopeAttr !ets !key !val = when (key /= AttrByName "_") $ do
+  if edh'ctx'eff'defining ctx
+    then defEffect
+    else unless (edh'ctx'pure ctx) $ iopdInsert key val (edh'scope'entity scope)
+  when (edh'ctx'exporting ctx) $ case edh'obj'store $ edh'scope'this scope of
+    HashStore  !hs             -> chkExport hs
+    ClassStore (Class _ !cs _) -> chkExport cs
+    HostStore{}                -> pure ()
+
+ where
+  !ctx     = edh'context ets
+  !scope   = contextScope ctx
+  !esScope = edh'scope'entity scope
+
+  chkExport :: EntityStore -> STM ()
+  chkExport !es = iopdLookup (AttrByName edhExportsMagicName) es >>= \case
+    Just (EdhDict (Dict _ !dsExp)) -> iopdInsert (attrKeyValue key) val dsExp
+    _                              -> do
+      !d <- EdhDict <$> createEdhDict [(attrKeyValue key, val)]
+      iopdInsert (AttrByName edhExportsMagicName) d es
+
+  defEffect :: STM ()
+  defEffect = iopdLookup (AttrByName edhEffectsMagicName) esScope >>= \case
+    Just (EdhDict (Dict _ !dsEff)) -> iopdInsert (attrKeyValue key) val dsEff
+    _                              -> do
+      !d <- EdhDict <$> createEdhDict [(attrKeyValue key, val)]
+      iopdInsert (AttrByName edhEffectsMagicName) d esScope
+
+
 -- | Evaluate an Edh expression
 evalExpr :: Expr -> EdhTxExit -> EdhTx
 
@@ -2846,11 +2871,11 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
           let !ets' = fromMaybe ets etsDef
           in  runEdhTx ets' $ evalExpr exprDef $ \ !defVal _ets ->
                 case defVal of
-                                                      -- `return default nil` means more defered default,
-                                                      -- that's only possible from an operator, other than
-                                                      -- the magic method we just called
                   EdhNil -> naExit
                   _      -> exitEdhSTM ets exit defVal
+          -- `return default nil` means more defered default,
+          -- that's only possible from an operator, other than
+          -- the magic method we just called
         _ -> exitEdhSTM ets exit result
 
     callCallable :: Object -> Object -> EdhCallable -> STM ()
@@ -2950,6 +2975,56 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
                   <> " expressed with: "
                   <> T.pack (show expr)
 
+-- defining an Edh class
+evalExpr (ClassExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
+  resolveEdhAttrAddr ets addr $ \ !name -> do
+    let !ctx       = edh'context ets
+        !scope     = contextScope ctx
+        !rootScope = edh'world'root $ edh'ctx'world ctx
+        !rootClass = edh'obj'class $ edh'scope'this rootScope
+        !metaClass = edh'obj'class rootClass
+
+    !idCls <- unsafeIOToSTM newUnique
+    !cs    <- iopdEmpty
+    !ss    <- newTVar []
+    let allocator :: EdhObjectAllocator
+        allocator _etsCtor _apkCtor !exitCtor =
+          exitCtor =<< HashStore <$> iopdEmpty
+
+        !clsProc = ProcDefi { edh'procedure'ident = idCls
+                            , edh'procedure'name  = name
+                            , edh'procedure'lexi  = scope
+                            , edh'procedure'decl  = pd
+                            }
+        !cls    = Class clsProc cs allocator
+        !clsObj = Object idCls (ClassStore cls) metaClass ss
+
+        doExit _rtn _ets = do
+          defineScopeAttr ets name $ EdhObject clsObj
+          exitEdhSTM ets exit $ EdhObject clsObj
+
+    let !clsScope = scope { edh'scope'entity = cs
+                          , edh'scope'this   = clsObj
+                          , edh'scope'that   = clsObj
+                          , edh'scope'proc   = clsProc
+                          }
+        !clsCtx = ctx { edh'ctx'stack        = clsScope <| edh'ctx'stack ctx
+                      , edh'ctx'genr'caller  = Nothing
+                      , edh'ctx'match        = true
+                      , edh'ctx'pure         = False
+                      , edh'ctx'exporting    = False
+                      , edh'ctx'eff'defining = False
+                      }
+        !etsCls = ets { edh'context = clsCtx }
+
+    case edh'procedure'body pd of
+      -- calling a host class definition
+      Right !hp -> runEdhTx etsCls $ hp (ArgsPack [] odEmpty) doExit
+      -- calling an Edh class definition
+      Left  !pb -> runEdhTx etsCls $ evalStmt pb doExit
+
+
+
 
 evalExpr !expr !exit = \ !ets -> case expr of
 
@@ -2980,22 +3055,6 @@ evalExpr !expr !exit = \ !ets -> case expr of
             chkExport name nsv
           exitEdhSTM ets exit nsv
         _ -> error "bug: createEdhObject returned non-object"
-
-  ClassExpr pd@(ProcDecl !addr _ _) -> resolveEdhAttrAddr ets addr $ \name ->
-    do
-      u <- unsafeIOToSTM newUnique
-      let !cls = EdhClass ProcDefi { edh'procedure'ident = u
-                                   , edh'procedure'name  = name
-                                   , edh'procedure'lexi  = scope
-                                   , edh'procedure'decl  = pd
-                                   }
-      when (addr /= NamedAttr "_") $ do
-        if edh'ctx'eff'defining ctx
-          then defEffect name cls
-          else unless (edh'ctx'pure ctx)
-            $ changeEntityAttr ets (edh'scope'entity scope) name cls
-        chkExport name cls
-      exitEdhSTM ets exit cls
 
   MethodExpr pd@(ProcDecl !addr _ _) -> resolveEdhAttrAddr ets addr $ \name ->
     do
@@ -3193,41 +3252,6 @@ evalExpr !expr !exit = \ !ets -> case expr of
                                  (AttrByName edhExportsMagicName)
                                  d
       exitEdhSTM ets exit op
-
-
- where
-
-  !ctx                   = edh'context ets
-  !world                 = edh'ctx'world ctx
-  !genr'caller           = edh'ctx'genr'caller ctx
-  (StmtSrc (!srcPos, _)) = edh'ctx'stmt ctx
-  !scope                 = contextScope ctx
-  this                   = edh'scope'this scope
-
-  chkExport :: AttrKey -> EdhValue -> STM ()
-  chkExport !key !val =
-    when (edh'ctx'exporting ctx)
-      $   lookupEdhSelfAttr (objEntity this) (AttrByName edhExportsMagicName)
-      >>= \case
-            EdhDict (Dict _ !thisExpDS) ->
-              iopdInsert (attrKeyValue key) val thisExpDS
-            _ -> do
-              d <- EdhDict <$> createEdhDict [(attrKeyValue key, val)]
-              changeEntityAttr ets
-                               (objEntity this)
-                               (AttrByName edhExportsMagicName)
-                               d
-  defEffect :: AttrKey -> EdhValue -> STM ()
-  defEffect !key !val =
-    lookupEdhSelfAttr (edh'scope'entity scope) (AttrByName edhEffectsMagicName)
-      >>= \case
-            EdhDict (Dict _ !effDS) -> iopdInsert (attrKeyValue key) val effDS
-            _                       -> do
-              d <- EdhDict <$> createEdhDict [(attrKeyValue key, val)]
-              changeEntityAttr ets
-                               (edh'scope'entity scope)
-                               (AttrByName edhEffectsMagicName)
-                               d
 
 
 validateOperDecl :: EdhThreadState -> ProcDecl -> STM ()
