@@ -3027,8 +3027,8 @@ evalExpr (NamespaceExpr pd@(ProcDecl !addr _ _) !argsSndr) !exit = \ !ets ->
       !idNs <- unsafeIOToSTM newUnique
       !hs   <-
         iopdFromList
-        $ (AttrByName "__name__", attrKeyValue name)
-        : odToList kwargs
+        $  odToList kwargs
+        ++ [(AttrByName "__name__", attrKeyValue name)]
       !ss <- newTVar []
       let !nsProc = ProcDefi { edh'procedure'ident = idNs
                              , edh'procedure'name  = name
