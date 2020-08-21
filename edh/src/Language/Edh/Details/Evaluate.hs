@@ -2972,8 +2972,8 @@ evalExpr (ClassExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
     let !ctx       = edh'context ets
         !scope     = contextScope ctx
         !rootScope = edh'world'root $ edh'ctx'world ctx
-        !rootClass = edh'obj'class $ edh'scope'this rootScope
-        !metaClass = edh'obj'class rootClass
+        !nsClass   = edh'obj'class $ edh'scope'this rootScope
+        !metaClass = edh'obj'class nsClass
 
     !idCls <- unsafeIOToSTM newUnique
     !cs    <- iopdEmpty
@@ -3015,9 +3015,6 @@ evalExpr (ClassExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
       Left  !pb -> runEdhTx etsCls $ evalStmt pb doExit
 
 -- defining an Edh namespace
---
--- todo for now a namespace is implemented just as a class receiving kwargs
---      into its static attr scope initially, need sth different?
 evalExpr (NamespaceExpr pd@(ProcDecl !addr _ _) !argsSndr) !exit = \ !ets ->
   packEdhArgs ets argsSndr $ \(ArgsPack !args !kwargs) -> if not (null args)
     then throwEdh ets UsageError "you don't pass positional args to a namespace"
@@ -3025,47 +3022,44 @@ evalExpr (NamespaceExpr pd@(ProcDecl !addr _ _) !argsSndr) !exit = \ !ets ->
       let !ctx       = edh'context ets
           !scope     = contextScope ctx
           !rootScope = edh'world'root $ edh'ctx'world ctx
-          !rootClass = edh'obj'class $ edh'scope'this rootScope
-          !metaClass = edh'obj'class rootClass
+          !nsClass   = edh'obj'class $ edh'scope'this rootScope
 
-      !idCls <- unsafeIOToSTM newUnique
-      !cs    <- iopdFromList $ odToList kwargs
-      !ss    <- newTVar []
-      let allocator :: EdhObjectAllocator
-          allocator _etsCtor _apkCtor !exitCtor =
-            exitCtor =<< HashStore <$> iopdEmpty
-
-          !clsProc = ProcDefi { edh'procedure'ident = idCls
-                              , edh'procedure'name  = name
-                              , edh'procedure'lexi  = scope
-                              , edh'procedure'decl  = pd
-                              }
-          !cls    = Class clsProc cs allocator
-          !clsObj = Object idCls (ClassStore cls) metaClass ss
+      !idNs <- unsafeIOToSTM newUnique
+      !hs   <-
+        iopdFromList
+        $ (AttrByName "__name__", attrKeyValue name)
+        : odToList kwargs
+      !ss <- newTVar []
+      let !nsProc = ProcDefi { edh'procedure'ident = idNs
+                             , edh'procedure'name  = name
+                             , edh'procedure'lexi  = scope
+                             , edh'procedure'decl  = pd
+                             }
+          !nsObj = Object idNs (HashStore hs) nsClass ss
 
           doExit _rtn _ets = do
-            defineScopeAttr ets name $ EdhObject clsObj
-            exitEdhSTM ets exit $ EdhObject clsObj
+            defineScopeAttr ets name $ EdhObject nsObj
+            exitEdhSTM ets exit $ EdhObject nsObj
 
-      let !clsScope = scope { edh'scope'entity = cs
-                            , edh'scope'this   = clsObj
-                            , edh'scope'that   = clsObj
-                            , edh'scope'proc   = clsProc
-                            }
-          !clsCtx = ctx { edh'ctx'stack        = clsScope <| edh'ctx'stack ctx
-                        , edh'ctx'genr'caller  = Nothing
-                        , edh'ctx'match        = true
-                        , edh'ctx'pure         = False
-                        , edh'ctx'exporting    = False
-                        , edh'ctx'eff'defining = False
-                        }
-          !etsCls = ets { edh'context = clsCtx }
+      let !nsScope = scope { edh'scope'entity = hs
+                           , edh'scope'this   = nsObj
+                           , edh'scope'that   = nsObj
+                           , edh'scope'proc   = nsProc
+                           }
+          !nsCtx = ctx { edh'ctx'stack        = nsScope <| edh'ctx'stack ctx
+                       , edh'ctx'genr'caller  = Nothing
+                       , edh'ctx'match        = true
+                       , edh'ctx'pure         = False
+                       , edh'ctx'exporting    = False
+                       , edh'ctx'eff'defining = False
+                       }
+          !etsNs = ets { edh'context = nsCtx }
 
       case edh'procedure'body pd of
-        -- calling a host class definition
-        Right !hp -> runEdhTx etsCls $ hp (ArgsPack [] odEmpty) doExit
-        -- calling an Edh class definition
-        Left  !pb -> runEdhTx etsCls $ evalStmt pb doExit
+        -- calling a host ns definition
+        Right !hp -> runEdhTx etsNs $ hp (ArgsPack [] odEmpty) doExit
+        -- calling an Edh ns definition
+        Left  !pb -> runEdhTx etsNs $ evalStmt pb doExit
 
 evalExpr (MethodExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
   resolveEdhAttrAddr ets addr $ \ !name -> do

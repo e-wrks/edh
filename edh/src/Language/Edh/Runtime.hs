@@ -36,31 +36,43 @@ import           Language.Edh.Details.Evaluate
 createEdhWorld :: MonadIO m => EdhConsole -> m EdhWorld
 createEdhWorld !console = liftIO $ do
 
-  -- * the meta class and root class
-  !idMeta <- newUnique
-  !hsMeta <- atomically iopdEmpty
-  !ssMeta <- newTVarIO []
+  -- * the meta class and namespace class
+  !idMeta      <- newUnique
+  !hsMeta      <- atomically iopdEmpty
+  !ssMeta      <- newTVarIO []
 
-  !idRoot <- newUnique
-  !hsRoot <- atomically $ iopdFromList
-    [(AttrByName "None", edhNone), (AttrByName "Nothing", edhNothing)]
+  !idNamespace <- newUnique
+  !hsNamespace <- atomically iopdEmpty
+  !ssNamespace <- newTVarIO []
+
+  -- root object is an instance of namespace class per se
+  !idRoot      <- newUnique
+  !hsRoot      <- atomically $ iopdFromList
+    [ (AttrByName "__name__", EdhString "<root>")
+    , (AttrByName "None"    , edhNone)
+    , (AttrByName "Nothing" , edhNothing)
+    ]
   !ssRoot <- newTVarIO []
 
   let
     metaProc = ProcDefi idMeta (AttrByName "class") rootScope
-      $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right fakeHostProc)
-    metaClass    = Class metaProc hsMeta rootAllocator
+      $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right phantomHostProc)
+    metaClass    = Class metaProc hsMeta phantomAllocator
     metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
 
-    rootProc     = ProcDefi idRoot (AttrByName "<root>") rootScope
-      $ ProcDecl (NamedAttr "<root>") (PackReceiver []) (Right fakeHostProc)
-    rootClass    = Class rootProc hsRoot rootAllocator
-    rootClassObj = Object idRoot (ClassStore rootClass) metaClassObj ssRoot
+    nsProc       = ProcDefi idNamespace (AttrByName "namespace") rootScope
+      $ ProcDecl
+          (NamedAttr "namespace")
+          (PackReceiver [])
+          (Right phantomHostProc)
+    nsClass = Class nsProc hsNamespace phantomAllocator
+    nsClassObj =
+      Object idNamespace (ClassStore nsClass) metaClassObj ssNamespace
 
-    rootObj      = Object idRoot (HashStore hsRoot) rootClassObj ssRoot
+    rootObj = Object idRoot (HashStore hsRoot) nsClassObj ssRoot
 
     rootScope =
-      Scope hsRoot rootObj rootObj defaultEdhExcptHndlr rootProc genesisStmt []
+      Scope hsRoot rootObj rootObj defaultEdhExcptHndlr nsProc genesisStmt []
 
   atomically
     $  (flip iopdUpdate hsMeta =<<)
@@ -72,6 +84,17 @@ createEdhWorld !console = liftIO $ do
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
        | (nm, getter, setter) <- [("name", mthClassNameGetter, Nothing)]
        ]
+
+  atomically
+    $ (flip iopdUpdate hsNamespace =<<)
+    $ sequence
+    -- TODO __show__ and __desc__ methods for namespace objects here
+    $ [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
+      | (nm, mth, args) <- [("__repr__", mthNsRepr, PackReceiver [])]
+      ]
+
+  atomically
+    $ iopdUpdate [(AttrByName "namespace", EdhObject nsClassObj)] hsRoot
 
   -- * the `scope` class
   !hsScope <- -- TODO port eval/get/put/attrs methods
@@ -232,8 +255,10 @@ createEdhWorld !console = liftIO $ do
 
   return world
  where
-  fakeHostProc :: EdhHostProc
-  fakeHostProc _ !exit = exitEdhTx exit nil
+
+  phantomAllocator _ _ _ = error "bug: allocating phantom object"
+  phantomHostProc :: EdhHostProc
+  phantomHostProc _ _ = throwEdhTx EvalError "bug: calling phantom procedure"
 
   genesisStmt :: StmtSrc
   genesisStmt = StmtSrc
@@ -244,14 +269,24 @@ createEdhWorld !console = liftIO $ do
     , VoidStmt
     )
 
-  rootAllocator _ _ _ = error "bug: allocating root object"
-
   mthClassRepr :: EdhHostProc
   mthClassRepr _apk !exit !ets = case edh'obj'store clsObj of
     ClassStore (Class !pd _ _) ->
       exitEdhSTM ets exit $ EdhString $ procedureName pd
     _ -> exitEdhSTM ets exit $ EdhString "<bogus-class>"
-    where clsObj = edh'scope'this $ contextScope $ edh'context ets
+    where !clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+  mthNsRepr :: EdhHostProc
+  mthNsRepr _apk !exit !ets = case edh'obj'store nsObj of
+    HashStore !hs -> iopdLookup (AttrByName "__name__") hs >>= \case
+      Just (EdhString !nsName) ->
+        exitEdhSTM ets exit $ EdhString $ "namespace " <> nsName <> " {..}"
+      Just (EdhSymbol (Symbol _ !nsSymRepr)) ->
+        exitEdhSTM ets exit $ EdhString $ "namespace " <> nsSymRepr <> " {..}"
+      Nothing -> exitEdhSTM ets exit $ EdhString "namespace _ {..}"
+      _       -> exitEdhSTM ets exit $ EdhString "<bogus-namespace>"
+    _ -> exitEdhSTM ets exit $ EdhString "<bogus-namespace>"
+    where !nsObj = edh'scope'this $ contextScope $ edh'context ets
 
   mthClassNameGetter :: EdhHostProc
   mthClassNameGetter _apk !exit !ets = case edh'obj'store clsObj of
