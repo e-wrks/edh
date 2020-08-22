@@ -11,13 +11,15 @@ import           Control.Monad.Except
 
 import           Control.Concurrent.STM
 
-import           Data.Unique
+import           Data.Maybe
+import qualified Data.List.NonEmpty            as NE
 import qualified Data.ByteString               as B
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import           Data.Text.Encoding
 import           Data.Text.Encoding.Error
 import qualified Data.HashMap.Strict           as Map
+import           Data.Unique
 import           Data.Dynamic
 
 import           Text.Megaparsec
@@ -103,8 +105,12 @@ createEdhWorld !console = liftIO $ do
     $  sequence
     $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
        | (nm, mth, args) <-
-         [ ("__repr__", mthScopeRepr, PackReceiver [])
-         , ("__show__", mthScopeShow, PackReceiver [])
+         [ ("__repr__", mthScopeRepr , PackReceiver [])
+         , ("__show__", mthScopeShow , PackReceiver [])
+         , ("eval"    , mthScopeEval , PackReceiver [])
+         , ("get"     , mthScopeGet  , PackReceiver [])
+         , ("put"     , mthScopePut  , PackReceiver [])
+         , ("attrs"   , mthScopeAttrs, PackReceiver [])
          ]
        ]
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
@@ -269,12 +275,21 @@ createEdhWorld !console = liftIO $ do
     , VoidStmt
     )
 
+
   mthClassRepr :: EdhHostProc
   mthClassRepr _apk !exit !ets = case edh'obj'store clsObj of
     ClassStore (Class !pd _ _) ->
       exitEdhSTM ets exit $ EdhString $ procedureName pd
     _ -> exitEdhSTM ets exit $ EdhString "<bogus-class>"
     where !clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+  mthClassNameGetter :: EdhHostProc
+  mthClassNameGetter _apk !exit !ets = case edh'obj'store clsObj of
+    ClassStore (Class !pd _ _) ->
+      exitEdhSTM ets exit $ attrKeyValue $ edh'procedure'name pd
+    _ -> exitEdhSTM ets exit nil
+    where clsObj = edh'scope'this $ contextScope $ edh'context ets
+
 
   mthNsRepr :: EdhHostProc
   mthNsRepr _apk !exit !ets = case edh'obj'store nsObj of
@@ -288,35 +303,146 @@ createEdhWorld !console = liftIO $ do
     _ -> exitEdhSTM ets exit $ EdhString "<bogus-namespace>"
     where !nsObj = edh'scope'this $ contextScope $ edh'context ets
 
-  mthClassNameGetter :: EdhHostProc
-  mthClassNameGetter _apk !exit !ets = case edh'obj'store clsObj of
-    ClassStore (Class !pd _ _) ->
-      exitEdhSTM ets exit $ attrKeyValue $ edh'procedure'name pd
-    _ -> exitEdhSTM ets exit nil
-    where clsObj = edh'scope'this $ contextScope $ edh'context ets
 
   mthScopeRepr :: EdhHostProc
   mthScopeRepr _ !exit = exitEdhTx exit $ EdhString "<scope>"
 
   mthScopeShow :: EdhHostProc
   mthScopeShow _ !exit !ets =
-    case edh'obj'store $ edh'scope'this $ contextScope $ edh'context ets of
-      HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
-        Nothing -> exitEdhSTM ets exit $ EdhString $ "bogus scope object"
-        Just (scope :: Scope) -> do
-          let !pd      = edh'scope'proc scope
-              !pb      = edh'procedure'body $ edh'procedure'decl pd
-              !lexiLoc = case pb of
-                Left  (StmtSrc (srcLoc, _)) -> T.pack $ sourcePosPretty srcLoc
-                Right _                     -> "<host-code>"
-              StmtSrc (!callerSrcLoc, _) = edh'scope'caller scope
-          exitEdhSTM ets exit
-            $  EdhString
-            $  "#scope@ "
-            <> lexiLoc
-            <> "\n#called by: "
-            <> T.pack (sourcePosPretty callerSrcLoc)
-      _ -> exitEdhSTM ets exit $ EdhString $ "bogus scope object"
+    castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
+      Nothing -> exitEdhSTM ets exit $ EdhString $ "bogus scope object"
+      Just (scope :: Scope) -> do
+        let !pd      = edh'scope'proc scope
+            !pb      = edh'procedure'body $ edh'procedure'decl pd
+            !lexiLoc = case pb of
+              Left  (StmtSrc (srcLoc, _)) -> T.pack $ sourcePosPretty srcLoc
+              Right _                     -> "<host-code>"
+            StmtSrc (!callerSrcLoc, _) = edh'scope'caller scope
+        exitEdhSTM ets exit
+          $  EdhString
+          $  "#scope@ "
+          <> lexiLoc
+          <> "\n#called by: "
+          <> T.pack (sourcePosPretty callerSrcLoc)
+
+  mthScopeAttrs :: EdhHostProc
+  mthScopeAttrs _apk !exit !ets =
+    castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
+      Nothing -> exitEdhSTM ets exit $ EdhString $ "bogus scope object"
+      Just (scope :: Scope) ->
+        (iopdSnapshot (edh'scope'entity scope) >>=)
+          $ exitEdhSTM ets exit
+          . EdhArgsPack
+          . ArgsPack []
+
+  mthScopeGet :: EdhHostProc
+  mthScopeGet (ArgsPack !args !kwargs) !exit !ets =
+    castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
+      Nothing -> exitEdhSTM ets exit $ EdhString $ "bogus scope object"
+      Just (scope :: Scope) -> do
+        let !es = edh'scope'entity scope
+            lookupAttrs
+              :: [EdhValue]
+              -> [(AttrKey, EdhValue)]
+              -> [EdhValue]
+              -> [(AttrKey, EdhValue)]
+              -> (([EdhValue], [(AttrKey, EdhValue)]) -> STM ())
+              -> STM ()
+            lookupAttrs rtnArgs rtnKwArgs [] [] !exit' =
+              exit' (rtnArgs, rtnKwArgs)
+            lookupAttrs rtnArgs rtnKwArgs [] ((n, v) : restKwArgs) !exit' =
+              attrKeyFrom v $ \ !k -> do
+                !attrVal <- fromMaybe nil <$> iopdLookup k es
+                lookupAttrs rtnArgs
+                            ((n, attrVal) : rtnKwArgs)
+                            []
+                            restKwArgs
+                            exit'
+            lookupAttrs rtnArgs rtnKwArgs (v : restArgs) kwargs' !exit' =
+              attrKeyFrom v $ \ !k -> do
+                !attrVal <- fromMaybe nil <$> iopdLookup k es
+                lookupAttrs (attrVal : rtnArgs) rtnKwArgs restArgs kwargs' exit'
+        lookupAttrs [] [] args (odToList kwargs) $ \case
+          ([v]    , []       ) -> exitEdhSTM ets exit v
+          (rtnArgs, rtnKwArgs) -> exitEdhSTM ets exit $ EdhArgsPack $ ArgsPack
+            (reverse rtnArgs)
+            (odFromList rtnKwArgs)
+   where
+    attrKeyFrom :: EdhValue -> (AttrKey -> STM ()) -> STM ()
+    attrKeyFrom (EdhString attrName) !exit' = exit' $ AttrByName attrName
+    attrKeyFrom (EdhSymbol sym     ) !exit' = exit' $ AttrBySym sym
+    attrKeyFrom badVal _ =
+      throwEdh ets UsageError $ "Invalid attribute reference type - " <> T.pack
+        (edhTypeNameOf badVal)
+
+  mthScopePut :: EdhHostProc
+  mthScopePut (ArgsPack !args !kwargs) !exit !ets =
+    castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
+      Nothing -> exitEdhSTM ets exit $ EdhString $ "bogus scope object"
+      Just (scope :: Scope) -> do
+        let !es = edh'scope'entity scope
+            putAttrs
+              :: [EdhValue]
+              -> [(AttrKey, EdhValue)]
+              -> ([(AttrKey, EdhValue)] -> STM ())
+              -> STM ()
+            putAttrs []           cumu !exit' = exit' cumu
+            putAttrs (arg : rest) cumu !exit' = case arg of
+              EdhPair (EdhString !k) !v ->
+                putAttrs rest ((AttrByName k, v) : cumu) exit'
+              EdhPair (EdhSymbol !k) !v ->
+                putAttrs rest ((AttrBySym k, v) : cumu) exit'
+              _ ->
+                throwEdh ets UsageError
+                  $  "Invalid key/value type to put into a scope - "
+                  <> T.pack (edhTypeNameOf arg)
+        putAttrs args [] $ \ !attrs -> do
+          iopdUpdate (attrs ++ odToList kwargs) es
+          exitEdhSTM ets exit nil
+
+  mthScopeEval :: EdhHostProc
+  mthScopeEval (ArgsPack !args !kwargs) !exit !ets =
+    castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
+      Nothing -> exitEdhSTM ets exit $ EdhString $ "bogus scope object"
+      Just (scope :: Scope) -> do
+        -- eval all exprs with the original scope on top of current call stack
+        let !ctx            = edh'context ets
+            !scopeCallStack = scope NE.<| edh'ctx'stack ctx
+            !etsEval        = ets
+              { edh'context = ctx { edh'ctx'stack        = scopeCallStack
+                                  , edh'ctx'genr'caller  = Nothing
+                                  , edh'ctx'match        = true
+                                  , edh'ctx'pure         = False
+                                  , edh'ctx'exporting    = False
+                                  , edh'ctx'eff'defining = False
+                                  }
+              }
+        !kwIOPD <- iopdEmpty
+        let
+          evalThePack
+            :: [EdhValue] -> [EdhValue] -> [(AttrKey, EdhValue)] -> STM ()
+          evalThePack !argsValues [] [] =
+            iopdToList kwIOPD >>= \ !kwargsValues ->
+              -- restore original tx state and return the eval-ed values
+              exitEdhSTM ets exit $ case argsValues of
+                [val] | null kwargsValues -> val
+                _ -> EdhArgsPack $ ArgsPack (reverse argsValues) $ odFromList
+                  kwargsValues
+          evalThePack !argsValues [] (kwExpr : kwargsExprs') = case kwExpr of
+            (!kw, EdhExpr _ !expr _) ->
+              runEdhTx etsEval $ evalExpr expr $ \ !val _ets -> do
+                iopdInsert kw (edhDeCaseClose val) kwIOPD
+                evalThePack argsValues [] kwargsExprs'
+            !v -> throwEdh ets EvalError $ "not an expr: " <> T.pack (show v)
+          evalThePack !argsValues (argExpr : argsExprs') !kwargsExprs =
+            case argExpr of
+              EdhExpr _ !expr _ ->
+                runEdhTx etsEval $ evalExpr expr $ \ !val _ets -> evalThePack
+                  (edhDeCaseClose val : argsValues)
+                  argsExprs'
+                  kwargsExprs
+              !v -> throwEdh ets EvalError $ "not an expr: " <> T.pack (show v)
+        evalThePack [] args $ odToList kwargs
 
   mthScopeOuterGetter :: EdhHostProc
   mthScopeOuterGetter _ !exit !ets = case edh'obj'store this of
@@ -336,6 +462,7 @@ createEdhWorld !console = liftIO $ do
                                                      ss
     _ -> exitEdhSTM ets exit $ EdhString $ "bogus scope object"
     where !this = edh'scope'this $ contextScope $ edh'context ets
+
 
   -- this is called in case a ProgramHalt is constructed by Edh code
   haltAllocator _ !apk !exit = case apk of

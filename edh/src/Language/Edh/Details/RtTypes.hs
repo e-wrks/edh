@@ -1582,9 +1582,7 @@ objectScope !obj = case edh'obj'store obj of
 --      be needed in the future
 mkScopeWrapper :: Context -> Scope -> STM Object
 mkScopeWrapper !ctx !scope = edhWrapScope scope
- where
-  !world       = edh'ctx'world ctx
-  edhWrapScope = edh'scope'wrapper world
+  where edhWrapScope = edh'scope'wrapper $ edh'ctx'world ctx
 
 
 data EdhIndex = EdhIndex !Int | EdhAny | EdhAll | EdhSlice {
