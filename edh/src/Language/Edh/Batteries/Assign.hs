@@ -18,12 +18,12 @@ import           Language.Edh.Details.Evaluate
 
 -- | operator (=)
 assignProc :: EdhIntrinsicOp
-assignProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
+assignProc !lhExpr !rhExpr !exit = ask >>= \ !ets ->
   local
-      (const pgs {
+      (const ets {
             -- execution of the assignment always in a tx for atomicity
                    edh'in'tx   = True
-                 , edh'context = (edh'context pgs) {
+                 , edh'context = (edh'context ets) {
             -- discourage artifact definition during assignment
                                                      contextPure = True }
                  }
@@ -40,29 +40,29 @@ assignProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                     -- indexing assign to a dict
                   EdhDict (Dict _ !ds) -> contEdhSTM $ do
                     setDictItem ixVal rhVal ds
-                    exitEdhSTM pgs exit rhVal
+                    exitEdh ets exit rhVal
 
                   -- indexing assign to an object, by calling its ([=])
                   -- method with ixVal and rhVal as the args
                   EdhObject obj ->
                     contEdhSTM
-                      $   lookupEdhObjAttr pgs obj (AttrByName "[=]")
+                      $   lookupEdhObjAttr ets obj (AttrByName "[=]")
                       >>= \case
                             EdhNil ->
-                              throwEdh pgs EvalError
+                              throwEdh ets EvalError
                                 $  "No magic ([=]) method from: "
                                 <> T.pack (show obj)
                             EdhMethod !mth'proc ->
                               -- enforced tx boundary cut just before
                               -- magic method call, after args prepared
-                              runEdhTx pgs $ callEdhMethod
+                              runEdhTx ets $ callEdhMethod
                                 obj
                                 mth'proc
                                 (ArgsPack [ixVal, rhVal] odEmpty)
                                 id
                                 exit
                             !badIndexer ->
-                              throwEdh pgs EvalError
+                              throwEdh ets EvalError
                                 $  "Malformed magic method ([=]) on "
                                 <> T.pack (show obj)
                                 <> " - "
@@ -71,7 +71,7 @@ assignProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                                 <> T.pack (show badIndexer)
 
                   _ ->
-                    local (const pgs)
+                    local (const ets)
                       $  throwEdh EvalError
                       $  "Don't know how to index assign "
                       <> T.pack (edhTypeNameOf tgtVal)
@@ -83,17 +83,17 @@ assignProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                       <> T.pack (show ixVal)
 
         _ -> evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-          assignEdhTarget pgs lhExpr exit $ edhDeCaseClose rhVal
+          assignEdhTarget ets lhExpr exit $ edhDeCaseClose rhVal
 
 
 -- | operator (+=), (-=), (*=), (/=), (//=), (&&=), (||=) etc.
 assignWithOpProc :: Text -> EdhIntrinsicOp -> EdhIntrinsicOp
-assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
+assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !ets ->
   local
-      (const pgs {
+      (const ets {
             -- execution of the assignment always in a tx for atomicity
                    edh'in'tx   = True
-                 , edh'context = (edh'context pgs) {
+                 , edh'context = (edh'context ets) {
             -- discourage artifact definition during assignment
                                                      contextPure = True }
                  }
@@ -112,19 +112,19 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                     contEdhSTM
                       $   iopdLookupDefault EdhNil ixVal ds
                       >>= \ !dVal ->
-                            runEdhTx pgs
+                            runEdhTx ets
                               $ withOp (IntplSubs dVal) (IntplSubs rhVal)
                               $ \(OriginalValue !opRtnV _ _) -> contEdhSTM $ do
                                   setDictItem ixVal opRtnV ds
-                                  exitEdhSTM pgs exit opRtnV
+                                  exitEdh ets exit opRtnV
 
                   -- indexing assign to an object, by calling its ([op=])
                   EdhObject obj -> -- method with ixVal and rhVal as the args
                     contEdhSTM
-                      $   lookupEdhObjAttr pgs obj (AttrByName magicMthName)
+                      $   lookupEdhObjAttr ets obj (AttrByName magicMthName)
                       >>= \case
                             EdhNil ->
-                              throwEdh pgs EvalError
+                              throwEdh ets EvalError
                                 $  "No magic ("
                                 <> magicMthName
                                 <> ") method from: "
@@ -132,14 +132,14 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                             EdhMethod !mth'proc ->
                               -- enforced tx boundary cut just before
                               -- magic method call, after args prepared
-                              runEdhTx pgs $ callEdhMethod
+                              runEdhTx ets $ callEdhMethod
                                 obj
                                 mth'proc
                                 (ArgsPack [ixVal, rhVal] odEmpty)
                                 id
                                 exit
                             !badIndexer ->
-                              throwEdh pgs EvalError
+                              throwEdh ets EvalError
                                 $  "Malformed magic method ("
                                 <> magicMthName
                                 <> ") on "
@@ -150,7 +150,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
                                 <> T.pack (show badIndexer)
 
                   _ ->
-                    local (const pgs)
+                    local (const ets)
                       $  throwEdh EvalError
                       $  "Don't know how to index assign "
                       <> T.pack (edhTypeNameOf tgtVal)
@@ -166,7 +166,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
             withOp (IntplSubs lhVal) (IntplSubs $ edhDeCaseClose rhVal)
               $ \opRtn@(OriginalValue !opRtnV _ _) -> case edhUltimate opRtnV of
                   EdhContinue -> exitEdhTx' exit opRtn
-                  !opRtnVal   -> assignEdhTarget pgs lhExpr exit opRtnVal
+                  !opRtnVal   -> assignEdhTarget ets lhExpr exit opRtnVal
   where magicMthName = "[" <> withOpSym <> "=]"
 
 
@@ -174,25 +174,25 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
 assignMissingProc :: EdhIntrinsicOp
 assignMissingProc (AttrExpr (DirectRef (NamedAttr "_"))) _ _ =
   throwEdh UsageError "Not so reasonable: _ ?= xxx"
-assignMissingProc (AttrExpr (DirectRef !addr)) !rhExpr !exit = ask >>= \pgs ->
-  contEdhSTM $ resolveEdhAttrAddr pgs addr $ \key -> do
-    let !ent      = scopeEntity $ contextScope $ edh'context pgs
-        pgsAssign = pgs
+assignMissingProc (AttrExpr (DirectRef !addr)) !rhExpr !exit = ask >>= \ets ->
+  contEdhSTM $ resolveEdhAttrAddr ets addr $ \key -> do
+    let !ent      = scopeEntity $ contextScope $ edh'context ets
+        etsAssign = ets
           {
             -- execution of the assignment always in a tx for atomicity
             edh'in'tx   = True
-          , edh'context = (edh'context pgs) {
+          , edh'context = (edh'context ets) {
             -- discourage artifact definition during assignment
                                               contextPure = True }
           }
-    lookupEntityAttr pgsAssign ent key >>= \case
+    lookupEntityAttr etsAssign ent key >>= \case
       EdhNil ->
-        runEdhTx pgsAssign $ evalExpr rhExpr $ \(OriginalValue !rhV _ _) ->
+        runEdhTx etsAssign $ evalExpr rhExpr $ \(OriginalValue !rhV _ _) ->
           let !rhVal = edhDeCaseClose rhV
           in  contEdhSTM $ do
-                changeEntityAttr pgsAssign ent key rhVal
-                exitEdhSTM pgs exit rhVal
-      !preVal -> exitEdhSTM pgs exit preVal
+                changeEntityAttr etsAssign ent key rhVal
+                exitEdh ets exit rhVal
+      !preVal -> exitEdh ets exit preVal
 assignMissingProc !lhExpr _ _ =
   throwEdh EvalError $ "Invalid left-hand expression to (?=) " <> T.pack
     (show lhExpr)

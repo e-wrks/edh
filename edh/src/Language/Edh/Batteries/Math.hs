@@ -156,23 +156,23 @@ logicalOrProc !lhExpr !rhExpr !exit =
 -- | operator (==)
 valEqProc :: EdhIntrinsicOp
 valEqProc !lhExpr !rhExpr !exit = do
-  !pgs <- ask
+  !ets <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      contEdhSTM $ edhValueEqual pgs lhVal rhVal $ \case
-        Just !conclusion -> exitEdhSTM pgs exit $ EdhBool conclusion
+      contEdhSTM $ edhValueEqual ets lhVal rhVal $ \case
+        Just !conclusion -> exitEdh ets exit $ EdhBool conclusion
         -- allow magic methods to be invoked, but default to not equal
-        Nothing          -> exitEdhSTM pgs exit $ EdhDefault $ EdhBool False
+        Nothing          -> exitEdh ets exit $ EdhDefault $ EdhBool False
 
 -- | operator (!=)
 idNeProc :: EdhIntrinsicOp
-idNeProc !lhExpr !rhExpr !exit = ask >>= \ !pgs ->
+idNeProc !lhExpr !rhExpr !exit = ask >>= \ !ets ->
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      contEdhSTM $ edhValueEqual pgs lhVal rhVal $ \case
-        Just !conclusion -> exitEdhSTM pgs exit $ EdhBool $ not conclusion
+      contEdhSTM $ edhValueEqual ets lhVal rhVal $ \case
+        Just !conclusion -> exitEdh ets exit $ EdhBool $ not conclusion
         -- allow magic methods to be invoked, but default to not equal
-        Nothing          -> exitEdhSTM pgs exit $ EdhDefault $ EdhBool True
+        Nothing          -> exitEdh ets exit $ EdhDefault $ EdhBool True
 
 -- | operator (is)
 idEqProc :: EdhIntrinsicOp
@@ -192,20 +192,20 @@ idNotEqProc !lhExpr !rhExpr !exit =
 -- | operator (>)
 isGtProc :: EdhIntrinsicOp
 isGtProc !lhExpr !rhExpr !exit = do
-  !pgs <- ask
+  !ets <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      contEdhSTM $ doEdhComparison pgs exit lhVal rhVal $ \case
+      contEdhSTM $ doEdhComparison ets exit lhVal rhVal $ \case
         GT -> True
         _  -> False
 
 -- | operator (>=)
 isGeProc :: EdhIntrinsicOp
 isGeProc !lhExpr !rhExpr !exit = do
-  !pgs <- ask
+  !ets <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      contEdhSTM $ doEdhComparison pgs exit lhVal rhVal $ \case
+      contEdhSTM $ doEdhComparison ets exit lhVal rhVal $ \case
         GT -> True
         EQ -> True
         _  -> False
@@ -213,20 +213,20 @@ isGeProc !lhExpr !rhExpr !exit = do
 -- | operator (<)
 isLtProc :: EdhIntrinsicOp
 isLtProc !lhExpr !rhExpr !exit = do
-  !pgs <- ask
+  !ets <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      contEdhSTM $ doEdhComparison pgs exit lhVal rhVal $ \case
+      contEdhSTM $ doEdhComparison ets exit lhVal rhVal $ \case
         LT -> True
         _  -> False
 
 -- | operator (<=)
 isLeProc :: EdhIntrinsicOp
 isLeProc !lhExpr !rhExpr !exit = do
-  !pgs <- ask
+  !ets <- ask
   evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
     evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-      contEdhSTM $ doEdhComparison pgs exit lhVal rhVal $ \case
+      contEdhSTM $ doEdhComparison ets exit lhVal rhVal $ \case
         LT -> True
         EQ -> True
         _  -> False
@@ -239,9 +239,9 @@ doEdhComparison
   -> EdhValue
   -> (Ordering -> Bool)
   -> STM ()
-doEdhComparison pgs exit lhVal rhVal cm = compareEdhValue lhVal rhVal >>= \case
-  Nothing  -> exitEdhSTM pgs exit EdhContinue
-  Just ord -> exitEdhSTM pgs exit (EdhBool $ cm ord)
+doEdhComparison ets exit lhVal rhVal cm = compareEdhValue lhVal rhVal >>= \case
+  Nothing  -> exitEdh ets exit EdhContinue
+  Just ord -> exitEdh ets exit (EdhBool $ cm ord)
 
 compareEdhValue :: EdhValue -> EdhValue -> STM (Maybe Ordering)
 compareEdhValue lhVal rhVal = case edhUltimate lhVal of

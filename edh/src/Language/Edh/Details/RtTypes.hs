@@ -604,9 +604,9 @@ exitEdhTx !exit !val !ets = edhDoSTM ets $ exit val ets
 --
 -- @edh'in'tx ets@ is normally controlled by the `ai` keyword at scripting
 -- level, this implements the semantics of it
-exitEdhSTM :: EdhThreadState -> EdhTxExit -> EdhValue -> STM ()
-exitEdhSTM !ets !exit !val = edhDoSTM ets $ exit val ets
-{-# INLINE exitEdhSTM #-}
+exitEdh :: EdhThreadState -> EdhTxExit -> EdhValue -> STM ()
+exitEdh !ets !exit !val = edhDoSTM ets $ exit val ets
+{-# INLINE exitEdh #-}
 
 
 -- | Type for a procedure in the host language (which is Haskell) that can be
@@ -670,7 +670,7 @@ launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerTx !etsConsume
       subcNow <- readTVar subc
       when (subcNow == subcBefore) retry
       producerTx etsProducer
-    exitEdhSTM etsConsumer exit $ EdhSink sink
+    exitEdh etsConsumer exit $ EdhSink sink
 
 
 -- | executable precedures

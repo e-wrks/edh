@@ -31,7 +31,7 @@ type EdhVector = IOVector EdhValue
 
 -- | host constructor Vector(*elements,length=None)
 vecHostCtor :: EdhHostCtor
-vecHostCtor !pgsCtor (ArgsPack !ctorArgs !ctorKwargs) !ctorExit = do
+vecHostCtor !etsCtor (ArgsPack !ctorArgs !ctorKwargs) !ctorExit = do
   let doIt :: Int -> [EdhValue] -> STM ()
       -- note @vs@ got to be lazy
       doIt !len vs = do
@@ -45,15 +45,15 @@ vecHostCtor !pgsCtor (ArgsPack !ctorArgs !ctorKwargs) !ctorExit = do
     Just (EdhDecimal !d) -> case D.decimalToInteger d of
       Just !len | len >= 0 -> doIt (fromInteger len) $ ctorArgs ++ repeat nil
       _ ->
-        throwEdh pgsCtor UsageError
+        throwEdh etsCtor UsageError
           $  "Length not an positive integer: "
           <> T.pack (show d)
     Just !badLenVal ->
-      throwEdh pgsCtor UsageError $ "Invalid length: " <> T.pack
+      throwEdh etsCtor UsageError $ "Invalid length: " <> T.pack
         (show badLenVal)
 
 vecMethods :: EdhProgState -> STM [(AttrKey, EdhValue)]
-vecMethods !pgsModule = sequence
+vecMethods !etsModule = sequence
   [ (AttrByName nm, ) <$> mkHostProc scope vc nm hp mthArgs
   | (nm, vc, hp, mthArgs) <-
     [ ("append", EdhMethod, vecAppendProc, PackReceiver [mandatoryArg "values"])
@@ -70,13 +70,13 @@ vecMethods !pgsModule = sequence
     ]
   ]
  where
-  !scope = contextScope $ edh'context pgsModule
+  !scope = contextScope $ edh'context etsModule
 
   vecAppendProc :: EdhHostProc
   vecAppendProc (ArgsPack !args !kwargs) !exit | odNull kwargs = do
-    pgs <- ask
+    ets <- ask
     let
-      !that = thatObject $ contextScope $ edh'context pgs
+      !that = thatObject $ contextScope $ edh'context ets
       esClone :: Dynamic -> (Dynamic -> STM ()) -> STM ()
       esClone !esd !cloneTo = case fromDynamic esd of
         Nothing                  -> cloneTo $ toDyn nil
@@ -84,14 +84,14 @@ vecMethods !pgsModule = sequence
           mvec' <-
             unsafeIOToSTM $ V.thaw =<< (V.++ V.fromList args) <$> V.freeze mvec
           cloneTo $ toDyn mvec'
-    contEdhSTM $ cloneEdhObject that esClone $ exitEdhSTM pgs exit . EdhObject
+    contEdhSTM $ cloneEdhObject that esClone $ exitEdh ets exit . EdhObject
   vecAppendProc _ _ = throwEdh UsageError "Invalid args to Vector.append()"
 
   vecEqProc :: EdhHostProc
   vecEqProc (ArgsPack [EdhObject (Object !entOther _ _)] !kwargs) !exit
-    | odNull kwargs = withThatEntity $ \ !pgs !mvec ->
+    | odNull kwargs = withThatEntity $ \ !ets !mvec ->
       fromDynamic <$> readTVar (entity'store entOther) >>= \case
-        Nothing                       -> exitEdhSTM pgs exit $ EdhBool False
+        Nothing                       -> exitEdh ets exit $ EdhBool False
         Just (mvecOther :: EdhVector) -> do
           !conclusion <- unsafeIOToSTM $ do
             -- TODO we're sacrificing thread safety for zero-copy performance
@@ -99,18 +99,18 @@ vecMethods !pgsModule = sequence
             vec      <- V.unsafeFreeze mvec
             vecOther <- V.unsafeFreeze mvecOther
             return $ vec == vecOther
-          exitEdhSTM pgs exit $ EdhBool conclusion
+          exitEdh ets exit $ EdhBool conclusion
   vecEqProc _ !exit = exitEdhTx exit $ EdhBool False
 
 
   vecIdxReadProc :: EdhHostProc
   vecIdxReadProc (ArgsPack [!idxVal] !kwargs) !exit | odNull kwargs =
-    withThatEntity $ \ !pgs !mvec -> do
-      let vecObj = thatObject $ contextScope $ edh'context pgs
+    withThatEntity $ \ !ets !mvec -> do
+      let vecObj = thatObject $ contextScope $ edh'context ets
           exitWith :: IOVector EdhValue -> STM ()
           exitWith !newVec =
             cloneEdhObject vecObj (\_ !cloneTo -> cloneTo $ toDyn newVec)
-              $ \ !newObj -> exitEdhSTM pgs exit $ EdhObject newObj
+              $ \ !newObj -> exitEdh ets exit $ EdhObject newObj
           exitWithRange :: Int -> Int -> Int -> STM ()
           exitWithRange !start !stop !step = do
             !newVec <- unsafeIOToSTM $ do
@@ -127,14 +127,14 @@ vecMethods !pgsModule = sequence
               return newVec
             exitWith newVec
 
-      parseEdhIndex pgs idxVal $ \case
-        Left !err -> throwEdh pgs UsageError err
+      parseEdhIndex ets idxVal $ \case
+        Left !err -> throwEdh ets UsageError err
         Right (EdhIndex !i) ->
-          unsafeIOToSTM (MV.read mvec i) >>= exitEdhSTM pgs exit
-        Right EdhAny -> exitEdhSTM pgs exit $ EdhObject vecObj
-        Right EdhAll -> exitEdhSTM pgs exit $ EdhObject vecObj
+          unsafeIOToSTM (MV.read mvec i) >>= exitEdh ets exit
+        Right EdhAny -> exitEdh ets exit $ EdhObject vecObj
+        Right EdhAll -> exitEdh ets exit $ EdhObject vecObj
         Right (EdhSlice !start !stop !step) ->
-          edhRegulateSlice pgs (MV.length mvec) (start, stop, step)
+          edhRegulateSlice ets (MV.length mvec) (start, stop, step)
             $ \(!iStart, !iStop, !iStep) -> if iStep == 1
                 then exitWith $ MV.unsafeSlice iStart (iStop - iStart) mvec
                 else exitWithRange iStart iStop iStep
@@ -144,7 +144,7 @@ vecMethods !pgsModule = sequence
 
   vecIdxWriteProc :: EdhHostProc
   vecIdxWriteProc (ArgsPack [!idxVal, !other] !kwargs) !exit | odNull kwargs =
-    withThatEntity $ \ !pgs !mvec -> do
+    withThatEntity $ \ !ets !mvec -> do
       let exitWithRangeAssign :: Int -> Int -> Int -> STM ()
           exitWithRangeAssign !start !stop !step = case edhUltimate other of
             EdhObject !otherObj ->
@@ -153,7 +153,7 @@ vecMethods !pgsModule = sequence
                 >>= \case
                       Just (mvecOther :: IOVector EdhValue) -> do
                         unsafeIOToSTM $ assignWithVec start 0 mvecOther
-                        exitEdhSTM pgs exit other
+                        exitEdh ets exit other
                       Nothing -> exitWithNonVecAssign
             _ -> exitWithNonVecAssign
            where
@@ -162,13 +162,13 @@ vecMethods !pgsModule = sequence
             exitWithNonVecAssign = case edhUltimate other of
               EdhArgsPack (ArgsPack !args _) -> do
                 unsafeIOToSTM $ assignWithList start $ take len args
-                exitEdhSTM pgs exit other
+                exitEdh ets exit other
               EdhList (List _ !lsv) -> do
                 ls <- readTVar lsv
                 unsafeIOToSTM $ assignWithList start $ take len ls
-                exitEdhSTM pgs exit other
+                exitEdh ets exit other
               !badList ->
-                throwEdh pgs UsageError
+                throwEdh ets UsageError
                   $  "Not assignable to indexed vector: "
                   <> T.pack (edhTypeNameOf badList)
             assignWithList :: Int -> [EdhValue] -> IO ()
@@ -183,17 +183,17 @@ vecMethods !pgsModule = sequence
                 MV.unsafeRead mvec' i >>= MV.unsafeWrite mvec n
                 assignWithVec (n + step) (i + 1) mvec'
 
-      parseEdhIndex pgs idxVal $ \case
-        Left  !err          -> throwEdh pgs UsageError err
+      parseEdhIndex ets idxVal $ \case
+        Left  !err          -> throwEdh ets UsageError err
         Right (EdhIndex !i) -> do
           unsafeIOToSTM $ MV.unsafeWrite mvec i other
-          exitEdhSTM pgs exit other
+          exitEdh ets exit other
         Right EdhAny -> do
           unsafeIOToSTM $ MV.set mvec other
-          exitEdhSTM pgs exit other
+          exitEdh ets exit other
         Right EdhAll -> exitWithRangeAssign 0 (MV.length mvec) 1
         Right (EdhSlice !start !stop !step) ->
-          edhRegulateSlice pgs (MV.length mvec) (start, stop, step)
+          edhRegulateSlice ets (MV.length mvec) (start, stop, step)
             $ \(!iStart, !iStop, !iStep) ->
                 exitWithRangeAssign iStart iStop iStep
 
@@ -203,23 +203,23 @@ vecMethods !pgsModule = sequence
 
 
   vecNullProc :: EdhHostProc
-  vecNullProc _ !exit = withThatEntity $ \ !pgs (mvec :: EdhVector) ->
-    exitEdhSTM pgs exit $ EdhBool $ MV.length mvec <= 0
+  vecNullProc _ !exit = withThatEntity $ \ !ets (mvec :: EdhVector) ->
+    exitEdh ets exit $ EdhBool $ MV.length mvec <= 0
 
   vecLenProc :: EdhHostProc
-  vecLenProc _ !exit = withThatEntity $ \ !pgs (mvec :: EdhVector) ->
-    exitEdhSTM pgs exit $ EdhDecimal $ fromIntegral $ MV.length mvec
+  vecLenProc _ !exit = withThatEntity $ \ !ets (mvec :: EdhVector) ->
+    exitEdh ets exit $ EdhDecimal $ fromIntegral $ MV.length mvec
 
   vecReprProc :: EdhHostProc
-  vecReprProc _ !exit = withThatEntity $ \ !pgs !mvec -> do
+  vecReprProc _ !exit = withThatEntity $ \ !ets !mvec -> do
     let go :: [EdhValue] -> [Text] -> STM ()
         go [] !rs =
-          exitEdhSTM pgs exit
+          exitEdh ets exit
             $  EdhString
             $  "Vector("
             <> T.intercalate "," (reverse rs)
             <> ")"
-        go (v : rest) rs = edhValueReprSTM pgs v $ \ !r -> go rest (r : rs)
+        go (v : rest) rs = edhValueReprSTM ets v $ \ !r -> go rest (r : rs)
     !vec <- unsafeIOToSTM $ V.freeze mvec
     go (V.toList vec) []
 

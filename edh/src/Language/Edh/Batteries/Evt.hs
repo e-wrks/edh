@@ -26,8 +26,8 @@ import           Language.Edh.Details.Evaluate
 mreProc :: EdhHostProc
 mreProc (ArgsPack !args !kwargs) !exit = case args of
   [v] | odNull kwargs -> case edhUltimate v of
-    EdhSink !sink -> ask >>= \pgs ->
-      contEdhSTM $ readTVar (evs'mrv sink) >>= \mrv -> exitEdhSTM pgs exit mrv
+    EdhSink !sink -> ask >>= \ets ->
+      contEdhSTM $ readTVar (evs'mrv sink) >>= \mrv -> exitEdh ets exit mrv
     _ ->
       throwEdh EvalError $ "mre() expects an event sink but passed a " <> T.pack
         (edhTypeNameOf v)
@@ -41,12 +41,12 @@ mreProc (ArgsPack !args !kwargs) !exit = case args of
 eosProc :: EdhHostProc
 eosProc (ArgsPack !args !kwargs) !exit = case args of
   [v] | odNull kwargs -> case edhUltimate v of
-    EdhSink !sink -> ask >>= \pgs ->
+    EdhSink !sink -> ask >>= \ets ->
       contEdhSTM $ readTVar (evs'seqn sink) >>= \case
-        0 -> exitEdhSTM pgs exit $ EdhBool False
+        0 -> exitEdh ets exit $ EdhBool False
         _ -> readTVar (evs'mrv sink) >>= \case
-          EdhNil -> exitEdhSTM pgs exit $ EdhBool True
-          _      -> exitEdhSTM pgs exit $ EdhBool False
+          EdhNil -> exitEdh ets exit $ EdhBool True
+          _      -> exitEdh ets exit $ EdhBool False
     _ ->
       throwEdh EvalError $ "eos() expects an event sink but passed a " <> T.pack
         (edhTypeNameOf v)

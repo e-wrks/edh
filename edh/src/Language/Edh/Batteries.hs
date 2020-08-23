@@ -249,7 +249,7 @@ installEdhBatteries :: MonadIO m => EdhWorld -> m ()
 installEdhBatteries world = liftIO $ do
   conClassUniq <- newUnique
   void $ runEdhProgram' (worldContext world) $ do
-    pgs <- ask
+    ets <- ask
     contEdhSTM $ do
 
       -- TODO survey for best practices & advices on precedences here
@@ -641,7 +641,7 @@ installEdhBatteries world = liftIO $ do
         ++ [ ((AttrByName nm, ) <$>)
              $   mkHostClass rootScope nm hc
              =<< createSideEntityManipulater True
-             =<< mths pgs
+             =<< mths ets
            | (nm, hc, mths) <- [("Vector", vecHostCtor, vecMethods)]
            ]
 
@@ -672,7 +672,7 @@ installEdhBatteries world = liftIO $ do
             }
           , objSupers = conSupers
           }
-        !conScope = objectScope (edh'context pgs) console
+        !conScope = objectScope (edh'context ets) console
 
       !conArts <- sequence
         [ (AttrByName nm, ) <$> mkHostProc conScope vc nm hp args
@@ -714,9 +714,9 @@ installEdhBatteries world = liftIO $ do
             )
           ]
         ]
-      updateEntityAttrs pgs conEntity conArts
+      updateEntityAttrs ets conEntity conArts
 
-      updateEntityAttrs pgs rootEntity
+      updateEntityAttrs ets rootEntity
         $  rootOperators
         ++ rootProcs
         ++ [
@@ -737,7 +737,7 @@ installEdhBatteries world = liftIO $ do
 
       !scopeSuperMethods <- sequence
         [ (AttrByName nm, )
-            <$> mkHostProc (objectScope (edh'context pgs) scopeSuperObj)
+            <$> mkHostProc (objectScope (edh'context ets) scopeSuperObj)
                            mc
                            nm
                            hp
@@ -753,10 +753,10 @@ installEdhBatteries world = liftIO $ do
           , (EdhMethod, "outer"    , scopeOuterProc    , PackReceiver [])
           ]
         ]
-      updateEntityAttrs pgs (objEntity scopeSuperObj) scopeSuperMethods
+      updateEntityAttrs ets (objEntity scopeSuperObj) scopeSuperMethods
 
       -- import the parts written in Edh 
-      runEdhTx pgs
+      runEdhTx ets
         $ importEdhModule' rootEntity WildReceiver "batteries/root" endOfEdh
 
  where

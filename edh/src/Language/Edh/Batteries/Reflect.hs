@@ -22,13 +22,12 @@ ctorProc :: EdhHostProc
 ctorProc (ArgsPack !args !kwargs) !exit !ets = do
   if odNull kwargs
     then case argsCls of
-      [] ->
-        exitEdhSTM ets exit $ EdhObject $ edh'obj'class $ edh'scope'this scope
-      [t] -> exitEdhSTM ets exit t
-      _   -> exitEdhSTM ets exit $ EdhArgsPack $ ArgsPack argsCls odEmpty
-    else exitEdhSTM ets
-                    exit
-                    (EdhArgsPack $ ArgsPack argsCls $ odMap edhClassOf kwargs)
+      []  -> exitEdh ets exit $ EdhObject $ edh'obj'class $ edh'scope'this scope
+      [t] -> exitEdh ets exit t
+      _   -> exitEdh ets exit $ EdhArgsPack $ ArgsPack argsCls odEmpty
+    else exitEdh ets
+                 exit
+                 (EdhArgsPack $ ArgsPack argsCls $ odMap edhClassOf kwargs)
  where
   !ctx     = edh'context ets
   !scope   = contextScope ctx
@@ -46,17 +45,17 @@ supersProc (ArgsPack !args !kwargs) !exit !ets = do
     then do
       !supers <-
         map EdhObject <$> (readTVar $ edh'obj'supers $ edh'scope'this scope)
-      exitEdhSTM ets exit $ EdhArgsPack $ ArgsPack supers odEmpty
+      exitEdh ets exit $ EdhArgsPack $ ArgsPack supers odEmpty
     else if odNull kwargs
       then do
         !argsSupers <- sequence $ supersOf <$> args
         case argsSupers of
-          [v] -> exitEdhSTM ets exit v
-          _   -> exitEdhSTM ets exit $ EdhArgsPack $ ArgsPack argsSupers odEmpty
+          [v] -> exitEdh ets exit v
+          _   -> exitEdh ets exit $ EdhArgsPack $ ArgsPack argsSupers odEmpty
       else do
         !argsSupers   <- sequence $ supersOf <$> args
         !kwargsSupers <- odMapSTM supersOf kwargs
-        exitEdhSTM ets exit (EdhArgsPack $ ArgsPack argsSupers kwargsSupers)
+        exitEdh ets exit (EdhArgsPack $ ArgsPack argsSupers kwargsSupers)
  where
   !ctx   = edh'context ets
   !scope = contextScope ctx
@@ -76,7 +75,7 @@ makeOpProc (ArgsPack !args !kwargs) !exit = if (not $ odNull kwargs)
   else case args of
     [(EdhExpr _ !lhe _), EdhString !op, (EdhExpr _ !rhe _)] -> \ !ets -> do
       !xu <- unsafeIOToSTM newUnique
-      exitEdhSTM ets exit $ EdhExpr xu (InfixExpr op lhe rhe) ""
+      exitEdh ets exit $ EdhExpr xu (InfixExpr op lhe rhe) ""
     _ -> throwEdhTx EvalError $ "Invalid arguments to makeOp: " <> T.pack
       (show args)
 

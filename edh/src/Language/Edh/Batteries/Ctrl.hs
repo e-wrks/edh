@@ -49,8 +49,8 @@ annoProc _ _ !exit = exitEdhTx exit nil
 -- keep propagating, i.e. re-thrown.
 catchProc :: EdhIntrinsicOp
 catchProc !tryExpr !catchExpr !exit =
-  edhCatch (evalExpr tryExpr) exit $ \recover rethrow -> ask >>= \pgs ->
-    case contextMatch $ edh'context pgs of
+  edhCatch (evalExpr tryExpr) exit $ \recover rethrow -> ask >>= \ets ->
+    case contextMatch $ edh'context ets of
       EdhNil -> rethrow -- no error occurred, no catch
       _ -> -- try recover by catch expression
         evalExpr catchExpr $ \recoverResult@(OriginalValue recoverVal _ _) ->
@@ -72,20 +72,20 @@ catchProc !tryExpr !catchExpr !exit =
 -- an exception if occurred, will never be assumed as recovered by the
 -- right-hand-expr.
 finallyProc :: EdhIntrinsicOp
-finallyProc !tryExpr !finallyExpr !exit = ask >>= \pgs -> contEdhSTM $ do
+finallyProc !tryExpr !finallyExpr !exit = ask >>= \ets -> contEdhSTM $ do
   hndlrTh <- unsafeIOToSTM myThreadId
-  edhCatch pgs
-              (\ !pgsTry !exit' -> runEdhTx pgsTry $ evalExpr tryExpr exit')
+  edhCatch ets
+              (\ !etsTry !exit' -> runEdhTx etsTry $ evalExpr tryExpr exit')
               exit
-    $ \pgsThrower !exv _recover !rethrow -> do
+    $ \etsThrower !exv _recover !rethrow -> do
         fnlyTh <- unsafeIOToSTM myThreadId
         if fnlyTh /= hndlrTh
           then -- don't run the finally block from a different thread other
                -- than the handler installer
                rethrow
           else
-            runEdhTx pgsThrower
-              { edh'context = (edh'context pgs) { contextMatch = exv }
+            runEdhTx etsThrower
+              { edh'context = (edh'context ets) { contextMatch = exv }
               }
             $ evalExpr finallyExpr
             $ const
@@ -98,19 +98,19 @@ finallyProc !tryExpr !finallyExpr !exit = ask >>= \pgs -> contEdhSTM $ do
 -- `fallthrough`
 branchProc :: EdhIntrinsicOp
 branchProc !lhExpr !rhExpr !exit = do
-  !pgs <- ask
-  let !callerCtx   = edh'context pgs
+  !ets <- ask
+  let !callerCtx   = edh'context ets
       !callerScope = contextScope callerCtx
       !ctxMatch    = contextMatch callerCtx
       updAttrs :: [(AttrKey, EdhValue)] -> STM ()
       updAttrs [] = -- todo: which one is semantically more correct ?
         -- to trigger a write, or avoid the write
         return ()  -- this avoids triggering stm write
-      updAttrs !ps' = updateEntityAttrs pgs (scopeEntity callerScope) ps'
+      updAttrs !ps' = updateEntityAttrs ets (scopeEntity callerScope) ps'
       branchMatched :: [(AttrName, EdhValue)] -> STM ()
       branchMatched !ps = do
         updAttrs [ (AttrByName n, noneNil v) | (n, v) <- ps, n /= "_" ]
-        runEdhTx pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+        runEdhTx ets $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
           exitEdhTx exit $ case rhVal of
             -- a nested branch matched, the outer branch eval to its final
             -- value with case closed
@@ -209,7 +209,7 @@ branchProc !lhExpr !rhExpr !exit = do
         -> contEdhSTM $ case ctxMatch of
           EdhNamedValue !n !v ->
             branchMatched [(termName, EdhString n), (valueName, v)]
-          _ -> exitEdhSTM pgs exit EdhCaseOther
+          _ -> exitEdh ets exit EdhCaseOther
 
       -- { head => tail } -- uncons pattern
       [StmtSrc (_, ExprStmt (InfixExpr "=>" (AttrExpr (DirectRef (NamedAttr headName))) (AttrExpr (DirectRef (NamedAttr tailName)))))]
@@ -223,8 +223,8 @@ branchProc !lhExpr !rhExpr !exit = do
                      rl <- newTVar rest
                      u  <- unsafeIOToSTM newUnique
                      doMatched h $ EdhList $ List u rl
-                   _ -> exitEdhSTM pgs exit EdhCaseOther
-                 _ -> exitEdhSTM pgs exit EdhCaseOther
+                   _ -> exitEdh ets exit EdhCaseOther
+                 _ -> exitEdh ets exit EdhCaseOther
 
       -- { prefix @< match >@ suffix } -- sub-string cut pattern
       [StmtSrc (_, ExprStmt (InfixExpr ">@" (InfixExpr "@<" (AttrExpr (DirectRef (NamedAttr prefixName))) matchExpr) (AttrExpr (DirectRef (NamedAttr suffixName)))))]
@@ -289,8 +289,8 @@ branchProc !lhExpr !rhExpr !exit = do
               readTVar l
                 >>= \ll -> if null ll
                       then branchMatched []
-                      else exitEdhSTM pgs exit EdhCaseOther
-            _ -> exitEdhSTM pgs exit EdhCaseOther
+                      else exitEdh ets exit EdhCaseOther
+            _ -> exitEdh ets exit EdhCaseOther
           else do
             attrNames <- fmap catMaybes $ sequence $ (<$> argSenders) $ \case
               SendPosArg (AttrExpr (DirectRef (NamedAttr vAttr))) ->
@@ -298,14 +298,14 @@ branchProc !lhExpr !rhExpr !exit = do
               _ -> return Nothing
             if length attrNames /= length argSenders
               then throwEdh
-                pgs
+                ets
                 UsageError
                 ("Invalid element in apk pattern: " <> T.pack (show argSenders))
               else case ctxMatch of
                 EdhArgsPack (ArgsPack !args !kwargs)
                   | length args == length argSenders && odNull kwargs -> branchMatched
                   $ zip attrNames args
-                _ -> exitEdhSTM pgs exit EdhCaseOther
+                _ -> exitEdh ets exit EdhCaseOther
 
       -- {{ class:inst }} -- instance resolving pattern
       [StmtSrc (_, ExprStmt (DictExpr [(AddrDictKey !clsAddr, AttrExpr (DirectRef (NamedAttr instAttr)))]))]
@@ -317,11 +317,11 @@ branchProc !lhExpr !rhExpr !exit = do
                 EdhNil -> exitEdhTx exit EdhCaseOther
                 EdhClass !cls ->
                   contEdhSTM
-                    $   resolveEdhInstance pgs (procedure'uniq cls) ctxObj
+                    $   resolveEdhInstance ets (procedure'uniq cls) ctxObj
                     >>= \case
                           Just instObj ->
                             branchMatched [(instAttr, EdhObject instObj)]
-                          Nothing -> exitEdhSTM pgs exit EdhCaseOther
+                          Nothing -> exitEdh ets exit EdhCaseOther
                 _ ->
                   throwEdh EvalError
                     $  T.pack
@@ -359,9 +359,9 @@ branchProc !lhExpr !rhExpr !exit = do
 
     -- value-wise matching against the target in context
     _ -> evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
-      contEdhSTM $ edhNamelyEqual pgs (edhDeCaseClose lhVal) ctxMatch $ \case
+      contEdhSTM $ edhNamelyEqual ets (edhDeCaseClose lhVal) ctxMatch $ \case
         True  -> branchMatched []
-        False -> exitEdhSTM pgs exit EdhCaseOther
+        False -> exitEdh ets exit EdhCaseOther
 
 
 -- | `Nothing` means invalid pattern, `[]` means no match, non-empty list is

@@ -32,8 +32,8 @@ import           Language.Edh.Details.Utils
 -- | operator (<|)
 loggingProc :: EdhIntrinsicOp
 loggingProc !lhExpr !rhExpr !exit = do
-  !pgs <- ask
-  let !ctx = edh'context pgs
+  !ets <- ask
+  let !ctx = edh'context ets
       parseSpec :: EdhValue -> Maybe (Int, StmtSrc)
       parseSpec = \case
         EdhDecimal !level ->
@@ -56,7 +56,7 @@ loggingProc !lhExpr !rhExpr !exit = do
           th <- unsafeIOToSTM myThreadId
           let !tracePrefix =
                 " 🐞 " <> show th <> " 👉 " <> sourcePosPretty srcPos <> " ❗ "
-          runEdhTx pgs $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
+          runEdhTx ets $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
             case edhDeCaseClose rhVal of
               EdhString !logStr ->
                 trace (tracePrefix ++ T.unpack logStr) $ exitEdhTx exit nil
@@ -73,9 +73,9 @@ loggingProc !lhExpr !rhExpr !exit = do
               !logger      = consoleLogger console
           if logLevel < conLogLevel
             then -- drop log msg without even eval it
-                 exitEdhSTM pgs exit nil
+                 exitEdh ets exit nil
             else
-              runEdhTx pgs $ evalExpr rhExpr $ \(OriginalValue !rhV _ _) -> do
+              runEdhTx ets $ evalExpr rhExpr $ \(OriginalValue !rhV _ _) -> do
                 let !rhVal  = edhDeCaseClose rhV
                     !srcLoc = if conLogLevel <= 20
                       then -- with source location info
@@ -85,10 +85,10 @@ loggingProc !lhExpr !rhExpr !exit = do
                 contEdhSTM $ case rhVal of
                   EdhArgsPack !apk -> do
                     logger logLevel srcLoc apk
-                    exitEdhSTM pgs exit nil
+                    exitEdh ets exit nil
                   _ -> do
                     logger logLevel srcLoc $ ArgsPack [rhVal] odEmpty
-                    exitEdhSTM pgs exit nil
+                    exitEdh ets exit nil
       _ -> throwEdh EvalError $ "Invalid log target: " <> T.pack (show lhVal)
 
 
@@ -96,9 +96,9 @@ loggingProc !lhExpr !rhExpr !exit = do
 --
 -- this just throws a 'ProgramHalt', godforbid no one recover from it.
 conExitProc :: EdhHostProc
-conExitProc !apk _ = ask >>= \pgs -> -- cross check with 'createEdhWorld'
-  contEdhSTM $ _getEdhErrClass pgs (AttrByName "ProgramHalt") >>= \ec ->
-    runEdhTx pgs $ createEdhObject ec apk $ \(OriginalValue !exv _ _) ->
+conExitProc !apk _ = ask >>= \ets -> -- cross check with 'createEdhWorld'
+  contEdhSTM $ _getEdhErrClass ets (AttrByName "ProgramHalt") >>= \ec ->
+    runEdhTx ets $ createEdhObject ec apk $ \(OriginalValue !exv _ _) ->
       edhThrow exv
 
 
@@ -110,14 +110,14 @@ defaultEdhPS2 = "Đ| "
 
 -- | host method console.readSource(ps1="(db)Đ: ", ps2="(db)Đ| ")
 conReadSourceProc :: EdhHostProc
-conReadSourceProc !apk !exit = ask >>= \pgs ->
+conReadSourceProc !apk !exit = ask >>= \ets ->
   case parseArgsPack (defaultEdhPS1, defaultEdhPS2) argsParser apk of
     Left  err        -> throwEdh UsageError err
     Right (ps1, ps2) -> contEdhSTM $ do
-      let !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context pgs
+      let !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context ets
       cmdIn <- newEmptyTMVar
       writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
-      edhPerformSTM pgs (readTMVar cmdIn)
+      edhPerformSTM ets (readTMVar cmdIn)
         $ \(EdhInput !name !lineNo !lines_) -> case name of
             "" -> exitEdhTx exit $ EdhString $ T.unlines lines_
             _ ->
@@ -152,12 +152,12 @@ conReadSourceProc !apk !exit = ask >>= \pgs ->
 
 -- | host method console.readCommand(ps1="Đ: ", ps2="Đ| ", inScopeOf=None)
 conReadCommandProc :: EdhHostProc
-conReadCommandProc !apk !exit = ask >>= \pgs ->
+conReadCommandProc !apk !exit = ask >>= \ets ->
   case parseArgsPack (defaultEdhPS1, defaultEdhPS2, Nothing) argsParser apk of
     Left  err                   -> throwEdh UsageError err
     Right (ps1, ps2, inScopeOf) -> contEdhSTM $ do
-      let ctx  = edh'context pgs
-          !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context pgs
+      let ctx  = edh'context ets
+          !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context ets
       -- mind to inherit this host proc's exception handler anyway
       cmdScope <- case inScopeOf of
         Just !so -> isScopeWrapper ctx so >>= \case
@@ -189,7 +189,7 @@ conReadCommandProc !apk !exit = ask >>= \pgs ->
             , scopeCaller = scopeCaller callerScope
             }
           _ -> return $ contextScope ctx
-      let !pgsCmd = pgs
+      let !etsCmd = ets
             { edh'context = ctx
                               { callStack        = cmdScope
                                                      NE.:| NE.tail (callStack ctx)
@@ -198,8 +198,8 @@ conReadCommandProc !apk !exit = ask >>= \pgs ->
             }
       cmdIn <- newEmptyTMVar
       writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
-      edhPerformSTM pgs (readTMVar cmdIn)
-        $ \(EdhInput !name !lineNo !lines_) -> local (const pgsCmd) $ evalEdh'
+      edhPerformSTM ets (readTMVar cmdIn)
+        $ \(EdhInput !name !lineNo !lines_) -> local (const etsCmd) $ evalEdh'
             (if T.null name then "<console>" else T.unpack name)
             lineNo
             (T.unlines lines_)
@@ -235,10 +235,10 @@ conReadCommandProc !apk !exit = ask >>= \pgs ->
 
 -- | host method console.print(*args, **kwargs)
 conPrintProc :: EdhHostProc
-conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
-  let !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context pgs
+conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \ets -> contEdhSTM $ do
+  let !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context ets
       printVS :: [EdhValue] -> [(AttrKey, EdhValue)] -> STM ()
-      printVS [] []              = exitEdhSTM pgs exit nil
+      printVS [] []              = exitEdh ets exit nil
       printVS [] ((k, v) : rest) = case v of
         EdhString !s -> do
           writeTBQueue ioQ
@@ -249,7 +249,7 @@ conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
             <> s
             <> "\n"
           printVS [] rest
-        _ -> runEdhTx pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
+        _ -> runEdhTx ets $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
           case vr of
             EdhString !s -> contEdhSTM $ do
               writeTBQueue ioQ
@@ -265,7 +265,7 @@ conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
         EdhString !s -> do
           writeTBQueue ioQ $ ConsoleOut $ s <> "\n"
           printVS rest kvs
-        _ -> runEdhTx pgs $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
+        _ -> runEdhTx ets $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
           case vr of
             EdhString !s -> contEdhSTM $ do
               writeTBQueue ioQ $ ConsoleOut $ s <> "\n"
@@ -276,10 +276,10 @@ conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \pgs -> contEdhSTM $ do
 
 conNowProc :: EdhHostProc
 conNowProc _ !exit = do
-  pgs <- ask
+  ets <- ask
   contEdhSTM $ do
     nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ getTime Realtime
-    exitEdhSTM pgs exit (EdhDecimal $ fromInteger nanos)
+    exitEdh ets exit (EdhDecimal $ fromInteger nanos)
 
 
 data PeriodicArgs = PeriodicArgs {
@@ -289,40 +289,40 @@ data PeriodicArgs = PeriodicArgs {
 
 timelyNotify
   :: EdhProgState -> PeriodicArgs -> EdhGenrCaller -> EdhTxExit -> STM ()
-timelyNotify !pgs (PeriodicArgs !delayMicros !wait1st) (!pgs', !iter'cb) !exit
+timelyNotify !ets (PeriodicArgs !delayMicros !wait1st) (!ets', !iter'cb) !exit
   = if wait1st
-    then edhPerformIO pgs (threadDelay delayMicros) $ \() -> contEdhSTM notifOne
+    then edhPerformIO ets (threadDelay delayMicros) $ \() -> contEdhSTM notifOne
     else notifOne
  where
   notifOne = do
     nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ getTime Realtime
-    runEdhTx pgs' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \case
-      Left (pgsThrower, exv) ->
-        edhThrow pgsThrower { edh'context = edh'context pgs } exv
-      Right EdhBreak         -> exitEdhSTM pgs exit nil
-      Right (EdhReturn !rtn) -> exitEdhSTM pgs exit rtn
+    runEdhTx ets' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \case
+      Left (etsThrower, exv) ->
+        edhThrow etsThrower { edh'context = edh'context ets } exv
+      Right EdhBreak         -> exitEdh ets exit nil
+      Right (EdhReturn !rtn) -> exitEdh ets exit rtn
       _ ->
-        edhPerformIO pgs (threadDelay delayMicros) $ \() -> contEdhSTM notifOne
+        edhPerformIO ets (threadDelay delayMicros) $ \() -> contEdhSTM notifOne
 
 -- | host generator console.everyMicros(n, wait1st=true) - with fixed interval
 conEveryMicrosProc :: EdhHostProc
-conEveryMicrosProc !apk !exit = ask >>= \pgs ->
-  case generatorCaller $ edh'context pgs of
+conEveryMicrosProc !apk !exit = ask >>= \ets ->
+  case generatorCaller $ edh'context ets of
     Nothing -> throwEdh EvalError "Can only be called as generator"
     Just genr'caller ->
       case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
-        Right !pargs -> contEdhSTM $ timelyNotify pgs pargs genr'caller exit
+        Right !pargs -> contEdhSTM $ timelyNotify ets pargs genr'caller exit
         Left  !err   -> throwEdh UsageError err
 
 -- | host generator console.everyMillis(n, wait1st=true) - with fixed interval
 conEveryMillisProc :: EdhHostProc
-conEveryMillisProc !apk !exit = ask >>= \pgs ->
-  case generatorCaller $ edh'context pgs of
+conEveryMillisProc !apk !exit = ask >>= \ets ->
+  case generatorCaller $ edh'context ets of
     Nothing -> throwEdh EvalError "Can only be called as generator"
     Just genr'caller ->
       case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
         Right !pargs -> contEdhSTM $ timelyNotify
-          pgs
+          ets
           pargs { periodic'interval = 1000 * periodic'interval pargs }
           genr'caller
           exit
@@ -330,13 +330,13 @@ conEveryMillisProc !apk !exit = ask >>= \pgs ->
 
 -- | host generator console.everySeconds(n, wait1st=true) - with fixed interval
 conEverySecondsProc :: EdhHostProc
-conEverySecondsProc !apk !exit = ask >>= \pgs ->
-  case generatorCaller $ edh'context pgs of
+conEverySecondsProc !apk !exit = ask >>= \ets ->
+  case generatorCaller $ edh'context ets of
     Nothing -> throwEdh EvalError "Can only be called as generator"
     Just genr'caller ->
       case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
         Right !pargs -> contEdhSTM $ timelyNotify
-          pgs
+          ets
           pargs { periodic'interval = 1000000 * periodic'interval pargs }
           genr'caller
           exit
