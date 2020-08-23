@@ -144,26 +144,50 @@ setterProc (ArgsPack !args !kwargs) !exit !ets =
 
 -- | operator (@) - attribute key dereferencing
 attrDerefAddrProc :: EdhIntrinsicOp
-attrDerefAddrProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal !ets ->
+attrDerefAddrProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal ->
   case edhUltimate rhVal of
-    EdhExpr _ (AttrExpr (DirectRef !addr)) _ ->
-      resolveEdhAttrAddr ets addr $ \key ->
-        runEdhTx ets $ getEdhAttr lhExpr key (noAttr $ T.pack $ show key) exit
+    EdhExpr _ (AttrExpr (DirectRef !addr)) _ -> \ !ets ->
+      resolveEdhAttrAddr ets addr $ \ !key ->
+        runEdhTx ets $ getEdhAttr lhExpr key (noAttr $ attrKeyStr key) exit
     EdhString !attrName ->
       getEdhAttr lhExpr (AttrByName attrName) (noAttr attrName) exit
-    EdhSymbol sym@(Symbol _ desc) ->
-      getEdhAttr lhExpr (AttrBySym sym) (noAttr $ "@" <> desc) exit
+    EdhSymbol sym@(Symbol _ !symRepr) ->
+      getEdhAttr lhExpr (AttrBySym sym) (noAttr symRepr) exit
     _ -> throwEdhTx EvalError $ "invalid attribute reference type - " <> T.pack
       (edhTypeNameOf rhVal)
  where
-  noAttr key lhVal =
+  noAttr !keyRepr !lhVal =
     throwEdhTx EvalError
       $  "no such attribute "
-      <> key
+      <> keyRepr
       <> " from a "
       <> T.pack (edhTypeNameOf lhVal)
       <> ": "
       <> T.pack (show lhVal)
+
+-- | operator (?@) - attribute dereferencing tempter, 
+-- address an attribute off an object if possible, nil otherwise
+attrDerefTemptProc :: EdhIntrinsicOp
+attrDerefTemptProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal ->
+  case edhUltimate rhVal of
+    EdhExpr _ (AttrExpr (DirectRef !addr)) _ -> \ !ets ->
+      resolveEdhAttrAddr ets addr
+        $ \ !key -> runEdhTx ets $ getEdhAttr lhExpr key noAttr exit
+    EdhString !attrName -> getEdhAttr lhExpr (AttrByName attrName) noAttr exit
+    EdhSymbol !sym      -> getEdhAttr lhExpr (AttrBySym sym) noAttr exit
+    _ ->
+      throwEdhTx EvalError $ "invalid attribute reference type - " <> T.pack
+        (edhTypeNameOf rhVal)
+  where noAttr _ = exitEdhTx exit nil
+
+-- | operator (?) - attribute tempter, 
+-- address an attribute off an object if possible, nil otherwise
+attrTemptProc :: EdhIntrinsicOp
+attrTemptProc !lhExpr !rhExpr !exit !ets = case rhExpr of
+  AttrExpr (DirectRef !addr) -> resolveEdhAttrAddr ets addr $ \ !key ->
+    runEdhTx ets $ getEdhAttr lhExpr key (const $ exitEdhTx exit nil) exit
+  _ -> throwEdh ets EvalError $ "invalid attribute expression: " <> T.pack
+    (show rhExpr)
 
 
 -- | operator ($) - function application
@@ -308,35 +332,6 @@ pairCtorProc !lhExpr !rhExpr !exit = do
         ets
         exit
         (EdhPair (edhDeCaseClose lhVal) (edhDeCaseClose rhVal))
-
-
--- | operator (?) - attribute tempter, 
--- address an attribute off an object if possible, nil otherwise
-attrTemptProc :: EdhIntrinsicOp
-attrTemptProc !lhExpr !rhExpr !exit = do
-  !ets <- ask
-  case rhExpr of
-    AttrExpr (DirectRef !addr) -> resolveEdhAttrAddr ets addr $ \key ->
-      runEdhTx ets $ getEdhAttr lhExpr key (const $ exitEdhTx exit nil) exit
-    _ -> throwEdhTx EvalError $ "invalid attribute expression: " <> T.pack
-      (show rhExpr)
-
--- | operator (?@) - attribute dereferencing tempter, 
--- address an attribute off an object if possible, nil otherwise
-attrDerefTemptProc :: EdhIntrinsicOp
-attrDerefTemptProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal ->
-  case edhUltimate rhVal of
-    EdhExpr _ (AttrExpr (DirectRef !addr)) _ -> ask >>= \ets ->
-      resolveEdhAttrAddr ets addr $ \key ->
-        runEdhTx ets $ getEdhAttr lhExpr key (const $ exitEdhTx exit nil) exit
-    EdhString !attrName -> getEdhAttr lhExpr
-                                      (AttrByName attrName)
-                                      (const $ exitEdhTx exit nil)
-                                      exit
-    EdhSymbol !sym ->
-      getEdhAttr lhExpr (AttrBySym sym) (const $ exitEdhTx exit nil) exit
-    _ -> throwEdhTx EvalError $ "invalid attribute reference type - " <> T.pack
-      (edhTypeNameOf rhVal)
 
 
 -- | the Symbol(repr, *reprs) constructor

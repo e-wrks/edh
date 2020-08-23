@@ -114,9 +114,13 @@ instance Hashable AttrKey where
 
 type AttrName = Text
 
+attrKeyStr :: AttrKey -> Text
+attrKeyStr (AttrByName !nm                ) = nm
+attrKeyStr (AttrBySym  (Symbol _ !symRepr)) = symRepr
+
 attrKeyValue :: AttrKey -> EdhValue
-attrKeyValue (AttrByName nm ) = EdhString nm
-attrKeyValue (AttrBySym  sym) = EdhSymbol sym
+attrKeyValue (AttrByName !nm ) = EdhString nm
+attrKeyValue (AttrBySym  !sym) = EdhSymbol sym
 
 
 -- | A symbol can stand in place of an alphanumeric name, used to
