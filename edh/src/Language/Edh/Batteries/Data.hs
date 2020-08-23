@@ -195,23 +195,22 @@ attrTemptProc !lhExpr !rhExpr !exit !ets = case rhExpr of
 -- similar to ($) operator in Haskell
 -- can be used to apply decorators with nicer syntax
 fapProc :: EdhIntrinsicOp
-fapProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal _ets ->
-  case lhVal of
-    EdhArgsPack (ArgsPack !args !kwargs) ->
-      runEdhTx ets $ evalExpr rhExpr $ \ !rhVal -> case edhUltimate rhVal of
-        EdhArgsPack (ArgsPack !args' !kwargs') -> do
+fapProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+  case edhUltimate lhVal of
+    -- special case, support merging of apks with func app syntax, so args can
+    -- be chained then applied to some function
+    EdhArgsPack (ArgsPack !args !kwargs) -> evalExpr rhExpr $ \ !rhVal ->
+      case edhUltimate rhVal of
+        EdhArgsPack (ArgsPack !args' !kwargs') -> \ !ets -> do
           !kwIOPD <- iopdFromList $ odToList kwargs
           iopdUpdate (odToList kwargs') kwIOPD
           !kwargs'' <- iopdSnapshot kwIOPD
           exitEdhSTM ets exit $ EdhArgsPack $ ArgsPack (args ++ args') kwargs''
         _ -> exitEdhTx exit $ EdhArgsPack $ ArgsPack (args ++ [rhVal]) kwargs
-    _ -> runEdhTx ets $ packEdhArgs argsPkr $ \ !apk ->
-      let !apk' = case apk of
-            ArgsPack [EdhArgsPack !apk''] !kwargs | odNull kwargs -> apk''
-            _ -> apk
-      in  contEdhSTM
-            $ edhMakeCall' ets callee'val callee'that apk' scopeMod
-            $ \mkCall -> runEdhTx ets (mkCall exit)
+    -- normal case
+    !calleeVal -> \ !ets -> packEdhArgs ets argsPkr $ \ !apk ->
+      edhPrepareCall' ets calleeVal (deApk apk)
+        $ \ !mkCall -> runEdhTx ets (mkCall exit)
  where
   argsPkr :: ArgsPacker
   argsPkr = case rhExpr of
@@ -222,28 +221,7 @@ fapProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal _ets ->
 --
 -- similar to UNIX pipe
 ffapProc :: EdhIntrinsicOp
-ffapProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal _ets ->
-  case rhVal of
-    EdhArgsPack (ArgsPack !args !kwargs) ->
-      runEdhTx ets $ evalExpr lhExpr $ \ !lhVal -> case edhUltimate lhVal of
-        EdhArgsPack (ArgsPack !args' !kwargs') -> do
-          !kwIOPD <- iopdFromList $ odToList kwargs
-          iopdUpdate (odToList kwargs') kwIOPD
-          !kwargs'' <- iopdSnapshot kwIOPD
-          exitEdhSTM ets exit $ EdhArgsPack $ ArgsPack (args ++ args') kwargs''
-        _ -> exitEdhTx exit $ EdhArgsPack $ ArgsPack (args ++ [lhVal]) kwargs
-    _ -> runEdhTx ets $ packEdhArgs argsPkr $ \ !apk ->
-      let !apk' = case apk of
-            ArgsPack [EdhArgsPack !apk''] !kwargs | odNull kwargs -> apk''
-            _ -> apk
-      in  contEdhSTM
-            $ edhMakeCall' ets callee'val callee'that apk' scopeMod
-            $ \mkCall -> runEdhTx ets (mkCall exit)
- where
-  argsPkr :: ArgsPacker
-  argsPkr = case lhExpr of
-    ArgsPackExpr !pkr -> pkr
-    _                 -> [SendPosArg lhExpr]
+ffapProc !lhExpr !rhExpr = fapProc rhExpr lhExpr
 
 
 -- | operator (:=) - named value definition
