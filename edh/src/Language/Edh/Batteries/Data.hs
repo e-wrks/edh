@@ -286,40 +286,36 @@ defMissingProc !lhExpr _ _ !ets =
 
 -- | operator (:) - pair constructor
 pairCtorProc :: EdhIntrinsicOp
-pairCtorProc !lhExpr !rhExpr !exit = do
-  ets <- ask
+pairCtorProc !lhExpr !rhExpr !exit !ets =
   -- make sure left hand and right hand values are evaluated in same tx
-  local (const ets { edh'in'tx = True })
-    $ evalExpr lhExpr
-    $ \ !lhVal -> evalExpr rhExpr $ \ !rhVal -> exitEdhSTM
-        ets
-        exit
-        (EdhPair (edhDeCaseClose lhVal) (edhDeCaseClose rhVal))
+  runEdhTx ets { edh'in'tx = True } $ evalExpr lhExpr $ \ !lhVal ->
+    evalExpr rhExpr $ \ !rhVal -> edhSwitchState ets
+      $ exitEdhTx exit (EdhPair (edhDeCaseClose lhVal) (edhDeCaseClose rhVal))
 
 
 -- | the Symbol(repr, *reprs) constructor
 symbolCtorProc :: EdhHostProc
-symbolCtorProc (ArgsPack _ !kwargs) _ | not $ odNull kwargs =
-  throwEdhTx UsageError "no kwargs should be passed to Symbol()"
-symbolCtorProc (ArgsPack !reprs _) !exit = ask >>= \ets -> do
-  let ctorSym :: EdhValue -> (Symbol -> STM ()) -> STM ()
-      ctorSym (EdhString !repr) !exit' = mkSymbol repr >>= exit'
-      ctorSym _ _ = throwEdh ets EvalError "invalid arg to Symbol()"
-  seqcontSTM (ctorSym <$> reprs) $ \case
+symbolCtorProc (ArgsPack !reprs !kwargs) !exit !ets = if not $ odNull kwargs
+  then throwEdh ets UsageError "no kwargs should be passed to Symbol()"
+  else seqcontSTM (ctorSym <$> reprs) $ \case
     [sym] -> exitEdhSTM ets exit $ EdhSymbol sym
     syms ->
       exitEdhSTM ets exit $ EdhArgsPack $ ArgsPack (EdhSymbol <$> syms) odEmpty
+ where
+  ctorSym :: EdhValue -> (Symbol -> STM ()) -> STM ()
+  ctorSym (EdhString !repr) !exit' = mkSymbol repr >>= exit'
+  ctorSym _ _ = throwEdh ets EvalError "invalid arg to Symbol()"
 
 
 uuidCtorProc :: EdhHostProc
-uuidCtorProc (ArgsPack [] !kwargs) !exit | odNull kwargs =
-  ask >>= \ !ets -> EdhUUID <$> mkUUID >>= exitEdhSTM ets exit
-uuidCtorProc (ArgsPack [EdhString !uuidTxt] !kwargs) !exit | odNull kwargs =
-  case UUID.fromText uuidTxt of
-    Just !uuid -> exitEdhTx exit $ EdhUUID uuid
-    _          -> throwEdhTx UsageError $ "invalid uuid string: " <> uuidTxt
+uuidCtorProc (ArgsPack [] !kwargs) !exit !ets | odNull kwargs =
+  EdhUUID <$> mkUUID >>= exitEdhSTM ets exit
+uuidCtorProc (ArgsPack [EdhString !uuidTxt] !kwargs) !exit !ets
+  | odNull kwargs = case UUID.fromText uuidTxt of
+    Just !uuid -> exitEdhSTM ets exit $ EdhUUID uuid
+    _          -> throwEdh ets UsageError $ "invalid uuid string: " <> uuidTxt
 -- todo support more forms of UUID ctor args
-uuidCtorProc _ _ = throwEdhTx UsageError "invalid args to UUID()"
+uuidCtorProc _ _ !ets = throwEdh ets UsageError "invalid args to UUID()"
 
 
 apkArgsProc :: EdhHostProc
