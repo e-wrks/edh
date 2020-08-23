@@ -558,16 +558,6 @@ installEdhBatteries world = liftIO $ do
                , PackReceiver [mandatoryArg "p"]
                )
              , ( EdhMethod
-               , "__ClassType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__HostClassType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
                , "__MethodType_name__"
                , procNameProc
                , PackReceiver [mandatoryArg "p"]
@@ -594,6 +584,21 @@ installEdhBatteries world = liftIO $ do
                )
              , ( EdhMethod
                , "__HostGenrType_name__"
+               , procNameProc
+               , PackReceiver [mandatoryArg "p"]
+               )
+             , ( EdhMethod
+               , "__InterpreterType_name__"
+               , procNameProc
+               , PackReceiver [mandatoryArg "p"]
+               )
+             , ( EdhMethod
+               , "__ProducerType_name__"
+               , procNameProc
+               , PackReceiver [mandatoryArg "p"]
+               )
+             , ( EdhMethod
+               , "__DescriptorType_name__"
                , procNameProc
                , PackReceiver [mandatoryArg "p"]
                )

@@ -337,223 +337,219 @@ apkKwrgsProc _ _ =
 
 -- | utility repr(*args,**kwargs) - repr extractor
 reprProc :: EdhHostProc
-reprProc (ArgsPack !args !kwargs) !exit = do
-  ets <- ask
-  let
-    go
-      :: [EdhValue]
-      -> [(AttrKey, EdhValue)]
-      -> [EdhValue]
-      -> [(AttrKey, EdhValue)]
-      -> STM ()
-    go [repr] kwReprs [] [] | null kwReprs = exitEdh ets exit repr
-    go reprs kwReprs [] [] =
-      exitEdh ets exit $ EdhArgsPack $ ArgsPack (reverse reprs) $ odFromList
-        kwReprs
-    go reprs kwReprs (v : rest) kwps =
-      runEdhTx ets $ edhValueRepr v $ \ !r -> go (r : reprs) kwReprs rest kwps
-    go reprs kwReprs [] ((k, v) : rest) =
-      runEdhTx ets $ edhValueRepr v $ \ !r ->
-        go reprs ((k, r) : kwReprs) [] rest
+reprProc (ArgsPack !args !kwargs) !exit !ets = do
   go [] [] args (odToList kwargs)
+ where
+  go
+    :: [EdhValue]
+    -> [(AttrKey, EdhValue)]
+    -> [EdhValue]
+    -> [(AttrKey, EdhValue)]
+    -> STM ()
+  go [repr] kwReprs [] [] | null kwReprs = exitEdh ets exit repr
+  go reprs kwReprs [] [] =
+    exitEdh ets exit $ EdhArgsPack $ ArgsPack (reverse reprs) $ odFromList
+      kwReprs
+  go reprs kwReprs (v : rest) kwps =
+    edhValueRepr ets v $ \ !r -> go (EdhString r : reprs) kwReprs rest kwps
+  go reprs kwReprs [] ((k, v) : rest) =
+    edhValueRepr ets v $ \ !r -> go reprs ((k, EdhString r) : kwReprs) [] rest
 
 
 capProc :: EdhHostProc
-capProc (ArgsPack [!v] !kwargs) !exit = do
-  !ets <- ask
-  case edhUltimate v of
-    EdhObject !o -> lookupEdhObjAttr ets o (AttrByName "__cap__") >>= \case
-      EdhNil -> exitEdh ets exit $ EdhDecimal D.nan
-      EdhMethod !mth ->
-        runEdhTx ets $ callEdhMethod o mth (ArgsPack [] kwargs) id exit
-      !badMagic ->
-        throwEdh ets UsageError
-          $  "bad magic __cap__ of "
-          <> T.pack (edhTypeNameOf badMagic)
-          <> " on class "
-          <> procedureName (objClass o)
-    _ -> exitEdh ets exit $ EdhDecimal D.nan
-capProc _ _ =
-  throwEdhTx UsageError "please get capacity of one value at a time"
+capProc (ArgsPack [!v] !kwargs) !exit !ets = case edhUltimate v of
+  EdhObject !o -> lookupEdhObjAttr o (AttrByName "__cap__") >>= \case
+    (_, EdhNil) -> exitEdh ets exit $ EdhDecimal D.nan
+    (!this', EdhProcedure (EdhMethod !mth) _) ->
+      runEdhTx ets $ callEdhMethod this' o mth (ArgsPack [] kwargs) id exit
+    (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+      runEdhTx ets $ callEdhMethod this that mth (ArgsPack [] kwargs) id exit
+    (_, !badMagic) ->
+      throwEdh ets UsageError
+        $  "bad magic __cap__ of "
+        <> T.pack (edhTypeNameOf badMagic)
+        <> " on class "
+        <> objClassName o
+  _ -> exitEdh ets exit $ EdhDecimal D.nan
+capProc _ _ !ets =
+  throwEdh ets UsageError "please get capacity of one value at a time"
 
 growProc :: EdhHostProc
-growProc (ArgsPack [!v, newCap@EdhDecimal{}] !kwargs) !exit = do
-  !ets <- ask
+growProc (ArgsPack [!v, newCap@EdhDecimal{}] !kwargs) !exit !ets =
   case edhUltimate v of
-    EdhObject !o -> lookupEdhObjAttr ets o (AttrByName "__grow__") >>= \case
-      EdhNil ->
+    EdhObject !o -> lookupEdhObjAttr o (AttrByName "__grow__") >>= \case
+      (_, EdhNil) ->
         throwEdh ets UsageError
           $  "grow() not supported by the object of class "
-          <> procedureName (objClass o)
-      EdhMethod !mth ->
-        runEdhTx ets $ callEdhMethod o mth (ArgsPack [newCap] kwargs) id exit
-      !badMagic ->
+          <> objClassName o
+      (!this', EdhProcedure (EdhMethod !mth) _) -> runEdhTx ets
+        $ callEdhMethod this' o mth (ArgsPack [newCap] kwargs) id exit
+      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+        runEdhTx ets
+          $ callEdhMethod this that mth (ArgsPack [newCap] kwargs) id exit
+      (_, !badMagic) ->
         throwEdh ets UsageError
           $  "bad magic __grow__ of "
           <> T.pack (edhTypeNameOf badMagic)
           <> " on class "
-          <> procedureName (objClass o)
+          <> objClassName o
     !badVal ->
       throwEdh ets UsageError $ "grow() not supported by a value of " <> T.pack
         (edhTypeNameOf badVal)
-growProc _ _ =
-  throwEdhTx UsageError "invalid args to grow(container, newCapacity)"
+growProc _ _ !ets =
+  throwEdh ets UsageError "invalid args to grow(container, newCapacity)"
 
 lenProc :: EdhHostProc
-lenProc (ArgsPack [!v] !kwargs) !exit = do
-  !ets <- ask
-  case edhUltimate v of
-    EdhObject !o -> lookupEdhObjAttr ets o (AttrByName "__len__") >>= \case
-      EdhNil -> exitEdh ets exit $ EdhDecimal D.nan
-      EdhMethod !mth ->
-        runEdhTx ets $ callEdhMethod o mth (ArgsPack [] kwargs) id exit
-      !badMagic ->
-        throwEdh ets UsageError
-          $  "bad magic __len__ of "
-          <> T.pack (edhTypeNameOf badMagic)
-          <> " on class "
-          <> procedureName (objClass o)
-    EdhList (List _ !lv) -> length <$> readTVar lv >>= \ !llen ->
-      exitEdh ets exit $ EdhDecimal $ fromIntegral llen
-    EdhDict (Dict _ !ds) -> iopdSize ds
-      >>= \ !dlen -> exitEdh ets exit $ EdhDecimal $ fromIntegral dlen
-    EdhArgsPack (ArgsPack !posArgs !kwArgs) | odNull kwArgs ->
-      -- no keyword arg, assuming tuple semantics
-      exitEdh ets exit $ EdhDecimal $ fromIntegral $ length posArgs
-    EdhArgsPack (ArgsPack !posArgs !kwArgs) | null posArgs ->
-      -- no positional arg, assuming named tuple semantics
-      exitEdh ets exit $ EdhDecimal $ fromIntegral $ odSize kwArgs
-    EdhArgsPack{} -> throwEdh
-      ets
-      UsageError
-      "unresonable to get length of an apk with both positional and keyword args"
-    _ -> exitEdh ets exit $ EdhDecimal D.nan
-lenProc _ _ = throwEdhTx UsageError "please get length of one value at a time"
+lenProc (ArgsPack [!v] !kwargs) !exit !ets = case edhUltimate v of
+  EdhObject !o -> lookupEdhObjAttr o (AttrByName "__len__") >>= \case
+    (_, EdhNil) -> exitEdh ets exit $ EdhDecimal D.nan
+    (!this', EdhProcedure (EdhMethod !mth) _) ->
+      runEdhTx ets $ callEdhMethod this' o mth (ArgsPack [] kwargs) id exit
+    (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+      runEdhTx ets $ callEdhMethod this that mth (ArgsPack [] kwargs) id exit
+    (_, !badMagic) ->
+      throwEdh ets UsageError
+        $  "bad magic __len__ of "
+        <> T.pack (edhTypeNameOf badMagic)
+        <> " on class "
+        <> objClassName o
+  EdhList (List _ !lv) -> length <$> readTVar lv >>= \ !llen ->
+    exitEdh ets exit $ EdhDecimal $ fromIntegral llen
+  EdhDict (Dict _ !ds) -> iopdSize ds
+    >>= \ !dlen -> exitEdh ets exit $ EdhDecimal $ fromIntegral dlen
+  EdhArgsPack (ArgsPack !posArgs !kwArgs) | odNull kwArgs ->
+    -- no keyword arg, assuming tuple semantics
+    exitEdh ets exit $ EdhDecimal $ fromIntegral $ length posArgs
+  EdhArgsPack (ArgsPack !posArgs !kwArgs) | null posArgs ->
+    -- no positional arg, assuming named tuple semantics
+    exitEdh ets exit $ EdhDecimal $ fromIntegral $ odSize kwArgs
+  EdhArgsPack{} -> throwEdh
+    ets
+    UsageError
+    "unresonable to get length of an apk with both positional and keyword args"
+  _ -> exitEdh ets exit $ EdhDecimal D.nan
+lenProc _ _ !ets =
+  throwEdh ets UsageError "please get length of one value at a time"
 
 markProc :: EdhHostProc
-markProc (ArgsPack [!v, newLen@EdhDecimal{}] !kwargs) !exit = do
-  !ets <- ask
+markProc (ArgsPack [!v, newLen@EdhDecimal{}] !kwargs) !exit !ets =
   case edhUltimate v of
-    EdhObject !o -> lookupEdhObjAttr ets o (AttrByName "__mark__") >>= \case
-      EdhNil ->
+    EdhObject !o -> lookupEdhObjAttr o (AttrByName "__mark__") >>= \case
+      (_, EdhNil) ->
         throwEdh ets UsageError
           $  "mark() not supported by the object of class "
-          <> procedureName (objClass o)
-      EdhMethod !mth ->
-        runEdhTx ets $ callEdhMethod o mth (ArgsPack [newLen] kwargs) id exit
-      !badMagic ->
+          <> objClassName o
+      (!this', EdhProcedure (EdhMethod !mth) _) -> runEdhTx ets
+        $ callEdhMethod this' o mth (ArgsPack [newLen] kwargs) id exit
+      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+        runEdhTx ets
+          $ callEdhMethod this that mth (ArgsPack [newLen] kwargs) id exit
+      (_, !badMagic) ->
         throwEdh ets UsageError
           $  "bad magic __mark__ of "
           <> T.pack (edhTypeNameOf badMagic)
           <> " on class "
-          <> procedureName (objClass o)
+          <> objClassName o
     !badVal ->
       throwEdh ets UsageError $ "mark() not supported by a value of " <> T.pack
         (edhTypeNameOf badVal)
-markProc _ _ =
-  throwEdhTx UsageError "invalid args to mark(container, newLength)"
+markProc _ _ !ets =
+  throwEdh ets UsageError "invalid args to mark(container, newLength)"
 
 
 showProc :: EdhHostProc
-showProc (ArgsPack [!v] !kwargs) !exit = do
-  !ets <- ask
-  let -- todo specialize more informative show for intrinsic types of values
-    showWithNoMagic = edhValueReprSTM ets v $ \ !r ->
-      exitEdh ets exit $ EdhString $ T.pack (edhTypeNameOf v) <> ": " <> r
-  case edhUltimate v of
-    EdhObject !o -> lookupEdhObjAttr ets o (AttrByName "__show__") >>= \case
-      EdhNil -> showWithNoMagic
-      EdhMethod !mth ->
-        runEdhTx ets $ callEdhMethod o mth (ArgsPack [] kwargs) id exit
-      !badMagic ->
-        throwEdh ets UsageError
-          $  "bad magic __show__ of "
-          <> T.pack (edhTypeNameOf badMagic)
-          <> " on class "
-          <> procedureName (objClass o)
-    _ -> showWithNoMagic
-showProc _ _ = throwEdhTx UsageError "please show one value at a time"
+showProc (ArgsPack [!v] !kwargs) !exit !ets = case edhUltimate v of
+  EdhObject !o -> lookupEdhObjAttr o (AttrByName "__show__") >>= \case
+    (_, EdhNil) -> showWithNoMagic
+    (!this', EdhProcedure (EdhMethod !mth) _) ->
+      runEdhTx ets $ callEdhMethod this' o mth (ArgsPack [] kwargs) id exit
+    (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+      runEdhTx ets $ callEdhMethod this that mth (ArgsPack [] kwargs) id exit
+    (_, !badMagic) ->
+      throwEdh ets UsageError
+        $  "bad magic __show__ of "
+        <> T.pack (edhTypeNameOf badMagic)
+        <> " on class "
+        <> objClassName o
+  _ -> showWithNoMagic
+ where -- todo specialize more informative show for intrinsic types of values
+  showWithNoMagic = edhValueRepr ets v $ \ !r ->
+    exitEdh ets exit $ EdhString $ T.pack (edhTypeNameOf v) <> ": " <> r
+showProc _ _ !ets = throwEdh ets UsageError "please show one value at a time"
 
 descProc :: EdhHostProc
-descProc (ArgsPack [!v] !kwargs) !exit = do
-  !ets <- ask
-  let -- TODO specialize more informative description (statistical wise) for
+descProc (ArgsPack [!v] !kwargs) !exit !ets = case edhUltimate v of
+  EdhObject !o -> lookupEdhObjAttr o (AttrByName "__desc__") >>= \case
+    (_, EdhNil) -> descWithNoMagic
+    (!this', EdhProcedure (EdhMethod !mth) _) ->
+      runEdhTx ets $ callEdhMethod this' o mth (ArgsPack [] kwargs) id exit
+    (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+      runEdhTx ets $ callEdhMethod this that mth (ArgsPack [] kwargs) id exit
+    (_, !badMagic) ->
+      throwEdh ets UsageError
+        $  "bad magic __desc__ of "
+        <> T.pack (edhTypeNameOf badMagic)
+        <> " on class "
+        <> objClassName o
+  _ -> descWithNoMagic
+ where -- TODO specialize more informative description (statistical wise) for
       --      intrinsic types of values
-      descWithNoMagic = edhValueReprSTM ets v $ \ !r -> case v of
-        EdhObject !o ->
-          exitEdh ets exit
-            $  EdhString
-            $  "it is an object of class "
-            <> procedureName (objClass o)
-            <> ", having representation:\n"
-            <> r
-        _ ->
-          exitEdh ets exit
-            $  EdhString
-            $  "it is of "
-            <> T.pack (edhTypeNameOf v)
-            <> ", having representation:\n"
-            <> r
-  case edhUltimate v of
-    EdhObject !o -> lookupEdhObjAttr ets o (AttrByName "__desc__") >>= \case
-      EdhNil -> descWithNoMagic
-      EdhMethod !mth ->
-        runEdhTx ets $ callEdhMethod o mth (ArgsPack [] kwargs) id exit
-      !badMagic ->
-        throwEdh ets UsageError
-          $  "bad magic __desc__ of "
-          <> T.pack (edhTypeNameOf badMagic)
-          <> " on class "
-          <> procedureName (objClass o)
-    _ -> descWithNoMagic
-descProc _ _ = throwEdhTx UsageError "please describe one value at a time"
+  descWithNoMagic = edhValueRepr ets v $ \ !r -> case v of
+    EdhObject !o ->
+      exitEdh ets exit
+        $  EdhString
+        $  "it is an object of class "
+        <> objClassName o
+        <> ", having representation:\n"
+        <> r
+    _ ->
+      exitEdh ets exit
+        $  EdhString
+        $  "it is of "
+        <> T.pack (edhTypeNameOf v)
+        <> ", having representation:\n"
+        <> r
+descProc _ _ !ets =
+  throwEdh ets UsageError "please describe one value at a time"
 
 
 -- | operator (++) - string coercing concatenator
 concatProc :: EdhIntrinsicOp
-concatProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhv ->
-  case edhUltimate lhv of
-    EdhBlob !lhBlob -> evalExpr rhExpr $ \ !rhv -> case edhUltimate rhv of
+concatProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+  evalExpr rhExpr $ \ !rhVal -> case edhUltimate lhVal of
+    EdhBlob !lhBlob -> case edhUltimate rhVal of
       EdhBlob !rhBlob -> exitEdhTx exit $ EdhBlob $ lhBlob <> rhBlob
       EdhString !rhStr ->
         exitEdhTx exit $ EdhBlob $ lhBlob <> TE.encodeUtf8 rhStr
-      rhVal ->
+      !rhv ->
         throwEdhTx UsageError
           $  "should not (++) a "
-          <> T.pack (edhTypeNameOf rhVal)
+          <> T.pack (edhTypeNameOf rhv)
           <> " to a blob."
-    lhVal -> edhValueStr lhVal $ \lhStr -> case lhStr of
-      EdhString !lhs -> evalExpr rhExpr $ \ !rhv ->
-        edhValueStr (edhDeCaseClose $ edhUltimate rhv) $ \ !rhStr ->
-          case rhStr of
-            EdhString !rhs -> exitEdhTx exit (EdhString $ lhs <> rhs)
-            _              -> error "bug: edhValueStr returned non-string"
-      _ -> error "bug: edhValueStr returned non-string"
+    !lhv -> \ !ets -> edhValueStr ets lhv $ \ !lhs ->
+      edhValueStr ets (edhDeCaseClose $ edhUltimate rhVal)
+        $ \ !rhs -> exitEdh ets exit (EdhString $ lhs <> rhs)
 
 
 -- | utility null(*args,**kwargs) - null tester
 isNullProc :: EdhHostProc
-isNullProc (ArgsPack !args !kwargs) !exit = do
-  !ets <- ask
-  if odNull kwargs
-    then case args of
-      [v] ->
-        edhValueNull ets v $ \isNull -> exitEdh ets exit $ EdhBool isNull
-      _ -> seqcontSTM (edhValueNull ets <$> args) $ \ !argsNulls ->
-        exitEdh ets exit $ EdhArgsPack $ ArgsPack (EdhBool <$> argsNulls)
-                                                     odEmpty
-    else seqcontSTM (edhValueNull ets <$> args) $ \argsNulls ->
-      seqcontSTM
-          [ \exit' ->
-              edhValueNull ets v (\ !isNull -> exit' (k, EdhBool isNull))
-          | (k, v) <- odToList kwargs
-          ]
-        $ \ !kwargsNulls -> exitEdh
-            ets
-            exit
-            ( EdhArgsPack
-            $ ArgsPack (EdhBool <$> argsNulls) (odFromList kwargsNulls)
-            )
+isNullProc (ArgsPack !args !kwargs) !exit !ets = if odNull kwargs
+  then case args of
+    [v] -> edhValueNull ets v $ \ !isNull -> exitEdh ets exit $ EdhBool isNull
+    _   -> seqcontSTM (edhValueNull ets <$> args) $ \ !argsNulls ->
+      exitEdh ets exit $ EdhArgsPack $ ArgsPack (EdhBool <$> argsNulls) odEmpty
+  else seqcontSTM (edhValueNull ets <$> args) $ \ !argsNulls ->
+    seqcontSTM
+        [ \ !exit' ->
+            edhValueNull ets v (\ !isNull -> exit' (k, EdhBool isNull))
+        | (k, v) <- odToList kwargs
+        ]
+      $ \ !kwargsNulls -> exitEdh
+          ets
+          exit
+          ( EdhArgsPack
+          $ ArgsPack (EdhBool <$> argsNulls) (odFromList kwargsNulls)
+          )
 
 
 -- | utility type(*args,**kwargs) - value type introspector
@@ -577,19 +573,22 @@ typeProc (ArgsPack !args !kwargs) !exit =
 procNameProc :: EdhHostProc
 procNameProc (ArgsPack !args !kwargs) !exit !ets = case args of
   [!p] | odNull kwargs -> case p of
-    EdhProcedure !callable _             -> cpName callable
+    EdhProcedure !callable _ -> cpName callable
     EdhBoundProc !callable _this _that _ -> cpName callable
+    _                        -> exitEdh ets exit nil
   _ -> throwEdh ets EvalError "bug: __ProcType_name__ got unexpected args"
  where
   cpName :: EdhCallable -> STM ()
   cpName = \case
     EdhIntrOp _ (IntrinOpDefi _ !opSym _) ->
-      exitEdhTx exit $ EdhString $ "(" <> opSym <> ")"
-    EdhMethod !pd     -> exitEdhTx exit $ EdhString $ procedureName pd
-    EdhOprtor _ _ !pd -> exitEdhTx exit $ EdhString $ procedureName pd
-    EdhGnrtor !pd     -> exitEdhTx exit $ EdhString $ procedureName pd
-    EdhIntrpr !pd     -> exitEdhTx exit $ EdhString $ procedureName pd
-    EdhPrducr !pd     -> exitEdhTx exit $ EdhString $ procedureName pd
+      exitEdh ets exit $ EdhString $ "(" <> opSym <> ")"
+    EdhOprtor _ _ !pd -> exitEdh ets exit $ EdhString $ procedureName pd
+    EdhMethod !pd     -> exitEdh ets exit $ EdhString $ procedureName pd
+    EdhGnrtor !pd     -> exitEdh ets exit $ EdhString $ procedureName pd
+    EdhIntrpr !pd     -> exitEdh ets exit $ EdhString $ procedureName pd
+    EdhPrducr !pd     -> exitEdh ets exit $ EdhString $ procedureName pd
+    EdhDescriptor !getter _setter ->
+      exitEdh ets exit $ EdhString $ procedureName getter
 
 
 -- | utility dict(***apk,**kwargs,*args) - dict constructor by arguments
@@ -632,38 +631,35 @@ listPushProc (ArgsPack [l@(EdhList (List _ !lv))] _) !exit = do
     >>= \mth -> exitEdh ets exit mth
  where
   listPush :: EdhHostProc
-  listPush (ArgsPack !args !kwargs') !exit' | odNull kwargs' = ask >>= \ets ->
-    do
-      modifyTVar' lv (args ++)
-      exitEdh ets exit' l
-  listPush _ _ = throwEdhTx UsageError "invalid args to list.push()"
+  listPush (ArgsPack !args !kwargs') !exit' !ets | odNull kwargs' = do
+    modifyTVar' lv (args ++)
+    exitEdh ets exit' l
+  listPush _ _ !ets = throwEdh ets UsageError "invalid args to list.push()"
 listPushProc _ _ =
   throwEdhTx EvalError "bug: __ListType_push__ got unexpected args"
 
 listPopProc :: EdhHostProc
-listPopProc (ArgsPack _ !kwargs) _ | not $ odNull kwargs =
-  throwEdhTx EvalError "bug: __ListType_pop__ got kwargs"
-listPopProc (ArgsPack [EdhList (List _ !lv)] _) !exit = do
-  !ets <- ask
-  contEdhSTM
-    $   mkHostProc (contextScope $ edh'context ets)
-                   EdhMethod
-                   "pop"
-                   listPop
-                   (PackReceiver [optionalArg "default" $ IntplSubs edhNone])
+listPopProc (ArgsPack _ !kwargs) _ !ets | not $ odNull kwargs =
+  throwEdh ets EvalError "bug: __ListType_pop__ got kwargs"
+listPopProc (ArgsPack [EdhList (List _ !lv)] _) !exit !ets =
+  mkHostProc (contextScope $ edh'context ets)
+             EdhMethod
+             "pop"
+             listPop
+             (PackReceiver [optionalArg "default" $ IntplSubs edhNone])
     >>= \mth -> exitEdh ets exit mth
  where
   listPop :: EdhHostProc
-  listPop !apk !exit' = case parseArgsPack edhNone parseArgs apk of
-    Left  err     -> throwEdhTx UsageError err
-    Right !defVal -> ask >>= \ets -> readTVar lv >>= \case
-      (val : rest) -> writeTVar lv rest >> exitEdh ets exit' val
-      _            -> exitEdh ets exit' defVal
+  listPop !apk !exit' !ets' = case parseArgsPack edhNone parseArgs apk of
+    Left  err     -> throwEdh ets' UsageError err
+    Right !defVal -> readTVar lv >>= \case
+      (val : rest) -> writeTVar lv rest >> exitEdh ets' exit' val
+      _            -> exitEdh ets' exit' defVal
    where
     parseArgs = ArgsPackParser [\arg _ -> Right arg]
       $ Map.fromList [("default", \arg _ -> Right arg)]
-listPopProc _ _ =
-  throwEdhTx EvalError "bug: __ListType_pop__ got unexpected args"
+listPopProc _ _ !ets =
+  throwEdh ets EvalError "bug: __ListType_pop__ got unexpected args"
 
 
 -- | operator (?<=) - element-of tester
@@ -733,8 +729,7 @@ lstrvrsPrpdProc !lhExpr !rhExpr !exit = do
       case edhUltimate rhVal of
         EdhArgsPack (ArgsPack !vs !kwargs) -> do
           lll <- readTVar ll
-          exitEdh ets exit $ EdhArgsPack $ ArgsPack (reverse lll ++ vs)
-                                                       kwargs
+          exitEdh ets exit $ EdhArgsPack $ ArgsPack (reverse lll ++ vs) kwargs
         EdhList (List _ !l) -> do
           lll <- readTVar ll
           modifyTVar' l (reverse lll ++)
