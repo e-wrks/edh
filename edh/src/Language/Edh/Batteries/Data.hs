@@ -226,48 +226,28 @@ ffapProc !lhExpr !rhExpr = fapProc rhExpr lhExpr
 
 -- | operator (:=) - named value definition
 defProc :: EdhIntrinsicOp
-defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
-  ets <- ask
-  evalExpr rhExpr $ \ !rhV -> do
-    let !rhVal   = edhDeCaseClose rhV
-        !ctx     = edh'context ets
-        !scope   = contextScope ctx
-        this     = edh'scope'this scope
-        !nv      = EdhNamedValue valName rhVal
+defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit !ets = do
+  runEdhTx ets { edh'in'tx = True } $ evalExpr rhExpr $ \ !rhVal !ets' -> do
+    let !rhv     = edhDeCaseClose rhVal
+        !nv      = EdhNamedValue valName rhv
         doAssign = do
-          changeEntityAttr ets (scopeEntity scope) (AttrByName valName) nv
-          when (contextExporting ctx && objEntity this == scopeEntity scope)
-            $   lookupEntityAttr ets
-                                 (objEntity this)
-                                 (AttrByName edhExportsMagicName)
-            >>= \case
-                  EdhDict (Dict _ !thisExpDS) ->
-                    iopdInsert (EdhString valName) nv thisExpDS
-                  _ -> do
-                    d <- EdhDict <$> createEdhDict [(EdhString valName, nv)]
-                    changeEntityAttr ets
-                                     (objEntity this)
-                                     (AttrByName edhExportsMagicName)
-                                     d
-    lookupEntityAttr ets (scopeEntity scope) (AttrByName valName) >>= \case
-      EdhNil -> do
+          iopdInsert key nv es
+          defineScopeAttr ets' key nv
+    iopdLookup key es >>= \case
+      Nothing -> do
         doAssign
         exitEdhSTM ets exit nv
-      oldDef@(EdhNamedValue n v) -> if v /= rhVal
-        then runEdhTx ets $ edhValueRepr rhVal $ \ !newR ->
-          edhValueRepr oldDef $ \ !oldR -> case newR of
-            EdhString !newRepr -> case oldR of
-              EdhString oldRepr ->
-                throwEdhTx EvalError
-                  $  "can not redefine "
-                  <> valName
-                  <> " from { "
-                  <> oldRepr
-                  <> " } to { "
-                  <> newRepr
-                  <> " }"
-              _ -> error "bug: edhValueRepr returned non-string"
-            _ -> error "bug: edhValueRepr returned non-string"
+      Just oldDef@(EdhNamedValue !n !v) -> if v /= rhv
+        then edhValueRepr ets rhv $ \ !newRepr ->
+          edhValueRepr ets oldDef $ \ !oldRepr ->
+            throwEdh ets EvalError
+              $  "can not redefine "
+              <> valName
+              <> " from { "
+              <> oldRepr
+              <> " } to { "
+              <> newRepr
+              <> " }"
         else do
           -- avoid writing the entity if all same
           unless (n == valName) doAssign
@@ -275,28 +255,33 @@ defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
       _ -> do
         doAssign
         exitEdhSTM ets exit nv
-defProc !lhExpr _ _ =
-  throwEdhTx EvalError $ "invalid value definition: " <> T.pack (show lhExpr)
-
+ where
+  !ctx   = edh'context ets
+  !scope = contextScope ctx
+  !es    = edh'scope'entity scope
+  !key   = AttrByName valName
+defProc !lhExpr _ _ !ets =
+  throwEdh ets EvalError $ "invalid value definition: " <> T.pack (show lhExpr)
 
 -- | operator (?:=) - named value definition if missing
 defMissingProc :: EdhIntrinsicOp
-defMissingProc (AttrExpr (DirectRef (NamedAttr "_"))) _ _ =
-  throwEdhTx UsageError "not so reasonable: _ ?:= xxx"
-defMissingProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit = do
-  ets <- ask
-  let !ent   = scopeEntity $ contextScope $ edh'context ets
-      !key   = AttrByName valName
-      !etsTx = ets { edh'in'tx = True } -- must within a tx
-  lookupEntityAttr etsTx ent key >>= \case
-    EdhNil -> runEdhTx etsTx $ evalExpr rhExpr $ \ !rhV -> do
-      let !rhVal = edhDeCaseClose rhV
-          !nv    = EdhNamedValue valName rhVal
-      changeEntityAttr etsTx ent key nv
-      exitEdhSTM ets exit nv
-    !preVal -> exitEdhSTM ets exit preVal
-defMissingProc !lhExpr _ _ =
-  throwEdhTx EvalError $ "invalid value definition: " <> T.pack (show lhExpr)
+defMissingProc (AttrExpr (DirectRef (NamedAttr "_"))) _ _ !ets =
+  throwEdh ets UsageError "not so reasonable: _ ?:= xxx"
+defMissingProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit !ets =
+  iopdLookup key es >>= \case
+    Nothing ->
+      runEdhTx ets { edh'in'tx = True } $ evalExpr rhExpr $ \ !rhVal !ets' -> do
+        let !rhv = edhDeCaseClose rhVal
+            !nv  = EdhNamedValue valName rhv
+        iopdInsert key nv es
+        defineScopeAttr ets' key nv
+        exitEdhSTM ets exit nv
+    Just !preVal -> exitEdhSTM ets exit preVal
+ where
+  !es  = edh'scope'entity $ contextScope $ edh'context ets
+  !key = AttrByName valName
+defMissingProc !lhExpr _ _ !ets =
+  throwEdh ets EvalError $ "invalid value definition: " <> T.pack (show lhExpr)
 
 
 -- | operator (:) - pair constructor
