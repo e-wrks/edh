@@ -53,6 +53,7 @@ createEdhWorld !console = liftIO $ do
     [ (AttrByName "__name__", EdhString "<root>")
     , (AttrByName "None"    , edhNone)
     , (AttrByName "Nothing" , edhNothing)
+    , (AttrByName "NA"      , edhNA)
     ]
   !ssRoot <- newTVarIO []
 

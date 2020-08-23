@@ -594,49 +594,44 @@ procNameProc (ArgsPack !args !kwargs) !exit !ets = case args of
 -- | utility dict(***apk,**kwargs,*args) - dict constructor by arguments
 -- can be used to convert arguments pack into dict
 dictProc :: EdhHostProc
-dictProc (ArgsPack !args !kwargs) !exit = do
-  !ets <- ask
-  do
-    !ds <-
-      iopdFromList
-        $ [ (EdhDecimal (fromIntegral i), t)
-          | (i, t) <- zip [(0 :: Int) ..] args
-          ]
-    flip iopdUpdate ds $ (<$> odToList kwargs) $ \(key, val) ->
-      (attrKeyValue key, val)
-    u <- unsafeIOToSTM newUnique
-    exitEdh ets exit (EdhDict (Dict u ds))
+dictProc (ArgsPack !args !kwargs) !exit !ets = do
+  !ds <-
+    iopdFromList
+      $ [ (EdhDecimal (fromIntegral i), t)
+        | (i, t) <- zip [(0 :: Int) ..] args
+        ]
+  flip iopdUpdate ds $ (<$> odToList kwargs) $ \(key, val) ->
+    (attrKeyValue key, val)
+  u <- unsafeIOToSTM newUnique
+  exitEdh ets exit (EdhDict (Dict u ds))
 
 dictSizeProc :: EdhHostProc
-dictSizeProc (ArgsPack _ !kwargs) _ | not $ odNull kwargs =
-  throwEdhTx EvalError "bug: __DictType_size__ got kwargs"
-dictSizeProc (ArgsPack [EdhDict (Dict _ !ds)] _) !exit = do
-  !ets <- ask
+dictSizeProc (ArgsPack _ !kwargs) _ !ets | not $ odNull kwargs =
+  throwEdh ets EvalError "bug: __DictType_size__ got kwargs"
+dictSizeProc (ArgsPack [EdhDict (Dict _ !ds)] _) !exit !ets =
   exitEdh ets exit . EdhDecimal . fromIntegral =<< iopdSize ds
-dictSizeProc _ _ =
-  throwEdhTx EvalError "bug: __DictType_size__ got unexpected args"
+dictSizeProc _ _ !ets =
+  throwEdh ets EvalError "bug: __DictType_size__ got unexpected args"
 
 
 listPushProc :: EdhHostProc
-listPushProc (ArgsPack _ !kwargs) _ | not $ odNull kwargs =
-  throwEdhTx EvalError "bug: __ListType_push__ got kwargs"
-listPushProc (ArgsPack [l@(EdhList (List _ !lv))] _) !exit = do
-  !ets <- ask
-  contEdhSTM
-    $   mkHostProc (contextScope $ edh'context ets)
-                   EdhMethod
-                   "push"
-                   listPush
-                   (PackReceiver [RecvRestPosArgs "values"])
+listPushProc (ArgsPack _ !kwargs) _ !ets | not $ odNull kwargs =
+  throwEdh ets EvalError "bug: __ListType_push__ got kwargs"
+listPushProc (ArgsPack [l@(EdhList (List _ !lv))] _) !exit !ets =
+  mkHostProc (contextScope $ edh'context ets)
+             EdhMethod
+             "push"
+             listPush
+             (PackReceiver [RecvRestPosArgs "values"])
     >>= \mth -> exitEdh ets exit mth
  where
   listPush :: EdhHostProc
-  listPush (ArgsPack !args !kwargs') !exit' !ets | odNull kwargs' = do
+  listPush (ArgsPack !args !kwargs') !exit' !ets' | odNull kwargs' = do
     modifyTVar' lv (args ++)
-    exitEdh ets exit' l
-  listPush _ _ !ets = throwEdh ets UsageError "invalid args to list.push()"
-listPushProc _ _ =
-  throwEdhTx EvalError "bug: __ListType_push__ got unexpected args"
+    exitEdh ets' exit' l
+  listPush _ _ !ets' = throwEdh ets' UsageError "invalid args to list.push()"
+listPushProc _ _ !ets =
+  throwEdh ets EvalError "bug: __ListType_push__ got unexpected args"
 
 listPopProc :: EdhHostProc
 listPopProc (ArgsPack _ !kwargs) _ !ets | not $ odNull kwargs =
@@ -664,78 +659,80 @@ listPopProc _ _ !ets =
 
 -- | operator (?<=) - element-of tester
 elemProc :: EdhIntrinsicOp
-elemProc !lhExpr !rhExpr !exit = do
-  !ets <- ask
-  evalExpr lhExpr $ \ !lhVal -> evalExpr rhExpr $ \ !rhVal ->
-    case edhUltimate rhVal of
-      EdhArgsPack (ArgsPack !vs _) ->
-        exitEdhTx exit (EdhBool $ lhVal `elem` vs)
-      EdhList (List _ !l) -> do
-        ll <- readTVar l
-        exitEdh ets exit $ EdhBool $ lhVal `elem` ll
-      EdhDict (Dict _ !ds) -> iopdLookup lhVal ds >>= \case
-        Nothing -> exitEdh ets exit $ EdhBool False
-        Just _  -> exitEdh ets exit $ EdhBool True
-      _ -> exitEdhTx exit EdhContinue
+elemProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+  evalExpr rhExpr $ \ !rhVal -> case edhUltimate rhVal of
+    EdhArgsPack (ArgsPack !vs _ ) -> exitEdhTx exit (EdhBool $ lhVal `elem` vs)
+    EdhList     (List     _   !l) -> \ !ets -> do
+      ll <- readTVar l
+      exitEdh ets exit $ EdhBool $ lhVal `elem` ll
+    EdhDict (Dict _ !ds) -> \ !ets -> iopdLookup lhVal ds >>= \case
+      Nothing -> exitEdh ets exit $ EdhBool False
+      Just _  -> exitEdh ets exit $ EdhBool True
+    _ -> exitEdhTx exit edhNA
 
 
 -- | operator (|*) - prefix tester
 isPrefixOfProc :: EdhIntrinsicOp
 isPrefixOfProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  edhValueStr (edhUltimate lhVal) $ \lhRepr -> case lhRepr of
-    EdhString !lhStr -> evalExpr rhExpr $ \ !rhVal ->
-      edhValueStr (edhUltimate rhVal) $ \ !rhRepr -> case rhRepr of
-        EdhString !rhStr ->
-          exitEdhTx exit $ EdhBool $ lhStr `T.isPrefixOf` rhStr
-        _ -> error "bug: edhValueStr returned non-string"
-    _ -> error "bug: edhValueStr returned non-string"
+  evalExpr rhExpr $ \ !rhVal !ets ->
+    edhValueStr ets (edhUltimate lhVal) $ \ !lhStr ->
+      edhValueStr ets (edhUltimate rhVal)
+        $ \ !rhStr -> exitEdh ets exit $ EdhBool $ lhStr `T.isPrefixOf` rhStr
 
 -- | operator (*|) - suffix tester
 hasSuffixProc :: EdhIntrinsicOp
 hasSuffixProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  edhValueStr (edhUltimate lhVal) $ \lhRepr -> case lhRepr of
-    EdhString !lhStr -> evalExpr rhExpr $ \ !rhVal ->
-      edhValueStr (edhUltimate rhVal) $ \ !rhRepr -> case rhRepr of
-        EdhString !rhStr ->
-          exitEdhTx exit $ EdhBool $ rhStr `T.isSuffixOf` lhStr
-        _ -> error "bug: edhValueStr returned non-string"
-    _ -> error "bug: edhValueStr returned non-string"
+  evalExpr rhExpr $ \ !rhVal !ets ->
+    edhValueStr ets (edhUltimate lhVal) $ \ !lhStr ->
+      edhValueStr ets (edhUltimate rhVal)
+        $ \ !rhStr -> exitEdh ets exit $ EdhBool $ rhStr `T.isSuffixOf` lhStr
 
 
 -- | operator (=>) - prepender
 prpdProc :: EdhIntrinsicOp
-prpdProc !lhExpr !rhExpr !exit = do
-  !ets <- ask
-  evalExpr lhExpr $ \ !lhV ->
-    let !lhVal = edhDeCaseClose lhV
-    in  evalExpr rhExpr $ \ !rhVal -> case edhUltimate rhVal of
-          EdhArgsPack (ArgsPack !vs !kwargs) ->
-            exitEdhTx exit (EdhArgsPack $ ArgsPack (lhVal : vs) kwargs)
-          EdhList (List _ !l) -> do
-            modifyTVar' l (lhVal :)
-            exitEdh ets exit rhVal
-          EdhDict (Dict _ !ds) -> val2DictEntry ets lhVal $ \(k, v) -> do
-            setDictItem k v ds
-            exitEdh ets exit rhVal
-          _ -> exitEdhTx exit EdhContinue
+prpdProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+  evalExpr rhExpr $ \ !rhVal ->
+    let !lhv = edhDeCaseClose lhVal
+    in
+      case edhUltimate rhVal of
+        EdhArgsPack (ArgsPack !vs !kwargs) ->
+          exitEdhTx exit (EdhArgsPack $ ArgsPack (lhv : vs) kwargs)
+        EdhList (List _ !l) -> \ !ets -> do
+          modifyTVar' l (lhv :)
+          exitEdh ets exit rhVal
+        EdhDict (Dict _ !ds) -> \ !ets -> val2DictEntry ets lhv $ \(k, v) -> do
+          setDictItem k v ds
+          exitEdh ets exit rhVal
+        _ -> exitEdhTx exit edhNA
+
+
+-- | operator (<-) - event publisher
+evtPubProc :: EdhIntrinsicOp
+evtPubProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+  case edhUltimate lhVal of
+    EdhSink !es -> evalExpr rhExpr $ \ !rhVal !ets ->
+      let !rhv = edhDeCaseClose rhVal
+      in  do
+            publishEvent es rhv
+            exitEdh ets exit rhv
+    _ -> exitEdhTx exit edhNA
 
 
 -- | operator (>>) - list reverse prepender
 lstrvrsPrpdProc :: EdhIntrinsicOp
-lstrvrsPrpdProc !lhExpr !rhExpr !exit = do
-  !ets <- ask
-  evalExpr lhExpr $ \ !lhVal -> case edhUltimate lhVal of
+lstrvrsPrpdProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+  case edhUltimate lhVal of
     EdhList (List _ !ll) -> evalExpr rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
-        EdhArgsPack (ArgsPack !vs !kwargs) -> do
+        EdhArgsPack (ArgsPack !vs !kwargs) -> \ !ets -> do
           lll <- readTVar ll
           exitEdh ets exit $ EdhArgsPack $ ArgsPack (reverse lll ++ vs) kwargs
-        EdhList (List _ !l) -> do
+        EdhList (List _ !l) -> \ !ets -> do
           lll <- readTVar ll
           modifyTVar' l (reverse lll ++)
           exitEdh ets exit rhVal
-        _ -> exitEdhTx exit EdhContinue
-    _ -> exitEdhTx exit EdhContinue
+        _ -> exitEdhTx exit edhNA
+    _ -> exitEdhTx exit edhNA
 
 
 -- | operator (=<) - comprehension maker, appender
@@ -810,7 +807,7 @@ cprhProc !lhExpr !rhExpr !exit = do
             exitEdh ets exit (EdhArgsPack $ ArgsPack (vs ++ ll) kwvs)
           EdhDict (Dict _ !ds) -> dictEntryList ds >>= \ !del ->
             exitEdh ets exit (EdhArgsPack $ ArgsPack (vs ++ del) kwvs)
-          _ -> exitEdhTx exit EdhContinue
+          _ -> exitEdhTx exit edhNA
         EdhList (List _ !l) -> case edhUltimate rhVal of
           EdhArgsPack (ArgsPack !args _) -> do
             modifyTVar' l (++ args)
@@ -822,7 +819,7 @@ cprhProc !lhExpr !rhExpr !exit = do
           EdhDict (Dict _ !ds) -> dictEntryList ds >>= \ !del -> do
             modifyTVar' l (++ del)
             exitEdh ets exit lhVal
-          _ -> exitEdhTx exit EdhContinue
+          _ -> exitEdhTx exit edhNA
         EdhDict (Dict _ !ds) -> case edhUltimate rhVal of
           EdhArgsPack (ArgsPack _ !kwargs) -> do
             iopdUpdate [ (attrKeyValue k, v) | (k, v) <- odToList kwargs ] ds
@@ -835,19 +832,6 @@ cprhProc !lhExpr !rhExpr !exit = do
           EdhDict (Dict _ !ds') -> do
             flip iopdUpdate ds =<< iopdToList ds'
             exitEdh ets exit lhVal
-          _ -> exitEdhTx exit EdhContinue
-        _ -> exitEdhTx exit EdhContinue
-
-
--- | operator (<-) - event publisher
-evtPubProc :: EdhIntrinsicOp
-evtPubProc !lhExpr !rhExpr !exit = do
-  !ets <- ask
-  evalExpr lhExpr $ \ !lhVal -> case edhUltimate lhVal of
-    EdhSink !es -> evalExpr rhExpr $ \ !rhV ->
-      let !rhVal = edhDeCaseClose rhV
-      in  do
-            publishEvent es rhVal
-            exitEdh ets exit rhVal
-    _ -> exitEdhTx exit EdhContinue
+          _ -> exitEdhTx exit edhNA
+        _ -> exitEdhTx exit edhNA
 

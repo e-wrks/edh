@@ -801,10 +801,10 @@ data EdhValue =
   -- similar to NotImplemented as in Python, this is used to signal
   -- try-next-impl semantics:
   --
-  -- - @return default { throw xxx }@ can be used to signal that it has to have
+  -- - @default { throw xxx }@ can be used to signal that it has to have
   --   some more concrete implementation
   --
-  -- - @return default nil@ can be used to prefer an even more deferred default
+  -- - @NA := default nil@ can be used to prefer an even more deferred default
   --   if any exists, then an all-nil default chain will finally result in
   --   @nil@, i.e. non-exist
   | EdhDefault !Unique !Expr !(Maybe EdhThreadState)
@@ -1002,6 +1002,13 @@ edhNothingExpr :: Expr
 edhNothingExpr = InfixExpr ":="
                            (AttrExpr (DirectRef (NamedAttr "Nothing")))
                            (LitExpr NilLiteral)
+
+-- | NA for not-applicable, similar to @NotImplemented@ as in Python
+edhNA :: EdhValue
+edhNA = EdhNamedValue "NA"
+  $ EdhDefault (unsafePerformIO newUnique) (LitExpr NilLiteral) Nothing
+{-# NOINLINE edhNA #-}
+
 
 -- | With `nil` converted to `None` so the result will never be `nil`.
 --
@@ -1320,17 +1327,17 @@ data EdhTypeValue = TypeType
     | SymbolType
     | UUIDType
     | ObjectType
+    | ClassType
+    | HostClassType
     | DictType
     | ListType
     | PairType
     | ArgsPackType
     | BlockType
-    | HostClassType
     | HostMethodType
     | HostOperType
     | HostGenrType
     | IntrinsicType
-    | ClassType
     | MethodType
     | OperatorType
     | GeneratorType
