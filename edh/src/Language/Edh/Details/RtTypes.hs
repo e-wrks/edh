@@ -394,26 +394,6 @@ castObjectStore' !val = case edhUltimate val of
   _              -> return Nothing
 
 
--- | Clone a host data object, with the specified function to clone the
--- 'Dynamic' data store
---
--- CAVEATS:
---  *) all super objects are referenced rather than deep copied
-cloneHostObject
-  :: Object
-  -> (Dynamic -> (Dynamic -> STM ()) -> STM ())
-  -> (Object -> STM ())
-  -> STM ()
-cloneHostObject (Object _ !os !cls !supers) !dsClone !exit = do
-  !oid     <- unsafeIOToSTM newUnique
-  !supers' <- newTVar =<< readTVar supers
-  case os of
-    HostStore !dsv -> readTVar dsv >>= \ !ds -> dsClone ds $ \ !ds' -> do
-      !dsv' <- newTVar ds'
-      exit $ Object oid (HostStore dsv') cls supers'
-    _ -> error "not a data object"
-
-
 -- | A world for Edh programs to change
 data EdhWorld = EdhWorld {
     -- | root scope of this world
@@ -1553,6 +1533,47 @@ mkHostClass !scope !className !allocator !classStore !superClasses = do
   !metaClassObj =
     edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
 
+mkHostClass'
+  :: Scope
+  -> Text
+  -> EdhObjectAllocator
+  -> [Object]
+  -> (Scope -> STM ())
+  -> STM Object
+mkHostClass' !scope !className !allocator !superClasses !storeMod = do
+  !classStore <- iopdEmpty
+  !idCls      <- unsafeIOToSTM newUnique
+  !ssCls      <- newTVar superClasses
+  let !clsProc = ProcDefi idCls (AttrByName className) scope
+        $ ProcDecl (NamedAttr className) (PackReceiver []) (Right fakeHostProc)
+      !cls      = Class clsProc classStore allocator
+      !clsObj   = Object idCls (ClassStore cls) metaClassObj ssCls
+      !clsScope = scope { edh'scope'entity  = classStore
+                        , edh'scope'this    = clsObj
+                        , edh'scope'that    = clsObj
+                        , edh'excpt'hndlr   = defaultEdhExcptHndlr
+                        , edh'scope'proc    = clsProc
+                        , edh'scope'caller  = clsCreStmt
+                        , edh'effects'stack = []
+                        }
+  storeMod clsScope
+  return clsObj
+ where
+  fakeHostProc :: EdhHostProc
+  fakeHostProc _ !exit = exitEdhTx exit nil
+
+  !metaClassObj =
+    edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
+
+  clsCreStmt :: StmtSrc
+  clsCreStmt = StmtSrc
+    ( SourcePos { sourceName   = "<host-class-creation>"
+                , sourceLine   = mkPos 1
+                , sourceColumn = mkPos 1
+                }
+    , VoidStmt
+    )
+
 
 objectScope :: Object -> Maybe Scope
 objectScope !obj = case edh'obj'store obj of
@@ -1584,7 +1605,7 @@ objectScope !obj = case edh'obj'store obj of
   fakeHostProc _ !exit' = exitEdhTx exit' nil
   objCreStmt :: StmtSrc
   objCreStmt = StmtSrc
-    ( SourcePos { sourceName   = "<obj-cre>"
+    ( SourcePos { sourceName   = "<object-creation>"
                 , sourceLine   = mkPos 1
                 , sourceColumn = mkPos 1
                 }

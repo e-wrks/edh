@@ -11,7 +11,6 @@ import           Control.Monad.State.Strict
 import           Control.Concurrent
 import           Control.Concurrent.STM
 
-import           Data.Unique
 import           Data.Maybe
 import qualified Data.ByteString               as B
 import           Data.Text                      ( Text )
@@ -23,7 +22,9 @@ import           Data.List.NonEmpty             ( NonEmpty(..)
                                                 , (<|)
                                                 )
 import qualified Data.List.NonEmpty            as NE
+import           Data.Unique
 import           Data.Dynamic
+import           Data.Typeable
 
 import           Text.Megaparsec
 
@@ -250,8 +251,8 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
   AttrExpr ThisRef ->
     let !this = edh'scope'this scope
         noMagic :: EdhTx
-        noMagic _ets = setObjAttr ets this key val
-          $ \ !valSet -> exitEdh ets exit valSet
+        noMagic _ets =
+            setObjAttr ets this key val $ \ !valSet -> exitEdh ets exit valSet
     in  runEdhTx ets
           $ setObjAttrWSM (AttrByName "<-@") this key val noMagic exit
 
@@ -1150,8 +1151,8 @@ edhPrepareForLoop
   -> (EdhValue -> STM ())
   -> ((EdhTxExit -> EdhTx) -> STM ())
   -> STM ()
-edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
-  case deParen iterExpr of
+edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLooper
+  = case deParen iterExpr of
     CallExpr !calleeExpr !argsSndr -> -- loop over a procedure call
       runEdhTx etsLoopPrep $ evalExpr calleeExpr $ \ !calleeVal _ets ->
         case calleeVal of
@@ -1612,6 +1613,43 @@ evalEdh' !srcName !lineNo !srcCode !exit !ets = do
       edhWrapException (toException edhErr)
         >>= \ !exo -> edhThrow ets (EdhObject exo)
     Right !stmts -> runEdhTx ets $ evalBlock stmts exit
+
+
+withThisHostObj
+  :: forall a
+   . Typeable a
+  => EdhThreadState
+  -> (TVar Dynamic -> a -> STM ())
+  -> STM ()
+withThisHostObj !ets =
+  withHostObject ets (edh'scope'this $ contextScope $ edh'context ets)
+
+withHostObject
+  :: forall a
+   . Typeable a
+  => EdhThreadState
+  -> Object
+  -> (TVar Dynamic -> a -> STM ())
+  -> STM ()
+withHostObject !ets !obj !exit = withHostObject' obj naExit exit
+ where
+  naExit =
+    throwEdh ets UsageError
+      $  "not a host object of expected storage type: "
+      <> T.pack (show $ typeRep (Proxy :: Proxy a))
+
+withHostObject'
+  :: forall a
+   . Typeable a
+  => Object
+  -> STM ()
+  -> (TVar Dynamic -> a -> STM ())
+  -> STM ()
+withHostObject' !obj !naExit !exit = case edh'obj'store obj of
+  HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+    Just (hsd :: a) -> exit hsv hsd
+    _               -> naExit
+  _ -> naExit
 
 
 deParen :: Expr -> Expr
@@ -2520,10 +2558,9 @@ evalExpr (ExprWithSrc !x !sss) !exit = \ !ets -> intplExpr ets x $ \x' -> do
     u <- unsafeIOToSTM newUnique
     exitEdh ets exit $ EdhExpr u x' $ T.concat ssl
 
-evalExpr (LitExpr !lit) !exit =
-  \ !ets -> evalLiteral lit >>= exitEdh ets exit
+evalExpr (LitExpr !lit) !exit = \ !ets -> evalLiteral lit >>= exitEdh ets exit
 
-evalExpr (PrefixExpr PrefixPlus  !expr') !exit = evalExpr expr' exit
+evalExpr (PrefixExpr PrefixPlus !expr') !exit = evalExpr expr' exit
 
 evalExpr (PrefixExpr PrefixMinus !expr') !exit = evalExpr expr' $ \ !val ->
   case edhDeCaseClose val of

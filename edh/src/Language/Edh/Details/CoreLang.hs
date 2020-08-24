@@ -5,9 +5,12 @@ module Language.Edh.Details.CoreLang where
 import           Prelude
 -- import           Debug.Trace
 
+import           GHC.Conc                       ( unsafeIOToSTM )
+
 import           Control.Concurrent.STM
 
 import           Data.Text                      ( Text )
+import           Data.Unique
 
 import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
@@ -113,3 +116,31 @@ lookupEdhSelfAttr !this !key = case edh'obj'store this of
       _ -> lookupFromClassOf clsObj
     where !clsObj = edh'obj'class obj
 {-# INLINE lookupEdhSelfAttr #-}
+
+
+-- * Edh object manipulation
+
+
+cloneEdhObject :: Object -> Object -> ObjectStore -> STM Object
+cloneEdhObject !fromThis !fromThat !newStore = do
+  !oidNewThis <- unsafeIOToSTM newUnique
+  let !newThis =
+        fromThis { edh'obj'ident = oidNewThis, edh'obj'store = newStore }
+  if fromThis == fromThat
+    then return newThis
+    else do
+      let
+
+        substThis :: [Object] -> [Object] -> [Object]
+        substThis [] !supersNew = reverse supersNew
+        substThis (super : rest) !supersNew =
+          substThis rest
+            $ (if super == fromThis then newThis else super)
+            : supersNew
+
+      !supers     <- readTVar $ edh'obj'supers fromThat
+      !oidNewThat <- unsafeIOToSTM newUnique
+      !supersNew  <- newTVar $! substThis supers []
+      return
+        $ fromThat { edh'obj'ident = oidNewThat, edh'obj'supers = supersNew }
+
