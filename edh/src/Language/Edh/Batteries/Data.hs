@@ -749,89 +749,87 @@ lstrvrsPrpdProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 --  * tuple append
 --      (,) =< (...) / [...] / {...}
 cprhProc :: EdhIntrinsicOp
-cprhProc !lhExpr !rhExpr !exit = do
-  !ets <- ask
-  let insertToDict :: EdhValue -> DictStore -> STM ()
-      insertToDict !p !d = val2DictEntry ets p $ \(k, v) -> setDictItem k v d
-  case rhExpr of
-    ForExpr argsRcvr iterExpr doExpr -> evalExpr lhExpr $ \ !lhVal ->
-      case edhUltimate lhVal of
-        EdhList (List _ !l) -> edhForLoop
-          ets
-          argsRcvr
-          iterExpr
-          doExpr
-          (\val -> modifyTVar' l (++ [val]))
-          (\mkLoop -> runEdhTx ets $ mkLoop $ \_ -> exitEdhTx exit lhVal)
-        EdhDict (Dict _ !d) -> edhForLoop
-          ets
-          argsRcvr
-          iterExpr
-          doExpr
-          (\val -> insertToDict val d)
-          (\mkLoop -> runEdhTx ets $ mkLoop $ \_ -> exitEdhTx exit lhVal)
+cprhProc !lhExpr !rhExpr !exit = case rhExpr of
+  ForExpr argsRcvr iterExpr doExpr -> evalExpr lhExpr $ \ !lhVal !ets ->
+    case edhUltimate lhVal of
+      EdhList (List _ !l) -> edhPrepareForLoop
+        ets
+        argsRcvr
+        iterExpr
+        doExpr
+        (\ !val -> modifyTVar' l (++ [val]))
+        (\ !runLoop -> runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal)
+      EdhDict (Dict _ !d) -> edhPrepareForLoop
+        ets
+        argsRcvr
+        iterExpr
+        doExpr
+        (\ !val -> insertToDict ets val d)
+        (\ !runLoop -> runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal)
+      EdhArgsPack (ArgsPack !args !kwargs) -> do
+        !posArgs <- newTVar args
+        !kwArgs  <- iopdFromList $ odToList kwargs
+        edhPrepareForLoop
+            ets
+            argsRcvr
+            iterExpr
+            doExpr
+            (\ !val -> case val of
+              EdhArgsPack (ArgsPack !args' !kwargs') -> do
+                modifyTVar' posArgs (++ args')
+                iopdUpdate (odToList kwargs') kwArgs
+              _ -> modifyTVar' posArgs (++ [val])
+            )
+          $ \ !runLoop -> runEdhTx ets $ runLoop $ \_ _ets -> do
+              args'   <- readTVar posArgs
+              kwargs' <- iopdSnapshot kwArgs
+              exitEdh ets exit (EdhArgsPack $ ArgsPack args' kwargs')
+      _ ->
+        throwEdh ets EvalError
+          $  "don't know how to comprehend into a "
+          <> T.pack (edhTypeNameOf lhVal)
+          <> ": "
+          <> T.pack (show lhVal)
+  _ -> evalExpr lhExpr $ \ !lhVal -> evalExpr rhExpr $ \ !rhVal !ets ->
+    case edhUltimate lhVal of
+      EdhArgsPack (ArgsPack !vs !kwvs) -> case edhUltimate rhVal of
         EdhArgsPack (ArgsPack !args !kwargs) -> do
-          !posArgs <- newTVar args
-          !kwArgs  <- iopdFromList $ odToList kwargs
-          edhForLoop
-              ets
-              argsRcvr
-              iterExpr
-              doExpr
-              (\val -> case val of
-                EdhArgsPack (ArgsPack !args' !kwargs') -> do
-                  modifyTVar' posArgs (++ args')
-                  iopdUpdate (odToList kwargs') kwArgs
-                _ -> modifyTVar' posArgs (++ [val])
-              )
-            $ \mkLoop -> runEdhTx ets $ mkLoop $ \_ -> do
-                args'   <- readTVar posArgs
-                kwargs' <- iopdSnapshot kwArgs
-                exitEdh ets exit (EdhArgsPack $ ArgsPack args' kwargs')
-        _ ->
-          throwEdhTx EvalError
-            $  "don't know how to comprehend into a "
-            <> T.pack (edhTypeNameOf lhVal)
-            <> ": "
-            <> T.pack (show lhVal)
-    _ -> evalExpr lhExpr $ \ !lhVal -> evalExpr rhExpr $ \ !rhVal ->
-      case edhUltimate lhVal of
-        EdhArgsPack (ArgsPack !vs !kwvs) -> case edhUltimate rhVal of
-          EdhArgsPack (ArgsPack !args !kwargs) -> do
-            kwIOPD <- iopdFromList $ odToList kwvs
-            iopdUpdate (odToList kwargs) kwIOPD
-            kwargs' <- iopdSnapshot kwIOPD
-            exitEdh ets exit (EdhArgsPack $ ArgsPack (vs ++ args) kwargs')
-          EdhList (List _ !l) -> do
-            ll <- readTVar l
-            exitEdh ets exit (EdhArgsPack $ ArgsPack (vs ++ ll) kwvs)
-          EdhDict (Dict _ !ds) -> dictEntryList ds >>= \ !del ->
-            exitEdh ets exit (EdhArgsPack $ ArgsPack (vs ++ del) kwvs)
-          _ -> exitEdhTx exit edhNA
-        EdhList (List _ !l) -> case edhUltimate rhVal of
-          EdhArgsPack (ArgsPack !args _) -> do
-            modifyTVar' l (++ args)
+          !kwIOPD <- iopdFromList $ odToList kwvs
+          !iopdUpdate (odToList kwargs) kwIOPD
+          kwargs' <- iopdSnapshot kwIOPD
+          exitEdh ets exit (EdhArgsPack $ ArgsPack (vs ++ args) kwargs')
+        EdhList (List _ !l) -> do
+          !ll <- readTVar l
+          exitEdh ets exit (EdhArgsPack $ ArgsPack (vs ++ ll) kwvs)
+        EdhDict (Dict _ !ds) -> dictEntryList ds >>= \ !del ->
+          exitEdh ets exit (EdhArgsPack $ ArgsPack (vs ++ del) kwvs)
+        _ -> exitEdh ets exit edhNA
+      EdhList (List _ !l) -> case edhUltimate rhVal of
+        EdhArgsPack (ArgsPack !args _) -> do
+          modifyTVar' l (++ args)
+          exitEdh ets exit lhVal
+        EdhList (List _ !l') -> do
+          !ll <- readTVar l'
+          modifyTVar' l (++ ll)
+          exitEdh ets exit lhVal
+        EdhDict (Dict _ !ds) -> dictEntryList ds >>= \ !del -> do
+          modifyTVar' l (++ del)
+          exitEdh ets exit lhVal
+        _ -> exitEdh ets exit edhNA
+      EdhDict (Dict _ !ds) -> case edhUltimate rhVal of
+        EdhArgsPack (ArgsPack _ !kwargs) -> do
+          iopdUpdate [ (attrKeyValue k, v) | (k, v) <- odToList kwargs ] ds
+          exitEdh ets exit lhVal
+        EdhList (List _ !l) -> do
+          !ll <- readTVar l
+          pvlToDictEntries ets ll $ \ !del -> do
+            iopdUpdate del ds
             exitEdh ets exit lhVal
-          EdhList (List _ !l') -> do
-            ll <- readTVar l'
-            modifyTVar' l (++ ll)
-            exitEdh ets exit lhVal
-          EdhDict (Dict _ !ds) -> dictEntryList ds >>= \ !del -> do
-            modifyTVar' l (++ del)
-            exitEdh ets exit lhVal
-          _ -> exitEdhTx exit edhNA
-        EdhDict (Dict _ !ds) -> case edhUltimate rhVal of
-          EdhArgsPack (ArgsPack _ !kwargs) -> do
-            iopdUpdate [ (attrKeyValue k, v) | (k, v) <- odToList kwargs ] ds
-            exitEdh ets exit lhVal
-          EdhList (List _ !l) -> do
-            ll <- readTVar l
-            pvlToDictEntries ets ll $ \ !del -> do
-              iopdUpdate del ds
-              exitEdh ets exit lhVal
-          EdhDict (Dict _ !ds') -> do
-            flip iopdUpdate ds =<< iopdToList ds'
-            exitEdh ets exit lhVal
-          _ -> exitEdhTx exit edhNA
-        _ -> exitEdhTx exit edhNA
-
+        EdhDict (Dict _ !ds') -> do
+          flip iopdUpdate ds =<< iopdToList ds'
+          exitEdh ets exit lhVal
+        _ -> exitEdh ets exit edhNA
+      _ -> exitEdh ets exit edhNA
+ where
+  insertToDict :: EdhThreadState -> EdhValue -> DictStore -> STM ()
+  insertToDict !s !p !d = val2DictEntry s p $ \(k, v) -> setDictItem k v d

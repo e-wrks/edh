@@ -1142,7 +1142,7 @@ callEdhMethod' !gnr'caller !this !that !mth !mth'body !apk !scopeMod !exit !etsC
     }
 
 
-edhForLoop
+edhPrepareForLoop
   :: EdhThreadState -- ets to prepare the looping
   -> ArgsReceiver
   -> Expr
@@ -1150,7 +1150,7 @@ edhForLoop
   -> (EdhValue -> STM ())
   -> ((EdhTxExit -> EdhTx) -> STM ())
   -> STM ()
-edhForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
+edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLooper =
   case deParen iterExpr of
     CallExpr !calleeExpr !argsSndr -> -- loop over a procedure call
       runEdhTx etsLoopPrep $ evalExpr calleeExpr $ \ !calleeVal _ets ->
@@ -1785,7 +1785,7 @@ evalStmt' !stmt !exit = case stmt of
           $ \ !mkCall -> runEdhTx etsForker $ forkEdh id (mkCall endOfEdh)
 
     (ForExpr !argsRcvr !iterExpr !doExpr) -> \ !etsForker ->
-      edhForLoop etsForker argsRcvr iterExpr doExpr (const $ return ())
+      edhPrepareForLoop etsForker argsRcvr iterExpr doExpr (const $ return ())
         $ \ !runLoop -> runEdhTx etsForker $ forkEdh id (runLoop endOfEdh)
 
     _ -> forkEdh id $ evalExpr expr endOfEdh
@@ -1822,7 +1822,7 @@ evalStmt' !stmt !exit = case stmt of
             $ \ !mkCall -> schedDefered etsSched id (mkCall endOfEdh)
 
       (ForExpr !argsRcvr !iterExpr !doExpr) -> \ !etsSched ->
-        edhForLoop etsSched argsRcvr iterExpr doExpr (const $ return ())
+        edhPrepareForLoop etsSched argsRcvr iterExpr doExpr (const $ return ())
           $ \ !runLoop -> schedDefered etsSched id (runLoop endOfEdh)
 
       _ -> \ !etsSched -> schedDefered etsSched id $ evalExpr expr endOfEdh
@@ -2645,7 +2645,7 @@ evalExpr (YieldExpr !yieldExpr) !exit =
             !val -> exitEdh ets exit val
 
 evalExpr (ForExpr !argsRcvr !iterExpr !doExpr) !exit = \ !ets ->
-  edhForLoop ets argsRcvr iterExpr doExpr (const $ return ())
+  edhPrepareForLoop ets argsRcvr iterExpr doExpr (const $ return ())
     $ \ !runLoop -> runEdhTx ets (runLoop exit)
 
 evalExpr (PerformExpr !effAddr) !exit = \ !ets ->
