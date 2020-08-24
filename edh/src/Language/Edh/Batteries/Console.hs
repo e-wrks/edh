@@ -17,12 +17,14 @@ import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.List.NonEmpty            as NE
 import qualified Data.HashMap.Strict           as Map
+import           Data.Dynamic
 
 import           Text.Megaparsec
 
 import           Data.Lossless.Decimal          ( decimalToInteger )
 
 import           Language.Edh.Control
+import           Language.Edh.Runtime
 import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
@@ -31,75 +33,66 @@ import           Language.Edh.Details.Utils
 
 -- | operator (<|)
 loggingProc :: EdhIntrinsicOp
-loggingProc !lhExpr !rhExpr !exit = do
-  !ets <- ask
-  let !ctx = edh'context ets
-      parseSpec :: EdhValue -> Maybe (Int, StmtSrc)
-      parseSpec = \case
-        EdhDecimal !level ->
-          (, contextStmt ctx) . fromInteger <$> decimalToInteger level
-        EdhPair (EdhDecimal !level) (EdhDecimal !unwind) ->
-          liftA2 (,) (fromInteger <$> decimalToInteger level)
-            $   scopeCaller
-            .   contextFrame ctx
-            .   fromInteger
-            <$> decimalToInteger unwind
-        _ -> Nothing
-  evalExpr lhExpr $ \(OriginalValue !lhVal _ _) ->
+loggingProc !lhExpr !rhExpr !exit !ets =
+  runEdhTx ets $ evalExpr lhExpr $ \ !lhVal _ets ->
     case parseSpec $ edhDeCaseClose lhVal of
       Just (logLevel, StmtSrc (srcPos, _)) -> if logLevel < 0
         -- as the log queue is a TBQueue per se, log msgs from a failing STM
         -- transaction has no way to go into the queue then get logged, but the
         -- failing cases are especially in need of diagnostics, so negative log
         -- level number is used to instruct a debug trace.
-        then contEdhSTM $ do
-          th <- unsafeIOToSTM myThreadId
+        then do
+          !th <- unsafeIOToSTM myThreadId
           let !tracePrefix =
                 " 🐞 " <> show th <> " 👉 " <> sourcePosPretty srcPos <> " ❗ "
-          runEdhTx ets $ evalExpr rhExpr $ \(OriginalValue !rhVal _ _) ->
-            case edhDeCaseClose rhVal of
-              EdhString !logStr ->
-                trace (tracePrefix ++ T.unpack logStr) $ exitEdhTx exit nil
-              _ -> edhValueRepr rhVal $ \(OriginalValue !rhRepr _ _) ->
-                case rhRepr of
-                  EdhString !logStr ->
-                    trace (tracePrefix ++ T.unpack logStr)
-                      $ exitEdhTx exit nil
-                  _ ->
-                    trace (tracePrefix ++ show rhRepr) $ exitEdhTx exit nil
-        else contEdhSTM $ do
-          let console      = worldConsole $ contextWorld ctx
-              !conLogLevel = consoleLogLevel console
-              !logger      = consoleLogger console
-          if logLevel < conLogLevel
-            then -- drop log msg without even eval it
-                 exitEdh ets exit nil
-            else
-              runEdhTx ets $ evalExpr rhExpr $ \(OriginalValue !rhV _ _) -> do
-                let !rhVal  = edhDeCaseClose rhV
-                    !srcLoc = if conLogLevel <= 20
-                      then -- with source location info
-                           Just $ sourcePosPretty srcPos
-                      else -- no source location info
-                           Nothing
-                contEdhSTM $ case rhVal of
-                  EdhArgsPack !apk -> do
-                    logger logLevel srcLoc apk
-                    exitEdh ets exit nil
-                  _ -> do
-                    logger logLevel srcLoc $ ArgsPack [rhVal] odEmpty
-                    exitEdh ets exit nil
-      _ -> throwEdh EvalError $ "invalid log target: " <> T.pack (show lhVal)
+          runEdhTx ets $ evalExpr rhExpr $ \ !rhVal _ets ->
+            edhValueStr ets (edhDeCaseClose rhVal) $ \ !logStr ->
+              trace (tracePrefix ++ T.unpack logStr) $ exitEdh ets exit nil
+        else if logLevel < conLogLevel
+          then -- drop log msg without even eval it
+               exitEdh ets exit nil
+          else runEdhTx ets $ evalExpr rhExpr $ \ !rhVal _ets -> do
+            let !rhv    = edhDeCaseClose rhVal
+                !srcLoc = if conLogLevel <= 20
+                  then -- with source location info
+                       Just $ sourcePosPretty srcPos
+                  else -- no source location info
+                       Nothing
+            case rhv of
+              EdhArgsPack !apk -> do
+                logger logLevel srcLoc apk
+                exitEdh ets exit nil
+              _ -> do
+                logger logLevel srcLoc $ ArgsPack [rhv] odEmpty
+                exitEdh ets exit nil
+      _ ->
+        throwEdh ets EvalError $ "invalid log target: " <> T.pack (show lhVal)
+ where
+  !ctx         = edh'context ets
+  !console     = edh'world'console $ edh'ctx'world ctx
+  !conLogLevel = consoleLogLevel console
+  !logger      = consoleLogger console
+
+  parseSpec :: EdhValue -> Maybe (Int, StmtSrc)
+  parseSpec = \case
+    EdhDecimal !level ->
+      (, edh'ctx'stmt ctx) . fromInteger <$> decimalToInteger level
+    EdhPair (EdhDecimal !level) (EdhDecimal !unwind) ->
+      liftA2 (,) (fromInteger <$> decimalToInteger level)
+        $   edh'scope'caller
+        .   contextFrame ctx
+        .   fromInteger
+        <$> decimalToInteger unwind
+    _ -> Nothing
 
 
 -- | host method console.exit(***apk)
 --
--- this just throws a 'ProgramHalt', godforbid no one recover from it.
+-- this is currently equivalent to @throw ProgramHalt(***apk)@
 conExitProc :: EdhHostProc
-conExitProc !apk _ = ask >>= \ets -> -- cross check with 'createEdhWorld'
-  contEdhSTM $ _getEdhErrClass ets (AttrByName "ProgramHalt") >>= \ec ->
-    runEdhTx ets $ createEdhObject ec apk $ \(OriginalValue !exv _ _) ->
-      edhThrow exv
+conExitProc !apk _ !ets = case apk of
+  ArgsPack [v] !kwargs | odNull kwargs -> haltEdhProgram ets v
+  _ -> haltEdhProgram ets $ EdhArgsPack apk
 
 
 -- | The default Edh command prompts
@@ -110,41 +103,49 @@ defaultEdhPS2 = "Đ| "
 
 -- | host method console.readSource(ps1="(db)Đ: ", ps2="(db)Đ| ")
 conReadSourceProc :: EdhHostProc
-conReadSourceProc !apk !exit = ask >>= \ets ->
-  case parseArgsPack (defaultEdhPS1, defaultEdhPS2) argsParser apk of
-    Left  err        -> throwEdh UsageError err
-    Right (ps1, ps2) -> contEdhSTM $ do
-      let !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context ets
-      cmdIn <- newEmptyTMVar
+conReadSourceProc !apk !exit !ets = if edh'in'tx ets
+  then throwEdh ets
+                UsageError
+                "you don't read console from within a transaction"
+  else case parseArgsPack (defaultEdhPS1, defaultEdhPS2) argsParser apk of
+    Left  err        -> throwEdh ets UsageError err
+    Right (ps1, ps2) -> do
+      !cmdIn <- newEmptyTMVar
       writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
-      edhPerformSTM ets (readTMVar cmdIn)
-        $ \(EdhInput !name !lineNo !lines_) -> case name of
-            "" -> exitEdhTx exit $ EdhString $ T.unlines lines_
-            _ ->
-              exitEdhTx exit
-                $ EdhPair
-                    (EdhPair (EdhString name) (EdhDecimal $ fromIntegral lineNo)
-                    )
-                $ EdhString
-                $ T.unlines lines_
+      runEdhTx ets
+        $   edhContSTM
+        $   readTMVar cmdIn
+        >>= \(EdhInput !name !lineNo !lines_) -> case name of
+              "" -> exitEdh ets exit $ EdhString $ T.unlines lines_
+              _ ->
+                exitEdh ets exit
+                  $ EdhPair
+                      (EdhPair (EdhString name)
+                               (EdhDecimal $ fromIntegral lineNo)
+                      )
+                  $ EdhString
+                  $ T.unlines lines_
  where
+  !ctx = edh'context ets
+  !ioQ = consoleIO $ edh'world'console $ edh'ctx'world ctx
+
   argsParser =
     ArgsPackParser
-        [ \arg (_, ps2') -> case arg of
+        [ \ !arg (_, ps2') -> case arg of
           EdhString ps1s -> Right (ps1s, ps2')
           _              -> Left "invalid ps1"
-        , \arg (ps1', _) -> case arg of
+        , \ !arg (ps1', _) -> case arg of
           EdhString ps2s -> Right (ps1', ps2s)
           _              -> Left "invalid ps2"
         ]
       $ Map.fromList
           [ ( "ps1"
-            , \arg (_, ps2') -> case arg of
+            , \ !arg (_, ps2') -> case arg of
               EdhString ps1s -> Right (ps1s, ps2')
               _              -> Left "invalid ps1"
             )
           , ( "ps2"
-            , \arg (ps1', _) -> case arg of
+            , \ !arg (ps1', _) -> case arg of
               EdhString ps2s -> Right (ps1', ps2s)
               _              -> Left "invalid ps2"
             )
@@ -152,134 +153,145 @@ conReadSourceProc !apk !exit = ask >>= \ets ->
 
 -- | host method console.readCommand(ps1="Đ: ", ps2="Đ| ", inScopeOf=None)
 conReadCommandProc :: EdhHostProc
-conReadCommandProc !apk !exit = ask >>= \ets ->
-  case parseArgsPack (defaultEdhPS1, defaultEdhPS2, Nothing) argsParser apk of
-    Left  err                   -> throwEdh UsageError err
-    Right (ps1, ps2, inScopeOf) -> contEdhSTM $ do
-      let ctx  = edh'context ets
-          !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context ets
-      -- mind to inherit this host proc's exception handler anyway
-      cmdScope <- case inScopeOf of
-        Just !so -> isScopeWrapper ctx so >>= \case
-          True -> return $ (wrappedScopeOf so)
-            { exceptionHandler = exceptionHandler $ contextScope ctx
-            }
-          False -> return $ (contextScope ctx)
-           -- eval cmd source in the specified object's (probably a module)
-           -- context scope
-            { scopeEntity = objEntity so
-            , thisObject  = so
-            , thatObject  = so
-            , scopeProc   = objClass so
-            , scopeCaller = StmtSrc
-                              ( SourcePos { sourceName   = "<console-cmd>"
-                                          , sourceLine   = mkPos 1
-                                          , sourceColumn = mkPos 1
-                                          }
-                              , VoidStmt
-                              )
-            }
-        _ -> case NE.tail $ callStack ctx of
-          -- eval cmd source with caller's this/that, and lexical context,
-          -- while the entity is already the same as caller's
-          callerScope : _ -> return $ (contextScope ctx)
-            { thisObject  = thisObject callerScope
-            , thatObject  = thatObject callerScope
-            , scopeProc   = scopeProc callerScope
-            , scopeCaller = scopeCaller callerScope
-            }
-          _ -> return $ contextScope ctx
-      let !etsCmd = ets
-            { edh'context = ctx
-                              { callStack        = cmdScope
-                                                     NE.:| NE.tail (callStack ctx)
-                              , contextExporting = False
-                              }
-            }
-      cmdIn <- newEmptyTMVar
-      writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
-      edhPerformSTM ets (readTMVar cmdIn)
-        $ \(EdhInput !name !lineNo !lines_) -> local (const etsCmd) $ evalEdh'
-            (if T.null name then "<console>" else T.unpack name)
-            lineNo
-            (T.unlines lines_)
-            exit
+conReadCommandProc !apk !exit !ets = if edh'in'tx ets
+  then throwEdh ets
+                UsageError
+                "you don't read console from within a transaction"
+  else
+    case parseArgsPack (defaultEdhPS1, defaultEdhPS2, Nothing) argsParser apk of
+      Left err -> throwEdh ets UsageError err
+      Right (ps1, ps2, inScopeOf) ->
+        let
+          doReadCmd :: Scope -> STM ()
+          doReadCmd !cmdScope = do
+            !cmdIn <- newEmptyTMVar
+            writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
+            runEdhTx ets
+              $   edhContSTM
+              $   readTMVar cmdIn
+              >>= \(EdhInput !name !lineNo !lines_) ->
+                    runEdhTx etsCmd
+                      $ evalEdh'
+                          (if T.null name then "<console>" else T.unpack name)
+                          lineNo
+                          (T.unlines lines_)
+                      $ edhSwitchState ets
+                      . exitEdhTx exit
+           where
+            !etsCmd = ets
+              { edh'context = ctx
+                { edh'ctx'stack =
+                  cmdScope
+                      {
+                        -- mind to inherit caller's exception handler anyway
+                        edh'excpt'hndlr  = edh'excpt'hndlr callerScope
+                        -- use a meaningful caller stmt
+                      , edh'scope'caller = StmtSrc
+                                             ( SourcePos
+                                               { sourceName   = "<console-cmd>"
+                                               , sourceLine   = mkPos 1
+                                               , sourceColumn = mkPos 1
+                                               }
+                                             , VoidStmt
+                                             )
+                      }
+                    NE.:| NE.tail (edh'ctx'stack ctx)
+                }
+              }
+        in
+          case inScopeOf of
+            Just !so -> case objectScope so of
+              -- eval cmd source in scope of the specified object
+              Just !inScope -> doReadCmd inScope
+              Nothing       -> case edh'obj'store so of
+                HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+                  -- the specified objec is a scope object, eval cmd source in
+                  -- the wrapped scope
+                  Just (inScope :: Scope) -> doReadCmd inScope
+                  _                       -> throwEdh
+                    ets
+                    UsageError
+                    "you don't read command inScopeOf a host object"
+                _ -> error "bug: objectScope not working for non-host object"
+
+            -- eval cmd source with caller's scope
+            _ -> doReadCmd callerScope
+
  where
+  !ctx         = edh'context ets
+  !callerScope = contextFrame ctx 1
+  !ioQ         = consoleIO $ edh'world'console $ edh'ctx'world ctx
+
   argsParser =
     ArgsPackParser
-        [ \arg (_, ps2', so) -> case arg of
+        [ \ !arg (_, ps2', so) -> case arg of
           EdhString ps1s -> Right (ps1s, ps2', so)
           _              -> Left "invalid ps1"
-        , \arg (ps1', _, so) -> case arg of
+        , \ !arg (ps1', _, so) -> case arg of
           EdhString ps2s -> Right (ps1', ps2s, so)
           _              -> Left "invalid ps2"
         ]
       $ Map.fromList
           [ ( "ps1"
-            , \arg (_, ps2', so) -> case arg of
+            , \ !arg (_, ps2', so) -> case arg of
               EdhString ps1s -> Right (ps1s, ps2', so)
               _              -> Left "invalid ps1"
             )
           , ( "ps2"
-            , \arg (ps1', _, so) -> case arg of
+            , \ !arg (ps1', _, so) -> case arg of
               EdhString ps2s -> Right (ps1', ps2s, so)
               _              -> Left "invalid ps2"
             )
           , ( "inScopeOf"
-            , \arg (ps1, ps2, _) -> case arg of
-              EdhObject so -> Right (ps1, ps2, Just so)
-              _            -> Left "invalid inScopeOf object"
+            , \ !arg (ps1, ps2, _) -> case arg of
+              EdhObject !so -> Right (ps1, ps2, Just so)
+              _             -> Left "invalid inScopeOf object"
             )
           ]
 
 
 -- | host method console.print(*args, **kwargs)
 conPrintProc :: EdhHostProc
-conPrintProc (ArgsPack !args !kwargs) !exit = ask >>= \ets -> contEdhSTM $ do
-  let !ioQ = consoleIO $ worldConsole $ contextWorld $ edh'context ets
-      printVS :: [EdhValue] -> [(AttrKey, EdhValue)] -> STM ()
-      printVS [] []              = exitEdh ets exit nil
-      printVS [] ((k, v) : rest) = case v of
-        EdhString !s -> do
-          writeTBQueue ioQ
-            $  ConsoleOut
-            $  "  "
-            <> T.pack (show k)
-            <> "="
-            <> s
-            <> "\n"
-          printVS [] rest
-        _ -> runEdhTx ets $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
-          case vr of
-            EdhString !s -> contEdhSTM $ do
-              writeTBQueue ioQ
-                $  ConsoleOut
-                $  "  "
-                <> T.pack (show k)
-                <> "="
-                <> s
-                <> "\n"
-              printVS [] rest
-            _ -> error "bug"
-      printVS (v : rest) !kvs = case v of
-        EdhString !s -> do
-          writeTBQueue ioQ $ ConsoleOut $ s <> "\n"
-          printVS rest kvs
-        _ -> runEdhTx ets $ edhValueRepr v $ \(OriginalValue !vr _ _) ->
-          case vr of
-            EdhString !s -> contEdhSTM $ do
-              writeTBQueue ioQ $ ConsoleOut $ s <> "\n"
-              printVS rest kvs
-            _ -> error "bug"
-  printVS args $ odToList kwargs
+conPrintProc (ArgsPack !args !kwargs) !exit !ets = printVS args
+  $ odToList kwargs
+ where
+  !ctx = edh'context ets
+  !ioQ = consoleIO $ edh'world'console $ edh'ctx'world ctx
+
+  printVS :: [EdhValue] -> [(AttrKey, EdhValue)] -> STM ()
+  printVS [] []              = exitEdh ets exit nil
+  printVS [] ((k, v) : rest) = case v of
+    EdhString !s -> do
+      writeTBQueue ioQ
+        $  ConsoleOut
+        $  "  "
+        <> T.pack (show k)
+        <> "="
+        <> s
+        <> "\n"
+      printVS [] rest
+    _ -> edhValueRepr ets v $ \ !s -> do
+      writeTBQueue ioQ
+        $  ConsoleOut
+        $  "  "
+        <> T.pack (show k)
+        <> "="
+        <> s
+        <> "\n"
+      printVS [] rest
+  printVS (v : rest) !kvs = case v of
+    EdhString !s -> do
+      writeTBQueue ioQ $ ConsoleOut $ s <> "\n"
+      printVS rest kvs
+    _ -> edhValueRepr ets v $ \ !s -> do
+      writeTBQueue ioQ $ ConsoleOut $ s <> "\n"
+      printVS rest kvs
 
 
 conNowProc :: EdhHostProc
-conNowProc _ !exit = do
-  ets <- ask
-  contEdhSTM $ do
-    nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ getTime Realtime
-    exitEdh ets exit (EdhDecimal $ fromInteger nanos)
+conNowProc _ !exit !ets = do
+  nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ getTime Realtime
+  exitEdh ets exit (EdhDecimal $ fromInteger nanos)
 
 
 data PeriodicArgs = PeriodicArgs {
@@ -289,63 +301,74 @@ data PeriodicArgs = PeriodicArgs {
 
 timelyNotify
   :: EdhThreadState -> PeriodicArgs -> EdhGenrCaller -> EdhTxExit -> STM ()
-timelyNotify !ets (PeriodicArgs !delayMicros !wait1st) (!ets', !iter'cb) !exit
-  = if wait1st
-    then edhPerformIO ets (threadDelay delayMicros) $ \() -> contEdhSTM notifOne
-    else notifOne
- where
-  notifOne = do
-    nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ getTime Realtime
-    runEdhTx ets' $ iter'cb (EdhDecimal $ fromInteger nanos) $ \case
-      Left (etsThrower, exv) ->
-        edhThrow etsThrower { edh'context = edh'context ets } exv
-      Right EdhBreak         -> exitEdh ets exit nil
-      Right (EdhReturn !rtn) -> exitEdh ets exit rtn
-      _ ->
-        edhPerformIO ets (threadDelay delayMicros) $ \() -> contEdhSTM notifOne
+timelyNotify !ets (PeriodicArgs !delayMicros !wait1st) (_, !iter'cb) !exit =
+  if edh'in'tx ets
+    then throwEdh ets UsageError "can not be called from within a transaction"
+    else do -- use a 'TMVar' filled asynchronously, so perceivers on the same
+      -- thread dont' get blocked by this wait
+      !notif <- newEmptyTMVar
+      let notifOne = do
+            !nanos <- takeTMVar notif
+            iter'cb (EdhDecimal $ fromInteger nanos) $ \case
+              Left  !exv             -> edhThrow ets exv
+              Right EdhBreak         -> exitEdh ets exit nil
+              Right (EdhReturn !rtn) -> exitEdh ets exit rtn
+              _                      -> schedNext
+          schedNext = runEdhTx ets $ edhContIO $ do
+            void $ forkIO $ do -- todo this is less optimal
+              threadDelay delayMicros
+              !nanos <- (toNanoSecs <$>) $ getTime Realtime
+              atomically $ void $ tryPutTMVar notif nanos
+            atomically $ runEdhTx ets $ edhContSTM notifOne
+      if wait1st
+        then schedNext
+        else do
+          putTMVar notif =<< unsafeIOToSTM (toNanoSecs <$> getTime Realtime)
+          notifOne
+
 
 -- | host generator console.everyMicros(n, wait1st=true) - with fixed interval
 conEveryMicrosProc :: EdhHostProc
-conEveryMicrosProc !apk !exit = ask >>= \ets ->
-  case generatorCaller $ edh'context ets of
-    Nothing -> throwEdh EvalError "can only be called as generator"
+conEveryMicrosProc !apk !exit !ets =
+  case edh'ctx'genr'caller $ edh'context ets of
+    Nothing -> throwEdh ets EvalError "can only be called as generator"
     Just genr'caller ->
       case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
-        Right !pargs -> contEdhSTM $ timelyNotify ets pargs genr'caller exit
-        Left  !err   -> throwEdh UsageError err
+        Right !pargs -> timelyNotify ets pargs genr'caller exit
+        Left  !err   -> throwEdh ets UsageError err
 
 -- | host generator console.everyMillis(n, wait1st=true) - with fixed interval
 conEveryMillisProc :: EdhHostProc
-conEveryMillisProc !apk !exit = ask >>= \ets ->
-  case generatorCaller $ edh'context ets of
-    Nothing -> throwEdh EvalError "can only be called as generator"
+conEveryMillisProc !apk !exit !ets =
+  case edh'ctx'genr'caller $ edh'context ets of
+    Nothing -> throwEdh ets EvalError "can only be called as generator"
     Just genr'caller ->
       case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
-        Right !pargs -> contEdhSTM $ timelyNotify
+        Right !pargs -> timelyNotify
           ets
           pargs { periodic'interval = 1000 * periodic'interval pargs }
           genr'caller
           exit
-        Left !err -> throwEdh UsageError err
+        Left !err -> throwEdh ets UsageError err
 
 -- | host generator console.everySeconds(n, wait1st=true) - with fixed interval
 conEverySecondsProc :: EdhHostProc
-conEverySecondsProc !apk !exit = ask >>= \ets ->
-  case generatorCaller $ edh'context ets of
-    Nothing -> throwEdh EvalError "can only be called as generator"
+conEverySecondsProc !apk !exit !ets =
+  case edh'ctx'genr'caller $ edh'context ets of
+    Nothing -> throwEdh ets EvalError "can only be called as generator"
     Just genr'caller ->
       case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
-        Right !pargs -> contEdhSTM $ timelyNotify
+        Right !pargs -> timelyNotify
           ets
           pargs { periodic'interval = 1000000 * periodic'interval pargs }
           genr'caller
           exit
-        Left !err -> throwEdh UsageError err
+        Left !err -> throwEdh ets UsageError err
 
 parsePeriodicArgs :: ArgsPackParser PeriodicArgs
 parsePeriodicArgs =
   ArgsPackParser
-      [ \arg pargs -> case arg of
+      [ \ !arg pargs -> case arg of
           EdhDecimal !d -> case decimalToInteger d of
             Just !i -> Right $ pargs { periodic'interval = fromIntegral i }
             _ -> Left $ "invalid interval, expect an integer but: " <> T.pack
@@ -355,7 +378,7 @@ parsePeriodicArgs =
       ]
     $ Map.fromList
         [ ( "wait1st"
-          , \arg pargs -> case arg of
+          , \ !arg pargs -> case arg of
             EdhBool !w -> Right pargs { periodic'wait1st = w }
             _ -> Left $ "invalid wait1st, expect true or false but: " <> T.pack
               (show arg)
