@@ -81,7 +81,7 @@ module Language.Edh.EHI
   , packEdhArgs
   , OriginalValue(..)
   , EdhTx
-  , EdhProgState(..)
+  , EdhThreadState(..)
   , EdhTask(..)
   , Context(..)
   , Scope(..)

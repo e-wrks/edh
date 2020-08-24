@@ -163,6 +163,12 @@ mkUUID :: STM UUID.UUID
 mkUUID = unsafeIOToSTM UUID.nextRandom
 
 
+mkDefault :: Expr -> STM EdhValue
+mkDefault !x = do
+  !u <- unsafeIOToSTM newUnique
+  return $ EdhDefault u x Nothing
+
+
 -- | A list in Edh is a multable, singly-linked, prepend list.
 data List = List !Unique !(TVar [EdhValue])
 instance Eq List where

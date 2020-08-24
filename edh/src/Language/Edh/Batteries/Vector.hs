@@ -52,7 +52,7 @@ vecHostCtor !etsCtor (ArgsPack !ctorArgs !ctorKwargs) !ctorExit = do
       throwEdh etsCtor UsageError $ "Invalid length: " <> T.pack
         (show badLenVal)
 
-vecMethods :: EdhProgState -> STM [(AttrKey, EdhValue)]
+vecMethods :: EdhThreadState -> STM [(AttrKey, EdhValue)]
 vecMethods !etsModule = sequence
   [ (AttrByName nm, ) <$> mkHostProc scope vc nm hp mthArgs
   | (nm, vc, hp, mthArgs) <-

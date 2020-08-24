@@ -288,7 +288,7 @@ data PeriodicArgs = PeriodicArgs {
   }
 
 timelyNotify
-  :: EdhProgState -> PeriodicArgs -> EdhGenrCaller -> EdhTxExit -> STM ()
+  :: EdhThreadState -> PeriodicArgs -> EdhGenrCaller -> EdhTxExit -> STM ()
 timelyNotify !ets (PeriodicArgs !delayMicros !wait1st) (!ets', !iter'cb) !exit
   = if wait1st
     then edhPerformIO ets (threadDelay delayMicros) $ \() -> contEdhSTM notifOne
