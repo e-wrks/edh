@@ -419,6 +419,17 @@ instance Eq EdhWorld where
   x == y =
     edh'scope'this (edh'world'root x) == edh'scope'this (edh'world'root y)
 
+createNamespace :: EdhWorld -> Text -> [(AttrKey, EdhValue)] -> STM Object
+createNamespace !world !nsName !nsArts = do
+  !oidNs <- unsafeIOToSTM newUnique
+  !hs    <- iopdFromList $ (AttrByName "__name__", EdhString nsName) : nsArts
+  !ss    <- newTVar []
+  let !nsObj = Object oidNs (HashStore hs) nsClass ss
+  return nsObj
+ where
+  !rootScope = edh'world'root world
+  !nsClass   = edh'obj'class $ edh'scope'this rootScope
+
 type ModuleId = Text
 
 worldContext :: EdhWorld -> Context

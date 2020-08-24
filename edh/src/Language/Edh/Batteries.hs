@@ -15,7 +15,6 @@ import           Control.Monad.Reader
 import           Control.Concurrent
 import           Control.Concurrent.STM
 
-import           Data.Unique
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.Text.IO                  as TIO
@@ -246,528 +245,470 @@ defaultEdhConsole !inputSettings = do
 
 
 installEdhBatteries :: MonadIO m => EdhWorld -> m ()
-installEdhBatteries world = liftIO $ do
-  conClassUniq <- newUnique
-  void $ runEdhProgram' (worldContext world) $ do
-    ets <- ask
-    contEdhSTM $ do
+installEdhBatteries world =
+  liftIO $ void $ runEdhProgram' (worldContext world) $ \ !ets -> do
 
       -- TODO survey for best practices & advices on precedences here
       --      once it's declared, can not be changed in the world.
 
-      declareEdhOperators
-        world
-        "<batteries>"
-        [ -- format: (symbol, precedence)
+    declareEdhOperators
+      world
+      "<batteries>"
+      [ -- format: (symbol, precedence)
 
-          -- annotation
-          ( "::"
-          , -9
-          )
+        -- annotation
+        ( "::"
+        , -9
+        )
 
-          -- branch
-        , ( "->"
-          , -1
-          )
-          -- catch
-        , ( "$=>"
-          , -2
-          )
-          -- finally
-        , ( "@=>"
-          , -2
-          )
+        -- branch
+      , ( "->"
+        , -1
+        )
+        -- catch
+      , ( "$=>"
+        , -2
+        )
+        -- finally
+      , ( "@=>"
+        , -2
+        )
 
-        -- the attribute key dereferencing operator
-        , ( "@"
-          , 10
-          )
-        -- attribute tempter, 
-        -- address an attribute off an object if possible, nil otherwise
-        , ("?", 10)
-        , ( "?@"
-          , 10
-          )
+      -- the attribute key dereferencing operator
+      , ( "@"
+        , 10
+        )
+      -- attribute tempter, 
+      -- address an attribute off an object if possible, nil otherwise
+      , ("?", 10)
+      , ( "?@"
+        , 10
+        )
 
-        -- the function application operator
-        , ( "$"
-          , -5
-          )
-        -- the flipped function application operator, a.k.a pipe operator
-        , ( "|"
-          , -5
-          )
+      -- the function application operator
+      , ( "$"
+        , -5
+        )
+      -- the flipped function application operator, a.k.a pipe operator
+      , ( "|"
+        , -5
+        )
 
-        -- assignments, make it lower than (++), so don't need to quote `a = b ++ c`
-        , ("=", 0)
-        , ( "?="
-          , 0
-          )
-        -- the definition operator, creates named value in Edh
-        , (":=", 1)
-        , ( "?:="
-          , 1
-          )
+      -- assignments, make it lower than (++), so don't need to quote `a = b ++ c`
+      , ("=", 0)
+      , ( "?="
+        , 0
+        )
+      -- the definition operator, creates named value in Edh
+      , (":=", 1)
+      , ( "?:="
+        , 1
+        )
 
-        -- syntactic sugars for (=)
-        , ("+=" , 2)
-        , ("-=" , 2)
-        , ("*=" , 2)
-        , ("/=" , 2)
-        , ("//=", 2)
-        , ("%=" , 2)
-        , ( "**="
-          , 2
-          )
+      -- syntactic sugars for (=)
+      , ("+=" , 2)
+      , ("-=" , 2)
+      , ("*=" , 2)
+      , ("/=" , 2)
+      , ("//=", 2)
+      , ("%=" , 2)
+      , ( "**="
+        , 2
+        )
 
-        -- arithmetic
-        , ("+" , 6)
-        , ("-" , 6)
-        , ("*" , 7)
-        , ("/" , 7)
-        , ("//", 7)
-        , ("%" , 7)
-        , ( "**"
-          , 8
-          )
-        -- comparations
-        , ( "=="
-          , 4
-          ) -- deep-value-wise equality test
-        , ( "!="
-          , 4
-          ) -- inversed identity-wise equality test
-            -- C style here, as (/=) is used for inplace division
-        , ( "is not"
-          , 4
-          ) -- identity-wise negative equality test
-        , ( "is"
-          , 4
-          ) -- identity-wise equality test
-        , (">" , 4)
-        , (">=", 4)
-        , ("<" , 4)
-        , ( "<="
-          , 4
-          )
-          -- logical arithmetic
-        , ("&&" , 3)
-        , ("||" , 3)
-        , ("&&=", 3)
-        , ( "||="
-          , 3
-          )
+      -- arithmetic
+      , ("+" , 6)
+      , ("-" , 6)
+      , ("*" , 7)
+      , ("/" , 7)
+      , ("//", 7)
+      , ("%" , 7)
+      , ( "**"
+        , 8
+        )
+      -- comparations
+      , ( "=="
+        , 4
+        ) -- deep-value-wise equality test
+      , ( "!="
+        , 4
+        ) -- inversed identity-wise equality test
+          -- C style here, as (/=) is used for inplace division
+      , ( "is not"
+        , 4
+        ) -- identity-wise negative equality test
+      , ( "is"
+        , 4
+        ) -- identity-wise equality test
+      , (">" , 4)
+      , (">=", 4)
+      , ("<" , 4)
+      , ( "<="
+        , 4
+        )
+        -- logical arithmetic
+      , ("&&" , 3)
+      , ("||" , 3)
+      , ("&&=", 3)
+      , ( "||="
+        , 3
+        )
 
-          -- emulate the ternary operator in C:
-          --       onCnd ? oneThing : theOther
-          --  * Python
-          --       onCnd and oneThing or theOther
-          --  * Edh
-          --       onCnd &> oneThing |> theOther
-        , ("&>", 3)
-        , ( "|>"
-          , 3
-          )
+        -- emulate the ternary operator in C:
+        --       onCnd ? oneThing : theOther
+        --  * Python
+        --       onCnd and oneThing or theOther
+        --  * Edh
+        --       onCnd &> oneThing |> theOther
+      , ("&>", 3)
+      , ( "|>"
+        , 3
+        )
 
-          -- comprehension
-          --  * list comprehension:
-          --     [] =< for x from range(100) do x*x
-          --  * dict comprehension:
-          --     {} =< for x from range(100) do (x, x*x)
-          --  * tuple comprehension:
-          --     (,) =< for x from range(100) do x*x
-        , ( "=<"
-          , 2
-          )
-          -- prepand to list
-          --     l = [3,7,5]
-          --     2 => l
-          --     [2,3,7,5]
-        , ( "=>"
-          , 2
-          )
-        -- the pair constructor, creates pairs in Edh
-        , ( ":"
-          , 2
-          )
-          -- reverse left-list and prepend to right-list
-          --     l = [3,7,5]
-          --     [9,2] >> l
-          --     [2,9,3,7,5]
-        , ( ">>"
-          , 2
-          )
-          -- element-of test
-        , ( "?<="
-          , 3
-          )
-          -- prefix test
-        , ( "|*"
-          , 3
-          )
-          -- suffix test
-        , ( "*|"
-          , 3
-          )
-          -- prefix cut (pattern only)
-        , ( ">@"
-          , 3
-          )
-          -- suffix cut (pattern only)
-        , ( "@<"
-          , 3
-          )
+        -- comprehension
+        --  * list comprehension:
+        --     [] =< for x from range(100) do x*x
+        --  * dict comprehension:
+        --     {} =< for x from range(100) do (x, x*x)
+        --  * tuple comprehension:
+        --     (,) =< for x from range(100) do x*x
+      , ( "=<"
+        , 2
+        )
+        -- prepand to list
+        --     l = [3,7,5]
+        --     2 => l
+        --     [2,3,7,5]
+      , ( "=>"
+        , 2
+        )
+      -- the pair constructor, creates pairs in Edh
+      , ( ":"
+        , 2
+        )
+        -- reverse left-list and prepend to right-list
+        --     l = [3,7,5]
+        --     [9,2] >> l
+        --     [2,9,3,7,5]
+      , ( ">>"
+        , 2
+        )
+        -- element-of test
+      , ( "?<="
+        , 3
+        )
+        -- prefix test
+      , ( "|*"
+        , 3
+        )
+        -- suffix test
+      , ( "*|"
+        , 3
+        )
+        -- prefix cut (pattern only)
+      , ( ">@"
+        , 3
+        )
+        -- suffix cut (pattern only)
+      , ( "@<"
+        , 3
+        )
 
-          -- publish to sink
-          --     evsPub <- outEvent
-        , ( "<-"
-          , 1
-          )
+        -- publish to sink
+        --     evsPub <- outEvent
+      , ( "<-"
+        , 1
+        )
 
-          -- string coercing concatenation
-        , ( "++"
-          , 2
-          )
+        -- string coercing concatenation
+      , ( "++"
+        , 2
+        )
 
-          -- logging
-        , ("<|", 1)
+        -- logging
+      , ("<|", 1)
+      ]
+
+    -- global operators at world root scope
+    !rootOperators <- sequence
+      [ (AttrByName sym, ) <$> mkIntrinsicOp world sym iop
+      | (sym, iop) <-
+        [ ("@"     , attrDerefAddrProc)
+        , ("$"     , fapProc)
+        , ("|"     , ffapProc)
+        , (":="    , defProc)
+        , ("?:="   , defMissingProc)
+        , (":"     , pairCtorProc)
+        , ("?"     , attrTemptProc)
+        , ("?@"    , attrDerefTemptProc)
+        , ("++"    , concatProc)
+        , ("=<"    , cprhProc)
+        , ("?<="   , elemProc)
+        , ("|*"    , isPrefixOfProc)
+        , ("*|"    , hasSuffixProc)
+        , ("=>"    , prpdProc)
+        , (">>"    , lstrvrsPrpdProc)
+        , ("<-"    , evtPubProc)
+        , ("+"     , addProc)
+        , ("-"     , subsProc)
+        , ("*"     , mulProc)
+        , ("/"     , divProc)
+        , ("//"    , divIntProc)
+        , ("%"     , modIntProc)
+        , ("**"    , powProc)
+        , ("&&"    , logicalAndProc)
+        , ("||"    , logicalOrProc)
+        , ("=="    , valEqProc)
+        , ("is not", idNotEqProc)
+        , ("is"    , idEqProc)
+        , ("!="    , idNeProc)
+        , (">"     , isGtProc)
+        , (">="    , isGeProc)
+        , ("<"     , isLtProc)
+        , ("<="    , isLeProc)
+        , ("="     , assignProc)
+        , ("+="    , assignWithOpProc "+" addProc)
+        , ("-="    , assignWithOpProc "-" subsProc)
+        , ("*="    , assignWithOpProc "*" mulProc)
+        , ("/="    , assignWithOpProc "/" divProc)
+        , ("//="   , assignWithOpProc "//" divIntProc)
+        , ("%="    , assignWithOpProc "%" modIntProc)
+        , ("**="   , assignWithOpProc "**" powProc)
+        , ("&&="   , assignWithOpProc "&&" logicalAndProc)
+        , ("||="   , assignWithOpProc "||" logicalOrProc)
+        , ("?="    , assignMissingProc)
+        , ("->"    , branchProc)
+        , ("$=>"   , catchProc)
+        , ("@=>"   , finallyProc)
+        , ("::"    , annoProc)
+        , ("<|"    , loggingProc)
         ]
+      ]
 
-      -- global operators at world root scope
-      !rootOperators <- sequence
-        [ (AttrByName sym, ) <$> mkIntrinsicOp world sym iop
-        | (sym, iop) <-
-          [ ("@"     , attrDerefAddrProc)
-          , ("$"     , fapProc)
-          , ("|"     , ffapProc)
-          , (":="    , defProc)
-          , ("?:="   , defMissingProc)
-          , (":"     , pairCtorProc)
-          , ("?"     , attrTemptProc)
-          , ("?@"    , attrDerefTemptProc)
-          , ("++"    , concatProc)
-          , ("=<"    , cprhProc)
-          , ("?<="   , elemProc)
-          , ("|*"    , isPrefixOfProc)
-          , ("*|"    , hasSuffixProc)
-          , ("=>"    , prpdProc)
-          , (">>"    , lstrvrsPrpdProc)
-          , ("<-"    , evtPubProc)
-          , ("+"     , addProc)
-          , ("-"     , subsProc)
-          , ("*"     , mulProc)
-          , ("/"     , divProc)
-          , ("//"    , divIntProc)
-          , ("%"     , modIntProc)
-          , ("**"    , powProc)
-          , ("&&"    , logicalAndProc)
-          , ("||"    , logicalOrProc)
-          , ("=="    , valEqProc)
-          , ("is not", idNotEqProc)
-          , ("is"    , idEqProc)
-          , ("!="    , idNeProc)
-          , (">"     , isGtProc)
-          , (">="    , isGeProc)
-          , ("<"     , isLtProc)
-          , ("<="    , isLeProc)
-          , ("="     , assignProc)
-          , ("+="    , assignWithOpProc "+" addProc)
-          , ("-="    , assignWithOpProc "-" subsProc)
-          , ("*="    , assignWithOpProc "*" mulProc)
-          , ("/="    , assignWithOpProc "/" divProc)
-          , ("//="   , assignWithOpProc "//" divIntProc)
-          , ("%="    , assignWithOpProc "%" modIntProc)
-          , ("**="   , assignWithOpProc "**" powProc)
-          , ("&&="   , assignWithOpProc "&&" logicalAndProc)
-          , ("||="   , assignWithOpProc "||" logicalOrProc)
-          , ("?="    , assignMissingProc)
-          , ("->"    , branchProc)
-          , ("$=>"   , catchProc)
-          , ("@=>"   , finallyProc)
-          , ("::"    , annoProc)
-          , ("<|"    , loggingProc)
-          ]
-        ]
-
-      -- global procedures at world root scope
-      !rootProcs <-
-        sequence
-        $  [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp args
-           | (mc, nm, hp, args) <-
-             [ ( EdhMethod
-               , "__StringType_bytes__"
-               , strEncodeProc
-               , PackReceiver [mandatoryArg "str"]
-               )
-             , ( EdhMethod
-               , "__BlobType_utf8string__"
-               , blobDecodeProc
-               , PackReceiver [mandatoryArg "blob"]
-               )
-             , ( EdhMethod
-               , "Symbol"
-               , symbolCtorProc
-               , PackReceiver [mandatoryArg "repr", RecvRestPosArgs "reprs"]
-               )
-             , ( EdhMethod
-               , "UUID"
-               , uuidCtorProc
-               , PackReceiver [mandatoryArg "uuidText"]
-               )
-             , ( EdhMethod
-               , "__ArgsPackType_args__"
-               , apkArgsProc
-               , PackReceiver [mandatoryArg "apk"]
-               )
-             , ( EdhMethod
-               , "__ArgsPackType_kwargs__"
-               , apkKwrgsProc
-               , PackReceiver [mandatoryArg "apk"]
-               )
-             , (EdhMethod, "repr", reprProc, WildReceiver)
-             , ( EdhMethod
-               , "cap"
-               , capProc
-               , PackReceiver [mandatoryArg "container"]
-               )
-             , ( EdhMethod
-               , "grow"
-               , growProc
-               , PackReceiver
-                 [mandatoryArg "container", mandatoryArg "newCapacity"]
-               )
-             , ( EdhMethod
-               , "len"
-               , lenProc
-               , PackReceiver [mandatoryArg "container"]
-               )
-             , ( EdhMethod
-               , "mark"
-               , markProc
-               , PackReceiver
-                 [mandatoryArg "container", mandatoryArg "newLength"]
-               )
-             , (EdhMethod, "show", showProc, PackReceiver [mandatoryArg "val"])
-             , (EdhMethod, "desc", descProc, PackReceiver [mandatoryArg "val"])
-             , (EdhMethod, "dict", dictProc  , WildReceiver)
-             , (EdhMethod, "null", isNullProc, WildReceiver)
-             , (EdhMethod, "type", typeProc  , WildReceiver)
-             , ( EdhMethod
-               , "__IntrinsicType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__MethodType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__HostMethodType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__OperatorType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__HostOperType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__GeneratorType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__HostGenrType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__InterpreterType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__ProducerType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "__DescriptorType_name__"
-               , procNameProc
-               , PackReceiver [mandatoryArg "p"]
-               )
-             , ( EdhMethod
-               , "property"
-               , propertyProc
-               , PackReceiver
-                 [ mandatoryArg "getter"
-                 , optionalArg "setter" $ LitExpr NilLiteral
-                 ]
-               )
-             , ( EdhMethod
-               , "setter"
-               , setterProc
-               , PackReceiver [mandatoryArg "mth"]
-               )
-             , (EdhMethod, "constructor", ctorProc       , WildReceiver)
-             , (EdhMethod, "supers"     , supersProc     , WildReceiver)
-             , (EdhMethod, "scope"      , scopeObtainProc, PackReceiver [])
-             , ( EdhMethod
-               , "makeOp"
-               , makeOpProc
-               , PackReceiver
-                 [mandatoryArg "lhe", mandatoryArg "opSym", mandatoryArg "rhe"]
-               )
-             , (EdhMethod, "mre", mreProc, PackReceiver [mandatoryArg "evs"])
-             , (EdhMethod, "eos", eosProc, PackReceiver [mandatoryArg "evs"])
-             , ( EdhMethod
-               , "__DictType_size__"
-               , dictSizeProc
-               , PackReceiver [mandatoryArg "d"]
-               )
-             , ( EdhMethod
-               , "__ListType_push__"
-               , listPushProc
-               , PackReceiver [mandatoryArg "l"]
-               )
-             , ( EdhMethod
-               , "__ListType_pop__"
-               , listPopProc
-               , PackReceiver [mandatoryArg "l"]
-               )
-             ]
-           ]
-        ++ [ ((AttrByName nm, ) <$>)
-             $   mkHostClass rootScope nm hc
-             =<< createSideEntityManipulater True
-             =<< mths ets
-           | (nm, hc, mths) <- [("Vector", vecHostCtor, vecMethods)]
-           ]
-
-
-      !conEntity <- createHashEntity =<< iopdFromList
-        [ (AttrByName "__repr__", EdhString "<console>")
-        , (AttrByName "debug"   , EdhDecimal 10)
-        , (AttrByName "info"    , EdhDecimal 20)
-        , (AttrByName "warn"    , EdhDecimal 30)
-        , (AttrByName "error"   , EdhDecimal 40)
-        , (AttrByName "fatal"   , EdhDecimal 50)
-        , ( AttrByName "logLevel"
-          , EdhDecimal (fromIntegral $ consoleLogLevel $ worldConsole world)
-          )
-        ]
-      !conSupers <- newTVar []
-      let
-        !console = Object
-          { objEntity = conEntity
-          , objClass  = ProcDefi
-            { procedure'uniq = conClassUniq
-            , procedure'name = AttrByName "<console>"
-            , procedure'lexi = Just rootScope
-            , procedure'decl = ProcDecl { procedure'addr = NamedAttr "<console>"
-                                        , procedure'args = PackReceiver []
-                                        , procedure'body = Right fakeHostProc
-                                        }
-            }
-          , objSupers = conSupers
-          }
-        !conScope = objectScope (edh'context ets) console
-
-      !conArts <- sequence
-        [ (AttrByName nm, ) <$> mkHostProc conScope vc nm hp args
-        | (vc, nm, hp, args) <-
-          [ (EdhMethod, "exit", conExitProc, PackReceiver [])
-          , ( EdhMethod
-            , "readSource"
-            , conReadSourceProc
-            , PackReceiver
-              [ optionalArg "ps1" $ LitExpr $ StringLiteral defaultEdhPS1
-              , optionalArg "ps2" $ LitExpr $ StringLiteral defaultEdhPS2
-              ]
-            )
-          , ( EdhMethod
-            , "readCommand"
-            , conReadCommandProc
-            , PackReceiver
-              [ optionalArg "ps1" $ LitExpr $ StringLiteral defaultEdhPS1
-              , optionalArg "ps2" $ LitExpr $ StringLiteral defaultEdhPS2
-              , optionalArg "inScopeOf" edhNoneExpr
-              ]
-            )
-          , (EdhMethod, "print", conPrintProc, WildReceiver)
-          , (EdhMethod, "now"  , conNowProc  , PackReceiver [])
-          , ( EdhGnrtor
-            , "everyMicros"
-            , conEveryMicrosProc
-            , PackReceiver [mandatoryArg "interval"]
-            )
-          , ( EdhGnrtor
-            , "everyMillis"
-            , conEveryMillisProc
-            , PackReceiver [mandatoryArg "interval"]
-            )
-          , ( EdhGnrtor
-            , "everySeconds"
-            , conEverySecondsProc
-            , PackReceiver [mandatoryArg "interval"]
-            )
-          ]
-        ]
-      updateEntityAttrs ets conEntity conArts
-
-      updateEntityAttrs ets rootEntity
-        $  rootOperators
-        ++ rootProcs
-        ++ [
-
-            -- console module
-             ( AttrByName "console"
-             , EdhObject console
+    -- global procedures at world root scope
+    !rootProcs <-
+      sequence
+      $  [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp args
+         | (mc, nm, hp, args) <-
+           [ ( EdhMethod
+             , "__StringType_bytes__"
+             , strEncodeProc
+             , PackReceiver [mandatoryArg "str"]
              )
-
-            -- math constants
-            -- todo figure out proper ways to make these really **constant**,
-            --      i.e. not rebindable to other values
-           , ( AttrByName "pi"
-             , EdhDecimal
-               $ Decimal 1 (-40) 31415926535897932384626433832795028841971
+           , ( EdhMethod
+             , "__BlobType_utf8string__"
+             , blobDecodeProc
+             , PackReceiver [mandatoryArg "blob"]
+             )
+           , ( EdhMethod
+             , "Symbol"
+             , symbolCtorProc
+             , PackReceiver [mandatoryArg "repr", RecvRestPosArgs "reprs"]
+             )
+           , ( EdhMethod
+             , "UUID"
+             , uuidCtorProc
+             , PackReceiver [mandatoryArg "uuidText"]
+             )
+           , ( EdhMethod
+             , "__ArgsPackType_args__"
+             , apkArgsProc
+             , PackReceiver [mandatoryArg "apk"]
+             )
+           , ( EdhMethod
+             , "__ArgsPackType_kwargs__"
+             , apkKwrgsProc
+             , PackReceiver [mandatoryArg "apk"]
+             )
+           , (EdhMethod, "repr", reprProc, WildReceiver)
+           , (EdhMethod, "cap", capProc, PackReceiver [mandatoryArg "container"])
+           , ( EdhMethod
+             , "grow"
+             , growProc
+             , PackReceiver
+               [mandatoryArg "container", mandatoryArg "newCapacity"]
+             )
+           , (EdhMethod, "len", lenProc, PackReceiver [mandatoryArg "container"])
+           , ( EdhMethod
+             , "mark"
+             , markProc
+             , PackReceiver [mandatoryArg "container", mandatoryArg "newLength"]
+             )
+           , (EdhMethod, "show", showProc  , PackReceiver [mandatoryArg "val"])
+           , (EdhMethod, "desc", descProc  , PackReceiver [mandatoryArg "val"])
+           , (EdhMethod, "dict", dictProc  , WildReceiver)
+           , (EdhMethod, "null", isNullProc, WildReceiver)
+           , (EdhMethod, "type", typeProc  , WildReceiver)
+           , ( EdhMethod
+             , "__IntrinsicType_name__"
+             , procNameProc
+             , PackReceiver [mandatoryArg "p"]
+             )
+           , ( EdhMethod
+             , "__MethodType_name__"
+             , procNameProc
+             , PackReceiver [mandatoryArg "p"]
+             )
+           , ( EdhMethod
+             , "__HostMethodType_name__"
+             , procNameProc
+             , PackReceiver [mandatoryArg "p"]
+             )
+           , ( EdhMethod
+             , "__OperatorType_name__"
+             , procNameProc
+             , PackReceiver [mandatoryArg "p"]
+             )
+           , ( EdhMethod
+             , "__HostOperType_name__"
+             , procNameProc
+             , PackReceiver [mandatoryArg "p"]
+             )
+           , ( EdhMethod
+             , "__GeneratorType_name__"
+             , procNameProc
+             , PackReceiver [mandatoryArg "p"]
+             )
+           , ( EdhMethod
+             , "__HostGenrType_name__"
+             , procNameProc
+             , PackReceiver [mandatoryArg "p"]
+             )
+           , ( EdhMethod
+             , "__InterpreterType_name__"
+             , procNameProc
+             , PackReceiver [mandatoryArg "p"]
+             )
+           , ( EdhMethod
+             , "__ProducerType_name__"
+             , procNameProc
+             , PackReceiver [mandatoryArg "p"]
+             )
+           , ( EdhMethod
+             , "__DescriptorType_name__"
+             , procNameProc
+             , PackReceiver [mandatoryArg "p"]
+             )
+           , ( EdhMethod
+             , "property"
+             , propertyProc
+             , PackReceiver
+               [mandatoryArg "getter", optionalArg "setter" $ LitExpr NilLiteral]
+             )
+           , (EdhMethod, "setter", setterProc, PackReceiver [mandatoryArg "mth"])
+           , (EdhMethod, "constructor", ctorProc, WildReceiver)
+           , (EdhMethod, "supers", supersProc, WildReceiver)
+           , ( EdhMethod
+             , "makeOp"
+             , makeOpProc
+             , PackReceiver
+               [mandatoryArg "lhe", mandatoryArg "opSym", mandatoryArg "rhe"]
+             )
+           , (EdhMethod, "mre", mreProc, PackReceiver [mandatoryArg "evs"])
+           , (EdhMethod, "eos", eosProc, PackReceiver [mandatoryArg "evs"])
+           , ( EdhMethod
+             , "__DictType_size__"
+             , dictSizeProc
+             , PackReceiver [mandatoryArg "d"]
+             )
+           , ( EdhMethod
+             , "__ListType_push__"
+             , listPushProc
+             , PackReceiver [mandatoryArg "l"]
+             )
+           , ( EdhMethod
+             , "__ListType_pop__"
+             , listPopProc
+             , PackReceiver [mandatoryArg "l"]
              )
            ]
+         ]
+      ++ [(AttrByName "Vector", ) . EdhObject <$> createVectorClass rootScope]
 
-      !scopeSuperMethods <- sequence
-        [ (AttrByName nm, )
-            <$> mkHostProc (objectScope (edh'context ets) scopeSuperObj)
-                           mc
-                           nm
-                           hp
-                           args
-        | (mc, nm, hp, args) <-
-          [ (EdhMethod, "__repr__" , scopeReprProc     , PackReceiver [])
-          , (EdhMethod, "eval"     , scopeEvalProc     , WildReceiver)
-          , (EdhMethod, "get"      , scopeGetProc      , WildReceiver)
-          , (EdhMethod, "put"      , scopePutProc      , WildReceiver)
-          , (EdhMethod, "attrs"    , scopeAttrsProc    , PackReceiver [])
-          , (EdhMethod, "callerLoc", scopeCallerLocProc, PackReceiver [])
-          , (EdhMethod, "lexiLoc"  , scopeLexiLocProc  , PackReceiver [])
-          , (EdhMethod, "outer"    , scopeOuterProc    , PackReceiver [])
-          ]
+
+    console <- createNamespace
+      world
+      "<console>"
+      [ (AttrByName "__repr__", EdhString "<console>")
+      , (AttrByName "debug"   , EdhDecimal 10)
+      , (AttrByName "info"    , EdhDecimal 20)
+      , (AttrByName "warn"    , EdhDecimal 30)
+      , (AttrByName "error"   , EdhDecimal 40)
+      , (AttrByName "fatal"   , EdhDecimal 50)
+      , ( AttrByName "logLevel"
+        , EdhDecimal (fromIntegral $ consoleLogLevel $ edh'world'console world)
+        )
+      ]
+    let !conScope = case objectScope console of
+          Just !s -> s
+          Nothing -> error "bug: no scope for namespace object"
+
+    !conArts <- sequence
+      [ (AttrByName nm, ) <$> mkHostProc conScope vc nm hp args
+      | (vc, nm, hp, args) <-
+        [ (EdhMethod, "exit", conExitProc, PackReceiver [])
+        , ( EdhMethod
+          , "readSource"
+          , conReadSourceProc
+          , PackReceiver
+            [ optionalArg "ps1" $ LitExpr $ StringLiteral defaultEdhPS1
+            , optionalArg "ps2" $ LitExpr $ StringLiteral defaultEdhPS2
+            ]
+          )
+        , ( EdhMethod
+          , "readCommand"
+          , conReadCommandProc
+          , PackReceiver
+            [ optionalArg "ps1" $ LitExpr $ StringLiteral defaultEdhPS1
+            , optionalArg "ps2" $ LitExpr $ StringLiteral defaultEdhPS2
+            , optionalArg "inScopeOf" edhNoneExpr
+            ]
+          )
+        , (EdhMethod, "print", conPrintProc, WildReceiver)
+        , (EdhMethod, "now"  , conNowProc  , PackReceiver [])
+        , ( EdhGnrtor
+          , "everyMicros"
+          , conEveryMicrosProc
+          , PackReceiver [mandatoryArg "interval"]
+          )
+        , ( EdhGnrtor
+          , "everyMillis"
+          , conEveryMillisProc
+          , PackReceiver [mandatoryArg "interval"]
+          )
+        , ( EdhGnrtor
+          , "everySeconds"
+          , conEverySecondsProc
+          , PackReceiver [mandatoryArg "interval"]
+          )
         ]
-      updateEntityAttrs ets (objEntity scopeSuperObj) scopeSuperMethods
+      ]
+    iopdUpdate conArts $ edh'scope'entity conScope
 
-      -- import the parts written in Edh 
-      runEdhTx ets
-        $ importEdhModule' rootEntity WildReceiver "batteries/root" endOfEdh
+    flip iopdUpdate rootEntity
+      $  rootOperators
+      ++ rootProcs
+      ++ [
+
+          -- console module
+           ( AttrByName "console"
+           , EdhObject console
+           )
+
+          -- math constants
+          -- todo figure out proper ways to make these really **constant**,
+          --      i.e. not rebindable to other values
+         , ( AttrByName "pi"
+           , EdhDecimal
+             $ Decimal 1 (-40) 31415926535897932384626433832795028841971
+           )
+         ]
+
+    -- import the parts written in Edh 
+    runEdhTx ets
+      $ importEdhModule' rootEntity WildReceiver "batteries/root" endOfEdh
 
  where
-  fakeHostProc :: EdhHostProc
-  fakeHostProc _ !exit = exitEdhTx exit nil
 
-  !rootScope     = worldScope world
-  !rootEntity    = objEntity $ thisObject rootScope
-  !scopeSuperObj = scopeSuper world
+  !rootScope  = edh'world'root world
+  !rootEntity = edh'scope'entity rootScope

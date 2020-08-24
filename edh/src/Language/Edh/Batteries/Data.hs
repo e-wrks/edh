@@ -226,7 +226,7 @@ ffapProc !lhExpr !rhExpr = fapProc rhExpr lhExpr
 
 -- | operator (:=) - named value definition
 defProc :: EdhIntrinsicOp
-defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit !ets = do
+defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit !ets =
   runEdhTx ets { edh'in'tx = True } $ evalExpr rhExpr $ \ !rhVal !ets' -> do
     let !rhv     = edhDeCaseClose rhVal
         !nv      = EdhNamedValue valName rhv
@@ -337,8 +337,7 @@ apkKwrgsProc _ _ =
 
 -- | utility repr(*args,**kwargs) - repr extractor
 reprProc :: EdhHostProc
-reprProc (ArgsPack !args !kwargs) !exit !ets = do
-  go [] [] args (odToList kwargs)
+reprProc (ArgsPack !args !kwargs) !exit !ets = go [] [] args (odToList kwargs)
  where
   go
     :: [EdhValue]
@@ -795,7 +794,7 @@ cprhProc !lhExpr !rhExpr !exit = case rhExpr of
       EdhArgsPack (ArgsPack !vs !kwvs) -> case edhUltimate rhVal of
         EdhArgsPack (ArgsPack !args !kwargs) -> do
           !kwIOPD <- iopdFromList $ odToList kwvs
-          !iopdUpdate (odToList kwargs) kwIOPD
+          iopdUpdate (odToList kwargs) kwIOPD
           kwargs' <- iopdSnapshot kwIOPD
           exitEdh ets exit (EdhArgsPack $ ArgsPack (vs ++ args) kwargs')
         EdhList (List _ !l) -> do
