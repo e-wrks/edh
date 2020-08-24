@@ -67,8 +67,8 @@ module Language.Edh.EHI
   , haltEdhProgram
   , runEdhProgram
   , runEdhProgram'
-  , edhMakeCall
-  , edhMakeCall'
+  , edhPrepareCall
+  , edhPrepareCall'
   , callEdhMethod
   , evalStmt
   , evalStmt'
@@ -79,7 +79,6 @@ module Language.Edh.EHI
   , recvEdhArgs
   , packEdhExprs
   , packEdhArgs
-  , OriginalValue(..)
   , EdhTx
   , EdhThreadState(..)
   , EdhTask(..)
@@ -92,10 +91,9 @@ module Language.Edh.EHI
   , edhThrow
   , edhCatch
   , throwEdh
-  , edhThrow
-  , edhCatch
-  , throwEdh
-  , getEdhErrClass
+  , edhThrowTx
+  , edhCatchTx
+  , throwEdhTx
     -- ** CPS helpers
   , exitEdh
   , runEdhTx
@@ -132,35 +130,12 @@ module Language.Edh.EHI
 
     -- ** Object system
   , Object(..)
-  , objStore
   , castObjectStore
   , castObjectStore'
   , Class
-  , EdhHostCtor
   , mkHostClass
-  , mkExtHostClass
+  , mkHostClass'
   , mkHostProperty
-  , Entity(..)
-  , EntityManipulater(..)
-  , lookupEntityAttr
-  , allEntityAttrs
-  , changeEntityAttr
-  , updateEntityAttrs
-  , createMaoEntity
-  , maoEntityManipulater
-  , createHashEntity
-  , hashEntityManipulater
-  , createSideEntityManipulater
-  , createSideEntity
-  , withThatEntity
-  , withThatEntity'
-  , withEntityOfClass
-  , withEntityOfClass'
-  , modifyThatEntity
-  , modifyThatEntity'
-  , modifyEntityOfClass
-  , modifyEntityOfClass'
-  , viewAsEdhObject
   , cloneEdhObject
   , createEdhObject
   , constructEdhObject
@@ -173,8 +148,6 @@ module Language.Edh.EHI
   , resolveEdhInstance
   , objectScope
   , mkScopeWrapper
-  , isScopeWrapper
-  , wrappedScopeOf
 
     -- ** Value system
   , createEdhDict
@@ -185,7 +158,9 @@ module Language.Edh.EHI
   , edhNamelyEqual
   , edhValueEqual
   , edhValueRepr
-  , edhValueReprSTM
+  , edhValueReprTx
+  , edhValueStr
+  , edhValueStrTx
   , EdhValue(..)
   , EdhTypeValue(..)
   , edhDeCaseClose
@@ -239,6 +214,7 @@ import qualified Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
 import           Language.Edh.Batteries
+import           Language.Edh.Batteries.Vector
 import           Language.Edh.Runtime
 import           Language.Edh.Event
 import           Language.Edh.Details.IOPD
