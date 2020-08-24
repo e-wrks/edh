@@ -25,6 +25,8 @@ data IOPD k v where
       iopd'map :: {-# UNPACK #-} !(TVar (Map.HashMap k Int))
     , iopd'write'pos :: {-# UNPACK #-} !(TVar Int)
     , iopd'num'holes :: {-# UNPACK #-} !(TVar Int)
+    -- TODO will the Vector possibly crash the program?
+    -- https://mail.haskell.org/pipermail/glasgow-haskell-users/2020-August/026947.html
     , iopd'array :: {-# UNPACK #-} !(TVar (Vector (TVar (Maybe (k, v)))))
     } -> IOPD k v
 
