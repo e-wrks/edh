@@ -31,7 +31,7 @@ mreProc (ArgsPack !args !kwargs) !exit = case args of
     _ ->
       throwEdh EvalError $ "mre() expects an event sink but passed a " <> T.pack
         (edhTypeNameOf v)
-  _ -> throwEdh UsageError "Invalid arg to mre()"
+  _ -> throwEdh UsageError "invalid arg to mre()"
 
 
 -- | utility eos()
@@ -50,5 +50,5 @@ eosProc (ArgsPack !args !kwargs) !exit = case args of
     _ ->
       throwEdh EvalError $ "eos() expects an event sink but passed a " <> T.pack
         (edhTypeNameOf v)
-  _ -> throwEdh UsageError "Invalid arg to eos()"
+  _ -> throwEdh UsageError "invalid arg to eos()"
 

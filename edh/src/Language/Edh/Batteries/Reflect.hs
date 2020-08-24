@@ -71,11 +71,11 @@ supersProc (ArgsPack !args !kwargs) !exit !ets = do
 -- | utility makeOp(lhExpr, opSym, rhExpr)
 makeOpProc :: EdhHostProc
 makeOpProc (ArgsPack !args !kwargs) !exit = if (not $ odNull kwargs)
-  then throwEdhTx EvalError "No kwargs accepted by makeOp"
+  then throwEdhTx EvalError "no kwargs accepted by makeOp"
   else case args of
     [(EdhExpr _ !lhe _), EdhString !op, (EdhExpr _ !rhe _)] -> \ !ets -> do
       !xu <- unsafeIOToSTM newUnique
       exitEdh ets exit $ EdhExpr xu (InfixExpr op lhe rhe) ""
-    _ -> throwEdhTx EvalError $ "Invalid arguments to makeOp: " <> T.pack
+    _ -> throwEdhTx EvalError $ "invalid arguments to makeOp: " <> T.pack
       (show args)
 

@@ -98,7 +98,7 @@ parseGoStmt !si = do
     ForExpr{}   -> return ()
     _           -> do
       setOffset errRptPos
-      fail "A block, case, call or for loop should be here"
+      fail "a block, case, call or for loop should be here"
   return (GoStmt expr, si')
 
 parseDeferStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
@@ -113,7 +113,7 @@ parseDeferStmt !si = do
     ForExpr{}   -> return ()
     _           -> do
       setOffset errRptPos
-      fail "A block, case, call or for loop should be here"
+      fail "a block, case, call or for loop should be here"
   return (DeferStmt expr, si')
 
 parseEffectStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
@@ -197,8 +197,8 @@ parseKwRecv !inPack = do
   validateTgt :: Maybe AttrAddr -> Maybe AttrAddr
   validateTgt tgt = case tgt of
     Nothing      -> Nothing
-    Just ThisRef -> fail "Can not overwrite this"
-    Just ThatRef -> fail "Can not overwrite that"
+    Just ThisRef -> fail "can not overwrite this"
+    Just ThatRef -> fail "can not overwrite that"
     _            -> tgt
   parseDefaultExpr :: Parser Expr
   parseDefaultExpr = do
@@ -226,7 +226,7 @@ parseAttrAddr = do
     ]
   followingPart :: Parser Expr
   followingPart = choice
-    [ keyword "this" *> fail "Unexpected this reference"
+    [ keyword "this" *> fail "unexpected this reference"
     , AttrExpr . DirectRef . SymbolicAttr <$> parseAttrSym
     , AttrExpr . DirectRef . NamedAttr <$> parseAttrName
     ]
@@ -401,20 +401,20 @@ parseOpDeclOvrdExpr !si = do
       Nothing -> do
         setOffset errRptPos
         fail
-          $  "You forget to specify the precedence for operator: "
+          $  "you forget to specify the precedence for operator: "
           <> T.unpack opSym
           <> " ?"
       Just (opPrec, _) -> return (OpOvrdExpr opSym procDecl opPrec, si')
     Just opPrec -> do
       when (opPrec < 0 || opPrec >= 10) $ do
         setOffset errRptPos
-        fail $ "Invalid operator precedence: " <> show opPrec
+        fail $ "invalid operator precedence: " <> show opPrec
       case Map.lookup opSym opPD of
         Nothing       -> return ()
         Just (_, odl) -> do
           setOffset errRptPos
           fail
-            $  "Redeclaring operator "
+            $  "redeclaring operator "
             <> T.unpack opSym
             <> " which has been declared at "
             <> T.unpack odl
@@ -793,7 +793,7 @@ parseIntplExpr (s, o, sss) = do
 
 parseExprPrec :: Precedence -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseExprPrec prec !si = lookAhead illegalExprStart >>= \case
-  True  -> fail "Illegal expression"
+  True  -> fail "illegal expression"
   False -> ((, si) <$> parseExprLit) <|> parseIntplExpr si <|> do
     (x, si') <- choice
       [ parsePrefixExpr si
@@ -850,7 +850,7 @@ parseExprPrec prec !si = lookAhead illegalExprStart >>= \case
         case Map.lookup opSym opPD of
           Nothing -> do
             setOffset errRptPos
-            fail $ "Undeclared operator: " <> T.unpack opSym
+            fail $ "undeclared operator: " <> T.unpack opSym
           Just (opPrec, _) -> if opPrec > prec'
             then return $ Just (opPrec, opSym)
             else do

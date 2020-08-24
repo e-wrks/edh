@@ -43,7 +43,7 @@ assignProc !lhExpr !rhExpr !exit !ets =
                 lookupEdhObjAttr obj (AttrByName "[=]") >>= \case
                   (_, EdhNil) ->
                     throwEdh ets EvalError
-                      $  "No magic ([=]) method from: "
+                      $  "no magic ([=]) method from: "
                       <> T.pack (show obj)
                   (this', EdhProcedure (EdhMethod !mth'proc) _) ->
                     -- enforced tx boundary cut just before
@@ -67,7 +67,7 @@ assignProc !lhExpr !rhExpr !exit !ets =
                       exit
                   (_, !badIndexer) ->
                     throwEdh ets EvalError
-                      $  "Malformed magic method ([=]) on "
+                      $  "malformed magic method ([=]) on "
                       <> T.pack (show obj)
                       <> " - "
                       <> T.pack (edhTypeNameOf badIndexer)
@@ -76,7 +76,7 @@ assignProc !lhExpr !rhExpr !exit !ets =
 
               _ ->
                 throwEdh ets EvalError
-                  $  "Don't know how to index assign "
+                  $  "don't know how to index assign "
                   <> T.pack (edhTypeNameOf tgtVal)
                   <> ": "
                   <> T.pack (show tgtVal)
@@ -126,7 +126,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit !ets =
                 lookupEdhObjAttr obj (AttrByName magicMthName) >>= \case
                   (_, EdhNil) ->
                     throwEdh ets EvalError
-                      $  "No magic ("
+                      $  "no magic ("
                       <> magicMthName
                       <> ") method from: "
                       <> T.pack (show obj)
@@ -152,7 +152,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit !ets =
                       exit
                   (_, !badIndexer) ->
                     throwEdh ets EvalError
-                      $  "Malformed magic method ("
+                      $  "malformed magic method ("
                       <> magicMthName
                       <> ") on "
                       <> T.pack (show obj)
@@ -163,7 +163,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit !ets =
 
               _ ->
                 throwEdh ets EvalError
-                  $  "Don't know how to index assign "
+                  $  "don't know how to index assign "
                   <> T.pack (edhTypeNameOf tgtVal)
                   <> ": "
                   <> T.pack (show tgtVal)
@@ -183,7 +183,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit !ets =
 -- | operator (?=)
 assignMissingProc :: EdhIntrinsicOp
 assignMissingProc (AttrExpr (DirectRef (NamedAttr "_"))) _ _ !ets =
-  throwEdh ets UsageError "Not so reasonable: _ ?= xxx"
+  throwEdh ets UsageError "not so reasonable: _ ?= xxx"
 assignMissingProc (AttrExpr (DirectRef !addr)) !rhExpr !exit !ets =
   resolveEdhAttrAddr ets addr $ \ !key -> do
     let !es = edh'scope'entity $ contextScope $ edh'context ets
@@ -203,6 +203,6 @@ assignMissingProc (AttrExpr (DirectRef !addr)) !rhExpr !exit !ets =
                     exitEdh ets exit rhv
       Just !preVal -> exitEdh ets exit preVal
 assignMissingProc !lhExpr _ _ !ets =
-  throwEdh ets EvalError $ "Invalid left-hand expression to (?=) " <> T.pack
+  throwEdh ets EvalError $ "invalid left-hand expression to (?=) " <> T.pack
     (show lhExpr)
 

@@ -126,7 +126,7 @@ branchProc !lhExpr !rhExpr !exit = do
 
       handlePairPattern !maybeName1 !pairPattern =
         case matchPairPattern pairPattern ctxMatch [] of
-          Nothing -> throwEdh EvalError $ "Invalid pair pattern: " <> T.pack
+          Nothing -> throwEdh EvalError $ "invalid pair pattern: " <> T.pack
             (show pairPattern)
           Just (_, []) -> -- valid pattern, no match
             exitEdhTx exit EdhCaseOther
@@ -152,7 +152,7 @@ branchProc !lhExpr !rhExpr !exit = do
     -- pattern matching. if a literal dict value really meant to be matched,
     -- the parenthesized form `( {k1: v1, k2: v2, ...} )` should be used.
     DictExpr !malPairs ->
-      throwEdh EvalError $ "Invalid match pattern: " <> T.pack (show malPairs)
+      throwEdh EvalError $ "invalid match pattern: " <> T.pack (show malPairs)
 
     -- other patterns matching
     BlockExpr patternExpr -> case patternExpr of
@@ -235,7 +235,7 @@ branchProc !lhExpr !rhExpr !exit = do
                 case mStrVal of
                   EdhString !mStr -> if T.null mStr
                     then throwEdh UsageError
-                                  "You don't use empty string for match"
+                                  "you don't use empty string for match"
                     else
                       let (prefix, rest) = T.breakOn mStr fullStr
                       in
@@ -300,7 +300,7 @@ branchProc !lhExpr !rhExpr !exit = do
               then throwEdh
                 ets
                 UsageError
-                ("Invalid element in apk pattern: " <> T.pack (show argSenders))
+                ("invalid element in apk pattern: " <> T.pack (show argSenders))
               else case ctxMatch of
                 EdhArgsPack (ArgsPack !args !kwargs)
                   | length args == length argSenders && odNull kwargs -> branchMatched
@@ -325,7 +325,7 @@ branchProc !lhExpr !rhExpr !exit = do
                 _ ->
                   throwEdh EvalError
                     $  T.pack
-                    $  "Invalid class "
+                    $  "invalid class "
                     <> show clsAddr
                     <> ", it is a "
                     <> edhTypeNameOf clsVal
@@ -346,7 +346,7 @@ branchProc !lhExpr !rhExpr !exit = do
 
       -- TODO more kinds of match patterns to support ?
       --      e.g. list pattern, with rest-items repacking etc.
-      _ -> throwEdh EvalError $ "Invalid match pattern: " <> T.pack
+      _ -> throwEdh EvalError $ "invalid match pattern: " <> T.pack
         (show patternExpr)
 
     -- guarded condition, ignore match target in context, just check if the

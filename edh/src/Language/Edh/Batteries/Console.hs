@@ -89,7 +89,7 @@ loggingProc !lhExpr !rhExpr !exit = do
                   _ -> do
                     logger logLevel srcLoc $ ArgsPack [rhVal] odEmpty
                     exitEdh ets exit nil
-      _ -> throwEdh EvalError $ "Invalid log target: " <> T.pack (show lhVal)
+      _ -> throwEdh EvalError $ "invalid log target: " <> T.pack (show lhVal)
 
 
 -- | host method console.exit(***apk)
@@ -132,21 +132,21 @@ conReadSourceProc !apk !exit = ask >>= \ets ->
     ArgsPackParser
         [ \arg (_, ps2') -> case arg of
           EdhString ps1s -> Right (ps1s, ps2')
-          _              -> Left "Invalid ps1"
+          _              -> Left "invalid ps1"
         , \arg (ps1', _) -> case arg of
           EdhString ps2s -> Right (ps1', ps2s)
-          _              -> Left "Invalid ps2"
+          _              -> Left "invalid ps2"
         ]
       $ Map.fromList
           [ ( "ps1"
             , \arg (_, ps2') -> case arg of
               EdhString ps1s -> Right (ps1s, ps2')
-              _              -> Left "Invalid ps1"
+              _              -> Left "invalid ps1"
             )
           , ( "ps2"
             , \arg (ps1', _) -> case arg of
               EdhString ps2s -> Right (ps1', ps2s)
-              _              -> Left "Invalid ps2"
+              _              -> Left "invalid ps2"
             )
           ]
 
@@ -209,26 +209,26 @@ conReadCommandProc !apk !exit = ask >>= \ets ->
     ArgsPackParser
         [ \arg (_, ps2', so) -> case arg of
           EdhString ps1s -> Right (ps1s, ps2', so)
-          _              -> Left "Invalid ps1"
+          _              -> Left "invalid ps1"
         , \arg (ps1', _, so) -> case arg of
           EdhString ps2s -> Right (ps1', ps2s, so)
-          _              -> Left "Invalid ps2"
+          _              -> Left "invalid ps2"
         ]
       $ Map.fromList
           [ ( "ps1"
             , \arg (_, ps2', so) -> case arg of
               EdhString ps1s -> Right (ps1s, ps2', so)
-              _              -> Left "Invalid ps1"
+              _              -> Left "invalid ps1"
             )
           , ( "ps2"
             , \arg (ps1', _, so) -> case arg of
               EdhString ps2s -> Right (ps1', ps2s, so)
-              _              -> Left "Invalid ps2"
+              _              -> Left "invalid ps2"
             )
           , ( "inScopeOf"
             , \arg (ps1, ps2, _) -> case arg of
               EdhObject so -> Right (ps1, ps2, Just so)
-              _            -> Left "Invalid inScopeOf object"
+              _            -> Left "invalid inScopeOf object"
             )
           ]
 
@@ -308,7 +308,7 @@ timelyNotify !ets (PeriodicArgs !delayMicros !wait1st) (!ets', !iter'cb) !exit
 conEveryMicrosProc :: EdhHostProc
 conEveryMicrosProc !apk !exit = ask >>= \ets ->
   case generatorCaller $ edh'context ets of
-    Nothing -> throwEdh EvalError "Can only be called as generator"
+    Nothing -> throwEdh EvalError "can only be called as generator"
     Just genr'caller ->
       case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
         Right !pargs -> contEdhSTM $ timelyNotify ets pargs genr'caller exit
@@ -318,7 +318,7 @@ conEveryMicrosProc !apk !exit = ask >>= \ets ->
 conEveryMillisProc :: EdhHostProc
 conEveryMillisProc !apk !exit = ask >>= \ets ->
   case generatorCaller $ edh'context ets of
-    Nothing -> throwEdh EvalError "Can only be called as generator"
+    Nothing -> throwEdh EvalError "can only be called as generator"
     Just genr'caller ->
       case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
         Right !pargs -> contEdhSTM $ timelyNotify
@@ -332,7 +332,7 @@ conEveryMillisProc !apk !exit = ask >>= \ets ->
 conEverySecondsProc :: EdhHostProc
 conEverySecondsProc !apk !exit = ask >>= \ets ->
   case generatorCaller $ edh'context ets of
-    Nothing -> throwEdh EvalError "Can only be called as generator"
+    Nothing -> throwEdh EvalError "can only be called as generator"
     Just genr'caller ->
       case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
         Right !pargs -> contEdhSTM $ timelyNotify
@@ -348,16 +348,16 @@ parsePeriodicArgs =
       [ \arg pargs -> case arg of
           EdhDecimal !d -> case decimalToInteger d of
             Just !i -> Right $ pargs { periodic'interval = fromIntegral i }
-            _ -> Left $ "Invalid interval, expect an integer but: " <> T.pack
+            _ -> Left $ "invalid interval, expect an integer but: " <> T.pack
               (show arg)
-          _ -> Left $ "Invalid interval, expect an integer but: " <> T.pack
+          _ -> Left $ "invalid interval, expect an integer but: " <> T.pack
             (show arg)
       ]
     $ Map.fromList
         [ ( "wait1st"
           , \arg pargs -> case arg of
             EdhBool !w -> Right pargs { periodic'wait1st = w }
-            _ -> Left $ "Invalid wait1st, expect true or false but: " <> T.pack
+            _ -> Left $ "invalid wait1st, expect true or false but: " <> T.pack
               (show arg)
           )
         ]

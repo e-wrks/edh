@@ -41,10 +41,10 @@ locateEdhModule :: FilePath -> FilePath -> IO (FilePath, FilePath)
 locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
   (_, ".edh") ->
     throwPkgError
-      $  "You don't include the `.edh` file extension in the import: "
+      $  "you don't include the `.edh` file extension in the import: "
       <> T.pack nomSpec
   _ -> doesPathExist pkgPath >>= \case
-    False -> throwPkgError $ "Path does not exist: " <> T.pack pkgPath
+    False -> throwPkgError $ "path does not exist: " <> T.pack pkgPath
     True  -> case stripPrefix "./" nomSpec of
       Just !relImp -> resolveRelImport relImp
       Nothing      -> canonicalizePath "." >>= resolveAbsImport
@@ -64,7 +64,7 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
           False ->
             -- do
             --   trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $  return ()
-            throwPkgError $ "No such module: " <> T.pack nomSpec
+            throwPkgError $ "no such module: " <> T.pack nomSpec
 
   resolveAbsImport :: FilePath -> IO (FilePath, FilePath)
   resolveAbsImport !caniPkgPath = do
@@ -82,7 +82,7 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
             -- trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $ return ()
             let !parentPkgPath = takeDirectory caniPkgPath
             if equalFilePath parentPkgPath caniPkgPath
-              then throwPkgError $ "No such module: " <> T.pack nomSpec
+              then throwPkgError $ "no such module: " <> T.pack nomSpec
               else resolveAbsImport parentPkgPath
 
 
@@ -98,6 +98,6 @@ locateEdhMainModule !importPath = canonicalizePath "." >>= resolveMainImport
       False -> do
         let !parentPkgPath = takeDirectory caniPkgPath
         if equalFilePath parentPkgPath caniPkgPath
-          then throwPkgError $ "No such main module: " <> T.pack importPath
+          then throwPkgError $ "no such main module: " <> T.pack importPath
           else resolveMainImport parentPkgPath
 

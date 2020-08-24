@@ -29,7 +29,7 @@ addProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhv ->
       EdhString !rhs -> exitEdhTx exit (EdhBlob $ lhb <> TE.encodeUtf8 rhs)
       rhVal ->
         throwEdhTx UsageError
-          $  "Should not (+) a "
+          $  "should not (+) a "
           <> T.pack (edhTypeNameOf rhVal)
           <> " to a blob."
     EdhString !lhs -> evalExpr rhExpr $ \ !rhv !ets ->
@@ -78,13 +78,13 @@ divIntProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
     EdhDecimal !lhNum -> case decimalToInteger lhNum of
       Nothing ->
         throwEdhTx EvalError
-          $  "Not an integer as left-hand value for (//) operation: "
+          $  "not an integer as left-hand value for (//) operation: "
           <> T.pack (show lhNum)
       Just !lhi -> evalExpr rhExpr $ \ !rhVal -> case edhUltimate rhVal of
         EdhDecimal !rhNum -> case decimalToInteger rhNum of
           Nothing ->
             throwEdhTx EvalError
-              $  "Not an integer as right-hand value for (//) operation: "
+              $  "not an integer as right-hand value for (//) operation: "
               <> T.pack (show rhNum)
           Just !rhi ->
             exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `div` rhi
@@ -99,13 +99,13 @@ modIntProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
     EdhDecimal !lhNum -> case decimalToInteger lhNum of
       Nothing ->
         throwEdhTx EvalError
-          $  "Not an integer as left-hand value for (%) operation: "
+          $  "not an integer as left-hand value for (%) operation: "
           <> T.pack (show lhNum)
       Just lhi -> evalExpr rhExpr $ \ !rhVal -> case edhUltimate rhVal of
         EdhDecimal !rhNum -> case decimalToInteger rhNum of
           Nothing ->
             throwEdhTx EvalError
-              $  "Not an integer as right-hand value for (%) operation: "
+              $  "not an integer as right-hand value for (%) operation: "
               <> T.pack (show rhNum)
           Just rhi -> exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `mod` rhi
         _ -> exitEdhTx exit edhNA

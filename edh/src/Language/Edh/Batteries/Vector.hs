@@ -46,10 +46,10 @@ vecHostCtor !etsCtor (ArgsPack !ctorArgs !ctorKwargs) !ctorExit = do
       Just !len | len >= 0 -> doIt (fromInteger len) $ ctorArgs ++ repeat nil
       _ ->
         throwEdh etsCtor UsageError
-          $  "Length not an positive integer: "
+          $  "length not an positive integer: "
           <> T.pack (show d)
     Just !badLenVal ->
-      throwEdh etsCtor UsageError $ "Invalid length: " <> T.pack
+      throwEdh etsCtor UsageError $ "invalid length: " <> T.pack
         (show badLenVal)
 
 vecMethods :: EdhThreadState -> STM [(AttrKey, EdhValue)]
@@ -85,7 +85,7 @@ vecMethods !etsModule = sequence
             unsafeIOToSTM $ V.thaw =<< (V.++ V.fromList args) <$> V.freeze mvec
           cloneTo $ toDyn mvec'
     contEdhSTM $ cloneEdhObject that esClone $ exitEdh ets exit . EdhObject
-  vecAppendProc _ _ = throwEdh UsageError "Invalid args to Vector.append()"
+  vecAppendProc _ _ = throwEdh UsageError "invalid args to Vector.append()"
 
   vecEqProc :: EdhHostProc
   vecEqProc (ArgsPack [EdhObject (Object !entOther _ _)] !kwargs) !exit
@@ -140,7 +140,7 @@ vecMethods !etsModule = sequence
                 else exitWithRange iStart iStop iStep
 
   vecIdxReadProc !apk _ =
-    throwEdh UsageError $ "Invalid index for a Vector: " <> T.pack (show apk)
+    throwEdh UsageError $ "invalid index for a Vector: " <> T.pack (show apk)
 
   vecIdxWriteProc :: EdhHostProc
   vecIdxWriteProc (ArgsPack [!idxVal, !other] !kwargs) !exit | odNull kwargs =
@@ -169,7 +169,7 @@ vecMethods !etsModule = sequence
                 exitEdh ets exit other
               !badList ->
                 throwEdh ets UsageError
-                  $  "Not assignable to indexed vector: "
+                  $  "not assignable to indexed vector: "
                   <> T.pack (edhTypeNameOf badList)
             assignWithList :: Int -> [EdhValue] -> IO ()
             assignWithList _  []       = return ()
@@ -198,7 +198,7 @@ vecMethods !etsModule = sequence
                 exitWithRangeAssign iStart iStop iStep
 
   vecIdxWriteProc !apk _ =
-    throwEdh UsageError $ "Invalid assigning index for a Vector: " <> T.pack
+    throwEdh UsageError $ "invalid assigning index for a Vector: " <> T.pack
       (show apk)
 
 

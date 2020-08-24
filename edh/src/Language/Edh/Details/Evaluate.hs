@@ -146,7 +146,7 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
             withMagicMethod magicMth this that
           EdhProcedure (EdhMethod !magicMth) _ ->
             withMagicMethod magicMth super super
-          _ -> throwEdh ets EvalError $ "Invalid magic method type: " <> T.pack
+          _ -> throwEdh ets EvalError $ "invalid magic method type: " <> T.pack
             (edhTypeNameOf magicVal)
    where
 
@@ -158,7 +158,7 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
       (_, EdhBoundProc (EdhMethod !magicMth) !this !that _) ->
         withMagicMethod magicMth this that
       (_, !magicVal) ->
-        throwEdh ets EvalError $ "Invalid magic method type: " <> T.pack
+        throwEdh ets EvalError $ "invalid magic method type: " <> T.pack
           (edhTypeNameOf magicVal)
 
     withMagicMethod :: ProcDefi -> Object -> Object -> STM ()
@@ -202,7 +202,7 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
             withMagicMethod magicMth this that
           EdhProcedure (EdhMethod !magicMth) _ ->
             withMagicMethod magicMth super super
-          _ -> throwEdh ets EvalError $ "Invalid magic method type: " <> T.pack
+          _ -> throwEdh ets EvalError $ "invalid magic method type: " <> T.pack
             (edhTypeNameOf magicVal)
    where
 
@@ -214,7 +214,7 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
       (_, EdhBoundProc (EdhMethod !magicMth) !this !that _) ->
         withMagicMethod magicMth this that
       (_, !magicVal) ->
-        throwEdh ets EvalError $ "Invalid magic method type: " <> T.pack
+        throwEdh ets EvalError $ "invalid magic method type: " <> T.pack
           (edhTypeNameOf magicVal)
 
     withMagicMethod :: ProcDefi -> Object -> Object -> STM ()
@@ -277,7 +277,7 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
     -- no virtual attribute supported yet
     _ ->
       throwEdh ets EvalError
-        $  "Invalid assignment target, it's a "
+        $  "invalid assignment target, it's a "
         <> T.pack (edhTypeNameOf tgtVal)
         <> ": "
         <> T.pack (show tgtVal)
@@ -664,7 +664,7 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
       then edhDoSTM etsCaller $ exit kwArgs
       else
         throwEdh etsCaller EvalError
-        $  "Unexpected "
+        $  "unexpected "
         <> T.pack (show $ length posArgs)
         <> " positional argument(s) to wild receiver"
 
@@ -731,7 +731,7 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
                   exit' (ArgsPack posArgs'' kwArgs'')
                 SymbolicAttr !symName -> -- todo support this ?
                   throwEdh etsCaller UsageError
-                    $  "Do you mean `this.@"
+                    $  "do you mean `this.@"
                     <> symName
                     <> "` instead ?"
               Just addr@(IndirectRef _ _) ->
@@ -741,7 +741,7 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
                   $ \_assignResult _ets -> exit' (ArgsPack posArgs'' kwArgs'')
               !tgt ->
                 throwEdh etsCaller UsageError
-                  $  "Invalid argument retarget: "
+                  $  "invalid argument retarget: "
                   <> T.pack (show tgt)
    where
     resolveArgValue
@@ -761,17 +761,17 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
               runEdhTx etsRecv $ evalExpr defaultExpr $ \ !val _ets ->
                 exit'' (edhDeCaseClose val, posArgs', kwArgs'')
             _ ->
-              throwEdh etsCaller UsageError $ "Missing argument: " <> T.pack
+              throwEdh etsCaller UsageError $ "missing argument: " <> T.pack
                 (show argKey)
   woResidual :: ArgsPack -> STM () -> STM ()
   woResidual (ArgsPack !posResidual !kwResidual) !exit'
     | not (null posResidual)
     = throwEdh etsCaller UsageError
-      $  "Extraneous "
+      $  "extraneous "
       <> T.pack (show $ length posResidual)
       <> " positional argument(s)"
     | not (odNull kwResidual)
-    = throwEdh etsCaller UsageError $ "Extraneous keyword arguments: " <> T.pack
+    = throwEdh etsCaller UsageError $ "extraneous keyword arguments: " <> T.pack
       (unwords (show <$> odKeys kwResidual))
     | otherwise
     = exit'
@@ -840,7 +840,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                 exit ((noneNil <$> ll) ++ posArgs)
               _ ->
                 throwEdh ets EvalError
-                  $  "Can not unpack args from a "
+                  $  "can not unpack args from a "
                   <> T.pack (edhTypeNameOf val)
                   <> ": "
                   <> T.pack (show val)
@@ -854,7 +854,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                 edhVal2Kw
                     k
                     (  throwEdh ets UsageError
-                    $  "Invalid keyword type: "
+                    $  "invalid keyword type: "
                     <> T.pack (edhTypeNameOf k)
                     )
                   $ \ !kw -> do
@@ -867,7 +867,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                   pkArgs xs $ \ !posArgs -> exit posArgs
               _ ->
                 throwEdh ets EvalError
-                  $  "Can not unpack kwargs from a "
+                  $  "can not unpack kwargs from a "
                   <> T.pack (edhTypeNameOf val)
                   <> ": "
                   <> T.pack (show val)
@@ -879,7 +879,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                 pkArgs xs $ \ !posArgs' -> exit (posArgs ++ posArgs')
               _ ->
                 throwEdh ets EvalError
-                  $  "Can not unpack apk from a "
+                  $  "can not unpack apk from a "
                   <> T.pack (edhTypeNameOf val)
                   <> ": "
                   <> T.pack (show val)
@@ -967,11 +967,11 @@ edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker
             callCallable callee this' obj
               $ flip (maybe id) effOuter
               $ \ !outerScope !s -> s { edh'effects'stack = outerScope }
-          _ -> throwEdh etsCallPrep EvalError "No __call__ method on object"
+          _ -> throwEdh etsCallPrep EvalError "no __call__ method on object"
 
     _ ->
       throwEdh etsCallPrep EvalError
-        $  "Can not call a "
+        $  "can not call a "
         <> T.pack (edhTypeNameOf calleeVal)
         <> ": "
         <> T.pack (show calleeVal)
@@ -1029,14 +1029,14 @@ edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker
             endOfEdh
         Just !badVal ->
           throwEdh etsCallPrep UsageError
-            $  "The value passed to a producer as `outlet` found to be a "
+            $  "the value passed to a producer as `outlet` found to be a "
             <> T.pack (edhTypeNameOf badVal)
 
     -- calling a generator
     (EdhGnrtor _) -> throwEdh
       etsCallPrep
       EvalError
-      "Can only call a generator method by for-from-do loop"
+      "can only call a generator method by for-from-do loop"
 
     _ ->
       throwEdh etsCallPrep EvalError
@@ -3577,7 +3577,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
                 if iStop' < -1 || iStop' >= len - 1
                   then
                     throwEdh ets EvalError
-                    $  "Backward stop index out of bounds: "
+                    $  "backward stop index out of bounds: "
                     <> T.pack (show iStop)
                     <> " vs "
                     <> T.pack (show len)
@@ -3591,7 +3591,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
               if iStart' < 0 || iStart' >= len
                 then
                   throwEdh ets UsageError
-                  $  "Backward start index out of bounds: "
+                  $  "backward start index out of bounds: "
                   <> T.pack (show iStart)
                   <> " vs "
                   <> T.pack (show len)
@@ -3603,7 +3603,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
               if iStart' < 0 || iStart' >= len
                 then
                   throwEdh ets UsageError
-                  $  "Backward start index out of bounds: "
+                  $  "backward start index out of bounds: "
                   <> T.pack (show iStart)
                   <> " vs "
                   <> T.pack (show len)
@@ -3614,14 +3614,14 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
                     if iStop' < -1 || iStop >= len - 1
                       then
                         throwEdh ets EvalError
-                        $  "Backward stop index out of bounds: "
+                        $  "backward stop index out of bounds: "
                         <> T.pack (show iStop)
                         <> " vs "
                         <> T.pack (show len)
                       else if iStart' < iStop'
                         then
                           throwEdh ets EvalError
-                          $  "Can not step backward from "
+                          $  "can not step backward from "
                           <> T.pack (show iStart)
                           <> " to "
                           <> T.pack (show iStop)
@@ -3667,7 +3667,7 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
               if iStart' > iStop'
                 then
                   throwEdh ets EvalError
-                  $  "Can not step from "
+                  $  "can not step from "
                   <> T.pack (show iStart)
                   <> " to "
                   <> T.pack (show iStop)
@@ -3683,7 +3683,7 @@ edhRegulateIndex !ets !len !idx !exit =
   in  if posIdx < 0 || posIdx >= len
         then
           throwEdh ets EvalError
-          $  "Index out of bounds: "
+          $  "index out of bounds: "
           <> T.pack (show idx)
           <> " vs "
           <> T.pack (show len)

@@ -373,7 +373,7 @@ createEdhWorld !console = liftIO $ do
     attrKeyFrom (EdhString attrName) !exit' = exit' $ AttrByName attrName
     attrKeyFrom (EdhSymbol sym     ) !exit' = exit' $ AttrBySym sym
     attrKeyFrom badVal _ =
-      throwEdh ets UsageError $ "Invalid attribute reference type - " <> T.pack
+      throwEdh ets UsageError $ "invalid attribute reference type - " <> T.pack
         (edhTypeNameOf badVal)
 
   mthScopePut :: EdhHostProc
@@ -395,7 +395,7 @@ createEdhWorld !console = liftIO $ do
                 putAttrs rest ((AttrBySym k, v) : cumu) exit'
               _ ->
                 throwEdh ets UsageError
-                  $  "Invalid key/value type to put into a scope - "
+                  $  "invalid key/value type to put into a scope - "
                   <> T.pack (edhTypeNameOf arg)
         putAttrs args [] $ \ !attrs -> do
           iopdUpdate (attrs ++ odToList kwargs) es
