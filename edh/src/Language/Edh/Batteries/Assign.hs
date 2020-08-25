@@ -199,7 +199,7 @@ assignMissingProc (AttrExpr (DirectRef !addr)) !rhExpr !exit !ets =
           $ \ !rhVal _ets ->
               let !rhv = edhDeCaseClose rhVal
               in  do
-                    iopdInsert key rhv es
+                    edhSetValue key rhv es
                     exitEdh ets exit rhv
       Just !preVal -> exitEdh ets exit preVal
 assignMissingProc !lhExpr _ _ !ets =

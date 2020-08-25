@@ -495,7 +495,7 @@ createEdhWorld !console = liftIO $ do
           evalThePack !argsValues [] (kwExpr : kwargsExprs') = case kwExpr of
             (!kw, EdhExpr _ !expr _) ->
               runEdhTx etsEval $ evalExpr expr $ \ !val _ets -> do
-                iopdInsert kw (edhDeCaseClose val) kwIOPD
+                edhSetValue kw (edhDeCaseClose val) kwIOPD
                 evalThePack argsValues [] kwargsExprs'
             !v -> throwEdh ets EvalError $ "not an expr: " <> T.pack (show v)
           evalThePack !argsValues (argExpr : argsExprs') !kwargsExprs =

@@ -313,8 +313,8 @@ setObjAttr !ets !obj !key !val !exit = lookupEdhObjAttr obj key >>= \case
           $ callEdhMethod this that setter (ArgsPack args odEmpty) id
           $ \ !propRtn _ets -> exit propRtn
   writeAttr = case edh'obj'store obj of
-    HashStore  !hs             -> iopdInsert key val hs >> exit val
-    ClassStore (Class _ !cs _) -> iopdInsert key val cs >> exit val
+    HashStore  !hs             -> edhSetValue key val hs >> exit val
+    ClassStore (Class _ !cs _) -> edhSetValue key val cs >> exit val
     HostStore _ ->
       throwEdh ets UsageError
         $  "no such property `"
@@ -345,7 +345,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     DirectRef !addr'          -> resolveEdhAttrAddr ets addr' $ \ !key -> do
       if edh'ctx'eff'defining ctx
         then defEffectInto esScope key
-        else iopdInsert key rhVal esScope
+        else edhSetValue key rhVal esScope
 
       exitWithChkExportTo (edh'scope'this scope) key rhVal
       -- ^ exporting within a method procedure actually adds the artifact to
@@ -413,9 +413,10 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
   expInto :: EntityStore -> AttrKey -> EdhValue -> STM ()
   expInto !es !artKey !artVal =
     iopdLookup (AttrByName edhExportsMagicName) es >>= \case
-      Just (EdhDict (Dict _ !ds)) -> iopdInsert (attrKeyValue artKey) artVal ds
-      _                           -> do
-        d <- EdhDict <$> createEdhDict [(attrKeyValue artKey, artVal)]
+      Just (EdhDict (Dict _ !ds)) ->
+        edhSetValue (attrKeyValue artKey) artVal ds
+      _ -> do
+        !d <- EdhDict <$> createEdhDict [(attrKeyValue artKey, artVal)]
         iopdInsert (AttrByName edhExportsMagicName) d es
 
   defEffIntoObj :: Object -> AttrKey -> STM ()
@@ -430,7 +431,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
   defEffectInto !es !artKey =
     iopdLookup (AttrByName edhEffectsMagicName) es >>= \case
       Just (EdhDict (Dict _ !effDS)) ->
-        iopdInsert (attrKeyValue artKey) rhVal effDS
+        edhSetValue (attrKeyValue artKey) rhVal effDS
       _ -> do
         !d <- EdhDict <$> createEdhDict [(attrKeyValue artKey, rhVal)]
         iopdInsert (AttrByName edhEffectsMagicName) d es
@@ -535,7 +536,7 @@ callEdhOperator !this !that !mth !prede !args !exit =
       let ctx       = edh'context ets
           scope     = contextScope ctx
 
-          !mthScope = (lexicalScopeOf mth)
+          !mthScope = (edh'procedure'lexi mth)
             { edh'scope'entity = edh'scope'entity scope
             , edh'scope'this   = this
             , edh'scope'that   = that
@@ -556,7 +557,7 @@ callEdhOperator !this !that !mth !prede !args !exit =
         edhSwitchState ets $ exitEdhTx exit hpRtn
 
     -- calling an Edh operator procedure
-    Left !pb -> callEdhOperator' this that mth prede pb args $ exit
+    Left !pb -> callEdhOperator' this that mth prede pb args exit
 
 callEdhOperator'
   :: Object
@@ -574,13 +575,13 @@ callEdhOperator' !this !that !mth !prede !mth'body !args !exit !ets =
               (ArgsPack args odEmpty)
     $ \ !ed -> do
         !es <- iopdFromList $ odToList ed
-        let !mthScope = (lexicalScopeOf mth) { edh'scope'entity = es
-                                             , edh'scope'this   = this
-                                             , edh'scope'that   = that
-                                             , edh'scope'proc   = mth
-                                             , edh'scope'caller = edh'ctx'stmt
-                                               ctx
-                                             }
+        let !mthScope = (edh'procedure'lexi mth)
+              { edh'scope'entity = es
+              , edh'scope'this   = this
+              , edh'scope'that   = that
+              , edh'scope'proc   = mth
+              , edh'scope'caller = edh'ctx'stmt ctx
+              }
             !mthCtx = ctx { edh'ctx'stack        = mthScope <| edh'ctx'stack ctx
                           , edh'ctx'genr'caller  = Nothing
                           , edh'ctx'match        = true
@@ -603,9 +604,9 @@ callEdhOperator' !this !that !mth !prede !mth'body !args !exit !ets =
  where
   !ctx     = edh'context ets
   !recvCtx = ctx
-    { edh'ctx'stack        = (lexicalScopeOf mth) { edh'scope'this = this
-                                                  , edh'scope'that = that
-                                                  }
+    { edh'ctx'stack        = (edh'procedure'lexi mth) { edh'scope'this = this
+                                                      , edh'scope'that = that
+                                                      }
                                :| []
     , edh'ctx'genr'caller  = Nothing
     , edh'ctx'match        = true
@@ -722,13 +723,13 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
           resolveArgValue argKey argDefault $ \(argVal, posArgs'', kwArgs'') ->
             case argTgtAddr of
               Nothing -> do
-                iopdInsert argKey argVal em
+                edhSetValue argKey argVal em
                 exit' (ArgsPack posArgs'' kwArgs'')
               Just (DirectRef !addr) -> case addr of
                 NamedAttr "_" -> -- drop
                   exit' (ArgsPack posArgs'' kwArgs'')
                 NamedAttr !attrName -> do -- simple rename
-                  iopdInsert (AttrByName attrName) argVal em
+                  edhSetValue (AttrByName attrName) argVal em
                   exit' (ArgsPack posArgs'' kwArgs'')
                 SymbolicAttr !symName -> -- todo support this ?
                   throwEdh etsCaller UsageError
@@ -1062,7 +1063,7 @@ callEdhMethod !this !that !mth !apk !scopeMod !exit !etsCaller = do
     Right !hp -> do
       -- a host procedure views the same scope entity as of the caller's
       -- call frame
-      let !mthScope = scopeMod $ (lexicalScopeOf mth)
+      let !mthScope = scopeMod $ (edh'procedure'lexi mth)
             { edh'scope'entity = edh'scope'entity callerScope
             , edh'scope'this   = this
             , edh'scope'that   = that
@@ -1108,7 +1109,7 @@ callEdhMethod' !gnr'caller !this !that !mth !mth'body !apk !scopeMod !exit !etsC
                 apk
     $ \ !ed -> do
         !esScope <- iopdFromList (odToList ed)
-        let !mthScope = scopeMod $ (lexicalScopeOf mth)
+        let !mthScope = scopeMod $ (edh'procedure'lexi mth)
               { edh'scope'entity = esScope
               , edh'scope'this   = this
               , edh'scope'that   = that
@@ -1130,9 +1131,9 @@ callEdhMethod' !gnr'caller !this !that !mth !mth'body !apk !scopeMod !exit !etsC
  where
   !callerCtx = edh'context etsCaller
   !recvCtx   = callerCtx
-    { edh'ctx'stack        = (lexicalScopeOf mth) { edh'scope'this = this
-                                                  , edh'scope'that = that
-                                                  }
+    { edh'ctx'stack        = (edh'procedure'lexi mth) { edh'scope'this = this
+                                                      , edh'scope'that = that
+                                                      }
                                :| []
     , edh'ctx'genr'caller  = Nothing
     , edh'ctx'match        = true
@@ -1214,7 +1215,7 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLo
           -- call frame
           let !ctx         = edh'context ets
               !scope       = contextScope ctx
-              !calleeScope = (lexicalScopeOf gnr'proc)
+              !calleeScope = (edh'procedure'lexi gnr'proc)
                 { edh'scope'entity = edh'scope'entity scope
                 , edh'scope'this   = this
                 , edh'scope'that   = that
@@ -2524,7 +2525,8 @@ defineScopeAttr :: EdhThreadState -> AttrKey -> EdhValue -> STM ()
 defineScopeAttr !ets !key !val = when (key /= AttrByName "_") $ do
   if edh'ctx'eff'defining ctx
     then defEffect
-    else unless (edh'ctx'pure ctx) $ iopdInsert key val (edh'scope'entity scope)
+    else unless (edh'ctx'pure ctx)
+      $ edhSetValue key val (edh'scope'entity scope)
   when (edh'ctx'exporting ctx) $ case edh'obj'store $ edh'scope'this scope of
     HashStore  !hs             -> chkExport hs
     ClassStore (Class _ !cs _) -> chkExport cs
@@ -2537,14 +2539,14 @@ defineScopeAttr !ets !key !val = when (key /= AttrByName "_") $ do
 
   chkExport :: EntityStore -> STM ()
   chkExport !es = iopdLookup (AttrByName edhExportsMagicName) es >>= \case
-    Just (EdhDict (Dict _ !dsExp)) -> iopdInsert (attrKeyValue key) val dsExp
+    Just (EdhDict (Dict _ !dsExp)) -> edhSetValue (attrKeyValue key) val dsExp
     _                              -> do
       !d <- EdhDict <$> createEdhDict [(attrKeyValue key, val)]
       iopdInsert (AttrByName edhExportsMagicName) d es
 
   defEffect :: STM ()
   defEffect = iopdLookup (AttrByName edhEffectsMagicName) esScope >>= \case
-    Just (EdhDict (Dict _ !dsEff)) -> iopdInsert (attrKeyValue key) val dsEff
+    Just (EdhDict (Dict _ !dsEff)) -> edhSetValue (attrKeyValue key) val dsEff
     _                              -> do
       !d <- EdhDict <$> createEdhDict [(attrKeyValue key, val)]
       iopdInsert (AttrByName edhEffectsMagicName) d esScope
@@ -3279,7 +3281,7 @@ pvlToDict !ets !pvl !exit = do
   !ds <- iopdEmpty
   let go []         = exit ds
       go (p : rest) = val2DictEntry ets p $ \(!key, !val) -> do
-        iopdInsert key val ds
+        edhSetValue key val ds
         go rest
   go pvl
 

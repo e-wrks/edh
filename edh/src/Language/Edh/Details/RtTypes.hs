@@ -35,11 +35,17 @@ import           Language.Edh.Control
 import           Language.Edh.Details.IOPD
 
 
-
--- TODO rm this after refactor done
-lexicalScopeOf :: ProcDefi -> Scope
-lexicalScopeOf = edh'procedure'lexi
-
+-- | `nil` carries deletion semantics in Edh
+edhSetValue
+  :: forall k
+   . (Eq k, Hashable k)
+  => k
+  -> EdhValue
+  -> IOPD k EdhValue
+  -> STM ()
+edhSetValue !key !val !d = case val of
+  EdhNil -> iopdDelete key d
+  _      -> iopdInsert key val d
 
 
 -- | A pack of evaluated argument values with positional/keyword origin,
