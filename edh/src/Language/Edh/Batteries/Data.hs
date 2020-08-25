@@ -190,9 +190,9 @@ attrTemptProc !lhExpr !rhExpr !exit !ets = case rhExpr of
     (show rhExpr)
 
 
--- | operator ($) - function application
+-- | operator ($) - low-precedence operator for procedure call
 --
--- similar to ($) operator in Haskell
+-- similar to the function application ($) operator in Haskell
 -- can be used to apply decorators with nicer syntax
 fapProc :: EdhIntrinsicOp
 fapProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
@@ -208,18 +208,17 @@ fapProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
           exitEdh ets exit $ EdhArgsPack $ ArgsPack (args ++ args') kwargs''
         _ -> exitEdhTx exit $ EdhArgsPack $ ArgsPack (args ++ [rhVal]) kwargs
     -- normal case
-    !calleeVal -> \ !ets -> packEdhArgs ets argsPkr $ \ !apk ->
-      edhPrepareCall' ets calleeVal (deApk apk)
-        $ \ !mkCall -> runEdhTx ets (mkCall exit)
+    !calleeVal -> \ !ets -> edhPrepareCall ets calleeVal argsPkr
+      $ \ !mkCall -> runEdhTx ets (mkCall exit)
  where
   argsPkr :: ArgsPacker
   argsPkr = case rhExpr of
     ArgsPackExpr !pkr -> pkr
     _                 -> [SendPosArg rhExpr]
 
--- | operator (|) - flipped function application
+-- | operator (|) - flipped ($), low-precedence operator for procedure call
 --
--- similar to UNIX pipe
+-- sorta similar to UNIX pipe
 ffapProc :: EdhIntrinsicOp
 ffapProc !lhExpr !rhExpr = fapProc rhExpr lhExpr
 

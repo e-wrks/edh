@@ -9,8 +9,8 @@
   # partial is used to create partially applied functions
   f1 = partial ( 1, 2 ) ( f )
 
-  # (|) pipe operator is flipped function application, then f2 is equivalent
-  # to f1
+  # note the (|) pipe operator is flipped procedure call operator, then f2 is
+  # equivalent to f1, but more idiomatic
   let f2 = f|partial( 1, 2 )
 
   # note the pipe (|) operator has a rather low precedence -5, lower than the
@@ -26,11 +26,14 @@ f3( 7 )
 {
   # args fusion
 
-  # with respecting to functional application via ($) or (|), if an ArgsPack
+  # with respecting to procedure call via ($) or (|), if an ArgsPack
   # takes the place of a procedure (the callee), it just absorbs the other
   # positional argument or a whole arguments pack, to form a new ArgsPack
 
   ( 2, 11, n=3 ) $ ( 9, 7, m=5 ) | console.print
+
+  ; # this semicolon is necessary or the following round brackets will be
+  #   parsed as procedure call
 
   ( 9, 7, m=5 ) | ( 2, 11, n=3 ) | console.print
 
@@ -40,20 +43,18 @@ f3( 7 )
   # decorator
 
   interpreter decor( caller, fe ) case caller.eval( fe ) of { f } -> {
-    # leverage a namespace and the separate scope of its __call__ method,
-    # to avoid name clashing with `f.name`
-    case f.name | namespace _ ( f=f ) method __call__ ( fn )
-    method @fn (*** apk ) {
-      console.info<| 'Calling procedure `' ++this.f.name++ '` with: ' ++ apk
-      this.f(*** apk )
-    } of { wrapper } -> caller.put( f.name: wrapper )
+    fn=f.name
+    caller.put( fn: method @fn (*** apk ) {
+        console.info<| 'Calling procedure `' ++ fn ++ '` with: ' ++ apk
+        f(*** apk )
+    } )
   }
 
-  # ($) dollar operator is function application similar to ($) in Haskell
+  # note ($) dollar operator is function application similar to ($) in Haskell
 
   decor$
   method g ( a, b, c ) {
-    console.print( 'this is g()', a=a, b=b, c=c )
+    console.info<| 'this is g(), we have: ' ++ ( a=a, b=b, c=c )
   }
 
 }

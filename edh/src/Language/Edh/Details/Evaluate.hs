@@ -117,7 +117,10 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit !ets = case fromExpr of
     EdhProcedure !callable !effOuter ->
       -- bind an unbound procedure to inferred `this` and `that`
       exitEdh ets exit $ EdhBoundProc callable rtnThis rtnThat effOuter
-    _ -> exitEdh ets exit rtnVal
+    -- return a bound procedure intact
+    EdhBoundProc{} -> exitEdh ets exit rtnVal
+    -- not a callable, return as is
+    _              -> exitEdh ets exit rtnVal
 
 
 -- There're 2 tiers of magic happen during object attribute resolution in Edh.
@@ -959,24 +962,23 @@ edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker
       ClassStore{} -> callMaker $ \ !exit -> constructEdhObject obj apk
         $ \ !instObj !ets -> exitEdh ets exit $ EdhObject instObj
       -- calling an object
-      _ -> lookupEdhObjAttr obj (AttrByName "__call__") >>= \(!this', !mth) ->
-        case mth of
-          EdhBoundProc !callee !this !that !effOuter ->
-            callCallable callee this that
-              $ flip (maybe id) effOuter
-              $ \ !outerScope !s -> s { edh'effects'stack = outerScope }
-          EdhProcedure !callee !effOuter ->
-            callCallable callee this' obj
-              $ flip (maybe id) effOuter
-              $ \ !outerScope !s -> s { edh'effects'stack = outerScope }
-          _ -> throwEdh etsCallPrep EvalError "no __call__ method on object"
+      _ -> lookupEdhObjAttr obj (AttrByName "__call__") >>= \case
+        (!this', EdhProcedure !callee !effOuter) ->
+          callCallable callee this' obj
+            $ flip (maybe id) effOuter
+            $ \ !outerScope !s -> s { edh'effects'stack = outerScope }
+        (_, EdhBoundProc !callee !this !that !effOuter) ->
+          callCallable callee this that
+            $ flip (maybe id) effOuter
+            $ \ !outerScope !s -> s { edh'effects'stack = outerScope }
+        _ -> throwEdh etsCallPrep EvalError "no __call__ method on object"
 
-    _ ->
+    _ -> edhValueRepr etsCallPrep calleeVal $ \ !calleeRepr ->
       throwEdh etsCallPrep EvalError
         $  "can not call a "
         <> T.pack (edhTypeNameOf calleeVal)
         <> ": "
-        <> T.pack (show calleeVal)
+        <> calleeRepr
 
  where
   scope = contextScope $ edh'context etsCallPrep
@@ -1446,6 +1448,7 @@ resolveEdhAttrAddr !ets (SymbolicAttr !symName) !exit =
 -- of subsequent actions following it, be cautious.
 throwEdhTx :: EdhErrorTag -> Text -> EdhTx
 throwEdhTx !et !msg !ets = throwEdh ets et msg
+{-# INLINE throwEdhTx #-}
 
 -- | Throw a tagged error from STM monad running Edh computation
 --
@@ -1453,6 +1456,7 @@ throwEdhTx !et !msg !ets = throwEdh ets et msg
 -- of subsequent actions following it, be cautious.
 throwEdh :: EdhThreadState -> EdhErrorTag -> Text -> STM ()
 throwEdh !ets !tag !msg = throwEdh' ets tag msg []
+{-# INLINE throwEdh #-}
 
 -- | Throw a tagged error with some detailed data, from STM monad running Edh
 -- computation
@@ -1466,12 +1470,17 @@ throwEdh' !ets !tag !msg !details = edhWrapException (toException edhErr)
  where
   !edhWrapException = edh'exception'wrapper (edh'ctx'world $ edh'context ets)
   !cc               = getEdhCallContext 0 ets
-  !edhErr =
-    EdhError tag msg (toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details) cc
+  !errDetails       = case details of
+    [] -> toDyn nil
+    _  -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
+  !edhErr = EdhError tag msg errDetails cc
+{-# INLINE throwEdh' #-}
 
 
 edhThrowTx :: EdhValue -> EdhTx
 edhThrowTx = flip edhThrow
+{-# INLINE edhThrowTx #-}
+
 -- | Throw arbitrary value from Edh
 --
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
@@ -1483,6 +1492,7 @@ edhThrow !ets !exv = do
       propagateExc exv' (frame : stack) =
         edh'excpt'hndlr frame exv' $ \exv'' -> propagateExc exv'' stack
   propagateExc exv $ NE.toList $ edh'ctx'stack $ edh'context ets
+{-# INLINE edhThrow #-}
 
 edhErrorUncaught :: EdhThreadState -> EdhValue -> STM ()
 edhErrorUncaught !ets !exv = case exv of
@@ -1520,6 +1530,8 @@ edhCatchTx !tryAct !exit !passOn !etsOuter =
             !ctxHndl  = ctxOuter { edh'ctx'match = exv }
             !etsHndl  = etsOuter { edh'context = ctxHndl }
         runEdhTx etsHndl $ passOn (const . recover) (const rethrow)
+{-# INLINE edhCatchTx #-}
+
 -- | Catch possible throw from the specified try action
 edhCatch
   :: EdhThreadState
@@ -1572,6 +1584,7 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
         _                  -> return False
       _ -> return False
     _ -> return False
+{-# INLINE edhCatch #-}
 
 
 parseEdh :: EdhWorld -> String -> Text -> STM (Either ParserError [StmtSrc])
@@ -1802,13 +1815,15 @@ evalStmt' !stmt !exit = case stmt of
   FallthroughStmt  -> exitEdhTx exit EdhFallthrough
   RethrowStmt      -> exitEdhTx exit EdhRethrow
 
-  ReturnStmt !expr -> evalExpr expr $ \ !v2r -> case edhDeCaseClose v2r of
-    val@EdhReturn{} -> exitEdhTx exit (EdhReturn val)
+  ReturnStmt !expr -> \ !ets -> -- use a pure ctx to eval the return expr
+    runEdhTx ets { edh'context = (edh'context ets) { edh'ctx'pure = True } }
+      $ evalExpr expr
+      $ \ !v2r -> edhSwitchState ets $ case edhDeCaseClose v2r of
       -- actually when a generator procedure checks the result of its `yield`
       -- for the case of early return from the do block, if it wants to
       -- cooperate, double return is the only option
       -- throwEdhTx UsageError "you don't double return"
-    !val            -> exitEdhTx exit (EdhReturn val)
+          !val -> exitEdhTx exit (EdhReturn val)
 
 
   AtoIsoStmt !expr -> \ !ets ->
@@ -2383,14 +2398,14 @@ evalAttrAddr !addr !exit !ets = case addr of
     runEdhTx ets $ getEdhAttr
       tgtExpr
       key
-      (\ !tgtVal ->
-        throwEdhTx EvalError
+      (\ !tgtVal _ets -> edhValueRepr ets tgtVal $ \ !tgtRepr ->
+        throwEdh ets EvalError
           $  "no such attribute "
           <> T.pack (show key)
           <> " from a "
           <> T.pack (edhTypeNameOf tgtVal)
           <> ": "
-          <> T.pack (show tgtVal)
+          <> tgtRepr
       )
       exit
  where

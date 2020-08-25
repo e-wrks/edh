@@ -14,8 +14,12 @@ method unless( pred ) {
 
 
 # Note:
-#  `$` is the function application operator as in Haskell
-#  curly brackets quoting is not necessary for a single statement
+#
+# - `$` is the low-precedence procedure call operator,
+#   similar to the same ($) operator (function application) as in Haskell
+#
+# - curly brackets quoting is not necessary for a single statement, but nice to
+#   have, for future sibling statements to be added
 
 
 # this may be the most idiomatic form, it may help a bit if you build the

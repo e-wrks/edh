@@ -6,11 +6,21 @@ export {
 
   # partial application
   method partial (*** apk1 ) method apply'to ( f ) {
-    # leverage a namespace and the separate scope of its __call__ method,
-    # to avoid name clashing with `f.name`
-    f.name ++ '|partial' ++ repr( apk1 ) | namespace _ ( f=f, apk1=apk1 )
-    method __call__( fn ) method @fn (*** apk2 ) {
-      this.f(*** this.apk1, *** apk2 )
+    # for the at-notation (@fn) of the wrapper's procedure name to work, an
+    # attribute of the key value is needed in scope
+    fn = f.name
+
+    # or to make an even fancy procedure name of the wrapper like this?
+    # fn = f.name ++ '|partial' ++ repr( apk1 )
+
+    # note this relies on the fact that the expression of a `return` statement
+    # is evaluated as being pure, i.e. no attribute will get defined into scope
+    # during the evaluation
+    #
+    # this is crucial for correctness, in case `f.name` happens to be one of
+    # `apk1`, `f`, or `fn`, which clashes with our attributes in local scope
+    return method @fn (*** apk2 ) {
+      f(*** apk1, *** apk2 )
     }
   }
 
