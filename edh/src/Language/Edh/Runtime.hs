@@ -106,7 +106,7 @@ createEdhWorld !console = liftIO $ do
     $ iopdUpdate [(AttrByName "namespace", EdhObject nsClassObj)] hsRoot
 
   -- * the `scope` class
-  !hsScope <- -- TODO port eval/get/put/attrs methods
+  !hsScope <-
     atomically
     $  (iopdFromList =<<)
     $  sequence

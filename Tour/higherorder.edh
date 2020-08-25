@@ -7,7 +7,6 @@
   }
 
   # partial is used to create partially applied functions
-  # TODO add `partial` to syntax highlighter as lib utilities
   f1 = partial ( 1, 2 ) ( f )
 
   # (|) pipe operator is flipped function application, then f2 is equivalent
