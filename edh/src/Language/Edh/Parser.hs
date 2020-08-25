@@ -50,10 +50,8 @@ optionalComma = fromMaybe False <$> optional (True <$ symbol ",")
 optionalSemicolon :: Parser Bool
 optionalSemicolon = fromMaybe False <$> optional (True <$ symbol ";")
 
--- TODO support more Unicode ranges as valid identifier chars
 isIdentStart :: Char -> Bool
-isIdentStart = flip elem validChars
-  where !validChars = '_' : ['a' .. 'z'] ++ ['A' .. 'Z']
+isIdentStart !c = c == '_' || Char.isAlphaNum c
 
 isIdentChar :: Char -> Bool
 isIdentChar c = isIdentStart c || isDigit c || c == '\''
