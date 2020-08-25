@@ -278,8 +278,7 @@ getEdhCallContext !unwind !ets = EdhCallContext
 -- There is only `procedure scope` in Edh
 -- also see https://github.com/e-wrks/edh/Tour/#procedure
 data Scope = Scope {
-    -- | the backing storage of this scope, it's unique in a method procedure,
-    -- and is the underlying hash store of 'edh'scope'this' in a class procedure.
+    -- | the backing storage of this scope
     edh'scope'entity :: !EntityStore
     -- | `this` object in this scope
   , edh'scope'this :: !Object
@@ -290,8 +289,10 @@ data Scope = Scope {
     -- top frame is a scope all same but the `edh'excpt'hndlr` field,
     -- which executes its handling logics appropriately.
   , edh'excpt'hndlr :: !EdhExcptHndlr
-    -- | the Edh procedure holding this scope
-  , edh'scope'proc :: !ProcDefi
+    -- | the Edh procedure, as to run which, this scope is created
+    -- note this is left lazy so the root scope can be created without infinite
+    -- loop
+  , edh'scope'proc :: ProcDefi
     -- | the Edh stmt caused creation of this scope
   , edh'scope'caller :: !StmtSrc
     -- | when this scope is of an effectful procedure as called, this is the
@@ -356,7 +357,9 @@ data Object = Object {
     -- | the storage for entity attributes of the object
   , edh'obj'store :: !ObjectStore
     -- | the class object must have a 'ClassStore' storage
-  , edh'obj'class :: !Object
+    -- note this field can not be strict, or it's infinite loop creating the
+    -- meta class object (whose class is itself)
+  , edh'obj'class :: Object
     -- | up-links for object inheritance hierarchy
   , edh'obj'supers :: !(TVar [Object])
   }
