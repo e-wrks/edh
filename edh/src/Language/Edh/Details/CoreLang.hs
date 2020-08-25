@@ -112,8 +112,8 @@ lookupEdhSelfAttr !this !key = case edh'obj'store this of
     else case edh'obj'store clsObj of
       ClassStore (Class _ !cs _) -> iopdLookup key cs >>= \case
         Just !v -> return v
-        Nothing -> lookupFromClassOf clsObj
-      _ -> lookupFromClassOf clsObj
+        Nothing -> return EdhNil -- don't resort to meta class here
+      _ -> return EdhNil -- todo should complain loudly here?
     where !clsObj = edh'obj'class obj
 {-# INLINE lookupEdhSelfAttr #-}
 

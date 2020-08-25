@@ -38,44 +38,47 @@ import           Language.Edh.Details.Evaluate
 createEdhWorld :: MonadIO m => EdhConsole -> m EdhWorld
 createEdhWorld !console = liftIO $ do
 
-  -- * the meta class and namespace class
-  !idMeta      <- newUnique
-  !hsMeta      <- atomically iopdEmpty
-  !ssMeta      <- newTVarIO []
+  -- the meta class
+  !idMeta <- newUnique
+  !hsMeta <- atomically iopdEmpty
+  !ssMeta <- newTVarIO []
 
-  !idNamespace <- newUnique
-  !hsNamespace <- atomically iopdEmpty
-  !ssNamespace <- newTVarIO []
-
-  -- root object is an instance of namespace class per se
-  !idRoot      <- newUnique
-  !hsRoot      <- atomically $ iopdFromList
+  -- the root object and root scope
+  !idRoot <- newUnique
+  !hsRoot <- atomically $ iopdFromList
     [ (AttrByName "__name__", EdhString "<root>")
     , (AttrByName "None"    , edhNone)
     , (AttrByName "Nothing" , edhNothing)
     , (AttrByName "NA"      , edhNA)
     ]
-  !ssRoot <- newTVarIO []
+  !ssRoot      <- newTVarIO []
+
+  -- the namespace class, root object is a special instance of namespace class
+  !idNamespace <- newUnique
+  !hsNamespace <- atomically iopdEmpty
+  !ssNamespace <- newTVarIO []
 
   let
-    metaProc = ProcDefi idMeta (AttrByName "class") rootScope
-      $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right phantomHostProc)
+    rootScope =
+      Scope hsRoot rootObj rootObj defaultEdhExcptHndlr rootProc genesisStmt []
+    rootProc = ProcDefi idRoot (AttrByName "<root>") rootScope
+      $ ProcDecl (NamedAttr "<root>") (PackReceiver []) (Right phantomHostProc)
+    rootObj  = Object idRoot (HashStore hsRoot) nsClassObj ssRoot
+
+    metaProc = ProcDefi idMeta (AttrByName "<meta>") rootScope
+      $ ProcDecl (NamedAttr "<meta>") (PackReceiver []) (Right phantomHostProc)
     metaClass    = Class metaProc hsMeta phantomAllocator
     metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
 
-    nsProc       = ProcDefi idNamespace (AttrByName "namespace") rootScope
-      $ ProcDecl
-          (NamedAttr "namespace")
-          (PackReceiver [])
-          (Right phantomHostProc)
+    nsProc =
+      ProcDefi idNamespace (AttrByName "<namespace>") rootScope
+        $ ProcDecl
+            (NamedAttr "<namespace>")
+            (PackReceiver [])
+            (Right phantomHostProc)
     nsClass = Class nsProc hsNamespace phantomAllocator
     nsClassObj =
       Object idNamespace (ClassStore nsClass) metaClassObj ssNamespace
-
-    rootObj = Object idRoot (HashStore hsRoot) nsClassObj ssRoot
-
-    rootScope =
-      Scope hsRoot rootObj rootObj defaultEdhExcptHndlr nsProc genesisStmt []
 
   atomically
     $  (flip iopdUpdate hsMeta =<<)
@@ -102,9 +105,6 @@ createEdhWorld !console = liftIO $ do
         ]
       ]
 
-  atomically
-    $ iopdUpdate [(AttrByName "namespace", EdhObject nsClassObj)] hsRoot
-
   -- * the `scope` class
   !hsScope <-
     atomically
@@ -122,12 +122,10 @@ createEdhWorld !console = liftIO $ do
        ]
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
        | (nm, getter, setter) <-
-         [ ("lexiLoc"  , mthScopeLexiLoc  , Nothing)
-         , ("callerLoc", mthScopeCallerLoc, Nothing)
+         [ ("outer"    , mthScopeOuterGetter, Nothing)
+         , ("lexiLoc"  , mthScopeLexiLoc    , Nothing)
+         , ("callerLoc", mthScopeCallerLoc  , Nothing)
          ]
-       ]
-    ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
-       | (nm, getter, setter) <- [("outer", mthScopeOuterGetter, Nothing)]
        ]
   let scopeAllocator !ets (ArgsPack _args !kwargs) !exit =
         case odLookup (AttrByName "ofObj") kwargs of
@@ -364,7 +362,15 @@ createEdhWorld !console = liftIO $ do
 
 
   mthScopeRepr :: EdhHostProc
-  mthScopeRepr _ !exit = exitEdhTx exit $ EdhString "<scope>"
+  mthScopeRepr _ !exit !ets =
+    castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
+      Nothing -> exitEdh ets exit $ EdhString "<bogus scope object>"
+      Just (scope :: Scope) ->
+        exitEdh ets exit
+          $  EdhString
+          $  "<scope: "
+          <> procedureName (edh'scope'proc scope)
+          <> ">"
 
   mthScopeShow :: EdhHostProc
   mthScopeShow _ !exit !ets =
@@ -517,20 +523,18 @@ createEdhWorld !console = liftIO $ do
   mthScopeOuterGetter _ !exit !ets = case edh'obj'store this of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
       Nothing               -> throwEdh ets EvalError "bogus scope object"
-      Just (scope :: Scope) -> do
-        let !outerScope = edh'procedure'lexi $ edh'scope'proc scope
-        if edh'scope'proc outerScope == edh'scope'proc scope
-          then exitEdh ets exit nil
-          else do
-            !oid  <- unsafeIOToSTM newUnique
-            !hsv' <- newTVar $ toDyn outerScope
-            !ss   <- newTVar []
-            exitEdh ets exit $ EdhObject $ Object oid
-                                                  (HostStore hsv')
-                                                  (edh'obj'class this)
-                                                  ss
+      Just (scope :: Scope) -> case outerScopeOf scope of
+        Nothing          -> exitEdh ets exit nil
+        Just !outerScope -> do
+          !hsv'          <- newTVar $ toDyn outerScope
+          !outerScopeObj <- cloneEdhObject this
+                                           (edh'scope'that procScope)
+                                           (HostStore hsv')
+          exitEdh ets exit $ EdhObject outerScopeObj
     _ -> exitEdh ets exit $ EdhString "bogus scope object"
-    where !this = edh'scope'this $ contextScope $ edh'context ets
+   where
+    !procScope = contextScope $ edh'context ets
+    !this      = edh'scope'this procScope
 
 
   -- this is called in case a ProgramHalt is constructed by Edh code

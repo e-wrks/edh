@@ -1624,40 +1624,46 @@ mkHostClass' !scope !className !allocator !superClasses !storeMod = do
 
 objectScope :: Object -> Maybe Scope
 objectScope !obj = case edh'obj'store obj of
-  HashStore  !hs             -> Just $ scopeOf hs
-  ClassStore (Class _ !cs _) -> Just $ scopeOf cs
-  HostStore  _               -> Nothing
- where
-  scopeOf :: EntityStore -> Scope
-  scopeOf !es =
-    let scope = Scope { edh'scope'entity  = es
-                      , edh'scope'this    = obj
-                      , edh'scope'that    = obj
-                      , edh'excpt'hndlr   = defaultEdhExcptHndlr
-                      , edh'scope'proc    = clsProc
-                      , edh'scope'caller  = objCreStmt
-                      , edh'effects'stack = []
-                      }
-        clsObj  = edh'obj'class obj
-        clsProc = case edh'obj'store clsObj of
+
+  HostStore  _                 -> Nothing
+
+  ClassStore (Class !cp !cs _) -> Just Scope
+    { edh'scope'entity  = cs
+    , edh'scope'this    = obj
+    , edh'scope'that    = obj
+    , edh'excpt'hndlr   = defaultEdhExcptHndlr
+    , edh'scope'proc    = cp
+    , edh'scope'caller  = StmtSrc
+                            ( SourcePos { sourceName   = "<class-definition>"
+                                        , sourceLine   = mkPos 1
+                                        , sourceColumn = mkPos 1
+                                        }
+                            , VoidStmt
+                            )
+    , edh'effects'stack = []
+    }
+
+  HashStore !hs ->
+    let !objClass = edh'obj'class obj
+        scopeProc = case edh'obj'store objClass of
           ClassStore (Class !cp _ _) -> cp
-          _ -> -- todo should err out instead?
-            ProcDefi (edh'obj'ident clsObj) (AttrByName "<bogus-class>") scope
-              $ ProcDecl
-                  (NamedAttr "<bogus-class>")
-                  (PackReceiver [])
-                  (Right fakeHostProc)
-    in  scope
-  fakeHostProc :: EdhHostProc
-  fakeHostProc _ !exit' = exitEdhTx exit' nil
-  objCreStmt :: StmtSrc
-  objCreStmt = StmtSrc
-    ( SourcePos { sourceName   = "<object-creation>"
-                , sourceLine   = mkPos 1
-                , sourceColumn = mkPos 1
-                }
-    , VoidStmt
-    )
+          _ -> error "bug: class of an object not bearing ClassStore"
+        scope = Scope
+          { edh'scope'entity  = hs
+          , edh'scope'this    = obj
+          , edh'scope'that    = obj
+          , edh'excpt'hndlr   = defaultEdhExcptHndlr
+          , edh'scope'proc    = scopeProc
+          , edh'scope'caller  = StmtSrc
+                                  ( SourcePos { sourceName = "<object-creation>"
+                                              , sourceLine = mkPos 1
+                                              , sourceColumn = mkPos 1
+                                              }
+                                  , VoidStmt
+                                  )
+          , edh'effects'stack = []
+          }
+    in  Just scope
 
 
 -- | Create a reflective object capturing the specified scope as from the
