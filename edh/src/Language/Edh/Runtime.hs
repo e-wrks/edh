@@ -165,10 +165,15 @@ createEdhWorld !console = liftIO $ do
        | (nm, mth, args) <-
          [ ("__repr__", mthErrRepr, PackReceiver [])
          , ("__show__", mthErrShow, PackReceiver [])
+         , ("__desc__", mthErrDesc, PackReceiver [])
          ]
        ]
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
-       | (nm, getter, setter) <- [("stack", mthErrStackGetter, Nothing)]
+       | (nm, getter, setter) <-
+         [ ("stack"  , mthErrStackGetter  , Nothing)
+         , ("message", mthErrMsgGetter    , Nothing)
+         , ("details", mthErrDetailsGetter, Nothing)
+         ]
        ]
   clsProgramHalt <- atomically
     $ mkHostClass rootScope "ProgramHalt" haltAllocator hsErrCls []
@@ -198,10 +203,10 @@ createEdhWorld !console = liftIO $ do
           Just !err -> do
             !hsv <- newTVar $ toDyn $ toException err
             let !clsErr = case err of
-                  ProgramHalt{}    -> clsProgramHalt
-                  EdhIOError{}     -> clsIOError
-                  EdhPeerError{}   -> clsPeerError
-                  EdhError !et _ _ -> case et of
+                  ProgramHalt{}      -> clsProgramHalt
+                  EdhIOError{}       -> clsIOError
+                  EdhPeerError{}     -> clsPeerError
+                  EdhError !et _ _ _ -> case et of
                     EdhException -> clsException
                     PackageError -> clsPackageError
                     ParseError   -> clsParseError
@@ -530,10 +535,12 @@ createEdhWorld !console = liftIO $ do
 
   -- this is called in case a ProgramHalt is constructed by Edh code
   haltAllocator _ !apk !exit = case apk of
-    ArgsPack [v] !kwargs | odNull kwargs ->
-      exit =<< HostStore <$> newTVar (toDyn $ ProgramHalt $ toDyn v)
-    _ -> exit =<< HostStore <$> newTVar
-      (toDyn $ ProgramHalt $ toDyn $ EdhArgsPack apk)
+    ArgsPack [] !kwargs | odNull kwargs -> createErr nil
+    ArgsPack [v] !kwargs | odNull kwargs -> createErr v
+    _ -> createErr $ EdhArgsPack apk
+   where
+    createErr !hv = exit =<< HostStore <$> newTVar
+      (toDyn $ toException $ ProgramHalt $ toDyn hv)
 
   -- creating an IOError from Edh code
   ioErrAllocator !ets apk@(ArgsPack !args !kwargs) !exit = case args of
@@ -542,11 +549,11 @@ createEdhWorld !console = liftIO $ do
       $ \ !repr -> createErr $ T.unpack repr
    where
     createErr !msg = exit =<< HostStore <$> newTVar
-      (toDyn $ EdhIOError $ SomeException $ userError msg)
+      (toDyn $ toException $ EdhIOError $ toException $ userError msg)
 
   -- a peer error is most prolly created from Edh code
   peerErrAllocator _ !apk !exit = exit =<< HostStore <$> newTVar
-    (toDyn peerError)
+    (toDyn $ toException peerError)
    where
     peerError = case apk of
       (ArgsPack [EdhString !peerSite, EdhString !details] !kwargs)
@@ -555,12 +562,12 @@ createEdhWorld !console = liftIO $ do
 
   -- creating a tagged Edh error from Edh code
   errAllocator !tag !ets apk@(ArgsPack !args !kwargs) !exit = case args of
-    [] | odNull kwargs' -> createErr ""
-    [EdhString !m] | odNull kwargs' -> createErr m
-    _ -> edhValueRepr ets (EdhArgsPack apk) $ \ !repr -> createErr repr
+    [EdhString !m] | odNull kwargs' -> createErr m nil
+    (EdhString !m : args') -> createErr m (EdhArgsPack $ ArgsPack args' kwargs)
+    _ -> createErr "❌" (EdhArgsPack apk)
    where
-    createErr msg =
-      exit =<< HostStore <$> newTVar (toDyn $ toException $ EdhError tag msg cc)
+    createErr !msg !details = exit =<< HostStore <$> newTVar
+      (toDyn $ toException $ EdhError tag msg (toDyn details) cc)
     (!maybeUnwind, !kwargs') = odTakeOut (AttrByName "unwind") kwargs
     !unwind                  = case maybeUnwind of
       Just (EdhDecimal d) -> case decimalToInteger d of
@@ -568,20 +575,6 @@ createEdhWorld !console = liftIO $ do
         _       -> 1
       _ -> 1
     !cc = getEdhCallContext unwind ets
-
-  mthErrShow :: EdhHostProc
-  mthErrShow _ !exit !ets = case edh'obj'store errObj of
-    HostStore !hsv -> readTVar hsv >>= \ !hsd -> case fromDynamic hsd of
-      Just (exc :: SomeException) -> case edhKnownError exc of
-        Just !err -> exitEdh ets exit $ EdhString $ T.pack (show err)
-        _ ->
-          exitEdh ets exit $ EdhString $ errClsName <> ": " <> T.pack (show exc)
-      _ ->
-        exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
-    _ -> exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
-   where
-    !errObj     = edh'scope'this $ contextScope $ edh'context ets
-    !errClsName = objClassName errObj
 
   mthErrRepr :: EdhHostProc
   mthErrRepr _ !exit !ets = case edh'obj'store errObj of
@@ -607,7 +600,7 @@ createEdhWorld !console = liftIO $ do
             <> ","
             <> T.pack (show details)
             <> ")"
-        Just (EdhError _tag !msg _cc) -> if T.null msg
+        Just (EdhError _tag !msg _details _cc) -> if T.null msg
           then exitEdh ets exit $ EdhString $ errClsName <> "()"
           else exitEdh ets exit $ EdhString $ errClsName <> "(`" <> msg <> "`)"
         _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
@@ -617,18 +610,85 @@ createEdhWorld !console = liftIO $ do
     !errObj     = edh'scope'this $ contextScope $ edh'context ets
     !errClsName = objClassName errObj
 
+  mthErrShow :: EdhHostProc
+  mthErrShow _ !exit !ets = case edh'obj'store errObj of
+    HostStore !hsv -> readTVar hsv >>= \ !hsd -> case fromDynamic hsd of
+      Just (exc :: SomeException) -> case edhKnownError exc of
+        Just err@(EdhError _errTag _errMsg !details _cc) -> do
+          let !detailsText = case fromDynamic details of
+                Just EdhNil -> ""
+                Just _      -> "\n * with more detailed data."
+                _           -> ""
+          exitEdh ets exit $ EdhString $ T.pack (show err) <> detailsText
+        _ -> exitEdh ets exit $ EdhString $ errClsName <> ": " <> T.pack
+          (show exc)
+      _ ->
+        exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
+    _ -> exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
+   where
+    !errObj     = edh'scope'this $ contextScope $ edh'context ets
+    !errClsName = objClassName errObj
+
+  mthErrDesc :: EdhHostProc
+  mthErrDesc _ !exit !ets = case edh'obj'store errObj of
+    HostStore !hsv -> readTVar hsv >>= \ !hsd -> case fromDynamic hsd of
+      Just (exc :: SomeException) -> case edhKnownError exc of
+        Just err@(EdhError _errTag _errMsg !details _cc) ->
+          case fromDynamic details of
+            Just EdhNil      -> exitEdh ets exit $ EdhString $ T.pack (show err)
+            Just !detailsVal -> edhValueStr ets detailsVal $ \ !detailsStr ->
+              exitEdh ets exit
+                $  EdhString
+                $  T.pack (show err)
+                <> "\n * details:\n"
+                <> detailsStr
+            _ -> exitEdh ets exit $ EdhString $ T.pack (show err)
+        _ ->
+          exitEdh ets exit $ EdhString $ errClsName <> ": " <> T.pack (show exc)
+      _ ->
+        exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
+    _ -> exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
+   where
+    !errObj     = edh'scope'this $ contextScope $ edh'context ets
+    !errClsName = objClassName errObj
+
   mthErrStackGetter :: EdhHostProc
   mthErrStackGetter _ !exit !ets = case edh'obj'store errObj of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
       Just (exc :: SomeException) -> case edhKnownError exc of
-        Just (EdhError _errTag _errMsg (EdhCallContext !tip !frames)) ->
-          exitEdh ets exit $ EdhArgsPack $ ArgsPack
+        Just (EdhError _errTag _errMsg _details (EdhCallContext !tip !frames))
+          -> exitEdh ets exit $ EdhArgsPack $ ArgsPack
             (EdhString . dispEdhCallFrame <$> frames)
             (odFromList [(AttrByName "tip", EdhString tip)])
         _ -> exitEdh ets exit nil
       _ -> exitEdh ets exit nil
     _ -> exitEdh ets exit nil
-    where errObj = edh'scope'this $ contextScope $ edh'context ets
+    where !errObj = edh'scope'this $ contextScope $ edh'context ets
+
+  mthErrMsgGetter :: EdhHostProc
+  mthErrMsgGetter _ !exit !ets = case edh'obj'store errObj of
+    HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+      Just (exc :: SomeException) -> case edhKnownError exc of
+        Just (EdhError _errTag !errMsg _errDetails _errCtx) ->
+          exitEdh ets exit $ EdhString errMsg
+        _ -> exitEdh ets exit nil
+      _ -> exitEdh ets exit nil
+    _ -> exitEdh ets exit nil
+    where !errObj = edh'scope'this $ contextScope $ edh'context ets
+
+  mthErrDetailsGetter :: EdhHostProc
+  mthErrDetailsGetter _ !exit !ets = case edh'obj'store errObj of
+    HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+      Just (exc :: SomeException) -> case edhKnownError exc of
+        Just (EdhError _errTag _errMsg !errDetails _errCtx) ->
+          case fromDynamic errDetails of
+            Just (detailsValue :: EdhValue) -> exitEdh ets exit detailsValue
+            _                               -> exitEdh ets exit nil
+        _ -> exitEdh ets exit nil
+      _ -> exitEdh ets exit nil
+    _ -> exitEdh ets exit nil
+    where !errObj = edh'scope'this $ contextScope $ edh'context ets
+
 
   moduleAllocator :: EdhObjectAllocator
   moduleAllocator !ets !apk !exit = case apk of
@@ -696,6 +756,7 @@ declareEdhOperators world declLoc opps = do
             <> ") for operator: "
             <> op
             )
+            (toDyn nil)
         $ EdhCallContext "<edh>" []
       else return (prevPrec, prevDeclLoc)
 

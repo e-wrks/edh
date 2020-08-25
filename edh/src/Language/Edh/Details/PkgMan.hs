@@ -14,16 +14,23 @@ import           Control.Exception
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import           Data.List
+import           Data.Dynamic
 
 import           Language.Edh.Control
+import           Language.Edh.Details.IOPD
+import           Language.Edh.Details.RtTypes
 
 
 -- package loading mechanism is kept as simple as possible by far, not Edh
 -- program context trips into it, the `PackageError` thrown may be augmented
 -- later when appropriate.
-throwPkgError :: Text -> IO a
-throwPkgError !msg =
-  throwIO $ EdhError PackageError msg $ EdhCallContext "<os>" []
+throwPkgError :: Text -> [(AttrKey, EdhValue)] -> IO a
+throwPkgError !msg !details =
+  throwIO
+    $ EdhError PackageError
+               msg
+               (toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details)
+    $ EdhCallContext "<os>" []
 
 
 edhPkgPathFrom :: FilePath -> FilePath
@@ -39,13 +46,13 @@ edhPkgPathFrom !fromPath = if "<" `isPrefixOf` fromPath
 -- point to the root directory
 locateEdhModule :: FilePath -> FilePath -> IO (FilePath, FilePath)
 locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
-  (_, ".edh") ->
-    throwPkgError
-      $  "you don't include the `.edh` file extension in the import: "
-      <> T.pack nomSpec
+  (_, ".edh") -> throwPkgError
+    "you don't include the `.edh` file extension in the import"
+    [(AttrByName "spec", EdhString $ T.pack nomSpec)]
   _ -> doesPathExist pkgPath >>= \case
-    False -> throwPkgError $ "path does not exist: " <> T.pack pkgPath
-    True  -> case stripPrefix "./" nomSpec of
+    False -> throwPkgError "path does not exist"
+                           [(AttrByName "path", EdhString $ T.pack pkgPath)]
+    True -> case stripPrefix "./" nomSpec of
       Just !relImp -> resolveRelImport relImp
       Nothing      -> canonicalizePath "." >>= resolveAbsImport
  where
@@ -60,11 +67,13 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
         -- trace (" ** no hit: " <> edhFilePath <> " ** " <> nomPath) $ return ()
         let !edhIdxPath = nomPath </> "__init__.edh"
         doesFileExist edhIdxPath >>= \case
-          True -> return (nomPath, edhIdxPath)
+          True  -> return (nomPath, edhIdxPath)
           False ->
             -- do
             --   trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $  return ()
-            throwPkgError $ "no such module: " <> T.pack nomSpec
+                   throwPkgError
+            "no such module"
+            [(AttrByName "moduSpec", EdhString $ T.pack nomSpec)]
 
   resolveAbsImport :: FilePath -> IO (FilePath, FilePath)
   resolveAbsImport !caniPkgPath = do
@@ -82,7 +91,9 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
             -- trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $ return ()
             let !parentPkgPath = takeDirectory caniPkgPath
             if equalFilePath parentPkgPath caniPkgPath
-              then throwPkgError $ "no such module: " <> T.pack nomSpec
+              then throwPkgError
+                "no such module"
+                [(AttrByName "moduSpec", EdhString $ T.pack nomSpec)]
               else resolveAbsImport parentPkgPath
 
 
@@ -98,6 +109,8 @@ locateEdhMainModule !importPath = canonicalizePath "." >>= resolveMainImport
       False -> do
         let !parentPkgPath = takeDirectory caniPkgPath
         if equalFilePath parentPkgPath caniPkgPath
-          then throwPkgError $ "no such main module: " <> T.pack importPath
+          then throwPkgError
+            "no such main module"
+            [(AttrByName "importPath", EdhString $ T.pack importPath)]
           else resolveMainImport parentPkgPath
 

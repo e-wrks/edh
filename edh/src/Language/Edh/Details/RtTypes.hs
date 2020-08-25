@@ -1473,6 +1473,7 @@ mkIntrinsicOp !world !opSym !iop = do
         $ EdhError
             UsageError
             ("no precedence declared in the world for operator: " <> opSym)
+            (toDyn nil)
         $ EdhCallContext "<edh>" []
     Just (preced, _) -> return
       $ EdhProcedure (EdhIntrOp preced $ IntrinOpDefi u opSym iop) Nothing

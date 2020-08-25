@@ -67,22 +67,21 @@ data EdhError =
 
     -- | tagged error, with a msg and context information of the throwing Edh
     -- thread
-    -- TODO add details :: !(OrderedDict AttrKey EdhValue)
-  | EdhError !EdhErrorTag !Text !EdhCallContext
+  | EdhError !EdhErrorTag !Text !Dynamic !EdhCallContext
 instance Show EdhError where
   show (ProgramHalt _  ) = "Edh⏹️Halt"
   show (EdhIOError  ioe) = show ioe
   show (EdhPeerError peerSite details) = --
     "🏗️ " <> T.unpack peerSite <> "\n" <> T.unpack details
-  show (EdhError EdhException !msg !cc) = --
+  show (EdhError EdhException !msg _details !cc) = --
     "Đ\n" <> show cc <> T.unpack msg
-  show (EdhError PackageError !msg !cc) = --
+  show (EdhError PackageError !msg _details !cc) = --
     "💔\n" <> show cc <> "📦 " <> T.unpack msg
-  show (EdhError ParseError !msg !cc) = --
+  show (EdhError ParseError !msg _details !cc) = --
     "💔\n" <> show cc <> "⛔ " <> T.unpack msg
-  show (EdhError EvalError !msg !cc) = --
+  show (EdhError EvalError !msg _details !cc) = --
     "💔\n" <> show cc <> "💣 " <> T.unpack msg
-  show (EdhError UsageError !msg !cc) = --
+  show (EdhError UsageError !msg _details !cc) = --
     "💔\n" <> show cc <> "🙈 " <> T.unpack msg
 instance Exception EdhError
 
@@ -101,7 +100,7 @@ edhKnownError exc = case fromException exc of
   Nothing                -> case fromException exc of
     Just (err :: ParserError) ->
       Just
-        $ EdhError ParseError (T.pack $ errorBundlePretty err)
+        $ EdhError ParseError (T.pack $ errorBundlePretty err) (toDyn ())
         $ EdhCallContext "<parsing>" []
     Nothing -> Nothing
 

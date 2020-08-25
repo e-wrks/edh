@@ -14,6 +14,7 @@ import           Control.Concurrent
 import           Control.Concurrent.STM
 
 import           Data.Unique
+import           Data.Dynamic
 
 import           Language.Edh.Control
 import           Language.Edh.Details.RtTypes
@@ -124,7 +125,9 @@ forkEventConsumer !consumingAct = do
       $ consumingAct sink
   atomically
     $        (readTMVar consumerDone >> throwSTM
-               (EdhError UsageError "event consumer quit without subscribing to sink"
+               ( EdhError UsageError
+                          "event consumer quit without subscribing to sink"
+                          (toDyn nil)
                $ EdhCallContext "<edh>" []
                )
              )

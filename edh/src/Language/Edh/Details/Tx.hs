@@ -30,6 +30,7 @@ driveEdhProgram !haltResult !bootCtx !prog = do
       throwIO
         $ EdhError UsageError
                    "Edh program should not run with async exceptions masked"
+                   (toDyn nil)
         $ EdhCallContext "<edh>" []
 
   -- prepare program environment

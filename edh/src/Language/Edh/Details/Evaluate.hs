@@ -1446,17 +1446,28 @@ resolveEdhAttrAddr !ets (SymbolicAttr !symName) !exit =
 -- of subsequent actions following it, be cautious.
 throwEdhTx :: EdhErrorTag -> Text -> EdhTx
 throwEdhTx !et !msg !ets = throwEdh ets et msg
+
 -- | Throw a tagged error from STM monad running Edh computation
 --
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent actions following it, be cautious.
 throwEdh :: EdhThreadState -> EdhErrorTag -> Text -> STM ()
-throwEdh !ets !tag !msg = edhWrapException (toException edhErr)
+throwEdh !ets !tag !msg = throwEdh' ets tag msg []
+
+-- | Throw a tagged error with some detailed data, from STM monad running Edh
+-- computation
+--
+-- a bit similar to `return` in Haskell, this doesn't cease the execution
+-- of subsequent actions following it, be cautious.
+throwEdh'
+  :: EdhThreadState -> EdhErrorTag -> Text -> [(AttrKey, EdhValue)] -> STM ()
+throwEdh' !ets !tag !msg !details = edhWrapException (toException edhErr)
   >>= \ !exo -> edhThrow ets $ EdhObject exo
  where
   !edhWrapException = edh'exception'wrapper (edh'ctx'world $ edh'context ets)
   !cc               = getEdhCallContext 0 ets
-  !edhErr           = EdhError tag msg cc
+  !edhErr =
+    EdhError tag msg (toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details) cc
 
 
 edhThrowTx :: EdhValue -> EdhTx
@@ -1475,21 +1486,23 @@ edhThrow !ets !exv = do
 
 edhErrorUncaught :: EdhThreadState -> EdhValue -> STM ()
 edhErrorUncaught !ets !exv = case exv of
+  EdhString !msg ->
+    throwSTM $ EdhError EvalError msg (toDyn nil) $ getEdhCallContext 0 ets
+  EdhArgsPack (ArgsPack (EdhString !msg : args') !kwargs) ->
+    throwSTM
+      $ EdhError EvalError msg (toDyn $ EdhArgsPack $ ArgsPack args' kwargs)
+      $ getEdhCallContext 0 ets
   EdhObject !exo -> case edh'obj'store exo of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
-      -- TODO replace cc in err if is empty here ?
-      Just (exc :: SomeException) -> throwSTM exc
-      -- TODO support magic method to coerce object as exception ?
-      Nothing                     -> edhValueRepr ets exv $ \ !msg ->
-        throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
-    -- TODO support magic method to coerce object as exception ?
-    _ -> edhValueRepr ets exv
-      $ \ !msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
-  EdhString !msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
-  -- coerce arbitrary value to EdhError
-  _              -> edhValueRepr ets exv
-    $ \ !msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
-
+      Just (exc :: SomeException) -> case edhKnownError exc of
+        Just !err -> throwSTM err
+        Nothing   -> throwSTM $ EdhIOError exc
+      _ -> throwDetails
+    _ -> throwDetails
+  _ -> throwDetails
+ where
+  throwDetails =
+    throwSTM $ EdhError EvalError "❌" (toDyn exv) $ getEdhCallContext 0 ets
 
 -- | Catch possible throw from the specified try action
 edhCatchTx
@@ -1610,7 +1623,7 @@ evalEdh' !srcName !lineNo !srcCode !exit !ets = do
           !edhWrapException =
             edh'exception'wrapper (edh'ctx'world $ edh'context ets)
           !cc     = getEdhCallContext 0 ets
-          !edhErr = EdhError ParseError msg cc
+          !edhErr = EdhError ParseError msg (toDyn nil) cc
       edhWrapException (toException edhErr)
         >>= \ !exo -> edhThrow ets (EdhObject exo)
     Right !stmts -> runEdhTx ets $ evalBlock stmts exit
@@ -2131,55 +2144,42 @@ importEdhModule !impSpec !exit !ets = if edh'in'tx ets
         normalizedSpec
 
   importFromFS :: STM ()
-  importFromFS =
-    flip
-        catchSTM
-        (\(e :: EdhError) -> case e of
-          EdhError !et !msg _ -> throwEdh ets et msg
-          _                   -> throwSTM e
-        )
-      $ locateModuInFS
-      $ \(!nomPath, !moduFile) -> do
-          let !moduId = T.pack nomPath
-          moduMap' <- takeTMVar worldModules
-          case Map.lookup moduId moduMap' of
-            Just !moduSlot -> do
-              -- put back immediately
-              putTMVar worldModules moduMap'
-              -- blocking wait the target module loaded
-              runEdhTx ets $ edhContSTM $ readTMVar moduSlot >>= \case
-                -- TODO GHC should be able to detect cyclic imports as 
-                --      deadlock, better to report that more friendly,
-                --      and more importantly, to prevent the crash.
-                EdhNamedValue _ !importError ->
-                  -- the first importer failed loading it,
-                  -- replicate the error in this thread
-                  edhThrow ets importError
-                !modu -> exitEdh ets exit modu
-            Nothing -> do -- we are the first importer
-              -- allocate an empty slot
-              moduSlot <- newEmptyTMVar
-              -- put it for global visibility
-              putTMVar worldModules $ Map.insert moduId moduSlot moduMap'
-              -- try load the module
-              edhCatch ets
-                       (loadModule moduSlot moduId moduFile)
-                       (exitEdh ets exit)
-                $ \ !exv _recover !rethrow -> case exv of
-                    EdhNil -> rethrow -- no error occurred
-                    _      -> do
-                      void $ tryPutTMVar moduSlot $ EdhNamedValue
-                        "<import-error>"
-                        exv
-                      -- cleanup on loading error
-                      moduMap'' <- takeTMVar worldModules
-                      case Map.lookup moduId moduMap'' of
-                        Nothing        -> putTMVar worldModules moduMap''
-                        Just moduSlot' -> if moduSlot' == moduSlot
-                          then putTMVar worldModules
-                            $ Map.delete moduId moduMap''
-                          else putTMVar worldModules moduMap''
-                      rethrow
+  importFromFS = locateModuInFS $ \(!nomPath, !moduFile) -> do
+    let !moduId = T.pack nomPath
+    moduMap' <- takeTMVar worldModules
+    case Map.lookup moduId moduMap' of
+      Just !moduSlot -> do
+        -- put back immediately
+        putTMVar worldModules moduMap'
+        -- blocking wait the target module loaded
+        runEdhTx ets $ edhContSTM $ readTMVar moduSlot >>= \case
+          -- TODO GHC should be able to detect cyclic imports as 
+          --      deadlock, better to report that more friendly,
+          --      and more importantly, to prevent the crash.
+          EdhNamedValue _ !importError ->
+            -- the first importer failed loading it,
+            -- replicate the error in this thread
+            edhThrow ets importError
+          !modu -> exitEdh ets exit modu
+      Nothing -> do -- we are the first importer
+        -- allocate an empty slot
+        moduSlot <- newEmptyTMVar
+        -- put it for global visibility
+        putTMVar worldModules $ Map.insert moduId moduSlot moduMap'
+        -- try load the module
+        edhCatch ets (loadModule moduSlot moduId moduFile) (exitEdh ets exit)
+          $ \ !exv _recover !rethrow -> case exv of
+              EdhNil -> rethrow -- no error occurred
+              _      -> do
+                void $ tryPutTMVar moduSlot $ EdhNamedValue "<import-error>" exv
+                -- cleanup on loading error
+                moduMap'' <- takeTMVar worldModules
+                case Map.lookup moduId moduMap'' of
+                  Nothing        -> putTMVar worldModules moduMap''
+                  Just moduSlot' -> if moduSlot' == moduSlot
+                    then putTMVar worldModules $ Map.delete moduId moduMap''
+                    else putTMVar worldModules moduMap''
+                rethrow
 
 
 loadModule :: TMVar EdhValue -> ModuleId -> FilePath -> EdhTxExit -> EdhTx
