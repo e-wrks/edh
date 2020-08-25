@@ -68,6 +68,9 @@ data EdhError =
     -- | tagged error, with a msg and context information of the throwing Edh
     -- thread
   | EdhError !EdhErrorTag !Text !Dynamic !EdhCallContext
+
+instance Exception EdhError
+
 instance Show EdhError where
   show (ProgramHalt _  ) = "Edh⏹️Halt"
   show (EdhIOError  ioe) = show ioe
@@ -83,7 +86,6 @@ instance Show EdhError where
     "💔\n" <> show cc <> "💣 " <> T.unpack msg
   show (EdhError UsageError !msg _details !cc) = --
     "💔\n" <> show cc <> "🙈 " <> T.unpack msg
-instance Exception EdhError
 
 data EdhErrorTag =
     EdhException -- for root class of custom Edh exceptions

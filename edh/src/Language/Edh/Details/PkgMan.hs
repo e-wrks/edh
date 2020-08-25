@@ -21,6 +21,9 @@ import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 
 
+data ImportName = RelativeName !Text | AbsoluteName !Text
+
+
 -- package loading mechanism is kept as simple as possible by far, not Edh
 -- program context trips into it, the `PackageError` thrown may be augmented
 -- later when appropriate.
@@ -41,10 +44,10 @@ edhPkgPathFrom !fromPath = if "<" `isPrefixOf` fromPath
     _                  -> fromPath
 
 
--- | returns nominal path and actual file path, the two will be different
--- e.g. in case an `__init__.edh` for a package, where nominal path will 
--- point to the root directory
-locateEdhModule :: FilePath -> FilePath -> IO (FilePath, FilePath)
+-- | returns import name, nominal path and actual file path, the last two will
+-- be different e.g. in case an `__init__.edh` for a package, where nominal
+-- path will  point to the root directory
+locateEdhModule :: FilePath -> FilePath -> IO (ImportName, FilePath, FilePath)
 locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
   (_, ".edh") -> throwPkgError
     "you don't include the `.edh` file extension in the import"
@@ -57,17 +60,17 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
       Nothing      -> canonicalizePath "." >>= resolveAbsImport
  where
 
-  resolveRelImport :: FilePath -> IO (FilePath, FilePath)
+  resolveRelImport :: FilePath -> IO (ImportName, FilePath, FilePath)
   resolveRelImport !relImp = do
     let !nomPath     = (if null pkgPath then "." else pkgPath) </> relImp
         !edhFilePath = nomPath ++ ".edh"
     doesFileExist edhFilePath >>= \case
-      True  -> return (nomPath, edhFilePath)
+      True  -> return (RelativeName (T.pack relImp), nomPath, edhFilePath)
       False -> do
         -- trace (" ** no hit: " <> edhFilePath <> " ** " <> nomPath) $ return ()
         let !edhIdxPath = nomPath </> "__init__.edh"
         doesFileExist edhIdxPath >>= \case
-          True  -> return (nomPath, edhIdxPath)
+          True  -> return (RelativeName (T.pack relImp), nomPath, edhIdxPath)
           False ->
             -- do
             --   trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $  return ()
@@ -75,18 +78,18 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
             "no such module"
             [(AttrByName "moduSpec", EdhString $ T.pack nomSpec)]
 
-  resolveAbsImport :: FilePath -> IO (FilePath, FilePath)
+  resolveAbsImport :: FilePath -> IO (ImportName, FilePath, FilePath)
   resolveAbsImport !caniPkgPath = do
     let !nomPath     = caniPkgPath </> "edh_modules" </> nomSpec
         !edhFilePath = nomPath ++ ".edh"
     -- trace (" ** no hit: " <> edhFilePath <> " ** " <> nomPath) $ return ()
     doesFileExist edhFilePath >>= \case
-      True  -> return (nomPath, edhFilePath)
+      True  -> return (AbsoluteName (T.pack nomSpec), nomPath, edhFilePath)
       False -> do
         -- trace (" ** no hit: " <> edhFilePath <> " ** " <> nomPath) $ return ()
         let !edhIdxPath = nomPath </> "__init__.edh"
         doesFileExist edhIdxPath >>= \case
-          True  -> return (nomPath, edhIdxPath)
+          True  -> return (AbsoluteName (T.pack nomSpec), nomPath, edhIdxPath)
           False -> do
             -- trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $ return ()
             let !parentPkgPath = takeDirectory caniPkgPath
@@ -97,15 +100,15 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
               else resolveAbsImport parentPkgPath
 
 
-locateEdhMainModule :: FilePath -> IO (FilePath, FilePath)
+locateEdhMainModule :: FilePath -> IO (Text, FilePath, FilePath)
 locateEdhMainModule !importPath = canonicalizePath "." >>= resolveMainImport
  where
-  resolveMainImport :: FilePath -> IO (FilePath, FilePath)
+  resolveMainImport :: FilePath -> IO (Text, FilePath, FilePath)
   resolveMainImport !caniPkgPath = do
     let !nomPath     = caniPkgPath </> "edh_modules" </> importPath
         !edhFilePath = nomPath </> "__main__.edh"
     doesFileExist edhFilePath >>= \case
-      True  -> return (nomPath, edhFilePath)
+      True  -> return (T.pack importPath, nomPath, edhFilePath)
       False -> do
         let !parentPkgPath = takeDirectory caniPkgPath
         if equalFilePath parentPkgPath caniPkgPath

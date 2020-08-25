@@ -243,11 +243,12 @@ createEdhWorld !console = liftIO $ do
       ]
   !clsModule <- atomically
     $ mkHostClass rootScope "module" moduleAllocator hsModuCls []
-  let edhCreateModule :: ModuleId -> String -> STM Object
-      edhCreateModule moduId srcName = do
+  let edhCreateModule :: Text -> ModuleId -> String -> STM Object
+      edhCreateModule !moduName !moduId !srcName = do
         !idModu <- unsafeIOToSTM newUnique
         !hs     <- iopdFromList
-          [ (AttrByName "__path__", EdhString moduId)
+          [ (AttrByName "__name__", EdhString moduName)
+          , (AttrByName "__path__", EdhString moduId)
           , (AttrByName "__file__", EdhString $ T.pack srcName)
           ]
         !ss <- newTVar []
@@ -787,9 +788,10 @@ runEdhProgram' !ctx !prog = liftIO $ do
     Just (Left  e) -> throwIO e
 
 
-createEdhModule :: MonadIO m => EdhWorld -> ModuleId -> String -> m Object
-createEdhModule !world !moduId !srcName =
-  liftIO $ atomically $ edh'module'creator world moduId srcName
+createEdhModule
+  :: MonadIO m => EdhWorld -> Text -> ModuleId -> String -> m Object
+createEdhModule !world !moduName !moduId !srcName =
+  liftIO $ atomically $ edh'module'creator world moduName moduId srcName
 
 
 type EdhModulePreparation = EdhThreadState -> STM () -> STM ()
@@ -800,7 +802,7 @@ edhModuleAsIs _ets !exit = exit
 installEdhModule
   :: MonadIO m => EdhWorld -> ModuleId -> EdhModulePreparation -> m Object
 installEdhModule !world !moduId !preInstall = liftIO $ do
-  modu <- createEdhModule world moduId "<host-code>"
+  modu <- createEdhModule world moduId moduId "<host-code>"
   void $ runEdhProgram' (worldContext world) $ \ !ets -> do
     let !moduCtx = moduleContext world modu
         !etsModu = ets { edh'context = moduCtx }
@@ -832,17 +834,18 @@ runEdhModule !world !impPath !preRun =
 
 runEdhModule'
   :: MonadIO m => EdhWorld -> FilePath -> EdhModulePreparation -> m EdhValue
-runEdhModule' !world !impPath !preRun = liftIO $ do
-  (nomPath, moduFile) <- locateEdhMainModule impPath
-  fileContent <- streamDecodeUtf8With lenientDecode <$> B.readFile moduFile
-  case fileContent of
-    Some !moduSource _ _ -> runEdhProgram' (worldContext world) $ \ !ets -> do
-      let !moduId = T.pack nomPath
-      !modu <- edh'module'creator world moduId moduFile
-      let !moduCtx = moduleContext world modu
-          !etsModu = ets { edh'context = moduCtx }
-      preRun etsModu $ runEdhTx etsModu $ evalEdh moduFile moduSource endOfEdh
-
+runEdhModule' !world !impPath !preRun =
+  liftIO $ locateEdhMainModule impPath >>= \(!moduName, !nomPath, !moduFile) ->
+    streamDecodeUtf8With lenientDecode <$> B.readFile moduFile >>= \case
+      Some !moduSource _ _ -> runEdhProgram' (worldContext world) $ \ !ets ->
+        do
+          let !moduId = T.pack nomPath
+          !modu <- edh'module'creator world moduName moduId moduFile
+          let !moduCtx = moduleContext world modu
+              !etsModu = ets { edh'context = moduCtx }
+          preRun etsModu $ runEdhTx etsModu $ evalEdh moduFile
+                                                      moduSource
+                                                      endOfEdh
 
 -- | perform an effectful call from current Edh context
 --

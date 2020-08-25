@@ -2119,7 +2119,7 @@ importEdhModule !impSpec !exit !ets = if edh'in'tx ets
   withoutLeadingSlash spec = fromMaybe spec $ T.stripPrefix "/" spec
   withoutTrailingSlash spec = fromMaybe spec $ T.stripSuffix "/" spec
 
-  locateModuInFS :: ((FilePath, FilePath) -> STM ()) -> STM ()
+  locateModuInFS :: ((ImportName, FilePath, FilePath) -> STM ()) -> STM ()
   locateModuInFS !exit' =
     lookupEdhCtxAttr scope (AttrByName "__path__") >>= \case
       EdhString !fromPath ->
@@ -2139,12 +2139,12 @@ importEdhModule !impSpec !exit !ets = if edh'in'tx ets
     --     case the module scope possibly altered after initialization
                   "." -> T.unpack fromPath
                   _   -> T.unpack normalizedSpec
-          _ -> error "bug: no valid `__file__` in context"
+          _ -> error "bug: no valid `__file__` in module context"
       _ -> (exit' =<<) $ unsafeIOToSTM $ locateEdhModule "." $ T.unpack
         normalizedSpec
 
   importFromFS :: STM ()
-  importFromFS = locateModuInFS $ \(!nomPath, !moduFile) -> do
+  importFromFS = locateModuInFS $ \(!impName, !nomPath, !moduFile) -> do
     let !moduId = T.pack nomPath
     moduMap' <- takeTMVar worldModules
     case Map.lookup moduId moduMap' of
@@ -2166,8 +2166,18 @@ importEdhModule !impSpec !exit !ets = if edh'in'tx ets
         moduSlot <- newEmptyTMVar
         -- put it for global visibility
         putTMVar worldModules $ Map.insert moduId moduSlot moduMap'
+        -- resolve correct module name
+        !moduName <- case impName of
+          AbsoluteName !moduName -> return moduName
+          RelativeName !relModuName ->
+            lookupEdhCtxAttr scope (AttrByName "__name__") >>= \case
+              EdhString !currModuName ->
+                return $ currModuName <> "/" <> relModuName
+              _ -> return $ "/" <> relModuName -- todo this confusing?
         -- try load the module
-        edhCatch ets (loadModule moduSlot moduId moduFile) (exitEdh ets exit)
+        edhCatch ets
+                 (loadModule moduSlot moduName moduId moduFile)
+                 (exitEdh ets exit)
           $ \ !exv _recover !rethrow -> case exv of
               EdhNil -> rethrow -- no error occurred
               _      -> do
@@ -2182,8 +2192,9 @@ importEdhModule !impSpec !exit !ets = if edh'in'tx ets
                 rethrow
 
 
-loadModule :: TMVar EdhValue -> ModuleId -> FilePath -> EdhTxExit -> EdhTx
-loadModule !moduSlot !moduId !moduFile !exit !ets = if edh'in'tx ets
+loadModule
+  :: TMVar EdhValue -> Text -> ModuleId -> FilePath -> EdhTxExit -> EdhTx
+loadModule !moduSlot !moduName !moduId !moduFile !exit !ets = if edh'in'tx ets
   then throwEdh ets
                 UsageError
                 "you don't load a module from within a transaction"
@@ -2191,7 +2202,7 @@ loadModule !moduSlot !moduId !moduFile !exit !ets = if edh'in'tx ets
     (unsafeIOToSTM $ streamDecodeUtf8With lenientDecode <$> B.readFile moduFile)
       >>= \case
             Some !moduSource _ _ -> do
-              !modu <- edhCreateModule moduId moduFile
+              !modu <- edhCreateModule moduName moduId moduFile
               case objectScope modu of
                 Nothing -> error "bug: module object has no scope"
                 Just !scopeLoad ->

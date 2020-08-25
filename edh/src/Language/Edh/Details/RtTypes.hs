@@ -435,7 +435,7 @@ data EdhWorld = EdhWorld {
     -- wrapping a host exceptin as an Edh object
   , edh'exception'wrapper :: !(SomeException -> STM Object)
     -- create a new module object
-  , edh'module'creator :: !(ModuleId -> String -> STM Object)
+  , edh'module'creator :: !(Text -> ModuleId -> String -> STM Object)
   }
 instance Eq EdhWorld where
   x == y =
