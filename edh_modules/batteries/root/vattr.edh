@@ -7,7 +7,7 @@ method push ( k, v ) {
 }
 
 export method __DictType_pop__ ( d )
-method pop ( k, default=None ) ai case d[ k ] of {
+method pop ( k, defVal=None ) ai case d[ k ] of {
   { v } -> { d[ k ] = nil; v }
-  default
+  defVal
 }

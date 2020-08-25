@@ -1474,20 +1474,20 @@ edhThrow !ets !exv = do
 
 edhErrorUncaught :: EdhThreadState -> EdhValue -> STM ()
 edhErrorUncaught !ets !exv = case exv of
-  EdhObject exo -> case edh'obj'store exo of
+  EdhObject !exo -> case edh'obj'store exo of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
       -- TODO replace cc in err if is empty here ?
       Just (exc :: SomeException) -> throwSTM exc
       -- TODO support magic method to coerce object as exception ?
-      Nothing                     -> edhValueRepr ets exv
-        $ \msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
+      Nothing                     -> edhValueRepr ets exv $ \ !msg ->
+        throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
     -- TODO support magic method to coerce object as exception ?
     _ -> edhValueRepr ets exv
-      $ \msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
+      $ \ !msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
   EdhString !msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
   -- coerce arbitrary value to EdhError
   _              -> edhValueRepr ets exv
-    $ \msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
+    $ \ !msg -> throwSTM $ EdhError EvalError msg $ getEdhCallContext 0 ets
 
 
 -- | Catch possible throw from the specified try action
@@ -2110,8 +2110,11 @@ importEdhModule !impSpec !exit !ets = if edh'in'tx ets
     lookupEdhCtxAttr scope (AttrByName "__path__") >>= \case
       EdhString !fromPath ->
         lookupEdhCtxAttr scope (AttrByName "__file__") >>= \case
-          EdhString !fromFile -> do
-            let !nomSpec = case normalizedSpec of
+          EdhString !fromFile ->
+            (exit' =<<)
+              $ unsafeIOToSTM
+              $ locateEdhModule (edhPkgPathFrom $ T.unpack fromFile)
+              $ case normalizedSpec of
     -- special case for `import * '.'`, 2 possible use cases:
     --
     --  *) from an entry module (i.e. __main__.edh), to import artifacts
@@ -2122,11 +2125,9 @@ importEdhModule !impSpec !exit !ets = if edh'in'tx ets
     --     case the module scope possibly altered after initialization
                   "." -> T.unpack fromPath
                   _   -> T.unpack normalizedSpec
-            (nomPath, moduFile) <- unsafeIOToSTM
-              $ locateEdhModule (edhPkgPathFrom $ T.unpack fromFile) nomSpec
-            exit' (nomPath, moduFile)
           _ -> error "bug: no valid `__file__` in context"
-      _ -> error "bug: no valid `__path__` in context"
+      _ -> (exit' =<<) $ unsafeIOToSTM $ locateEdhModule "." $ T.unpack
+        normalizedSpec
 
   importFromFS :: STM ()
   importFromFS =
@@ -2137,7 +2138,7 @@ importEdhModule !impSpec !exit !ets = if edh'in'tx ets
           _                   -> throwSTM e
         )
       $ locateModuInFS
-      $ \(nomPath, moduFile) -> do
+      $ \(!nomPath, !moduFile) -> do
           let !moduId = T.pack nomPath
           moduMap' <- takeTMVar worldModules
           case Map.lookup moduId moduMap' of
@@ -2429,22 +2430,27 @@ edhValueRepr !ets !val !exitRepr = case val of
       $ \ !entriesCSR -> exitRepr $ "{ " <> entriesCSR <> "}"
 
   -- object repr
-  EdhObject !o -> lookupEdhObjAttr o (AttrByName "__repr__") >>= \case
-    (_, EdhNil        ) -> exitRepr $ T.pack (show o)
-    (_, EdhString repr) -> exitRepr repr
-    (!this', EdhProcedure (EdhMethod !mth) _) ->
-      runEdhTx ets
-        $ callEdhMethod this' o mth (ArgsPack [] odEmpty) id
-        $ \ !mthRtn _ets -> case mthRtn of
-            EdhString !repr -> exitRepr repr
-            _               -> edhValueRepr ets mthRtn exitRepr
-    (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-      runEdhTx ets
-        $ callEdhMethod this that mth (ArgsPack [] odEmpty) id
-        $ \ !mthRtn _ets -> case mthRtn of
-            EdhString !repr -> exitRepr repr
-            _               -> edhValueRepr ets mthRtn exitRepr
-    (_, reprVal) -> edhValueRepr ets reprVal exitRepr
+  EdhObject !o -> do
+    let withMagic = \case
+          (_, EdhNil        ) -> exitRepr $ T.pack (show o)
+          (_, EdhString repr) -> exitRepr repr
+          (!this', EdhProcedure (EdhMethod !mth) _) ->
+            runEdhTx ets
+              $ callEdhMethod this' o mth (ArgsPack [] odEmpty) id
+              $ \ !mthRtn _ets -> case mthRtn of
+                  EdhString !repr -> exitRepr repr
+                  _               -> edhValueRepr ets mthRtn exitRepr
+          (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+            runEdhTx ets
+              $ callEdhMethod this that mth (ArgsPack [] odEmpty) id
+              $ \ !mthRtn _ets -> case mthRtn of
+                  EdhString !repr -> exitRepr repr
+                  _               -> edhValueRepr ets mthRtn exitRepr
+          (_, reprVal) -> edhValueRepr ets reprVal exitRepr
+    case edh'obj'store o of
+      ClassStore{} ->
+        lookupEdhObjAttr (edh'obj'class o) (AttrByName "__repr__") >>= withMagic
+      _ -> lookupEdhObjAttr o (AttrByName "__repr__") >>= withMagic
 
   -- repr of named value
   EdhNamedValue !n v@EdhNamedValue{} ->
@@ -2454,11 +2460,15 @@ edhValueRepr !ets !val !exitRepr = case val of
   EdhNamedValue !n !v ->
     edhValueRepr ets v $ \ !repr -> exitRepr $ n <> " := " <> repr <> ""
 
-  -- TODO handle Text repr with more performant impl. falling onto show atm.
+  EdhProcedure !callable _ -> exitRepr $ callableName callable
+  EdhBoundProc !callable _ _ _ ->
+    exitRepr $ "{# bound #} " <> callableName callable
 
   -- todo specially handle return/default etc. ?
 
-  -- repr of other values simply as to show itself
+  -- TODO handle Text repr with more performant impl.
+
+  -- repr of other values, fallback to its 'Show' instance
   _ -> exitRepr $ T.pack $ show val
 
  where

@@ -458,7 +458,13 @@ markProc _ _ !ets =
 
 showProc :: EdhHostProc
 showProc (ArgsPack [!v] !kwargs) !exit !ets = case edhUltimate v of
-  EdhObject !o -> lookupEdhObjAttr o (AttrByName "__show__") >>= \case
+  EdhObject !o -> case edh'obj'store o of
+    ClassStore{} -> lookupEdhObjAttr (edh'obj'class o) (AttrByName "__show__")
+      >>= showWithMagic o
+    _ -> lookupEdhObjAttr o (AttrByName "__show__") >>= showWithMagic o
+  _ -> showWithNoMagic
+ where -- todo specialize more informative show for intrinsic types of values
+  showWithMagic !o = \case
     (_, EdhNil) -> showWithNoMagic
     (!this', EdhProcedure (EdhMethod !mth) _) ->
       runEdhTx ets $ callEdhMethod this' o mth (ArgsPack [] kwargs) id exit
@@ -470,15 +476,20 @@ showProc (ArgsPack [!v] !kwargs) !exit !ets = case edhUltimate v of
         <> T.pack (edhTypeNameOf badMagic)
         <> " on class "
         <> objClassName o
-  _ -> showWithNoMagic
- where -- todo specialize more informative show for intrinsic types of values
   showWithNoMagic = edhValueRepr ets v $ \ !r ->
     exitEdh ets exit $ EdhString $ T.pack (edhTypeNameOf v) <> ": " <> r
 showProc _ _ !ets = throwEdh ets UsageError "please show one value at a time"
 
 descProc :: EdhHostProc
 descProc (ArgsPack [!v] !kwargs) !exit !ets = case edhUltimate v of
-  EdhObject !o -> lookupEdhObjAttr o (AttrByName "__desc__") >>= \case
+  EdhObject !o -> case edh'obj'store o of
+    ClassStore{} -> lookupEdhObjAttr (edh'obj'class o) (AttrByName "__desc__")
+      >>= descWithMagic o
+    _ -> lookupEdhObjAttr o (AttrByName "__desc__") >>= descWithMagic o
+  _ -> descWithNoMagic
+ where -- TODO specialize more informative description (statistical wise) for
+      --      intrinsic types of values
+  descWithMagic !o = \case
     (_, EdhNil) -> descWithNoMagic
     (!this', EdhProcedure (EdhMethod !mth) _) ->
       runEdhTx ets $ callEdhMethod this' o mth (ArgsPack [] kwargs) id exit
@@ -490,21 +501,18 @@ descProc (ArgsPack [!v] !kwargs) !exit !ets = case edhUltimate v of
         <> T.pack (edhTypeNameOf badMagic)
         <> " on class "
         <> objClassName o
-  _ -> descWithNoMagic
- where -- TODO specialize more informative description (statistical wise) for
-      --      intrinsic types of values
   descWithNoMagic = edhValueRepr ets v $ \ !r -> case v of
     EdhObject !o ->
       exitEdh ets exit
         $  EdhString
-        $  "it is an object of class "
+        $  "It is an object of class "
         <> objClassName o
         <> ", having representation:\n"
         <> r
     _ ->
       exitEdh ets exit
         $  EdhString
-        $  "it is of "
+        $  "It is of "
         <> T.pack (edhTypeNameOf v)
         <> ", having representation:\n"
         <> r

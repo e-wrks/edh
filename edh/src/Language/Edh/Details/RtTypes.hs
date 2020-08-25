@@ -320,6 +320,19 @@ rootScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
   else rootScopeOf outerScope
   where !outerScope = edh'procedure'lexi $ edh'scope'proc scope
 
+scopeLexiLoc :: Scope -> (Text -> STM ()) -> STM ()
+scopeLexiLoc !scope !exit = case pb of
+  Left (StmtSrc (srcLoc, _)) -> exit $ T.pack $ sourcePosPretty srcLoc
+  Right{} ->
+    iopdLookup (AttrByName "__file__") (edh'scope'entity scope) >>= \case
+      Nothing           -> exit $ "<host-procedure: " <> procedureName pd <> ">"
+      Just !moduFileVal -> case moduFileVal of
+        EdhString !moduFile -> exit moduFile
+        _                   -> exit $ "<procedure: " <> procedureName pd <> ">"
+ where
+  !pd = edh'scope'proc scope
+  !pb = edh'procedure'body $ edh'procedure'decl pd
+
 
 -- | A class is wrapped as an object per se, the object's storage structure is
 -- here:
@@ -728,6 +741,19 @@ instance Hashable EdhCallable where
   hashWithSalt s (EdhDescriptor getter setter) =
     s `hashWithSalt` getter `hashWithSalt` setter
 
+callableName :: EdhCallable -> Text
+callableName = \case
+  EdhIntrOp _preced (IntrinOpDefi _ !opSym _) -> "(" <> opSym <> ")"
+  EdhOprtor _preced _ !pd                     -> "(" <> procedureName pd <> ")"
+  EdhMethod !pd                               -> procedureName pd
+  EdhGnrtor !pd                               -> procedureName pd
+  EdhIntrpr !pd                               -> procedureName pd
+  EdhPrducr !pd                               -> procedureName pd
+  EdhDescriptor !getter !setter ->
+    (<> procedureName getter <> ">") $ case setter of
+      Nothing -> "readonly property "
+      Just _  -> "property "
+
 
 -- Atop Haskell, most types in Edh the surface language, are for
 -- immutable values, besides dict and list, the only other mutable
@@ -836,7 +862,7 @@ instance Show EdhValue where
 
   show (EdhObject   v         ) = show v
 
-  show (EdhProcedure !pc _    ) = "<" ++ show pc ++ ">"
+  show (EdhProcedure !pc _    ) = "<callable:" ++ show pc ++ ">"
   show (EdhBoundProc !pc _ _ _) = "<bound:" ++ show pc ++ ">"
 
   show EdhBreak                 = "<break>"

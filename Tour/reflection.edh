@@ -36,7 +36,7 @@ this'modu'scope.eval( x )
 }
 let ( s1, s2 ) = (* f( 3 ) )
 
-s2.lexiLoc()
+s2.lexiLoc
 
 s1.attrs()
 

@@ -190,10 +190,13 @@ driveEdhProgram !haltResult !bootCtx !prog = do
     Nothing -> -- this thread is done, run defers lastly
       readTVarIO defers >>= driveDefers
     Just (EdhDoIO !ets !actIO) -> do
-      -- during actIO, perceivers won't fire, program termination won't stop
-      -- this thread
-      catch actIO $ \(e :: SomeException) ->
-        atomically $ edhWrapException e >>= \ !exo ->
+      -- note during actIO, perceivers won't fire, program termination won't
+      -- stop this thread
+      catch actIO $ \(e :: SomeException) -> case edhKnownError e of
+        -- this'll propagate to main thread if not on it
+        Just !err -> throwIO err
+        -- give a chance for the Edh code to handle an unknown exception
+        Nothing   -> atomically $ edhWrapException e >>= \ !exo ->
           writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets $ EdhObject exo
       driveEdhThread defers tq -- loop another iteration for the thread
     Just (EdhDoSTM !ets !actSTM) -> do
@@ -202,8 +205,11 @@ driveEdhProgram !haltResult !bootCtx !prog = do
               readTVarIO defers >>= driveDefers
             False -> -- loop another iteration for the thread
               driveEdhThread defers tq
-      catch doIt $ \(e :: SomeException) ->
-        atomically $ edhWrapException e >>= \ !exo ->
+      catch doIt $ \(e :: SomeException) -> case edhKnownError e of
+        -- this'll propagate to main thread if not on it
+        Just !err -> throwIO err
+        -- give a chance for the Edh code to handle an unknown exception
+        Nothing   -> atomically $ edhWrapException e >>= \ !exo ->
           writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets $ EdhObject exo
       driveEdhThread defers tq -- loop another iteration for the thread
 

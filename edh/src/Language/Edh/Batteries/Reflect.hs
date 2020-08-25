@@ -38,6 +38,7 @@ ctorProc (ArgsPack !args !kwargs) !exit !ets = do
   edhClassOf (EdhObject !o) = EdhObject $ edh'obj'class o
   edhClassOf _              = edhNone
 
+
 -- | utility supers(*args,**kwargs)
 supersProc :: EdhHostProc
 supersProc (ArgsPack !args !kwargs) !exit !ets = do

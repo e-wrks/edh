@@ -628,13 +628,12 @@ installEdhBatteries world =
 
     console <- createNamespace
       world
-      "<console>"
-      [ (AttrByName "__repr__", EdhString "<console>")
-      , (AttrByName "debug"   , EdhDecimal 10)
-      , (AttrByName "info"    , EdhDecimal 20)
-      , (AttrByName "warn"    , EdhDecimal 30)
-      , (AttrByName "error"   , EdhDecimal 40)
-      , (AttrByName "fatal"   , EdhDecimal 50)
+      "console"
+      [ (AttrByName "debug", EdhDecimal 10)
+      , (AttrByName "info" , EdhDecimal 20)
+      , (AttrByName "warn" , EdhDecimal 30)
+      , (AttrByName "error", EdhDecimal 40)
+      , (AttrByName "fatal", EdhDecimal 50)
       , ( AttrByName "logLevel"
         , EdhDecimal (fromIntegral $ consoleLogLevel $ edh'world'console world)
         )

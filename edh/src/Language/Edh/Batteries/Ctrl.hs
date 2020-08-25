@@ -51,15 +51,18 @@ catchProc !tryExpr !catchExpr !exit !ets =
     $ \ !exv recover rethrow -> case exv of
         EdhNil -> rethrow -- no error occurred, no catch
         -- try recover by catch expression
-        _      -> runEdhTx ets $ evalExpr catchExpr $ \ !recoverVal _ets ->
-          case recoverVal of
-            EdhRethrow -> rethrow -- not to recover
-            EdhCaseClose !val ->
-              -- don't bubble up the close-of-case, as `catch` is not a branch 
-              recover val
-            EdhCaseOther   -> rethrow -- not to recover
-            EdhFallthrough -> rethrow -- not to recover
-            _              -> recover recoverVal
+        _ ->
+          runEdhTx ets { edh'context = (edh'context ets) { edh'ctx'match = exv }
+                       }
+            $ evalExpr catchExpr
+            $ \ !recoverVal _ets -> case recoverVal of
+                EdhRethrow -> rethrow -- not to recover
+                EdhCaseClose !val ->
+                  -- don't bubble up the close-of-case, as `catch` is not a branch 
+                  recover val
+                EdhCaseOther   -> rethrow -- not to recover
+                EdhFallthrough -> rethrow -- not to recover
+                _              -> recover recoverVal
 
 -- | operator (@=>) - the `finally`
 --

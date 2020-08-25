@@ -14,7 +14,7 @@ export {
   # the default basic implementation for the `dir` command
   interpreter printDir( callerScope, ofScope=None, ) {
     ofScope = ofScope &> callerScope.eval( ofScope ) |> callerScope
-    console.print( ofScope.lexiLoc(), **ofScope.attrs() )
+    console.print( ofScope.lexiLoc, **ofScope.attrs() )
   }
 
   # basic implementation of a string form for `dir` command to
@@ -23,7 +23,7 @@ export {
     ofScope = ofScope &> callerScope.eval( ofScope ) |> callerScope
 
     return join(
-      ofScope.lexiLoc(),
+      ofScope.lexiLoc,
       *() =< for ( k, v ) from ofScope.attrs() do
       '  ' ++ k ++ '=' ++ v,
       sep= '\n',
@@ -38,8 +38,8 @@ export {
     prompt = prompt &> callerScope.eval( prompt ) |> repr( callerScope )
 
     console.print(
-      ' * entering a shell at ' ++ callerScope.lexiLoc(),
-      ' * which is called from ' ++ callerScope.callerLoc() )
+      ' * entering a shell at ' ++ callerScope.lexiLoc,
+      ' * which is called from ' ++ callerScope.callerLoc )
     console.print(
       ' * key in `quit` or `continue` to leave the shell and continue.' )
 

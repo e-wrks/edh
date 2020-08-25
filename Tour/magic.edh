@@ -15,7 +15,7 @@
         return Tensor( name= '(' ++ this.name ++ '+' ++ other.name ++ ')' )
       }
 
-      continue # as NotImplemented in Python
+      return NA # not-applicable - similar to NotImplemented in Python
     }
 
 
@@ -28,7 +28,7 @@
         return Tensor( name= '(' ++ this.name ++ '*' ++ other.name ++ ')' )
       }
 
-      continue # as NotImplemented in Python
+      return NA # not-applicable - similar to NotImplemented in Python
     }
 
 
@@ -41,7 +41,7 @@
         return Tensor( name= '(' ++ this.name ++ '-' ++ other.name ++ ')' )
       }
 
-      continue # as NotImplemented in Python
+      return NA # not-applicable - similar to NotImplemented in Python
     }
 
     method (-@) ( other ) case type( other ) of {
@@ -52,7 +52,7 @@
         error( 'not resolved to magic (-) of ' ++ lhv ++ ' ?!' )
       }
 
-      continue # as NotImplemented in Python
+      return NA # not-applicable - similar to NotImplemented in Python
     }
 
 
@@ -65,7 +65,7 @@
         return Tensor( name= '(' ++ this.name ++ '/' ++ other.name ++ ')' )
       }
 
-      continue # as NotImplemented in Python
+      return NA # not-applicable - similar to NotImplemented in Python
     }
 
     method (/@) ( other ) case type( other ) of {
@@ -76,7 +76,7 @@
         error( 'not resolved to magic (/) of ' ++ lhv ++ ' ?!' )
       }
 
-      continue # as NotImplemented in Python
+      return NA # not-applicable - similar to NotImplemented in Python
     }
 
   }
