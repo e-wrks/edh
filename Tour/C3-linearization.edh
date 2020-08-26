@@ -21,8 +21,26 @@ class K3 extends ( D, A )
 
 class Z extends ( K1, K2, K3 )
 
-console.print( Z.mro )
+Z.mro
+
+# unlike other object systems (e.g. in Python), where all member attributes
+# (including methods) collapse into a single end object instance, in Edh an
+# object is composed of a self instance and all super object instances
+# strictly corresponding to mro of its class, and each such super instance
+# satisfies the same rule if viewed alone, while at the same time shared
+# super class induces shared object, there'll be no duplication of super
+# instances.
 
 z = Z()
+supers( z )
 
-console.print( supers( z ) )
+# a specific super instance can be obtained via pattern matching:
+
+case z of { { K2: k2 } } -> k2
+
+# check a super instance alone
+K2.mro
+supers( k2 )
+
+# check a super instance shared
+( case z of { { O: z's'o } } -> z's'o ) is ( case k2 of { { O: k2's'o } } -> k2's'o )
