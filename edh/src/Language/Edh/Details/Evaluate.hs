@@ -144,7 +144,7 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
   getViaSupers [] !exit = exit nil
   getViaSupers (super : restSupers) !exit =
     runEdhTx ets
-      $ getObjAttrWSM edhMetaMagicSpell super magicSpell noMetamagic
+      $ getObjAttrWSM edhMetaMagicSpell super magicSpell noMetaMagic
       $ \ !magicVal _ets -> case magicVal of
           EdhBoundProc (EdhMethod !magicMth) !this !that _ ->
             withMagicMethod magicMth this that
@@ -154,8 +154,8 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
             (edhTypeNameOf magicVal)
    where
 
-    noMetamagic :: EdhTx
-    noMetamagic _ets = lookupEdhObjAttr super magicSpell >>= \case
+    noMetaMagic :: EdhTx
+    noMetaMagic _ets = lookupEdhObjAttr super magicSpell >>= \case
       (_, EdhNil) -> getViaSupers restSupers exit
       (!super', EdhProcedure (EdhMethod !magicMth) _) ->
         withMagicMethod magicMth super' super
@@ -200,7 +200,7 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
   setViaSupers [] !exit = exit nil
   setViaSupers (super : restSupers) !exit =
     runEdhTx ets
-      $ getObjAttrWSM edhMetaMagicSpell super magicSpell noMetamagic
+      $ getObjAttrWSM edhMetaMagicSpell super magicSpell noMetaMagic
       $ \ !magicVal _ets -> case magicVal of
           EdhBoundProc (EdhMethod !magicMth) !this !that _ ->
             withMagicMethod magicMth this that
@@ -210,8 +210,8 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
             (edhTypeNameOf magicVal)
    where
 
-    noMetamagic :: EdhTx
-    noMetamagic _ets = lookupEdhObjAttr super magicSpell >>= \case
+    noMetaMagic :: EdhTx
+    noMetaMagic _ets = lookupEdhObjAttr super magicSpell >>= \case
       (_, EdhNil) -> setViaSupers restSupers exit
       (!super', EdhProcedure (EdhMethod !magicMth) _) ->
         withMagicMethod magicMth super' super
@@ -316,8 +316,8 @@ setObjAttr !ets !obj !key !val !exit = lookupEdhObjAttr obj key >>= \case
           $ callEdhMethod this that setter (ArgsPack args odEmpty) id
           $ \ !propRtn _ets -> exit propRtn
   writeAttr = case edh'obj'store obj of
-    HashStore  !hs             -> edhSetValue key val hs >> exit val
-    ClassStore (Class _ !cs _) -> edhSetValue key val cs >> exit val
+    HashStore  !hs  -> edhSetValue key val hs >> exit val
+    ClassStore !cls -> edhSetValue key val (edh'class'store cls) >> exit val
     HostStore _ ->
       throwEdh ets UsageError
         $  "no such property `"
@@ -406,8 +406,8 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
   exitWithChkExportTo :: Object -> AttrKey -> EdhValue -> STM ()
   exitWithChkExportTo !obj !artKey !artVal = do
     when (edh'ctx'exporting ctx) $ case edh'obj'store obj of
-      HashStore  !hs             -> expInto hs artKey artVal
-      ClassStore (Class _ !cs _) -> expInto cs artKey artVal
+      HashStore  !hs  -> expInto hs artKey artVal
+      ClassStore !cls -> expInto (edh'class'store cls) artKey artVal
       HostStore _ ->
         throwEdh ets UsageError
           $  "no way exporting to a host object of class "
@@ -424,8 +424,8 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
 
   defEffIntoObj :: Object -> AttrKey -> STM ()
   defEffIntoObj !obj !key = case edh'obj'store obj of
-    HashStore  !hs             -> defEffectInto hs key
-    ClassStore (Class _ !cs _) -> defEffectInto cs key
+    HashStore  !hs  -> defEffectInto hs key
+    ClassStore !cls -> defEffectInto (edh'class'store cls) key
     HostStore _ ->
       throwEdh ets UsageError
         $  "no way defining effects into a host object of class "
@@ -440,46 +440,47 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
         iopdInsert (AttrByName edhEffectsMagicName) d es
 
 
--- | Creating an Edh object from a class, without calling any `__init__()`
+-- | Create an Edh object from a class, without calling any `__init__()`
 -- method.
---
--- Note no duplicate object instance will be created even if the class
--- inheritance hierarchy forms diamond shapes.
-createEdhObject
+edhCreateObj
   :: EdhThreadState -> Object -> ArgsPack -> (Object -> STM ()) -> STM ()
-createEdhObject !ets !clsObj !apk !exitEnd = do
-  !mroEnd <- iopdEmpty
-  createOne mroEnd clsObj exitEnd
- where
+edhCreateObj !ets !clsObj !apk !exitEnd = newTVar Map.empty >>= \ !instMap ->
+  do
+    let
+      fillSupers :: Object -> [Object] -> [Object] -> STM ()
+      fillSupers !self [] !objSupers =
+        writeTVar (edh'obj'supers self) (reverse objSupers)
+      fillSupers !self (clsSuper : clsRest) !objSupers =
+        Map.lookup clsSuper <$> readTVar instMap >>= \case
+          Just !objSuper -> fillSupers self clsRest (objSuper : objSupers)
+          Nothing        -> error
+            "bug: some super class not appeared in a descendant class' mro"
 
-  createOne :: IOPD Object Object -> Object -> (Object -> STM ()) -> STM ()
-  createOne !mroEnd !clsCurr !exit = iopdLookup clsCurr mroEnd >>= \case
-    Just !objCurr -> exit objCurr
-    Nothing       -> case edh'obj'store clsCurr of
-      ClassStore (Class _ _ !allocator) -> allocator ets apk $ \ !es -> do
-        !oid       <- unsafeIOToSTM newUnique
-        !supersVar <- newTVar []
-        let !objCurr = Object oid es clsCurr supersVar
-        iopdInsert clsCurr objCurr mroEnd
+      createSelf :: Object -> ((Object, [Object]) -> STM ()) -> STM ()
+      createSelf !c !exit = case edh'obj'store c of
+        ClassStore !cls -> edh'class'allocator cls ets apk $ \ !es -> do
+          !oid <- unsafeIOToSTM newUnique
+          !ss  <- newTVar []
+          let !o = Object oid es c ss
+          modifyTVar' instMap $ Map.insert c o
+          !mro <- readTVar (edh'class'mro cls)
+          exit (o, mro)
+        _ ->
+          throwEdh ets UsageError
+            $  "can not create new object from a non-class object, which is a: "
+            <> objClassName c
 
-        !mroSupers    <- iopdEmpty
-        !superClasses <- readTVar $ edh'obj'supers clsCurr
-        createSupers mroEnd mroSupers superClasses $ do
-          fmap snd <$> iopdToList mroSupers >>= writeTVar supersVar
-          exit objCurr
-      _ ->
-        throwEdh ets UsageError
-          $  "can not create object from an object of class "
-          <> objClassName clsCurr
+      createSupers :: [Object] -> STM () -> STM ()
+      createSupers [] !exit = exit
+      createSupers (clsSuper : restSupers) !exit =
+        createSelf clsSuper $ \(!objSuper, !mroSuper) ->
+          createSupers restSupers $ do
+            fillSupers objSuper mroSuper []
+            exit
 
-  createSupers
-    :: IOPD Object Object -> IOPD Object Object -> [Object] -> STM () -> STM ()
-  createSupers _ _ [] !exit = exit
-  createSupers !mroEnd !mroSupers (superCls : restSupers) !exit =
-    createOne mroEnd superCls $ \ !superObj -> do
-      iopdInsert superCls superObj mroSupers
-      createSupers mroEnd mroSupers restSupers exit
-
+    createSelf clsObj $ \(!that, !mro) -> createSupers mro $ do
+      fillSupers that mro []
+      exitEnd that
 
 -- | Construct an Edh object from a class.
 --
@@ -494,12 +495,9 @@ createEdhObject !ets !clsObj !apk !exitEnd = do
 --   providing the respective `__init__()` method, unless the provided 
 --   `__init__()` method itself being already bound to sth else, which is
 --   unusual
---
--- Note no duplicate object instance will be created even if the class
--- inheritance hierarchy forms diamond shapes.
-constructEdhObject :: Object -> ArgsPack -> (Object -> EdhTx) -> EdhTx
-constructEdhObject !clsObj !apk !exit !ets =
-  createEdhObject ets clsObj apk $ \ !obj -> do
+edhConstructObj :: Object -> ArgsPack -> (Object -> EdhTx) -> EdhTx
+edhConstructObj !clsObj !apk !exit !ets =
+  edhCreateObj ets clsObj apk $ \ !obj -> do
     let
       callInit :: [Object] -> STM ()
       callInit [] = runEdhTx ets $ exit obj
@@ -519,6 +517,55 @@ constructEdhObject !clsObj !apk !exit !ets =
               $  "invalid __init__ method of type: "
               <> T.pack (edhTypeNameOf badInitMth)
     callInit =<< (obj :) <$> readTVar (edh'obj'supers obj)
+
+
+edhObjExtends :: EdhThreadState -> Object -> Object -> STM () -> STM ()
+edhObjExtends !ets !this !superObj !exit = case edh'obj'store this of
+  ClassStore{} -> case edh'obj'store superObj of
+    ClassStore{} -> doExtends
+    _ -> throwEdh ets UsageError "a class object can not extend a non-class"
+  _ -> doExtends
+ where
+  doExtends = do
+    modifyTVar' (edh'obj'supers this) (++ [superObj])
+    runEdhTx ets $ getObjAttrWSM edhMetaMagicSpell
+                                 superObj
+                                 magicSpell
+                                 noMetaMagic
+                                 withMagicMethod
+
+  !magicSpell = AttrByName "<-^"
+
+  noMetaMagic :: EdhTx
+  noMetaMagic _ets = lookupEdhSelfAttr superObj magicSpell >>= \case
+    EdhNil    -> exit
+    !magicMth -> runEdhTx ets $ withMagicMethod magicMth
+
+  callMagicMethod !mthThis !mthThat !mth = case objectScope this of
+    Nothing ->
+      runEdhTx ets
+        $ callEdhMethod mthThis mthThat mth (ArgsPack [edhNone] odEmpty) id
+        $ \_magicRtn _ets -> exit
+    Just !objScope -> do
+      !scopeObj <- mkScopeWrapper (edh'context ets) objScope
+      runEdhTx ets
+        $ callEdhMethod mthThis
+                        mthThat
+                        mth
+                        (ArgsPack [EdhObject scopeObj] odEmpty)
+                        id
+        $ \_magicRtn _ets -> exit
+
+  withMagicMethod :: EdhValue -> EdhTx
+  withMagicMethod !magicMth _ets = case magicMth of
+    EdhNil                          -> exit
+    EdhProcedure (EdhMethod !mth) _ -> callMagicMethod superObj this mth
+    -- even if it's already bound, should use `this` here as
+    -- contextual `that` there
+    EdhBoundProc (EdhMethod !mth) !mthThis _mthThat _ ->
+      callMagicMethod mthThis this mth
+    _ -> throwEdh ets EvalError $ "invalid magic (<-^) method type: " <> T.pack
+      (edhTypeNameOf magicMth)
 
 
 callEdhOperator
@@ -959,7 +1006,7 @@ edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker
 
     (EdhObject !obj) -> case edh'obj'store obj of
       -- calling a class
-      ClassStore{} -> callMaker $ \ !exit -> constructEdhObject obj apk
+      ClassStore{} -> callMaker $ \ !exit -> edhConstructObj obj apk
         $ \ !instObj !ets -> exitEdh ets exit $ EdhObject instObj
       -- calling an object
       _ -> lookupEdhObjAttr obj (AttrByName "__call__") >>= \case
@@ -1795,9 +1842,9 @@ evalStmt' !stmt !exit = case stmt of
               -- imported from, only objects (most are module objects) can be
               -- an import source.
               else case edh'obj'store $ edh'scope'this scope of
-                HashStore  !hs             -> Just hs
-                ClassStore (Class _ !cs _) -> Just cs
-                _                          -> Nothing
+                HashStore  !hs  -> Just hs
+                ClassStore !cls -> Just (edh'class'store cls)
+                _               -> Nothing
         case maybeExp2ent of
           Nothing       -> pure ()
           Just !exp2Ent -> do -- do export what's assigned
@@ -1944,71 +1991,29 @@ evalStmt' !stmt !exit = case stmt of
 
 
   ExtendsStmt !superExpr -> evalExpr superExpr $ \ !superVal !ets ->
-    case edhDeCaseClose superVal of
-      EdhObject !superObj ->
-        let
-          !magicSpell = AttrByName "<-^"
-
-          !ctx        = edh'context ets
-          !this       = edh'scope'this $ contextScope ctx
-
-          noMetaMagic :: EdhTx
-          noMetaMagic _ets = lookupEdhSelfAttr superObj magicSpell >>= \case
-            EdhNil    -> exitEdh ets exit nil
-            !magicMth -> runEdhTx ets $ withMagicMethod magicMth
-          callMagicMethod !mthThis !mthThat !mth = case objectScope this of
-            Nothing ->
-              runEdhTx ets
-                $ callEdhMethod mthThis
-                                mthThat
-                                mth
-                                (ArgsPack [edhNone] odEmpty)
-                                id
-                $ \_magicRtn _ets -> exitEdh ets exit nil
-            Just !objScope -> do
-              !scopeObj <- mkScopeWrapper ctx objScope
-              runEdhTx ets
-                $ callEdhMethod mthThis
-                                mthThat
-                                mth
-                                (ArgsPack [EdhObject scopeObj] odEmpty)
-                                id
-                $ \_magicRtn _ets -> exitEdh ets exit nil
-          withMagicMethod :: EdhValue -> EdhTx
-          withMagicMethod !magicMth _ets = case magicMth of
-            EdhNil -> exitEdh ets exit nil
-            EdhProcedure (EdhMethod !mth) _ ->
-              callMagicMethod superObj this mth
-            -- even if it's already bound, should use `this` here as
-            -- contextual `that` there
-            EdhBoundProc (EdhMethod !mth) !mthThis _mthThat _ ->
-              callMagicMethod mthThis this mth
-            _ ->
-              throwEdh ets EvalError
-                $  "invalid magic (<-^) method type: "
-                <> T.pack (edhTypeNameOf magicMth)
-
-          doExtends = do
-            modifyTVar' (edh'obj'supers this) (++ [superObj])
-            runEdhTx ets $ getObjAttrWSM edhMetaMagicSpell
-                                         superObj
-                                         magicSpell
-                                         noMetaMagic
-                                         withMagicMethod
-        in
-          case edh'obj'store this of
-            ClassStore{} -> case edh'obj'store superObj of
-              ClassStore{} -> doExtends
-              _ -> throwEdh ets
-                            UsageError
-                            "can not extend a non-class by a class object"
-            _ -> doExtends
-      _ ->
-        throwEdh ets UsageError
-          $  "can only extends an object, not a "
-          <> T.pack (edhTypeNameOf superVal)
-          <> ": "
-          <> T.pack (show superVal)
+    let !this = edh'scope'this $ contextScope $ edh'context ets
+    in  case edhDeCaseClose superVal of
+          EdhObject !superObj ->
+            edhObjExtends ets this superObj $ exitEdh ets exit nil
+          EdhArgsPack (ArgsPack !supers !kwargs) | odNull kwargs ->
+            let extendSupers :: [EdhValue] -> STM ()
+                extendSupers []           = exitEdh ets exit nil
+                extendSupers (val : rest) = case val of
+                  EdhObject !superObj ->
+                    edhObjExtends ets this superObj $ extendSupers rest
+                  _ -> edhValueStr ets val $ \ !superStr ->
+                    throwEdh ets UsageError
+                      $  "can not extends a "
+                      <> T.pack (edhTypeNameOf val)
+                      <> ": "
+                      <> superStr
+            in  extendSupers supers
+          _ -> edhValueStr ets superVal $ \ !superStr ->
+            throwEdh ets UsageError
+              $  "can not extends a "
+              <> T.pack (edhTypeNameOf superVal)
+              <> ": "
+              <> superStr
 
 
   EffectStmt !effs -> \ !ets ->
@@ -2075,8 +2080,8 @@ importFromApk !tgtEnt !argsRcvr !fromApk !exit !ets =
 importFromObject :: EntityStore -> ArgsReceiver -> Object -> EdhTxExit -> EdhTx
 importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
   case edh'obj'store fromObj of
-    HashStore  !hs             -> doImp hs
-    ClassStore (Class _ !cs _) -> doImp cs
+    HashStore  !hs  -> doImp hs
+    ClassStore !cls -> doImp (edh'class'store cls)
     _ ->
       throwEdh ets UsageError
         $  "can not import from a host object of class "
@@ -2554,9 +2559,9 @@ defineScopeAttr !ets !key !val = when (key /= AttrByName "_") $ do
     else unless (edh'ctx'pure ctx)
       $ edhSetValue key val (edh'scope'entity scope)
   when (edh'ctx'exporting ctx) $ case edh'obj'store $ edh'scope'this scope of
-    HashStore  !hs             -> chkExport hs
-    ClassStore (Class _ !cs _) -> chkExport cs
-    HostStore{}                -> pure ()
+    HashStore  !hs  -> chkExport hs
+    ClassStore !cls -> chkExport (edh'class'store cls)
+    HostStore{}     -> pure ()
 
  where
   !ctx     = edh'context ets
@@ -2820,8 +2825,9 @@ evalExpr (ImportExpr !argsRcvr !srcExpr !maybeInto) !exit = \ !ets ->
     Just !intoExpr -> runEdhTx ets $ evalExpr intoExpr $ \ !intoVal ->
       case intoVal of
         EdhObject !intoObj -> case edh'obj'store intoObj of
-          HashStore  !hs             -> importInto hs argsRcvr srcExpr exit
-          ClassStore (Class _ !cs _) -> importInto cs argsRcvr srcExpr exit
+          HashStore !hs -> importInto hs argsRcvr srcExpr exit
+          ClassStore !cls ->
+            importInto (edh'class'store cls) argsRcvr srcExpr exit
           HostStore{} ->
             throwEdhTx UsageError
               $  "can not import into a host object of class "
@@ -3053,6 +3059,7 @@ evalExpr (ClassExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
     !idCls <- unsafeIOToSTM newUnique
     !cs    <- iopdEmpty
     !ss    <- newTVar []
+    !mro   <- newTVar []
     let allocator :: EdhObjectAllocator
         allocator _etsCtor _apkCtor !exitCtor =
           exitCtor =<< HashStore <$> iopdEmpty
@@ -3062,12 +3069,14 @@ evalExpr (ClassExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
                             , edh'procedure'lexi  = scope
                             , edh'procedure'decl  = pd
                             }
-        !cls    = Class clsProc cs allocator
+        !cls    = Class clsProc cs allocator mro
         !clsObj = Object idCls (ClassStore cls) metaClass ss
 
-        doExit _rtn _ets = do
-          defineScopeAttr ets name $ EdhObject clsObj
-          exitEdh ets exit $ EdhObject clsObj
+        doExit _rtn _ets = readTVar ss >>= fillClassMRO cls >>= \case
+          "" -> do
+            defineScopeAttr ets name $ EdhObject clsObj
+            exitEdh ets exit $ EdhObject clsObj
+          !mroInvalid -> throwEdh ets UsageError mroInvalid
 
     let !clsScope = scope { edh'scope'entity = cs
                           , edh'scope'this   = clsObj

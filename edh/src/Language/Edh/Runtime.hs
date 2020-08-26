@@ -39,24 +39,26 @@ createEdhWorld :: MonadIO m => EdhConsole -> m EdhWorld
 createEdhWorld !console = liftIO $ do
 
   -- the meta class
-  !idMeta <- newUnique
-  !hsMeta <- atomically iopdEmpty
-  !ssMeta <- newTVarIO []
+  !idMeta  <- newUnique
+  !hsMeta  <- atomically iopdEmpty
+  !ssMeta  <- newTVarIO []
+  !mroMeta <- newTVarIO [] -- no super class, and self is not stored
 
   -- the root object and root scope
-  !idRoot <- newUnique
-  !hsRoot <- atomically $ iopdFromList
+  !idRoot  <- newUnique
+  !hsRoot  <- atomically $ iopdFromList
     [ (AttrByName "__name__", EdhString "<root>")
     , (AttrByName "None"    , edhNone)
     , (AttrByName "Nothing" , edhNothing)
     , (AttrByName "NA"      , edhNA)
     ]
-  !ssRoot      <- newTVarIO []
+  !ssRoot       <- newTVarIO []
 
   -- the namespace class, root object is a special instance of namespace class
-  !idNamespace <- newUnique
-  !hsNamespace <- atomically iopdEmpty
-  !ssNamespace <- newTVarIO []
+  !idNamespace  <- newUnique
+  !hsNamespace  <- atomically iopdEmpty
+  !ssNamespace  <- newTVarIO []
+  !mroNamespace <- newTVarIO [] -- no super class, and self is not stored
 
   let
     rootScope =
@@ -67,7 +69,7 @@ createEdhWorld !console = liftIO $ do
 
     metaProc = ProcDefi idMeta (AttrByName "<meta>") rootScope
       $ ProcDecl (NamedAttr "<meta>") (PackReceiver []) (Right phantomHostProc)
-    metaClass    = Class metaProc hsMeta phantomAllocator
+    metaClass    = Class metaProc hsMeta phantomAllocator mroMeta
     metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
 
     nsProc =
@@ -76,7 +78,7 @@ createEdhWorld !console = liftIO $ do
             (NamedAttr "<namespace>")
             (PackReceiver [])
             (Right phantomHostProc)
-    nsClass = Class nsProc hsNamespace phantomAllocator
+    nsClass = Class nsProc hsNamespace phantomAllocator mroNamespace
     nsClassObj =
       Object idNamespace (ClassStore nsClass) metaClassObj ssNamespace
 
@@ -91,7 +93,10 @@ createEdhWorld !console = liftIO $ do
          ]
        ]
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
-       | (nm, getter, setter) <- [("name", mthClassNameGetter, Nothing)]
+       | (nm, getter, setter) <-
+         [ ("name", mthClassNameGetter, Nothing)
+         , ("mro" , mthClassMROGetter , Nothing)
+         ]
        ]
 
   atomically
@@ -295,24 +300,33 @@ createEdhWorld !console = liftIO $ do
 
   mthClassRepr :: EdhHostProc
   mthClassRepr _apk !exit !ets = case edh'obj'store clsObj of
-    ClassStore (Class !pd _ _) ->
-      exitEdh ets exit $ EdhString $ procedureName pd
+    ClassStore !cls ->
+      exitEdh ets exit $ EdhString $ procedureName (edh'class'proc cls)
     _ -> exitEdh ets exit $ EdhString "<bogus-class>"
     where !clsObj = edh'scope'that $ contextScope $ edh'context ets
 
   mthClassShow :: EdhHostProc
   mthClassShow _apk !exit !ets = case edh'obj'store clsObj of
-    ClassStore (Class !pd _ _) ->
-      exitEdh ets exit $ EdhString $ "class: " <> procedureName pd
+    ClassStore !cls ->
+      exitEdh ets exit $ EdhString $ "class: " <> procedureName
+        (edh'class'proc cls)
     _ -> exitEdh ets exit $ EdhString "<bogus-class>"
     where !clsObj = edh'scope'that $ contextScope $ edh'context ets
 
   mthClassNameGetter :: EdhHostProc
   mthClassNameGetter _apk !exit !ets = case edh'obj'store clsObj of
-    ClassStore (Class !pd _ _) ->
-      exitEdh ets exit $ attrKeyValue $ edh'procedure'name pd
+    ClassStore !cls ->
+      exitEdh ets exit $ attrKeyValue $ edh'procedure'name (edh'class'proc cls)
     _ -> exitEdh ets exit nil
-    where clsObj = edh'scope'that $ contextScope $ edh'context ets
+    where !clsObj = edh'scope'that $ contextScope $ edh'context ets
+
+  mthClassMROGetter :: EdhHostProc
+  mthClassMROGetter _apk !exit !ets = case edh'obj'store clsObj of
+    ClassStore !cls -> do
+      !mro <- readTVar $ edh'class'mro cls
+      exitEdh ets exit $ EdhArgsPack $ ArgsPack (EdhObject <$> mro) odEmpty
+    _ -> exitEdh ets exit nil
+    where !clsObj = edh'scope'that $ contextScope $ edh'context ets
 
 
 
@@ -528,7 +542,7 @@ createEdhWorld !console = liftIO $ do
         Nothing          -> exitEdh ets exit nil
         Just !outerScope -> do
           !hsv'          <- newTVar $ toDyn outerScope
-          !outerScopeObj <- cloneEdhObject this
+          !outerScopeObj <- edhMutCloneObj this
                                            (edh'scope'that procScope)
                                            (HostStore hsv')
           exitEdh ets exit $ EdhObject outerScopeObj

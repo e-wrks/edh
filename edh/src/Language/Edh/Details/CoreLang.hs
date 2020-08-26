@@ -103,14 +103,14 @@ lookupEdhSelfAttr !this !key = case edh'obj'store this of
   HashStore !es -> iopdLookup key es >>= \case
     Just !v -> return v
     Nothing -> lookupFromClassOf this
-  ClassStore (Class _ !cs _) -> iopdLookup key cs >>= \case
+  ClassStore !cls -> iopdLookup key (edh'class'store cls) >>= \case
     Just !v -> return v
     Nothing -> lookupFromClassOf this
  where
   lookupFromClassOf !obj = if clsObj == obj
     then return EdhNil -- reached ultimate meta class of the world
     else case edh'obj'store clsObj of
-      ClassStore (Class _ !cs _) -> iopdLookup key cs >>= \case
+      ClassStore !cls -> iopdLookup key (edh'class'store cls) >>= \case
         Just !v -> return v
         Nothing -> return EdhNil -- don't resort to meta class here
       _ -> return EdhNil -- todo should complain loudly here?
@@ -121,8 +121,10 @@ lookupEdhSelfAttr !this !key = case edh'obj'store this of
 -- * Edh object manipulation
 
 
-cloneEdhObject :: Object -> Object -> ObjectStore -> STM Object
-cloneEdhObject !fromThis !fromThat !newStore = do
+-- Clone `that` object with one of its super object (i.e. `this`) mutated
+-- to bear the new object stroage
+edhMutCloneObj :: Object -> Object -> ObjectStore -> STM Object
+edhMutCloneObj !fromThis !fromThat !newStore = do
   !oidNewThis <- unsafeIOToSTM newUnique
   let !newThis =
         fromThis { edh'obj'ident = oidNewThis, edh'obj'store = newStore }

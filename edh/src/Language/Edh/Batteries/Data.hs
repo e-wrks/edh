@@ -42,7 +42,7 @@ blobDecodeProc _ _ =
 
 propertyProc :: EdhHostProc
 propertyProc !apk !exit !ets = case edh'obj'store caller'this of
-  ClassStore (Class _ !cs _) -> defProp cs
+  ClassStore !cls -> defProp (edh'class'store cls)
   HashStore !hs -> defProp hs
   _ -> throwEdh ets UsageError "can not define property for a host object"
  where
@@ -110,7 +110,7 @@ propertyProc !apk !exit !ets = case edh'obj'store caller'this of
 setterProc :: EdhHostProc
 setterProc (ArgsPack !args !kwargs) !exit !ets =
   case edh'obj'store caller'this of
-    ClassStore (Class _ !cs _) -> defProp cs
+    ClassStore !cls -> defProp (edh'class'store cls)
     HashStore !hs -> defProp hs
     _ -> throwEdh ets UsageError "can not define property for a host object"
  where

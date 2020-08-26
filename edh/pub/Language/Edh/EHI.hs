@@ -136,9 +136,9 @@ module Language.Edh.EHI
   , mkHostClass
   , mkHostClass'
   , mkHostProperty
-  , cloneEdhObject
-  , createEdhObject
-  , constructEdhObject
+  , edhCreateObj
+  , edhConstructObj
+  , edhMutCloneObj
   , AttrKey(..)
   , attrKeyValue
   , lookupEdhCtxAttr

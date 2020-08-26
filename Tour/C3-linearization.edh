@@ -1,0 +1,28 @@
+
+# https://en.wikipedia.org/wiki/C3_linearization
+
+class O pass
+
+class A extends O
+
+class B extends O
+
+class C extends O
+
+class D extends O
+
+class E extends O
+
+class K1 extends ( A, B, C )
+
+class K2 extends ( D, B, E )
+
+class K3 extends ( D, A )
+
+class Z extends ( K1, K2, K3 )
+
+console.print( Z.mro )
+
+z = Z()
+
+console.print( supers( z ) )

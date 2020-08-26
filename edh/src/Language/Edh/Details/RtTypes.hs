@@ -12,6 +12,7 @@ import           Control.Monad
 import           Control.Concurrent.STM
 
 import           Data.Foldable
+import           Data.Either
 import           Data.Unique
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
@@ -351,11 +352,13 @@ data Class = Class {
     edh'class'proc :: !ProcDefi
   , edh'class'store :: !EntityStore
   , edh'class'allocator :: !EdhObjectAllocator
+    -- | the C3 linearized method resolution order, with self omitted
+  , edh'class'mro :: !(TVar [Object])
   }
 instance Eq Class where
-  Class x'p _ _ == Class y'p _ _ = x'p == y'p
+  Class x'p _ _ _ == Class y'p _ _ _ = x'p == y'p
 instance Hashable Class where
-  hashWithSalt s (Class p _ _) = hashWithSalt s p
+  hashWithSalt s (Class p _ _ _) = hashWithSalt s p
 
 type EdhObjectAllocator
   = EdhThreadState -> ArgsPack -> (ObjectStore -> STM ()) -> STM ()
@@ -367,6 +370,69 @@ edhClassName !clsObj = case edh'obj'store clsObj of
 
 objClassName :: Object -> Text
 objClassName = edhClassName . edh'obj'class
+
+-- | Calculate the C3 linearization of the super classes and fill into the
+-- class' mro list.
+--
+-- Note we don't store self in the mro list here.
+--
+-- For the algorithm see:
+--   https://en.wikipedia.org/wiki/C3_linearization
+fillClassMRO :: Class -> [Object] -> STM Text
+fillClassMRO _ [] = return ""
+fillClassMRO !cls !superClasses =
+
+  partitionEithers <$> sequence (l <$> superClasses) >>= \case
+    ([], !superLs) -> case merge (superLs ++ [superClasses]) [] of
+      Left  !mroInvalid -> return mroInvalid
+      Right !selfL      -> do
+        writeTVar (edh'class'mro cls) selfL
+        return ""
+    (errs, _) -> return $ T.intercalate "; " errs
+
+ where
+
+  l :: Object -> STM (Either Text [Object])
+  l !c = case edh'obj'store c of
+    ClassStore (Class _ _ _ !mro) -> Right . (c :) <$> readTVar mro
+    _ ->
+      return $ Left $ "class expected but given an object of " <> objClassName c
+
+  merge :: [[Object]] -> [Object] -> Either Text [Object]
+  merge []    !result = return $ reverse result
+  merge lists result  = do
+    (goodHead, lists') <- pickHead lists
+    merge lists' (goodHead : result)
+
+   where
+
+    pickHead :: [[Object]] -> Either Text (Object, [[Object]])
+    pickHead [] = error "bug: empty list of lists passed to pickHead"
+    pickHead (l2t : lsBacklog) = tryHeads l2t lsBacklog []
+
+    tryHeads
+      :: [Object]
+      -> [[Object]]
+      -> [[Object]]
+      -> Either Text (Object, [[Object]])
+    tryHeads [] _ _ = error "bug: empty list to try"
+    tryHeads l2t@(h : t) lsBacklog lsTried =
+      let (nowhereTail, neTails) =
+              checkTail (lsBacklog ++ lsTried) [ t | not (null t) ]
+      in  if nowhereTail
+            then return (h, neTails)
+            else case lsBacklog of
+              []               -> Left "no C3 linearization exists"
+              n2t : lsBacklog' -> tryHeads n2t lsBacklog' (l2t : lsTried)
+     where
+      checkTail :: [[Object]] -> [[Object]] -> (Bool, [[Object]])
+      checkTail []       neTails = (True, neTails)
+      checkTail ([] : _) _       = error "bug: empty list in rest of the lists"
+      checkTail (l2c@(h' : t') : rest) neTails
+        | h' == h = checkTail rest $ if null t' then neTails else t' : neTails
+        | h `elem` t' = (False, [])
+        | otherwise = checkTail rest (l2c : neTails)
+
 
 -- | An object views an entity, with inheritance relationship 
 -- to any number of super objects.
@@ -393,8 +459,8 @@ instance Show Object where
   -- the show, as 'show' may be called from an stm transaction, stm
   -- will fail hard on encountering of nested 'atomically' calls.
   show obj = case edh'obj'store $ edh'obj'class obj of
-    ClassStore (Class !pd _ _) ->
-      "<object: " ++ T.unpack (procedureName pd) ++ ">"
+    ClassStore !cls ->
+      "<object: " ++ T.unpack (procedureName $ edh'class'proc cls) ++ ">"
     _ -> "<bogus-object>"
 
 data ObjectStore =
@@ -1425,8 +1491,8 @@ edhTypeOf EdhList{}                = ListType
 
 edhTypeOf (EdhObject o)            = case edh'obj'store o of
   HashStore{} -> ObjectType
-  ClassStore (Class pd _ _) ->
-    case edh'procedure'body $ edh'procedure'decl pd of
+  ClassStore !cls ->
+    case edh'procedure'body $ edh'procedure'decl $ edh'class'proc cls of
       Left{}  -> ClassType
       Right{} -> HostClassType
   HostStore{} -> ObjectType -- TODO add a @HostObjectType@ to distinguish?
@@ -1560,18 +1626,24 @@ mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
 
 mkHostClass
   :: Scope
-  -> Text
+  -> AttrName
   -> EdhObjectAllocator
   -> EntityStore
   -> [Object]
   -> STM Object
 mkHostClass !scope !className !allocator !classStore !superClasses = do
-  !idCls <- unsafeIOToSTM newUnique
-  !ssCls <- newTVar superClasses
+  !idCls  <- unsafeIOToSTM newUnique
+  !ssCls  <- newTVar superClasses
+  !mroCls <- newTVar []
   let !clsProc = ProcDefi idCls (AttrByName className) scope
         $ ProcDecl (NamedAttr className) (PackReceiver []) (Right fakeHostProc)
-      !cls    = Class clsProc classStore allocator
+      !cls    = Class clsProc classStore allocator mroCls
       !clsObj = Object idCls (ClassStore cls) metaClassObj ssCls
+  !mroInvalid <- fillClassMRO cls superClasses
+  unless (T.null mroInvalid)
+    $ throwSTM
+    $ EdhError UsageError mroInvalid (toDyn nil)
+    $ EdhCallContext "<mkHostClass>" []
   return clsObj
  where
   fakeHostProc :: EdhHostProc
@@ -1582,7 +1654,7 @@ mkHostClass !scope !className !allocator !classStore !superClasses = do
 
 mkHostClass'
   :: Scope
-  -> Text
+  -> AttrName
   -> EdhObjectAllocator
   -> [Object]
   -> (Scope -> STM ())
@@ -1591,9 +1663,10 @@ mkHostClass' !scope !className !allocator !superClasses !storeMod = do
   !classStore <- iopdEmpty
   !idCls      <- unsafeIOToSTM newUnique
   !ssCls      <- newTVar superClasses
+  !mroCls     <- newTVar []
   let !clsProc = ProcDefi idCls (AttrByName className) scope
         $ ProcDecl (NamedAttr className) (PackReceiver []) (Right fakeHostProc)
-      !cls      = Class clsProc classStore allocator
+      !cls      = Class clsProc classStore allocator mroCls
       !clsObj   = Object idCls (ClassStore cls) metaClassObj ssCls
       !clsScope = scope { edh'scope'entity  = classStore
                         , edh'scope'this    = clsObj
@@ -1604,6 +1677,11 @@ mkHostClass' !scope !className !allocator !superClasses !storeMod = do
                         , edh'effects'stack = []
                         }
   storeMod clsScope
+  !mroInvalid <- fillClassMRO cls superClasses
+  unless (T.null mroInvalid)
+    $ throwSTM
+    $ EdhError UsageError mroInvalid (toDyn nil)
+    $ EdhCallContext "<mkHostClass>" []
   return clsObj
  where
   fakeHostProc :: EdhHostProc
@@ -1625,9 +1703,9 @@ mkHostClass' !scope !className !allocator !superClasses !storeMod = do
 objectScope :: Object -> Maybe Scope
 objectScope !obj = case edh'obj'store obj of
 
-  HostStore  _                 -> Nothing
+  HostStore  _                   -> Nothing
 
-  ClassStore (Class !cp !cs _) -> Just Scope
+  ClassStore (Class !cp !cs _ _) -> Just Scope
     { edh'scope'entity  = cs
     , edh'scope'this    = obj
     , edh'scope'that    = obj
@@ -1646,7 +1724,7 @@ objectScope !obj = case edh'obj'store obj of
   HashStore !hs ->
     let !objClass = edh'obj'class obj
         scopeProc = case edh'obj'store objClass of
-          ClassStore (Class !cp _ _) -> cp
+          ClassStore !cls -> edh'class'proc cls
           _ -> error "bug: class of an object not bearing ClassStore"
         scope = Scope
           { edh'scope'entity  = hs
