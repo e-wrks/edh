@@ -7,11 +7,18 @@ import           Prelude
 
 import           GHC.Conc                       ( unsafeIOToSTM )
 
+import           Control.Monad
 import           Control.Concurrent.STM
 
+import           Data.Either
 import           Data.Text                      ( Text )
+import qualified Data.Text                     as T
 import           Data.Unique
+import           Data.Dynamic
 
+import           Text.Megaparsec
+
+import           Language.Edh.Control
 import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 
@@ -61,6 +68,145 @@ resolveEffectfulAttr (scope : rest) !key =
 
 
 -- * Edh inheritance resolution
+
+
+-- | Calculate the C3 linearization of the super classes and fill into the
+-- class' mro list.
+--
+-- Note we don't store self in the mro list here.
+--
+-- For the algorithm see:
+--   https://en.wikipedia.org/wiki/C3_linearization
+fillClassMRO :: Class -> [Object] -> STM Text
+fillClassMRO _ [] = return ""
+fillClassMRO !cls !superClasses =
+
+  partitionEithers <$> sequence (l <$> superClasses) >>= \case
+    ([], !superLs) -> case merge (superLs ++ [superClasses]) [] of
+      Left  !mroInvalid -> return mroInvalid
+      Right !selfL      -> do
+        writeTVar (edh'class'mro cls) selfL
+        return ""
+    (errs, _) -> return $ T.intercalate "; " errs
+
+ where
+
+  l :: Object -> STM (Either Text [Object])
+  l !c = case edh'obj'store c of
+    ClassStore (Class _ _ _ !mro) -> Right . (c :) <$> readTVar mro
+    _ ->
+      return $ Left $ "class expected but given an object of " <> objClassName c
+
+  merge :: [[Object]] -> [Object] -> Either Text [Object]
+  merge []    !result = return $ reverse result
+  merge lists result  = do
+    (goodHead, lists') <- pickHead lists
+    merge lists' (goodHead : result)
+
+   where
+
+    pickHead :: [[Object]] -> Either Text (Object, [[Object]])
+    pickHead [] = error "bug: empty list of lists passed to pickHead"
+    pickHead (l2t : lsBacklog) = tryHeads l2t lsBacklog []
+
+    tryHeads
+      :: [Object]
+      -> [[Object]]
+      -> [[Object]]
+      -> Either Text (Object, [[Object]])
+    tryHeads [] _ _ = error "bug: empty list to try"
+    tryHeads l2t@(h : t) lsBacklog lsTried =
+      let (nowhereTail, neTails) =
+              checkTail (lsBacklog ++ lsTried) [ t | not (null t) ]
+      in  if nowhereTail
+            then return (h, neTails)
+            else case lsBacklog of
+              []               -> Left "no C3 linearization exists"
+              n2t : lsBacklog' -> tryHeads n2t lsBacklog' (l2t : lsTried)
+     where
+      checkTail :: [[Object]] -> [[Object]] -> (Bool, [[Object]])
+      checkTail []       neTails = (True, neTails)
+      checkTail ([] : _) _       = error "bug: empty list in rest of the lists"
+      checkTail (l2c@(h' : t') : rest) neTails
+        | h' == h = checkTail rest $ if null t' then neTails else t' : neTails
+        | h `elem` t' = (False, [])
+        | otherwise = checkTail rest (l2c : neTails)
+
+
+mkHostClass
+  :: Scope
+  -> AttrName
+  -> EdhObjectAllocator
+  -> EntityStore
+  -> [Object]
+  -> STM Object
+mkHostClass !scope !className !allocator !classStore !superClasses = do
+  !idCls  <- unsafeIOToSTM newUnique
+  !ssCls  <- newTVar superClasses
+  !mroCls <- newTVar []
+  let !clsProc = ProcDefi idCls (AttrByName className) scope
+        $ ProcDecl (NamedAttr className) (PackReceiver []) (Right fakeHostProc)
+      !cls    = Class clsProc classStore allocator mroCls
+      !clsObj = Object idCls (ClassStore cls) metaClassObj ssCls
+  !mroInvalid <- fillClassMRO cls superClasses
+  unless (T.null mroInvalid)
+    $ throwSTM
+    $ EdhError UsageError mroInvalid (toDyn nil)
+    $ EdhCallContext "<mkHostClass>" []
+  return clsObj
+ where
+  fakeHostProc :: EdhHostProc
+  fakeHostProc _ !exit = exitEdhTx exit nil
+
+  !metaClassObj =
+    edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
+
+mkHostClass'
+  :: Scope
+  -> AttrName
+  -> EdhObjectAllocator
+  -> [Object]
+  -> (Scope -> STM ())
+  -> STM Object
+mkHostClass' !scope !className !allocator !superClasses !storeMod = do
+  !classStore <- iopdEmpty
+  !idCls      <- unsafeIOToSTM newUnique
+  !ssCls      <- newTVar superClasses
+  !mroCls     <- newTVar []
+  let !clsProc = ProcDefi idCls (AttrByName className) scope
+        $ ProcDecl (NamedAttr className) (PackReceiver []) (Right fakeHostProc)
+      !cls      = Class clsProc classStore allocator mroCls
+      !clsObj   = Object idCls (ClassStore cls) metaClassObj ssCls
+      !clsScope = scope { edh'scope'entity  = classStore
+                        , edh'scope'this    = clsObj
+                        , edh'scope'that    = clsObj
+                        , edh'excpt'hndlr   = defaultEdhExcptHndlr
+                        , edh'scope'proc    = clsProc
+                        , edh'scope'caller  = clsCreStmt
+                        , edh'effects'stack = []
+                        }
+  storeMod clsScope
+  !mroInvalid <- fillClassMRO cls superClasses
+  unless (T.null mroInvalid)
+    $ throwSTM
+    $ EdhError UsageError mroInvalid (toDyn nil)
+    $ EdhCallContext "<mkHostClass>" []
+  return clsObj
+ where
+  fakeHostProc :: EdhHostProc
+  fakeHostProc _ !exit = exitEdhTx exit nil
+
+  !metaClassObj =
+    edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
+
+  clsCreStmt :: StmtSrc
+  clsCreStmt = StmtSrc
+    ( SourcePos { sourceName   = "<host-class-creation>"
+                , sourceLine   = mkPos 1
+                , sourceColumn = mkPos 1
+                }
+    , VoidStmt
+    )
 
 
 resolveEdhInstance :: Object -> Object -> STM (Maybe Object)
