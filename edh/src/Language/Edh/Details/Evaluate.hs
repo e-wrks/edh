@@ -149,7 +149,7 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
           EdhBoundProc (EdhMethod !magicMth) !this !that _ ->
             withMagicMethod magicMth this that
           EdhProcedure (EdhMethod !magicMth) _ ->
-            withMagicMethod magicMth super super
+            withMagicMethod magicMth super obj
           _ -> throwEdh ets EvalError $ "invalid magic method type: " <> T.pack
             (edhTypeNameOf magicVal)
    where
@@ -158,7 +158,7 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
     noMetaMagic _ets = lookupEdhObjAttr super magicSpell >>= \case
       (_, EdhNil) -> getViaSupers restSupers exit
       (!super', EdhProcedure (EdhMethod !magicMth) _) ->
-        withMagicMethod magicMth super' super
+        withMagicMethod magicMth super' obj
       (_, EdhBoundProc (EdhMethod !magicMth) !this !that _) ->
         withMagicMethod magicMth this that
       (_, !magicVal) ->
@@ -173,17 +173,14 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
                         magicMth
                         (ArgsPack [attrKeyValue key] odEmpty)
                         id
-        $ \ !magicRtn _ets -> case magicRtn of
+        $ \ !magicRtn _ets -> case edhUltimate magicRtn of
             EdhDefault _ !exprDef !etsDef -> getViaSupers restSupers $ \case
               EdhNil ->
                 runEdhTx (fromMaybe ets etsDef)
                   $ evalExpr exprDef
                   $ \ !defVal _ets -> exit defVal
               !betterEffVal -> exit betterEffVal
-            EdhProcedure !callable !effOuter ->
-              -- bind an unbound procedure to this super as `this`,
-              -- and the obj as `that`
-              exit $ EdhBoundProc callable super obj effOuter
+            -- note don't bind a magic method here
             _ -> exit magicRtn
 
 
@@ -205,7 +202,7 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
           EdhBoundProc (EdhMethod !magicMth) !this !that _ ->
             withMagicMethod magicMth this that
           EdhProcedure (EdhMethod !magicMth) _ ->
-            withMagicMethod magicMth super super
+            withMagicMethod magicMth super obj
           _ -> throwEdh ets EvalError $ "invalid magic method type: " <> T.pack
             (edhTypeNameOf magicVal)
    where
@@ -214,7 +211,7 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
     noMetaMagic _ets = lookupEdhObjAttr super magicSpell >>= \case
       (_, EdhNil) -> setViaSupers restSupers exit
       (!super', EdhProcedure (EdhMethod !magicMth) _) ->
-        withMagicMethod magicMth super' super
+        withMagicMethod magicMth super' obj
       (_, EdhBoundProc (EdhMethod !magicMth) !this !that _) ->
         withMagicMethod magicMth this that
       (_, !magicVal) ->
@@ -229,7 +226,7 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
                         magicMth
                         (ArgsPack [attrKeyValue key, val] odEmpty)
                         id
-        $ \ !magicRtn _ets -> case magicRtn of
+        $ \ !magicRtn _ets -> case edhUltimate magicRtn of
             EdhDefault _ !exprDef !etsDef -> setViaSupers restSupers $ \case
               EdhNil ->
                 runEdhTx (fromMaybe ets etsDef)

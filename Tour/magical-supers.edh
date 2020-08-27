@@ -12,21 +12,21 @@
     #    *) `extends xxx` (<-^)
     # where `this`, `obj` and procedure context this is a grand business child
     method (!<-) ( magicSpell ) {
-      30<| 'casting spell (' ++ magicSpell ++ ')'
+      console.warn<| 'casting spell (' ++ magicSpell ++ ')'
 
-      # treat explicit nil/false still as not present
-      that?@magicSpell |> NA
+      # note method binding is a concern need careful handling
+
+      NA # do no override
     }
 
     # handles super attribute resolution, on a magic child (referred to by `that`),
     # for `super.xxx` from a grand business child
     method (@<-^) ( attrKey ) {
-      20<| 'getting super.' ++ attrKey ++ ' from the super'
+      console.info<| 'getting super.' ++ attrKey ++ ' from the super'
 
-      case that?@attrKey of {
-        nil -> NA # to consult next super
-        { n } -> n / 2 # can do some transformation here
-      }
+      # note method binding is a concern need careful handling
+
+      NA # do no override
     }
 
   }
@@ -35,62 +35,59 @@
 
 {
 
-  class Super1 {
+  class Super1 { extends MetaSuper1
 
     # handles `extends` from a business child (referred to by `that`),
     # `this` is the new super object being added to `that`, if this
     # method err out, the inheritance relationship won't be established.
     # `boScope` is a scope object reflecting `that` object's entity
     method (<-^) ( boScope ) {
-      20<| 'connecting child of ' ++ constructor( that )
+      console.info<| 'connecting child of ' ++ constructor( that )
       ++ ' which is defined at: ' ++ boScope.lexiLoc
     }
 
     # handles `this.xxx` from a business child (referred to by `that`)
     method (@<-) ( attrKey ) {
-      20<| 'getting this.' ++ attrKey
+      console.info<| 'getting this.' ++ attrKey
       return NA # try next super, or fail as normally if no such attr
     }
 
     # handles `obj.xxx` from a business child (referred to by `that`)
     method (@<-*) ( attrKey ) {
-      20<| 'getting ' ++ attrKey ++ ' from the obj'
+      console.info<| 'getting ' ++ attrKey ++ ' from the obj'
       that?@attrKey # giving out nil if no such attr
     }
 
-    # a default attribute value
-    n = 23
+    # a readonly property providing fixed default value
+    property$
+    method n() 23
 
     # handles `this.xxx = yyy` from a business child (referred to by `that`)
     method (<-@) ( attrKey, attrVal ) {
-      20<| 'setting this.' ++ attrKey ++ ' to ' ++ attrVal
+      console.info<| 'setting this.' ++ attrKey ++ ' to ' ++ attrVal
       that@attrKey = attrVal
     }
 
     # handles `obj.xxx = yyy` for `obj` being a business child (referred to by `that`)
     method (*<-@) ( attrKey, attrVal ) {
-      20<| 'setting ' ++ attrKey ++ ' to ' ++ attrVal ++ ' for the obj'
+      console.info<| 'setting ' ++ attrKey ++ ' to ' ++ attrVal ++ ' for the obj'
       that@attrKey = attrVal
     }
 
-    extends MetaSuper1()
 
   }
 
-  class BusObj1 {
+  class BusObj1 { extends Super1
 
-    _selfScope = scope() # for debug purpose
-
+    property$
     method n () {
-      30<| 'super provided n - ' ++ super?n
+      console.warn<| 'super provided n - ' ++ super?n
       this.n1
     }
 
     this.n1 = 7
 
     this.n2 = 3
-
-    extends Super1()
 
   }
 
@@ -100,17 +97,18 @@ bo1 = BusObj1()
 
 {
 
-  20<| 'bo1.n() is ' ++ bo1.n()
+  console.info<| 'bo1.n is ' ++ bo1.n
 
-  20<| 'bo1.n1 is ' ++ bo1.n1
+  console.info<| 'bo1.n1 is ' ++ bo1.n1
 
-  20<| 'bo1.n2 is ' ++ bo1.n2
+  console.info<| 'bo1.n2 is ' ++ bo1.n2
 
-  20<| 'bo1.n3 is ' ++ bo1.n3
+  # destined to fail
+  # console.info<| 'bo1.n3 is ' ++ bo1.n3
 
 }
 
 {
   bo1.n1 = 5
-  20<| 'bo1.n1 set to ' ++ bo1.n1
+  console.info<| 'bo1.n1 set to ' ++ bo1.n1
 }
