@@ -51,10 +51,10 @@ optionalSemicolon :: Parser Bool
 optionalSemicolon = fromMaybe False <$> optional (True <$ symbol ";")
 
 isIdentStart :: Char -> Bool
-isIdentStart !c = c == '_' || Char.isAlphaNum c
+isIdentStart !c = c == '_' || Char.isAlpha c
 
 isIdentChar :: Char -> Bool
-isIdentChar c = isIdentStart c || isDigit c || c == '\''
+isIdentChar c = c == '_' || c == '\'' || Char.isAlphaNum c
 
 isDigit :: Char -> Bool
 isDigit = flip elem ['0' .. '9']
