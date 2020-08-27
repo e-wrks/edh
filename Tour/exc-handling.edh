@@ -73,11 +73,11 @@
   # custom exception classes can be defined and caught accordingly
   # wrt class hierarchy
 
-  class MyException extends Exception( "My bad!" )
+  class MyException extends Exception
 
-  class AppException method __init__ (*** apk ) extends Exception(*** apk )
+  class AppException extends Exception
 
-  class RuleViolated method __init__ (*** apk ) extends AppException(*** apk )
+  class RuleViolated extends AppException
 
   method doBusiness () {
     throw RuleViolated( "warning ignored", reason= 'unknown', degree= 'perphaps!' )
@@ -86,10 +86,11 @@
   {
     doBusiness()
   } $=> { { RuleViolated:exc } } -> {
-    console.print( 'or maybe the rule is wrong ...' )
-    fallthrough
+    console.debug<| 'or maybe the rule is wrong ...'
+    rethrow
   } $=> { { AppException:exc } } -> {
-    console.info <| 'app error recorded - ' ++ exc.details
+    console.warn <| 'app error encountered: ' ++ desc( exc )
+    console.info <| 'app error recorded - ' ++ exc.message ++ ' -- ' ++ exc.details
   } @=> {
     console.info <| 'looking forward for more business to do'
   }
@@ -103,7 +104,7 @@
 
   method f() {
     console.print( "I suspect why I'm called anyway ...",
-      backtrace = Exception( "See I'm so called." ) )
+      backtrace = show( Exception( "See I'm so called." ) ) )
   }
 
   method g() {

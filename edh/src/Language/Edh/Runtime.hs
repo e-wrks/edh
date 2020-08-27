@@ -521,14 +521,14 @@ createEdhWorld !console = liftIO $ do
           evalThePack !argsValues [] (kwExpr : kwargsExprs') = case kwExpr of
             (!kw, EdhExpr _ !expr _) ->
               runEdhTx etsEval $ evalExpr expr $ \ !val _ets -> do
-                edhSetValue kw (edhDeCaseClose val) kwIOPD
+                edhSetValue kw (edhDeCaseWrap val) kwIOPD
                 evalThePack argsValues [] kwargsExprs'
             !v -> throwEdh ets EvalError $ "not an expr: " <> T.pack (show v)
           evalThePack !argsValues (argExpr : argsExprs') !kwargsExprs =
             case argExpr of
               EdhExpr _ !expr _ ->
                 runEdhTx etsEval $ evalExpr expr $ \ !val _ets -> evalThePack
-                  (edhDeCaseClose val : argsValues)
+                  (edhDeCaseWrap val : argsValues)
                   argsExprs'
                   kwargsExprs
               !v -> throwEdh ets EvalError $ "not an expr: " <> T.pack (show v)
@@ -626,8 +626,10 @@ createEdhWorld !console = liftIO $ do
       Nothing -> exitEdh ets exit $ EdhString $ errClsName <> "()"
     _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
    where
-    !errObj     = edh'scope'this $ contextScope $ edh'context ets
-    !errClsName = objClassName errObj
+    !scope      = contextScope $ edh'context ets
+    !errObj     = edh'scope'this scope
+    !endErr     = edh'scope'that scope
+    !errClsName = objClassName endErr
 
   mthErrShow :: EdhHostProc
   mthErrShow _ !exit !ets = case edh'obj'store errObj of

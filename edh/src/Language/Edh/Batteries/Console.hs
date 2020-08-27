@@ -35,7 +35,7 @@ import           Language.Edh.Details.Utils
 loggingProc :: EdhIntrinsicOp
 loggingProc !lhExpr !rhExpr !exit !ets =
   runEdhTx ets $ evalExpr lhExpr $ \ !lhVal _ets ->
-    case parseSpec $ edhDeCaseClose lhVal of
+    case parseSpec $ edhDeCaseWrap lhVal of
       Just (logLevel, StmtSrc (srcPos, _)) -> if logLevel < 0
         -- as the log queue is a TBQueue per se, log msgs from a failing STM
         -- transaction has no way to go into the queue then get logged, but the
@@ -46,13 +46,13 @@ loggingProc !lhExpr !rhExpr !exit !ets =
           let !tracePrefix =
                 " 🐞 " <> show th <> " 👉 " <> sourcePosPretty srcPos <> " ❗ "
           runEdhTx ets $ evalExpr rhExpr $ \ !rhVal _ets ->
-            edhValueStr ets (edhDeCaseClose rhVal) $ \ !logStr ->
+            edhValueStr ets (edhDeCaseWrap rhVal) $ \ !logStr ->
               trace (tracePrefix ++ T.unpack logStr) $ exitEdh ets exit nil
         else if logLevel < conLogLevel
           then -- drop log msg without even eval it
                exitEdh ets exit nil
           else runEdhTx ets $ evalExpr rhExpr $ \ !rhVal _ets -> do
-            let !rhv    = edhDeCaseClose rhVal
+            let !rhv    = edhDeCaseWrap rhVal
                 !srcLoc = if conLogLevel <= 20
                   then -- with source location info
                        Just $ sourcePosPretty srcPos

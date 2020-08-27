@@ -49,20 +49,21 @@ catchProc :: EdhIntrinsicOp
 catchProc !tryExpr !catchExpr !exit !ets =
   edhCatch ets (evalExpr tryExpr) (exitEdh ets exit)
     $ \ !exv recover rethrow -> case exv of
-        EdhNil -> rethrow -- no error occurred, no catch
-        -- try recover by catch expression
-        _ ->
+        EdhNil -> rethrow nil -- no error occurred, no catch
+        _ -> -- try recover by catch expression
           runEdhTx ets { edh'context = (edh'context ets) { edh'ctx'match = exv }
                        }
             $ evalExpr catchExpr
-            $ \ !recoverVal _ets -> case recoverVal of
-                EdhRethrow -> rethrow -- not to recover
-                EdhCaseClose !val ->
-                  -- don't bubble up the close-of-case, as `catch` is not a branch 
-                  recover val
-                EdhCaseOther   -> rethrow -- not to recover
-                EdhFallthrough -> rethrow -- not to recover
-                _              -> recover recoverVal
+            $ \ !catchResult _ets -> case edhDeCaseClose catchResult of
+
+                -- these results all mean no recovery, i.e. to rethrow
+                EdhRethrow     -> rethrow exv -- explicit rethrow
+                EdhFallthrough -> rethrow exv -- explicit fallthrough
+                EdhCaseOther   -> rethrow exv -- implicit none-match
+
+                -- other results are regarded as valid recovery
+                -- note `nil` included
+                !recoverVal    -> recover recoverVal
 
 -- | operator (@=>) - the `finally`
 --
@@ -77,17 +78,17 @@ finallyProc !tryExpr !finallyExpr !exit !ets = do
   hndlrTh <- unsafeIOToSTM myThreadId
   edhCatch ets (evalExpr tryExpr) (exitEdh ets exit)
     $ \ !exv _recover !rethrow -> do
-        fnlyTh <- unsafeIOToSTM myThreadId
+        !fnlyTh <- unsafeIOToSTM myThreadId
         if fnlyTh /= hndlrTh
           then -- don't run the finally block from a different thread other
                -- than the handler installer
-               rethrow
+               rethrow exv
           else
             runEdhTx ets
               { edh'context = (edh'context ets) { edh'ctx'match = exv }
               }
             $ evalExpr finallyExpr
-            $ \_result _ets -> rethrow
+            $ \_result _ets -> rethrow exv
 
 
 -- | operator (->) - the brancher, if its left-hand matches, early stop its
@@ -293,13 +294,13 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
   -- condition itself is true
   PrefixExpr Guard guardedExpr ->
     runEdhTx ets $ evalExpr guardedExpr $ \ !predValue _ets ->
-      if edhDeCaseClose predValue /= true
+      if edhDeCaseWrap predValue /= true
         then exitEdh ets exit EdhCaseOther
         else branchMatched []
 
   -- value-wise matching against the target in context
   _ -> runEdhTx ets $ evalExpr lhExpr $ \ !lhVal _ets ->
-    edhNamelyEqual ets (edhDeCaseClose lhVal) ctxMatch $ \case
+    edhNamelyEqual ets (edhDeCaseWrap lhVal) ctxMatch $ \case
       True  -> branchMatched []
       False -> exitEdh ets exit EdhCaseOther
 
@@ -321,7 +322,7 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
     runEdhTx ets $ evalExpr rhExpr $ \ !rhVal -> exitEdhTx exit $ case rhVal of
       -- a nested branch matched, the outer branch eval to its final
       -- value with case closed
-      EdhCaseClose !nestedMatch -> EdhCaseClose $ edhDeCaseClose nestedMatch
+      EdhCaseClose !nestedMatch -> EdhCaseClose $ edhDeCaseWrap nestedMatch
       -- a nested branch mismatched, while the outer branch did match,
       -- so eval to nil with case closed
       EdhCaseOther              -> EdhCaseClose nil

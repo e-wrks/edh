@@ -163,6 +163,7 @@ module Language.Edh.EHI
   , EdhValue(..)
   , EdhTypeValue(..)
   , edhDeCaseClose
+  , edhDeCaseWrap
   , edhUltimate
   , nil
   , edhNone

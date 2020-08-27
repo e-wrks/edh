@@ -27,9 +27,9 @@ assignProc !lhExpr !rhExpr !exit !ets =
     $ case lhExpr of
         -- indexing assignment
         IndexExpr !ixExpr !tgtExpr -> evalExpr ixExpr $ \ !ixV -> do
-          let !ixVal = edhDeCaseClose ixV
+          let !ixVal = edhDeCaseWrap ixV
           evalExpr rhExpr $ \ !rhVal -> do
-            let !rhv = edhDeCaseClose rhVal
+            let !rhv = edhDeCaseWrap rhVal
             evalExpr tgtExpr $ \ !tgtVal _ets -> case edhUltimate tgtVal of
 
               -- indexing assign to a dict
@@ -86,7 +86,7 @@ assignProc !lhExpr !rhExpr !exit !ets =
                   <> T.pack (show ixVal)
 
         _ -> evalExpr rhExpr $ \ !rhVal ->
-          assignEdhTarget lhExpr (edhDeCaseClose rhVal)
+          assignEdhTarget lhExpr (edhDeCaseWrap rhVal)
             -- restore original tx state
             $ edhSwitchState ets
             . exitEdhTx exit
@@ -104,9 +104,9 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit !ets =
 
     $ case lhExpr of
         IndexExpr ixExpr tgtExpr -> evalExpr ixExpr $ \ !ixV -> do
-          let !ixVal = edhDeCaseClose ixV
+          let !ixVal = edhDeCaseWrap ixV
           evalExpr rhExpr $ \ !rhVal -> do
-            let !rhv = edhDeCaseClose rhVal
+            let !rhv = edhDeCaseWrap rhVal
             evalExpr tgtExpr $ \ !tgtVal !ets' -> case edhUltimate tgtVal of
 
               -- indexing assign to a dict
@@ -173,7 +173,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit !ets =
                   <> T.pack (show ixVal)
 
         _ -> evalExpr rhExpr $ \ !rhVal -> evalExpr lhExpr $ \ !lhVal ->
-          withOp (IntplSubs lhVal) (IntplSubs $ edhDeCaseClose rhVal)
+          withOp (IntplSubs lhVal) (IntplSubs $ edhDeCaseWrap rhVal)
             $ \ !opRtnV -> case edhUltimate opRtnV of
                 EdhDefault{} -> edhSwitchState ets $ exitEdhTx exit opRtnV
                 _ -> assignEdhTarget lhExpr opRtnV $ edhSwitchState ets . exit
@@ -197,7 +197,7 @@ assignMissingProc (AttrExpr (DirectRef !addr)) !rhExpr !exit !ets =
                      }
           $ evalExpr rhExpr
           $ \ !rhVal _ets ->
-              let !rhv = edhDeCaseClose rhVal
+              let !rhv = edhDeCaseWrap rhVal
               in  do
                     edhSetValue key rhv es
                     exitEdh ets exit rhv

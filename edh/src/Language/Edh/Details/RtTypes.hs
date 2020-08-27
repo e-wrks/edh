@@ -999,15 +999,19 @@ instance Hashable EdhValue where
 
 edhDeCaseClose :: EdhValue -> EdhValue
 edhDeCaseClose (EdhCaseClose !val) = edhDeCaseClose val
-edhDeCaseClose EdhCaseOther        = nil
-edhDeCaseClose EdhFallthrough      = nil
 edhDeCaseClose !val                = val
+
+edhDeCaseWrap :: EdhValue -> EdhValue
+edhDeCaseWrap (EdhCaseClose !val) = edhDeCaseWrap val
+edhDeCaseWrap EdhCaseOther        = nil
+edhDeCaseWrap EdhFallthrough      = nil
+edhDeCaseWrap !val                = val
 
 edhUltimate :: EdhValue -> EdhValue
 edhUltimate (EdhNamedValue _ !v) = edhUltimate v
 edhUltimate (EdhReturn !v      ) = edhUltimate v
 edhUltimate (EdhYield  !v      ) = edhUltimate v
-edhUltimate !v                   = edhDeCaseClose v
+edhUltimate !v                   = edhDeCaseWrap v
 
 
 nil :: EdhValue

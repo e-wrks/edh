@@ -227,7 +227,7 @@ ffapProc !lhExpr !rhExpr = fapProc rhExpr lhExpr
 defProc :: EdhIntrinsicOp
 defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit !ets =
   runEdhTx ets { edh'in'tx = True } $ evalExpr rhExpr $ \ !rhVal !ets' -> do
-    let !rhv     = edhDeCaseClose rhVal
+    let !rhv     = edhDeCaseWrap rhVal
         !nv      = EdhNamedValue valName rhv
         doAssign = do
           iopdInsert key nv es
@@ -270,7 +270,7 @@ defMissingProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit !ets =
   iopdLookup key es >>= \case
     Nothing ->
       runEdhTx ets { edh'in'tx = True } $ evalExpr rhExpr $ \ !rhVal !ets' -> do
-        let !rhv = edhDeCaseClose rhVal
+        let !rhv = edhDeCaseWrap rhVal
             !nv  = EdhNamedValue valName rhv
         iopdInsert key nv es
         defineScopeAttr ets' key nv
@@ -289,7 +289,7 @@ pairCtorProc !lhExpr !rhExpr !exit !ets =
   -- make sure left hand and right hand values are evaluated in same tx
   runEdhTx ets { edh'in'tx = True } $ evalExpr lhExpr $ \ !lhVal ->
     evalExpr rhExpr $ \ !rhVal -> edhSwitchState ets
-      $ exitEdhTx exit (EdhPair (edhDeCaseClose lhVal) (edhDeCaseClose rhVal))
+      $ exitEdhTx exit (EdhPair (edhDeCaseWrap lhVal) (edhDeCaseWrap rhVal))
 
 
 -- | the Symbol(repr, *reprs) constructor
@@ -461,6 +461,14 @@ showProc (ArgsPack [!v] !kwargs) !exit !ets = case edhUltimate v of
     ClassStore{} -> lookupEdhObjAttr (edh'obj'class o) (AttrByName "__show__")
       >>= showWithMagic o
     _ -> lookupEdhObjAttr o (AttrByName "__show__") >>= showWithMagic o
+  EdhProcedure !callable Nothing ->
+    exitEdh ets exit $ EdhString $ T.pack (show callable)
+  EdhProcedure !callable Just{} ->
+    exitEdh ets exit $ EdhString $ "effectful " <> T.pack (show callable)
+  EdhBoundProc !callable _ _ Nothing ->
+    exitEdh ets exit $ EdhString $ "bound " <> T.pack (show callable)
+  EdhBoundProc !callable _ _ Just{} ->
+    exitEdh ets exit $ EdhString $ "effectful bound " <> T.pack (show callable)
   _ -> showWithNoMagic
  where -- todo specialize more informative show for intrinsic types of values
   showWithMagic !o = \case
@@ -485,6 +493,20 @@ descProc (ArgsPack [!v] !kwargs) !exit !ets = case edhUltimate v of
     ClassStore{} -> lookupEdhObjAttr (edh'obj'class o) (AttrByName "__desc__")
       >>= descWithMagic o
     _ -> lookupEdhObjAttr o (AttrByName "__desc__") >>= descWithMagic o
+  EdhProcedure !callable Nothing ->
+    exitEdh ets exit $ EdhString $ "It is a procedure: " <> T.pack
+      (show callable)
+  EdhProcedure !callable Just{} ->
+    exitEdh ets exit $ EdhString $ "It is an effectful procedure: " <> T.pack
+      (show callable)
+  EdhBoundProc !callable _ _ Nothing ->
+    exitEdh ets exit $ EdhString $ "It is a bound procedure: " <> T.pack
+      (show callable)
+  EdhBoundProc !callable _ _ Just{} ->
+    exitEdh ets exit
+      $  EdhString
+      $  "It is an effectful bound procedure: "
+      <> T.pack (show callable)
   _ -> descWithNoMagic
  where -- TODO specialize more informative description (statistical wise) for
       --      intrinsic types of values
@@ -533,7 +555,7 @@ concatProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
           <> T.pack (edhTypeNameOf rhv)
           <> " to a blob."
     !lhv -> \ !ets -> edhValueStr ets lhv $ \ !lhs ->
-      edhValueStr ets (edhDeCaseClose $ edhUltimate rhVal)
+      edhValueStr ets (edhUltimate rhVal)
         $ \ !rhs -> exitEdh ets exit (EdhString $ lhs <> rhs)
 
 
@@ -698,7 +720,7 @@ hasSuffixProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 prpdProc :: EdhIntrinsicOp
 prpdProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
   evalExpr rhExpr $ \ !rhVal ->
-    let !lhv = edhDeCaseClose lhVal
+    let !lhv = edhDeCaseWrap lhVal
     in
       case edhUltimate rhVal of
         EdhArgsPack (ArgsPack !vs !kwargs) ->
@@ -717,7 +739,7 @@ evtPubProc :: EdhIntrinsicOp
 evtPubProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
     EdhSink !es -> evalExpr rhExpr $ \ !rhVal !ets ->
-      let !rhv = edhDeCaseClose rhVal
+      let !rhv = edhDeCaseWrap rhVal
       in  do
             publishEvent es rhv
             exitEdh ets exit rhv
