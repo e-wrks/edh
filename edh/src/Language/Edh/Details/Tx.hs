@@ -4,6 +4,8 @@ module Language.Edh.Details.Tx where
 import           Prelude
 -- import           Debug.Trace
 
+-- import           System.IO.Unsafe               ( unsafePerformIO )
+
 import           Control.Exception
 import           Control.Monad
 
@@ -143,6 +145,7 @@ driveEdhProgram !haltResult !bootCtx !prog = do
   driveDefers :: [DeferRecord] -> IO ()
   driveDefers [] = return ()
   driveDefers ((DeferRecord !etsDefer !deferredProc) : restDefers) = do
+
     !deferPerceivers <- newTVarIO []
     !deferDefers     <- newTVarIO []
     !deferTaskQueue  <- newTBQueueIO 100
@@ -153,6 +156,7 @@ driveEdhProgram !haltResult !bootCtx !prog = do
                , edh'defers     = deferDefers
                }
     driveEdhThread deferDefers deferTaskQueue
+
     driveDefers restDefers
 
   drivePerceiver :: EdhValue -> PerceiveRecord -> IO Bool
@@ -187,32 +191,48 @@ driveEdhProgram !haltResult !bootCtx !prog = do
     False -> drivePerceivers rest
 
   driveEdhThread :: TVar [DeferRecord] -> TBQueue EdhTask -> IO ()
-  driveEdhThread !defers !tq = atomically (nextTaskFromQueue tq) >>= \case
-    Nothing -> -- this thread is done, run defers lastly
-      readTVarIO defers >>= driveDefers
-    Just (EdhDoIO !ets !actIO) -> do
+  driveEdhThread !defers !tq = taskLoop
+   where
+    taskLoop = atomically (nextTaskFromQueue tq) >>= \case
+
+      -- this thread is done, run defers lastly
+      Nothing                    -> readTVarIO defers >>= driveDefers
+
       -- note during actIO, perceivers won't fire, program termination won't
       -- stop this thread
-      catch actIO $ \(e :: SomeException) -> case edhKnownError e of
-        -- this'll propagate to main thread if not on it
-        Just !err -> throwIO err
-        -- give a chance for the Edh code to handle an unknown exception
-        Nothing   -> atomically $ edhWrapException e >>= \ !exo ->
-          writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets $ EdhObject exo
-      driveEdhThread defers tq -- loop another iteration for the thread
-    Just (EdhDoSTM !ets !actSTM) -> do
-      let doIt = goSTM ets actSTM >>= \case
-            True -> -- terminate this thread, after running defers lastly
-              readTVarIO defers >>= driveDefers
-            False -> -- loop another iteration for the thread
-              driveEdhThread defers tq
-      catch doIt $ \(e :: SomeException) -> case edhKnownError e of
-        -- this'll propagate to main thread if not on it
-        Just !err -> throwIO err
-        -- give a chance for the Edh code to handle an unknown exception
-        Nothing   -> atomically $ edhWrapException e >>= \ !exo ->
-          writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets $ EdhObject exo
-      driveEdhThread defers tq -- loop another iteration for the thread
+      Just (EdhDoIO !ets !actIO) -> try actIO >>= \case
+
+        -- continue running this thread
+        Right ()                   -> taskLoop
+
+        Left  (e :: SomeException) -> case edhKnownError e of
+
+          -- this'll propagate to main thread if not on it
+          Just !err -> throwIO err
+
+          -- give a chance for the Edh code to handle an unknown exception
+          Nothing   -> do
+            atomically $ edhWrapException e >>= \ !exo ->
+              writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets $ EdhObject exo
+            -- continue running this thread for the queued exception handler
+            taskLoop
+
+      Just (EdhDoSTM !ets !actSTM) -> try (goSTM ets actSTM) >>= \case
+
+        -- terminate this thread, after running defers lastly
+        Right True                 -> readTVarIO defers >>= driveDefers
+
+        -- continue running this thread
+        Right False                -> taskLoop
+
+        Left  (e :: SomeException) -> case edhKnownError e of
+
+          -- this'll propagate to main thread if not on it
+          Just !err -> throwIO err
+
+          -- give a chance for the Edh code to handle an unknown exception
+          Nothing   -> atomically $ edhWrapException e >>= \ !exo ->
+            writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets $ EdhObject exo
 
   goSTM :: EdhThreadState -> STM () -> IO Bool
   goSTM !etsTask !actTask = loopSTM

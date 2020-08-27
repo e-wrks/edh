@@ -301,7 +301,7 @@ data PeriodicArgs = PeriodicArgs {
 
 timelyNotify
   :: EdhThreadState -> PeriodicArgs -> EdhGenrCaller -> EdhTxExit -> STM ()
-timelyNotify !ets (PeriodicArgs !delayMicros !wait1st) (_, !iter'cb) !exit =
+timelyNotify !ets (PeriodicArgs !delayMicros !wait1st) !iter'cb !exit =
   if edh'in'tx ets
     then throwEdh ets UsageError "can not be called from within a transaction"
     else do -- use a 'TMVar' filled asynchronously, so perceivers on the same
@@ -319,7 +319,7 @@ timelyNotify !ets (PeriodicArgs !delayMicros !wait1st) (_, !iter'cb) !exit =
               threadDelay delayMicros
               !nanos <- (toNanoSecs <$>) $ getTime Realtime
               atomically $ void $ tryPutTMVar notif nanos
-            atomically $ runEdhTx ets $ edhContSTM notifOne
+            atomically $ edhDoSTM ets notifOne
       if wait1st
         then schedNext
         else do

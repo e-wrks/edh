@@ -223,19 +223,16 @@ contextFrame !ctx !unwind = unwindStack (NE.head stack) (NE.tail stack) unwind
   unwindStack !s []         _  = s
   unwindStack _  (s : rest) !c = unwindStack s rest (c - 1)
 
+-- the yield receiver, a.k.a. the caller's continuation
 type EdhGenrCaller
-  = ( -- the caller's state
-       EdhThreadState
-      -- the yield receiver, a.k.a. the caller's continuation
-    ,  EdhValue -- one value yielded from the generator
-    -> ( -- continuation of the genrator
-        --  - Left exv
-        --    exception to be thrown from that `yield` expr
-        -- -  Right yieldedValue
-        --    value given to that `yield` expr
-        Either EdhValue EdhValue -> STM ())
-    -> STM ()
-    )
+  =  EdhValue -- ^ one value yielded from the generator
+  -> (Either EdhValue EdhValue -> STM ())
+    -- ^ continuation of the genrator
+    -- - Left exv
+    --    exception to be thrown from that `yield` expr
+    -- - Right yieldedValue
+    --    value given to that `yield` expr
+  -> STM ()
 
 
 type EdhExcptHndlr
@@ -1113,7 +1110,7 @@ data Stmt =
       --
       -- the perceiption construct is somewhat similar to traditional signal
       -- handling mechanism in OS process management
-    | PerceiveStmt !Expr !Expr
+    | PerceiveStmt !Expr !StmtSrc
       -- | while loop
     | WhileStmt !Expr !StmtSrc
       -- | break from a while/for loop, or terminate the Edh thread if given

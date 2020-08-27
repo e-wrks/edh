@@ -319,8 +319,8 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
   branchMatched !ps = do
     updAttrs [ (AttrByName n, noneNil v) | (n, v) <- ps, n /= "_" ]
     runEdhTx ets $ evalExpr rhExpr $ \ !rhVal -> exitEdhTx exit $ case rhVal of
-        -- a nested branch matched, the outer branch eval to its final
-        -- value with case closed
+      -- a nested branch matched, the outer branch eval to its final
+      -- value with case closed
       EdhCaseClose !nestedMatch -> EdhCaseClose $ edhDeCaseClose nestedMatch
       -- a nested branch mismatched, while the outer branch did match,
       -- so eval to nil with case closed

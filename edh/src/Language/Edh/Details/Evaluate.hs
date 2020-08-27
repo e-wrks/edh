@@ -1279,7 +1279,7 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLo
                 }
               !calleeCtx = ctx
                 { edh'ctx'stack        = calleeScope <| edh'ctx'stack ctx
-                , edh'ctx'genr'caller  = Just (ets, recvYield exit)
+                , edh'ctx'genr'caller  = Just $ recvYield ets exit
                 , edh'ctx'match        = true
                 , edh'ctx'pure         = False
                 , edh'ctx'exporting    = False
@@ -1287,33 +1287,37 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLo
                 }
               !etsCallee = ets { edh'context = calleeCtx }
           runEdhTx etsCallee $ hp apk $ \ !val ->
-            edhSwitchState etsLoopPrep $ exit val
+            -- a host generator is responsible to return a sense-making result
+            -- anyway
+            edhSwitchState ets $ exitEdhTx exit val
 
         -- calling an Edh generator
-        Left !pb -> forLooper $ \ !exit ->
-          callEdhMethod' (Just (etsLoopPrep, recvYield exit))
-                         this
-                         that
-                         gnr'proc
-                         pb
-                         apk
-                         scopeMod
-              -- return the result in CPS with looper ets restored
-            $ \ !gnrRtn -> edhSwitchState etsLoopPrep $ case gnrRtn of
-                EdhContinue ->
-                  -- todo what's the case a generator would return a continue?
-                  exitEdhTx exit nil
-                EdhBreak ->
-                  -- todo what's the case a generator would return a break?
-                  exitEdhTx exit nil
-                EdhReturn !rtnVal -> -- it'll be double return, in
-                  -- case do block issued return and propagated here
-                  -- or the generator can make it that way, which is
-                  -- black magic
-                  -- unwrap the return, as result of this for-loop 
-                  exitEdhTx exit rtnVal
+        Left !pb -> forLooper $ \ !exit !ets ->
+          runEdhTx ets
+            $ callEdhMethod' (Just $ recvYield ets exit)
+                             this
+                             that
+                             gnr'proc
+                             pb
+                             apk
+                             scopeMod
+            $ \ !gnrRtn -> case gnrRtn of
+
+                -- todo what's the case a generator would return a continue?
+                EdhContinue       -> exitEdhTx exit nil
+
+                -- todo what's the case a generator would return a break?
+                EdhBreak          -> exitEdhTx exit nil
+
+                -- it'll be double return, in case do block issued return and
+                -- propagated here or the generator can make it that way, which
+                -- is black magic
+
+                -- unwrap the return, as result of this for-loop 
+                EdhReturn !rtnVal -> exitEdhTx exit rtnVal
+
                 -- otherwise passthrough
-                _ -> exitEdhTx exit gnrRtn
+                _                 -> exitEdhTx exit gnrRtn
 
   loopCallGenr _ !callee _ _ _ =
     throwEdh etsLoopPrep EvalError $ "bug: unexpected generator: " <> T.pack
@@ -1324,8 +1328,12 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLo
   -- here is to be the eval'ed value of the `yield` expression from the
   -- generator's perspective, or exception to be thrown from there
   recvYield
-    :: EdhTxExit -> EdhValue -> (Either EdhValue EdhValue -> STM ()) -> STM ()
-  recvYield !exit !yielded'val !genrCont = do
+    :: EdhThreadState
+    -> EdhTxExit
+    -> EdhValue
+    -> (Either EdhValue EdhValue -> STM ())
+    -> STM ()
+  recvYield !ets !exit !yielded'val !genrCont = do
     let doOne !exitOne !etsTry =
           recvEdhArgs
               etsTry
@@ -1355,7 +1363,7 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLo
             genrCont $ Right nil
           EdhReturn EdhReturn{} -> -- this has special meaning
             -- Edh code should not use this pattern
-            throwEdh etsLoopPrep UsageError "double return from do-of-for?"
+            throwEdh ets UsageError "double return from do-of-for?"
           EdhReturn !rtnVal ->
             -- early return from for-from-do, the geneerator on
             -- double wrapped return yielded, will unwrap one
@@ -1368,18 +1376,16 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLo
             genrCont $ Right val
     case yielded'val of
       EdhNil -> -- nil yielded from a generator effectively early stops
-        exitEdh etsLoopPrep exit nil
-      EdhContinue ->
-        throwEdh etsLoopPrep EvalError "generator yielded continue"
-      EdhBreak -> throwEdh etsLoopPrep EvalError "generator yielded break"
-      EdhReturn{} -> throwEdh etsLoopPrep EvalError "generator yielded return"
-      _ -> edhCatch etsLoopPrep doOne doneOne $ \ !exv _recover rethrow ->
-        case exv of
-          EdhNil -> rethrow -- no exception occurred in do block
-          _ -> -- exception uncaught in do block
-            -- propagate to the generator, the genr may catch it or 
-            -- the exception will propagate to outer of for-from-do
-            genrCont $ Left exv
+        exitEdh ets exit nil
+      EdhContinue -> throwEdh ets EvalError "generator yielded continue"
+      EdhBreak    -> throwEdh ets EvalError "generator yielded break"
+      EdhReturn{} -> throwEdh ets EvalError "generator yielded return"
+      _ -> edhCatch ets doOne doneOne $ \ !exv _recover rethrow -> case exv of
+        EdhNil -> rethrow -- no exception occurred in do block
+        _ -> -- exception uncaught in do block
+          -- propagate to the generator, the genr may catch it or 
+          -- the exception will propagate to outer of for-from-do
+          genrCont $ Left exv
 
   loopOverValue :: EdhValue -> STM ()
   loopOverValue !iterVal = forLooper $ \ !exit !ets -> do
@@ -1957,12 +1963,12 @@ evalStmt' !stmt !exit = case stmt of
       _ -> \ !etsSched -> schedDefered etsSched id $ evalExpr expr endOfEdh
 
 
-  PerceiveStmt !sinkExpr !bodyExpr -> evalExpr sinkExpr $ \ !sinkVal !ets ->
+  PerceiveStmt !sinkExpr !bodyStmt -> evalExpr sinkExpr $ \ !sinkVal !ets ->
     case edhUltimate sinkVal of
       EdhSink !sink -> do
         let reactor !breakThread =
-              evalExpr bodyExpr $ \ !reactResult _etsReactor ->
-                case reactResult of
+              evalStmt bodyStmt $ \ !reactResult _etsReactor ->
+                case edhDeCaseClose reactResult of
                   EdhBreak -> writeTVar breakThread True
                   -- todo warn or even err out in case return/continue/default
                   --      etc. are returned to here?
@@ -2377,20 +2383,20 @@ intplStmtSrc !ets (StmtSrc (!sp, !stmt)) !exit' =
 
 intplStmt :: EdhThreadState -> Stmt -> (Stmt -> STM ()) -> STM ()
 intplStmt !ets !stmt !exit = case stmt of
-  AtoIsoStmt !x         -> intplExpr ets x $ \x' -> exit $ AtoIsoStmt x'
-  GoStmt     !x         -> intplExpr ets x $ \x' -> exit $ GoStmt x'
-  DeferStmt  !x         -> intplExpr ets x $ \x' -> exit $ DeferStmt x'
-  LetStmt !rcvrs !sndrs -> intplArgsRcvr ets rcvrs $ \rcvrs' ->
+  AtoIsoStmt !x         -> intplExpr ets x $ \ !x' -> exit $ AtoIsoStmt x'
+  GoStmt     !x         -> intplExpr ets x $ \ !x' -> exit $ GoStmt x'
+  DeferStmt  !x         -> intplExpr ets x $ \ !x' -> exit $ DeferStmt x'
+  LetStmt !rcvrs !sndrs -> intplArgsRcvr ets rcvrs $ \ !rcvrs' ->
     seqcontSTM (intplArgSndr ets <$> sndrs)
-      $ \sndrs' -> exit $ LetStmt rcvrs' sndrs'
-  ExtendsStmt !x           -> intplExpr ets x $ \x' -> exit $ ExtendsStmt x'
-  PerceiveStmt !sink !body -> intplExpr ets sink
-    $ \sink' -> intplExpr ets body $ \body' -> exit $ PerceiveStmt sink' body'
-  WhileStmt !cond !act -> intplExpr ets cond
-    $ \cond' -> intplStmtSrc ets act $ \act' -> exit $ WhileStmt cond' act'
-  ThrowStmt  !x -> intplExpr ets x $ \x' -> exit $ ThrowStmt x'
-  ReturnStmt !x -> intplExpr ets x $ \x' -> exit $ ReturnStmt x'
-  ExprStmt   !x -> intplExpr ets x $ \x' -> exit $ ExprStmt x'
+      $ \ !sndrs' -> exit $ LetStmt rcvrs' sndrs'
+  ExtendsStmt !x           -> intplExpr ets x $ \ !x' -> exit $ ExtendsStmt x'
+  PerceiveStmt !sink !body -> intplExpr ets sink $ \ !sink' ->
+    intplStmtSrc ets body $ \ !body' -> exit $ PerceiveStmt sink' body'
+  WhileStmt !cond !act -> intplExpr ets cond $ \ !cond' ->
+    intplStmtSrc ets act $ \ !act' -> exit $ WhileStmt cond' act'
+  ThrowStmt  !x -> intplExpr ets x $ \ !x' -> exit $ ThrowStmt x'
+  ReturnStmt !x -> intplExpr ets x $ \ !x' -> exit $ ReturnStmt x'
+  ExprStmt   !x -> intplExpr ets x $ \ !x' -> exit $ ExprStmt x'
   _             -> exit stmt
 
 
@@ -2715,33 +2721,32 @@ evalExpr (CaseExpr !tgtExpr !branchesExpr) !exit =
 evalExpr (YieldExpr !yieldExpr) !exit =
   evalExpr yieldExpr $ \ !valToYield !ets ->
     case edh'ctx'genr'caller $ edh'context ets of
-      Nothing -> throwEdh ets UsageError "unexpected yield"
-      Just (!etsGenrCaller, !yieldVal) ->
-        yieldVal (edhDeCaseClose valToYield) $ \case
+      Nothing        -> throwEdh ets UsageError "unexpected yield"
+      Just !yieldVal -> yieldVal (edhDeCaseClose valToYield) $ \case
           -- give the generator procedure the chance to handle the error
-          Left  !exv      -> edhThrow ets exv
-          -- no exception occurred in the `do` block, check its intent
-          Right !doResult -> case edhDeCaseClose doResult of
-            EdhContinue -> -- for loop should send nil here instead in
-              -- case continue issued from the do block
-              throwEdh etsGenrCaller EvalError "bug: <continue> reached yield"
-            EdhBreak -> -- for loop is breaking, let the generator
-              -- return nil
-              -- the generator can intervene the return, that'll be
-              -- black magic
-              exitEdh ets exit $ EdhReturn EdhNil
-            EdhReturn EdhReturn{} -> -- this must be synthesiszed,
-              -- in case do block issued return, the for loop wrap it as
-              -- double return, so as to let the yield expr in the generator
-              -- propagate the value return, as the result of the for loop
-              -- the generator can intervene the return, that'll be
-              -- black magic
-              exitEdh ets exit doResult
-            EdhReturn{} -> -- for loop should have double-wrapped the
-              -- return, which is handled above, in case its do block
-              -- issued a return
-              throwEdh etsGenrCaller EvalError "bug: <return> reached yield"
-            !val -> exitEdh ets exit val
+        Left  !exv      -> edhThrow ets exv
+        -- no exception occurred in the `do` block, check its intent
+        Right !doResult -> case edhDeCaseClose doResult of
+          EdhContinue -> -- for loop should send nil here instead in
+            -- case continue issued from the do block
+            throwEdh ets EvalError "bug: <continue> reached yield"
+          EdhBreak -> -- for loop is breaking, let the generator
+            -- return nil
+            -- the generator can intervene the return, that'll be
+            -- black magic
+            exitEdh ets exit $ EdhReturn EdhNil
+          EdhReturn EdhReturn{} -> -- this must be synthesiszed,
+            -- in case do block issued return, the for loop wrap it as
+            -- double return, so as to let the yield expr in the generator
+            -- propagate the value return, as the result of the for loop
+            -- the generator can intervene the return, that'll be
+            -- black magic
+            exitEdh ets exit doResult
+          EdhReturn{} -> -- for loop should have double-wrapped the
+            -- return, which is handled above, in case its do block
+            -- issued a return
+            throwEdh ets EvalError "bug: <return> reached yield"
+          !val -> exitEdh ets exit val
 
 evalExpr (ForExpr !argsRcvr !iterExpr !doExpr) !exit = \ !ets ->
   edhPrepareForLoop ets argsRcvr iterExpr doExpr (const $ return ())
