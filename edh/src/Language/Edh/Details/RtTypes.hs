@@ -765,8 +765,8 @@ callableName = \case
   EdhPrducr !pd                               -> procedureName pd
   EdhDescriptor !getter !setter ->
     (<> procedureName getter <> ">") $ case setter of
-      Nothing -> "readonly property "
-      Just _  -> "property "
+      Nothing -> "<readonly property "
+      Just _  -> "<property "
 
 
 -- Atop Haskell, most types in Edh the surface language, are for

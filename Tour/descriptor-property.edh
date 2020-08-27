@@ -35,7 +35,7 @@
 }
 
 # this won't enforce tx during construction
-case C() of { o } -> { pass }
+case C() of { o } -> o
 
 # this enforces tx during construction, then shellHere() won't work there
 # o = C()
