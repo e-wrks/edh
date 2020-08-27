@@ -5,8 +5,10 @@
 
     method __init__ ( name as this.name ) pass
 
+    method __repr__ () this.name
 
-    this.(+@) = method (+) ( other ) case type( other ) of {
+
+    method (+) ( other ) case type( other ) of {
       # add to a constant
       DecimalType -> Tensor( name= '(' ++ this.name ++ '+' ++ other ++ ')' )
 
@@ -17,9 +19,10 @@
 
       return NA # not-applicable - similar to NotImplemented in Python
     }
+    ; (+@) = (+)
 
 
-    this.(*@) = method (*) ( other ) case type( other ) of {
+    method (*) ( other ) case type( other ) of {
       # mul to a constant
       DecimalType -> Tensor( name= '(' ++ this.name ++ '*' ++ other ++ ')' )
 
@@ -30,6 +33,7 @@
 
       return NA # not-applicable - similar to NotImplemented in Python
     }
+    ; (*@) = (*)
 
 
     method (-) ( other ) case type( other ) of {
@@ -85,18 +89,18 @@
 
 let ( x, y ) = ( Tensor( 'x' ), Tensor( 'y' ) )
 
-result = x + y; result?name
-result = x + 5; result?name
-result = 5 + x; result?name
-result = x - 5; result?name
-result = 5 - x; result?name
-result = x * y; result?name
-result = x / y; result?name
-result = x * 3; result?name
-result = 3 * x; result?name
-result = x / 3; result?name
-result = 3 / x; result?name
+x + y
+x + 5
+5 + x
+x - 5
+5 - x
+x * y
+x / y
+x * 3
+3 * x
+x / 3
+3 / x
 
-result = 3 + x / 7 * ( y - 5 ); result?name
+3 + x / 7 * ( y - 5 )
 
 x + 'z'

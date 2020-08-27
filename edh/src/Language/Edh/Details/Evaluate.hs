@@ -2972,31 +2972,48 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
         _ -> naExit
      where
       chkExitMagic :: EdhTxExit
-      chkExitMagic !result _ets = case result of
+      chkExitMagic !result _ets = case edhUltimate result of
         EdhDefault _ !exprDef !etsDef ->
-          let !ets' = fromMaybe ets etsDef
-          in  runEdhTx ets' $ evalExpr exprDef $ \ !defVal _ets ->
-                case defVal of
-                  EdhNil -> naExit
-                  _      -> exitEdh ets exit defVal
-          -- `return default nil` means more defered default,
-          -- that's only possible from an operator, other than
-          -- the magic method we just called
+          -- eval default expression with possibly the designated thread state
+          runEdhTx (fromMaybe ets etsDef)
+            $ evalExpr exprDef
+            $ \ !defVal _ets -> case defVal of
+
+                -- `return default nil` means more defered default,
+                -- that's only possible from an operator, other than
+                -- the magic method we just called
+                EdhNil -> naExit
+
+                -- exit with original thread state
+                _      -> exitEdh ets exit defVal
         _ -> exitEdh ets exit result
+
+    tryMagicWithDefault :: Expr -> Maybe EdhThreadState -> STM ()
+    tryMagicWithDefault !exprDef !etsDef =
+      runEdhTx ets $ evalExpr lhExpr $ \ !lhVal -> evalExpr rhExpr
+        $ \ !rhVal _ets -> tryMagicWithDefault' exprDef etsDef lhVal rhVal
+    tryMagicWithDefault'
+      :: Expr -> Maybe EdhThreadState -> EdhValue -> EdhValue -> STM ()
+    tryMagicWithDefault' !exprDef !etsDef !lhVal !rhVal =
+      tryMagicMethod lhVal rhVal
+        -- eval default expression with possibly the designated thread state
+        $ runEdhTx (fromMaybe ets etsDef)
+        $ evalExpr exprDef
+        $ \ !resultDef _ets -> case resultDef of
+            EdhNil -> notApplicable lhVal rhVal
+            -- exit with original thread state
+            _      -> exitEdh ets exit resultDef
 
     callCallable :: Object -> Object -> EdhCallable -> STM ()
     callCallable !this !that !callable = case callable of
 
       -- calling an intrinsic operator
       EdhIntrOp _ (IntrinOpDefi _ _ iop'proc) ->
-        runEdhTx ets $ iop'proc lhExpr rhExpr $ \ !rtnVal -> case rtnVal of
-          EdhDefault _ !exprDef !etsDef -> evalExpr lhExpr $ \ !lhVal ->
-            evalExpr rhExpr $ \ !rhVal _ets ->
-              tryMagicMethod lhVal rhVal
-                $ let !ets' = fromMaybe ets etsDef
-                  in  runEdhTx ets' $ evalExpr exprDef $ \ !resultDef ->
-                        edhSwitchState ets $ exitEdhTx exit resultDef
-          _ -> edhSwitchState ets $ exitEdhTx exit rtnVal
+        runEdhTx ets $ iop'proc lhExpr rhExpr $ \ !rtnVal _ets ->
+          case edhUltimate rtnVal of
+            EdhDefault _ !exprDef !etsDef -> tryMagicWithDefault exprDef etsDef
+            -- exit with original thread state
+            _                             -> exitEdh ets exit rtnVal
 
       -- calling an operator procedure
       EdhOprtor _ !op'pred !op'proc ->
@@ -3011,15 +3028,9 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
                                 op'proc
                                 op'pred
                                 [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
-                  $ \ !rtnVal _ets -> case rtnVal of
+                  $ \ !rtnVal _ets -> case edhUltimate rtnVal of
                       EdhDefault _ !exprDef !etsDef ->
-                        tryMagicMethod lhVal rhVal
-                          $ let !ets' = fromMaybe ets etsDef
-                            in
-                              runEdhTx ets'
-                              $ evalExpr exprDef
-                              $ \ !resultDef ->
-                                  edhSwitchState ets $ exitEdhTx exit resultDef
+                        tryMagicWithDefault' exprDef etsDef lhVal rhVal
                       _ -> exitEdh ets exit rtnVal
 
           -- 3 pos-args - caller scope + lh/rh expr receiving operator
@@ -3037,18 +3048,10 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
                   , EdhExpr lhu lhExpr ""
                   , EdhExpr rhu rhExpr ""
                   ]
-              $ \ !rtnVal -> case rtnVal of
+              $ \ !rtnVal _ets -> case edhUltimate rtnVal of
                   EdhDefault _ !exprDef !etsDef ->
-                    evalExpr lhExpr $ \ !lhVal ->
-                      evalExpr rhExpr $ \ !rhVal _ets ->
-                        tryMagicMethod lhVal rhVal
-                          $ let !ets' = fromMaybe ets etsDef
-                            in
-                              runEdhTx ets'
-                              $ evalExpr exprDef
-                              $ \ !resultDef ->
-                                  edhSwitchState ets $ exitEdhTx exit resultDef
-                  _ -> edhSwitchState ets $ exitEdhTx exit rtnVal
+                    tryMagicWithDefault exprDef etsDef
+                  _ -> exitEdh ets exit rtnVal
 
           _ ->
             throwEdh ets UsageError $ "invalid operator signature: " <> T.pack
@@ -3064,21 +3067,19 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
       Nothing -> runEdhTx ets $ evalExpr lhExpr $ \ !lhVal ->
         evalExpr rhExpr $ \ !rhVal _ets ->
           tryMagicMethod lhVal rhVal $ notApplicable lhVal rhVal
-      Just (!opVal, !op'lexi) ->
-        let this = edh'scope'this op'lexi
-            that = edh'scope'that op'lexi
-        in  case opVal of
-              EdhProcedure !callable _ -> callCallable this that callable
-              EdhBoundProc !callable !this' !that' _ ->
-                callCallable this' that' callable
-              _ ->
-                throwEdh ets EvalError
-                  $  "not callable "
-                  <> T.pack (edhTypeNameOf opVal)
-                  <> ": "
-                  <> T.pack (show opVal)
-                  <> " expressed with: "
-                  <> T.pack (show expr)
+      Just (!opVal, !op'lexi) -> case opVal of
+        EdhProcedure !callable _ -> callCallable (edh'scope'this op'lexi)
+                                                 (edh'scope'that op'lexi)
+                                                 callable
+        EdhBoundProc !callable !this !that _ -> callCallable this that callable
+        _ ->
+          throwEdh ets EvalError
+            $  "not callable "
+            <> T.pack (edhTypeNameOf opVal)
+            <> ": "
+            <> T.pack (show opVal)
+            <> " expressed with: "
+            <> T.pack (show expr)
 
 -- defining an Edh class
 evalExpr (ClassExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->

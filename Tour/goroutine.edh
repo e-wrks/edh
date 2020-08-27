@@ -2,9 +2,13 @@
 {
 
   n = 0
-  go for nanos from console.everySeconds(1) do {
-    console.info <| '  ⏰ tick#' ++ (n+=1) ++ ' ⏲️  ' ++ nanos ++ 'ns'
-    if n > 5 then { break }
+  go for nanos from console.everySeconds( 1 ) do {
+    console.info <| '  ⏰ tick#' ++ ( n+=1 ) ++ ' ⏲️  ' ++ nanos ++ 'ns'
+    if n >= 3 then { break }
   }
 
 }
+
+# keep the program from quitting too early, in case this file is redirected as
+# stdin to an Edh interpreter
+for _ from console.everySeconds( 5 ) do { break }
