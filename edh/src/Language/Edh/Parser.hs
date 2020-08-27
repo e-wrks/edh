@@ -458,8 +458,8 @@ parseStmt' !prec !si = do
     , parseThrowStmt si
     , (, si) <$> parseVoidStmt
 
-          -- NOTE: statements above should probably all be detected by
-          -- `illegalExprStart` as invalid start for an expr
+      -- NOTE: statements above should probably all be detected by
+      -- `illegalExprStart` as invalid start for an expr
     , parseExprPrec prec si >>= \(x, si') -> return (ExprStmt x, si')
     ]
   return (StmtSrc (srcPos, stmt), si')
@@ -480,11 +480,11 @@ parseIfExpr !si = do
   void $ keyword "if"
   (cond, si') <- parseExpr si
   void $ keyword "then"
-  (cseq, si2) <- parseExpr si'
+  (cseq, si2) <- parseStmt si'
   (alt , si3) <-
     fmap (maybe (Nothing, si2) (\(alt, si3) -> (Just alt, si3))) $ optional $ do
       void $ keyword "else"
-      parseExpr si2
+      parseStmt si2
   return (IfExpr cond cseq alt, si3)
 
 parseCaseExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -508,7 +508,7 @@ parseForExpr !si = do
   void $ keyword "from"
   (iter, si') <- parseExpr si
   void $ keyword "do"
-  (doX, si'') <- parseExpr si'
+  (doX, si'') <- parseStmt si'
   return (ForExpr ar iter doX, si'')
 
 parsePerformExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)

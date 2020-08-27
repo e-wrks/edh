@@ -1201,11 +1201,11 @@ edhPrepareForLoop
   :: EdhThreadState -- ets to prepare the looping
   -> ArgsReceiver
   -> Expr
-  -> Expr
+  -> StmtSrc
   -> (EdhValue -> STM ())
   -> ((EdhTxExit -> EdhTx) -> STM ())
   -> STM ()
-edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLooper
+edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doStmt !iterCollector !forLooper
   = case deParen1 iterExpr of -- a complex call expression is better quoted within
     -- a pair of parenthesis; and we strip off only 1 layer of parentheis here, so
     -- in case a pure context intended for the call expression, double-parenthesis
@@ -1350,7 +1350,7 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLo
               )
             $ \ !em -> do
                 iopdUpdate (odToList em) (edh'scope'entity scopeLooper)
-                runEdhTx etsTry $ evalExpr doExpr exitOne
+                runEdhTx etsTry $ evalStmt doStmt exitOne
         doneOne !doResult = case edhDeCaseClose doResult of
           EdhContinue ->
             -- send nil to generator on continue
@@ -1400,7 +1400,7 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLo
         do1 :: ArgsPack -> STM () -> STM ()
         do1 !apk !next = recvEdhArgs ets ctx argsRcvr apk $ \ !em -> do
           iopdUpdate (odToList em) (edh'scope'entity scope)
-          runEdhTx ets $ evalExpr doExpr $ \ !doResult -> case doResult of
+          runEdhTx ets $ evalStmt doStmt $ \ !doResult -> case doResult of
             EdhBreak ->
               -- break for loop
               exitEdhTx exit nil
@@ -1926,8 +1926,8 @@ evalStmt' !stmt !exit = case stmt of
         edhPrepareCall etsForker calleeVal argsSndr $ \ !mkCall ->
           runEdhTx etsForker $ forkEdh id (mkCall endOfEdh) exit
 
-    (ForExpr !argsRcvr !iterExpr !doExpr) -> \ !etsForker ->
-      edhPrepareForLoop etsForker argsRcvr iterExpr doExpr (const $ return ())
+    (ForExpr !argsRcvr !iterExpr !doStmt) -> \ !etsForker ->
+      edhPrepareForLoop etsForker argsRcvr iterExpr doStmt (const $ return ())
         $ \ !runLoop -> runEdhTx etsForker $ forkEdh id (runLoop endOfEdh) exit
 
     _ -> forkEdh id (evalExpr expr endOfEdh) exit
@@ -1963,8 +1963,8 @@ evalStmt' !stmt !exit = case stmt of
           edhPrepareCall etsSched calleeVal argsSndr
             $ \ !mkCall -> schedDefered etsSched id (mkCall endOfEdh)
 
-      (ForExpr !argsRcvr !iterExpr !doExpr) -> \ !etsSched ->
-        edhPrepareForLoop etsSched argsRcvr iterExpr doExpr (const $ return ())
+      (ForExpr !argsRcvr !iterExpr !doStmt) -> \ !etsSched ->
+        edhPrepareForLoop etsSched argsRcvr iterExpr doStmt (const $ return ())
           $ \ !runLoop -> schedDefered etsSched id (runLoop endOfEdh)
 
       _ -> \ !etsSched -> schedDefered etsSched id $ evalExpr expr endOfEdh
@@ -2290,38 +2290,41 @@ intplExpr :: EdhThreadState -> Expr -> (Expr -> STM ()) -> STM ()
 intplExpr !ets !x !exit = case x of
   IntplExpr !x' ->
     runEdhTx ets $ evalExpr x' $ \ !val _ets -> exit $ IntplSubs val
-  PrefixExpr !pref !x' -> intplExpr ets x' $ \x'' -> exit $ PrefixExpr pref x''
-  IfExpr !cond !cons !alt -> intplExpr ets cond $ \cond' ->
-    intplExpr ets cons $ \cons' -> case alt of
-      Nothing -> exit $ IfExpr cond' cons' Nothing
-      Just !altx ->
-        intplExpr ets altx $ \altx' -> exit $ IfExpr cond' cons' $ Just altx'
-  CaseExpr !tgt !branches -> intplExpr ets tgt $ \tgt' ->
-    intplExpr ets branches $ \branches' -> exit $ CaseExpr tgt' branches'
+  PrefixExpr !pref !x' ->
+    intplExpr ets x' $ \ !x'' -> exit $ PrefixExpr pref x''
+  IfExpr !cond !cons !alt -> intplExpr ets cond $ \ !cond' ->
+    intplStmtSrc ets cons $ \ !cons' -> case alt of
+      Nothing    -> exit $ IfExpr cond' cons' Nothing
+      Just !altx -> intplStmtSrc ets altx
+        $ \ !altx' -> exit $ IfExpr cond' cons' $ Just altx'
+  CaseExpr !tgt !branches -> intplExpr ets tgt $ \ !tgt' ->
+    intplExpr ets branches $ \ !branches' -> exit $ CaseExpr tgt' branches'
   DictExpr !entries -> seqcontSTM (intplDictEntry ets <$> entries)
-    $ \entries' -> exit $ DictExpr entries'
+    $ \ !entries' -> exit $ DictExpr entries'
   ListExpr !es ->
-    seqcontSTM (intplExpr ets <$> es) $ \es' -> exit $ ListExpr es'
+    seqcontSTM (intplExpr ets <$> es) $ \ !es' -> exit $ ListExpr es'
   ArgsPackExpr !argSenders -> seqcontSTM (intplArgSender ets <$> argSenders)
-    $ \argSenders' -> exit $ ArgsPackExpr argSenders'
-  ParenExpr !x' -> intplExpr ets x' $ \x'' -> exit $ ParenExpr x''
+    $ \ !argSenders' -> exit $ ArgsPackExpr argSenders'
+  ParenExpr !x' -> intplExpr ets x' $ \ !x'' -> exit $ ParenExpr x''
   BlockExpr !ss ->
-    seqcontSTM (intplStmtSrc ets <$> ss) $ \ss' -> exit $ BlockExpr ss'
-  YieldExpr !x'             -> intplExpr ets x' $ \x'' -> exit $ YieldExpr x''
-  ForExpr !rcvs !fromX !doX -> intplExpr ets fromX
-    $ \fromX' -> intplExpr ets doX $ \doX' -> exit $ ForExpr rcvs fromX' doX'
-  AttrExpr !addr -> intplAttrAddr ets addr $ \addr' -> exit $ AttrExpr addr'
-  IndexExpr !v !t ->
-    intplExpr ets v $ \v' -> intplExpr ets t $ \t' -> exit $ IndexExpr v' t'
-  CallExpr !v !args -> intplExpr ets v $ \v' ->
-    seqcontSTM (intplArgSndr ets <$> args) $ \args' -> exit $ CallExpr v' args'
+    seqcontSTM (intplStmtSrc ets <$> ss) $ \ !ss' -> exit $ BlockExpr ss'
+  YieldExpr !x'             -> intplExpr ets x' $ \ !x'' -> exit $ YieldExpr x''
+  ForExpr !rcvs !fromX !doX -> intplExpr ets fromX $ \ !fromX' ->
+    intplStmtSrc ets doX $ \ !doX' -> exit $ ForExpr rcvs fromX' doX'
+  AttrExpr !addr  -> intplAttrAddr ets addr $ \ !addr' -> exit $ AttrExpr addr'
+  IndexExpr !v !t -> intplExpr ets v
+    $ \ !v' -> intplExpr ets t $ \ !t' -> exit $ IndexExpr v' t'
+  CallExpr !v !args -> intplExpr ets v $ \ !v' ->
+    seqcontSTM (intplArgSndr ets <$> args)
+      $ \ !args' -> exit $ CallExpr v' args'
   InfixExpr !op !lhe !rhe -> intplExpr ets lhe
-    $ \lhe' -> intplExpr ets rhe $ \rhe' -> exit $ InfixExpr op lhe' rhe'
-  ImportExpr !rcvrs !xFrom !maybeInto -> intplArgsRcvr ets rcvrs $ \rcvrs' ->
-    intplExpr ets xFrom $ \xFrom' -> case maybeInto of
-      Nothing     -> exit $ ImportExpr rcvrs' xFrom' Nothing
-      Just !oInto -> intplExpr ets oInto
-        $ \oInto' -> exit $ ImportExpr rcvrs' xFrom' $ Just oInto'
+    $ \ !lhe' -> intplExpr ets rhe $ \ !rhe' -> exit $ InfixExpr op lhe' rhe'
+  ImportExpr !rcvrs !xFrom !maybeInto ->
+    intplArgsRcvr ets rcvrs $ \ !rcvrs' -> intplExpr ets xFrom $ \ !xFrom' ->
+      case maybeInto of
+        Nothing     -> exit $ ImportExpr rcvrs' xFrom' Nothing
+        Just !oInto -> intplExpr ets oInto
+          $ \ !oInto' -> exit $ ImportExpr rcvrs' xFrom' $ Just oInto'
   _ -> exit x
 
 intplDictEntry
@@ -2330,36 +2333,36 @@ intplDictEntry
   -> ((DictKeyExpr, Expr) -> STM ())
   -> STM ()
 intplDictEntry !ets (k@LitDictKey{}, !x) !exit =
-  intplExpr ets x $ \x' -> exit (k, x')
+  intplExpr ets x $ \ !x' -> exit (k, x')
 intplDictEntry !ets (AddrDictKey !k, !x) !exit = intplAttrAddr ets k
-  $ \k' -> intplExpr ets x $ \x' -> exit (AddrDictKey k', x')
-intplDictEntry !ets (ExprDictKey !k, !x) !exit =
-  intplExpr ets k $ \k' -> intplExpr ets x $ \x' -> exit (ExprDictKey k', x')
+  $ \ !k' -> intplExpr ets x $ \ !x' -> exit (AddrDictKey k', x')
+intplDictEntry !ets (ExprDictKey !k, !x) !exit = intplExpr ets k
+  $ \ !k' -> intplExpr ets x $ \ !x' -> exit (ExprDictKey k', x')
 
 intplArgSender :: EdhThreadState -> ArgSender -> (ArgSender -> STM ()) -> STM ()
 intplArgSender !ets (UnpackPosArgs !x) !exit =
-  intplExpr ets x $ \x' -> exit $ UnpackPosArgs x'
+  intplExpr ets x $ \ !x' -> exit $ UnpackPosArgs x'
 intplArgSender !ets (UnpackKwArgs !x) !exit =
-  intplExpr ets x $ \x' -> exit $ UnpackKwArgs x'
+  intplExpr ets x $ \ !x' -> exit $ UnpackKwArgs x'
 intplArgSender !ets (UnpackPkArgs !x) !exit =
-  intplExpr ets x $ \x' -> exit $ UnpackPkArgs x'
+  intplExpr ets x $ \ !x' -> exit $ UnpackPkArgs x'
 intplArgSender !ets (SendPosArg !x) !exit =
-  intplExpr ets x $ \x' -> exit $ SendPosArg x'
+  intplExpr ets x $ \ !x' -> exit $ SendPosArg x'
 intplArgSender !ets (SendKwArg !addr !x) !exit =
-  intplExpr ets x $ \x' -> exit $ SendKwArg addr x'
+  intplExpr ets x $ \ !x' -> exit $ SendKwArg addr x'
 
 intplAttrAddr :: EdhThreadState -> AttrAddr -> (AttrAddr -> STM ()) -> STM ()
 intplAttrAddr !ets !addr !exit = case addr of
-  IndirectRef !x' !a -> intplExpr ets x' $ \x'' -> exit $ IndirectRef x'' a
+  IndirectRef !x' !a -> intplExpr ets x' $ \ !x'' -> exit $ IndirectRef x'' a
   _                  -> exit addr
 
 intplArgsRcvr
   :: EdhThreadState -> ArgsReceiver -> (ArgsReceiver -> STM ()) -> STM ()
 intplArgsRcvr !ets !a !exit = case a of
-  PackReceiver !rcvrs ->
-    seqcontSTM (intplArgRcvr <$> rcvrs) $ \rcvrs' -> exit $ PackReceiver rcvrs'
+  PackReceiver !rcvrs -> seqcontSTM (intplArgRcvr <$> rcvrs)
+    $ \ !rcvrs' -> exit $ PackReceiver rcvrs'
   SingleReceiver !rcvr ->
-    intplArgRcvr rcvr $ \rcvr' -> exit $ SingleReceiver rcvr'
+    intplArgRcvr rcvr $ \ !rcvr' -> exit $ SingleReceiver rcvr'
   WildReceiver -> exit WildReceiver
  where
   intplArgRcvr :: ArgReceiver -> (ArgReceiver -> STM ()) -> STM ()
@@ -2368,25 +2371,25 @@ intplArgsRcvr !ets !a !exit = case a of
       Nothing -> case maybeDefault of
         Nothing -> exit' $ RecvArg attrAddr Nothing Nothing
         Just !x ->
-          intplExpr ets x $ \x' -> exit' $ RecvArg attrAddr Nothing $ Just x'
-      Just !addr -> intplAttrAddr ets addr $ \addr' -> case maybeDefault of
+          intplExpr ets x $ \ !x' -> exit' $ RecvArg attrAddr Nothing $ Just x'
+      Just !addr -> intplAttrAddr ets addr $ \ !addr' -> case maybeDefault of
         Nothing -> exit' $ RecvArg attrAddr (Just addr') Nothing
         Just !x -> intplExpr ets x
-          $ \x' -> exit' $ RecvArg attrAddr (Just addr') $ Just x'
+          $ \ !x' -> exit' $ RecvArg attrAddr (Just addr') $ Just x'
 
     _ -> exit' a'
 
 intplArgSndr :: EdhThreadState -> ArgSender -> (ArgSender -> STM ()) -> STM ()
 intplArgSndr !ets !a !exit' = case a of
-  UnpackPosArgs !v -> intplExpr ets v $ \v' -> exit' $ UnpackPosArgs v'
-  UnpackKwArgs  !v -> intplExpr ets v $ \v' -> exit' $ UnpackKwArgs v'
-  UnpackPkArgs  !v -> intplExpr ets v $ \v' -> exit' $ UnpackPkArgs v'
-  SendPosArg    !v -> intplExpr ets v $ \v' -> exit' $ SendPosArg v'
-  SendKwArg !n !v  -> intplExpr ets v $ \v' -> exit' $ SendKwArg n v'
+  UnpackPosArgs !v -> intplExpr ets v $ \ !v' -> exit' $ UnpackPosArgs v'
+  UnpackKwArgs  !v -> intplExpr ets v $ \ !v' -> exit' $ UnpackKwArgs v'
+  UnpackPkArgs  !v -> intplExpr ets v $ \ !v' -> exit' $ UnpackPkArgs v'
+  SendPosArg    !v -> intplExpr ets v $ \ !v' -> exit' $ SendPosArg v'
+  SendKwArg !n !v  -> intplExpr ets v $ \ !v' -> exit' $ SendKwArg n v'
 
 intplStmtSrc :: EdhThreadState -> StmtSrc -> (StmtSrc -> STM ()) -> STM ()
 intplStmtSrc !ets (StmtSrc (!sp, !stmt)) !exit' =
-  intplStmt ets stmt $ \stmt' -> exit' $ StmtSrc (sp, stmt')
+  intplStmt ets stmt $ \ !stmt' -> exit' $ StmtSrc (sp, stmt')
 
 intplStmt :: EdhThreadState -> Stmt -> (Stmt -> STM ()) -> STM ()
 intplStmt !ets !stmt !exit = case stmt of
@@ -2667,9 +2670,9 @@ evalExpr (PrefixExpr Guard !expr') !exit = \ !ets -> do
 
 evalExpr (IfExpr !cond !cseq !alt) !exit = evalExpr cond $ \ !val ->
   case edhUltimate $ edhDeCaseWrap val of
-    (EdhBool True ) -> evalExpr cseq exit
+    (EdhBool True ) -> evalStmt cseq exit
     (EdhBool False) -> case alt of
-      Just !elseClause -> evalExpr elseClause exit
+      Just !elseClause -> evalStmt elseClause exit
       _                -> exitEdhTx exit nil
     !v -> -- we are so strongly typed, don't coerce anything to bool
       throwEdhTx EvalError
@@ -2754,8 +2757,8 @@ evalExpr (YieldExpr !yieldExpr) !exit =
             throwEdh ets EvalError "bug: <return> reached yield"
           !val -> exitEdh ets exit val
 
-evalExpr (ForExpr !argsRcvr !iterExpr !doExpr) !exit = \ !ets ->
-  edhPrepareForLoop ets argsRcvr iterExpr doExpr (const $ return ())
+evalExpr (ForExpr !argsRcvr !iterExpr !doStmt) !exit = \ !ets ->
+  edhPrepareForLoop ets argsRcvr iterExpr doStmt (const $ return ())
     $ \ !runLoop -> runEdhTx ets (runLoop exit)
 
 evalExpr (PerformExpr !effAddr) !exit = \ !ets ->

@@ -1257,8 +1257,8 @@ data DictKeyExpr =
 
 data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
     | IfExpr { if'condition :: !Expr
-            , if'consequence :: !Expr
-            , if'alternative :: !(Maybe Expr)
+            , if'consequence :: !StmtSrc
+            , if'alternative :: !(Maybe StmtSrc)
             }
     | CaseExpr { case'target :: !Expr , case'branches :: !Expr }
 
@@ -1314,7 +1314,7 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
 
     -- | a for-from-do loop is made an expression in Edh, so it can
     -- appear as the right-hand expr of the comprehension (=<) operator.
-    | ForExpr !ArgsReceiver !Expr !Expr
+    | ForExpr !ArgsReceiver !Expr !StmtSrc
 
     -- | call out an effectful artifact, search only outer stack frames,
     -- if from an effectful procedure run
