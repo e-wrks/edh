@@ -126,7 +126,6 @@ module Language.Edh.EHI
   , SourcePos(..)
   , mkPos
   , sourcePosPretty
-  , deParen
 
     -- ** Object system
   , Object(..)

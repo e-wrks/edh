@@ -1202,7 +1202,13 @@ edhPrepareForLoop
   -> ((EdhTxExit -> EdhTx) -> STM ())
   -> STM ()
 edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doExpr !iterCollector !forLooper
-  = case deParen iterExpr of
+  = case deParen1 iterExpr of -- a complex call expression is better quoted within
+    -- a pair of parenthesis; and we strip off only 1 layer of parentheis here, so
+    -- in case a pure context intended for the call expression, double-parenthesis
+    -- quoting will work. e.g. an adhoc procedure defined then called, but that
+    -- procedure would better not get defined into the enclosing scope, and it is
+    -- preferably be named instead of being anonymous (with a single underscore
+    -- in place of the procedure name in the definition).
     CallExpr !calleeExpr !argsSndr -> -- loop over a procedure call
       runEdhTx etsLoopPrep $ evalExpr calleeExpr $ \ !calleeVal _ets ->
         case calleeVal of
@@ -1731,9 +1737,18 @@ deParen x = case x of
   ParenExpr x' -> deParen x'
   _            -> x
 
+deParen1 :: Expr -> Expr
+deParen1 x = case x of
+  ParenExpr x' -> x'
+  _            -> x
+
 deApk :: ArgsPack -> ArgsPack
 deApk (ArgsPack [EdhArgsPack !apk] !kwargs) | odNull kwargs = deApk apk
-deApk apk = apk
+deApk x = x
+
+deApk1 :: ArgsPack -> ArgsPack
+deApk1 (ArgsPack [EdhArgsPack !apk] !kwargs) | odNull kwargs = apk
+deApk1 x = x
 
 evalStmt :: StmtSrc -> EdhTxExit -> EdhTx
 evalStmt ss@(StmtSrc (_sp, !stmt)) !exit !ets =
@@ -2674,7 +2689,11 @@ evalExpr (ArgsPackExpr !argSenders) !exit = \ !ets ->
     -- restore original tx state
     $ \ !apk -> exitEdh ets exit $ EdhArgsPack apk
 
-evalExpr (ParenExpr !x) !exit = evalExpr x exit
+evalExpr (ParenExpr !x) !exit = \ !ets ->
+  -- use a pure ctx to eval the expr in parenthesis
+  runEdhTx ets { edh'context = (edh'context ets) { edh'ctx'pure = True } }
+    $ evalExpr x
+    $ \ !vip -> edhSwitchState ets $ exitEdhTx exit vip
 
 evalExpr (BlockExpr !stmts) !exit =
   -- a branch match should not escape out of a block, so adjacent blocks always
