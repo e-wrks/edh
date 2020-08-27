@@ -2,47 +2,43 @@
 {
 
   class B {
-      method __init__ (name as this.name) pass
+    method __init__ ( name as this.name ) pass
 
-      method greeting(guest) {
-          console.info <| ("Hello "++guest++", I am "++name++', your guide.')
-      }
+    method greeting( guest ) {
+      console.info <| "Hello " ++guest++ ", I am " ++ this.name
+      ++ ', your guide.'
+    }
   }
 
   class C {
-      extends B('Nobleman')
+    extends B
+    method __init__ ( name as this.name = 'Nobleman' ) pass
   }
 
   class D {
-      extends B('Farmer')
+    extends B
+    method __init__( name as this.name = 'Farmer' ) pass
 
-      method hello() {
-          console.info <| (`Hello there!`)
-      }
+    method hello() {
+      console.info <| `Hello there!`
+    }
   }
 
   class E {
-      extends C()
-      extends D()
-      # an E object will contain 2 copies of B object,
-      # the order above matters in resolving the `greeting` method.
+    extends C
+    extends D
   }
 
 }
 
-e = E()
+e = E( name = 'SuperMan' )
 
-supers(e)
+supers( e )
 
 e.hello()
 
-e.greeting('New Comer')
+e.greeting( 'New Comer' )
 
-embededD = case e of {{ D:d }} -> d
-embededD.hello()
+case e of { { D:d } } -> d
 
-d = D()
-case d of {{ C:c }} -> c
-
-embededC = case e of {{ C:c }} -> c
-embededC.hello()
+d.hello()
