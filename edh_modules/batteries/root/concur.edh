@@ -26,10 +26,12 @@ export method concur(* tasks, c=6, dbgLogger=0 ) {
   # to be assigned from another procedure (the later
   # `scheduleMore()` method in this case)
   class Scheduler {
-    method __init__ ( tasks as this.tasks ) pass
+    method __init__ ( tasks as this.tasks ) {
 
-    # this somewhat emulates a WaitGroup in Go
-    cntRunning = 0 # 'this.' at ctor proc scope is optional
+      # this somewhat emulates a WaitGroup in Go
+      this.cntRunning = 0
+
+    }
 
     method scheduleMore() {
 
@@ -54,11 +56,11 @@ export method concur(* tasks, c=6, dbgLogger=0 ) {
         defer {
           this.cntRunning -= 1 # this is atomic in Edh
 
-          if this.cntRunning < c then # seen run slot available
+          if this.cntRunning < c # seen run slot available
           # to bring another pending task from backlog at running,
           # or to post notification to 'doneSig' upon overall
           # finishing up detected (i.e. backlog drained)
-          this.scheduleMore()
+          then this.scheduleMore()
         }
 
         task2do() # do the real work
@@ -71,8 +73,9 @@ export method concur(* tasks, c=6, dbgLogger=0 ) {
   }
 
   schd = Scheduler( tasks )
-  while not null( schd.tasks ) && schd.cntRunning < c
-  schd.scheduleMore()
+  while not null( schd.tasks ) && schd.cntRunning < c {
+    schd.scheduleMore()
+  }
 
   for nTasksRunning from doneSig do if nTasksRunning < 1 then {
     dbgLogger <| '  🎉  all concur tasks done.'

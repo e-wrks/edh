@@ -1883,26 +1883,26 @@ evalStmt' !stmt !exit = case stmt of
   GoStmt !expr -> case expr of
 
     CaseExpr !tgtExpr !branchesExpr -> evalExpr tgtExpr $ \ !val !etsForker ->
-      runEdhTx etsForker
-        $ forkEdh
-            (\ !etsForkee -> etsForkee
-              { edh'context = (edh'context etsForkee) { edh'ctx'match = edhDeCaseClose
-                                                        val
-                                                      }
-              }
-            )
-        $ evalCaseBlock branchesExpr endOfEdh
+      runEdhTx etsForker $ forkEdh
+        (\ !etsForkee -> etsForkee
+          { edh'context = (edh'context etsForkee) { edh'ctx'match = edhDeCaseClose
+                                                    val
+                                                  }
+          }
+        )
+        (evalCaseBlock branchesExpr endOfEdh)
+        exit
 
     (CallExpr !calleeExpr !argsSndr) ->
       evalExpr calleeExpr $ \ !calleeVal !etsForker ->
-        edhPrepareCall etsForker calleeVal argsSndr
-          $ \ !mkCall -> runEdhTx etsForker $ forkEdh id (mkCall endOfEdh)
+        edhPrepareCall etsForker calleeVal argsSndr $ \ !mkCall ->
+          runEdhTx etsForker $ forkEdh id (mkCall endOfEdh) exit
 
     (ForExpr !argsRcvr !iterExpr !doExpr) -> \ !etsForker ->
       edhPrepareForLoop etsForker argsRcvr iterExpr doExpr (const $ return ())
-        $ \ !runLoop -> runEdhTx etsForker $ forkEdh id (runLoop endOfEdh)
+        $ \ !runLoop -> runEdhTx etsForker $ forkEdh id (runLoop endOfEdh) exit
 
-    _ -> forkEdh id $ evalExpr expr endOfEdh
+    _ -> forkEdh id (evalExpr expr endOfEdh) exit
 
 
   DeferStmt !expr -> do

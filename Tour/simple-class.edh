@@ -2,29 +2,57 @@
 {
 
   class C {
-    method __init__ ( a as this.a ) pass
 
-    b = 5
-    method f ( n ) n*a/b
-    method g ( n ) { v = ( n+3 ) /a; return v*b }
+    # __init__() is called on object construction, used to receive
+    # construction arguments
+    method __init__ ( a as this._a ) pass
 
-    method setA( a as this.a ) pass
+    # property can be defined using getter and optional setter method
+    property$ method a () this._a
+    setter$ method a ( a as this._a ) pass
+
+    # an old-school setter method works of course
     method setB( b as this.b ) pass
+
+    # a class level (static) attribute
+    #
+    # - is available and can be changed from/via the class object via
+    #   dot-notation
+    #
+    # - serves as default value for instance attribute when accessed via
+    #   dot-notation
+    #
+    # - is available directly (no dot-notation) to all methods defined within
+    #   the class scope, as the class scope is lexically the outer scope of
+    #   such a method procedure; but note assigning in a method procedure
+    #   will change it's local scope's attribute, to change a class attribute,
+    #   assignment via dot-notation against the class object is necessary
+    #
+    b = 5
+
+    method f ( n ) n * this.a / this.b
+    method g ( n ) { v = ( n+3 ) / this.a; return v * b }
+
   }
 
-  c = C( 17 ); # this semicolon is necessary,
-  # or the following tuple will parse as a call
-  # against the assignment result, which is the
-  # newly constructed C object.
+  o = C( 17 )
 
-  ( c.f( 7 ), c.g( 7 ) )
+  ; # this semicolon is necessary,
+  # or the following apk will parse as a call against the assignment result,
+  # which is the newly constructed C object.
+
+  ( o.f( 7 ), o.g( 7 ) )
 
 }
 
-c.setA( 11 ); c.setB( 23 )
+( o.a, o.b )
 
-( c.f( 7 ), c.g( 7 ) )
+o.a = 11; o.setB( 23 )
 
-c.b = 3
+( o.a, o.b )
 
-( c.f( 7 ), c.g( 7 ) )
+( o.f( 7 ), o.g( 7 ) )
+
+C.b = 3; o.b = 13
+
+( o.f( 7 ), o.g( 7 ) )

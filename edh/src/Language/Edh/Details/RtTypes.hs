@@ -570,9 +570,10 @@ endOfEdh _ _ = return ()
 --
 -- NOTE this happens as part of current STM tx, the actual fork won't happen if
 --      any subsequent Edh code within the tx throws without recovered
-forkEdh :: (EdhThreadState -> EdhThreadState) -> EdhTx -> EdhTx
-forkEdh !bootMod !p !etsForker =
+forkEdh :: (EdhThreadState -> EdhThreadState) -> EdhTx -> EdhTxExit -> EdhTx
+forkEdh !bootMod !p !exit !etsForker = do
   writeTBQueue (edh'fork'queue etsForker) (etsForker, p . bootMod)
+  exitEdh etsForker exit nil
 {-# INLINE forkEdh #-}
 
 -- | Schedule an STM action to be performed in current Edh thread, but after
@@ -688,11 +689,15 @@ launchEventProducer :: EdhTxExit -> EventSink -> EdhTx -> EdhTx
 launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerTx !etsConsumer
   = do
     subcBefore <- readTVar subc
-    runEdhTx etsConsumer $ forkEdh id $ \ !etsProducer -> do
-      subcNow <- readTVar subc
-      when (subcNow == subcBefore) retry
-      producerTx etsProducer
-    exitEdh etsConsumer exit $ EdhSink sink
+    let prodThAct !etsProducer = do
+          subcNow <- readTVar subc
+          when (subcNow == subcBefore) retry
+          producerTx etsProducer
+    runEdhTx etsConsumer
+      $ forkEdh id prodThAct
+      $ const
+      $ exitEdhTx exit
+      $ EdhSink sink
 
 
 -- | executable precedures
