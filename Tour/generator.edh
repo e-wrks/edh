@@ -24,21 +24,31 @@ for n from ss( 3 ) do { console.info<|n; if n > 100 then { break } else n }
     #   *) `return {return val}` on `return val` from do block of the loop
     #   *) exception from do block of the loop re-thrown from its position
 
-    case yield 'something' of {
-      { return nil } -> {
-        console.info<| 'the do block broke the for loop'
-        return nil # cooperate nicely,
-        # or cast black magic if you wish
+    {
+
+      case yield 'something' of {
+        { return nil } -> {
+          console.info<| 'the do block broke the for loop'
+          return nil # cooperate nicely,
+          # or cast black magic if you wish
+        }
+        { return rtn } -> {
+          console.info<| 'early returning from do block: ' ++ rtn
+          return rtn # cooperate nicely,
+          # or cast black magic if you wish
+        }
+        { xchg'val } -> {
+          console.info<| 'the do block sent ' ++ xchg'val ++ " to generator's yield"
+        }
+        console.info<| 'the do block continued the for loop'
       }
-      { return rtn } -> {
-        console.info<| 'early returning from do block: ' ++ rtn
-        return rtn # cooperate nicely,
-        # or cast black magic if you wish
-      }
-      { xchg'val } -> {
-        console.info<| 'the do block sent ' ++ xchg'val ++ " to generator's yield"
-      }
-      console.info<| 'the do block continued the for loop'
+
+    } $=> { exc } -> {
+      console.warn<| 'the do block throwed an exceptin: ' ++ show( exc )
+
+      # if we do rethrow, the exception will be propagated to outer of
+      # the calling for loop
+      # rethrow
     }
 
   }
@@ -53,3 +63,5 @@ for _ from g() do { break }
 for _ from g() do { return 'otherthing' }
 
 for _ from g() do { return nil }
+
+for _ from g() do { throw 'stop it!' }

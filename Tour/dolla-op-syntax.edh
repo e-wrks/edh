@@ -1,17 +1,18 @@
 
-# functional paradigm in Edh
+{
+  # some playful syntax with the low-precedence procedure call operator ($)
 
+  method when( pred ) {
+    interpreter whenThat'sTrue ( callerScope, affirmExpr )
+    if pred then callerScope.eval( affirmExpr ) else nil
+  }
 
-method when( pred ) {
-  interpreter whenThat'sTrue ( callerScope, affirmExpr )
-  if pred then callerScope.eval( affirmExpr ) else nil
+  method unless( pred ) {
+    interpreter unlessThat'sTrue ( callerScope, negatExpr )
+    if pred then nil else callerScope.eval( negatExpr )
+  }
+
 }
-
-method unless( pred ) {
-  interpreter unlessThat'sTrue ( callerScope, negatExpr )
-  if pred then nil else callerScope.eval( negatExpr )
-}
-
 
 # Note:
 #
