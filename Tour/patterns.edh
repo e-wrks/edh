@@ -17,7 +17,7 @@ case ( 3, 5, 7 ) of { ( x, y, z ) } -> 'tuple pattern matches the length'
 case ( 3, 5, 7 ) of { ( x, y ) } -> 'tuple pattern matches the length'
 
 class B pass
-class C extends B()
+class C extends B
 c = C()
 
 case c of { { B:b } } -> 'instance resolving pattern obtains the right super instance: ' ++ b
