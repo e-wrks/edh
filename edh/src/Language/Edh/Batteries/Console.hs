@@ -310,7 +310,12 @@ timelyNotify !ets (PeriodicArgs !delayMicros !wait1st) !iter'cb !exit =
       let notifOne = do
             !nanos <- takeTMVar notif
             iter'cb (EdhDecimal $ fromInteger nanos) $ \case
-              Left  !exv             -> edhThrow ets exv
+              Left (!etsThrower, !exv) ->
+      -- note we can actually be encountering the exception occurred from
+      -- a descendant thread forked by the thread running the enclosing
+      -- generator, @etsThrower@ has the correct task queue, and @ets@
+      -- has the correct contextual callstack anyway
+                edhThrow etsThrower { edh'context = edh'context ets } exv
               Right EdhBreak         -> exitEdh ets exit nil
               Right (EdhReturn !rtn) -> exitEdh ets exit rtn
               _                      -> schedNext

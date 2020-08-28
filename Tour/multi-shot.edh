@@ -5,12 +5,16 @@
       ; -1<| 'async defer cleanup #' ++ n
     }
 
+    ; -1<| 'async throwing #' ++ n
     throw '!AsyncFailure#' ++ n
 
     ; -1<| 'not a chance to see this'
   }
 
   {
+    # note the thrown exception will first go into `range()` which is the
+    # generator being looped against, and as `range()` won't catch any
+    # exception, it'll then be propagate to the for loop here
     for i from range( 3 ) do go asyncRisk( i )
 
     throw '!SyncFailure'

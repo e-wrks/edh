@@ -3,11 +3,9 @@ module Language.Edh.Batteries.Ctrl where
 
 import           Prelude
 -- import           Debug.Trace
+-- import           System.IO.Unsafe
 
-import           GHC.Conc                       ( unsafeIOToSTM )
-
-import           Control.Concurrent
-import           Control.Concurrent.STM
+import           GHC.Conc
 
 import           Data.Maybe
 import           Data.Unique
@@ -46,24 +44,25 @@ annoProc _ _ !exit = exitEdhTx exit nil
 -- matched (i.e. not to a value of <fallthrough>), or the exception will
 -- keep propagating, i.e. re-thrown.
 catchProc :: EdhIntrinsicOp
-catchProc !tryExpr !catchExpr !exit !ets =
-  edhCatch ets (evalExpr tryExpr) (exitEdh ets exit)
-    $ \ !exv recover rethrow -> case exv of
-        EdhNil -> rethrow nil -- no error occurred, no catch
-        _ -> -- try recover by catch expression
-          runEdhTx ets { edh'context = (edh'context ets) { edh'ctx'match = exv }
-                       }
-            $ evalExpr catchExpr
-            $ \ !catchResult _ets -> case edhDeCaseClose catchResult of
+catchProc !tryExpr !catchExpr !exit !etsOuter =
+  edhCatch etsOuter (evalExpr tryExpr) (exitEdh etsOuter exit)
+    $ \ !etsThrower !exv recover rethrow -> case exv of
+        EdhNil -> rethrow nil -- no exception has occurred, no catch
+        _ -> -- eval the catch expression to see if it recovers or not
+          let !ctxOuter = edh'context etsOuter
+              !ctxHndl  = ctxOuter { edh'ctx'match = exv }
+              !etsHndl  = etsThrower { edh'context = ctxHndl }
+          in  runEdhTx etsHndl $ evalExpr catchExpr $ \ !catchResult _ets ->
+                case edhDeCaseClose catchResult of
 
-                -- these results all mean no recovery, i.e. to rethrow
-                EdhRethrow     -> rethrow exv -- explicit rethrow
-                EdhFallthrough -> rethrow exv -- explicit fallthrough
-                EdhCaseOther   -> rethrow exv -- implicit none-match
+                  -- these results all mean no recovery, i.e. to rethrow
+                  EdhRethrow     -> rethrow exv -- explicit rethrow
+                  EdhFallthrough -> rethrow exv -- explicit fallthrough
+                  EdhCaseOther   -> rethrow exv -- implicit none-match
 
-                -- other results are regarded as valid recovery
-                -- note `nil` included
-                !recoverVal    -> recover recoverVal
+                  -- other results are regarded as valid recovery
+                  -- note `nil` included
+                  !recoverVal    -> recover recoverVal
 
 -- | operator (@=>) - the `finally`
 --
@@ -74,21 +73,16 @@ catchProc !tryExpr !catchExpr !exit !ets =
 -- an exception if occurred, will never be assumed as recovered by the
 -- right-hand-expr.
 finallyProc :: EdhIntrinsicOp
-finallyProc !tryExpr !finallyExpr !exit !ets = do
-  hndlrTh <- unsafeIOToSTM myThreadId
-  edhCatch ets (evalExpr tryExpr) (exitEdh ets exit)
-    $ \ !exv _recover !rethrow -> do
-        !fnlyTh <- unsafeIOToSTM myThreadId
-        if fnlyTh /= hndlrTh
-          then -- don't run the finally block from a different thread other
-               -- than the handler installer
-               rethrow exv
-          else
-            runEdhTx ets
-              { edh'context = (edh'context ets) { edh'ctx'match = exv }
-              }
-            $ evalExpr finallyExpr
-            $ \_result _ets -> rethrow exv
+finallyProc !tryExpr !finallyExpr !exit !etsOuter =
+  edhCatch etsOuter (evalExpr tryExpr) (exitEdh etsOuter exit)
+    $ \ !etsThrower !exv _recover !rethrow ->
+        -- note this @passOn@ won't be triggered on a different (descendant)
+        -- thread, in case no exception has occurred
+        let !ctxOuter = edh'context etsOuter
+            !ctxHndl  = ctxOuter { edh'ctx'match = exv }
+            !etsHndl  = etsThrower { edh'context = ctxHndl }
+        in  runEdhTx etsHndl $ evalExpr finallyExpr $ \_result _ets ->
+              rethrow exv
 
 
 -- | operator (->) - the brancher, if its left-hand matches, early stop its

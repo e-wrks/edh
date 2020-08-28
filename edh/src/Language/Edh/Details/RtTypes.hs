@@ -226,22 +226,24 @@ contextFrame !ctx !unwind = unwindStack (NE.head stack) (NE.tail stack) unwind
 -- the yield receiver, a.k.a. the caller's continuation
 type EdhGenrCaller
   =  EdhValue -- ^ one value yielded from the generator
-  -> (Either EdhValue EdhValue -> STM ())
+  -> (Either (EdhThreadState, EdhValue) EdhValue -> STM ())
     -- ^ continuation of the genrator
-    -- - Left exv
-    --    exception to be thrown from that `yield` expr
-    -- - Right yieldedValue
-    --    value given to that `yield` expr
+    -- - Left (etsThrower, exv)
+    --    exception thrown in processing that `yield`ed value
+    -- - Right yieldResult
+    --    result given back as the yielded value is processed,
+    --    suitable to be the eval result of that `yield` action
   -> STM ()
 
 
 type EdhExcptHndlr
-  =  EdhValue -- ^ the error value to handle
+  =  EdhThreadState       -- ^ thread state of the thrower
+  -> EdhValue             -- ^ the error value to handle
   -> (EdhValue -> STM ()) -- ^ action to re-throw if not recovered
   -> STM ()
 
 defaultEdhExcptHndlr :: EdhExcptHndlr
-defaultEdhExcptHndlr !exv !rethrow = rethrow exv
+defaultEdhExcptHndlr _etsThrower !exv !rethrow = rethrow exv
 
 
 -- | Construct an call context from thread state

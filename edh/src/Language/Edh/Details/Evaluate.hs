@@ -3,6 +3,8 @@ module Language.Edh.Details.Evaluate where
 
 import           Prelude
 -- import           Debug.Trace
+-- import           GHC.Stack
+-- import           System.IO.Unsafe
 
 import           GHC.Conc                       ( unsafeIOToSTM )
 
@@ -1336,7 +1338,7 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doStmt !iterCollector !forLo
     :: EdhThreadState
     -> EdhTxExit
     -> EdhValue
-    -> (Either EdhValue EdhValue -> STM ())
+    -> (Either (EdhThreadState, EdhValue) EdhValue -> STM ())
     -> STM ()
   recvYield !ets !exit !yielded'val !genrCont = do
     let doOne !exitOne !etsTry =
@@ -1385,12 +1387,14 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doStmt !iterCollector !forLo
       EdhContinue -> throwEdh ets EvalError "generator yielded continue"
       EdhBreak    -> throwEdh ets EvalError "generator yielded break"
       EdhReturn{} -> throwEdh ets EvalError "generator yielded return"
-      _ -> edhCatch ets doOne doneOne $ \ !exv _recover rethrow -> case exv of
-        EdhNil -> rethrow exv -- no exception occurred in do block
-        _ -> -- exception uncaught in do block
-          -- propagate to the generator, the genr may catch it or 
-          -- the exception will propagate to outer of for-from-do
-          genrCont $ Left exv
+      _ ->
+        edhCatch ets doOne doneOne $ \ !etsThrower !exv _recover rethrow ->
+          case exv of
+            EdhNil -> rethrow nil -- no exception occurred in do block
+            _ -> -- exception uncaught in do block
+              -- propagate to the generator, the genr may catch it or 
+              -- the exception will propagate to outer of for-from-do
+              genrCont $ Left (etsThrower, exv)
 
   loopOverValue :: EdhValue -> STM ()
   loopOverValue !iterVal = forLooper $ \ !exit !ets -> do
@@ -1550,22 +1554,17 @@ edhThrowTx = flip edhThrow
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent actions following it, be cautious.
 edhThrow :: EdhThreadState -> EdhValue -> STM ()
-edhThrow !ets !exv = do
-  let propagateExc :: EdhValue -> [Scope] -> STM ()
-      propagateExc !exv' [] = edhErrorUncaught ets exv'
-      propagateExc !exv' (frame : stack) =
-        edh'excpt'hndlr frame exv' $ \ !exv'' -> propagateExc exv'' stack
-  propagateExc exv $ NE.toList $ edh'ctx'stack $ edh'context ets
+edhThrow !ets !exv = propagateExc exv $ NE.toList $ edh'ctx'stack $ edh'context
+  ets
+ where
+  propagateExc :: EdhValue -> [Scope] -> STM ()
+  propagateExc !exv' [] = edhErrorUncaught ets exv'
+  propagateExc !exv' (frame : stack) =
+    edh'excpt'hndlr frame ets exv' $ \ !exv'' -> propagateExc exv'' stack
 {-# INLINE edhThrow #-}
 
 edhErrorUncaught :: EdhThreadState -> EdhValue -> STM ()
 edhErrorUncaught !ets !exv = case exv of
-  EdhString !msg ->
-    throwSTM $ EdhError EvalError msg (toDyn nil) $ getEdhCallContext 0 ets
-  EdhArgsPack (ArgsPack (EdhString !msg : args') !kwargs) ->
-    throwSTM
-      $ EdhError EvalError msg (toDyn $ EdhArgsPack $ ArgsPack args' kwargs)
-      $ getEdhCallContext 0 ets
   EdhObject !exo -> case edh'obj'store exo of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
       Just (exc :: SomeException) -> case edhKnownError exc of
@@ -1573,12 +1572,25 @@ edhErrorUncaught !ets !exv = case exv of
         Nothing   -> throwSTM $ EdhIOError exc
       _ -> throwDetails
     _ -> throwDetails
+  EdhString !msg ->
+    throwSTM $ EdhError EvalError msg (toDyn nil) $ getEdhCallContext 0 ets
+  EdhArgsPack (ArgsPack (EdhString !msg : args') !kwargs) ->
+    throwSTM
+      $ EdhError
+          EvalError
+          msg
+          (toDyn $ if null args' && odNull kwargs
+            then nil
+            else EdhArgsPack $ ArgsPack args' kwargs
+          )
+      $ getEdhCallContext 0 ets
   _ -> throwDetails
  where
   throwDetails =
     throwSTM $ EdhError EvalError "❌" (toDyn exv) $ getEdhCallContext 0 ets
 
--- | Catch possible throw from the specified try action
+
+-- | Try an Edh action, pass its result to the @passOn@ via `edh'ctx'match`
 edhCatchTx
   :: (EdhTxExit -> EdhTx)     -- ^ tryAct
   -> EdhTxExit                -- ^ normal/recovered exit
@@ -1589,19 +1601,20 @@ edhCatchTx
   -> EdhTx
 edhCatchTx !tryAct !exit !passOn !etsOuter =
   edhCatch etsOuter tryAct (runEdhTx etsOuter . exit)
-    $ \ !exv recover rethrow -> do
+    $ \ !etsThrower !exv recover rethrow ->
         let !ctxOuter = edh'context etsOuter
             !ctxHndl  = ctxOuter { edh'ctx'match = exv }
-            !etsHndl  = etsOuter { edh'context = ctxHndl }
-        runEdhTx etsHndl $ passOn (const . recover) (const . rethrow)
+            !etsHndl  = etsThrower { edh'context = ctxHndl }
+        in  runEdhTx etsHndl $ passOn (const . recover) (const . rethrow)
 {-# INLINE edhCatchTx #-}
 
--- | Catch possible throw from the specified try action
+-- | Try an Edh action, pass its result to the @passOn@
 edhCatch
   :: EdhThreadState
   -> (EdhTxExit -> EdhTx)     -- ^ tryAct
   -> (EdhValue -> STM ())     -- ^ normal/recovered exit
-  -> (  EdhValue              -- ^ thrown value or nil
+  -> (  EdhThreadState        -- ^ thread state of the thrower
+     -> EdhValue              -- ^ thrown value or nil
      -> (EdhValue -> STM ())  -- ^ recover exit
      -> (EdhValue -> STM ())  -- ^ rethrow exit
      -> STM ()
@@ -1616,30 +1629,54 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
     !tryCtx =
       ctxOuter { edh'ctx'stack = tryScope :| NE.tail (edh'ctx'stack ctxOuter) }
     !etsTry = etsOuter { edh'context = tryCtx }
+
     hndlr :: EdhExcptHndlr
-    hndlr !exv !rethrow =
-      let goRecover :: EdhValue -> STM ()
-          -- an exception handler provided another result value to recover
-          goRecover !result = isProgramHalt exv >>= \case
-            True  -> goRethrow exv -- never recover from ProgramHalt
-            False -> do -- do recover from the exception
-              !rcvrTh <- unsafeIOToSTM myThreadId
-              if rcvrTh /= hndlrTh
-                -- just skip the action if from a different thread
-                then return () -- other than the handler installer
-                else exit result
-          goRethrow :: EdhValue -> STM ()
-          goRethrow !exv' = edh'excpt'hndlr scopeOuter exv' rethrow
-      in  passOn exv goRecover goRethrow
-  runEdhTx etsTry $ tryAct $ \ !tryResult _ets -> do
-    -- no exception occurred, go trigger finally block
-    !rcvrTh <- unsafeIOToSTM myThreadId
-    if rcvrTh /= hndlrTh
-      -- just skip the action if from a different thread
-      then return () -- other than the handler installer
-      else
-        passOn nil (error "bug: recovering from finally block") $ const $ exit
-          tryResult
+    hndlr !etsThrower !exv !rethrow =
+      unsafeIOToSTM myThreadId >>= \ !rcvrTh -> if rcvrTh /= hndlrTh
+
+             -- from a different (descendant) thread, not the handler
+             -- installer
+        then if exv == EdhNil
+
+          -- no exception has occurred, skip finally block as it should
+          -- eval only once on the original thread
+          then return ()
+
+          -- handle the exception on a descendant thread, but skip
+          -- recovery,  and propagate rethrow
+          else passOn etsThrower exv (const $ return ()) goRethrow
+
+             -- from the same thread installed this handler
+        else if exv == EdhNil
+
+          -- no exception has occurred, but it may be a finally block,
+          -- trigger it
+          then passOn etsThrower
+                      nil
+                      (error "bug: a finally block trying recovery")
+                      goRethrow
+
+          -- handle the exception on the original thread
+          else
+            let goRecover :: EdhValue -> STM ()
+                -- the catch block is providing a result value to recover
+                goRecover !result = isProgramHalt exv >>= \case
+                  -- never recover from ProgramHalt
+                  True  -> goRethrow exv
+                  -- do recover
+                  False -> exit result
+            in  passOn etsThrower exv goRecover goRethrow
+
+     where
+      goRethrow :: EdhValue -> STM ()
+      goRethrow !exv' = edh'excpt'hndlr scopeOuter etsThrower exv' rethrow
+
+  runEdhTx etsTry $ tryAct $ \ !tryResult _ets ->
+    -- no exception has occurred, this is the original thread, it may be a
+    -- finally block and go trigger it
+    passOn etsOuter nil (error "bug: a finally block trying recovery")
+      $ const
+      $ exit tryResult
  where
   isProgramHalt !exv = case exv of
     EdhObject !exo -> case edh'obj'store exo of
@@ -1992,7 +2029,7 @@ evalStmt' !stmt !exit = case stmt of
           <> T.pack (show sinkVal)
 
 
-  ThrowStmt excExpr ->
+  ThrowStmt !excExpr ->
     evalExpr excExpr $ \ !exv -> edhThrowTx $ edhDeCaseClose exv
 
 
@@ -2226,7 +2263,7 @@ importEdhModule !impSpec !exit !ets = if edh'in'tx ets
         edhCatch ets
                  (loadModule moduSlot moduName moduId moduFile)
                  (exitEdh ets exit)
-          $ \ !exv _recover !rethrow -> case exv of
+          $ \_etsThrower !exv _recover !rethrow -> case exv of
               EdhNil -> rethrow exv -- no error occurred
               _      -> do
                 void $ tryPutTMVar moduSlot $ EdhNamedValue "<import-error>" exv
@@ -2732,9 +2769,18 @@ evalExpr (YieldExpr !yieldExpr) !exit =
     case edh'ctx'genr'caller $ edh'context ets of
       Nothing        -> throwEdh ets UsageError "unexpected yield"
       Just !yieldVal -> yieldVal (edhDeCaseClose valToYield) $ \case
-          -- give the generator procedure the chance to handle the error
-        Left  !exv      -> edhThrow ets exv
-        -- no exception occurred in the `do` block, check its intent
+
+        -- the @do@ block has an exception thrown but uncaught
+        Left (!etsThrower, !exv) ->
+          -- propagate the exception to the enclosing generator
+          --
+          -- note we can actually be encountering the exception occurred from
+          -- a descendant thread forked by the thread running the enclosing
+          -- generator, @etsThrower@ has the correct task queue, and @ets@
+          -- has the correct contextual callstack anyway
+          edhThrow etsThrower { edh'context = edh'context ets } exv
+
+        -- no exception occurred in the @do@ block, check its intent
         Right !doResult -> case edhDeCaseClose doResult of
           EdhContinue -> -- for loop should send nil here instead in
             -- case continue issued from the do block
