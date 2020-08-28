@@ -276,12 +276,7 @@ getEdhCallContext !unwind !ets = EdhCallContext
     Right _                   -> "<host-code>"
 
 
--- Especially note that Edh has no block scope as in C
--- family languages, JavaScript neither does before ES6,
--- Python neither does until now (3.8).
---
--- There is only `procedure scope` in Edh
--- also see https://github.com/e-wrks/edh/Tour/#procedure
+-- | A lexical scope
 data Scope = Scope {
     -- | the backing storage of this scope
     edh'scope'entity :: !EntityStore
@@ -1295,22 +1290,8 @@ data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
       -- | operator override
     | OpOvrdExpr !OpSymbol !ProcDecl !Precedence
 
-    -- | the block is made an expression in Edh, instead of a statement
-    -- as in a C family language. it evaluates to the value of last expr
-    -- within it, in case no `EdhCaseClose` encountered, or can stop
-    -- early with the value from a `EdhCaseClose`, typically returned
-    -- from the branch `(->)` operator.
-    --
-    -- this allows multiple statements grouped as a single expression
-    -- fitting into subclauses of if-then-else, while, for-from-do,
-    -- and try-catch-finally etc. where an expression is expected.
-    -- 
-    -- then the curly brackets can be used to quote a statement into an
-    -- expression, e.g. so that a method procedure can explicitly
-    -- `return { continue }` to carry a semantic to the magic method
-    -- caller that it should try next method, similar to what
-    -- `NotImplemented` does in Python.
     | BlockExpr ![StmtSrc]
+    | ScopedBlockExpr ![StmtSrc]
 
     | YieldExpr !Expr
 
@@ -1581,7 +1562,7 @@ objectScope !obj = case edh'obj'store obj of
     , edh'excpt'hndlr   = defaultEdhExcptHndlr
     , edh'scope'proc    = cp
     , edh'scope'caller  = StmtSrc
-                            ( SourcePos { sourceName   = "<class-definition>"
+                            ( SourcePos { sourceName   = "<class-scope>"
                                         , sourceLine   = mkPos 1
                                         , sourceColumn = mkPos 1
                                         }
@@ -1602,8 +1583,8 @@ objectScope !obj = case edh'obj'store obj of
           , edh'excpt'hndlr   = defaultEdhExcptHndlr
           , edh'scope'proc    = scopeProc
           , edh'scope'caller  = StmtSrc
-                                  ( SourcePos { sourceName = "<object-creation>"
-                                              , sourceLine = mkPos 1
+                                  ( SourcePos { sourceName   = "<object-scope>"
+                                              , sourceLine   = mkPos 1
                                               , sourceColumn = mkPos 1
                                               }
                                   , VoidStmt

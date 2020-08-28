@@ -626,11 +626,24 @@ parseOpName :: Parser Text
 parseOpName = between (symbol "(") (symbol ")") parseOpLit
 
 parseOpLit :: Parser Text
-parseOpLit = choice
-  [ lexeme $ takeWhile1P (Just "operator symbol") isOperatorChar
-  , keyword "is not"
-  , keyword "is"
-  ]
+parseOpLit = choice [keyword "is not", keyword "is", lexeme opLit]
+ where
+  opLit = try $ do
+    opSym <- takeWhile1P (Just "operator symbol") isOperatorChar
+    -- or it's an augmented closing bracket
+    notFollowedBy $ oneOf ("}])" :: [Char])
+    return opSym
+
+parseScopedBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseScopedBlock !si0 = void (symbol "{@") >> parseRest [] si0
+ where
+  parseRest :: [StmtSrc] -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+  parseRest !t !si = optionalSemicolon *> choice
+    [ symbol "@}" $> (ScopedBlockExpr $ reverse t, si)
+    , do
+      (ss, si') <- parseStmt si
+      parseRest (ss : t) si'
+    ]
 
 parseDictOrBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseDictOrBlock !si0 = symbol "{"
@@ -803,6 +816,7 @@ parseExprPrec prec !si = lookAhead illegalExprStart >>= \case
       , parsePerformExpr si
       , parseBehaveExpr si
       , parseListExpr si
+      , parseScopedBlock si
       , parseDictOrBlock si
       , parseOpAddrOrApkOrParen si
       , parseExportExpr si
@@ -828,14 +842,11 @@ parseExprPrec prec !si = lookAhead illegalExprStart >>= \case
     , parseMoreInfix si' expr
     ]
   parseMoreInfix :: IntplSrcInfo -> Expr -> Parser (Expr, IntplSrcInfo)
-  parseMoreInfix si' leftExpr = choice
-    [ lookAhead (symbol "$}") >> return (leftExpr, si')
-    , higherOp prec >>= \case
-      Nothing              -> return (leftExpr, si')
-      Just (opPrec, opSym) -> do
-        (rightExpr, si'') <- parseExprPrec opPrec si'
-        parseMoreInfix si'' $ InfixExpr opSym leftExpr rightExpr
-    ]
+  parseMoreInfix si' leftExpr = higherOp prec >>= \case
+    Nothing              -> return (leftExpr, si')
+    Just (opPrec, opSym) -> do
+      (rightExpr, si'') <- parseExprPrec opPrec si'
+      parseMoreInfix si'' $ InfixExpr opSym leftExpr rightExpr
 
   higherOp :: Precedence -> Parser (Maybe (Precedence, OpSymbol))
   higherOp prec' = do

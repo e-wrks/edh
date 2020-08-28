@@ -2753,6 +2753,19 @@ evalExpr (BlockExpr !stmts) !exit =
   -- execute sequentially
   evalBlock stmts $ \ !blkResult -> exitEdhTx exit $ edhDeCaseClose blkResult
 
+evalExpr (ScopedBlockExpr !stmts) !exit = \ !ets -> do
+  !esBlock <- iopdEmpty
+  let
+    !ctx        = edh'context ets
+    !scopeBlock = (contextScope ctx) { edh'scope'entity = esBlock
+                                     , edh'scope'caller = edh'ctx'stmt ctx
+                                     }
+    !etsBlock = ets
+      { edh'context = ctx { edh'ctx'stack = scopeBlock <| edh'ctx'stack ctx }
+      }
+  runEdhTx etsBlock $ evalBlock stmts $ \ !blkResult ->
+    edhSwitchState ets $ exitEdhTx exit $ edhDeCaseClose blkResult
+
 evalExpr (CaseExpr !tgtExpr !branchesExpr) !exit =
   evalExpr tgtExpr $ \ !tgtVal !ets ->
     runEdhTx ets

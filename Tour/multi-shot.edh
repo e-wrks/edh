@@ -25,12 +25,21 @@
       ; -1<| 'forker cleanup with a failure: ' ++ exc
     }
     ; -1<| 'forker cleanup without failure'
-  } $=> { exc } -> { # this exception handler will be triggered
-    # to run in multiple forked threads (forkees), as well as in
-    # the forker thread. but its recover continuation will only
-    # run by the thread installed it, i.e. the forker thread.
-    ; -1<| 'handling ' ++ exc
-  }
+  } $=> {@ # use a scoped block for the catch, as this catch block can run
+    # in any descendant thread, it's race condation to capture the thrown
+    # exception as a named attribute into a shared scope then use it along.
+
+    # a scoped block always creates a new scope on evaluation, so every
+    # exception is handled in a thread-local scope, then we are safe wrt
+    # concurrency
+
+    { exc } -> { # this exception handler will be triggered
+      # to run in multiple forked threads (forkees), as well as in
+      # the forker thread. but its recover continuation will only
+      # run by the thread installed it, i.e. the forker thread.
+      ; -1<| 'handling ' ++ exc
+    }
+  @}
 
   # too obviously, but it could really go wrong with,
   # a continuation based implementation
