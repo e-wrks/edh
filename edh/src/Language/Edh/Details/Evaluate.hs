@@ -2504,6 +2504,19 @@ evalDictLit ((k, v) : entries) !dsl !exit !ets = case k of
     evalExpr v $ \ !vVal -> evalDictLit entries ((kVal, vVal) : dsl) exit
 
 
+edhValueDesc :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
+edhValueDesc !ets !val !exitDesc = case edhUltimate val of
+  EdhObject !obj -> edhValueRepr ets val $ \ !valRepr ->
+    exitDesc $ "`" <> objClassName obj <> "` object `" <> valRepr <> "`"
+  _ -> edhValueRepr ets val $ \ !valRepr ->
+    exitDesc
+      $  "`"
+      <> T.pack (edhTypeNameOf val)
+      <> "` value `"
+      <> valRepr
+      <> "`"
+
+
 edhValueRepr :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
 edhValueRepr !ets !val !exitRepr = case val of
 
@@ -2935,14 +2948,15 @@ evalExpr (DefaultExpr !exprDef) !exit = \ !ets -> do
 
 evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
   let
-    notApplicable !lhVal !rhVal =
-      throwEdh ets EvalError
-        $  "operator ("
-        <> opSym
-        <> ") not applicable to "
-        <> T.pack (edhTypeNameOf $ edhUltimate lhVal)
-        <> " and "
-        <> T.pack (edhTypeNameOf $ edhUltimate rhVal)
+    notApplicable !lhVal !rhVal = edhValueDesc ets lhVal $ \ !lhDesc ->
+      edhValueDesc ets rhVal $ \ !rhDesc ->
+        throwEdh ets EvalError
+          $  "operator ("
+          <> opSym
+          <> ") not applicable to "
+          <> lhDesc
+          <> " and "
+          <> rhDesc
 
     tryMagicMethod :: EdhValue -> EdhValue -> STM () -> STM ()
     tryMagicMethod !lhVal !rhVal !naExit = case edhUltimate lhVal of

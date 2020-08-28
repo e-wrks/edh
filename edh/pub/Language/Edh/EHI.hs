@@ -160,6 +160,7 @@ module Language.Edh.EHI
   , edhValueReprTx
   , edhValueStr
   , edhValueStrTx
+  , edhValueDesc
   , EdhValue(..)
   , EdhTypeValue(..)
   , edhDeCaseClose
