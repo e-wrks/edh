@@ -29,16 +29,16 @@
 }
 
 # wait a second
-for _ from console.everySeconds( 1 ) do { break }
+for _ from console.everySeconds( 1 ) do break
 evs <- '  🛎️  ding.ding..'; pass
 # stopSig <- "don't do that!" ;pass
 
 # wait a second
-for _ from console.everySeconds( 1 ) do { break }
+for _ from console.everySeconds( 1 ) do break
 evs <- '  🍃  chill..chill...'; pass
 stopSig <- "that's enough!"; pass
 
 # wait a second
-for _ from console.everySeconds( 1 ) do { break }
+for _ from console.everySeconds( 1 ) do break
 evs <- '  ☎️  ling.ling..ling...'; pass
 # stopSig <- nil

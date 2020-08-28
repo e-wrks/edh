@@ -1,7 +1,7 @@
 
 
 generator ss n while true n = yield n*n
-for n from ss( 3 ) do { console.info<|n; if n > 100 then { break } else n }
+for n from ss( 3 ) do { console.info<|n; if n > 100 then break else n }
 
 
 {
@@ -54,14 +54,14 @@ for n from ss( 3 ) do { console.info<|n; if n > 100 then { break } else n }
   }
 }
 
-for _ from g() do { pass }
+for _ from g() do pass
 
-for _ from g() do { continue }
+for _ from g() do continue
 
-for _ from g() do { break }
+for _ from g() do break
 
-for _ from g() do { return 'otherthing' }
+for _ from g() do return 'otherthing'
 
-for _ from g() do { return nil }
+for _ from g() do return nil
 
-for _ from g() do { throw 'stop it!' }
+for _ from g() do throw 'stop it!'

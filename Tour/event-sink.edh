@@ -59,4 +59,4 @@
 
 # keep the program from quitting too early, in case this file is redirected as
 # stdin to an Edh interpreter
-for _ from console.everySeconds( 5 ) do { break }
+for _ from console.everySeconds( 5 ) do break
