@@ -787,31 +787,31 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
         $ \(_, posArgs'', kwArgs'') -> exit' (ArgsPack posArgs'' kwArgs'')
       RecvArg !argAddr !argTgtAddr !argDefault ->
         resolveEdhAttrAddr etsRecv argAddr $ \ !argKey ->
-          resolveArgValue argKey argDefault $ \(!argVal, !posArgs'', !kwArgs'') ->
-            case argTgtAddr of
-              Nothing -> do
-                edhSetValue argKey argVal em
-                exit' (ArgsPack posArgs'' kwArgs'')
-              Just (DirectRef !addr) -> case addr of
-                NamedAttr "_" -> -- drop
+          resolveArgValue argKey argDefault
+            $ \(!argVal, !posArgs'', !kwArgs'') -> case argTgtAddr of
+                Nothing -> do
+                  edhSetValue argKey argVal em
                   exit' (ArgsPack posArgs'' kwArgs'')
-                NamedAttr !attrName -> do -- simple rename
-                  edhSetValue (AttrByName attrName) argVal em
-                  exit' (ArgsPack posArgs'' kwArgs'')
-                SymbolicAttr !symName -> -- todo support this ?
+                Just (DirectRef !addr) -> case addr of
+                  NamedAttr "_" -> -- drop
+                    exit' (ArgsPack posArgs'' kwArgs'')
+                  NamedAttr !attrName -> do -- simple rename
+                    edhSetValue (AttrByName attrName) argVal em
+                    exit' (ArgsPack posArgs'' kwArgs'')
+                  SymbolicAttr !symName -> -- todo support this ?
+                    throwEdh etsCaller UsageError
+                      $  "do you mean `this.@"
+                      <> symName
+                      <> "` instead ?"
+                Just addr@(IndirectRef _ _) ->
+                  -- do assignment in callee's context, and return to caller's afterwards
+                  runEdhTx etsRecv
+                    $ assignEdhTarget (AttrExpr addr) argVal
+                    $ \_assignResult _ets -> exit' (ArgsPack posArgs'' kwArgs'')
+                !tgt ->
                   throwEdh etsCaller UsageError
-                    $  "do you mean `this.@"
-                    <> symName
-                    <> "` instead ?"
-              Just addr@(IndirectRef _ _) ->
-                -- do assignment in callee's context, and return to caller's afterwards
-                runEdhTx etsRecv
-                  $ assignEdhTarget (AttrExpr addr) argVal
-                  $ \_assignResult _ets -> exit' (ArgsPack posArgs'' kwArgs'')
-              !tgt ->
-                throwEdh etsCaller UsageError
-                  $  "invalid argument retarget: "
-                  <> T.pack (show tgt)
+                    $  "invalid argument retarget: "
+                    <> T.pack (show tgt)
    where
     resolveArgValue
       :: AttrKey
@@ -830,8 +830,9 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
               runEdhTx etsRecv $ evalExpr defaultExpr $ \ !val _ets ->
                 exit'' (edhDeCaseWrap val, posArgs', kwArgs'')
             _ ->
-              throwEdh etsCaller UsageError $ "missing argument: " <> T.pack
-                (show argKey)
+              throwEdh etsCaller UsageError
+                $  "missing argument: "
+                <> attrKeyStr argKey
   woResidual :: ArgsPack -> STM () -> STM ()
   woResidual (ArgsPack !posResidual !kwResidual) !exit'
     | not (null posResidual)
