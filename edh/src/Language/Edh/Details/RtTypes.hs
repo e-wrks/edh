@@ -1114,8 +1114,6 @@ data Stmt =
       -- | literal `pass` to fill a place where a statement needed,
       -- same as in Python
       VoidStmt
-      -- | atomically isolated, mark a code section for transaction bounds
-    | AtoIsoStmt !Expr
       -- | similar to `go` in Go, starts goroutine
     | GoStmt !Expr
       -- | not similar to `defer` in Go (in Go `defer` snapshots arg values
@@ -1286,85 +1284,94 @@ data DictKeyExpr =
     | ExprDictKey !Expr -- this must be quoted in parenthesis
   deriving (Eq, Show)
 
-data Expr = LitExpr !Literal | PrefixExpr !Prefix !Expr
-    | IfExpr { if'condition :: !Expr
-            , if'consequence :: !StmtSrc
-            , if'alternative :: !(Maybe StmtSrc)
-            }
-    | CaseExpr { case'target :: !Expr , case'branches :: !Expr }
+data Expr =
+    -- | atomically isolated, mark an expression to be evaluated in a single
+    -- STM transaction as a whole
+    AtoIsoExpr !Expr
 
-      -- note: the order of entries is reversed as parsed from source
-    | DictExpr ![(DictKeyExpr, Expr)]
-    | ListExpr ![Expr]
-    | ArgsPackExpr !ArgsPacker
-    | ParenExpr !Expr
+  | LitExpr !Literal
+  | PrefixExpr !Prefix !Expr
 
-      -- | import with args (re)pack receiving syntax
-      -- `into` a target object from specified expr, or current scope
-    | ImportExpr !ArgsReceiver !Expr !(Maybe Expr)
-      -- | only artifacts introduced within an `export` statement, into
-      -- `this` object in context, are eligible for importing by others
-    | ExportExpr !Expr
-      -- | namespace definition
-    | NamespaceExpr !ProcDecl !ArgsPacker
-      -- | class definition
-    | ClassExpr !ProcDecl
-      -- | method procedure definition
-    | MethodExpr !ProcDecl
-      -- | generator procedure definition
-    | GeneratorExpr !ProcDecl
-      -- | interpreter declaration, an interpreter procedure is not otherwise
-      -- different from a method procedure, except it receives arguments
-      -- in expression form rather than values, in addition to the reflective
-      -- `callerScope` as first argument
-    | InterpreterExpr !ProcDecl
-    | ProducerExpr !ProcDecl
-      -- | operator declaration
-    | OpDeclExpr !OpSymbol !Precedence !ProcDecl
-      -- | operator override
-    | OpOvrdExpr !OpSymbol !ProcDecl !Precedence
+  | IfExpr { if'condition :: !Expr
+          , if'consequence :: !StmtSrc
+          , if'alternative :: !(Maybe StmtSrc)
+          }
 
-    | BlockExpr ![StmtSrc]
-    | ScopedBlockExpr ![StmtSrc]
+  | CaseExpr { case'target :: !Expr , case'branches :: !Expr }
 
-    | YieldExpr !Expr
+    -- note: the order of entries is reversed as parsed from source
+  | DictExpr ![(DictKeyExpr, Expr)]
+  | ListExpr ![Expr]
+  | ArgsPackExpr !ArgsPacker
+  | ParenExpr !Expr
 
-    -- | a for-from-do loop is made an expression in Edh, so it can
-    -- appear as the right-hand expr of the comprehension (=<) operator.
-    | ForExpr !ArgsReceiver !Expr !StmtSrc
+    -- | import with args (re)pack receiving syntax
+    -- `into` a target object from specified expr, or current scope
+  | ImportExpr !ArgsReceiver !Expr !(Maybe Expr)
+    -- | only artifacts introduced within an `export` statement, into
+    -- `this` object in context, are eligible for importing by others
+  | ExportExpr !Expr
+    -- | namespace definition
+  | NamespaceExpr !ProcDecl !ArgsPacker
+    -- | class definition
+  | ClassExpr !ProcDecl
+    -- | method procedure definition
+  | MethodExpr !ProcDecl
+    -- | generator procedure definition
+  | GeneratorExpr !ProcDecl
+    -- | interpreter declaration, an interpreter procedure is not otherwise
+    -- different from a method procedure, except it receives arguments
+    -- in expression form rather than values, in addition to the reflective
+    -- `callerScope` as first argument
+  | InterpreterExpr !ProcDecl
+  | ProducerExpr !ProcDecl
+    -- | operator declaration
+  | OpDeclExpr !OpSymbol !Precedence !ProcDecl
+    -- | operator override
+  | OpOvrdExpr !OpSymbol !ProcDecl !Precedence
 
-    -- | call out an effectful artifact, search only outer stack frames,
-    -- if from an effectful procedure run
-    | PerformExpr !AttrAddressor
-    -- | call out an effectful artifact, always search full stack frames
-    | BehaveExpr !AttrAddressor
+  | BlockExpr ![StmtSrc]
+  | ScopedBlockExpr ![StmtSrc]
 
-    | AttrExpr !AttrAddr
-    | IndexExpr { index'value :: !Expr
-                , index'target :: !Expr
-                }
-    | CallExpr !Expr !ArgsPacker
+  | YieldExpr !Expr
 
-    | InfixExpr !OpSymbol !Expr !Expr
+  -- | a for-from-do loop is made an expression in Edh, so it can
+  -- appear as the right-hand expr of the comprehension (=<) operator.
+  | ForExpr !ArgsReceiver !Expr !StmtSrc
 
-    -- specify a default by Edh code
-    | DefaultExpr !Expr
+  -- | call out an effectful artifact, search only outer stack frames,
+  -- if from an effectful procedure run
+  | PerformExpr !AttrAddressor
+  -- | call out an effectful artifact, always search full stack frames
+  | BehaveExpr !AttrAddressor
 
-    -- to support interpolation within expressions, with source form
-    | ExprWithSrc !Expr ![SourceSeg]
-    | IntplExpr !Expr
-    | IntplSubs !EdhValue
+  | AttrExpr !AttrAddr
+  | IndexExpr { index'value :: !Expr
+              , index'target :: !Expr
+              }
+  | CallExpr !Expr !ArgsPacker
+
+  | InfixExpr !OpSymbol !Expr !Expr
+
+  -- specify a default by Edh code
+  | DefaultExpr !Expr
+
+  -- to support interpolation within expressions, with source form
+  | ExprWithSrc !Expr ![SourceSeg]
+  | IntplExpr !Expr
+  | IntplSubs !EdhValue
   deriving (Eq, Show)
 
 data SourceSeg = SrcSeg !Text | IntplSeg !Expr
   deriving (Eq, Show)
 
-data Literal = SinkCtor
-    | NilLiteral
-    | DecLiteral !Decimal
-    | BoolLiteral !Bool
-    | StringLiteral !Text
-    | TypeLiteral !EdhTypeValue
+data Literal =
+    SinkCtor
+  | NilLiteral
+  | DecLiteral !Decimal
+  | BoolLiteral !Bool
+  | StringLiteral !Text
+  | TypeLiteral !EdhTypeValue
   deriving (Eq, Show)
 instance Hashable Literal where
   hashWithSalt s SinkCtor          = hashWithSalt s (-1 :: Int)
@@ -1376,43 +1383,44 @@ instance Hashable Literal where
 
 
 -- | the type for the value of type of a value
-data EdhTypeValue = TypeType
-    -- nil has no type, its type if you really ask, is nil
-    | DecimalType
-    | BoolType
-    | StringType
-    | BlobType
-    | SymbolType
-    | UUIDType
-    | ObjectType
-    | ClassType
-    | HostClassType
-    | DictType
-    | ListType
-    | PairType
-    | ArgsPackType
-    | BlockType
-    | HostMethodType
-    | HostOperType
-    | HostGenrType
-    | IntrinsicType
-    | MethodType
-    | OperatorType
-    | GeneratorType
-    | InterpreterType
-    | ProducerType
-    | DescriptorType
-    | BreakType
-    | ContinueType
-    | CaseCloseType
-    | CaseOtherType
-    | FallthroughType
-    | RethrowType
-    | YieldType
-    | ReturnType
-    | DefaultType
-    | SinkType
-    | ExprType
+-- note nil has no type, its type if you really ask, is nil
+data EdhTypeValue =
+    TypeType
+  | DecimalType
+  | BoolType
+  | StringType
+  | BlobType
+  | SymbolType
+  | UUIDType
+  | ObjectType
+  | ClassType
+  | HostClassType
+  | DictType
+  | ListType
+  | PairType
+  | ArgsPackType
+  | BlockType
+  | HostMethodType
+  | HostOperType
+  | HostGenrType
+  | IntrinsicType
+  | MethodType
+  | OperatorType
+  | GeneratorType
+  | InterpreterType
+  | ProducerType
+  | DescriptorType
+  | BreakType
+  | ContinueType
+  | CaseCloseType
+  | CaseOtherType
+  | FallthroughType
+  | RethrowType
+  | YieldType
+  | ReturnType
+  | DefaultType
+  | SinkType
+  | ExprType
   deriving (Enum, Eq, Ord, Show)
 instance Hashable EdhTypeValue where
   hashWithSalt s t = hashWithSalt s $ fromEnum t

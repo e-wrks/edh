@@ -333,17 +333,15 @@ setObjAttr !ets !obj !key !val !exit = lookupEdhObjAttr obj key >>= \case
 
 
 -- | Assign an evaluated value to a target expression
---
--- Note the calling procedure should declare in-tx state in evaluating the
--- right-handle value as well as running this, so the evaluation of the
--- right-hand value as well as the writting to the target entity are done
--- within the same tx, thus for atomicity of the whole assignment.
 assignEdhTarget :: Expr -> EdhValue -> EdhTxExit -> EdhTx
 assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
+
+  -- attribute assignment
   AttrExpr !addr -> case addr of
     -- silently drop value assigned to single underscore
     DirectRef (NamedAttr "_") -> exitEdh ets exit nil
-    -- no magic imposed to direct assignment in a (possibly class) proc
+
+    -- assign as attribute of local scope
     DirectRef !addr'          -> resolveEdhAttrAddr ets addr' $ \ !key -> do
       if edh'ctx'eff'defining ctx
         then defEffectInto esScope key
@@ -372,13 +370,16 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
               exitWithChkExportTo that key rhVal
             else setObjAttr ets that key rhVal
               $ \ !valSet -> exitWithChkExportTo that key valSet
+
     -- assign to an addressed attribute
     IndirectRef !tgtExpr !addr' -> resolveEdhAttrAddr ets addr'
       $ \ !key -> runEdhTx ets $ setEdhAttr tgtExpr key rhVal exit
+
     -- god forbidden things
     ThisRef  -> throwEdh ets EvalError "can not assign to this"
     ThatRef  -> throwEdh ets EvalError "can not assign to that"
     SuperRef -> throwEdh ets EvalError "can not assign to super"
+
   -- dereferencing attribute assignment
   InfixExpr "@" !tgtExpr !addrRef ->
     runEdhTx ets $ evalExpr addrRef $ \ !addrVal _ets ->
@@ -397,6 +398,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     throwEdh ets EvalError
       $  "invalid left hand expression for assignment: "
       <> T.pack (show x)
+
  where
   !ctx    = edh'context ets
   scope   = contextScope ctx
@@ -723,8 +725,8 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
 
  where
 
-    -- execution of the args receiving always in a tx for atomicity, and
-    -- in the specified receiving (should be callee's outer) context
+  -- execution of the args receiving always in a tx for atomicity, and
+  -- in the specified receiving (should be callee's outer) context
   !etsRecv = etsCaller { edh'in'tx = True, edh'context = recvCtx }
 
   recvFromPack
@@ -952,12 +954,8 @@ packEdhArgs !ets !argSenders !pkExit = do
     -- restore original tx state after args packed
     pkExit $ ArgsPack posArgs kwArgs
  where
-  !etsPacking = ets {
-                      -- make sure values in a pack are evaluated in same tx
-                      edh'in'tx   = True
-                      -- discourage artifact definition during args packing
-                    , edh'context = (edh'context ets) { edh'ctx'pure = True }
-                    }
+  -- discourage artifact definition during args packing
+  !etsPacking = ets { edh'context = (edh'context ets) { edh'ctx'pure = True } }
 
 -- Each Edh call is carried out in 2 phases, the preparation and the actual
 -- call execution. This is necessary to support the `go/defer` mechanism,
@@ -1208,13 +1206,13 @@ edhPrepareForLoop
   -> ((EdhTxExit -> EdhTx) -> STM ())
   -> STM ()
 edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doStmt !iterCollector !forLooper
-  = case deParen1 iterExpr of -- a complex call expression is better quoted within
-    -- a pair of parenthesis; and we strip off only 1 layer of parentheis here, so
-    -- in case a pure context intended for the call expression, double-parenthesis
-    -- quoting will work. e.g. an adhoc procedure defined then called, but that
-    -- procedure would better not get defined into the enclosing scope, and it is
-    -- preferably be named instead of being anonymous (with a single underscore
-    -- in place of the procedure name in the definition).
+  = case deParen1 iterExpr of -- a complex expression is better quoted within
+    -- a pair of parenthesis; and we strip off only 1 layer of parenthesis
+    -- here, so in case a pure context intended, double-parenthesis quoting
+    -- will work e.g. an adhoc procedure defined then called, but that
+    -- procedure would better not get defined into the enclosing scope, and it
+    -- is preferably be named instead of being anonymous (with a single
+    -- underscore in place of the procedure name in the definition).
     CallExpr !calleeExpr !argsSndr -> -- loop over a procedure call
       runEdhTx etsLoopPrep $ evalExpr calleeExpr $ \ !calleeVal _ets ->
         case calleeVal of
@@ -1877,16 +1875,13 @@ evalExprs (x : xs) !exit = evalExpr x $ \ !val -> evalExprs xs $ \ !tv ->
 evalStmt' :: Stmt -> EdhTxExit -> EdhTx
 evalStmt' !stmt !exit = case stmt of
 
-  ExprStmt !expr -> evalExpr expr $ \result -> exitEdhTx exit result
+  ExprStmt !expr -> evalExpr expr $ \ !result -> exitEdhTx exit result
 
   LetStmt !argsRcvr !argsSndr -> \ !ets -> do
-    let !ctx    = edh'context ets
-        !scope  = contextScope ctx
-        -- ensure args sending and receiving happens within a same tx
-        -- for atomicity of the let statement
-        !etsLet = ets { edh'in'tx = True }
-    packEdhArgs etsLet argsSndr $ \ !apk ->
-      recvEdhArgs etsLet ctx argsRcvr (deApk apk) $ \ !um -> do
+    let !ctx   = edh'context ets
+        !scope = contextScope ctx
+    packEdhArgs ets argsSndr $ \ !apk ->
+      recvEdhArgs ets ctx argsRcvr (deApk apk) $ \ !um -> do
         if not (edh'ctx'eff'defining ctx)
           then -- normal multi-assignment
                iopdUpdate (odToList um) (edh'scope'entity scope)
@@ -1916,11 +1911,12 @@ evalStmt' !stmt !exit = case stmt of
             let !impd = [ (attrKeyValue k, v) | (k, v) <- odToList um ]
             iopdLookup (AttrByName edhExportsMagicName) exp2Ent >>= \case
               Just (EdhDict (Dict _ !exp2ds)) -> iopdUpdate impd exp2ds
-              _                               -> do -- todo warn if of wrong type
+              -- todo warn if of wrong type
+              _                               -> do
                 !d <- EdhDict <$> createEdhDict impd
                 iopdInsert (AttrByName edhExportsMagicName) d exp2Ent
-        exitEdh ets exit nil
-        -- let statement evaluates to nil always, with previous thread state
+
+        exitEdh ets exit nil -- let statement evaluates to nil always
 
   BreakStmt        -> exitEdhTx exit EdhBreak
   ContinueStmt     -> exitEdhTx exit EdhContinue
@@ -1936,13 +1932,6 @@ evalStmt' !stmt !exit = case stmt of
       -- cooperate, double return is the only option
       -- throwEdhTx UsageError "you don't double return"
           !val -> exitEdhTx exit (EdhReturn val)
-
-
-  AtoIsoStmt !expr -> \ !ets ->
-    runEdhTx ets { edh'in'tx = True } -- ensure in'tx state
-      $ evalExpr expr
-        -- restore original tx state
-      $ \ !val -> edhSwitchState ets $ exit $ edhDeCaseWrap val
 
 
   GoStmt !expr -> case expr of
@@ -2327,6 +2316,7 @@ intplExpr !ets !x !exit = case x of
     runEdhTx ets $ evalExpr x' $ \ !val _ets -> exit $ IntplSubs val
   PrefixExpr !pref !x' ->
     intplExpr ets x' $ \ !x'' -> exit $ PrefixExpr pref x''
+  AtoIsoExpr !x           -> intplExpr ets x $ \ !x' -> exit $ AtoIsoExpr x'
   IfExpr !cond !cons !alt -> intplExpr ets cond $ \ !cond' ->
     intplStmtSrc ets cons $ \ !cons' -> case alt of
       Nothing    -> exit $ IfExpr cond' cons' Nothing
@@ -2428,9 +2418,8 @@ intplStmtSrc !ets (StmtSrc (!sp, !stmt)) !exit' =
 
 intplStmt :: EdhThreadState -> Stmt -> (Stmt -> STM ()) -> STM ()
 intplStmt !ets !stmt !exit = case stmt of
-  AtoIsoStmt !x         -> intplExpr ets x $ \ !x' -> exit $ AtoIsoStmt x'
-  GoStmt     !x         -> intplExpr ets x $ \ !x' -> exit $ GoStmt x'
-  DeferStmt  !x         -> intplExpr ets x $ \ !x' -> exit $ DeferStmt x'
+  GoStmt    !x          -> intplExpr ets x $ \ !x' -> exit $ GoStmt x'
+  DeferStmt !x          -> intplExpr ets x $ \ !x' -> exit $ DeferStmt x'
   LetStmt !rcvrs !sndrs -> intplArgsRcvr ets rcvrs $ \ !rcvrs' ->
     seqcontSTM (intplArgSndr ets <$> sndrs)
       $ \ !sndrs' -> exit $ LetStmt rcvrs' sndrs'
@@ -2716,6 +2705,16 @@ evalExpr (PrefixExpr Guard !expr') !exit = \ !ets -> do
     (ArgsPack [EdhString "standalone guard treated as plain value."] odEmpty)
   runEdhTx ets $ evalExpr expr' exit
 
+
+evalExpr (AtoIsoExpr !expr) !exit = \ !ets ->
+  runEdhTx ets { edh'in'tx = True } -- ensure in'tx state
+    $ evalExpr (deParen1 expr) -- a complex expression is better quoted within
+    -- a pair of parenthesis; and we strip off only 1 layer of parenthesis
+    -- here, so in case a pure context intended, double-parenthesis quoting
+    -- will work
+    $ \ !val -> edhSwitchState ets $ exit $ edhDeCaseWrap val
+
+
 evalExpr (IfExpr !cond !cseq !alt) !exit = evalExpr cond $ \ !val ->
   case edhUltimate $ edhDeCaseWrap val of
     (EdhBool True ) -> evalStmt cseq exit
@@ -2730,28 +2729,17 @@ evalExpr (IfExpr !cond !cseq !alt) !exit = evalExpr cond $ \ !val ->
         <> T.pack (show v)
         <> " ❌"
 
-evalExpr (DictExpr !entries) !exit = \ !ets ->
-  -- make sure dict k:v pairs are evaluated in same tx
-  runEdhTx ets { edh'in'tx = True }
-    $ evalDictLit entries []
-    -- restore origional tx state
-    $ \ !dv _ets -> exitEdh ets exit dv
+evalExpr (DictExpr !entries) !exit = evalDictLit entries [] exit
 
-evalExpr (ListExpr !xs) !exit = \ !ets ->
-  -- make sure list items are evaluated in same tx
-  runEdhTx ets { edh'in'tx = True } $ evalExprs xs $ \ !tv _ets -> case tv of
-    EdhArgsPack (ArgsPack !l _) -> do
-      ll <- newTVar l
-      u  <- unsafeIOToSTM newUnique
-      -- restore original tx state
-      exitEdh ets exit (EdhList $ List u ll)
-    _ -> error "bug: evalExprs returned non-apk"
+evalExpr (ListExpr !xs     ) !exit = evalExprs xs $ \ !tv !ets -> case tv of
+  EdhArgsPack (ArgsPack !l _) -> do
+    ll <- newTVar l
+    u  <- unsafeIOToSTM newUnique
+    exitEdh ets exit (EdhList $ List u ll)
+  _ -> error "bug: evalExprs returned non-apk"
 
 evalExpr (ArgsPackExpr !argSenders) !exit = \ !ets ->
-  -- make sure packed values are evaluated in same tx
-  packEdhArgs ets { edh'in'tx = True } argSenders
-    -- restore original tx state
-    $ \ !apk -> exitEdh ets exit $ EdhArgsPack apk
+  packEdhArgs ets argSenders $ \ !apk -> exitEdh ets exit $ EdhArgsPack apk
 
 evalExpr (ParenExpr !x) !exit = \ !ets ->
   -- use a pure ctx to eval the expr in parenthesis

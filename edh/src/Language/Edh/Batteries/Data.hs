@@ -225,13 +225,17 @@ ffapProc !lhExpr !rhExpr = fapProc rhExpr lhExpr
 
 -- | operator (:=) - named value definition
 defProc :: EdhIntrinsicOp
-defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit !ets =
-  runEdhTx ets { edh'in'tx = True } $ evalExpr rhExpr $ \ !rhVal !ets' -> do
-    let !rhv     = edhDeCaseWrap rhVal
+defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit =
+  evalExpr rhExpr $ \ !rhVal !ets -> do
+    let !ctx     = edh'context ets
+        !scope   = contextScope ctx
+        !es      = edh'scope'entity scope
+        !key     = AttrByName valName
+        !rhv     = edhDeCaseWrap rhVal
         !nv      = EdhNamedValue valName rhv
         doAssign = do
           iopdInsert key nv es
-          defineScopeAttr ets' key nv
+          defineScopeAttr ets key nv
     iopdLookup key es >>= \case
       Nothing -> do
         doAssign
@@ -254,13 +258,8 @@ defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit !ets =
       _ -> do
         doAssign
         exitEdh ets exit nv
- where
-  !ctx   = edh'context ets
-  !scope = contextScope ctx
-  !es    = edh'scope'entity scope
-  !key   = AttrByName valName
-defProc !lhExpr _ _ !ets =
-  throwEdh ets EvalError $ "invalid value definition: " <> T.pack (show lhExpr)
+defProc !lhExpr _ _ =
+  throwEdhTx EvalError $ "invalid value definition: " <> T.pack (show lhExpr)
 
 -- | operator (?:=) - named value definition if missing
 defMissingProc :: EdhIntrinsicOp
@@ -268,13 +267,12 @@ defMissingProc (AttrExpr (DirectRef (NamedAttr "_"))) _ _ !ets =
   throwEdh ets UsageError "not so reasonable: _ ?:= xxx"
 defMissingProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit !ets =
   iopdLookup key es >>= \case
-    Nothing ->
-      runEdhTx ets { edh'in'tx = True } $ evalExpr rhExpr $ \ !rhVal !ets' -> do
-        let !rhv = edhDeCaseWrap rhVal
-            !nv  = EdhNamedValue valName rhv
-        iopdInsert key nv es
-        defineScopeAttr ets' key nv
-        exitEdh ets exit nv
+    Nothing -> runEdhTx ets $ evalExpr rhExpr $ \ !rhVal _ets -> do
+      let !rhv = edhDeCaseWrap rhVal
+          !nv  = EdhNamedValue valName rhv
+      iopdInsert key nv es
+      defineScopeAttr ets key nv
+      exitEdh ets exit nv
     Just !preVal -> exitEdh ets exit preVal
  where
   !es  = edh'scope'entity $ contextScope $ edh'context ets
@@ -285,11 +283,9 @@ defMissingProc !lhExpr _ _ !ets =
 
 -- | operator (:) - pair constructor
 pairCtorProc :: EdhIntrinsicOp
-pairCtorProc !lhExpr !rhExpr !exit !ets =
-  -- make sure left hand and right hand values are evaluated in same tx
-  runEdhTx ets { edh'in'tx = True } $ evalExpr lhExpr $ \ !lhVal ->
-    evalExpr rhExpr $ \ !rhVal -> edhSwitchState ets
-      $ exitEdhTx exit (EdhPair (edhDeCaseWrap lhVal) (edhDeCaseWrap rhVal))
+pairCtorProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+  evalExpr rhExpr $ \ !rhVal ->
+    exitEdhTx exit (EdhPair (edhDeCaseWrap lhVal) (edhDeCaseWrap rhVal))
 
 
 -- | the Symbol(repr, *reprs) constructor

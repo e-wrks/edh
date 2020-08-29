@@ -80,10 +80,6 @@ parseStmts !si !ss = (eof >> return (reverse ss, si)) <|> do
 parseVoidStmt :: Parser Stmt
 parseVoidStmt = VoidStmt <$ symbol "pass" -- same as Python
 
-parseAtoIsoStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseAtoIsoStmt !si =
-  keyword "ai" >> parseExpr si >>= \(x, si') -> return (AtoIsoStmt x, si')
-
 parseGoStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseGoStmt !si = do
   void $ keyword "go"
@@ -438,8 +434,7 @@ parseStmt' !prec !si = do
   void optionalSemicolon
   srcPos      <- getSourcePos
   (stmt, si') <- choice
-    [ parseAtoIsoStmt si
-    , parseGoStmt si
+    [ parseGoStmt si
     , parseDeferStmt si
     , parseEffectStmt si
     , parseLetStmt si
@@ -727,6 +722,9 @@ parsePrefixExpr !si = choice
   , (symbol "|" >> notFollowedBy (satisfy isOperatorChar)) >> do
     (x, si') <- parseExprPrec 1 si
     return (PrefixExpr Guard x, si')
+  , keyword "ai" >> do
+    (x, si') <- parseExpr si
+    return (AtoIsoExpr x, si')
   , keyword "default" >> do
     (x, si') <- parseExpr si
     return (DefaultExpr x, si')
@@ -739,8 +737,7 @@ illegalExprStart :: Parser Bool
 illegalExprStart =
   True
     <$  choice
-          [ keyword "ai"
-          , keyword "go"
+          [ keyword "go"
           , keyword "defer"
           , keyword "effect"
           , keyword "let"
