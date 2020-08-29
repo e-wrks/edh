@@ -447,13 +447,12 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
 -- note the caller is responsible to make sure the supplied host storage data
 -- is compatible with the class, the super objects are compatible with the
 -- class' mro.
-edhCreateHostObj
-  :: Object -> Dynamic -> [Object] -> (Object -> STM ()) -> STM ()
-edhCreateHostObj !clsObj !hsd !supers !exit = do
+edhCreateHostObj :: Object -> Dynamic -> [Object] -> STM Object
+edhCreateHostObj !clsObj !hsd !supers = do
   !oid <- unsafeIOToSTM newUnique
   !es  <- HostStore <$> newTVar hsd
   !ss  <- newTVar supers
-  exit $ Object oid es clsObj ss
+  return $ Object oid es clsObj ss
 
 
 -- | Create an Edh object from a class, without calling any `__init__()`
@@ -787,8 +786,8 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
                                      resolveArgValue (AttrByName "_") Nothing
         $ \(_, posArgs'', kwArgs'') -> exit' (ArgsPack posArgs'' kwArgs'')
       RecvArg !argAddr !argTgtAddr !argDefault ->
-        resolveEdhAttrAddr etsRecv argAddr $ \argKey ->
-          resolveArgValue argKey argDefault $ \(argVal, posArgs'', kwArgs'') ->
+        resolveEdhAttrAddr etsRecv argAddr $ \ !argKey ->
+          resolveArgValue argKey argDefault $ \(!argVal, !posArgs'', !kwArgs'') ->
             case argTgtAddr of
               Nothing -> do
                 edhSetValue argKey argVal em
