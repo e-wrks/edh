@@ -283,24 +283,28 @@ odValues (OrderedDict _m !a) = go [] (V.length a - 1)
     Just (_key, !val) -> go (val : vals) (i - 1)
 
 odToList :: forall k v . (Eq k, Hashable k) => OrderedDict k v -> [(k, v)]
-odToList (OrderedDict _m !a) = go [] (V.length a - 1)
+odToList (OrderedDict !m !a) = go [] (V.length a - 1)
  where
   go :: [(k, v)] -> Int -> [(k, v)]
   go !entries !i | i < 0 = entries
   go !entries !i         = case V.unsafeIndex a i of
-    Nothing     -> go entries (i - 1)
-    Just !entry -> go (entry : entries) (i - 1)
+    Nothing                -> go entries (i - 1)
+    Just entry@(key, _val) -> if Map.member key m
+      then go (entry : entries) (i - 1)
+      else go entries (i - 1)
 
 odToReverseList
   :: forall k v . (Eq k, Hashable k) => OrderedDict k v -> [(k, v)]
-odToReverseList (OrderedDict _m !a) = go [] 0
+odToReverseList (OrderedDict !m !a) = go [] 0
  where
   !cap = V.length a
   go :: [(k, v)] -> Int -> [(k, v)]
   go !entries !i | i >= cap = entries
   go !entries !i            = case V.unsafeIndex a i of
-    Nothing     -> go entries (i + 1)
-    Just !entry -> go (entry : entries) (i + 1)
+    Nothing                -> go entries (i + 1)
+    Just entry@(key, _val) -> if Map.member key m
+      then go (entry : entries) (i + 1)
+      else go entries (i + 1)
 
 odFromList :: forall k v . (Eq k, Hashable k) => [(k, v)] -> OrderedDict k v
 odFromList !entries =
