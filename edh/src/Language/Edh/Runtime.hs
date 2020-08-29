@@ -24,8 +24,6 @@ import           Data.Dynamic
 
 import           Text.Megaparsec
 
-import           Data.Lossless.Decimal          ( decimalToInteger )
-
 import           Language.Edh.Control
 import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
@@ -135,7 +133,7 @@ createEdhWorld !console = liftIO $ do
   let scopeAllocator !ets (ArgsPack _args !kwargs) !exit =
         case odLookup (AttrByName "ofObj") kwargs of
           Just !val -> case val of
-            EdhObject !obj -> case objectScope obj of
+            EdhObject !obj -> objectScope obj >>= \case
               Nothing ->
                 throwEdh ets UsageError
                   $  "no scope from a host object of class: "
@@ -248,20 +246,6 @@ createEdhWorld !console = liftIO $ do
       ]
   !clsModule <- atomically
     $ mkHostClass rootScope "module" moduleAllocator hsModuCls []
-  let edhCreateModule :: Text -> ModuleId -> String -> STM Object
-      edhCreateModule !moduName !moduId !srcName = do
-        !idModu <- unsafeIOToSTM newUnique
-        !hs     <- iopdFromList
-          [ (AttrByName "__name__", EdhString moduName)
-          , (AttrByName "__path__", EdhString moduId)
-          , (AttrByName "__file__", EdhString $ T.pack srcName)
-          ]
-        !ss <- newTVar []
-        return Object { edh'obj'ident  = idModu
-                      , edh'obj'store  = HashStore hs
-                      , edh'obj'class  = clsModule
-                      , edh'obj'supers = ss
-                      }
   atomically $ iopdUpdate [(AttrByName "module", EdhObject clsModule)] hsRoot
 
 
@@ -278,7 +262,7 @@ createEdhWorld !console = liftIO $ do
                        , edh'world'console     = console
                        , edh'scope'wrapper     = edhWrapScope
                        , edh'exception'wrapper = edhWrapException
-                       , edh'module'creator    = edhCreateModule
+                       , edh'module'class      = clsModule
                        }
 
   return world
@@ -580,20 +564,8 @@ createEdhWorld !console = liftIO $ do
       _ -> EdhPeerError "<bogus-peer>" $ T.pack $ show apk
 
   -- creating a tagged Edh error from Edh code
-  errAllocator !tag !ets apk@(ArgsPack !args !kwargs) !exit = case args of
-    [EdhString !m] | odNull kwargs' -> createErr m nil
-    (EdhString !m : args') -> createErr m (EdhArgsPack $ ArgsPack args' kwargs)
-    _ -> createErr "❌" (EdhArgsPack apk)
-   where
-    createErr !msg !details = exit =<< HostStore <$> newTVar
-      (toDyn $ toException $ EdhError tag msg (toDyn details) cc)
-    (!maybeUnwind, !kwargs') = odTakeOut (AttrByName "unwind") kwargs
-    !unwind                  = case maybeUnwind of
-      Just (EdhDecimal d) -> case decimalToInteger d of
-        Just !n -> fromIntegral n
-        _       -> 1
-      _ -> 1
-    !cc = getEdhCallContext unwind ets
+  errAllocator !tag !ets !apk !exit = exit =<< HostStore <$> newTVar
+    (toDyn $ toException $ edhCreateError 0 ets tag apk)
 
   mthErrRepr :: EdhHostProc
   mthErrRepr _ !exit !ets = case edh'obj'store errObj of
@@ -807,7 +779,7 @@ runEdhProgram' !ctx !prog = liftIO $ do
 createEdhModule
   :: MonadIO m => EdhWorld -> Text -> ModuleId -> String -> m Object
 createEdhModule !world !moduName !moduId !srcName =
-  liftIO $ atomically $ edh'module'creator world moduName moduId srcName
+  liftIO $ atomically $ edhCreateModule world moduName moduId srcName
 
 
 type EdhModulePreparation = EdhThreadState -> STM () -> STM ()
@@ -818,14 +790,13 @@ edhModuleAsIs _ets !exit = exit
 installEdhModule
   :: MonadIO m => EdhWorld -> ModuleId -> EdhModulePreparation -> m Object
 installEdhModule !world !moduId !preInstall = liftIO $ do
-  modu <- createEdhModule world moduId moduId "<host-code>"
-  void $ runEdhProgram' (worldContext world) $ \ !ets -> do
-    let !moduCtx = moduleContext world modu
-        !etsModu = ets { edh'context = moduCtx }
-    preInstall etsModu $ do
-      moduSlot <- newTMVar $ EdhObject modu
-      moduMap  <- takeTMVar (edh'world'modules world)
-      putTMVar (edh'world'modules world) $ Map.insert moduId moduSlot moduMap
+  !modu <- createEdhModule world moduId moduId "<host-module>"
+  void $ runEdhProgram' (worldContext world) $ \ !ets ->
+    moduleContext world modu >>= \ !moduCtx ->
+      preInstall ets { edh'context = moduCtx } $ do
+        moduSlot <- newTMVar $ EdhObject modu
+        moduMap  <- takeTMVar (edh'world'modules world)
+        putTMVar (edh'world'modules world) $ Map.insert moduId moduSlot moduMap
   return modu
 
 installedEdhModule :: MonadIO m => EdhWorld -> ModuleId -> m (Maybe Object)
@@ -854,14 +825,14 @@ runEdhModule' !world !impPath !preRun =
   liftIO $ locateEdhMainModule impPath >>= \(!moduName, !nomPath, !moduFile) ->
     streamDecodeUtf8With lenientDecode <$> B.readFile moduFile >>= \case
       Some !moduSource _ _ -> runEdhProgram' (worldContext world) $ \ !ets ->
-        do
-          let !moduId = T.pack nomPath
-          !modu <- edh'module'creator world moduName moduId moduFile
-          let !moduCtx = moduleContext world modu
-              !etsModu = ets { edh'context = moduCtx }
-          preRun etsModu $ runEdhTx etsModu $ evalEdh moduFile
-                                                      moduSource
-                                                      endOfEdh
+        let !moduId = T.pack nomPath
+        in  edhCreateModule world moduName moduId moduFile >>= \ !modu ->
+              moduleContext world modu >>= \ !moduCtx ->
+                let !etsModu = ets { edh'context = moduCtx }
+                in  preRun etsModu $ runEdhTx etsModu $ evalEdh moduFile
+                                                                moduSource
+                                                                endOfEdh
+
 
 -- | perform an effectful call from current Edh context
 --

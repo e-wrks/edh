@@ -200,7 +200,7 @@ conReadCommandProc !apk !exit !ets = if edh'in'tx ets
               }
         in
           case inScopeOf of
-            Just !so -> case objectScope so of
+            Just !so -> objectScope so >>= \case
               -- eval cmd source in scope of the specified object
               Just !inScope -> doReadCmd inScope
               Nothing       -> case edh'obj'store so of

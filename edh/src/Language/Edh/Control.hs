@@ -75,17 +75,17 @@ instance Show EdhError where
   show (ProgramHalt _  ) = "Edh⏹️Halt"
   show (EdhIOError  ioe) = show ioe
   show (EdhPeerError peerSite details) = --
-    "🏗️ " <> T.unpack peerSite <> "\n" <> T.unpack details
+    "🏗️ traceback: " <> T.unpack peerSite <> "\n" <> T.unpack details
   show (EdhError EdhException !msg _details !cc) = --
-    "Đ\n" <> show cc <> T.unpack msg
+    "Đ traceback\n" <> show cc <> T.unpack msg
   show (EdhError PackageError !msg _details !cc) = --
-    "💔\n" <> show cc <> "📦 " <> T.unpack msg
+    "💔 traceback\n" <> show cc <> "📦 " <> T.unpack msg
   show (EdhError ParseError !msg _details !cc) = --
-    "💔\n" <> show cc <> "⛔ " <> T.unpack msg
+    "💔 traceback\n" <> show cc <> "⛔ " <> T.unpack msg
   show (EdhError EvalError !msg _details !cc) = --
-    "💔\n" <> show cc <> "💣 " <> T.unpack msg
+    "💔 traceback\n" <> show cc <> "💣 " <> T.unpack msg
   show (EdhError UsageError !msg _details !cc) = --
-    "💔\n" <> show cc <> "🙈 " <> T.unpack msg
+    "💔 traceback\n" <> show cc <> "🙈 " <> T.unpack msg
 
 data EdhErrorTag =
     EdhException -- for root class of custom Edh exceptions

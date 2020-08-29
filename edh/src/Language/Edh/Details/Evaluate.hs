@@ -540,7 +540,7 @@ edhObjExtends !ets !this !superObj !exit = case edh'obj'store this of
     EdhNil    -> exit
     !magicMth -> runEdhTx ets $ withMagicMethod magicMth
 
-  callMagicMethod !mthThis !mthThat !mth = case objectScope this of
+  callMagicMethod !mthThis !mthThat !mth = objectScope this >>= \case
     Nothing ->
       runEdhTx ets
         $ callEdhMethod mthThis mthThat mth (ArgsPack [edhNone] odEmpty) id
@@ -2287,8 +2287,8 @@ loadModule !moduSlot !moduName !moduId !moduFile !exit !ets = if edh'in'tx ets
     unsafeIOToSTM (streamDecodeUtf8With lenientDecode <$> B.readFile moduFile)
       >>= \case
             Some !moduSource _ _ -> do
-              !modu <- edhCreateModule moduName moduId moduFile
-              case objectScope modu of
+              !modu <- edhCreateModule world moduName moduId moduFile
+              objectScope modu >>= \case
                 Nothing -> error "bug: module object has no scope"
                 Just !scopeLoad ->
                   let !ctxLoad = ctx
@@ -2306,16 +2306,14 @@ loadModule !moduSlot !moduName !moduId !moduFile !exit !ets = if edh'in'tx ets
                             -- switch back to module importer's scope and continue
                             exitEdh ets exit $ EdhObject modu
  where
-  !ctx            = edh'context ets
-  !world          = edh'ctx'world ctx
-
-  edhCreateModule = edh'module'creator world
+  !ctx   = edh'context ets
+  !world = edh'ctx'world ctx
 
 
-moduleContext :: EdhWorld -> Object -> Context
-moduleContext !world !modu = case objectScope modu of
+moduleContext :: EdhWorld -> Object -> STM Context
+moduleContext !world !modu = objectScope modu >>= \case
   Nothing         -> error "bug: module object has no scope"
-  Just !moduScope -> worldCtx
+  Just !moduScope -> return worldCtx
     { edh'ctx'stack        = moduScope <| edh'ctx'stack worldCtx
     , edh'ctx'exporting    = False
     , edh'ctx'eff'defining = False

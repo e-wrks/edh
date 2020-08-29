@@ -7,6 +7,8 @@ import           Prelude
 
 import           GHC.Conc
 
+import           Control.Exception
+
 import           Data.Maybe
 import           Data.Unique
 import qualified Data.Text                     as T
@@ -32,6 +34,12 @@ import           Language.Edh.Details.Evaluate
 --
 annoProc :: EdhIntrinsicOp
 annoProc _ _ !exit = exitEdhTx exit nil
+
+
+errorProc :: EdhHostProc
+errorProc !apk _ !ets = edhThrow ets . EdhObject =<< edh'exception'wrapper
+  (edh'ctx'world $ edh'context ets)
+  (toException $ edhCreateError 1 ets EdhException apk)
 
 
 -- | operator ($=>) - the `catch`

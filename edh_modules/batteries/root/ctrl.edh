@@ -1,2 +1,0 @@
-
-export method error (*** apk ) throw EvalError(*** apk )

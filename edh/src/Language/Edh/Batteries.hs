@@ -15,6 +15,7 @@ import           Control.Monad.Reader
 import           Control.Concurrent
 import           Control.Concurrent.STM
 
+import           Data.Maybe
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.Text.IO                  as TIO
@@ -520,6 +521,7 @@ installEdhBatteries world =
              , apkKwrgsProc
              , PackReceiver [mandatoryArg "apk"]
              )
+           , (EdhMethod, "error", errorProc, WildReceiver)
            , (EdhMethod, "repr", reprProc, WildReceiver)
            , (EdhMethod, "cap", capProc, PackReceiver [mandatoryArg "container"])
            , ( EdhMethod
@@ -638,11 +640,9 @@ installEdhBatteries world =
         , EdhDecimal (fromIntegral $ consoleLogLevel $ edh'world'console world)
         )
       ]
-    let !conScope = case objectScope console of
-          Just !s -> s
-          Nothing -> error "bug: no scope for namespace object"
+    !conScope <- fromJust <$> objectScope console
 
-    !conArts <- sequence
+    !conArts  <- sequence
       [ (AttrByName nm, ) <$> mkHostProc conScope vc nm hp args
       | (vc, nm, hp, args) <-
         [ (EdhMethod, "exit", conExitProc, PackReceiver [])

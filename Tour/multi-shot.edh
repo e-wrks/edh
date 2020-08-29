@@ -6,7 +6,7 @@
     }
 
     ; -1<| 'async throwing #' ++ n
-    throw '!AsyncFailure#' ++ n
+    throw Exception( '!AsyncFailure#' ++ n, n=n )
 
     ; -1<| 'not a chance to see this'
   }
@@ -17,12 +17,12 @@
     # exception, it'll then be propagate to the for loop here
     for i from range( 3 ) do go asyncRisk( i )
 
-    throw '!SyncFailure'
+    throw Exception( '!SyncFailure' )
   } @=> { # this finally block will only run by the thread
     # installed it, i.e. the forker thread
     { exc } -> { # forker's finally block only knows about sync
       # exceptions
-      ; -1<| 'forker cleanup with a failure: ' ++ exc
+      ; -1<| 'forker cleanup with a failure: ' ++ desc( exc )
     }
     ; -1<| 'forker cleanup without failure'
   } $=> {@ # use a scoped block for the catch, as this catch block can run

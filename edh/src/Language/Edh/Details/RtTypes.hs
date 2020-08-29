@@ -275,6 +275,25 @@ getEdhCallContext !unwind !ets = EdhCallContext
     Left  (StmtSrc (spos, _)) -> T.pack (sourcePosPretty spos)
     Right _                   -> "<host-code>"
 
+edhCreateError :: Int -> EdhThreadState -> EdhErrorTag -> ArgsPack -> EdhError
+edhCreateError !unwindDef !ets !tag apk@(ArgsPack !args !kwargs) = case args of
+  [EdhString !m] | odNull kwargs' -> createErr m nil
+  (EdhString !m : args')          -> createErr m $ case args' of
+    [] | odNull kwargs' -> nil
+    _                   -> EdhArgsPack $ ArgsPack args' kwargs
+  _ -> createErr "❌" $ case args of
+    [] | odNull kwargs' -> nil
+    _                   -> EdhArgsPack apk
+ where
+  createErr !msg !details = EdhError tag msg (toDyn details) cc
+  (!maybeUnwind, !kwargs') = odTakeOut (AttrByName "unwind") kwargs
+  !unwind                  = case maybeUnwind of
+    Just (EdhDecimal d) -> case decimalToInteger d of
+      Just !n -> fromIntegral n
+      _       -> unwindDef
+    _ -> unwindDef
+  !cc = getEdhCallContext unwind ets
+
 
 -- | A lexical scope
 data Scope = Scope {
@@ -432,7 +451,7 @@ data EdhWorld = EdhWorld {
     -- wrapping a host exceptin as an Edh object
   , edh'exception'wrapper :: !(SomeException -> STM Object)
     -- create a new module object
-  , edh'module'creator :: !(Text -> ModuleId -> String -> STM Object)
+  , edh'module'class :: !Object
   }
 instance Eq EdhWorld where
   x == y =
@@ -450,6 +469,21 @@ createNamespace !world !nsName !nsArts = do
   !nsClass   = edh'obj'class $ edh'scope'this rootScope
 
 type ModuleId = Text
+
+edhCreateModule :: EdhWorld -> Text -> ModuleId -> String -> STM Object
+edhCreateModule !world !moduName !moduId !srcName = do
+  !idModu <- unsafeIOToSTM newUnique
+  !hs     <- iopdFromList
+    [ (AttrByName "__name__", EdhString moduName)
+    , (AttrByName "__path__", EdhString moduId)
+    , (AttrByName "__file__", EdhString $ T.pack srcName)
+    ]
+  !ss <- newTVar []
+  return Object { edh'obj'ident  = idModu
+                , edh'obj'store  = HashStore hs
+                , edh'obj'class  = edh'module'class world
+                , edh'obj'supers = ss
+                }
 
 worldContext :: EdhWorld -> Context
 worldContext !world = Context
@@ -1550,12 +1584,12 @@ mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
   return $ EdhProcedure (EdhDescriptor getter setter) Nothing
 
 
-objectScope :: Object -> Maybe Scope
+objectScope :: Object -> STM (Maybe Scope)
 objectScope !obj = case edh'obj'store obj of
 
-  HostStore  _                   -> Nothing
+  HostStore  _                   -> return Nothing
 
-  ClassStore (Class !cp !cs _ _) -> Just Scope
+  ClassStore (Class !cp !cs _ _) -> return $ Just Scope
     { edh'scope'entity  = cs
     , edh'scope'this    = obj
     , edh'scope'that    = obj
@@ -1573,25 +1607,77 @@ objectScope !obj = case edh'obj'store obj of
 
   HashStore !hs ->
     let !objClass = edh'obj'class obj
-        scopeProc = case edh'obj'store objClass of
-          ClassStore !cls -> edh'class'proc cls
-          _ -> error "bug: class of an object not bearing ClassStore"
-        scope = Scope
-          { edh'scope'entity  = hs
-          , edh'scope'this    = obj
-          , edh'scope'that    = obj
-          , edh'excpt'hndlr   = defaultEdhExcptHndlr
-          , edh'scope'proc    = scopeProc
-          , edh'scope'caller  = StmtSrc
-                                  ( SourcePos { sourceName   = "<object-scope>"
-                                              , sourceLine   = mkPos 1
-                                              , sourceColumn = mkPos 1
-                                              }
-                                  , VoidStmt
-                                  )
-          , edh'effects'stack = []
-          }
-    in  Just scope
+    in
+      case edh'obj'store objClass of
+        ClassStore !cls ->
+          let
+            !cp = edh'class'proc cls
+            mustStr !v = case edhUltimate v of
+              EdhString !s -> s
+              _            -> error $ "bug: not a string - " <> show v
+          in
+            case procedureName cp of
+              "module" -> do
+                !moduPath <-
+                  mustStr
+                    <$> iopdLookupDefault (EdhString "<anonymous>")
+                                          (AttrByName "__path__")
+                                          hs
+                !moduFile <-
+                  mustStr
+                    <$> iopdLookupDefault (EdhString "<on-the-fly>")
+                                          (AttrByName "__file__")
+                                          hs
+                return $ Just Scope
+                  { edh'scope'entity  = hs
+                  , edh'scope'this    = obj
+                  , edh'scope'that    = obj
+                  , edh'excpt'hndlr   = defaultEdhExcptHndlr
+                  , edh'scope'proc    = ProcDefi
+                    { edh'procedure'ident = edh'obj'ident obj
+                    , edh'procedure'name  = AttrByName moduPath
+                    , edh'procedure'lexi  = edh'procedure'lexi cp
+                    , edh'procedure'decl  = ProcDecl
+                      { edh'procedure'addr = NamedAttr moduPath
+                      , edh'procedure'args = PackReceiver []
+                      , edh'procedure'body = Left $ StmtSrc
+                                               ( SourcePos
+                                                 { sourceName   = T.unpack
+                                                                    moduFile
+                                                 , sourceLine   = mkPos 1
+                                                 , sourceColumn = mkPos 1
+                                                 }
+                                               , VoidStmt
+                                               )
+                      }
+                    }
+                  , edh'scope'caller  = StmtSrc
+                                          ( SourcePos
+                                            { sourceName   = "<run-module>"
+                                            , sourceLine   = mkPos 1
+                                            , sourceColumn = mkPos 1
+                                            }
+                                          , VoidStmt
+                                          )
+                  , edh'effects'stack = []
+                  }
+              _ -> return $ Just Scope
+                { edh'scope'entity  = hs
+                , edh'scope'this    = obj
+                , edh'scope'that    = obj
+                , edh'excpt'hndlr   = defaultEdhExcptHndlr
+                , edh'scope'proc    = cp
+                , edh'scope'caller  = StmtSrc
+                                        ( SourcePos
+                                          { sourceName   = "<object-scope>"
+                                          , sourceLine   = mkPos 1
+                                          , sourceColumn = mkPos 1
+                                          }
+                                        , VoidStmt
+                                        )
+                , edh'effects'stack = []
+                }
+        _ -> error "bug: class of an object not bearing ClassStore"
 
 
 -- | Create a reflective object capturing the specified scope as from the
