@@ -84,10 +84,12 @@ module Language.Edh.EHI
   , EdhTask(..)
   , Context(..)
   , Scope(..)
+  , EdhCallable(..)
   , EdhHostProc
   , EdhTxExit
     -- ** Edh Runtime error
   , getEdhCallContext
+  , edhCreateError
   , edhThrow
   , edhCatch
   , throwEdh
@@ -102,10 +104,11 @@ module Language.Edh.EHI
   , foldl'contSTM
   , mapcontSTM
     -- ** Sync utilities
+  , edhDoSTM
+  , endOfEdh
   , forkEdh
   , edhContSTM
   , edhContIO
-  , endOfEdh
     -- ** Reflective manipulation
   , StmtSrc(..)
   , Stmt(..)
@@ -129,16 +132,25 @@ module Language.Edh.EHI
 
     -- ** Object system
   , Object(..)
+  , ObjectStore(..)
   , castObjectStore
   , castObjectStore'
+  , withThisHostObj
+  , withThisHostObj'
+  , withHostObject
+  , withHostObject'
+  , EdhObjectAllocator
   , Class
   , mkHostClass
   , mkHostClass'
   , mkHostProperty
+  , edhCreateHostObj
   , edhCreateObj
   , edhConstructObj
   , edhMutCloneObj
+  , EntityStore
   , AttrKey(..)
+  , attrKeyStr
   , attrKeyValue
   , lookupEdhCtxAttr
   , resolveEdhCtxAttr
@@ -149,7 +161,10 @@ module Language.Edh.EHI
   , mkScopeWrapper
 
     -- ** Value system
+  , edhSetValue
   , createEdhDict
+  , setDictItem
+  , dictEntryList
   , edhTypeNameOf
   , edhTypeOf
   , edhValueNull
@@ -178,17 +193,17 @@ module Language.Edh.EHI
   , inf
   , D.Decimal(..)
   , Symbol(..)
-  , symbolName
   , Dict(..)
   , ItemKey
-  , setDictItem
   , List(..)
   , ArgsPack(..)
   , ProcDefi(..)
   , EdhGenrCaller
+  , symbolName
   , globalSymbol
   , mkSymbol
   , mkUUID
+  , mkDefault
   , mkHostProc
   , mkSymbolicHostProc
   , mkIntrinsicOp

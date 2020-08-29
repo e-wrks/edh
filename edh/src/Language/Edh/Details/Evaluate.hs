@@ -441,6 +441,21 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
         iopdInsert (AttrByName edhEffectsMagicName) d es
 
 
+-- | Create an Edh host object from the specified class, host storage data and
+-- list of super objects.
+--
+-- note the caller is responsible to make sure the supplied host storage data
+-- is compatible with the class, the super objects are compatible with the
+-- class' mro.
+edhCreateHostObj
+  :: Object -> Dynamic -> [Object] -> (Object -> STM ()) -> STM ()
+edhCreateHostObj !clsObj !hsd !supers !exit = do
+  !oid <- unsafeIOToSTM newUnique
+  !es  <- HostStore <$> newTVar hsd
+  !ss  <- newTVar supers
+  exit $ Object oid es clsObj ss
+
+
 -- | Create an Edh object from a class, without calling any `__init__()`
 -- method.
 edhCreateObj
@@ -1751,6 +1766,16 @@ withThisHostObj
   -> STM ()
 withThisHostObj !ets =
   withHostObject ets (edh'scope'this $ contextScope $ edh'context ets)
+
+withThisHostObj'
+  :: forall a
+   . Typeable a
+  => EdhThreadState
+  -> STM ()
+  -> (TVar Dynamic -> a -> STM ())
+  -> STM ()
+withThisHostObj' !ets =
+  withHostObject' (edh'scope'this $ contextScope $ edh'context ets)
 
 withHostObject
   :: forall a
