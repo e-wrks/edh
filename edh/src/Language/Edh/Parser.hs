@@ -622,12 +622,7 @@ parseOpName = between (symbol "(") (symbol ")") parseOpLit
 
 parseOpLit :: Parser Text
 parseOpLit = choice [keyword "is not", keyword "is", lexeme opLit]
- where
-  opLit = try $ do
-    opSym <- takeWhile1P (Just "operator symbol") isOperatorChar
-    -- or it's an augmented closing bracket
-    notFollowedBy $ oneOf ("}])" :: [Char])
-    return opSym
+  where opLit = takeWhile1P (Just "operator symbol") isOperatorChar
 
 parseScopedBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseScopedBlock !si0 = void (symbol "{@") >> parseRest [] si0
@@ -849,21 +844,23 @@ parseExprPrec prec !si = lookAhead illegalExprStart >>= \case
   higherOp prec' = do
     beforeOp  <- getParserState
     errRptPos <- getOffset
-    optional parseOpLit >>= \case
-      Nothing    -> return Nothing
-      Just opSym -> do
-        opPD <- get
-        case Map.lookup opSym opPD of
-          Nothing -> do
-            setOffset errRptPos
-            fail $ "undeclared operator: " <> T.unpack opSym
-          Just (opPrec, _) -> if opPrec > prec'
-            then return $ Just (opPrec, opSym)
-            else do
-              -- leave this op to be encountered later, i.e.
-              -- after left-hand expr collapsed into one
-              setParserState beforeOp
-              return Nothing
+    optional (try (parseOpLit <* -- or it's an augmented closing bracket
+                                 notFollowedBy (oneOf ("}])" :: [Char]))))
+      >>= \case
+            Nothing    -> return Nothing
+            Just opSym -> do
+              opPD <- get
+              case Map.lookup opSym opPD of
+                Nothing -> do
+                  setOffset errRptPos
+                  fail $ "undeclared operator: " <> T.unpack opSym
+                Just (opPrec, _) -> if opPrec > prec'
+                  then return $ Just (opPrec, opSym)
+                  else do
+                    -- leave this op to be encountered later, i.e.
+                    -- after left-hand expr collapsed into one
+                    setParserState beforeOp
+                    return Nothing
 
 
 parseExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
