@@ -886,6 +886,19 @@ packEdhArgs !ets !argSenders !pkExit = do
     pkArgs []       !exit = exit []
     pkArgs (x : xs) !exit = do
       let
+        unpackDict :: DictStore -> STM ()
+        unpackDict !ds = do
+          !dkvl <- iopdToList ds
+          dictKvs2Kwl dkvl $ \ !kvl -> do
+            iopdUpdate kvl kwIOPD
+            pkArgs xs exit
+        unpackObj :: EntityStore -> STM ()
+        unpackObj !es =
+          iopdLookup (AttrByName edhExportsMagicName) es >>= \case
+            Nothing -> pkArgs xs exit
+            Just (EdhDict (Dict _ !ds)) -> unpackDict ds
+            Just !badExplVal -> edhValueDesc ets badExplVal $ \ !badDesc ->
+              throwEdh ets UsageError $ "bad object export list - " <> badDesc
         edhVal2Kw :: EdhValue -> STM () -> (AttrKey -> STM ()) -> STM ()
         edhVal2Kw !k !nopExit !exit' = case k of
           EdhString !name -> exit' $ AttrByName name
@@ -911,19 +924,17 @@ packEdhArgs !ets !argSenders !pkExit = do
               (EdhList (List _ !l)) -> pkArgs xs $ \ !posArgs -> do
                 ll <- readTVar l
                 exit ((noneNil <$> ll) ++ posArgs)
-              _ ->
+              _ -> edhValueDesc ets val $ \ !badValDesc ->
                 throwEdh ets EvalError
                   $  "can not unpack args from a "
-                  <> T.pack (edhTypeNameOf val)
-                  <> ": "
-                  <> T.pack (show val)
+                  <> badValDesc
         UnpackKwArgs !kwExpr ->
           runEdhTx etsPacking $ evalExpr kwExpr $ \ !val _ets ->
             case edhUltimate val of
               EdhArgsPack (ArgsPack _posArgs !kwArgs') -> do
                 iopdUpdate (odToList kwArgs') kwIOPD
                 pkArgs xs $ \ !posArgs' -> exit posArgs'
-              (EdhPair !k !v) ->
+              EdhPair !k !v ->
                 edhVal2Kw
                     k
                     (  throwEdh ets UsageError
@@ -932,30 +943,29 @@ packEdhArgs !ets !argSenders !pkExit = do
                     )
                   $ \ !kw -> do
                       iopdInsert kw (noneNil $ edhDeCaseWrap v) kwIOPD
-                      pkArgs xs $ \ !posArgs -> exit posArgs
-              (EdhDict (Dict _ !ds)) -> do
-                !dkvl <- iopdToList ds
-                dictKvs2Kwl dkvl $ \ !kvl -> do
-                  iopdUpdate kvl kwIOPD
-                  pkArgs xs $ \ !posArgs -> exit posArgs
-              _ ->
+                      pkArgs xs exit
+              EdhDict   (Dict _ !ds) -> unpackDict ds
+              EdhObject !obj         -> case edh'obj'store obj of
+                HashStore  !hs  -> unpackObj hs
+                ClassStore !cls -> unpackObj (edh'class'store cls)
+                HostStore{}     -> edhValueRepr ets val $ \ !objRepr ->
+                  throwEdh ets EvalError
+                    $  "can not unpack kwargs from a host object - "
+                    <> objRepr
+              _ -> edhValueDesc ets val $ \ !badValDesc ->
                 throwEdh ets EvalError
                   $  "can not unpack kwargs from a "
-                  <> T.pack (edhTypeNameOf val)
-                  <> ": "
-                  <> T.pack (show val)
+                  <> badValDesc
         UnpackPkArgs !pkExpr ->
           runEdhTx etsPacking $ evalExpr pkExpr $ \ !val _ets ->
             case edhUltimate val of
               (EdhArgsPack (ArgsPack !posArgs !kwArgs')) -> do
                 iopdUpdate (odToList kwArgs') kwIOPD
                 pkArgs xs $ \ !posArgs' -> exit (posArgs ++ posArgs')
-              _ ->
+              _ -> edhValueDesc ets val $ \ !badValDesc ->
                 throwEdh ets EvalError
                   $  "can not unpack apk from a "
-                  <> T.pack (edhTypeNameOf val)
-                  <> ": "
-                  <> T.pack (show val)
+                  <> badValDesc
         SendPosArg !argExpr ->
           runEdhTx etsPacking $ evalExpr argExpr $ \ !val _ets -> pkArgs xs
             $ \ !posArgs -> exit (noneNil (edhDeCaseWrap val) : posArgs)
@@ -963,10 +973,10 @@ packEdhArgs !ets !argSenders !pkExit = do
           runEdhTx etsPacking $ evalExpr argExpr $ \ !val _ets -> case kwAddr of
             NamedAttr "_" ->  -- silently drop the value to keyword of single
               -- underscore, the user may just want its side-effect
-              pkArgs xs $ \ !posArgs -> exit posArgs
+              pkArgs xs exit
             _ -> resolveEdhAttrAddr ets kwAddr $ \ !kwKey -> do
               iopdInsert kwKey (noneNil $ edhDeCaseWrap val) kwIOPD
-              pkArgs xs $ \ !posArgs -> exit posArgs
+              pkArgs xs exit
   pkArgs argSenders $ \ !posArgs -> do
     !kwArgs <- iopdSnapshot kwIOPD
     -- restore original tx state after args packed
@@ -2180,9 +2190,8 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
             _                 -> Nothing -- todo warn about this
         | (k, v) <- expl
         ]
-    Just !badExplVal ->
-      throwEdh ets UsageError $ "bad __exports__ type: " <> T.pack
-        (edhTypeNameOf badExplVal)
+    Just !badExplVal -> edhValueDesc ets badExplVal $ \ !badDesc ->
+      throwEdh ets UsageError $ "bad object export list - " <> badDesc
 
   withExps :: [(AttrKey, EdhValue)] -> STM ()
   withExps !exps =
