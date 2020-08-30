@@ -74,36 +74,39 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit !ets = case fromExpr of
           (_    , EdhNil) -> exitEdh ets exitNoAttr $ EdhObject this
           (this', !val  ) -> chkExit this' this' val
 
-  _ -> runEdhTx ets $ evalExpr fromExpr $ \ !fromVal _ets -> case fromVal of
+  _ -> runEdhTx ets $ evalExpr fromExpr $ \ !fromVal _ets ->
+    case edhUltimate fromVal of
 
-    -- give super objects the magical power to intercept
-    -- attribute access on descendant objects, via obj ref
-    EdhObject !obj ->
-      let noMagic :: EdhTx
-          noMagic _ets = lookupEdhObjAttr obj key >>= \case
-            (_    , EdhNil) -> exitEdh ets exitNoAttr $ EdhObject obj
-            (this', !val  ) -> chkExit this' obj val
-      in  runEdhTx ets $ getObjAttrWSM (AttrByName "@<-*") obj key noMagic exit
+      -- give super objects the magical power to intercept
+      -- attribute access on descendant objects, via obj ref
+      EdhObject !obj ->
+        let noMagic :: EdhTx
+            noMagic _ets = lookupEdhObjAttr obj key >>= \case
+              (_    , EdhNil) -> exitEdh ets exitNoAttr $ EdhObject obj
+              (this', !val  ) -> chkExit this' obj val
+        in  runEdhTx ets
+              $ getObjAttrWSM (AttrByName "@<-*") obj key noMagic exit
 
-    -- getting attr from an apk
-    EdhArgsPack (ArgsPack _ !kwargs) ->
-      exitEdh ets exit $ odLookupDefault EdhNil key kwargs
+      -- getting attr from an apk
+      EdhArgsPack (ArgsPack _ !kwargs) ->
+        exitEdh ets exit $ odLookupDefault EdhNil key kwargs
 
-    -- virtual attrs by magic method from context
-    _ -> case key of
-      AttrByName !attrName -> do
-        let !magicName =
+      -- virtual attrs by magic method from context
+      _ -> case key of
+        AttrByName !attrName -> do
+          let
+            !magicName =
               "__" <> T.pack (edhTypeNameOf fromVal) <> "_" <> attrName <> "__"
-        lookupEdhCtxAttr scope (AttrByName magicName) >>= \case
-          EdhProcedure (EdhMethod !mth) _ -> runEdhTx ets $ callEdhMethod
-            (edh'scope'this scope)
-            (edh'scope'that scope)
-            mth
-            (ArgsPack [fromVal] odEmpty)
-            id
-            exit
-          _ -> exitEdh ets exitNoAttr fromVal
-      _ -> exitEdh ets exitNoAttr fromVal
+          lookupEdhCtxAttr scope (AttrByName magicName) >>= \case
+            EdhProcedure (EdhMethod !mth) _ -> runEdhTx ets $ callEdhMethod
+              (edh'scope'this scope)
+              (edh'scope'that scope)
+              mth
+              (ArgsPack [fromVal] odEmpty)
+              id
+              exit
+            _ -> exitEdh ets exitNoAttr fromVal
+        _ -> exitEdh ets exitNoAttr fromVal
 
  where
   ctx   = edh'context ets
