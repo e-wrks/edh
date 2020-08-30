@@ -107,6 +107,8 @@ createEdhWorld !console = liftIO $ do
         , ("__desc__", mthNsDesc, PackReceiver [])
         ]
       ]
+  atomically
+    $ iopdUpdate [(AttrByName "namespace", EdhObject nsClassObj)] hsRoot
 
   -- * the `scope` class
   !hsScope <-
@@ -268,7 +270,8 @@ createEdhWorld !console = liftIO $ do
   return world
  where
 
-  phantomAllocator _ _ _ = error "bug: allocating phantom object"
+  phantomAllocator !ets _ _ =
+    throwEdh ets EvalError "bug: allocating phantom object"
   phantomHostProc :: EdhHostProc
   phantomHostProc _ _ = throwEdhTx EvalError "bug: calling phantom procedure"
 
