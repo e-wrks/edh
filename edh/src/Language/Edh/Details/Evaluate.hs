@@ -2779,13 +2779,22 @@ evalExpr (BlockExpr !stmts) !exit =
 
 evalExpr (ScopedBlockExpr !stmts) !exit = \ !ets -> do
   !esBlock <- iopdEmpty
+  !spid    <- unsafeIOToSTM newUnique
   let
     !ctx        = edh'context ets
-    !scopeBlock = (contextScope ctx) { edh'scope'entity = esBlock
-                                     , edh'scope'caller = edh'ctx'stmt ctx
-                                     }
+    !currScope  = contextScope ctx
+    !blockScope = currScope
+      { edh'scope'entity = esBlock
+      -- current scope should be the lexical *outer* of the new nested *block*
+      -- scope, specifically, a `scope()` obtained from within the nested block
+      -- should have its @.outer@ point to current block
+      , edh'scope'proc = (edh'scope'proc currScope) { edh'procedure'ident = spid
+                                                    , edh'procedure'lexi = currScope
+                                                    }
+      , edh'scope'caller = edh'ctx'stmt ctx
+      }
     !etsBlock = ets
-      { edh'context = ctx { edh'ctx'stack = scopeBlock <| edh'ctx'stack ctx }
+      { edh'context = ctx { edh'ctx'stack = blockScope <| edh'ctx'stack ctx }
       }
   runEdhTx etsBlock $ evalBlock stmts $ \ !blkResult ->
     edhSwitchState ets $ exitEdhTx exit $ edhDeCaseClose blkResult
