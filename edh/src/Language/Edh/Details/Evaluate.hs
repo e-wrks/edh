@@ -2204,33 +2204,68 @@ importFromApk !tgtEnt !argsRcvr !fromApk !exit !ets =
 
 importFromObject :: EntityStore -> ArgsReceiver -> Object -> EdhTxExit -> EdhTx
 importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
-  case edh'obj'store fromObj of
-    HashStore  !hs  -> doImp hs
-    ClassStore !cls -> doImp (edh'class'store cls)
-    _ ->
-      throwEdh ets UsageError
-        $  "can not import from a host object of class "
-        <> objClassName fromObj
+  iopdEmpty >>= \ !arts -> do
+    !supers <- readTVar $ edh'obj'supers fromObj
+    -- the reversed order ensures that artifacts from a nearer object overwrite
+    -- those from farther objects
+    sequence_ $ reverse $ collect1 arts <$> fromObj : supers
+    !arts' <- iopdSnapshot arts
+    runEdhTx ets $ importFromApk tgtEnt argsRcvr (ArgsPack [] arts') $ \_ ->
+      exitEdhTx exit $ EdhObject fromObj
  where
-  doImp :: EntityStore -> STM ()
-  doImp !esFrom = iopdLookup (AttrByName edhExportsMagicName) esFrom >>= \case
-    Nothing                            -> withExps [] -- nothing exported at all
-    Just (EdhDict (Dict _ !dsExpFrom)) -> iopdToList dsExpFrom >>= \ !expl ->
-      withExps $ catMaybes
-        [ case k of
-            EdhString !expKey -> Just (AttrByName expKey, v)
-            EdhSymbol !expSym -> Just (AttrBySym expSym, v)
-            _                 -> Nothing -- todo warn about this
-        | (k, v) <- expl
-        ]
-    Just !badExplVal -> edhValueDesc ets badExplVal $ \ !badDesc ->
-      throwEdh ets UsageError $ "bad object export list - " <> badDesc
-
-  withExps :: [(AttrKey, EdhValue)] -> STM ()
-  withExps !exps =
-    runEdhTx ets
-      $ importFromApk tgtEnt argsRcvr (ArgsPack [] $ odFromList exps)
-      $ \_ -> exitEdhTx exit $ EdhObject fromObj
+  doBindTo :: Object -> Object -> EdhValue -> EdhValue
+  doBindTo !this !that = \case
+    EdhProcedure !callable !effOuter ->
+      EdhBoundProc callable this that effOuter
+    !art -> art
+  collect1 :: EntityStore -> Object -> STM ()
+  collect1 !arts !obj = case edh'obj'store obj of
+    HashStore !hs -> case edh'obj'store $ edh'obj'class obj of
+      ClassStore !cls -> do
+        -- ensure instance artifacts overwrite class artifacts
+        collectExp (edh'class'store cls) (doBindTo obj fromObj)
+        collectExp hs                    (doBindTo obj fromObj)
+      _ ->
+        edhValueDesc ets (EdhObject $ edh'obj'class fromObj) $ \ !badDesc ->
+          -- note this seems not preventing cps exiting,
+          -- at least we can get an error thrown
+          throwEdh ets EvalError
+            $  "bad class for the object to be imported - "
+            <> badDesc
+    ClassStore !cls -> collectExp (edh'class'store cls) id
+    HostStore{}     -> case edh'obj'store $ edh'obj'class obj of
+      ClassStore !cls ->
+        collectExp (edh'class'store cls) (doBindTo obj fromObj)
+      _ ->
+        edhValueDesc ets (EdhObject $ edh'obj'class fromObj) $ \ !badDesc ->
+          -- note this seems not preventing cps exiting,
+          -- at least we can get an error thrown
+          throwEdh ets EvalError
+            $  "bad class for the host object to be imported - "
+            <> badDesc
+   where
+    collectExp :: EntityStore -> (EdhValue -> EdhValue) -> STM ()
+    collectExp !esFrom !binder =
+      iopdLookup (AttrByName edhExportsMagicName) esFrom >>= \case
+        Nothing                            -> return ()
+        Just (EdhDict (Dict _ !dsExpFrom)) -> iopdToList dsExpFrom
+          >>= \ !expl -> iopdUpdate (transEntries expl []) arts
+        Just !badExplVal -> edhValueDesc ets badExplVal $ \ !badDesc ->
+          -- note this seems not preventing cps exiting,
+          -- at least we can get an error thrown
+          throwEdh ets UsageError $ "bad object export list - " <> badDesc
+     where
+      transEntries
+        :: [(ItemKey, EdhValue)]
+        -> [(AttrKey, EdhValue)]
+        -> [(AttrKey, EdhValue)]
+      transEntries []                    result = result
+      transEntries ((!key, !val) : rest) result = case key of
+        EdhString !expKey ->
+          transEntries rest $ (AttrByName expKey, binder val) : result
+        EdhSymbol !expSym ->
+          transEntries rest $ (AttrBySym expSym, binder val) : result
+        _ -> transEntries rest result -- todo should err out here?
 
 importEdhModule' :: EntityStore -> ArgsReceiver -> Text -> EdhTxExit -> EdhTx
 importEdhModule' !tgtEnt !argsRcvr !importSpec !exit =
