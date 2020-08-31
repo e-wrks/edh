@@ -479,8 +479,8 @@ showProc (ArgsPack [!v] !kwargs) !exit !ets = case edhUltimate v of
         <> T.pack (edhTypeNameOf badMagic)
         <> " on class "
         <> objClassName o
-  showWithNoMagic = edhValueRepr ets v $ \ !r ->
-    exitEdh ets exit $ EdhString $ T.pack (edhTypeNameOf v) <> ": " <> r
+  showWithNoMagic = edhValueStr ets v $ \ !s ->
+    exitEdh ets exit $ EdhString $ T.pack (edhTypeNameOf v) <> ": " <> s
 showProc _ _ !ets = throwEdh ets UsageError "please show one value at a time"
 
 descProc :: EdhHostProc
@@ -518,21 +518,8 @@ descProc (ArgsPack [!v] !kwargs) !exit !ets = case edhUltimate v of
         <> T.pack (edhTypeNameOf badMagic)
         <> " on class "
         <> objClassName o
-  descWithNoMagic = edhValueRepr ets v $ \ !r -> case v of
-    EdhObject !o ->
-      exitEdh ets exit
-        $  EdhString
-        $  "It is an object of class "
-        <> objClassName o
-        <> ", having representation:\n"
-        <> r
-    _ ->
-      exitEdh ets exit
-        $  EdhString
-        $  "It is of "
-        <> T.pack (edhTypeNameOf v)
-        <> ", having representation:\n"
-        <> r
+  descWithNoMagic =
+    edhValueDesc ets v $ \ !d -> exitEdh ets exit $ EdhString $ "It is a " <> d
 descProc _ _ !ets =
   throwEdh ets UsageError "please describe one value at a time"
 
