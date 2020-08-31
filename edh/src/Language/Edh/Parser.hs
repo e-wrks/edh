@@ -33,7 +33,7 @@ import           Language.Edh.Details.RtTypes
 type IntplSrcInfo = (Text, Int, [SourceSeg])
 
 sc :: Parser ()
-sc = L.space space1 (L.skipLineComment "#") (L.skipBlockComment "{#" "#}")
+sc = L.space space1 (L.skipLineComment "#") (L.skipBlockCommentNested "{#" "#}")
 
 symbol :: Text -> Parser Text
 symbol = L.symbol sc
