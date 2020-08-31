@@ -6,11 +6,10 @@ import           Prelude
 -- import           GHC.Stack
 -- import           System.IO.Unsafe
 
-import           GHC.Conc                       ( unsafeIOToSTM )
+import           GHC.Conc
 
 import           Control.Exception
 import           Control.Monad.State.Strict
-import           Control.Concurrent
 import           Control.Concurrent.STM
 
 import           Data.Maybe
@@ -1639,7 +1638,6 @@ edhCatch
      )
   -> STM ()
 edhCatch !etsOuter !tryAct !exit !passOn = do
-  !hndlrTh <- unsafeIOToSTM myThreadId
   let
     !ctxOuter   = edh'context etsOuter
     !scopeOuter = contextScope ctxOuter
@@ -1649,49 +1647,28 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
     !etsTry = etsOuter { edh'context = tryCtx }
 
     hndlr :: EdhExcptHndlr
-    hndlr !etsThrower !exv !rethrow =
-      unsafeIOToSTM myThreadId >>= \ !rcvrTh -> if rcvrTh /= hndlrTh
-
-             -- from a different (descendant) thread, not the handler
-             -- installer
-        then if exv == EdhNil
-
-          -- no exception has occurred, skip finally block as it should
-          -- eval only once on the original thread
-          then return ()
-
-          -- handle the exception on a descendant thread, but skip
-          -- recovery,  and propagate rethrow
-          else passOn etsThrower exv (const $ return ()) goRethrow
-
-             -- from the same thread installed this handler
-        else if exv == EdhNil
-
-          -- no exception has occurred, but it may be a finally block,
-          -- trigger it
-          then passOn etsThrower
-                      nil
-                      (error "bug: a finally block trying recovery")
-                      goRethrow
-
-          -- handle the exception on the original thread
-          else
-            let goRecover :: EdhValue -> STM ()
-                -- the catch block is providing a result value to recover
-                goRecover !result = isProgramHalt exv >>= \case
-                  -- never recover from ProgramHalt
-                  True  -> goRethrow exv
-                  -- do recover
-                  False -> exit result
-            in  passOn etsThrower exv goRecover goRethrow
-
+    hndlr !etsThrower !exv !rethrow = passOn etsThrower exv goRecover goRethrow
      where
+
+      -- the catch block is providing a result value to recover
+      goRecover :: EdhValue -> STM ()
+      goRecover !result = isProgramHalt exv >>= \case
+        -- but never recover from ProgramHalt
+        True  -> goRethrow exv
+        False -> if edh'task'queue etsOuter /= edh'task'queue etsThrower
+          then -- not on same thread, cease the recovery continuation
+               return ()
+          else -- on the same thread, continue the recovery
+               exit result
+
+      -- the catch block doesn't want to catch this exception, propagate it
+      -- outward
       goRethrow :: EdhValue -> STM ()
       goRethrow !exv' = edh'excpt'hndlr scopeOuter etsThrower exv' rethrow
 
   runEdhTx etsTry $ tryAct $ \ !tryResult _ets ->
-    -- no exception has occurred, this is the original thread, it may be a
-    -- finally block and go trigger it
+    -- no exception has occurred, the @passOn@ may be a finally block and we
+    -- trigger it here, but expect it to rethow (not to recover)
     passOn etsOuter nil (error "bug: a finally block trying recovery")
       $ const
       $ exit tryResult

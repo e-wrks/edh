@@ -18,15 +18,18 @@
     for i from range( 3 ) do go asyncRisk( i )
 
     throw Exception( '!SyncFailure' )
-  } @=> { # this finally block will only run by the thread
-    # installed it, i.e. the forker thread
-    { exc } -> { # forker's finally block only knows about sync
+  } @=> { # a finally block will only be executed by the thread installed it,
+    # i.e. always be synchronous, there's never a thing as asynchronous cleanup
+
+    { exc } -> { # note forker's finally block only knows about synchronous
       # exceptions
       ; -1<| 'forker cleanup with a failure: ' ++ desc( exc )
     }
+
     ; -1<| 'forker cleanup without failure'
+
   } $=> {@ # use a scoped block for the catch, as this catch block can run
-    # in any descendant thread, it's race condation to capture the thrown
+    # in any descendant thread, it's a race condation to capture the thrown
     # exception as a named attribute into a shared scope then use it along.
 
     # a scoped block always creates a new scope on evaluation, so every
@@ -37,15 +40,17 @@
       # to run in multiple forked threads (forkees), as well as in
       # the forker thread. but its recover continuation will only
       # run by the thread installed it, i.e. the forker thread.
-      ; -1<| 'handling ' ++ exc
+      ; -1<| 'handling ' ++ desc( exc )
     }
   @}
 
-  # too obviously, but it could really go wrong with,
+  # too obvious, but it could really go wrong with,
   # a continuation based implementation
   ; -1<| 'this should run only once by forker thread'
 
-  for _ from console.everyMillis( 10 ) do break
+  # a slight delay in the main thread or we can terminate too early to miss
+  # the async affairs
+  for _ from console.everyMillis( 80 ) do break
 
   ; -1<| 'all done.'
 }

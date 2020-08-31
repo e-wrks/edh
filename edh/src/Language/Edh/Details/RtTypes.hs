@@ -1660,11 +1660,10 @@ objectScope !obj = case edh'obj'store obj of
                       }
                     }
                   , edh'scope'caller  = StmtSrc
-                                          ( SourcePos
-                                            { sourceName   = "<run-module>"
-                                            , sourceLine   = mkPos 1
-                                            , sourceColumn = mkPos 1
-                                            }
+                                          ( SourcePos { sourceName = "<run-edh>"
+                                                      , sourceLine = mkPos 1
+                                                      , sourceColumn = mkPos 1
+                                                      }
                                           , VoidStmt
                                           )
                   , edh'effects'stack = []

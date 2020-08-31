@@ -43,4 +43,10 @@ K2.mro
 supers( k2 )
 
 # check a super instance shared
-( case z of { { O: z's'o } } -> z's'o ) is ( case k2 of { { O: k2's'o } } -> k2's'o )
+{
+  (
+    case z of { { O: z's'o } } -> z's'o
+  ) is (
+    case k2 of { { O: k2's'o } } -> k2's'o
+  )
+}

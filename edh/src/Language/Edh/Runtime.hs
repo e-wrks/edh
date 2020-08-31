@@ -837,6 +837,20 @@ runEdhModule' !world !impPath !preRun =
                                                                 endOfEdh
 
 
+runEdhFile :: MonadIO m => EdhWorld -> FilePath -> m (Either EdhError EdhValue)
+runEdhFile !world !edhFile =
+  liftIO $ tryJust edhKnownError $ runEdhFile' world edhFile
+
+runEdhFile' :: MonadIO m => EdhWorld -> FilePath -> m EdhValue
+runEdhFile' !world !edhFile =
+  liftIO $ streamDecodeUtf8With lenientDecode <$> B.readFile edhFile >>= \case
+    Some !moduSource _ _ -> runEdhProgram' (worldContext world) $ \ !ets ->
+      edhCreateModule world "__main__" "__main__" edhFile >>= \ !modu ->
+        moduleContext world modu >>= \ !moduCtx ->
+          let !etsModu = ets { edh'context = moduCtx }
+          in  runEdhTx etsModu $ evalEdh edhFile moduSource endOfEdh
+
+
 -- | perform an effectful call from current Edh context
 --
 -- if performing from an effectful procedure call, use the outer stack of

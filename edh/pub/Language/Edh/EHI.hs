@@ -51,6 +51,8 @@ module Language.Edh.EHI
   , behaveEdhEffect'
   , runEdhModule
   , runEdhModule'
+  , runEdhFile
+  , runEdhFile'
   , EdhModulePreparation
   , edhModuleAsIs
   , createEdhModule

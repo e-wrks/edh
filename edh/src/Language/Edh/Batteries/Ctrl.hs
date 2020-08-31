@@ -48,13 +48,17 @@ errorProc !apk _ !ets = edhThrow ets . EdhObject =<< edh'exception'wrapper
 
 -- | operator ($=>) - the `catch`
 --
--- the right-hand-expr will only be eval'ed  when an exception occurred
--- in its left-hand-expr;
--- the exception value is the context match target during eval of the
--- right-hand-expr;
--- the exceptin is assused to have been recovered, if the rhe evals as
--- matched (i.e. not to a value of <fallthrough>), or the exception will
--- keep propagating, i.e. re-thrown.
+-- - the right-hand-expr will only be eval'ed  when an exception occurred
+--   in its left-hand-expr;
+-- - the exception value is the context match target during eval of the
+--   right-hand-expr;
+-- - the exceptin is assused to have been recovered, if the rhe evals as
+--   matched (i.e. not to a value of <fallthrough>), or the exception will
+--   keep propagating, i.e. re-thrown.
+--
+-- - especially note any asynchronous exception occurred on some descendant
+--   thread forked by the @tryExpr@ will trigger the right-hand-expr to be
+--   executed on that thread
 catchProc :: EdhIntrinsicOp
 catchProc !tryExpr !catchExpr !exit !etsOuter =
   edhCatch etsOuter (evalExpr tryExpr) (exitEdh etsOuter exit)
@@ -78,23 +82,30 @@ catchProc !tryExpr !catchExpr !exit !etsOuter =
 
 -- | operator (@=>) - the `finally`
 --
--- the right-hand-expr will always be eval'ed whether the left-hand-expr
--- has caused exeption or not;
--- the exception value (or nil if none occurred) is the context match
--- target during eval of the right-hand-expr;
--- an exception if occurred, will never be assumed as recovered by the
--- right-hand-expr.
+-- - the right-hand-expr will always be eval'ed whether the left-hand-expr
+--   has caused exeption or not;
+-- - the exception value (or nil if none occurred) is the context match
+--   target during eval of the right-hand-expr;
+-- - an exception if occurred, will never be assumed as recovered by the
+--   right-hand-expr.
+--
+-- - especially note asynchronous exceptions won't trigger the right-hand-expr
+--   to be executed
 finallyProc :: EdhIntrinsicOp
 finallyProc !tryExpr !finallyExpr !exit !etsOuter =
   edhCatch etsOuter (evalExpr tryExpr) (exitEdh etsOuter exit)
     $ \ !etsThrower !exv _recover !rethrow ->
-        -- note this @passOn@ won't be triggered on a different (descendant)
-        -- thread, in case no exception has occurred
-        let !ctxOuter = edh'context etsOuter
-            !ctxHndl  = ctxOuter { edh'ctx'match = exv }
-            !etsHndl  = etsThrower { edh'context = ctxHndl }
-        in  runEdhTx etsHndl $ evalExpr finallyExpr $ \_result _ets ->
-              rethrow exv
+        -- note we deliberately avoid executing a finally block on a
+        -- descendant thread here
+        if edh'task'queue etsOuter /= edh'task'queue etsThrower
+          then -- not on same thread, bypass finally block
+               rethrow exv
+          else -- on the same thread, eval the finally block
+            let !ctxOuter = edh'context etsOuter
+                !ctxHndl  = ctxOuter { edh'ctx'match = exv }
+                !etsHndl  = etsThrower { edh'context = ctxHndl }
+            in  runEdhTx etsHndl $ evalExpr finallyExpr $ \_result _ets ->
+                  rethrow exv
 
 
 -- | operator (->) - the brancher, if its left-hand matches, early stop its
