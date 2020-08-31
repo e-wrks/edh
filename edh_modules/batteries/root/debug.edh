@@ -3,10 +3,34 @@ import * './str'
 
 export {
 
-  # the indicator whether this world is under debugging
-  debug = if console.logLevel <= console.debug
-  then this # alias to this module when debugging
-  else false # not debugging
+  if console.logLevel <= console.debug then {
+
+    # world-wide indicator whether the world is under debugging
+    debug=this # alias to this module when debugging
+
+    interpreter assert( callerScope,
+      assertion, msg= 'assertion failed', ***details
+    ) case callerScope.eval( assertion ) of {
+      true -> { pass }
+      nil -> { result = None; fallthrough }
+      { result } -> { fallthrough }
+
+      detailsResult = case callerScope.eval(*** details ) of {
+        nil -> () # not quite possible but, convert to an empty apk
+        { ( singleResult ) } -> ( singleResult, ) # convert to an apk
+        { apk } -> apk
+      }
+
+      error( callerScope.eval( msg ), result=result, ***detailsResult )
+    }
+
+  } else {
+
+    debug=false # not debugging
+
+    method assert(*** _ ) pass
+
+  }
 
   # used to create unique command objects
   class Command { __repr__ = 'Command()' }

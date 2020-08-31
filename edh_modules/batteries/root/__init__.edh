@@ -1,4 +1,8 @@
 
+{#
+ # this module will be imported by the interpreter into a world's root scope
+ #}
+
 export {
 
   # alias this module
