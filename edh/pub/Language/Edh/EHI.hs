@@ -77,6 +77,8 @@ module Language.Edh.EHI
   , recvEdhArgs
   , packEdhExprs
   , packEdhArgs
+  , implantEffect
+  , implantEffects
   , EdhTx
   , EdhThreadState(..)
   , EdhTask(..)

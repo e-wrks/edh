@@ -347,7 +347,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     -- assign as attribute of local scope
     DirectRef !addr'          -> resolveEdhAttrAddr ets addr' $ \ !key -> do
       if edh'ctx'eff'defining ctx
-        then defEffectInto esScope key
+        then implantEffect esScope key rhVal
         else edhSetValue key rhVal esScope
 
       exitWithChkExportTo (edh'scope'this scope) key rhVal
@@ -428,20 +428,12 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
 
   defEffIntoObj :: Object -> AttrKey -> STM ()
   defEffIntoObj !obj !key = case edh'obj'store obj of
-    HashStore  !hs  -> defEffectInto hs key
-    ClassStore !cls -> defEffectInto (edh'class'store cls) key
+    HashStore  !hs  -> implantEffect hs key rhVal
+    ClassStore !cls -> implantEffect (edh'class'store cls) key rhVal
     HostStore _ ->
       throwEdh ets UsageError
         $  "no way defining effects into a host object of class "
         <> objClassName obj
-  defEffectInto :: EntityStore -> AttrKey -> STM ()
-  defEffectInto !es !artKey =
-    iopdLookup (AttrByName edhEffectsMagicName) es >>= \case
-      Just (EdhDict (Dict _ !effDS)) ->
-        edhSetValue (attrKeyValue artKey) rhVal effDS
-      _ -> do
-        !d <- EdhDict <$> createEdhDict [(attrKeyValue artKey, rhVal)]
-        iopdInsert (AttrByName edhEffectsMagicName) d es
 
 
 -- | Create an Edh host object from the specified class, host storage data and
@@ -1956,16 +1948,8 @@ evalStmt' !stmt !exit = case stmt of
         if not (edh'ctx'eff'defining ctx)
           then -- normal multi-assignment
                iopdUpdate (odToList um) (edh'scope'entity scope)
-          else do -- define effectful artifacts by multi-assignment
-            let !effd = [ (attrKeyValue k, v) | (k, v) <- odToList um ]
-            iopdLookup (AttrByName edhEffectsMagicName) (edh'scope'entity scope)
-              >>= \case
-                    Just (EdhDict (Dict _ !effDS)) -> iopdUpdate effd effDS
-                    _                              -> do
-                      !d <- EdhDict <$> createEdhDict effd
-                      iopdInsert (AttrByName edhEffectsMagicName)
-                                 d
-                                 (edh'scope'entity scope)
+          else -- define effectful artifacts by multi-assignment
+               implantEffects (edh'scope'entity scope) (odToList um)
         let !maybeExp2ent = if edh'ctx'exporting ctx
               then Nothing -- not exporting
               -- always export to current this object's scope, and possibly a
@@ -2175,23 +2159,14 @@ importInto !tgtEnt !argsRcvr !srcExpr !exit = case srcExpr of
         <> ": "
         <> T.pack (show srcVal)
 
-
-edhExportsMagicName :: Text
-edhExportsMagicName = "__exports__"
-
 importFromApk :: EntityStore -> ArgsReceiver -> ArgsPack -> EdhTxExit -> EdhTx
 importFromApk !tgtEnt !argsRcvr !fromApk !exit !ets =
   recvEdhArgs ets ctx argsRcvr fromApk $ \ !em -> do
     if not (edh'ctx'eff'defining ctx)
       then -- normal import
            iopdUpdate (odToList em) tgtEnt
-      else do -- importing effects
-        let !effd = [ (attrKeyValue k, v) | (k, v) <- odToList em ]
-        iopdLookup (AttrByName edhEffectsMagicName) tgtEnt >>= \case
-          Just (EdhDict (Dict _ !dsEff)) -> iopdUpdate effd dsEff
-          _                              -> do -- todo warn if of wrong type
-            d <- EdhDict <$> createEdhDict effd
-            iopdInsert (AttrByName edhEffectsMagicName) d tgtEnt
+      else -- importing effects
+           implantEffects tgtEnt (odToList em)
     when (edh'ctx'exporting ctx) $ do -- do export what's imported
       let !impd = [ (attrKeyValue k, v) | (k, v) <- odToList em ]
       iopdLookup (AttrByName edhExportsMagicName) tgtEnt >>= \case
@@ -2728,7 +2703,7 @@ edhValueStrTx !v !exit !ets =
 defineScopeAttr :: EdhThreadState -> AttrKey -> EdhValue -> STM ()
 defineScopeAttr !ets !key !val = when (key /= AttrByName "_") $ do
   if edh'ctx'eff'defining ctx
-    then defEffect
+    then implantEffect esScope key val
     else unless (edh'ctx'pure ctx)
       $ edhSetValue key val (edh'scope'entity scope)
   when (edh'ctx'exporting ctx) $ case edh'obj'store $ edh'scope'this scope of
@@ -2748,12 +2723,25 @@ defineScopeAttr !ets !key !val = when (key /= AttrByName "_") $ do
       !d <- EdhDict <$> createEdhDict [(attrKeyValue key, val)]
       iopdInsert (AttrByName edhExportsMagicName) d es
 
-  defEffect :: STM ()
-  defEffect = iopdLookup (AttrByName edhEffectsMagicName) esScope >>= \case
+implantEffect :: EntityStore -> AttrKey -> EdhValue -> STM ()
+implantEffect !tgtEnt !key !val =
+  iopdLookup (AttrByName edhEffectsMagicName) tgtEnt >>= \case
     Just (EdhDict (Dict _ !dsEff)) -> edhSetValue (attrKeyValue key) val dsEff
-    _                              -> do
+    _                              -> unless (val == EdhNil) $ do
+      -- todo warn if of wrong type
       !d <- EdhDict <$> createEdhDict [(attrKeyValue key, val)]
-      iopdInsert (AttrByName edhEffectsMagicName) d esScope
+      iopdInsert (AttrByName edhEffectsMagicName) d tgtEnt
+
+implantEffects :: EntityStore -> [(AttrKey, EdhValue)] -> STM ()
+-- todo assuming no nil in the list by far, change to edhSetValue one by one,
+-- once nil can be the case
+implantEffects !tgtEnt !effs =
+  iopdLookup (AttrByName edhEffectsMagicName) tgtEnt >>= \case
+    Just (EdhDict (Dict _ !dsEff)) -> iopdUpdate effd dsEff
+    _                              -> do -- todo warn if of wrong type
+      !d <- EdhDict <$> createEdhDict effd
+      iopdInsert (AttrByName edhEffectsMagicName) d tgtEnt
+  where !effd = [ (attrKeyValue k, v) | (k, v) <- effs ]
 
 
 -- | Evaluate an Edh expression

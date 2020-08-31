@@ -18,10 +18,10 @@ import           Repl
 main :: IO ()
 main = do
 
-  console <- defaultEdhConsole defaultEdhConsoleSettings
-  let consoleOut = writeTBQueue (consoleIO console) . ConsoleOut
+  !console <- defaultEdhConsole defaultEdhConsoleSettings
+  let !consoleOut = writeTBQueue (consoleIO console) . ConsoleOut
 
-  void $ forkFinally (edhProgLoop console) $ \result -> do
+  void $ forkFinally (edhProgLoop console) $ \ !result -> do
     case result of
       Left (e :: SomeException) ->
         atomically $ consoleOut $ "💥 " <> T.pack (show e)

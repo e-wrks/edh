@@ -292,3 +292,9 @@ edhMutCloneObj !fromThis !fromThat !newStore = do
       return
         $ fromThat { edh'obj'ident = oidNewThat, edh'obj'supers = supersNew }
 
+
+-- * import/export
+
+
+edhExportsMagicName :: Text
+edhExportsMagicName = "__exports__"

@@ -22,7 +22,7 @@ edhProgLoop !console = do
 
   -- create the world, we always work with this world no matter how
   -- many times the Edh programs crash
-  world <- createEdhWorld console
+  !world <- createEdhWorld console
   installEdhBatteries world
 
   -- XXX here to install worshipped host modules and other artifacts
@@ -62,5 +62,5 @@ edhProgLoop !console = do
               doneRightOrRebirth
   doneRightOrRebirth
  where
-  consoleOut      = writeTBQueue (consoleIO console) . ConsoleOut
-  consoleShutdown = writeTBQueue (consoleIO console) ConsoleShutdown
+  !consoleOut      = writeTBQueue (consoleIO console) . ConsoleOut
+  !consoleShutdown = writeTBQueue (consoleIO console) ConsoleShutdown

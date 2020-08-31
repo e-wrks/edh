@@ -628,7 +628,7 @@ installEdhBatteries world =
       ++ [(AttrByName "Vector", ) . EdhObject <$> createVectorClass rootScope]
 
 
-    console <- createNamespace
+    !console <- createNamespace
       world
       "console"
       [ (AttrByName "debug", EdhDecimal 10)
