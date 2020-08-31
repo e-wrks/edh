@@ -1842,15 +1842,21 @@ evalStmt ss@(StmtSrc (_sp, !stmt)) !exit !ets =
     $ evalStmt' stmt
     $ \ !rtn -> edhSwitchState ets $ exit rtn
 
-evalCaseBlock :: Expr -> EdhTxExit -> EdhTx
-evalCaseBlock !expr !exit = case expr of
+
+evalCaseBranches :: Expr -> EdhTxExit -> EdhTx
+evalCaseBranches !expr !exit = case expr of
+
   -- case-of with a block is normal
-  BlockExpr stmts' -> evalBlock stmts' exit
+  BlockExpr       stmts -> evalBlock stmts exit
+  ScopedBlockExpr stmts -> evalScopedBlock stmts exit
+
   -- single branch case is some special
-  _                -> evalExpr expr $ \ !val -> case val of
-    -- the only branch did match
+  _                     -> evalExpr expr $ \ !val -> case val of
+    -- the only branch did match, let not the branch match escape
     (EdhCaseClose !v) -> exitEdhTx exit $ edhDeCaseClose v
-    -- the only branch didn't match
+    -- the only branch didn't match. non-exhaustive case is bad smell in FP,
+    -- but kinda norm in imperative style, some equvilant to if-then without an
+    -- else clause. anyway the nonmatch should not escape here
     EdhCaseOther      -> exitEdhTx exit nil
     -- yield should have been handled by 'evalExpr'
     (EdhYield _)      -> throwEdhTx EvalError "bug yield reached block"
@@ -1863,6 +1869,33 @@ evalCaseBlock !expr !exit = case expr of
     -- other vanilla result, propagate as is
     _                 -> exitEdhTx exit val
 
+
+evalScopedBlock :: [StmtSrc] -> EdhTxExit -> EdhTx
+evalScopedBlock !stmts !exit !ets = do
+  !esBlock <- iopdEmpty
+  !spid    <- unsafeIOToSTM newUnique
+  let
+    !ctx        = edh'context ets
+    !currScope  = contextScope ctx
+    !blockScope = currScope
+      { edh'scope'entity = esBlock
+      -- current scope should be the lexical *outer* of the new nested *block*
+      -- scope, required for correct contextual attribute resolution, and
+      -- specifically, a `scope()` obtained from within the nested block should
+      -- have its @.outer@ point to current block
+      , edh'scope'proc = (edh'scope'proc currScope) { edh'procedure'ident = spid
+                                                    , edh'procedure'lexi = currScope
+                                                    }
+      , edh'scope'caller = edh'ctx'stmt ctx
+      }
+    !etsBlock = ets
+      { edh'context = ctx { edh'ctx'stack = blockScope <| edh'ctx'stack ctx }
+      }
+  runEdhTx etsBlock $ evalBlock stmts $ \ !blkResult ->
+    edhSwitchState ets $ exitEdhTx exit blkResult
+
+-- note a branch match should not escape out of a block, so adjacent blocks
+-- always execute sequentially
 evalBlock :: [StmtSrc] -> EdhTxExit -> EdhTx
 evalBlock []    !exit = exitEdhTx exit nil
 evalBlock [!ss] !exit = evalStmt ss $ \ !val -> case val of
@@ -1982,7 +2015,7 @@ evalStmt' !stmt !exit = case stmt of
                                                   }
           }
         )
-        (evalCaseBlock branchesExpr endOfEdh)
+        (evalCaseBranches branchesExpr endOfEdh)
         exit
 
     (CallExpr !calleeExpr !argsSndr) ->
@@ -2020,7 +2053,7 @@ evalStmt' !stmt !exit = case stmt of
                                                        }
                 }
               )
-            $ evalCaseBlock branchesExpr endOfEdh
+            $ evalCaseBranches branchesExpr endOfEdh
 
       (CallExpr !calleeExpr !argsSndr) ->
         evalExpr calleeExpr $ \ !calleeVal !etsSched ->
@@ -2784,32 +2817,9 @@ evalExpr (ParenExpr !x) !exit = \ !ets ->
     $ evalExpr x
     $ \ !vip -> edhSwitchState ets $ exitEdhTx exit vip
 
-evalExpr (BlockExpr !stmts) !exit =
-  -- a branch match should not escape out of a block, so adjacent blocks always
-  -- execute sequentially
-  evalBlock stmts $ \ !blkResult -> exitEdhTx exit $ edhDeCaseClose blkResult
+evalExpr (BlockExpr       !stmts) !exit = evalBlock stmts exit
 
-evalExpr (ScopedBlockExpr !stmts) !exit = \ !ets -> do
-  !esBlock <- iopdEmpty
-  !spid    <- unsafeIOToSTM newUnique
-  let
-    !ctx        = edh'context ets
-    !currScope  = contextScope ctx
-    !blockScope = currScope
-      { edh'scope'entity = esBlock
-      -- current scope should be the lexical *outer* of the new nested *block*
-      -- scope, specifically, a `scope()` obtained from within the nested block
-      -- should have its @.outer@ point to current block
-      , edh'scope'proc = (edh'scope'proc currScope) { edh'procedure'ident = spid
-                                                    , edh'procedure'lexi = currScope
-                                                    }
-      , edh'scope'caller = edh'ctx'stmt ctx
-      }
-    !etsBlock = ets
-      { edh'context = ctx { edh'ctx'stack = blockScope <| edh'ctx'stack ctx }
-      }
-  runEdhTx etsBlock $ evalBlock stmts $ \ !blkResult ->
-    edhSwitchState ets $ exitEdhTx exit $ edhDeCaseClose blkResult
+evalExpr (ScopedBlockExpr !stmts) !exit = evalScopedBlock stmts exit
 
 evalExpr (CaseExpr !tgtExpr !branchesExpr) !exit =
   evalExpr tgtExpr $ \ !tgtVal !ets ->
@@ -2817,7 +2827,7 @@ evalExpr (CaseExpr !tgtExpr !branchesExpr) !exit =
         { edh'context = (edh'context ets) { edh'ctx'match = edhDeCaseWrap tgtVal
                                           }
         }
-      $ evalCaseBlock branchesExpr
+      $ evalCaseBranches branchesExpr
       -- restore original tx state after block done
       $ \ !blkResult _ets -> exitEdh ets exit blkResult
 

@@ -8,26 +8,39 @@ export {
     # world-wide indicator whether the world is under debugging
     debug=this # alias to this module when debugging
 
+    # the advantage of being an interpreter procedure here, is no eval of rest
+    # exprs as long as the assertion stands
     interpreter assert( callerScope,
-      assertion, msg= 'assertion failed', ***details
+      assertion, msg=None, ***details
     ) case callerScope.eval( assertion ) of {
-      true -> { pass }
-      nil -> { result = None; fallthrough }
+      true -> { pass } # as it should be
+
+      # other values are unexpected
+      nil -> { result = '<nil>'; fallthrough }
       { result } -> { fallthrough }
 
-      detailsResult = case callerScope.eval(*** details ) of {
-        nil -> () # not quite possible but, convert to an empty apk
-        { ( singleResult ) } -> ( singleResult, ) # convert to an apk
-        { apk } -> apk
-      }
+      detailsResult = if null $ details
+      then () # empty apk, don't bother eval it
+      # note in below we localize artifacts (avoid polluting the outer scope),
+      # with a scoped block {@ ... @}
+      else {@ case d = callerScope.eval(*** details ) | type of {
+          nil -> () # a very corner case, convert to an empty apk
+          ArgsPackType -> d
+          _ -> ( d, ) # single value, convert to an apk
+      } @}
 
-      error( callerScope.eval( msg ), result=result, ***detailsResult )
+      error(
+        msg &> callerScope.eval( msg ) |> 'assertion failed',
+        # following goes as the thrown exception's @.details@
+        result=result, ***detailsResult
+      )
     }
 
   } else {
 
     debug=false # not debugging
 
+    # assert being nop when not debugging
     method assert(*** _ ) pass
 
   }
@@ -82,8 +95,8 @@ export {
 
     } $=> { # catch exceptions
 
-      { { IOError:exc } } -> {
-        console.fatal <| 'IO error - ' ++ exc
+      { { IOError:ioExc } } -> {
+        console.fatal <| 'IO error - ' ++ ioExc
         rethrow # escalate it to the program loop of the
         # host interpreter, let it decide what to do.
       }
@@ -122,8 +135,8 @@ export {
 
     } $=> { # catch exceptions
 
-      { { IOError:exc } } -> {
-        console.fatal <| 'IO error - ' ++ exc
+      { { IOError:ioExc } } -> {
+        console.fatal <| 'IO error - ' ++ ioExc
         rethrow # escalate it to the program loop of the
         # host interpreter, let it decide what to do.
       }

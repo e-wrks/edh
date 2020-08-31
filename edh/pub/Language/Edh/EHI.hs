@@ -72,8 +72,6 @@ module Language.Edh.EHI
   , callEdhMethod
   , evalStmt
   , evalStmt'
-  , evalBlock
-  , evalCaseBlock
   , evalExpr
   , evalExprs
   , recvEdhArgs
