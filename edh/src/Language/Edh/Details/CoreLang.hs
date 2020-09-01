@@ -292,6 +292,14 @@ edhMutCloneObj !fromThis !fromThat !newStore = do
       return
         $ fromThat { edh'obj'ident = oidNewThat, edh'obj'supers = supersNew }
 
+-- Clone `that` object with one of its super object (i.e. `this`) mutated
+-- to bear the new host storage data
+-- 
+-- todo maybe check new storage data type matches the old one?
+edhCloneHostObj :: Object -> Object -> Dynamic -> STM Object
+edhCloneHostObj !fromThis !fromThat !newData =
+  HostStore <$> newTVar newData >>= edhMutCloneObj fromThis fromThat
+
 
 -- * import/export
 

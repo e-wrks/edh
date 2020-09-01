@@ -143,6 +143,8 @@ module Language.Edh.EHI
   , withHostObject'
   , EdhObjectAllocator
   , Class
+  , edhClassName
+  , objClassName
   , mkHostClass
   , mkHostClass'
   , mkHostProperty
@@ -150,6 +152,7 @@ module Language.Edh.EHI
   , edhCreateObj
   , edhConstructObj
   , edhMutCloneObj
+  , edhCloneHostObj
   , EntityStore
   , AttrKey(..)
   , attrKeyStr
@@ -188,6 +191,7 @@ module Language.Edh.EHI
   , edhNoneExpr
   , edhNothing
   , edhNothingExpr
+  , edhNA
   , noneNil
   , true
   , false
