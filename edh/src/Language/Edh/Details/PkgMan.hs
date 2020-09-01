@@ -53,7 +53,7 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
     "you don't include the `.edh` file extension in the import"
     [(AttrByName "spec", EdhString $ T.pack nomSpec)]
   _ -> doesPathExist pkgPath >>= \case
-    False -> throwPkgError "path does not exist"
+    False -> throwPkgError ("path does not exist: " <> T.pack pkgPath)
                            [(AttrByName "path", EdhString $ T.pack pkgPath)]
     True -> case stripPrefix "./" nomSpec of
       Just !relImp -> resolveRelImport relImp
@@ -75,7 +75,7 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
             -- do
             --   trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $  return ()
                    throwPkgError
-            "no such module"
+            ("no such module: " <> T.pack nomSpec)
             [(AttrByName "moduSpec", EdhString $ T.pack nomSpec)]
 
   resolveAbsImport :: FilePath -> IO (ImportName, FilePath, FilePath)
@@ -95,7 +95,7 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
             let !parentPkgPath = takeDirectory caniPkgPath
             if equalFilePath parentPkgPath caniPkgPath
               then throwPkgError
-                "no such module"
+                ("no such module: " <> T.pack nomSpec)
                 [(AttrByName "moduSpec", EdhString $ T.pack nomSpec)]
               else resolveAbsImport parentPkgPath
 
@@ -113,7 +113,7 @@ locateEdhMainModule !importPath = canonicalizePath "." >>= resolveMainImport
         let !parentPkgPath = takeDirectory caniPkgPath
         if equalFilePath parentPkgPath caniPkgPath
           then throwPkgError
-            "no such main module"
+            ("no such main module: " <> T.pack importPath)
             [(AttrByName "importPath", EdhString $ T.pack importPath)]
           else resolveMainImport parentPkgPath
 
