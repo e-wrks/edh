@@ -23,7 +23,7 @@ while true { # this is the *Loop* in so-called REPL
     # the exception can have happened in a descendant goroutine/thread,
     # and throwTo this main thread, console.print() won't show such an
     # asynchronous exception timely, we use error log here.
-    console.error<| 'Recovered from error: ' ++ show( cmdExc )
+    console.error<| 'Recovered from error: ' ++ desc( cmdExc )
 
     # TODO in case of asynchronous exception occurred, the last
     # console.readCommand() is interrupted, but the console IO loop is

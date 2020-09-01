@@ -54,4 +54,4 @@ main = getArgs >>= \case
 
     consoleIOLoop console
 
-  _ -> hPutStrLn stderr "Usage: edh <.edh-file>" >> exitFailure
+  _ -> hPutStrLn stderr "Usage: runedh <.edh-file>" >> exitFailure
