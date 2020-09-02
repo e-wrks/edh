@@ -12,7 +12,7 @@
 
 export method concur(* tasks, c=6, dbgLogger=0 ) {
   null( tasks ) -> { return nil }
-  c < 1 -> error( "Invalid concurrency: " ++ c )
+  c < 1 -> error( "invalid concurrency: " ++ c )
 
   # event sink for decreased number of running tasks, this will
   # read zero after all done. will only start to fire after all
@@ -20,60 +20,59 @@ export method concur(* tasks, c=6, dbgLogger=0 ) {
   # below 'c', i.e. started overall finishing up
   doneSig = sink
 
-  # use a class to manage 'tasks' and 'cntRunning' as instance
-  # attributes, an attribute belonging to the local scope of a
-  # method procedure (`concur()` in this case) is not possible
-  # to be assigned from another procedure (the later
-  # `scheduleMore()` method in this case)
-  class Scheduler {
-    method __init__ ( tasks as this.tasks ) {
+  namespace schd (
+    backlog = [] =< tasks, # convert to a mutable list
+    cntRunning = 0, # this somewhat emulates a WaitGroup in Go
+  ) method scheduleMore() ai { # do one scheduling in a whole transaction
+    if this.cntRunning >= c then return nil # avoid exceeding the limit
 
-      # this somewhat emulates a WaitGroup in Go
-      this.cntRunning = 0
+    # note contextual this/that are both the namespace object `schd` in here
 
+    case this.backlog.pop() of {
+      nil -> assert( false, 'impossible' )
+      None -> { # no more tasks in backlog
+        doneSig <- this.cntRunning # notify about overall finishing up
+        return nil
+      }
+      { task2do } -> {
+        pass # one task taken out of backlog
+      }
     }
 
-    method scheduleMore() {
+    go { # start a new thread (goroutine) to run 'task2do'
 
-      # uncons this.tasks within an *atoiso* tx block
-      ai case this.tasks of {
-        { () } -> { # no more tasks in backlog
-          doneSig <- this.cntRunning # notify about overall finishing up
-          return nil
-        }
-        { task2do => rest } -> { # one task taken out of backlog
-          this.tasks = rest # update this.task within tx
-          rest = nil # unref so it's garbage collectable a bit earlier
-        }
+      # use `defer` to always run upon thread termination,
+      # this is necessary as code after `task2do()` may not
+      # get actually executed in case this thread is broken by
+      # an event perceiver registered during `task2do()`
+      defer {
+        ai this.cntRunning -= 1 # decrease it atomically
+
+        if this.cntRunning < c # seen run slot available
+        # to bring another pending task from backlog at running,
+        # or to post notification to 'doneSig' upon overall
+        # finishing up detected (i.e. backlog drained)
+        then this.scheduleMore()
       }
 
-      go { # start a new thread (goroutine) to run 'task2do'
-
-        # use `defer` to always run upon thread termination,
-        # this is necessary as code after `task2do()` may not
-        # get actually executed in case this thread is broken by
-        # an event perceiver registered during `task2do()`
-        defer {
-          this.cntRunning -= 1 # this is atomic in Edh
-
-          if this.cntRunning < c # seen run slot available
-          # to bring another pending task from backlog at running,
-          # or to post notification to 'doneSig' upon overall
-          # finishing up detected (i.e. backlog drained)
-          then this.scheduleMore()
-        }
-
-        task2do() # do the real work
-
-      }
-      # similar to WaitGroup.Add() in Go
-      this.cntRunning += 1 # this is atomic in Edh
+      # do the real work
+      #
+      # note it may throw, but we don't take care here, the caller of
+      # `concur()` has these choices:
+      # - make sure all exceptions are handled within each task
+      # - catch exceptions propagated out from `concur()`, asynchronously
+      # - leave an exception uncaught or rethrow it, it'll propagate to the
+      #   main thread thus probably terminate the whole program, according to
+      #   how that's handled there
+      task2do()
 
     }
+    # similar to WaitGroup.Add() in Go
+    this.cntRunning += 1 # increase it, note the whole procedure is ai
+
   }
 
-  schd = Scheduler( tasks )
-  while not null( schd.tasks ) && schd.cntRunning < c {
+  while not null( schd.backlog ) && schd.cntRunning < c {
     schd.scheduleMore()
   }
 
