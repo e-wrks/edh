@@ -3113,7 +3113,11 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
       tryMagicMethod lhVal rhVal
         -- eval default expression with possibly the designated thread state
         $ runEdhTx (fromMaybe ets etsDef)
-        $ evalExpr exprDef
+        $ evalExpr
+            (case exprDef of
+              ExprWithSrc !x _ -> x
+              _                -> exprDef
+            )
         $ \ !resultDef _ets -> case resultDef of
             EdhNil -> notApplicable lhVal rhVal
             -- exit with original thread state
