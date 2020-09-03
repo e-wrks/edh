@@ -915,9 +915,11 @@ instance Show EdhValue where
   show EdhRethrow               = "<rethrow>"
   show (EdhYield  v     )       = "<yield: " ++ show v ++ ">"
   show (EdhReturn v     )       = "<return: " ++ show v ++ ">"
-  show (EdhDefault _ x _)       = "<default: " ++ show x ++ ">"
+  show (EdhDefault _ x _)       = case x of
+    ExprWithSrc _ [SrcSeg src] -> "default " <> T.unpack src
+    _                          -> "<default: " ++ show x ++ ">"
 
-  show (EdhSink v       )       = show v
+  show (EdhSink v) = show v
 
   show (EdhNamedValue n v@EdhNamedValue{}) =
     -- Edh operators are all left-associative, parenthesis needed
@@ -1077,8 +1079,10 @@ edhNothingExpr = InfixExpr ":="
 
 -- | NA for not-applicable, similar to @NotImplemented@ as in Python
 edhNA :: EdhValue
-edhNA = EdhNamedValue "NA"
-  $ EdhDefault (unsafePerformIO newUnique) (LitExpr NilLiteral) Nothing
+edhNA = EdhNamedValue "NA" $ EdhDefault
+  (unsafePerformIO newUnique)
+  (ExprWithSrc (LitExpr NilLiteral) [SrcSeg "nil"])
+  Nothing
 {-# NOINLINE edhNA #-}
 
 
@@ -1426,11 +1430,9 @@ instance Hashable EdhTypeValue where
   hashWithSalt s t = hashWithSalt s $ fromEnum t
 
 edhTypeNameOf :: EdhValue -> String
-edhTypeNameOf EdhNil                   = "nil"
-edhTypeNameOf (EdhNamedValue n EdhNil) = T.unpack n
-edhTypeNameOf (EdhNamedValue n v) =
-  T.unpack n <> " := " <> show (edhTypeNameOf v)
-edhTypeNameOf v = show $ edhTypeOf v
+edhTypeNameOf EdhNil               = "nil"
+edhTypeNameOf (EdhNamedValue _n v) = edhTypeNameOf v
+edhTypeNameOf v                    = show $ edhTypeOf v
 
 -- | Get the type tag of an value
 --
@@ -1439,25 +1441,24 @@ edhTypeNameOf v = show $ edhTypeOf v
 edhTypeOf :: EdhValue -> EdhTypeValue
 
 -- it's a taboo to get the type of a nil, either named or not
-edhTypeOf EdhNil                   = undefined
-edhTypeOf (EdhNamedValue _ EdhNil) = undefined
+edhTypeOf EdhNil        = undefined
 
-edhTypeOf EdhType{}                = TypeType
+edhTypeOf EdhType{}     = TypeType
 
-edhTypeOf EdhDecimal{}             = DecimalType
-edhTypeOf EdhBool{}                = BoolType
-edhTypeOf EdhBlob{}                = BlobType
-edhTypeOf EdhString{}              = StringType
-edhTypeOf EdhSymbol{}              = SymbolType
-edhTypeOf EdhUUID{}                = UUIDType
+edhTypeOf EdhDecimal{}  = DecimalType
+edhTypeOf EdhBool{}     = BoolType
+edhTypeOf EdhBlob{}     = BlobType
+edhTypeOf EdhString{}   = StringType
+edhTypeOf EdhSymbol{}   = SymbolType
+edhTypeOf EdhUUID{}     = UUIDType
 
-edhTypeOf EdhPair{}                = PairType
-edhTypeOf EdhArgsPack{}            = ArgsPackType
+edhTypeOf EdhPair{}     = PairType
+edhTypeOf EdhArgsPack{} = ArgsPackType
 
-edhTypeOf EdhDict{}                = DictType
-edhTypeOf EdhList{}                = ListType
+edhTypeOf EdhDict{}     = DictType
+edhTypeOf EdhList{}     = ListType
 
-edhTypeOf (EdhObject o)            = case edh'obj'store o of
+edhTypeOf (EdhObject o) = case edh'obj'store o of
   HashStore{} -> ObjectType
   ClassStore !cls ->
     case edh'procedure'body $ edh'procedure'decl $ edh'class'proc cls of
