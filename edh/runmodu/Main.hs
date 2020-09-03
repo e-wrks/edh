@@ -24,7 +24,7 @@ main :: IO ()
 main = getArgs >>= \case
   []        -> runModu "repl"
   [edhModu] -> runModu edhModu
-  _         -> hPutStrLn stderr "Usage: edh [ <.edh-file> ]" >> exitFailure
+  _         -> hPutStrLn stderr "Usage: edh [ <edh-module> ]" >> exitFailure
  where
   runModu :: FilePath -> IO ()
   runModu !moduSpec = do
