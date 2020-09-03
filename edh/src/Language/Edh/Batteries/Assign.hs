@@ -32,9 +32,7 @@ assignProc !lhExpr !rhExpr !exit !ets = runEdhTx etsAssign $ case lhExpr of
         -- indexing assign to an object, by calling its ([=])
         -- method with ixVal and rhv as the args
         EdhObject obj -> lookupEdhObjAttr obj (AttrByName "[=]") >>= \case
-          (_, EdhNil) ->
-            throwEdh ets EvalError $ "no magic ([=]) method from: " <> T.pack
-              (show obj)
+          (_, EdhNil) -> exitEdh ets exit edhNA
           (this', EdhProcedure (EdhMethod !mth'proc) _) ->
             runEdhTx ets $ callEdhMethod this'
                                          obj
@@ -58,16 +56,7 @@ assignProc !lhExpr !rhExpr !exit !ets = runEdhTx etsAssign $ case lhExpr of
               <> ": "
               <> T.pack (show badIndexer)
 
-        _ ->
-          throwEdh ets EvalError
-            $  "don't know how to index assign "
-            <> T.pack (edhTypeNameOf tgtVal)
-            <> ": "
-            <> T.pack (show tgtVal)
-            <> " with "
-            <> T.pack (edhTypeNameOf ixVal)
-            <> ": "
-            <> T.pack (show ixVal)
+        _ -> exitEdh ets exit edhNA
 
   _ -> evalExpr rhExpr $ \ !rhVal ->
     assignEdhTarget lhExpr (edhDeCaseWrap rhVal)
@@ -107,12 +96,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit !ets =
           EdhObject obj ->
             let !magicMthName = "[" <> withOpSym <> "=]"
             in  lookupEdhObjAttr obj (AttrByName magicMthName) >>= \case
-                  (_, EdhNil) ->
-                    throwEdh ets EvalError
-                      $  "no magic ("
-                      <> magicMthName
-                      <> ") method from: "
-                      <> T.pack (show obj)
+                  (_, EdhNil) -> exitEdh ets exit edhNA
                   (!this', EdhProcedure (EdhMethod !mth'proc) _) ->
                     runEdhTx ets $ callEdhMethod
                       this'
@@ -140,16 +124,7 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit !ets =
                       <> ": "
                       <> T.pack (show badIndexer)
 
-          _ ->
-            throwEdh ets EvalError
-              $  "don't know how to index assign "
-              <> T.pack (edhTypeNameOf tgtVal)
-              <> ": "
-              <> T.pack (show tgtVal)
-              <> " with "
-              <> T.pack (edhTypeNameOf ixVal)
-              <> ": "
-              <> T.pack (show ixVal)
+          _ -> exitEdh ets exit edhNA
 
     _ -> evalExpr rhExpr $ \ !rhVal -> evalExpr lhExpr $ \ !lhVal -> do
       let lhMagicMthName = withOpSym <> "="
