@@ -24,6 +24,8 @@ import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
 
+import           Language.Edh.Batteries.Math
+
 
 -- Boxed Vector for Edh values, non-transactional, mutable anytime
 type EdhVector = IOVector EdhValue
@@ -46,6 +48,141 @@ createVectorClass !clsOuterScope =
           , EdhMethod
           , vecIdxWriteProc
           , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
+          )
+        , ( "[+=]"
+          , EdhMethod
+          , vecIdxAssignWithOpProc addProc
+          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
+          )
+        , ( "[-=]"
+          , EdhMethod
+          , vecIdxAssignWithOpProc subtProc
+          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
+          )
+        , ( "[*=]"
+          , EdhMethod
+          , vecIdxAssignWithOpProc mulProc
+          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
+          )
+        , ( "[/=]"
+          , EdhMethod
+          , vecIdxAssignWithOpProc divProc
+          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
+          )
+        , ( "[//=]"
+          , EdhMethod
+          , vecIdxAssignWithOpProc divIntProc
+          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
+          )
+        , ( "[%=]"
+          , EdhMethod
+          , vecIdxAssignWithOpProc modIntProc
+          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
+          )
+        , ( "[**=]"
+          , EdhMethod
+          , vecIdxAssignWithOpProc powProc
+          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
+          )
+        , ( "[&&=]"
+          , EdhMethod
+          , vecIdxAssignWithOpProc logicalAndProc
+          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
+          )
+        , ( "[||=]"
+          , EdhMethod
+          , vecIdxAssignWithOpProc logicalOrProc
+          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
+          )
+        , ( "+"
+          , EdhMethod
+          , vecCopyWithOpProc addProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "-"
+          , EdhMethod
+          , vecCopyWithOpProc subtProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "*"
+          , EdhMethod
+          , vecCopyWithOpProc mulProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "/"
+          , EdhMethod
+          , vecCopyWithOpProc divProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "//"
+          , EdhMethod
+          , vecCopyWithOpProc divIntProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "%"
+          , EdhMethod
+          , vecCopyWithOpProc modIntProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "**"
+          , EdhMethod
+          , vecCopyWithOpProc powProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "&&"
+          , EdhMethod
+          , vecCopyWithOpProc logicalAndProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "||"
+          , EdhMethod
+          , vecCopyWithOpProc logicalOrProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "+="
+          , EdhMethod
+          , vecAssignWithOpProc addProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "-="
+          , EdhMethod
+          , vecAssignWithOpProc subtProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "*="
+          , EdhMethod
+          , vecAssignWithOpProc mulProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "/="
+          , EdhMethod
+          , vecAssignWithOpProc divProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "//="
+          , EdhMethod
+          , vecAssignWithOpProc divIntProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "%="
+          , EdhMethod
+          , vecAssignWithOpProc modIntProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "**="
+          , EdhMethod
+          , vecAssignWithOpProc powProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "&&="
+          , EdhMethod
+          , vecAssignWithOpProc logicalAndProc
+          , PackReceiver [mandatoryArg "val"]
+          )
+        , ( "||="
+          , EdhMethod
+          , vecAssignWithOpProc logicalOrProc
+          , PackReceiver [mandatoryArg "val"]
           )
         , ("__null__", EdhMethod, vecNullProc, PackReceiver [])
         , ("__len__" , EdhMethod, vecLenProc , PackReceiver [])
@@ -106,7 +243,7 @@ createVectorClass !clsOuterScope =
 
   vecIdxReadProc :: EdhHostProc
   vecIdxReadProc apk@(ArgsPack !args _kwargs) !exit !ets = case args of
-    [!idxVal] -> withThisHostObj ets $ \_ !mvec -> do
+    [!idxVal] -> withHostObject ets thisVecObj $ \_ !mvec -> do
       let exitWith :: EdhVector -> STM ()
           exitWith !newVec = do
             !newStore <- HostStore <$> newTVar (toDyn newVec)
@@ -203,6 +340,147 @@ createVectorClass !clsOuterScope =
       throwEdh ets UsageError
         $  "invalid assigning index for a Vector: "
         <> T.pack (show apk)
+
+
+  vecCopyWithOpProc :: EdhIntrinsicOp -> EdhHostProc
+  vecCopyWithOpProc !withOp apk@(ArgsPack !args _kwargs) !exit !ets =
+    case args of
+      [!other] -> withHostObject ets thisVecObj $ \_ !mvec ->
+        unsafeIOToSTM (MV.new $ MV.length mvec) >>= \ !newVec ->
+          let copyAt :: Int -> STM ()
+              copyAt !n = if n < 0
+                then do
+                  !newStore <- HostStore <$> newTVar (toDyn newVec)
+                  edhMutCloneObj thisVecObj (edh'scope'that scope) newStore
+                    >>= exitEdh ets exit
+                    .   EdhObject
+                else unsafeIOToSTM (MV.read mvec n) >>= \ !srcVal ->
+                  runEdhTx ets
+                    $ withOp (IntplSubs srcVal) (IntplSubs other)
+                    $ \ !opRtnV _ets -> do
+                        unsafeIOToSTM $ MV.unsafeWrite newVec n opRtnV
+                        copyAt (n - 1)
+          in  copyAt (MV.length mvec - 1)
+      _ ->
+        throwEdh ets UsageError
+          $  "invalid op assigning args for a Vector: "
+          <> T.pack (show apk)
+   where
+    !scope      = contextScope $ edh'context ets
+    !thisVecObj = edh'scope'this scope
+
+
+  opAssignElems
+    :: EdhThreadState
+    -> EdhIntrinsicOp
+    -> EdhValue
+    -> EdhVector
+    -> Int
+    -> Int
+    -> Int
+    -> STM ()
+    -> STM ()
+  opAssignElems !ets !withOp !rhVal !mvec !start !stop !step !exit = assignAt
+    start
+   where
+    assignAt :: Int -> STM ()
+    assignAt !n = if n >= stop
+      then exit
+      else unsafeIOToSTM (MV.read mvec n) >>= \ !oldVal ->
+        runEdhTx ets
+          $ withOp (IntplSubs oldVal) (IntplSubs rhVal)
+          $ \ !opRtnV _ets -> do
+              unsafeIOToSTM $ MV.unsafeWrite mvec n opRtnV
+              assignAt (n + step)
+
+  vecAssignWithOpProc :: EdhIntrinsicOp -> EdhHostProc
+  vecAssignWithOpProc !withOp apk@(ArgsPack !args _kwargs) !exit !ets =
+    case args of
+      [!other] -> withHostObject ets thisVecObj $ \_ !mvec ->
+        opAssignElems ets withOp other mvec 0 (MV.length mvec) 1
+          $ exitEdh ets exit
+          $ EdhObject thisVecObj
+      _ ->
+        throwEdh ets UsageError
+          $  "invalid op assigning args for a Vector: "
+          <> T.pack (show apk)
+   where
+    !scope      = contextScope $ edh'context ets
+    !thisVecObj = edh'scope'this scope
+
+  opAssignRange
+    :: EdhThreadState
+    -> EdhIntrinsicOp
+    -> EdhValue
+    -> EdhVector
+    -> Int
+    -> Int
+    -> Int
+    -> EdhTxExit
+    -> STM ()
+  opAssignRange !ets !withOp !rhVal !mvec !start !stop !step !exit =
+    case edhUltimate rhVal of
+      EdhObject !objOther -> withHostObject' objOther exitWithNonVecAssign
+        $ \_ !mvecOther -> assignWithVec start 0 mvecOther
+      _ -> exitWithNonVecAssign
+   where
+    (q, r)               = quotRem (stop - start) step
+    !len                 = if r == 0 then abs q else 1 + abs q
+    exitWithNonVecAssign = case edhUltimate rhVal of
+      EdhArgsPack (ArgsPack !args' _) -> assignWithList start $ take len args'
+      EdhList (List _ !lsv) -> do
+        !ls <- readTVar lsv
+        assignWithList start $ take len ls
+      _ -> opAssignElems ets withOp rhVal mvec start stop step
+        $ exitEdh ets exit nil
+    assignWithList :: Int -> [EdhValue] -> STM ()
+    assignWithList _ [] = exitEdh ets exit nil
+    assignWithList !n (x : xs) =
+      unsafeIOToSTM (MV.read mvec n) >>= \ !oldVal ->
+        runEdhTx ets
+          $ withOp (IntplSubs oldVal) (IntplSubs x)
+          $ \ !opRtnV _ets -> do
+              unsafeIOToSTM $ MV.unsafeWrite mvec n opRtnV
+              assignWithList (n + step) xs
+    assignWithVec :: Int -> Int -> EdhVector -> STM ()
+    assignWithVec !n !i !mvec' = if i >= len || i >= MV.length mvec'
+      then exitEdh ets exit nil
+      else do
+        !oldVal   <- unsafeIOToSTM $ MV.unsafeRead mvec n
+        !otherVal <- unsafeIOToSTM $ MV.unsafeRead mvec' i
+        runEdhTx ets
+          $ withOp (IntplSubs oldVal) (IntplSubs otherVal)
+          $ \ !opRtnV _ets -> do
+              unsafeIOToSTM $ MV.unsafeWrite mvec n opRtnV
+              assignWithVec (n + step) (i + 1) mvec'
+
+  vecIdxAssignWithOpProc :: EdhIntrinsicOp -> EdhHostProc
+  vecIdxAssignWithOpProc !withOp apk@(ArgsPack !args _kwargs) !exit !ets =
+    case args of
+      [!idxVal, !other] -> withThisHostObj ets $ \_ !mvec ->
+        parseEdhIndex ets idxVal $ \case
+          Left !err -> throwEdh ets UsageError err
+          Right (EdhIndex !i) ->
+            unsafeIOToSTM (MV.read mvec i) >>= \ !oldVal ->
+              runEdhTx ets
+                $ withOp (IntplSubs oldVal) (IntplSubs other)
+                $ \ !opRtnV _ets -> do
+                    unsafeIOToSTM $ MV.unsafeWrite mvec i opRtnV
+                    exitEdh ets exit opRtnV
+          Right EdhAny ->
+            opAssignElems ets withOp other mvec 0 (MV.length mvec) 1
+              $ exitEdh ets exit nil
+          Right EdhAll ->
+            opAssignRange ets withOp other mvec 0 (MV.length mvec) 1 exit
+          Right (EdhSlice !start !stop !step) ->
+            edhRegulateSlice ets (MV.length mvec) (start, stop, step)
+              $ \(!iStart, !iStop, !iStep) ->
+                  opAssignRange ets withOp other mvec iStart iStop iStep exit
+
+      _ ->
+        throwEdh ets UsageError
+          $  "invalid index op assigning args for a Vector: "
+          <> T.pack (show apk)
 
 
   vecNullProc :: EdhHostProc
