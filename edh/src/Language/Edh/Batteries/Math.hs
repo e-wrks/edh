@@ -39,8 +39,8 @@ addProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhv ->
 
 
 -- | operator (-)
-subsProc :: EdhIntrinsicOp
-subsProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+subtProc :: EdhIntrinsicOp
+subtProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
     EdhDecimal !lhNum -> evalExpr rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
