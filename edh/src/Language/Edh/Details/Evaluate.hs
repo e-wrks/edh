@@ -449,6 +449,22 @@ edhCreateHostObj !clsObj !hsd !supers = do
   return $ Object oid es clsObj ss
 
 
+-- Clone `that` object with one of its super object (i.e. `this`) mutated
+-- to bear the new host storage data
+-- 
+-- todo maybe check new storage data type matches the old one?
+edhCloneHostObj
+  :: EdhThreadState
+  -> Object
+  -> Object
+  -> Dynamic
+  -> (Object -> STM ())
+  -> STM ()
+edhCloneHostObj !ets !fromThis !fromThat !newData !exit = do
+  !newStore <- HostStore <$> newTVar newData
+  edhMutCloneObj ets fromThis fromThat newStore exit
+
+
 -- | Create an Edh object from a class, without calling any `__init__()`
 -- method.
 edhCreateObj
@@ -526,6 +542,85 @@ edhConstructObj !clsObj !apk !exit !ets =
               $  "invalid __init__ method of type: "
               <> T.pack (edhTypeNameOf badInitMth)
     callInit =<< (obj :) <$> readTVar (edh'obj'supers obj)
+
+
+-- Clone `that` object with one of its super object (i.e. `this`) mutated
+-- to bear the new object stroage
+edhMutCloneObj
+  :: EdhThreadState
+  -> Object
+  -> Object
+  -> ObjectStore
+  -> (Object -> STM ())
+  -> STM ()
+edhMutCloneObj !ets !fromThis !fromThat !newStore !exitEnd =
+  newTVar Map.empty >>= \ !instMap ->
+    let
+      cloneSupers :: [Object] -> ([Object] -> STM ()) -> [Object] -> STM ()
+      cloneSupers !cloned !exitSupers [] = exitSupers $ reverse cloned
+      cloneSupers !cloned !exitSupers (super : rest) =
+        Map.lookup super <$> readTVar instMap >>= \case
+          Just !superClone -> cloneSupers (superClone : cloned) exitSupers rest
+          Nothing          -> clone1 super $ \ !superClone ->
+            cloneSupers (superClone : cloned) exitSupers rest
+      clone1 :: Object -> (Object -> STM ()) -> STM ()
+      clone1 !obj !exit1 =
+        (readTVar (edh'obj'supers obj) >>=)
+          $ cloneSupers []
+          $ \ !supersClone -> do
+              !oidNew    <- unsafeIOToSTM newUnique
+              !supersNew <- newTVar supersClone
+              !objClone  <- if obj == fromThis
+                then return fromThis { edh'obj'ident  = oidNew
+                                     , edh'obj'store  = newStore
+                                     , edh'obj'supers = supersNew
+                                     }
+                else case edh'obj'store obj of
+                  HashStore !es -> do
+                    !es' <- iopdClone es
+                    let !objClone = obj { edh'obj'ident  = oidNew
+                                        , edh'obj'store  = HashStore es'
+                                        , edh'obj'supers = supersNew
+                                        }
+                    return objClone
+                  ClassStore !cls -> do
+                    !cs' <- iopdClone $ edh'class'store cls
+                    let !clsClone = obj
+                          { edh'obj'ident  = oidNew
+                          , edh'obj'store  = ClassStore cls
+                                               { edh'class'store = cs'
+                                               }
+                          , edh'obj'supers = supersNew
+                          }
+                    return clsClone
+                  HostStore !hsv -> do
+                    !hsv' <- newTVar =<< readTVar hsv
+                    let !objClone = obj { edh'obj'ident  = oidNew
+                                        , edh'obj'store  = HostStore hsv'
+                                        , edh'obj'supers = supersNew
+                                        }
+                    return objClone
+              modifyTVar' instMap $ Map.insert obj objClone
+              lookupEdhMagicAttr objClone (AttrByName "__clone__") >>= \case
+                EdhNil -> exit1 objClone
+                EdhProcedure (EdhMethod !mth) _ ->
+                  runEdhTx ets
+                    $ callEdhMethod objClone
+                                    fromThat
+                                    mth
+                                    (ArgsPack [] odEmpty)
+                                    id
+                    $ \_ _ets -> exit1 objClone
+                EdhBoundProc (EdhMethod _mth) _this _that _ -> throwEdh
+                  ets
+                  UsageError
+                  "a bound __clone__ method, assumed wrong, discussion?"
+                !badMth ->
+                  throwEdh ets UsageError
+                    $  "invalid __clone__ method of type: "
+                    <> T.pack (edhTypeNameOf badMth)
+    in
+      clone1 fromThat $ \ !thatNew -> exitEnd thatNew
 
 
 edhObjExtends :: EdhThreadState -> Object -> Object -> STM () -> STM ()

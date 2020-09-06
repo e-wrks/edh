@@ -528,11 +528,9 @@ createEdhWorld !console = liftIO $ do
       Just (scope :: Scope) -> case outerScopeOf scope of
         Nothing          -> exitEdh ets exit nil
         Just !outerScope -> do
-          !hsv'          <- newTVar $ toDyn outerScope
-          !outerScopeObj <- edhMutCloneObj this
-                                           (edh'scope'that procScope)
-                                           (HostStore hsv')
-          exitEdh ets exit $ EdhObject outerScopeObj
+          !hsv' <- newTVar $ toDyn outerScope
+          edhMutCloneObj ets this (edh'scope'that procScope) (HostStore hsv')
+            $ \ !outerScopeObj -> exitEdh ets exit $ EdhObject outerScopeObj
     _ -> exitEdh ets exit $ EdhString "bogus scope object"
    where
     !procScope = contextScope $ edh'context ets

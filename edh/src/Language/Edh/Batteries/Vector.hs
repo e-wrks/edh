@@ -247,9 +247,8 @@ createVectorClass !clsOuterScope =
       let exitWith :: EdhVector -> STM ()
           exitWith !newVec = do
             !newStore <- HostStore <$> newTVar (toDyn newVec)
-            edhMutCloneObj thisVecObj (edh'scope'that scope) newStore
-              >>= exitEdh ets exit
-              .   EdhObject
+            edhMutCloneObj ets thisVecObj (edh'scope'that scope) newStore
+              $ \ !thatObjClone -> exitEdh ets exit $ EdhObject thatObjClone
           exitWithRange :: Int -> Int -> Int -> STM ()
           exitWithRange !start !stop !step = do
             !newVec <- unsafeIOToSTM $ do
@@ -347,20 +346,21 @@ createVectorClass !clsOuterScope =
     case args of
       [!other] -> withHostObject ets thisVecObj $ \_ !mvec ->
         unsafeIOToSTM (MV.new $ MV.length mvec) >>= \ !newVec ->
-          let copyAt :: Int -> STM ()
-              copyAt !n = if n < 0
-                then do
-                  !newStore <- HostStore <$> newTVar (toDyn newVec)
-                  edhMutCloneObj thisVecObj (edh'scope'that scope) newStore
-                    >>= exitEdh ets exit
-                    .   EdhObject
-                else unsafeIOToSTM (MV.read mvec n) >>= \ !srcVal ->
-                  runEdhTx ets
-                    $ withOp (IntplSubs srcVal) (IntplSubs other)
-                    $ \ !opRtnV _ets -> do
-                        unsafeIOToSTM $ MV.unsafeWrite newVec n opRtnV
-                        copyAt (n - 1)
-          in  copyAt (MV.length mvec - 1)
+          let
+            copyAt :: Int -> STM ()
+            copyAt !n = if n < 0
+              then do
+                !newStore <- HostStore <$> newTVar (toDyn newVec)
+                edhMutCloneObj ets thisVecObj (edh'scope'that scope) newStore
+                  $ \ !thatObjClone -> exitEdh ets exit $ EdhObject thatObjClone
+              else unsafeIOToSTM (MV.read mvec n) >>= \ !srcVal ->
+                runEdhTx ets
+                  $ withOp (IntplSubs srcVal) (IntplSubs other)
+                  $ \ !opRtnV _ets -> do
+                      unsafeIOToSTM $ MV.unsafeWrite newVec n opRtnV
+                      copyAt (n - 1)
+          in
+            copyAt (MV.length mvec - 1)
       _ ->
         throwEdh ets UsageError
           $  "invalid op assigning args for a Vector: "

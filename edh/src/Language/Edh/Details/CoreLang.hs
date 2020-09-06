@@ -245,60 +245,45 @@ lookupEdhSuperAttr !this !key = readTVar (edh'obj'supers this) >>= searchSupers
 
 lookupEdhSelfAttr :: Object -> AttrKey -> STM EdhValue
 lookupEdhSelfAttr !this !key = case edh'obj'store this of
-  HostStore{}   -> lookupFromClassOf this
+  HostStore{}   -> lookupFromClass
   HashStore !es -> iopdLookup key es >>= \case
     Just !v -> return v
-    Nothing -> lookupFromClassOf this
+    Nothing -> lookupFromClass
   ClassStore !cls -> iopdLookup key (edh'class'store cls) >>= \case
     Just !v -> return v
-    Nothing -> lookupFromClassOf this
+    Nothing -> lookupFromClass
  where
-  lookupFromClassOf !obj = if clsObj == obj
+  lookupFromClass = if clsObj == this
     then return EdhNil -- reached ultimate meta class of the world
     else case edh'obj'store clsObj of
       ClassStore !cls -> iopdLookup key (edh'class'store cls) >>= \case
         Just !v -> return v
         Nothing -> return EdhNil -- don't resort to meta class here
       _ -> return EdhNil -- todo should complain loudly here?
-    where !clsObj = edh'obj'class obj
+    where !clsObj = edh'obj'class this
 {-# INLINE lookupEdhSelfAttr #-}
 
-
--- * Edh object manipulation
-
-
--- Clone `that` object with one of its super object (i.e. `this`) mutated
--- to bear the new object stroage
-edhMutCloneObj :: Object -> Object -> ObjectStore -> STM Object
-edhMutCloneObj !fromThis !fromThat !newStore = do
-  !oidNewThis <- unsafeIOToSTM newUnique
-  let !newThis =
-        fromThis { edh'obj'ident = oidNewThis, edh'obj'store = newStore }
-  if fromThis == fromThat
-    then return newThis
-    else do
-      let
-
-        substThis :: [Object] -> [Object] -> [Object]
-        substThis [] !supersNew = reverse supersNew
-        substThis (super : rest) !supersNew =
-          substThis rest
-            $ (if super == fromThis then newThis else super)
-            : supersNew
-
-      !supers     <- readTVar $ edh'obj'supers fromThat
-      !oidNewThat <- unsafeIOToSTM newUnique
-      !supersNew  <- newTVar $! substThis supers []
-      return
-        $ fromThat { edh'obj'ident = oidNewThat, edh'obj'supers = supersNew }
-
--- Clone `that` object with one of its super object (i.e. `this`) mutated
--- to bear the new host storage data
--- 
--- todo maybe check new storage data type matches the old one?
-edhCloneHostObj :: Object -> Object -> Dynamic -> STM Object
-edhCloneHostObj !fromThis !fromThat !newData =
-  HostStore <$> newTVar newData >>= edhMutCloneObj fromThis fromThat
+-- note magic attributes can not be inherited
+lookupEdhMagicAttr :: Object -> AttrKey -> STM EdhValue
+lookupEdhMagicAttr !this !key = case edh'obj'store this of
+  HostStore{} -> -- a host object can only have magic attributes on its class
+    lookupFromClass
+  HashStore !es -> -- unlike in Python, here we honor magic attributes from
+    -- an object itself
+                   iopdLookup key es >>= \case
+    Just !v -> return v
+    Nothing -> lookupFromClass
+  ClassStore{} -> -- magic attributes on a class are assumed for its instances,
+    -- not for itself
+    lookupFromClass
+ where
+  lookupFromClass = case edh'obj'store clsObj of
+    ClassStore !cls -> iopdLookup key (edh'class'store cls) >>= \case
+      Just !v -> return v
+      Nothing -> return EdhNil -- don't resort to meta class here
+    _ -> return EdhNil -- todo should complain loudly here?
+    where !clsObj = edh'obj'class this
+{-# INLINE lookupEdhMagicAttr #-}
 
 
 -- * import/export
