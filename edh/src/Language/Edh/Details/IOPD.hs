@@ -30,32 +30,43 @@ data IOPD k v where
     , iopd'array :: {-# UNPACK #-} !(TVar (Vector (TVar (Maybe (k, v)))))
     } -> IOPD k v
 
+iopdClone :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM (IOPD k v)
+iopdClone (IOPD !mv !wpv !nhv !av) = do
+  !mv'  <- newTVar =<< readTVar mv
+  !wpv' <- newTVar =<< readTVar wpv
+  !nhv' <- newTVar =<< readTVar nhv
+  !av'  <- newTVar =<< do
+    !a <- readTVar av
+    let a' = runST $ V.thaw a >>= V.freeze
+    return a'
+  return $ IOPD mv' wpv' nhv' av'
+
 iopdEmpty :: forall k v . (Eq k, Hashable k) => STM (IOPD k v)
 iopdEmpty = do
-  mv  <- newTVar Map.empty
-  wpv <- newTVar 0
-  nhv <- newTVar 0
-  av  <- newTVar V.empty
+  !mv  <- newTVar Map.empty
+  !wpv <- newTVar 0
+  !nhv <- newTVar 0
+  !av  <- newTVar V.empty
   return $ IOPD mv wpv nhv av
 
 iopdNull :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM Bool
 iopdNull (IOPD _mv !wpv !nhv _av) = do
-  wp <- readTVar wpv
-  nh <- readTVar nhv
+  !wp <- readTVar wpv
+  !nh <- readTVar nhv
   return (wp - nh <= 0)
 
 iopdSize :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM Int
 iopdSize (IOPD _mv !wpv !nhv _av) = do
-  wp <- readTVar wpv
-  nh <- readTVar nhv
+  !wp <- readTVar wpv
+  !nh <- readTVar nhv
   return $ wp - nh
 
 iopdSingleton :: forall k v . (Eq k, Hashable k) => k -> v -> STM (IOPD k v)
 iopdSingleton !key !val = do
-  mv  <- newTVar $ Map.singleton key 0
-  wpv <- newTVar 1
-  nhv <- newTVar 0
-  av  <- newTVar . V.singleton =<< newTVar (Just (key, val))
+  !mv  <- newTVar $ Map.singleton key 0
+  !wpv <- newTVar 1
+  !nhv <- newTVar 0
+  !av  <- newTVar . V.singleton =<< newTVar (Just (key, val))
   return $ IOPD mv wpv nhv av
 
 iopdInsert :: forall k v . (Eq k, Hashable k) => k -> v -> IOPD k v -> STM ()
@@ -64,31 +75,31 @@ iopdInsert !key !val d@(IOPD !mv !wpv _nhv !av) =
     Just !i ->
       flip V.unsafeIndex i <$> readTVar av >>= flip writeTVar (Just (key, val))
     Nothing -> do
-      entry <- newTVar $ Just (key, val)
-      wp0   <- readTVar wpv
-      a0    <- readTVar av
+      !entry <- newTVar $ Just (key, val)
+      !wp0   <- readTVar wpv
+      !a0    <- readTVar av
       if wp0 >= V.length a0 then iopdReserve 7 d else pure ()
-      wp <- readTVar wpv
-      a  <- readTVar av
+      !wp <- readTVar wpv
+      !a  <- readTVar av
       if wp >= V.length a
         then error "bug: iopd reservation malfunctioned"
         else pure ()
       flip seq (modifyTVar' mv $ Map.insert key wp) $ runST $ do
-        a' <- V.unsafeThaw a
+        !a' <- V.unsafeThaw a
         MV.unsafeWrite a' wp entry
       writeTVar wpv (wp + 1)
 
 iopdReserve :: forall k v . (Eq k, Hashable k) => Int -> IOPD k v -> STM ()
 iopdReserve !moreCap (IOPD _mv !wpv _nhv !av) = do
-  wp <- readTVar wpv
-  a  <- readTVar av
+  !wp <- readTVar wpv
+  !a  <- readTVar av
   let !needCap = wp + moreCap
       !cap     = V.length a
   if cap >= needCap
     then return ()
     else do
       let !aNew = runST $ do
-            a' <- MV.unsafeNew needCap
+            !a' <- MV.unsafeNew needCap
             MV.unsafeCopy (MV.unsafeSlice 0 wp a')
               =<< V.unsafeThaw (V.slice 0 wp a)
             V.unsafeFreeze a'
@@ -129,8 +140,8 @@ iopdDelete !key (IOPD !mv _wpv !nhv !av) =
 
 iopdKeys :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM [k]
 iopdKeys (IOPD _mv !wpv _nhv !av) = do
-  wp <- readTVar wpv
-  a  <- readTVar av
+  !wp <- readTVar wpv
+  !a  <- readTVar av
   let go !keys !i | i < 0 = return keys
       go !keys !i         = readTVar (V.unsafeIndex a i) >>= \case
         Nothing           -> go keys (i - 1)
@@ -139,8 +150,8 @@ iopdKeys (IOPD _mv !wpv _nhv !av) = do
 
 iopdValues :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM [v]
 iopdValues (IOPD _mv !wpv _nhv !av) = do
-  wp <- readTVar wpv
-  a  <- readTVar av
+  !wp <- readTVar wpv
+  !a  <- readTVar av
   let go !vals !i | i < 0 = return vals
       go !vals !i         = readTVar (V.unsafeIndex a i) >>= \case
         Nothing           -> go vals (i - 1)
@@ -149,8 +160,8 @@ iopdValues (IOPD _mv !wpv _nhv !av) = do
 
 iopdToList :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM [(k, v)]
 iopdToList (IOPD _mv !wpv _nhv !av) = do
-  wp <- readTVar wpv
-  a  <- readTVar av
+  !wp <- readTVar wpv
+  !a  <- readTVar av
   let go !entries !i | i < 0 = return entries
       go !entries !i         = readTVar (V.unsafeIndex a i) >>= \case
         Nothing     -> go entries (i - 1)
@@ -160,8 +171,8 @@ iopdToList (IOPD _mv !wpv _nhv !av) = do
 iopdToReverseList
   :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM [(k, v)]
 iopdToReverseList (IOPD _mv !wpv _nhv !av) = do
-  wp <- readTVar wpv
-  a  <- readTVar av
+  !wp <- readTVar wpv
+  !a  <- readTVar av
   let go !entries !i | i >= wp = return entries
       go !entries !i           = readTVar (V.unsafeIndex a i) >>= \case
         Nothing     -> go entries (i + 1)
@@ -170,9 +181,9 @@ iopdToReverseList (IOPD _mv !wpv _nhv !av) = do
 
 iopdFromList :: forall k v . (Eq k, Hashable k) => [(k, v)] -> STM (IOPD k v)
 iopdFromList !entries = do
-  tves <- sequence $ [ (key, ) <$> newTVar (Just e) | e@(!key, _) <- entries ]
+  !tves <- sequence $ [ (key, ) <$> newTVar (Just e) | e@(!key, _) <- entries ]
   let (mNew, wpNew, nhNew, aNew) = runST $ do
-        a <- MV.unsafeNew cap
+        !a <- MV.unsafeNew cap
         let go [] !m !wp !nh = (m, wp, nh, ) <$> V.unsafeFreeze a
             go ((!key, !ev) : rest) !m !wp !nh = case Map.lookup key m of
               Nothing -> do
@@ -182,10 +193,10 @@ iopdFromList !entries = do
                 MV.unsafeWrite a i ev
                 go rest m wp nh
         go tves Map.empty 0 0
-  mv  <- newTVar mNew
-  wpv <- newTVar wpNew
-  nhv <- newTVar nhNew
-  av  <- newTVar aNew
+  !mv  <- newTVar mNew
+  !wpv <- newTVar wpNew
+  !nhv <- newTVar nhNew
+  !av  <- newTVar aNew
   return $ IOPD mv wpv nhv av
   where cap = length entries
 
@@ -194,10 +205,10 @@ iopdFromList !entries = do
 iopdSnapshot
   :: forall k v . (Eq k, Hashable k) => IOPD k v -> STM (OrderedDict k v)
 iopdSnapshot (IOPD !mv !wpv _nhv !av) = do
-  m  <- readTVar mv
-  wp <- readTVar wpv
-  a  <- readTVar av
-  a' <- V.sequence (readTVar <$> V.slice 0 wp a)
+  !m  <- readTVar mv
+  !wp <- readTVar wpv
+  !a  <- readTVar av
+  !a' <- V.sequence (readTVar <$> V.slice 0 wp a)
   return $ OrderedDict m a'
 
 
@@ -309,7 +320,7 @@ odToReverseList (OrderedDict !m !a) = go [] 0
 odFromList :: forall k v . (Eq k, Hashable k) => [(k, v)] -> OrderedDict k v
 odFromList !entries =
   let (mNew, aNew) = runST $ do
-        a <- MV.unsafeNew $ length entries
+        !a <- MV.unsafeNew $ length entries
         let go []                    !m _wp = (m, ) <$> V.unsafeFreeze a
             go (ev@(!key, _) : rest) !m !wp = case Map.lookup key m of
               Nothing -> do
@@ -330,7 +341,7 @@ odMap
 odMap _f (OrderedDict !m _a) | Map.null m = OrderedDict Map.empty V.empty
 odMap !f (OrderedDict !m !a) =
   let !aNew = runST $ do
-        a' <- MV.unsafeNew $ V.length a
+        !a' <- MV.unsafeNew $ V.length a
         MV.set a' Nothing
         let go []                  = V.unsafeFreeze a'
             go ((!key, !i) : rest) = do
@@ -351,7 +362,7 @@ odMapSTM _f (OrderedDict !m _a) | Map.null m =
   return $ OrderedDict Map.empty V.empty
 odMapSTM !f (OrderedDict !m !a) =
   let !aNew = runST $ do
-        a' <- MV.unsafeNew $ V.length a
+        !a' <- MV.unsafeNew $ V.length a
         MV.set a' $ return Nothing
         let go []                  = V.unsafeFreeze a'
             go ((!key, !i) : rest) = do
