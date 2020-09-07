@@ -1,0 +1,52 @@
+
+{
+
+  class DynAttrs {
+
+    method __init__ (** attrs ) {
+      this._d = dict(** attrs )
+      this._n = 111
+    }
+
+
+    method (@) ( attrKey ) this._d[ attrKey ]
+
+    method (@=) ( attrKey, *optionalVal ) case optionalVal of {
+      { () } -> this._d[ attrKey ] = nil
+      { ( attrVal ) } -> this._d[ attrKey ] = attrVal
+      _ -> assert( false, 'impossible' )
+    }
+
+
+    property$
+    method n () this._n
+
+    setter$
+    method n (* optionalVal ) case optionalVal of {
+      { () } -> this._n = nil
+      { ( val ) } -> this._n = val
+      _ -> assert( false, 'impossible' )
+    }
+
+  }
+
+}
+
+dao = DynAttrs( a=3, b=2, c=5 )
+dao._d
+
+dao.a
+dao.a=7
+dao.a
+dao._d
+
+dao.b=nil
+dao._d
+dao.b # this should throw
+
+dao.n
+dao.n=333
+dao.n
+dao._d
+dao.n=nil
+dao.n # this should throw

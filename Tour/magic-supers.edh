@@ -1,0 +1,98 @@
+
+{
+
+  class Super1 {
+
+    # handles `extends` from a child object, which can be referred to by
+    # `that` reference from this procedure, it is usually a class object as
+    # descendant class.
+    #
+    # `this` is the new super object being added to `that`, if this
+    # method err out, the inheritance relationship won't be established.
+    # `childScope` is a scope object reflecting `that` object's entity
+    method (<-^) ( childScope ) {
+      ; -1<| 'connecting child ' ++ that
+      ++ ' which is defined at: ' ++ childScope.lexiLoc
+    }
+
+    # handles `obj.xxx` against an end object, which can be referred to by
+    # `that` reference from this procedure.
+    method (@<-) ( attrKey ) {
+      ; -1<| 'getting ' ++ attrKey ++ ' from the obj'
+
+      case choice = 2 of {
+        # try rest super objects, default to the expr specified here if none
+        # of them provided a better value
+        1 -> {
+          return default that@attrKey * 2 $=> nil
+        }
+
+        # try rest super objects, as if this specific super magic doesn't exist
+        # this should be useless as a static choice, by much powerful to be a
+        # dynamic one
+        2 -> {
+          return NA # note `NA` is equivalent to `default nil`
+        }
+
+        # avoid consulting further super objects and give the resolution result
+        # immediately
+        #
+        # note here is giving out nil (no-such-attr semantic) if no such attr
+        # on this super, even if some of the further super objects has a valid
+        # attribute so named
+        3 -> {
+          return this?@attrKey
+        }
+      }
+
+    }
+
+    # handles `obj.xxx = yyy` for `obj` being an end object, which can be
+    # referred to by `that` reference from this procedure
+    method (<-@) ( attrKey, attrVal ) {
+      ; -1<| 'setting ' ++ attrKey ++ ' to ' ++ attrVal ++ ' for the obj'
+      that@attrKey = attrVal
+    }
+
+    # a readonly property providing fixed default value
+    property$
+    method n() 23
+
+  }
+
+  class BusObj1 { extends Super1
+
+    property$
+    method n () {
+      inherited = super?n
+      ; -1<| 'super provided n - ' ++ inherited
+      return this.n2 * inherited
+    }
+
+    this.n1 = 7
+
+    this.n2 = 3
+
+  }
+
+}
+
+bo1 = BusObj1()
+
+{
+
+  ; -1<| 'bo1.n is ' ++ bo1.n
+
+  ; -1<| 'bo1.n1 is ' ++ bo1.n1
+
+  ; -1<| 'bo1.n2 is ' ++ bo1.n2
+
+  # destined to fail
+  # ;-1<| 'bo1.n3 is ' ++ bo1.n3
+
+}
+
+{
+  bo1.n1 = 5
+  ; -1<| 'bo1.n1 set to ' ++ bo1.n1
+}
