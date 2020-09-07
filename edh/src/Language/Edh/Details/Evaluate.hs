@@ -53,7 +53,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit !ets = case fromExpr of
   AttrExpr ThisRef ->
     let !this = edh'scope'this scope
     in  lookupEdhObjAttr this key >>= \case
-          (_   , EdhNil) -> exitEdh ets exitNoAttr $ EdhObject this
+          (_    , EdhNil) -> exitEdh ets exitNoAttr $ EdhObject this
           (this', !val  ) -> chkVanillaExit this' this val
 
   -- no magic layer laid over access via `that` ref
@@ -842,9 +842,8 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
 
  where
 
-  -- execution of the args receiving always in a tx for atomicity, and
-  -- in the specified receiving (should be callee's outer) context
-  !etsRecv = etsCaller { edh'in'tx = True, edh'context = recvCtx }
+  -- execution of the args receiving always in the callee's outer context
+  !etsRecv = etsCaller { edh'context = recvCtx }
 
   recvFromPack
     :: ArgsPack
