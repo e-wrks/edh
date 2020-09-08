@@ -141,6 +141,8 @@ module Language.Edh.EHI
   , withThisHostObj'
   , withHostObject
   , withHostObject'
+  , withDerivedHostObject
+  , withDerivedHostObject'
   , EdhObjectAllocator
   , Class
   , edhClassName

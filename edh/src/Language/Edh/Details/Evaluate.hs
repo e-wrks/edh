@@ -1910,6 +1910,44 @@ withHostObject' !obj !naExit !exit = case edh'obj'store obj of
   _ -> naExit
 
 
+withDerivedHostObject
+  :: forall a
+   . Typeable a
+  => EdhThreadState
+  -> Object
+  -> (Object -> TVar Dynamic -> a -> STM ())
+  -> STM ()
+withDerivedHostObject !ets !endObj !exit = withDerivedHostObject' endObj
+                                                                  naExit
+                                                                  exit
+ where
+  naExit =
+    throwEdh ets UsageError
+      $  "not derived from a host object of expected storage type: "
+      <> T.pack (show $ typeRep (Proxy :: Proxy a))
+
+withDerivedHostObject'
+  :: forall a
+   . Typeable a
+  => Object
+  -> STM ()
+  -> (Object -> TVar Dynamic -> a -> STM ())
+  -> STM ()
+withDerivedHostObject' !endObj !naExit !exit = case edh'obj'store endObj of
+  HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+    Just (hsd :: a) -> exit endObj hsv hsd
+    _               -> readTVar (edh'obj'supers endObj) >>= checkSupers
+  _ -> readTVar (edh'obj'supers endObj) >>= checkSupers
+ where
+  checkSupers :: [Object] -> STM ()
+  checkSupers []                = naExit
+  checkSupers (superObj : rest) = case edh'obj'store superObj of
+    HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+      Just (hsd :: a) -> exit superObj hsv hsd
+      _               -> checkSupers rest
+    _ -> checkSupers rest
+
+
 deExpr :: Expr -> Expr
 deExpr (ExprWithSrc !x _) = deExpr x
 deExpr !x                 = x
