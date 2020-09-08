@@ -144,17 +144,13 @@ setterProc (ArgsPack !args !kwargs) !exit !ets =
 
 -- | operator (@) - attribute key dereferencing
 attrDerefAddrProc :: EdhIntrinsicOp
-attrDerefAddrProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal ->
-  case edhUltimate rhVal of
-    EdhExpr _ (AttrExpr (DirectRef !addr)) _ -> \ !ets ->
-      resolveEdhAttrAddr ets addr $ \ !key ->
+attrDerefAddrProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal !ets ->
+  let naExit = edhValueDesc ets rhVal $ \ !badRefDesc ->
+        throwEdh ets EvalError
+          $  "invalid attribute reference value: "
+          <> badRefDesc
+  in  edhValueAsAttrKey' ets rhVal naExit $ \ !key ->
         runEdhTx ets $ getEdhAttr lhExpr key (noAttr $ attrKeyStr key) exit
-    EdhString !attrName ->
-      getEdhAttr lhExpr (AttrByName attrName) (noAttr attrName) exit
-    EdhSymbol sym@(Symbol _ !symRepr) ->
-      getEdhAttr lhExpr (AttrBySym sym) (noAttr symRepr) exit
-    _ -> throwEdhTx EvalError $ "invalid attribute reference type - " <> T.pack
-      (edhTypeNameOf rhVal)
  where
   noAttr !keyRepr !lhVal =
     throwEdhTx EvalError
@@ -168,16 +164,13 @@ attrDerefAddrProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal ->
 -- | operator (?@) - attribute dereferencing tempter, 
 -- address an attribute off an object if possible, nil otherwise
 attrDerefTemptProc :: EdhIntrinsicOp
-attrDerefTemptProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal ->
-  case edhUltimate rhVal of
-    EdhExpr _ (AttrExpr (DirectRef !addr)) _ -> \ !ets ->
-      resolveEdhAttrAddr ets addr
+attrDerefTemptProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal !ets ->
+  let naExit = edhValueDesc ets rhVal $ \ !badRefDesc ->
+        throwEdh ets EvalError
+          $  "invalid attribute reference value: "
+          <> badRefDesc
+  in  edhValueAsAttrKey' ets rhVal naExit
         $ \ !key -> runEdhTx ets $ getEdhAttr lhExpr key noAttr exit
-    EdhString !attrName -> getEdhAttr lhExpr (AttrByName attrName) noAttr exit
-    EdhSymbol !sym      -> getEdhAttr lhExpr (AttrBySym sym) noAttr exit
-    _ ->
-      throwEdhTx EvalError $ "invalid attribute reference type - " <> T.pack
-        (edhTypeNameOf rhVal)
   where noAttr _ = exitEdhTx exit nil
 
 -- | operator (?) - attribute tempter, 

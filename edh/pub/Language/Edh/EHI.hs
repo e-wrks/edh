@@ -181,6 +181,7 @@ module Language.Edh.EHI
   , edhValueStr
   , edhValueStrTx
   , edhValueDesc
+  , edhValueAsAttrKey
   , EdhValue(..)
   , EdhTypeValue(..)
   , edhDeCaseClose

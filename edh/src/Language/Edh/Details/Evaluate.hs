@@ -42,6 +42,21 @@ import           Language.Edh.Details.PkgMan
 import           Language.Edh.Details.Utils
 
 
+edhValueAsAttrKey :: EdhThreadState -> EdhValue -> (AttrKey -> STM ()) -> STM ()
+edhValueAsAttrKey !ets !keyVal !exit =
+  let naExit = edhValueDesc ets keyVal $ \ !valDesc ->
+        throwEdh ets EvalError $ "unexpected attribute key: " <> valDesc
+  in  edhValueAsAttrKey' ets keyVal naExit exit
+edhValueAsAttrKey'
+  :: EdhThreadState -> EdhValue -> STM () -> (AttrKey -> STM ()) -> STM ()
+edhValueAsAttrKey' !ets !keyVal !naExit !exit = case edhUltimate keyVal of
+  EdhString !attrName -> exit $ AttrByName attrName
+  EdhSymbol !sym      -> exit $ AttrBySym sym
+  EdhExpr _ (AttrExpr (DirectRef !addr)) _ -> resolveEdhAttrAddr ets addr exit
+  _                   -> naExit
+{-# INLINE edhValueAsAttrKey #-}
+
+
 -- | Get an attribute value from a target expression.
 --
 -- The target would be an object in most common cases, but can be some type of
