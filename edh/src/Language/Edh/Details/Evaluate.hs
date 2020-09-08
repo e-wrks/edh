@@ -2350,142 +2350,170 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
           transEntries rest $ (AttrBySym expSym, binder val) : result
         _ -> transEntries rest result -- todo should err out here?
 
-importEdhModule' :: EntityStore -> ArgsReceiver -> Text -> EdhTxExit -> EdhTx
-importEdhModule' !tgtEnt !argsRcvr !importSpec !exit =
-  importEdhModule importSpec $ \ !moduVal -> case moduVal of
-    EdhObject !modu -> importFromObject tgtEnt argsRcvr modu exit
-    _               -> error "bug: imported module not an object"
-
+-- | Import some Edh module
+--
+-- Note the returned module object may still be under going initialization run
 importEdhModule :: Text -> EdhTxExit -> EdhTx
-importEdhModule !impSpec !exit !ets = if edh'in'tx ets
-  then throwEdh ets UsageError "you don't import from within a transaction"
-  else do
-    moduMap <- readTMVar worldModules
-    case Map.lookup normalizedSpec moduMap of
-      -- attempt the import specification as direct module id first
-      Just !moduSlot -> readTMVar moduSlot >>= \case
-        -- import error has been encountered, propagate the error
-        EdhNamedValue _ !importError -> edhThrow ets importError
-        -- module already imported, got it as is
-        !modu                        -> exitEdh ets exit modu
-      -- resolving to `.edh` source files from local filesystem
-      Nothing -> importFromFS
- where
-  !ctx           = edh'context ets
-  !worldModules  = edh'world'modules $ edh'ctx'world ctx
-  !scope         = contextScope ctx
+importEdhModule !importSpec !exit =
+  importEdhModule'' importSpec (\_ _ -> pure ()) exit
 
-  normalizedSpec = normalizeImpSpec impSpec
-  normalizeImpSpec :: Text -> Text
-  normalizeImpSpec = withoutLeadingSlash . withoutTrailingSlash
-  withoutLeadingSlash spec = fromMaybe spec $ T.stripPrefix "/" spec
-  withoutTrailingSlash spec = fromMaybe spec $ T.stripSuffix "/" spec
+-- | Import some Edh module into specified entity
+importEdhModule' :: EntityStore -> ArgsReceiver -> Text -> EdhTxExit -> EdhTx
+importEdhModule' !tgtEnt !argsRcvr !importSpec !exit !ets =
+  runEdhTx ets $ importEdhModule''
+    importSpec
+    (\ !modu !loadExit ->
+      -- an exception handler triggered during the import in post load action
+      -- may appear executed later than subsequent code of the import
+      --  statement,this may be surprising
+      runEdhTx ets $ importFromObject tgtEnt argsRcvr modu $ \_ _ -> loadExit
+    )
+    exit
 
-  locateModuInFS :: ((ImportName, FilePath, FilePath) -> STM ()) -> STM ()
-  locateModuInFS !exit' =
-    lookupEdhCtxAttr scope (AttrByName "__path__") >>= \case
-      EdhString !fromPath ->
-        lookupEdhCtxAttr scope (AttrByName "__file__") >>= \case
-          EdhString !fromFile ->
-            (exit' =<<)
-              $ unsafeIOToSTM
-              $ locateEdhModule (edhPkgPathFrom $ T.unpack fromFile)
-              $ case normalizedSpec of
-    -- special case for `import * '.'`, 2 possible use cases:
-    --
-    --  *) from an entry module (i.e. __main__.edh), to import artifacts
-    --     from its respective persistent module
-    --
-    --  *) from a persistent module, to re-populate the module scope with
-    --     its own exports (i.e. the dict __exports__ in its scope), in
-    --     case the module scope possibly altered after initialization
-                  "." -> T.unpack fromPath
-                  _   -> T.unpack normalizedSpec
-          _ -> error "bug: no valid `__file__` in module context"
-      _ -> (exit' =<<) $ unsafeIOToSTM $ locateEdhModule "." $ T.unpack
-        normalizedSpec
-
-  importFromFS :: STM ()
-  importFromFS = locateModuInFS $ \(!impName, !nomPath, !moduFile) -> do
-    let !moduId = T.pack nomPath
-    moduMap' <- takeTMVar worldModules
-    case Map.lookup moduId moduMap' of
-      Just !moduSlot -> do
-        -- put back immediately
-        putTMVar worldModules moduMap'
-        -- blocking wait the target module loaded
-        runEdhTx ets $ edhContSTM $ readTMVar moduSlot >>= \case
-          -- TODO GHC should be able to detect cyclic imports as 
-          --      deadlock, better to report that more friendly,
-          --      and more importantly, to prevent the crash.
-          EdhNamedValue _ !importError ->
-            -- the first importer failed loading it,
-            -- replicate the error in this thread
-            edhThrow ets importError
-          !modu -> exitEdh ets exit modu
-      Nothing -> do -- we are the first importer
-        -- allocate an empty slot
-        moduSlot <- newEmptyTMVar
-        -- put it for global visibility
-        putTMVar worldModules $ Map.insert moduId moduSlot moduMap'
-        -- resolve correct module name
-        !moduName <- case impName of
-          AbsoluteName !moduName -> return moduName
-          RelativeName !relModuName ->
-            lookupEdhCtxAttr scope (AttrByName "__name__") >>= \case
-              EdhString !currModuName ->
-                return $ currModuName <> "/" <> relModuName
-              _ -> return $ "/" <> relModuName -- todo this confusing?
-        -- try load the module
-        edhCatch ets
-                 (loadModule moduSlot moduName moduId moduFile)
-                 (exitEdh ets exit)
-          $ \_etsThrower !exv _recover !rethrow -> case exv of
-              EdhNil -> rethrow exv -- no error occurred
-              _      -> do
-                void $ tryPutTMVar moduSlot $ EdhNamedValue "<import-error>" exv
-                -- cleanup on loading error
-                moduMap'' <- takeTMVar worldModules
-                case Map.lookup moduId moduMap'' of
-                  Nothing        -> putTMVar worldModules moduMap''
-                  Just moduSlot' -> if moduSlot' == moduSlot
-                    then putTMVar worldModules $ Map.delete moduId moduMap''
-                    else putTMVar worldModules moduMap''
-                rethrow exv
-
-
-loadModule
-  :: TMVar EdhValue -> Text -> ModuleId -> FilePath -> EdhTxExit -> EdhTx
-loadModule !moduSlot !moduName !moduId !moduFile !exit !ets = if edh'in'tx ets
-  then throwEdh ets
+-- | Import some Edh module and perform the `loadAct` after its fully loaded
+--
+-- Note the returned module object may still be under going initialization run,
+-- and the load action may be performed either synchronously or asynchronously
+importEdhModule'' :: Text -> (Object -> STM () -> STM ()) -> EdhTxExit -> EdhTx
+importEdhModule'' !importSpec !loadAct !impExit !etsImp = if edh'in'tx etsImp
+  then throwEdh etsImp
                 UsageError
-                "you don't load a module from within a transaction"
-  else
+                "you don't import file modules from within a transaction"
+  else loadEdhModule $ \case
+    -- module already loaded, perform the load action synchronously, before
+    -- returning the module object
+    ModuLoaded !modu -> loadAct modu $ exitEdh etsImp impExit $ EdhObject modu
+    -- import error has been encountered, propagate the error synchronously
+    ModuFailed !exvImport -> edhThrow etsImp exvImport
+    -- enqueue the load action to be performed asynchronously, then return the
+    -- module object that still under in-progress loading, this is crucial to
+    -- not get killed as deadlock in case of cyclic import
+    ModuLoading !loadScope !postQueue -> do
+      modifyTVar' postQueue ((\ !modu -> loadAct modu $ pure ()) :)
+      exitEdh etsImp impExit $ EdhObject $ edh'scope'this loadScope
+ where
+
+  runModuleSource :: Scope -> FilePath -> EdhTxExit -> EdhTx
+  runModuleSource !scopeLoad !moduFile !exit !ets =
     unsafeIOToSTM (streamDecodeUtf8With lenientDecode <$> B.readFile moduFile)
       >>= \case
-            Some !moduSource _ _ -> do
-              !modu <- edhCreateModule world moduName moduId moduFile
-              objectScope modu >>= \case
-                Nothing -> error "bug: module object has no scope"
-                Just !scopeLoad ->
-                  let !ctxLoad = ctx
-                        { edh'ctx'stack        = scopeLoad <| edh'ctx'stack ctx
-                        , edh'ctx'pure         = False
-                        , edh'ctx'exporting    = False
-                        , edh'ctx'eff'defining = False
-                        }
-                      !etsLoad = ets { edh'context = ctxLoad }
-                  in  runEdhTx etsLoad
-                        $ evalEdh moduFile moduSource
-                        $ \_moduResult _ets -> do
-                            -- arm the successfully loaded module
-                            void $ tryPutTMVar moduSlot $ EdhObject modu
-                            -- switch back to module importer's scope and continue
-                            exitEdh ets exit $ EdhObject modu
- where
-  !ctx   = edh'context ets
-  !world = edh'ctx'world ctx
+            Some !moduSource _ _ ->
+              let !ctxLoad = ctx
+                    { edh'ctx'stack        = scopeLoad <| edh'ctx'stack ctx
+                    , edh'ctx'pure         = False
+                    , edh'ctx'exporting    = False
+                    , edh'ctx'eff'defining = False
+                    }
+                  !etsRunModu = ets { edh'context = ctxLoad }
+              in  runEdhTx etsRunModu $ evalEdh moduFile moduSource exit
+    where !ctx = edh'context ets
 
+  loadEdhModule :: (ModuSlot -> STM ()) -> STM ()
+  loadEdhModule !exit = do
+    !moduMap <- readTMVar worldModules
+    case Map.lookup normalizedSpec moduMap of
+      -- attempt the import specification as direct module id first
+      Just !moduSlotVar -> readTVar moduSlotVar >>= exit
+      -- resolving to `.edh` source files from local filesystem
+      Nothing           -> importFromFS
+   where
+    !ctx           = edh'context etsImp
+    !world         = edh'ctx'world ctx
+    !worldModules  = edh'world'modules world
+
+    normalizedSpec = normalizeImpSpec importSpec
+    normalizeImpSpec :: Text -> Text
+    normalizeImpSpec = withoutLeadingSlash . withoutTrailingSlash
+    withoutLeadingSlash spec = fromMaybe spec $ T.stripPrefix "/" spec
+    withoutTrailingSlash spec = fromMaybe spec $ T.stripSuffix "/" spec
+
+    importFromFS :: STM ()
+    importFromFS = locateModuInFS $ \(!impName, !nomPath, !moduFile) -> do
+      let !moduId = T.pack nomPath
+      !moduMap' <- takeTMVar worldModules
+      case Map.lookup moduId moduMap' of
+        Just !moduSlotVar -> do
+          -- put the world wide map back
+          putTMVar worldModules moduMap'
+          -- and done
+          readTVar moduSlotVar >>= exit
+        Nothing -> do -- we are the first importer
+          -- resolve correct module name
+          !moduName <- case impName of
+            AbsoluteName !moduName -> return moduName
+            RelativeName !relModuName ->
+              lookupEdhCtxAttr scope (AttrByName "__name__") >>= \case
+                EdhString !currModuName ->
+                  return $ currModuName <> "/" <> relModuName
+                _ -> return $ "/" <> relModuName -- todo this confusing?
+          -- allocate a loading slot
+          !modu         <- edhCreateModule world moduName moduId moduFile
+          !loadingScope <- objectScope modu >>= \case
+            Nothing         -> error "bug: module object has no scope"
+            Just !scopeLoad -> return scopeLoad
+          !postLoads   <- newTVar []
+          !moduSlotVar <- newTVar $ ModuLoading loadingScope postLoads
+          -- update into world wide module map
+          putTMVar worldModules $ Map.insert moduId moduSlotVar moduMap'
+          -- try load the module in next transaction
+          runEdhTx etsImp
+            $ edhContSTM
+            $ edhCatch
+                etsImp
+                (runModuleSource loadingScope moduFile)
+                (\_moduResult -> do
+                  let !loadedSlot = ModuLoaded modu
+                  -- update the world wide map for this just loaded module
+                  writeTVar moduSlotVar loadedSlot
+                  -- run its post load actions
+                  -- todo 
+                  --  *) should catch and ensure every post action executed?
+                  --     those actions tend not to throw as just write to TBQs
+                  --  *) should eval post actions in same order as they are
+                  --     queued? i.e. reverse the intermediate list here
+                  readTVar postLoads >>= sequence_ . (<*> pure modu)
+                  -- return the loaded slot
+                  exit loadedSlot
+                )
+            $ \_etsThrower !exv _recover !rethrow -> case exv of
+                EdhNil -> rethrow exv -- no error occurred
+                _      -> do
+                  let !failedSlot = ModuFailed exv
+                  writeTVar moduSlotVar failedSlot
+                  -- cleanup on loading error
+                  moduMap'' <- takeTMVar worldModules
+                  case Map.lookup moduId moduMap'' of
+                    Nothing            -> putTMVar worldModules moduMap''
+                    Just !moduSlotVar' -> if moduSlotVar' == moduSlotVar
+                      then putTMVar worldModules $ Map.delete moduId moduMap''
+                      else putTMVar worldModules moduMap''
+                  rethrow exv
+     where
+      !scope = contextScope ctx
+
+      locateModuInFS :: ((ImportName, FilePath, FilePath) -> STM ()) -> STM ()
+      locateModuInFS !exit' =
+        lookupEdhCtxAttr scope (AttrByName "__path__") >>= \case
+          EdhString !fromPath ->
+            lookupEdhCtxAttr scope (AttrByName "__file__") >>= \case
+              EdhString !fromFile ->
+                (exit' =<<)
+                  $ unsafeIOToSTM
+                  $ locateEdhModule (edhPkgPathFrom $ T.unpack fromFile)
+                  $ case normalizedSpec of
+        -- special case for `import * '.'`, 2 possible use cases:
+        --
+        --  *) from an entry module (i.e. __main__.edh), to import artifacts
+        --     from its respective persistent module
+        --
+        --  *) from a persistent module, to re-populate the module scope with
+        --     its own exports (i.e. the dict __exports__ in its scope), in
+        --     case the module scope possibly altered after initialization
+                      "." -> T.unpack fromPath
+                      _   -> T.unpack normalizedSpec
+              _ -> error "bug: no valid `__file__` in module context"
+          _ -> (exit' =<<) $ unsafeIOToSTM $ locateEdhModule "." $ T.unpack
+            normalizedSpec
 
 moduleContext :: EdhWorld -> Object -> STM Context
 moduleContext !world !modu = objectScope modu >>= \case

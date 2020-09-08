@@ -439,11 +439,8 @@ data EdhWorld = EdhWorld {
     -- | all operators declared in this world, this also used as the
     -- _world lock_ in parsing source code to be executed in this world
   , edh'world'operators :: !(TMVar OpPrecDict)
-    -- | all modules loaded or being loaded into this world, for each
-    -- entry, will be a transient entry containing an error value (that
-    -- appears as an EdhNamedValue) if failed loading, or a permanent
-    -- entry containing the module object if successfully loaded
-  , edh'world'modules :: !(TMVar (Map.HashMap ModuleId (TMVar EdhValue)))
+    -- | all modules loaded, being loaded, or failed loading into this world
+  , edh'world'modules :: !(TMVar (Map.HashMap ModuleId (TVar ModuSlot)))
     -- | for console logging, input and output
   , edh'world'console :: !EdhConsole
     -- wrapping a scope as object for reflective purpose
@@ -469,6 +466,11 @@ createNamespace !world !nsName !nsArts = do
   !nsClass   = edh'obj'class $ edh'scope'this rootScope
 
 type ModuleId = Text
+
+data ModuSlot =
+    ModuLoaded   !Object
+  | ModuLoading  !Scope !(TVar [Object -> STM ()])
+  | ModuFailed   !EdhValue
 
 edhCreateModule :: EdhWorld -> Text -> ModuleId -> String -> STM Object
 edhCreateModule !world !moduName !moduId !srcName = do

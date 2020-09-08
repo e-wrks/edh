@@ -795,8 +795,8 @@ installEdhModule !world !moduId !preInstall = liftIO $ do
   void $ runEdhProgram' (worldContext world) $ \ !ets ->
     moduleContext world modu >>= \ !moduCtx ->
       preInstall ets { edh'context = moduCtx } $ do
-        moduSlot <- newTMVar $ EdhObject modu
-        moduMap  <- takeTMVar (edh'world'modules world)
+        !moduSlot <- newTVar $ ModuLoaded modu
+        !moduMap  <- takeTMVar (edh'world'modules world)
         putTMVar (edh'world'modules world) $ Map.insert moduId moduSlot moduMap
   return modu
 
@@ -805,10 +805,11 @@ installedEdhModule !world !moduId =
   liftIO $ atomically $ tryReadTMVar (edh'world'modules world) >>= \case
     Nothing  -> return Nothing
     Just !mm -> case Map.lookup moduId mm of
-      Nothing        -> return Nothing
-      Just !moduSlot -> tryReadTMVar moduSlot >>= \case
-        Just (EdhObject !modu) -> return $ Just modu
-        _                      -> return Nothing
+      Nothing           -> return Nothing
+      Just !moduSlotVar -> readTVar moduSlotVar >>= \case
+        ModuLoaded !modu         -> return $ Just modu
+        ModuLoading !loadScope _ -> return $ Just $ edh'scope'this loadScope
+        _                        -> return Nothing
 
 
 runEdhModule
