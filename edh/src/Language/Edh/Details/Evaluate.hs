@@ -2334,25 +2334,32 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
     runEdhTx ets $ importFromApk tgtEnt argsRcvr (ArgsPack [] arts') $ \_ ->
       exitEdhTx exit $ EdhObject fromObj
  where
+  moduClass = edh'module'class $ edh'ctx'world $ edh'context ets
+
   doBindTo :: Object -> Object -> EdhValue -> EdhValue
   doBindTo !this !that = \case
     EdhProcedure !callable !effOuter ->
       EdhBoundProc callable this that effOuter
     !art -> art
+
   collect1 :: EntityStore -> Object -> STM ()
   collect1 !arts !obj = case edh'obj'store obj of
-    HashStore !hs -> case edh'obj'store $ edh'obj'class obj of
-      ClassStore !cls -> do
-        -- ensure instance artifacts overwrite class artifacts
-        collectExp (edh'class'store cls) (doBindTo obj fromObj)
-        collectExp hs                    (doBindTo obj fromObj)
-      _ ->
-        edhValueDesc ets (EdhObject $ edh'obj'class fromObj) $ \ !badDesc ->
-          -- note this seems not preventing cps exiting,
-          -- at least we can get an error thrown
-          throwEdh ets EvalError
-            $  "bad class for the object to be imported - "
-            <> badDesc
+    HashStore !hs ->
+      let !objClass = edh'obj'class obj
+          !binder   = if objClass == moduClass then id else doBindTo obj fromObj
+      in  case edh'obj'store objClass of
+            ClassStore !cls -> do
+              -- ensure instance artifacts overwrite class artifacts
+              collectExp (edh'class'store cls) binder
+              collectExp hs                    binder
+            _ ->
+              edhValueDesc ets (EdhObject $ edh'obj'class fromObj)
+                $ \ !badDesc ->
+                -- note this seems not preventing cps exiting,
+                -- at least we can get an error thrown
+                    throwEdh ets EvalError
+                      $  "bad class for the object to be imported - "
+                      <> badDesc
     ClassStore !cls -> collectExp (edh'class'store cls) id
     HostStore{}     -> case edh'obj'store $ edh'obj'class obj of
       ClassStore !cls ->
