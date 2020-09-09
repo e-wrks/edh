@@ -114,25 +114,18 @@ finallyProc !tryExpr !finallyExpr !exit !etsOuter =
 -- `fallthrough`
 branchProc :: EdhIntrinsicOp
 branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
-    -- recognize `_` as similar to the wildcard pattern match in Haskell,
-    -- it always matches
+
+  -- recognize `_` as similar to the wildcard pattern match in Haskell,
+  -- it always matches
   AttrExpr (DirectRef (NamedAttr "_")) -> afterMatch
 
-  InfixExpr "|" !patternExpr !guardExpr ->
-    handlePattern
-        patternExpr
-        (throwEdh ets UsageError $ "bad pattern: " <> T.pack (show patternExpr))
+  InfixExpr "|" !matchExpr !guardExpr ->
+    handlePattern matchExpr (valueMatch matchExpr $ chkGuard guardExpr)
       $ \ !ps -> do
           updAttrs ps
-          runEdhTx ets $ evalExpr guardExpr $ \ !guardResult _ets ->
-            case edhUltimate guardResult of
-              EdhBool True  -> afterMatch
-              EdhBool False -> exitEdh ets exit EdhCaseOther
-              _             -> edhValueDesc ets guardResult $ \ !badDesc ->
-                throwEdh ets UsageError $ "bad guard result: " <> badDesc
+          chkGuard guardExpr
 
-
-  _ -> handlePattern lhExpr valueMatch $ \ !ps -> do
+  _ -> handlePattern lhExpr (valueMatch lhExpr afterMatch) $ \ !ps -> do
     updAttrs ps
     afterMatch
 
@@ -141,20 +134,6 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
   !callerScope = contextScope callerCtx
   !ctxMatch    = edh'ctx'match callerCtx
   !scopeEntity = edh'scope'entity callerScope
-
-  -- value-wise matching against the target in context
-  valueMatch   = runEdhTx ets $ evalExpr lhExpr $ \ !lhVal _ets ->
-    edhNamelyEqual ets (edhDeCaseWrap lhVal) ctxMatch $ \case
-      True  -> afterMatch
-      False -> exitEdh ets exit EdhCaseOther
-
-  updAttrs :: [(AttrKey, EdhValue)] -> STM ()
-  updAttrs [] = -- todo: which one is semantically more correct ?
-    -- to trigger a write, or avoid the write
-    return ()  -- this avoids triggering stm write
-  updAttrs !ps' = iopdUpdate
-    [ (k, noneNil v) | (k, v) <- ps', k /= AttrByName "_" ]
-    scopeEntity
 
   afterMatch :: STM ()
   afterMatch = runEdhTx ets $ evalExpr rhExpr $ \ !rhVal ->
@@ -169,6 +148,30 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
       EdhFallthrough            -> EdhFallthrough
       -- some other value, the outer branch eval to it
       _                         -> EdhCaseClose rhVal
+
+  chkGuard :: Expr -> STM ()
+  chkGuard !guardExpr =
+    runEdhTx ets $ evalExpr guardExpr $ \ !guardResult _ets ->
+      case edhUltimate guardResult of
+        EdhBool True  -> afterMatch
+        EdhBool False -> exitEdh ets exit EdhCaseOther
+        _             -> edhValueDesc ets guardResult $ \ !badDesc ->
+          throwEdh ets UsageError $ "bad guard result: " <> badDesc
+
+  -- value-wise matching against the target in context
+  valueMatch !matchExpr !matchExit =
+    runEdhTx ets $ evalExpr matchExpr $ \ !matchVal _ets ->
+      edhNamelyEqual ets (edhDeCaseWrap matchVal) ctxMatch $ \case
+        True  -> matchExit
+        False -> exitEdh ets exit EdhCaseOther
+
+  updAttrs :: [(AttrKey, EdhValue)] -> STM ()
+  updAttrs [] = -- todo: which one is semantically more correct ?
+    -- to trigger a write, or avoid the write
+    return ()  -- this avoids triggering stm write
+  updAttrs !ps' = iopdUpdate
+    [ (k, noneNil v) | (k, v) <- ps', k /= AttrByName "_" ]
+    scopeEntity
 
   handlePattern :: Expr -> STM () -> ([(AttrKey, EdhValue)] -> STM ()) -> STM ()
   handlePattern !fullExpr !naExit !matchExit = case fullExpr of
