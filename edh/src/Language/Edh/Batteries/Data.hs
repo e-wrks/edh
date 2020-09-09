@@ -445,20 +445,32 @@ markProc _ _ !ets =
 
 
 showProc :: EdhHostProc
-showProc (ArgsPack [!v] !kwargs) !exit !ets = case edhUltimate v of
-  EdhObject !o -> case edh'obj'store o of
-    ClassStore{} -> lookupEdhObjAttr (edh'obj'class o) (AttrByName "__show__")
-      >>= showWithMagic o
-    _ -> lookupEdhObjAttr o (AttrByName "__show__") >>= showWithMagic o
-  EdhProcedure !callable Nothing ->
-    exitEdh ets exit $ EdhString $ T.pack (show callable)
-  EdhProcedure !callable Just{} ->
-    exitEdh ets exit $ EdhString $ "effectful " <> T.pack (show callable)
-  EdhBoundProc !callable _ _ Nothing ->
-    exitEdh ets exit $ EdhString $ "bound " <> T.pack (show callable)
-  EdhBoundProc !callable _ _ Just{} ->
-    exitEdh ets exit $ EdhString $ "effectful bound " <> T.pack (show callable)
-  _ -> showWithNoMagic
+showProc (ArgsPack [!v] !kwargs) !exit !ets = case v of
+
+  -- show of named value
+  EdhNamedValue !n val@EdhNamedValue{} -> edhValueRepr ets val
+    -- Edh operators are all left-associative, parenthesis needed
+    $ \ !repr -> exitEdh ets exit $ EdhString $ n <> " := (" <> repr <> ")"
+  EdhNamedValue !n !val -> edhValueRepr ets val
+    $ \ !repr -> exitEdh ets exit $ EdhString $ n <> " := " <> repr <> ""
+
+  -- show of other values
+  _ -> case edhUltimate v of
+    EdhObject !o -> case edh'obj'store o of
+      ClassStore{} ->
+        lookupEdhObjAttr (edh'obj'class o) (AttrByName "__show__")
+          >>= showWithMagic o
+      _ -> lookupEdhObjAttr o (AttrByName "__show__") >>= showWithMagic o
+    EdhProcedure !callable Nothing ->
+      exitEdh ets exit $ EdhString $ T.pack (show callable)
+    EdhProcedure !callable Just{} ->
+      exitEdh ets exit $ EdhString $ "effectful " <> T.pack (show callable)
+    EdhBoundProc !callable _ _ Nothing ->
+      exitEdh ets exit $ EdhString $ "bound " <> T.pack (show callable)
+    EdhBoundProc !callable _ _ Just{} ->
+      exitEdh ets exit $ EdhString $ "effectful bound " <> T.pack
+        (show callable)
+    _ -> showWithNoMagic
  where -- todo specialize more informative show for intrinsic types of values
   showWithMagic !o = \case
     (_, EdhNil) -> showWithNoMagic

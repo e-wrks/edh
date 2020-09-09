@@ -2806,15 +2806,10 @@ edhValueRepr !ets !val !exitRepr = case val of
         lookupEdhObjAttr (edh'obj'class o) (AttrByName "__repr__") >>= withMagic
       _ -> lookupEdhObjAttr o (AttrByName "__repr__") >>= withMagic
 
-  -- repr of named value
-  EdhNamedValue !n v@EdhNamedValue{} ->
-    edhValueRepr ets v $ \ !repr ->
-    -- Edh operators are all left-associative, parenthesis needed
-                                    exitRepr $ n <> " := (" <> repr <> ")"
-  EdhNamedValue !n !v ->
-    edhValueRepr ets v $ \ !repr -> exitRepr $ n <> " := " <> repr <> ""
+  -- repr of named value is just its name
+  EdhNamedValue !n        _v -> exitRepr n
 
-  EdhProcedure !callable _ -> exitRepr $ callableName callable
+  EdhProcedure  !callable _  -> exitRepr $ callableName callable
   EdhBoundProc !callable _ _ _ ->
     exitRepr $ "{# bound #} " <> callableName callable
 
@@ -2846,19 +2841,13 @@ edhValueRepr !ets !val !exitRepr = case val of
     exit' $ T.concat [ k <> ":" <> v <> ", " | (k, v) <- entries ]
   reprDictCSR entries ((k, v) : rest) exit' = edhValueRepr ets k $ \ !kRepr ->
     do
-      let krDecor :: Text -> Text
-          krDecor = case k of
-            -- quote the key repr in the entry if it's a term
-            -- bcoz (:=) precedence is 1, less than (:)'s 2
-            EdhNamedValue{} -> \r -> "(" <> r <> ")"
-            _               -> id
-          vrDecor :: Text -> Text
+      let vrDecor :: Text -> Text
           vrDecor = case v of
             -- quote the value repr in the entry if it's a pair
             EdhPair{} -> \r -> "(" <> r <> ")"
             _         -> id
       edhValueRepr ets v $ \ !vRepr ->
-        reprDictCSR ((krDecor kRepr, vrDecor vRepr) : entries) rest exit'
+        reprDictCSR ((kRepr, vrDecor vRepr) : entries) rest exit'
 
 edhValueReprTx :: EdhValue -> EdhTxExit -> EdhTx
 edhValueReprTx !val !exit !ets =
