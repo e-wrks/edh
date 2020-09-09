@@ -1,0 +1,64 @@
+
+{
+
+  class CreditRating {
+
+    market'grade = 0 # static default value
+
+    method __init__( sym as this.sym, ***_ ) this.score = case this.sym of {
+
+      'AAA' -> 100
+      'AA' -> 80
+      'A' -> 70
+      'BBB' -> 60
+
+      'BB' -> 50
+      'B' -> 40
+      'CCC' -> 30
+      'CC' -> 20
+      'C' -> 10
+      'D' -> 0
+      'NR' -> NA
+
+      assert( false, 'invalid rating symbol: ' ++ this.sym )
+      None
+    }
+
+    method __repr__() this.sym
+
+    method __compare__( other ) case other of {
+      { { CreditRating: r } } -> case true of {
+        that.market'grade > r.market'grade -> GT
+        that.market'grade < r.market'grade -> LT
+        that.score > r.score -> GT
+        that.score < r.score -> LT
+        _ -> EQ
+      }
+      _ -> NA
+    }
+
+  }
+
+  class RatedOnEarth { extends CreditRating
+
+    market'grade = 100 # static default value
+
+  }
+
+  class FictionalRating { extends CreditRating
+
+    market'grade = -100 # static default value
+
+  }
+
+}
+
+
+BBB'on'earth = RatedOnEarth( 'BBB' )
+
+phantom'AAA = FictionalRating( 'AAA' )
+
+{
+  console.print$ 'Should you believe that? - '
+  ++ phantom'AAA > BBB'on'earth
+}

@@ -8,11 +8,14 @@ import           Control.Concurrent.STM
 
 import qualified Data.Text                     as T
 import qualified Data.Text.Encoding            as TE
+import           Data.Maybe
 
 import           Data.Lossless.Decimal
 
 import           Language.Edh.Control
+import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
+import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
 
 
@@ -165,7 +168,7 @@ idEqProc :: EdhIntrinsicOp
 idEqProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal -> evalExpr rhExpr
   $ \ !rhVal -> exitEdhTx exit (EdhBool $ edhIdentEqual lhVal rhVal)
 
--- | operator (is not) (not is)
+-- | operator (is not)
 idNotEqProc :: EdhIntrinsicOp
 idNotEqProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
   evalExpr rhExpr
@@ -205,12 +208,86 @@ isLeProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 
 doEdhComparison
   :: EdhTxExit -> EdhValue -> EdhValue -> (Ordering -> Bool) -> EdhTx
-doEdhComparison !exit !lhVal !rhVal !cm !ets = compareEdhValue >>= \case
-  Nothing  -> exitEdh ets exit edhNA
-  Just ord -> exitEdh ets exit (EdhBool $ cm ord)
+doEdhComparison !exit !lhVal !rhVal !cm !ets = if edhIdentEqual lhVal rhVal
+  then exitEdh ets exit (EdhBool $ cm EQ)
+  else case edhUltimate lhVal of
+    EdhObject !lhObj -> case edh'obj'store lhObj of
+      ClassStore{} ->
+        lookupEdhObjAttr (edh'obj'class lhObj) cmpMagicKey
+          >>= tryMagic id lhObj rhVal tryRightHandMagic
+      _ ->
+        lookupEdhObjAttr lhObj cmpMagicKey
+          >>= tryMagic id lhObj rhVal tryRightHandMagic
+    _ -> tryRightHandMagic
  where
-  compareEdhValue :: STM (Maybe Ordering)
-  compareEdhValue = case edhUltimate lhVal of
+  cmpMagicKey = AttrByName "__compare__"
+
+  inverse :: Ordering -> Ordering
+  inverse = \case
+    EQ -> EQ
+    LT -> GT
+    GT -> LT
+
+  tryRightHandMagic = case edhUltimate rhVal of
+    EdhObject !rhObj -> case edh'obj'store rhObj of
+      ClassStore{} ->
+        lookupEdhObjAttr (edh'obj'class rhObj) cmpMagicKey
+          >>= tryMagic inverse rhObj lhVal noMagic
+      _ ->
+        lookupEdhObjAttr rhObj cmpMagicKey
+          >>= tryMagic inverse rhObj lhVal noMagic
+    _ -> noMagic
+
+  tryMagic
+    :: (Ordering -> Ordering)
+    -> Object
+    -> EdhValue
+    -> STM ()
+    -> (Object, EdhValue)
+    -> STM ()
+  tryMagic !reorder !obj !opponent !naExit = \case
+    (_     , EdhNil                         ) -> naExit
+    (!this', EdhProcedure (EdhMethod !mth) _) -> runEdhTx ets $ callEdhMethod
+      this'
+      obj
+      mth
+      (ArgsPack [opponent] odEmpty)
+      id
+      chkMagicRtn
+    (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+      runEdhTx ets $ callEdhMethod this
+                                   that
+                                   mth
+                                   (ArgsPack [opponent] odEmpty)
+                                   id
+                                   chkMagicRtn
+    (_, !badCmpMagic) -> edhValueDesc ets badCmpMagic $ \ !badDesc ->
+      throwEdh ets UsageError $ "bad __compare__ magic: " <> badDesc
+   where
+    chkMagicRtn :: EdhTxExit
+    chkMagicRtn !magicRtn _ets = case edhUltimate magicRtn of
+      EdhDefault _ !exprDef !etsDef ->
+        runEdhTx (fromMaybe ets etsDef)
+          $ evalExpr (deExpr exprDef)
+          $ \ !defVal _ets -> chkMagicExit defVal
+      _ -> chkMagicExit magicRtn
+     where
+      chkMagicExit :: EdhValue -> STM ()
+      chkMagicExit = \case
+        EdhNil      -> naExit
+        EdhOrd !ord -> exitEdh ets exit (EdhBool $ cm $ reorder ord)
+        _           -> edhValueDesc ets magicRtn $ \ !badDesc ->
+          throwEdh ets UsageError
+            $  "invalid result from __compare__: "
+            <> badDesc
+
+
+  noMagic = compareWithNoMagic >>= \case
+    Nothing   -> exitEdh ets exit edhNA
+    Just !ord -> exitEdh ets exit (EdhBool $ cm ord)
+
+  compareWithNoMagic :: STM (Maybe Ordering)
+  compareWithNoMagic = case edhUltimate lhVal of
     EdhDecimal !lhNum -> case edhUltimate rhVal of
       EdhDecimal !rhNum -> return $ Just $ compare lhNum rhNum
       _                 -> return Nothing
