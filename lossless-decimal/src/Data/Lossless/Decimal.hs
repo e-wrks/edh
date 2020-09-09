@@ -12,9 +12,9 @@ import qualified Data.Scientific               as Scientific
 
 data Decimal = Decimal {
     denominator'10 :: !Integer
-    , exponent'10 :: !Integer
-    , numerator'10 :: !Integer
-}
+  , exponent'10    :: !Integer
+  , numerator'10   :: !Integer
+  }
 
 decimalToInteger :: Decimal -> Maybe Integer
 decimalToInteger v | d /= 1 || e < 0 = Nothing
