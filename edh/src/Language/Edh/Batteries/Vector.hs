@@ -42,7 +42,13 @@ createVectorClass !clsOuterScope =
           , vecAppendProc
           , PackReceiver [mandatoryArg "values"]
           )
-        , ("==", EdhMethod, vecEqProc     , PackReceiver [])
+        , ("==", EdhMethod, vecEqProc id, PackReceiver [])
+        , ( "!="
+          , EdhMethod
+          , vecEqProc not
+          , PackReceiver []
+          )
+-- TODO support vectorized comparitions
         , ("[]", EdhMethod, vecIdxReadProc, PackReceiver [mandatoryArg "idx"])
         , ( "[=]"
           , EdhMethod
@@ -228,8 +234,8 @@ createVectorClass !clsOuterScope =
       exitEdh ets exit $ EdhObject $ edh'scope'this $ contextScope $ edh'context
         ets
 
-  vecEqProc :: EdhHostProc
-  vecEqProc (ArgsPack !args _kwargs) !exit !ets = case args of
+  vecEqProc :: (Bool -> Bool) -> EdhHostProc
+  vecEqProc !inversion (ArgsPack !args _kwargs) !exit !ets = case args of
     [EdhObject !objOther] -> withThisHostObj ets $ \_ (mvec :: EdhVector) ->
       withHostObject' objOther naExit $ \_ !mvecOther -> do
         !conclusion <- unsafeIOToSTM $ do
@@ -238,9 +244,9 @@ createVectorClass !clsOuterScope =
           !vec      <- V.unsafeFreeze mvec
           !vecOther <- V.unsafeFreeze mvecOther
           return $ vec == vecOther
-        exitEdh ets exit $ EdhBool conclusion
+        exitEdh ets exit $ EdhBool $ inversion conclusion
     _ -> naExit
-    where naExit = exitEdh ets exit $ EdhBool False
+    where naExit = exitEdh ets exit $ EdhBool $ inversion False
 
   vecIdxReadProc :: EdhHostProc
   vecIdxReadProc apk@(ArgsPack !args _kwargs) !exit !ets = case args of
