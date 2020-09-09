@@ -83,7 +83,8 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit !ets =
           EdhDict (Dict _ !ds) ->
             iopdLookupDefault EdhNil ixVal ds >>= \ !dVal ->
               runEdhTx ets
-                $ withOp (IntplSubs dVal) (IntplSubs rhv)
+                $ withOp (LitExpr $ ValueLiteral dVal)
+                         (LitExpr $ ValueLiteral rhv)
                 $ \ !opRtnV _ets -> do
                     case opRtnV of
                       EdhDefault{} -> pure ()
@@ -199,7 +200,8 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit !ets =
           EdhObject !rhObj -> \_ets -> tryRightHandMagic rhObj
 
           _ ->
-            withOp (IntplSubs lhVal) (IntplSubs $ edhDeCaseWrap rhVal)
+            withOp (LitExpr $ ValueLiteral lhVal)
+                   (LitExpr $ ValueLiteral $ edhDeCaseWrap rhVal)
               $ \ !opRtnV -> case edhUltimate opRtnV of
                   EdhDefault{} -> edhSwitchState ets $ exitEdhTx exit opRtnV
                   _ ->

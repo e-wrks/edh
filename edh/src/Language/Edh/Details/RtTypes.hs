@@ -1376,7 +1376,6 @@ data Expr =
   -- to support interpolation within expressions, with source form
   | ExprWithSrc !Expr ![SourceSeg]
   | IntplExpr !Expr
-  | IntplSubs !EdhValue
   deriving (Eq, Show)
 
 data SourceSeg = SrcSeg !Text | IntplSeg !Expr
@@ -1389,6 +1388,7 @@ data Literal =
   | BoolLiteral !Bool
   | StringLiteral !Text
   | TypeLiteral !EdhTypeValue
+  | ValueLiteral !EdhValue
   deriving (Eq, Show)
 instance Hashable Literal where
   hashWithSalt s SinkCtor          = hashWithSalt s (-1 :: Int)
@@ -1397,6 +1397,7 @@ instance Hashable Literal where
   hashWithSalt s (BoolLiteral   x) = hashWithSalt s x
   hashWithSalt s (StringLiteral x) = hashWithSalt s x
   hashWithSalt s (TypeLiteral   x) = hashWithSalt s x
+  hashWithSalt s (ValueLiteral   x) = hashWithSalt s x
 
 
 -- | the type for the value of type of a value

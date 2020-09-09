@@ -2573,8 +2573,8 @@ moduleContext !world !modu = objectScope modu >>= \case
 
 intplExpr :: EdhThreadState -> Expr -> (Expr -> STM ()) -> STM ()
 intplExpr !ets !x !exit = case x of
-  IntplExpr !x' ->
-    runEdhTx ets $ evalExpr x' $ \ !val _ets -> exit $ IntplSubs val
+  IntplExpr !x' -> runEdhTx ets $ evalExpr x' $ \ !val _ets ->
+    exit $ LitExpr $ ValueLiteral val
   PrefixExpr !pref !x' ->
     intplExpr ets x' $ \ !x'' -> exit $ PrefixExpr pref x''
   AtoIsoExpr !x'          -> intplExpr ets x' $ \ !x'' -> exit $ AtoIsoExpr x''
@@ -2703,6 +2703,7 @@ evalLiteral = \case
   NilLiteral       -> return nil
   TypeLiteral !v   -> return (EdhType v)
   SinkCtor         -> EdhSink <$> newEventSink
+  ValueLiteral !v  -> return v
 
 
 evalAttrAddr :: AttrAddr -> EdhTxExit -> EdhTx
@@ -2921,8 +2922,6 @@ implantEffects !tgtEnt !effs =
 
 -- | Evaluate an Edh expression
 evalExpr :: Expr -> EdhTxExit -> EdhTx
-
-evalExpr (IntplSubs !val) !exit = exitEdhTx exit val
 
 evalExpr IntplExpr{} _exit =
   throwEdhTx EvalError "bug: interpolating out side of expr range."

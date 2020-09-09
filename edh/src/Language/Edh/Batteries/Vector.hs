@@ -356,7 +356,8 @@ createVectorClass !clsOuterScope =
                   $ \ !thatObjClone -> exitEdh ets exit $ EdhObject thatObjClone
               else unsafeIOToSTM (MV.read mvec n) >>= \ !srcVal ->
                 runEdhTx ets
-                  $ withOp (IntplSubs srcVal) (IntplSubs other)
+                  $ withOp (LitExpr $ ValueLiteral srcVal)
+                           (LitExpr $ ValueLiteral other)
                   $ \ !opRtnV _ets -> do
                       unsafeIOToSTM $ MV.unsafeWrite newVec n opRtnV
                       copyAt (n - 1)
@@ -389,7 +390,8 @@ createVectorClass !clsOuterScope =
       then exit
       else unsafeIOToSTM (MV.read mvec n) >>= \ !oldVal ->
         runEdhTx ets
-          $ withOp (IntplSubs oldVal) (IntplSubs rhVal)
+          $ withOp (LitExpr $ ValueLiteral oldVal)
+                   (LitExpr $ ValueLiteral rhVal)
           $ \ !opRtnV _ets -> do
               unsafeIOToSTM $ MV.unsafeWrite mvec n opRtnV
               assignAt (n + step)
@@ -439,7 +441,7 @@ createVectorClass !clsOuterScope =
     assignWithList !n (x : xs) =
       unsafeIOToSTM (MV.read mvec n) >>= \ !oldVal ->
         runEdhTx ets
-          $ withOp (IntplSubs oldVal) (IntplSubs x)
+          $ withOp (LitExpr $ ValueLiteral oldVal) (LitExpr $ ValueLiteral x)
           $ \ !opRtnV _ets -> do
               unsafeIOToSTM $ MV.unsafeWrite mvec n opRtnV
               assignWithList (n + step) xs
@@ -450,7 +452,8 @@ createVectorClass !clsOuterScope =
         !oldVal   <- unsafeIOToSTM $ MV.unsafeRead mvec n
         !otherVal <- unsafeIOToSTM $ MV.unsafeRead mvec' i
         runEdhTx ets
-          $ withOp (IntplSubs oldVal) (IntplSubs otherVal)
+          $ withOp (LitExpr $ ValueLiteral oldVal)
+                   (LitExpr $ ValueLiteral otherVal)
           $ \ !opRtnV _ets -> do
               unsafeIOToSTM $ MV.unsafeWrite mvec n opRtnV
               assignWithVec (n + step) (i + 1) mvec'
@@ -464,7 +467,8 @@ createVectorClass !clsOuterScope =
           Right (EdhIndex !i) ->
             unsafeIOToSTM (MV.read mvec i) >>= \ !oldVal ->
               runEdhTx ets
-                $ withOp (IntplSubs oldVal) (IntplSubs other)
+                $ withOp (LitExpr $ ValueLiteral oldVal)
+                         (LitExpr $ ValueLiteral other)
                 $ \ !opRtnV _ets -> do
                     unsafeIOToSTM $ MV.unsafeWrite mvec i opRtnV
                     exitEdh ets exit opRtnV

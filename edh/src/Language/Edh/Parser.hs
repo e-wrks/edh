@@ -561,6 +561,12 @@ parseLitExpr = choice
   , DecLiteral D.nan <$ litKw "nan"
   , DecLiteral D.inf <$ litKw "inf"
   , DecLiteral <$> parseDecLit
+  , ValueLiteral edhNone <$ litKw "None"
+  , ValueLiteral edhNothing <$ litKw "Nothing"
+  , ValueLiteral edhNA <$ litKw "NA"
+  , ValueLiteral (EdhOrd EQ) <$ litKw "EQ"
+  , ValueLiteral (EdhOrd LT) <$ litKw "LT"
+  , ValueLiteral (EdhOrd GT) <$ litKw "GT"
   , TypeLiteral DecimalType <$ litKw "DecimalType"
   , TypeLiteral BoolType <$ litKw "BoolType"
   , TypeLiteral StringType <$ litKw "StringType"

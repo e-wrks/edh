@@ -654,11 +654,12 @@ listPopProc :: EdhHostProc
 listPopProc (ArgsPack _ !kwargs) _ !ets | not $ odNull kwargs =
   throwEdh ets EvalError "bug: __ListType_pop__ got kwargs"
 listPopProc (ArgsPack [EdhList (List _ !lv)] _) !exit !ets =
-  mkHostProc (contextScope $ edh'context ets)
-             EdhMethod
-             "pop"
-             listPop
-             (PackReceiver [optionalArg "default" $ IntplSubs edhNone])
+  mkHostProc
+      (contextScope $ edh'context ets)
+      EdhMethod
+      "pop"
+      listPop
+      (PackReceiver [optionalArg "def'val" $ LitExpr $ ValueLiteral edhNone])
     >>= \mth -> exitEdh ets exit mth
  where
   listPop :: EdhHostProc
@@ -669,7 +670,7 @@ listPopProc (ArgsPack [EdhList (List _ !lv)] _) !exit !ets =
       _            -> exitEdh ets' exit' defVal
    where
     parseArgs = ArgsPackParser [\arg _ -> Right arg]
-      $ Map.fromList [("default", \arg _ -> Right arg)]
+      $ Map.fromList [("def'val", \arg _ -> Right arg)]
 listPopProc _ _ !ets =
   throwEdh ets EvalError "bug: __ListType_pop__ got unexpected args"
 

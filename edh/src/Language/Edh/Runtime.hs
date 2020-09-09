@@ -44,15 +44,8 @@ createEdhWorld !console = liftIO $ do
 
   -- the root object and root scope
   !idRoot  <- newUnique
-  !hsRoot  <- atomically $ iopdFromList
-    [ (AttrByName "__name__", EdhString "<root>")
-    , (AttrByName "None"    , edhNone)
-    , (AttrByName "Nothing" , edhNothing)
-    , (AttrByName "NA"      , edhNA)
-    , (AttrByName "EQ"      , EdhOrd EQ)
-    , (AttrByName "LT"      , EdhOrd LT)
-    , (AttrByName "GT"      , EdhOrd GT)
-    ]
+  !hsRoot  <- atomically
+    $ iopdFromList [(AttrByName "__name__", EdhString "<root>")]
   !ssRoot       <- newTVarIO []
 
   -- the namespace class, root object is a special instance of namespace class
