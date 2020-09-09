@@ -208,7 +208,8 @@ createVectorClass !clsOuterScope =
     case odLookup (AttrByName "length") ctorKwargs of
       Nothing              -> doIt (-1) ctorArgs
       Just (EdhDecimal !d) -> case D.decimalToInteger d of
-        Just !len | len >= 0 -> doIt (fromInteger len) $ ctorArgs ++ repeat nil
+        Just !len | len >= 0 ->
+          doIt (fromInteger len) $ ctorArgs ++ repeat edhNA
         _ ->
           throwEdh etsCtor UsageError
             $  "length not an positive integer: "
