@@ -206,17 +206,15 @@ doEdhComparison
   -> EdhValue
   -> (Maybe Ordering -> STM ())
   -> STM ()
-doEdhComparison !ets !lhVal !rhVal !exit = if edhIdentEqual lhVal rhVal
-  then exit $ Just EQ
-  else case edhUltimate lhVal of
-    EdhObject !lhObj -> case edh'obj'store lhObj of
-      ClassStore{} ->
-        lookupEdhObjAttr (edh'obj'class lhObj) cmpMagicKey
-          >>= tryMagic id lhObj rhVal tryRightHandMagic
-      _ ->
-        lookupEdhObjAttr lhObj cmpMagicKey
-          >>= tryMagic id lhObj rhVal tryRightHandMagic
-    _ -> tryRightHandMagic
+doEdhComparison !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
+  EdhObject !lhObj -> case edh'obj'store lhObj of
+    ClassStore{} ->
+      lookupEdhObjAttr (edh'obj'class lhObj) cmpMagicKey
+        >>= tryMagic id lhObj rhVal tryRightHandMagic
+    _ ->
+      lookupEdhObjAttr lhObj cmpMagicKey
+        >>= tryMagic id lhObj rhVal tryRightHandMagic
+  _ -> tryRightHandMagic
  where
   cmpMagicKey = AttrByName "__compare__"
 
