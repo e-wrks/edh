@@ -239,7 +239,6 @@ import qualified Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
 import           Language.Edh.Batteries
-import           Language.Edh.Batteries.Vector
 import           Language.Edh.Runtime
 import           Language.Edh.Event
 import           Language.Edh.Details.IOPD

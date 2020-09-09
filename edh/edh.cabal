@@ -24,7 +24,21 @@ source-repository head
   subdir:   edh
 
 library
-  exposed-modules:    Language.Edh.EHI
+  exposed-modules:
+    Language.Edh.Batteries
+    Language.Edh.EHI
+    Language.Edh.Runtime
+
+  other-modules:
+    Language.Edh.Batteries.Assign
+    Language.Edh.Batteries.Console
+    Language.Edh.Batteries.Ctrl
+    Language.Edh.Batteries.Data
+    Language.Edh.Batteries.Evt
+    Language.Edh.Batteries.Math
+    Language.Edh.Batteries.Reflect
+    Language.Edh.Batteries.Vector
+
   hs-source-dirs:     pub
   default-language:   Haskell2010
   default-extensions:
@@ -37,29 +51,30 @@ library
 
   ghc-options:        -Wall
   build-depends:
-    , base                  >=4.12 && <5
+    , base                  >=4.12  && <5
+    , bytestring
+    , clock
     , containers
+    , directory
     , edh-internal
+    , filepath
+    , ghc                   >=8.6.5
     , hashable
+    , haskeline
     , lossless-decimal
     , megaparsec            >7.0
     , mtl
+    , scientific
     , stm                   >=2.5
     , text
+    , time
     , transformers
     , unordered-containers
+    , uuid
+    , vector
 
 library edh-internal
   exposed-modules:
-    Language.Edh.Batteries
-    Language.Edh.Batteries.Assign
-    Language.Edh.Batteries.Console
-    Language.Edh.Batteries.Ctrl
-    Language.Edh.Batteries.Data
-    Language.Edh.Batteries.Evt
-    Language.Edh.Batteries.Math
-    Language.Edh.Batteries.Reflect
-    Language.Edh.Batteries.Vector
     Language.Edh.Control
     Language.Edh.Details.CoreLang
     Language.Edh.Details.Evaluate
@@ -70,7 +85,6 @@ library edh-internal
     Language.Edh.Details.Utils
     Language.Edh.Event
     Language.Edh.Parser
-    Language.Edh.Runtime
 
   hs-source-dirs:     src
   default-language:   Haskell2010
