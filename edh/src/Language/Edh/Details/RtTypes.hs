@@ -865,6 +865,8 @@ data EdhValue =
   | EdhYield !EdhValue
   | EdhReturn !EdhValue
 
+  | EdhOrd !Ordering
+
   -- | prefer better efforted result, but can default to the specified expr
   -- if there's no better result applicable
   -- 
@@ -917,6 +919,9 @@ instance Show EdhValue where
   show EdhRethrow               = "<rethrow>"
   show (EdhYield  v     )       = "<yield: " ++ show v ++ ">"
   show (EdhReturn v     )       = "<return: " ++ show v ++ ">"
+
+  show (EdhOrd    ord   )       = show ord
+
   show (EdhDefault _ x _)       = case x of
     ExprWithSrc _ [SrcSeg src] -> "default " <> T.unpack src
     _                          -> "<default: " ++ show x ++ ">"
@@ -974,6 +979,9 @@ instance Eq EdhValue where
 -- todo: regard a yielded/returned value equal to the value itself ?
   EdhYield  x'v               == EdhYield  y'v               = x'v == y'v
   EdhReturn x'v               == EdhReturn y'v               = x'v == y'v
+
+  EdhOrd    x                 == EdhOrd    y                 = x == y
+
   EdhDefault x'u _ _          == EdhDefault y'u _ _          = x'u == y'u
 
   EdhSink x                   == EdhSink y                   = x == y
@@ -1021,6 +1029,9 @@ instance Hashable EdhValue where
   hashWithSalt s EdhRethrow     = hashWithSalt s (-6 :: Int)
   hashWithSalt s (EdhYield  v)  = s `hashWithSalt` (-7 :: Int) `hashWithSalt` v
   hashWithSalt s (EdhReturn v)  = s `hashWithSalt` (-8 :: Int) `hashWithSalt` v
+
+  hashWithSalt s (EdhOrd    o)  = s `hashWithSalt` (-10 :: Int) `hashWithSalt` o
+
   hashWithSalt s (EdhDefault u _ _) =
     s `hashWithSalt` (-9 :: Int) `hashWithSalt` u
 
@@ -1424,6 +1435,7 @@ data EdhTypeValue =
   | RethrowType
   | YieldType
   | ReturnType
+  | OrdType
   | DefaultType
   | SinkType
   | ExprType
@@ -1479,6 +1491,7 @@ edhTypeOf EdhFallthrough          = FallthroughType
 edhTypeOf EdhRethrow              = RethrowType
 edhTypeOf EdhYield{}              = YieldType
 edhTypeOf EdhReturn{}             = ReturnType
+edhTypeOf EdhOrd{}                = OrdType
 edhTypeOf EdhDefault{}            = DefaultType
 edhTypeOf EdhSink{}               = SinkType
 edhTypeOf (EdhNamedValue _ v)     = edhTypeOf v

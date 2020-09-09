@@ -33,7 +33,8 @@ import           Language.Edh.Details.RtTypes
 type IntplSrcInfo = (Text, Int, [SourceSeg])
 
 sc :: Parser ()
-sc = L.space space1 (L.skipLineComment "#") (L.skipBlockCommentNested "{#" "#}")
+sc =
+  L.space space1 (L.skipLineComment "#") (L.skipBlockCommentNested "{#" "#}")
 
 symbol :: Text -> Parser Text
 symbol = L.symbol sc
@@ -591,6 +592,7 @@ parseLitExpr = choice
   , TypeLiteral RethrowType <$ litKw "RethrowType"
   , TypeLiteral YieldType <$ litKw "YieldType"
   , TypeLiteral ReturnType <$ litKw "ReturnType"
+  , TypeLiteral OrdType <$ litKw "OrdType"
   , TypeLiteral DefaultType <$ litKw "DefaultType"
   , TypeLiteral SinkType <$ litKw "SinkType"
   , TypeLiteral ExprType <$ litKw "ExprType"

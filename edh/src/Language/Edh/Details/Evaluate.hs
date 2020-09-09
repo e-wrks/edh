@@ -2820,6 +2820,11 @@ edhValueRepr !ets !val !exitRepr = case val of
   EdhBoundProc !callable _ _ _ ->
     exitRepr $ "{# bound #} " <> callableName callable
 
+  EdhOrd !ord -> exitRepr $ case ord of
+    EQ -> "EQ"
+    LT -> "LT"
+    GT -> "GT"
+
   -- todo specially handle return/default etc. ?
 
   -- TODO handle Text repr with more performant impl.
