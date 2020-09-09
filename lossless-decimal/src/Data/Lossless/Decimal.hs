@@ -172,6 +172,20 @@ divDecimal :: Decimal -> Decimal -> Decimal
 divDecimal (Decimal x'd x'e x'n) (Decimal y'd y'e y'n) =
   mulDecimal (Decimal x'd x'e x'n) (Decimal y'n (-y'e) y'd)
 
+divIntDecimal :: Decimal -> Decimal -> Decimal
+divIntDecimal x y = case decimalToInteger x of
+  Nothing -> nan
+  Just xi -> case decimalToInteger y of
+    Nothing -> nan
+    Just yi -> Decimal 1 0 $ xi `div` yi
+
+modIntDecimal :: Decimal -> Decimal -> Decimal
+modIntDecimal x y = case decimalToInteger x of
+  Nothing -> nan
+  Just xi -> case decimalToInteger y of
+    Nothing -> nan
+    Just yi -> Decimal 1 0 $ xi `mod` yi
+
 showDecimal :: Decimal -> String
 showDecimal v
   | d == 0    = if n == 0 then "nan" else if n < 0 then "-inf" else "inf"

@@ -79,16 +79,10 @@ divIntProc :: EdhIntrinsicOp
 divIntProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
     EdhDecimal !lhNum -> case decimalToInteger lhNum of
-      Nothing ->
-        throwEdhTx EvalError
-          $  "not an integer as left-hand value for (//) operation: "
-          <> T.pack (show lhNum)
+      Nothing   -> exitEdhTx exit edhNA
       Just !lhi -> evalExpr rhExpr $ \ !rhVal -> case edhUltimate rhVal of
         EdhDecimal !rhNum -> case decimalToInteger rhNum of
-          Nothing ->
-            throwEdhTx EvalError
-              $  "not an integer as right-hand value for (//) operation: "
-              <> T.pack (show rhNum)
+          Nothing -> exitEdhTx exit edhNA
           Just !rhi ->
             exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `div` rhi
         _ -> exitEdhTx exit edhNA
@@ -100,16 +94,10 @@ modIntProc :: EdhIntrinsicOp
 modIntProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
     EdhDecimal !lhNum -> case decimalToInteger lhNum of
-      Nothing ->
-        throwEdhTx EvalError
-          $  "not an integer as left-hand value for (%) operation: "
-          <> T.pack (show lhNum)
+      Nothing  -> exitEdhTx exit edhNA
       Just lhi -> evalExpr rhExpr $ \ !rhVal -> case edhUltimate rhVal of
         EdhDecimal !rhNum -> case decimalToInteger rhNum of
-          Nothing ->
-            throwEdhTx EvalError
-              $  "not an integer as right-hand value for (%) operation: "
-              <> T.pack (show rhNum)
+          Nothing  -> exitEdhTx exit edhNA
           Just rhi -> exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `mod` rhi
         _ -> exitEdhTx exit edhNA
     _ -> exitEdhTx exit edhNA
