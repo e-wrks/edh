@@ -166,14 +166,14 @@ idNotEqProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 -- | operator (>)
 isGtProc :: EdhIntrinsicOp
 isGtProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> doEdhComparison exit lhVal rhVal $ \case
+  evalExpr rhExpr $ \ !rhVal -> doEdhComparison' exit lhVal rhVal $ \case
     GT -> True
     _  -> False
 
 -- | operator (>=)
 isGeProc :: EdhIntrinsicOp
 isGeProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> doEdhComparison exit lhVal rhVal $ \case
+  evalExpr rhExpr $ \ !rhVal -> doEdhComparison' exit lhVal rhVal $ \case
     GT -> True
     EQ -> True
     _  -> False
@@ -181,23 +181,33 @@ isGeProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 -- | operator (<)
 isLtProc :: EdhIntrinsicOp
 isLtProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> doEdhComparison exit lhVal rhVal $ \case
+  evalExpr rhExpr $ \ !rhVal -> doEdhComparison' exit lhVal rhVal $ \case
     LT -> True
     _  -> False
 
 -- | operator (<=)
 isLeProc :: EdhIntrinsicOp
 isLeProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> doEdhComparison exit lhVal rhVal $ \case
+  evalExpr rhExpr $ \ !rhVal -> doEdhComparison' exit lhVal rhVal $ \case
     LT -> True
     EQ -> True
     _  -> False
 
+doEdhComparison'
+  :: EdhTxExit -> EdhValue -> EdhValue -> (Ordering -> Bool) -> EdhTx
+doEdhComparison' !exit !lhVal !rhVal !cm !ets =
+  doEdhComparison ets lhVal rhVal $ \case
+    Nothing   -> exitEdh ets exit edhNA
+    Just !ord -> exitEdh ets exit $ EdhBool $ cm ord
 
 doEdhComparison
-  :: EdhTxExit -> EdhValue -> EdhValue -> (Ordering -> Bool) -> EdhTx
-doEdhComparison !exit !lhVal !rhVal !cm !ets = if edhIdentEqual lhVal rhVal
-  then exitEdh ets exit (EdhBool $ cm EQ)
+  :: EdhThreadState
+  -> EdhValue
+  -> EdhValue
+  -> (Maybe Ordering -> STM ())
+  -> STM ()
+doEdhComparison !ets !lhVal !rhVal !exit = if edhIdentEqual lhVal rhVal
+  then exit $ Just EQ
   else case edhUltimate lhVal of
     EdhObject !lhObj -> case edh'obj'store lhObj of
       ClassStore{} ->
@@ -263,27 +273,22 @@ doEdhComparison !exit !lhVal !rhVal !cm !ets = if edhIdentEqual lhVal rhVal
       chkMagicExit :: EdhValue -> STM ()
       chkMagicExit = \case
         EdhNil      -> naExit
-        EdhOrd !ord -> exitEdh ets exit (EdhBool $ cm $ reorder ord)
+        EdhOrd !ord -> exit $ Just $ reorder ord
         _           -> edhValueDesc ets magicRtn $ \ !badDesc ->
           throwEdh ets UsageError
             $  "invalid result from __compare__: "
             <> badDesc
 
-
-  noMagic = compareWithNoMagic >>= \case
-    Nothing   -> exitEdh ets exit edhNA
-    Just !ord -> exitEdh ets exit (EdhBool $ cm ord)
-
-  compareWithNoMagic :: STM (Maybe Ordering)
-  compareWithNoMagic = case edhUltimate lhVal of
+  noMagic :: STM ()
+  noMagic = case edhUltimate lhVal of
     EdhDecimal !lhNum -> case edhUltimate rhVal of
-      EdhDecimal !rhNum -> return $ Just $ compare lhNum rhNum
-      _                 -> return Nothing
+      EdhDecimal !rhNum -> exit $ Just $ compare lhNum rhNum
+      _                 -> exit Nothing
     EdhString lhStr -> case edhUltimate rhVal of
-      EdhString rhStr -> return $ Just $ compare lhStr rhStr
-      _               -> return Nothing
+      EdhString rhStr -> exit $ Just $ compare lhStr rhStr
+      _               -> exit Nothing
     EdhBool lhCnd -> case edhUltimate rhVal of
-      EdhBool rhCnd -> return $ Just $ compare lhCnd rhCnd
-      _             -> return Nothing
-    _ -> return Nothing
+      EdhBool rhCnd -> exit $ Just $ compare lhCnd rhCnd
+      _             -> exit Nothing
+    _ -> exit Nothing
 
