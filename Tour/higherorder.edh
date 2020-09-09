@@ -29,8 +29,9 @@ f3( 7 )
   # with respecting to procedure call via ($) or (|), if an ArgsPack
   # takes the place of a procedure (the callee), it just absorbs the other
   # positional argument or a whole arguments pack, to form a new ArgsPack
+  # note (|) has higher precedence than ($), so parenthesis quoting is needed
 
-  ( 2, 11, n=3 ) $ ( 9, 7, m=5 ) | console.print
+  ( ( 2, 11, n=3 ) $ ( 9, 7, m=5 ) ) | console.print
 
   ; # this semicolon is necessary or the following round brackets will be
   #   parsed as procedure call

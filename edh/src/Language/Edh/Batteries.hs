@@ -288,14 +288,17 @@ installEdhBatteries world =
 
       -- the function application operator
       , ( "$"
-        , -5
+        , -5 -- make it lower than procedure body definition (i.e. -3 to be
+        -- cross checked with `parseProcBody`), or decorators can go wrong
         )
       -- the flipped function application operator, a.k.a pipe operator
       , ( "|"
-        , -5
+        , 0 -- make it slightly higher than (->),
+            -- so the guard syntax in pattern matching works nicely
         )
 
-      -- assignments, make it lower than (++), so don't need to quote `a = b ++ c`
+      -- assignments, make them lower than (++),
+      -- so don't need to quote `a = b ++ c`
       , ("=", 0)
       , ( "?="
         , 0
