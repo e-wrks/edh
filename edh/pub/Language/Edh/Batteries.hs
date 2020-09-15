@@ -305,10 +305,14 @@ installEdhBatteries world =
         , -5 -- make it lower than procedure body definition (i.e. -3 to be
         -- cross checked with `parseProcBody`), or decorators can go wrong
         )
-      -- the flipped function application operator, a.k.a pipe operator
+      -- the flipped function application operator, in UNIX pipe semantics
       , ( "|"
         , 0 -- make it slightly higher than (->),
             -- so the guard syntax in pattern matching works nicely
+        )
+      -- the flipped function application operator, in Haskell convention
+      , ( "&"
+        , -4 -- make it one higher than ($) as in Haskell
         )
 
       -- assignments, make them lower than (++),
@@ -454,6 +458,7 @@ installEdhBatteries world =
         [ ("@"     , attrDerefAddrProc)
         , ("$"     , fapProc)
         , ("|"     , ffapProc)
+        , ("&"     , ffapProc)
         , (":="    , defProc)
         , ("?:="   , defMissingProc)
         , (":"     , pairCtorProc)
