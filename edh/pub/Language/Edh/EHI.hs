@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 
 -- | Edh Host Interface
 --
@@ -86,7 +87,7 @@ module Language.Edh.EHI
   , EdhTask(..)
   , Context(..)
   , Scope(..)
-  , EdhCallable(..)
+  , EdhProc(..)
   , EdhHostProc
   , EdhTxExit
     -- ** Edh Runtime error
@@ -122,8 +123,6 @@ module Language.Edh.EHI
   , AttrAddressor(..)
   , ArgsReceiver(..)
   , ArgReceiver(..)
-  , mandatoryArg
-  , optionalArg
   , ArgsPacker
   , ArgSender(..)
   , ProcDecl(..)
@@ -149,7 +148,6 @@ module Language.Edh.EHI
   , objClassName
   , mkHostClass
   , mkHostClass'
-  , mkHostProperty
   , edhCreateHostObj
   , edhCreateObj
   , edhConstructObj
@@ -213,14 +211,11 @@ module Language.Edh.EHI
   , mkSymbol
   , mkUUID
   , mkDefault
-  , mkHostProc
-  , mkSymbolicHostProc
-  , mkIntrinsicOp
   , EdhVector
 
-    -- * args pack parsing
-  , ArgsPackParser(..)
-  , parseArgsPack
+    -- * argument exchanging
+  , module Language.Edh.Args
+  , module Language.Edh.InterOp
 
     -- * indexing and slicing support
   , EdhIndex(..)
@@ -237,6 +232,8 @@ import           Text.Megaparsec
 
 import qualified Data.Lossless.Decimal         as D
 
+import           Language.Edh.Args
+import           Language.Edh.InterOp
 import           Language.Edh.Control
 import           Language.Edh.Batteries
 import           Language.Edh.Runtime

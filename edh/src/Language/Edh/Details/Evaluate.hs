@@ -1137,11 +1137,11 @@ edhPrepareCall'
 edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker
   = case calleeVal of
     EdhBoundProc !callee !this !that !effOuter ->
-      callCallable callee this that
+      callProc callee this that
         $ flip (maybe id) effOuter
         $ \ !outerStack !s -> s { edh'effects'stack = outerStack }
     EdhProcedure !callee !effOuter ->
-      callCallable callee (edh'scope'this scope) (edh'scope'that scope)
+      callProc callee (edh'scope'this scope) (edh'scope'that scope)
         $ flip (maybe id) effOuter
         $ \ !outerStack !s -> s { edh'effects'stack = outerStack }
 
@@ -1152,11 +1152,11 @@ edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker
       -- calling an object
       _ -> lookupEdhObjAttr obj (AttrByName "__call__") >>= \case
         (!this', EdhProcedure !callee !effOuter) ->
-          callCallable callee this' obj
+          callProc callee this' obj
             $ flip (maybe id) effOuter
             $ \ !outerStack !s -> s { edh'effects'stack = outerStack }
         (_, EdhBoundProc !callee !this !that !effOuter) ->
-          callCallable callee this that
+          callProc callee this that
             $ flip (maybe id) effOuter
             $ \ !outerStack !s -> s { edh'effects'stack = outerStack }
         _ -> throwEdh etsCallPrep EvalError "no __call__ method on object"
@@ -1171,8 +1171,8 @@ edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker
  where
   scope = contextScope $ edh'context etsCallPrep
 
-  callCallable :: EdhCallable -> Object -> Object -> (Scope -> Scope) -> STM ()
-  callCallable !callee !this !that !scopeMod = case callee of
+  callProc :: EdhProc -> Object -> Object -> (Scope -> Scope) -> STM ()
+  callProc !callee !this !that !scopeMod = case callee of
 
     -- calling a method procedure
     EdhMethod !mth ->
@@ -1401,7 +1401,7 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doStmt !iterCollector !forLo
 
   loopCallGenr
     :: ArgsPacker
-    -> EdhCallable
+    -> EdhProc
     -> Object
     -> Object
     -> (Scope -> Scope)
@@ -3320,8 +3320,8 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
             -- exit with original thread state
             _      -> exitEdh ets exit resultDef
 
-    callCallable :: Object -> Object -> EdhCallable -> STM ()
-    callCallable !this !that !callable = case callable of
+    callProc :: Object -> Object -> EdhProc -> STM ()
+    callProc !this !that !callable = case callable of
 
       -- calling an intrinsic operator
       EdhIntrOp _ (IntrinOpDefi _ _ iop'proc) ->
@@ -3385,10 +3385,10 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
         evalExpr rhExpr $ \ !rhVal _ets ->
           tryMagicMethod lhVal rhVal $ notApplicable lhVal rhVal
       Just (!opVal, !op'lexi) -> case opVal of
-        EdhProcedure !callable _ -> callCallable (edh'scope'this op'lexi)
+        EdhProcedure !callable _ -> callProc (edh'scope'this op'lexi)
                                                  (edh'scope'that op'lexi)
                                                  callable
-        EdhBoundProc !callable !this !that _ -> callCallable this that callable
+        EdhBoundProc !callable !this !that _ -> callProc this that callable
         _ ->
           throwEdh ets EvalError
             $  "not callable "

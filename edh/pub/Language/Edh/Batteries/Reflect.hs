@@ -18,7 +18,7 @@ import           Language.Edh.Details.Evaluate
 
 
 -- | utility constructor(*args,**kwargs)
-ctorProc :: EdhHostProc
+ctorProc :: ArgsPack -> EdhHostProc
 ctorProc (ArgsPack !args !kwargs) !exit !ets = do
   if odNull kwargs
     then case argsCls of
@@ -40,7 +40,7 @@ ctorProc (ArgsPack !args !kwargs) !exit !ets = do
 
 
 -- | utility supers(*args,**kwargs)
-supersProc :: EdhHostProc
+supersProc :: ArgsPack -> EdhHostProc
 supersProc (ArgsPack !args !kwargs) !exit !ets = do
   if null args && odNull kwargs
     then do
@@ -70,13 +70,11 @@ supersProc (ArgsPack !args !kwargs) !exit !ets = do
 
 
 -- | utility makeOp(lhExpr, opSym, rhExpr)
-makeOpProc :: EdhHostProc
-makeOpProc (ArgsPack !args !kwargs) !exit = if (not $ odNull kwargs)
-  then throwEdhTx EvalError "no kwargs accepted by makeOp"
-  else case args of
-    [(EdhExpr _ !lhe _), EdhString !op, (EdhExpr _ !rhe _)] -> \ !ets -> do
-      !xu <- unsafeIOToSTM newUnique
-      exitEdh ets exit $ EdhExpr xu (InfixExpr op lhe rhe) ""
-    _ -> throwEdhTx EvalError $ "invalid arguments to makeOp: " <> T.pack
-      (show args)
+makeOpProc :: [EdhValue] -> EdhHostProc
+makeOpProc !args !exit = case args of
+  [(EdhExpr _ !lhe _), EdhString !op, (EdhExpr _ !rhe _)] -> \ !ets -> do
+    !xu <- unsafeIOToSTM newUnique
+    exitEdh ets exit $ EdhExpr xu (InfixExpr op lhe rhe) ""
+  _ -> throwEdhTx EvalError $ "invalid arguments to makeOp: " <> T.pack
+    (show args)
 

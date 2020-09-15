@@ -155,7 +155,7 @@ mkHostClass !scope !className !allocator !classStore !superClasses = do
     $ EdhCallContext "<mkHostClass>" []
   return clsObj
  where
-  fakeHostProc :: EdhHostProc
+  fakeHostProc :: ArgsPack -> EdhHostProc
   fakeHostProc _ !exit = exitEdhTx exit nil
 
   !metaClassObj =
@@ -193,7 +193,7 @@ mkHostClass' !scope !className !allocator !superClasses !storeMod = do
     $ EdhCallContext "<mkHostClass>" []
   return clsObj
  where
-  fakeHostProc :: EdhHostProc
+  fakeHostProc :: ArgsPack -> EdhHostProc
   fakeHostProc _ !exit = exitEdhTx exit nil
 
   !metaClassObj =

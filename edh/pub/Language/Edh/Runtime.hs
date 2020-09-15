@@ -25,6 +25,7 @@ import           Data.Dynamic
 import           Text.Megaparsec
 
 import           Language.Edh.Control
+import           Language.Edh.InterOp
 import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Tx
@@ -80,10 +81,10 @@ createEdhWorld !console = liftIO $ do
     $  (flip iopdUpdate hsMeta =<<)
     $  sequence
     -- todo more static attrs for class objects here
-    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
-       | (nm, mth, args) <-
-         [ ("__repr__", mthClassRepr, PackReceiver [])
-         , ("__show__", mthClassShow, PackReceiver [])
+    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm hp
+       | (nm, hp) <-
+         [ ("__repr__", wrapHostProc mthClassRepr)
+         , ("__show__", wrapHostProc mthClassShow)
          ]
        ]
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
@@ -96,11 +97,11 @@ createEdhWorld !console = liftIO $ do
   atomically
     $ (flip iopdUpdate hsNamespace =<<)
     $ sequence
-    $ [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
-      | (nm, mth, args) <-
-        [ ("__repr__", mthNsRepr, PackReceiver [])
-        , ("__show__", mthNsShow, PackReceiver [])
-        , ("__desc__", mthNsDesc, PackReceiver [])
+    $ [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm hp
+      | (nm, hp) <-
+        [ ("__repr__", wrapHostProc mthNsRepr)
+        , ("__show__", wrapHostProc mthNsShow)
+        , ("__desc__", wrapHostProc mthNsDesc)
         ]
       ]
   atomically
@@ -111,14 +112,14 @@ createEdhWorld !console = liftIO $ do
     atomically
     $  (iopdFromList =<<)
     $  sequence
-    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
-       | (nm, mth, args) <-
-         [ ("__repr__", mthScopeRepr , PackReceiver [])
-         , ("__show__", mthScopeShow , PackReceiver [])
-         , ("eval"    , mthScopeEval , PackReceiver [])
-         , ("get"     , mthScopeGet  , PackReceiver [])
-         , ("put"     , mthScopePut  , PackReceiver [])
-         , ("attrs"   , mthScopeAttrs, PackReceiver [])
+    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm hp
+       | (nm, hp) <-
+         [ ("__repr__", wrapHostProc mthScopeRepr)
+         , ("__show__", wrapHostProc mthScopeShow)
+         , ("eval"    , wrapHostProc mthScopeEval)
+         , ("get"     , wrapHostProc mthScopeGet)
+         , ("put"     , wrapHostProc mthScopePut)
+         , ("attrs"   , wrapHostProc mthScopeAttrs)
          ]
        ]
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
@@ -160,11 +161,11 @@ createEdhWorld !console = liftIO $ do
     atomically
     $  (iopdFromList =<<)
     $  sequence
-    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
-       | (nm, mth, args) <-
-         [ ("__repr__", mthErrRepr, PackReceiver [])
-         , ("__show__", mthErrShow, PackReceiver [])
-         , ("__desc__", mthErrDesc, PackReceiver [])
+    $  [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm hp
+       | (nm, hp) <-
+         [ ("__repr__", wrapHostProc mthErrRepr)
+         , ("__show__", wrapHostProc mthErrShow)
+         , ("__desc__", wrapHostProc mthErrDesc)
          ]
        ]
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
@@ -236,10 +237,10 @@ createEdhWorld !console = liftIO $ do
     atomically
     $ (iopdFromList =<<)
     $ sequence
-    $ [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm mth args
-      | (nm, mth, args) <-
-        [ ("__repr__", mthModuClsRepr, PackReceiver [])
-        , ("__show__", mthModuClsShow, PackReceiver [])
+    $ [ (AttrByName nm, ) <$> mkHostProc rootScope EdhMethod nm hp
+      | (nm, hp) <-
+        [ ("__repr__", wrapHostProc mthModuClsRepr)
+        , ("__show__", wrapHostProc mthModuClsShow)
         ]
       ]
   !clsModule <- atomically
@@ -268,8 +269,9 @@ createEdhWorld !console = liftIO $ do
 
   phantomAllocator !ets _ _ =
     throwEdh ets EvalError "bug: allocating phantom object"
-  phantomHostProc :: EdhHostProc
-  phantomHostProc _ _ = throwEdhTx EvalError "bug: calling phantom procedure"
+  phantomHostProc :: ArgsPack -> EdhHostProc
+  phantomHostProc _apk _exit =
+    throwEdhTx EvalError "bug: calling phantom procedure"
 
   genesisStmt :: StmtSrc
   genesisStmt = StmtSrc
@@ -282,14 +284,14 @@ createEdhWorld !console = liftIO $ do
 
 
   mthClassRepr :: EdhHostProc
-  mthClassRepr _apk !exit !ets = case edh'obj'store clsObj of
+  mthClassRepr !exit !ets = case edh'obj'store clsObj of
     ClassStore !cls ->
       exitEdh ets exit $ EdhString $ procedureName (edh'class'proc cls)
     _ -> exitEdh ets exit $ EdhString "<bogus-class>"
     where !clsObj = edh'scope'that $ contextScope $ edh'context ets
 
   mthClassShow :: EdhHostProc
-  mthClassShow _apk !exit !ets = case edh'obj'store clsObj of
+  mthClassShow !exit !ets = case edh'obj'store clsObj of
     ClassStore !cls ->
       exitEdh ets exit $ EdhString $ "class: " <> procedureName
         (edh'class'proc cls)
@@ -297,14 +299,14 @@ createEdhWorld !console = liftIO $ do
     where !clsObj = edh'scope'that $ contextScope $ edh'context ets
 
   mthClassNameGetter :: EdhHostProc
-  mthClassNameGetter _apk !exit !ets = case edh'obj'store clsObj of
+  mthClassNameGetter !exit !ets = case edh'obj'store clsObj of
     ClassStore !cls ->
       exitEdh ets exit $ attrKeyValue $ edh'procedure'name (edh'class'proc cls)
     _ -> exitEdh ets exit nil
     where !clsObj = edh'scope'that $ contextScope $ edh'context ets
 
   mthClassMROGetter :: EdhHostProc
-  mthClassMROGetter _apk !exit !ets = case edh'obj'store clsObj of
+  mthClassMROGetter !exit !ets = case edh'obj'store clsObj of
     ClassStore !cls -> do
       !mro <- readTVar $ edh'class'mro cls
       exitEdh ets exit $ EdhArgsPack $ ArgsPack (EdhObject <$> mro) odEmpty
@@ -314,7 +316,7 @@ createEdhWorld !console = liftIO $ do
 
 
   mthNsRepr :: EdhHostProc
-  mthNsRepr _apk !exit !ets = exitEdh ets exit . EdhString =<< nsRepr
+  mthNsRepr !exit !ets = exitEdh ets exit . EdhString =<< nsRepr
    where
     !scope = contextScope $ edh'context ets
     nsRepr :: STM Text
@@ -328,7 +330,7 @@ createEdhWorld !console = liftIO $ do
       _ -> return "<bogus-namespace>"
 
   mthNsShow :: EdhHostProc
-  mthNsShow _apk !exit !ets = exitEdh ets exit . EdhString =<< nsShow
+  mthNsShow !exit !ets = exitEdh ets exit . EdhString =<< nsShow
    where
     !scope = contextScope $ edh'context ets
     nsShow :: STM Text
@@ -343,7 +345,7 @@ createEdhWorld !console = liftIO $ do
       _ -> return "It's a bogus-namespace"
 
   mthNsDesc :: EdhHostProc
-  mthNsDesc _apk !exit !ets = exitEdh ets exit . EdhString =<< nsDesc
+  mthNsDesc !exit !ets = exitEdh ets exit . EdhString =<< nsDesc
    where
     !scope = contextScope $ edh'context ets
     nsDesc :: STM Text
@@ -360,7 +362,7 @@ createEdhWorld !console = liftIO $ do
 
 
   mthScopeRepr :: EdhHostProc
-  mthScopeRepr _ !exit !ets =
+  mthScopeRepr !exit !ets =
     castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
       Nothing -> exitEdh ets exit $ EdhString "<bogus scope object>"
       Just (scope :: Scope) ->
@@ -371,7 +373,7 @@ createEdhWorld !console = liftIO $ do
           <> ">"
 
   mthScopeShow :: EdhHostProc
-  mthScopeShow _ !exit !ets =
+  mthScopeShow !exit !ets =
     castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
       Nothing               -> exitEdh ets exit $ EdhString "bogus scope object"
       Just (scope :: Scope) -> scopeLexiLoc scope $ \ !lexiLoc -> do
@@ -384,7 +386,7 @@ createEdhWorld !console = liftIO $ do
           <> T.pack (sourcePosPretty callerSrcLoc)
 
   mthScopeCallerLoc :: EdhHostProc
-  mthScopeCallerLoc _ !exit !ets =
+  mthScopeCallerLoc !exit !ets =
     castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
       Nothing -> exitEdh ets exit $ EdhString "<bogus scope object>"
       Just (scope :: Scope) -> do
@@ -392,14 +394,14 @@ createEdhWorld !console = liftIO $ do
         exitEdh ets exit $ EdhString $ T.pack (sourcePosPretty callerSrcLoc)
 
   mthScopeLexiLoc :: EdhHostProc
-  mthScopeLexiLoc _ !exit !ets =
+  mthScopeLexiLoc !exit !ets =
     castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
       Nothing -> exitEdh ets exit $ EdhString "<bogus scope object>"
       Just (scope :: Scope) ->
         scopeLexiLoc scope $ \ !lexiLoc -> exitEdh ets exit $ EdhString lexiLoc
 
   mthScopeAttrs :: EdhHostProc
-  mthScopeAttrs _apk !exit !ets =
+  mthScopeAttrs !exit !ets =
     castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
       Nothing -> throwEdh ets EvalError "bogus scope object"
       Just (scope :: Scope) ->
@@ -408,7 +410,7 @@ createEdhWorld !console = liftIO $ do
           . EdhArgsPack
           . ArgsPack []
 
-  mthScopeGet :: EdhHostProc
+  mthScopeGet :: ArgsPack -> EdhHostProc
   mthScopeGet (ArgsPack !args !kwargs) !exit !ets =
     castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
       Nothing               -> throwEdh ets EvalError "bogus scope object"
@@ -448,7 +450,7 @@ createEdhWorld !console = liftIO $ do
       throwEdh ets UsageError $ "invalid attribute reference type - " <> T.pack
         (edhTypeNameOf badVal)
 
-  mthScopePut :: EdhHostProc
+  mthScopePut :: ArgsPack -> EdhHostProc
   mthScopePut (ArgsPack !args !kwargs) !exit !ets =
     castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
       Nothing               -> throwEdh ets EvalError "bogus scope object"
@@ -473,7 +475,7 @@ createEdhWorld !console = liftIO $ do
           iopdUpdate (attrs ++ odToList kwargs) es
           exitEdh ets exit nil
 
-  mthScopeEval :: EdhHostProc
+  mthScopeEval :: ArgsPack -> EdhHostProc
   mthScopeEval (ArgsPack !args !kwargs) !exit !ets =
     castObjectStore (edh'scope'this $ contextScope $ edh'context ets) >>= \case
       Nothing               -> throwEdh ets EvalError "bogus scope object"
@@ -518,7 +520,7 @@ createEdhWorld !console = liftIO $ do
         evalThePack [] args $ odToList kwargs
 
   mthScopeOuterGetter :: EdhHostProc
-  mthScopeOuterGetter _ !exit !ets = case edh'obj'store this of
+  mthScopeOuterGetter !exit !ets = case edh'obj'store this of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
       Nothing               -> throwEdh ets EvalError "bogus scope object"
       Just (scope :: Scope) -> case outerScopeOf scope of
@@ -565,7 +567,7 @@ createEdhWorld !console = liftIO $ do
     (toDyn $ toException $ edhCreateError 0 ets tag apk)
 
   mthErrRepr :: EdhHostProc
-  mthErrRepr _ !exit !ets = case edh'obj'store errObj of
+  mthErrRepr !exit !ets = case edh'obj'store errObj of
     HostStore !hsv -> readTVar hsv >>= \ !hsd -> case fromDynamic hsd of
       Just (exc :: SomeException) -> case edhKnownError exc of
         Just (ProgramHalt !dhv) -> case fromDynamic dhv of
@@ -601,7 +603,7 @@ createEdhWorld !console = liftIO $ do
     !errClsName = objClassName endErr
 
   mthErrShow :: EdhHostProc
-  mthErrShow _ !exit !ets = case edh'obj'store errObj of
+  mthErrShow !exit !ets = case edh'obj'store errObj of
     HostStore !hsv -> readTVar hsv >>= \ !hsd -> case fromDynamic hsd of
       Just (exc :: SomeException) -> case edhKnownError exc of
         Just err@(EdhError _errTag _errMsg !details _cc) -> do
@@ -620,7 +622,7 @@ createEdhWorld !console = liftIO $ do
     !errClsName = objClassName errObj
 
   mthErrDesc :: EdhHostProc
-  mthErrDesc _ !exit !ets = case edh'obj'store errObj of
+  mthErrDesc !exit !ets = case edh'obj'store errObj of
     HostStore !hsv -> readTVar hsv >>= \ !hsd -> case fromDynamic hsd of
       Just (exc :: SomeException) -> case edhKnownError exc of
         Just err@(EdhError _errTag _errMsg !details _cc) ->
@@ -643,7 +645,7 @@ createEdhWorld !console = liftIO $ do
     !errClsName = objClassName errObj
 
   mthErrStackGetter :: EdhHostProc
-  mthErrStackGetter _ !exit !ets = case edh'obj'store errObj of
+  mthErrStackGetter !exit !ets = case edh'obj'store errObj of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
       Just (exc :: SomeException) -> case edhKnownError exc of
         Just (EdhError _errTag _errMsg _details (EdhCallContext !tip !frames))
@@ -656,7 +658,7 @@ createEdhWorld !console = liftIO $ do
     where !errObj = edh'scope'this $ contextScope $ edh'context ets
 
   mthErrMsgGetter :: EdhHostProc
-  mthErrMsgGetter _ !exit !ets = case edh'obj'store errObj of
+  mthErrMsgGetter !exit !ets = case edh'obj'store errObj of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
       Just (exc :: SomeException) -> case edhKnownError exc of
         Just (EdhError _errTag !errMsg _errDetails _errCtx) ->
@@ -667,7 +669,7 @@ createEdhWorld !console = liftIO $ do
     where !errObj = edh'scope'this $ contextScope $ edh'context ets
 
   mthErrDetailsGetter :: EdhHostProc
-  mthErrDetailsGetter _ !exit !ets = case edh'obj'store errObj of
+  mthErrDetailsGetter !exit !ets = case edh'obj'store errObj of
     HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
       Just (exc :: SomeException) -> case edhKnownError exc of
         Just (EdhError _errTag _errMsg !errDetails _errCtx) ->
@@ -690,14 +692,14 @@ createEdhWorld !console = liftIO $ do
     _ -> throwEdh ets UsageError "invalid args to module()"
 
   mthModuClsRepr :: EdhHostProc
-  mthModuClsRepr _ !exit !ets = do
+  mthModuClsRepr !exit !ets = do
     !path <- lookupEdhSelfAttr this (AttrByName "__path__")
     edhValueStr ets path $ \ !pathStr ->
       exitEdh ets exit $ EdhString $ "<module: " <> pathStr <> ">"
     where !this = edh'scope'this $ contextScope $ edh'context ets
 
   mthModuClsShow :: EdhHostProc
-  mthModuClsShow _ !exit !ets = do
+  mthModuClsShow !exit !ets = do
     !path <- lookupEdhSelfAttr this (AttrByName "__path__")
     !file <- lookupEdhSelfAttr this (AttrByName "__file__")
     edhValueStr ets path $ \ !pathStr -> edhValueStr ets file $ \ !fileStr ->

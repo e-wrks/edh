@@ -270,7 +270,7 @@ getEdhCallContext !unwind !ets = EdhCallContext
         []
       $ unwindStack unwind
       $ NE.init (edh'ctx'stack ctx)
-  procSrcLoc :: Either StmtSrc EdhHostProc -> Text
+  procSrcLoc :: Either StmtSrc (ArgsPack -> EdhHostProc) -> Text
   procSrcLoc !procBody = case procBody of
     Left  (StmtSrc (spos, _)) -> T.pack (sourcePosPretty spos)
     Right _                   -> "<host-code>"
@@ -662,18 +662,6 @@ exitEdh !ets !exit !val = edhDoSTM ets $ exit val ets
 {-# INLINE exitEdh #-}
 
 
--- | Type for a procedure in the host language (which is Haskell) that can be
--- called from Edh code.
---
--- Note the top frame of the call stack from thread state is the one for the
--- callee, that scope should have mounted the caller's scope entity, not a new
--- entity in contrast to when an Edh procedure as the callee.
-type EdhHostProc -- such a procedure servs as the callee
-  =  ArgsPack    -- ^ the pack of arguments
-  -> EdhTxExit -- ^ the CPS exit to return a value from this procedure
-  -> EdhTx
-
-
 -- | Type of an intrinsic infix operator in the host language (Haskell).
 --
 -- Note no stack frame is created/pushed when an intrinsic operator is called.
@@ -684,6 +672,12 @@ data IntrinOpDefi = IntrinOpDefi {
   , intrinsic'op'symbol :: !AttrName
   , intrinsic'op :: EdhIntrinsicOp
   }
+
+
+-- | Monotype for the last part of an 'EdhCallable' procedure
+type EdhHostProc -- such a procedure servs as the callee
+  =  EdhTxExit -- ^ the CPS exit to return a value from this procedure
+  -> EdhTx
 
 
 -- | An event sink is similar to a Go channel, but is broadcast
@@ -731,7 +725,7 @@ launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerTx !etsConsume
 
 
 -- | executable precedures
-data EdhCallable =
+data EdhProc =
     EdhIntrOp !Precedence !IntrinOpDefi
   | EdhOprtor !Precedence !(Maybe EdhValue) !ProcDefi
   | EdhMethod !ProcDefi
@@ -745,7 +739,7 @@ data EdhCallable =
   -- deleter semantic is expressed as calling setter without arg
   | EdhDescriptor !ProcDefi !(Maybe ProcDefi)
 
-instance Show EdhCallable where
+instance Show EdhProc where
   show (EdhIntrOp !preced (IntrinOpDefi _ !opSym _)) =
     "intrinsic: (" ++ T.unpack opSym ++ ") " ++ show preced
   show (EdhOprtor !preced _ !pd) =
@@ -760,7 +754,7 @@ instance Show EdhCallable where
       Nothing -> "readonly property "
       Just _  -> "property "
 
-instance Eq EdhCallable where
+instance Eq EdhProc where
   EdhIntrOp _ (IntrinOpDefi x'u _ _) == EdhIntrOp _ (IntrinOpDefi y'u _ _) =
     x'u == y'u
   EdhOprtor _ _ x == EdhOprtor _ _ y = x == y
@@ -774,7 +768,7 @@ instance Eq EdhCallable where
 
   _ == _ = False
 
-instance Hashable EdhCallable where
+instance Hashable EdhProc where
   hashWithSalt s (EdhIntrOp _ (IntrinOpDefi x'u _ _)) = hashWithSalt s x'u
   hashWithSalt s (EdhMethod x                       ) = hashWithSalt s x
   hashWithSalt s (EdhOprtor _ _ x                   ) = hashWithSalt s x
@@ -785,7 +779,7 @@ instance Hashable EdhCallable where
   hashWithSalt s (EdhDescriptor getter setter) =
     s `hashWithSalt` getter `hashWithSalt` setter
 
-callableName :: EdhCallable -> Text
+callableName :: EdhProc -> Text
 callableName = \case
   EdhIntrOp _preced (IntrinOpDefi _ !opSym _) -> "(" <> opSym <> ")"
   EdhOprtor _preced _ !pd                     -> "(" <> procedureName pd <> ")"
@@ -850,10 +844,10 @@ data EdhValue =
 
   -- | a callable procedure
   -- with the effect outer stack if resolved as an effectful artifact
-  | EdhProcedure !EdhCallable !(Maybe [Scope])
+  | EdhProcedure !EdhProc !(Maybe [Scope])
   -- | a callable procedure bound to a specific this object and that object
   -- with the effect outer stack if resolved as an effectful artifact
-  | EdhBoundProc !EdhCallable !Object !Object !(Maybe [Scope])
+  | EdhBoundProc !EdhProc !Object !Object !(Maybe [Scope])
 
   -- * flow control
   | EdhBreak
@@ -1236,12 +1230,6 @@ instance Show ArgReceiver where
   show (RecvRestPkArgs  nm) = "***" ++ T.unpack nm
   show (RecvArg nm _ _    ) = show nm
 
-mandatoryArg :: AttrName -> ArgReceiver
-mandatoryArg !name = RecvArg (NamedAttr name) Nothing Nothing
-
-optionalArg :: AttrName -> Expr -> ArgReceiver
-optionalArg !name !defExpr = RecvArg (NamedAttr name) Nothing (Just defExpr)
-
 
 type ArgsPacker = [ArgSender]
 data ArgSender = UnpackPosArgs !Expr
@@ -1255,7 +1243,7 @@ data ArgSender = UnpackPosArgs !Expr
 data ProcDecl = ProcDecl {
     edh'procedure'addr :: !AttrAddressor
   , edh'procedure'args :: !ArgsReceiver
-  , edh'procedure'body :: !(Either StmtSrc EdhHostProc)
+  , edh'procedure'body :: !(Either StmtSrc (ArgsPack -> EdhHostProc))
   }
 instance Eq ProcDecl where
   ProcDecl{} == ProcDecl{} = False
@@ -1397,7 +1385,7 @@ instance Hashable Literal where
   hashWithSalt s (BoolLiteral   x) = hashWithSalt s x
   hashWithSalt s (StringLiteral x) = hashWithSalt s x
   hashWithSalt s (TypeLiteral   x) = hashWithSalt s x
-  hashWithSalt s (ValueLiteral   x) = hashWithSalt s x
+  hashWithSalt s (ValueLiteral  x) = hashWithSalt s x
 
 
 -- | the type for the value of type of a value
@@ -1498,7 +1486,7 @@ edhTypeOf EdhSink{}               = SinkType
 edhTypeOf (EdhNamedValue _ v)     = edhTypeOf v
 edhTypeOf EdhExpr{}               = ExprType
 
-edhProcTypeOf :: EdhCallable -> EdhTypeValue
+edhProcTypeOf :: EdhProc -> EdhTypeValue
 edhProcTypeOf = \case
   EdhIntrOp{} -> IntrinsicType
   EdhOprtor _ _ (ProcDefi _ _ _ (ProcDecl _ _ pb)) -> case pb of
@@ -1513,100 +1501,6 @@ edhProcTypeOf = \case
   EdhIntrpr{}     -> InterpreterType
   EdhPrducr{}     -> ProducerType
   EdhDescriptor{} -> DescriptorType
-
-
-mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
-mkIntrinsicOp !world !opSym !iop = do
-  u <- unsafeIOToSTM newUnique
-  Map.lookup opSym <$> readTMVar (edh'world'operators world) >>= \case
-    Nothing ->
-      throwSTM
-        $ EdhError
-            UsageError
-            ("no precedence declared in the world for operator: " <> opSym)
-            (toDyn nil)
-        $ EdhCallContext "<edh>" []
-    Just (preced, _) -> return
-      $ EdhProcedure (EdhIntrOp preced $ IntrinOpDefi u opSym iop) Nothing
-
-
-mkHostProc
-  :: Scope
-  -> (ProcDefi -> EdhCallable)
-  -> Text
-  -> EdhHostProc
-  -> ArgsReceiver
-  -> STM EdhValue
-mkHostProc !scope !vc !nm !p !args = do
-  u <- unsafeIOToSTM newUnique
-  return $ EdhProcedure
-    (vc ProcDefi
-      { edh'procedure'ident = u
-      , edh'procedure'name  = AttrByName nm
-      , edh'procedure'lexi  = scope
-      , edh'procedure'decl  = ProcDecl { edh'procedure'addr = NamedAttr nm
-                                       , edh'procedure'args = args
-                                       , edh'procedure'body = Right p
-                                       }
-      }
-    )
-    Nothing
-
-mkSymbolicHostProc
-  :: Scope
-  -> (ProcDefi -> EdhCallable)
-  -> Symbol
-  -> EdhHostProc
-  -> ArgsReceiver
-  -> STM EdhValue
-mkSymbolicHostProc !scope !vc !sym !p !args = do
-  u <- unsafeIOToSTM newUnique
-  return $ EdhProcedure
-    (vc ProcDefi
-      { edh'procedure'ident = u
-      , edh'procedure'name  = AttrBySym sym
-      , edh'procedure'lexi  = scope
-      , edh'procedure'decl  = ProcDecl
-                                { edh'procedure'addr = SymbolicAttr
-                                                         $ symbolName sym
-                                , edh'procedure'args = args
-                                , edh'procedure'body = Right p
-                                }
-      }
-    )
-    Nothing
-
-
-mkHostProperty
-  :: Scope -> Text -> EdhHostProc -> Maybe EdhHostProc -> STM EdhValue
-mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
-  getter <- do
-    u <- unsafeIOToSTM newUnique
-    return $ ProcDefi
-      { edh'procedure'ident = u
-      , edh'procedure'name  = AttrByName nm
-      , edh'procedure'lexi  = scope
-      , edh'procedure'decl  = ProcDecl { edh'procedure'addr = NamedAttr nm
-                                       , edh'procedure'args = PackReceiver []
-                                       , edh'procedure'body = Right getterProc
-                                       }
-      }
-  setter <- case maybeSetterProc of
-    Nothing          -> return Nothing
-    Just !setterProc -> do
-      u <- unsafeIOToSTM newUnique
-      return $ Just $ ProcDefi
-        { edh'procedure'ident = u
-        , edh'procedure'name  = AttrByName nm
-        , edh'procedure'lexi  = scope
-        , edh'procedure'decl  = ProcDecl
-          { edh'procedure'addr = NamedAttr nm
-          , edh'procedure'args = PackReceiver
-                                   [optionalArg "newValue" $ LitExpr NilLiteral]
-          , edh'procedure'body = Right setterProc
-          }
-        }
-  return $ EdhProcedure (EdhDescriptor getter setter) Nothing
 
 
 objectScope :: Object -> STM (Maybe Scope)

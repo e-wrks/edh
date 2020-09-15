@@ -44,10 +44,18 @@ library
   default-extensions:
     NoImplicitPrelude
     BangPatterns
+    ConstraintKinds
+    DataKinds
+    FlexibleContexts
+    FlexibleInstances
+    GADTs
+    KindSignatures
     LambdaCase
     OverloadedStrings
     ScopedTypeVariables
     TupleSections
+    TypeOperators
+    ViewPatterns
 
   ghc-options:        -Wall
   build-depends:
@@ -75,6 +83,7 @@ library
 
 library edh-internal
   exposed-modules:
+    Language.Edh.Args
     Language.Edh.Control
     Language.Edh.Details.CoreLang
     Language.Edh.Details.Evaluate
@@ -84,6 +93,7 @@ library edh-internal
     Language.Edh.Details.Tx
     Language.Edh.Details.Utils
     Language.Edh.Event
+    Language.Edh.InterOp
     Language.Edh.Parser
 
   hs-source-dirs:     src
@@ -91,11 +101,18 @@ library edh-internal
   default-extensions:
     NoImplicitPrelude
     BangPatterns
+    ConstraintKinds
+    DataKinds
+    FlexibleContexts
+    FlexibleInstances
     GADTs
+    KindSignatures
     LambdaCase
     OverloadedStrings
     ScopedTypeVariables
     TupleSections
+    TypeOperators
+    ViewPatterns
 
   ghc-options:        -Wall
   build-depends:
@@ -128,10 +145,18 @@ executable edh
   default-extensions:
     NoImplicitPrelude
     BangPatterns
+    ConstraintKinds
+    DataKinds
+    FlexibleContexts
+    FlexibleInstances
+    GADTs
+    KindSignatures
     LambdaCase
     OverloadedStrings
     ScopedTypeVariables
     TupleSections
+    TypeOperators
+    ViewPatterns
 
   ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-maxN31
 
@@ -166,10 +191,18 @@ executable runedh
   default-extensions:
     NoImplicitPrelude
     BangPatterns
+    ConstraintKinds
+    DataKinds
+    FlexibleContexts
+    FlexibleInstances
+    GADTs
+    KindSignatures
     LambdaCase
     OverloadedStrings
     ScopedTypeVariables
     TupleSections
+    TypeOperators
+    ViewPatterns
 
   ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-maxN31
 

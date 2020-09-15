@@ -16,19 +16,20 @@ import           System.Clock
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.List.NonEmpty            as NE
-import qualified Data.HashMap.Strict           as Map
 import           Data.Dynamic
 
 import           Text.Megaparsec
 
-import           Data.Lossless.Decimal          ( decimalToInteger )
+import           Data.Lossless.Decimal          ( Decimal
+                                                , decimalToInteger
+                                                )
 
 import           Language.Edh.Control
+import           Language.Edh.Args
 import           Language.Edh.Runtime
 import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
-import           Language.Edh.Details.Utils
 
 
 -- | operator (<|)
@@ -89,7 +90,7 @@ loggingProc !lhExpr !rhExpr !exit !ets =
 -- | host method console.exit(***apk)
 --
 -- this is currently equivalent to @throw ProgramHalt(***apk)@
-conExitProc :: EdhHostProc
+conExitProc :: ArgsPack -> EdhHostProc
 conExitProc !apk _ !ets = case apk of
   ArgsPack [v] !kwargs | odNull kwargs -> haltEdhProgram ets v
   _ -> haltEdhProgram ets $ EdhArgsPack apk
@@ -102,14 +103,13 @@ defaultEdhPS1 = "Đ: "
 defaultEdhPS2 = "Đ| "
 
 -- | host method console.readSource(ps1="(db)Đ: ", ps2="(db)Đ| ")
-conReadSourceProc :: EdhHostProc
-conReadSourceProc !apk !exit !ets = if edh'in'tx ets
-  then throwEdh ets
-                UsageError
-                "you don't read console from within a transaction"
-  else case parseArgsPack (defaultEdhPS1, defaultEdhPS2) argsParser apk of
-    Left  err        -> throwEdh ets UsageError err
-    Right (ps1, ps2) -> do
+conReadSourceProc :: "ps1" ?: Text -> "ps2" ?: Text -> EdhHostProc
+conReadSourceProc (defaultArg defaultEdhPS1 -> !ps1) (defaultArg defaultEdhPS2 -> ps2) !exit !ets
+  = if edh'in'tx ets
+    then throwEdh ets
+                  UsageError
+                  "you don't read console from within a transaction"
+    else do
       !cmdIn <- newEmptyTMVar
       writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
       runEdhTx ets
@@ -129,129 +129,79 @@ conReadSourceProc !apk !exit !ets = if edh'in'tx ets
   !ctx = edh'context ets
   !ioQ = consoleIO $ edh'world'console $ edh'ctx'world ctx
 
-  argsParser =
-    ArgsPackParser
-        [ \ !arg (_, ps2') -> case arg of
-          EdhString ps1s -> Right (ps1s, ps2')
-          _              -> Left "invalid ps1"
-        , \ !arg (ps1', _) -> case arg of
-          EdhString ps2s -> Right (ps1', ps2s)
-          _              -> Left "invalid ps2"
-        ]
-      $ Map.fromList
-          [ ( "ps1"
-            , \ !arg (_, ps2') -> case arg of
-              EdhString ps1s -> Right (ps1s, ps2')
-              _              -> Left "invalid ps1"
-            )
-          , ( "ps2"
-            , \ !arg (ps1', _) -> case arg of
-              EdhString ps2s -> Right (ps1', ps2s)
-              _              -> Left "invalid ps2"
-            )
-          ]
-
 -- | host method console.readCommand(ps1="Đ: ", ps2="Đ| ", inScopeOf=None)
-conReadCommandProc :: EdhHostProc
-conReadCommandProc !apk !exit !ets = if edh'in'tx ets
-  then throwEdh ets
-                UsageError
-                "you don't read console from within a transaction"
-  else
-    case parseArgsPack (defaultEdhPS1, defaultEdhPS2, Nothing) argsParser apk of
-      Left err -> throwEdh ets UsageError err
-      Right (ps1, ps2, inScopeOf) ->
-        let
-          doReadCmd :: Scope -> STM ()
-          doReadCmd !cmdScope = do
-            !cmdIn <- newEmptyTMVar
-            writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
-            runEdhTx ets
-              $   edhContSTM
-              $   readTMVar cmdIn
-              >>= \(EdhInput !name !lineNo !lines_) ->
-                    runEdhTx etsCmd
-                      $ evalEdh'
-                          (if T.null name then "<console>" else T.unpack name)
-                          lineNo
-                          (T.unlines lines_)
-                      $ edhSwitchState ets
-                      . exitEdhTx exit
-           where
-            !etsCmd = ets
-              { edh'context = ctx
-                { edh'ctx'stack =
-                  cmdScope
-                      {
-                        -- mind to inherit caller's exception handler anyway
-                        edh'excpt'hndlr  = edh'excpt'hndlr callerScope
-                        -- use a meaningful caller stmt
-                      , edh'scope'caller = StmtSrc
-                                             ( SourcePos
-                                               { sourceName   = "<console-cmd>"
-                                               , sourceLine   = mkPos 1
-                                               , sourceColumn = mkPos 1
-                                               }
-                                             , VoidStmt
-                                             )
-                      }
-                    NE.:| NE.tail (edh'ctx'stack ctx)
-                }
+conReadCommandProc
+  :: "ps1" ?: Text -> "ps2" ?: Text -> "inScopeOf" ?: Object -> EdhHostProc
+conReadCommandProc (defaultArg defaultEdhPS1 -> !ps1) (defaultArg defaultEdhPS2 -> ps2) (optionalArg -> !inScopeOf) !exit !ets
+  = if edh'in'tx ets
+    then throwEdh ets
+                  UsageError
+                  "you don't read console from within a transaction"
+    else
+      let
+        doReadCmd :: Scope -> STM ()
+        doReadCmd !cmdScope = do
+          !cmdIn <- newEmptyTMVar
+          writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
+          runEdhTx ets
+            $   edhContSTM
+            $   readTMVar cmdIn
+            >>= \(EdhInput !name !lineNo !lines_) ->
+                  runEdhTx etsCmd
+                    $ evalEdh'
+                        (if T.null name then "<console>" else T.unpack name)
+                        lineNo
+                        (T.unlines lines_)
+                    $ edhSwitchState ets
+                    . exitEdhTx exit
+         where
+          !etsCmd = ets
+            { edh'context = ctx
+              { edh'ctx'stack =
+                cmdScope
+                    {
+                      -- mind to inherit caller's exception handler anyway
+                      edh'excpt'hndlr  = edh'excpt'hndlr callerScope
+                      -- use a meaningful caller stmt
+                    , edh'scope'caller = StmtSrc
+                                           ( SourcePos
+                                             { sourceName   = "<console-cmd>"
+                                             , sourceLine   = mkPos 1
+                                             , sourceColumn = mkPos 1
+                                             }
+                                           , VoidStmt
+                                           )
+                    }
+                  NE.:| NE.tail (edh'ctx'stack ctx)
               }
-        in
-          case inScopeOf of
-            Just !so -> objectScope so >>= \case
-              -- eval cmd source in scope of the specified object
-              Just !inScope -> doReadCmd inScope
-              Nothing       -> case edh'obj'store so of
-                HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
-                  -- the specified objec is a scope object, eval cmd source in
-                  -- the wrapped scope
-                  Just (inScope :: Scope) -> doReadCmd inScope
-                  _                       -> throwEdh
-                    ets
-                    UsageError
-                    "you don't read command inScopeOf a host object"
-                _ -> error "bug: objectScope not working for non-host object"
+            }
+      in
+        case inScopeOf of
+          Just !so -> objectScope so >>= \case
+            -- eval cmd source in scope of the specified object
+            Just !inScope -> doReadCmd inScope
+            Nothing       -> case edh'obj'store so of
+              HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+                -- the specified objec is a scope object, eval cmd source in
+                -- the wrapped scope
+                Just (inScope :: Scope) -> doReadCmd inScope
+                _                       -> throwEdh
+                  ets
+                  UsageError
+                  "you don't read command inScopeOf a host object"
+              _ -> error "bug: objectScope not working for non-host object"
 
-            -- eval cmd source with caller's scope
-            _ -> doReadCmd callerScope
+          -- eval cmd source with caller's scope
+          _ -> doReadCmd callerScope
 
  where
   !ctx         = edh'context ets
   !callerScope = contextFrame ctx 1
   !ioQ         = consoleIO $ edh'world'console $ edh'ctx'world ctx
 
-  argsParser =
-    ArgsPackParser
-        [ \ !arg (_, ps2', so) -> case arg of
-          EdhString ps1s -> Right (ps1s, ps2', so)
-          _              -> Left "invalid ps1"
-        , \ !arg (ps1', _, so) -> case arg of
-          EdhString ps2s -> Right (ps1', ps2s, so)
-          _              -> Left "invalid ps2"
-        ]
-      $ Map.fromList
-          [ ( "ps1"
-            , \ !arg (_, ps2', so) -> case arg of
-              EdhString ps1s -> Right (ps1s, ps2', so)
-              _              -> Left "invalid ps1"
-            )
-          , ( "ps2"
-            , \ !arg (ps1', _, so) -> case arg of
-              EdhString ps2s -> Right (ps1', ps2s, so)
-              _              -> Left "invalid ps2"
-            )
-          , ( "inScopeOf"
-            , \ !arg (ps1, ps2, _) -> case arg of
-              EdhObject !so -> Right (ps1, ps2, Just so)
-              _             -> Left "invalid inScopeOf object"
-            )
-          ]
-
 
 -- | host method console.print(*args, **kwargs)
-conPrintProc :: EdhHostProc
+conPrintProc :: ArgsPack -> EdhHostProc
 conPrintProc (ArgsPack !args !kwargs) !exit !ets = printVS args
   $ odToList kwargs
  where
@@ -289,22 +239,29 @@ conPrintProc (ArgsPack !args !kwargs) !exit !ets = printVS args
 
 
 conNowProc :: EdhHostProc
-conNowProc _ !exit !ets = do
+conNowProc !exit !ets = do
   nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ getTime Realtime
   exitEdh ets exit (EdhDecimal $ fromInteger nanos)
 
 
-data PeriodicArgs = PeriodicArgs {
-    periodic'interval :: !Int
-  , periodic'wait1st :: !Bool
-  }
-
 timelyNotify
-  :: EdhThreadState -> PeriodicArgs -> EdhGenrCaller -> EdhTxExit -> STM ()
-timelyNotify !ets (PeriodicArgs !delayMicros !wait1st) !iter'cb !exit =
-  if edh'in'tx ets
-    then throwEdh ets UsageError "can not be called from within a transaction"
-    else do -- use a 'TMVar' filled asynchronously, so perceivers on the same
+  :: EdhThreadState
+  -> Int
+  -> Decimal
+  -> Bool
+  -> EdhGenrCaller
+  -> EdhTxExit
+  -> STM ()
+timelyNotify !ets !scale !interval !wait1st !iter'cb !exit = if edh'in'tx ets
+  then throwEdh ets UsageError "can not be called from within a transaction"
+  else case decimalToInteger interval of
+    Nothing ->
+      throwEdh ets UsageError
+        $  "invalid interval, expect an integer but: "
+        <> T.pack (show interval)
+    Just !i -> do
+      let !delayMicros = scale * fromInteger i
+      -- use a 'TMVar' filled asynchronously, so perceivers on the same
       -- thread dont' get blocked by this wait
       !notif <- newEmptyTMVar
       let notifOne = do
@@ -333,60 +290,24 @@ timelyNotify !ets (PeriodicArgs !delayMicros !wait1st) !iter'cb !exit =
 
 
 -- | host generator console.everyMicros(n, wait1st=true) - with fixed interval
-conEveryMicrosProc :: EdhHostProc
-conEveryMicrosProc !apk !exit !ets =
+conEveryMicrosProc :: Decimal -> "wait1st" ?: Bool -> EdhHostProc
+conEveryMicrosProc !interval (defaultArg True -> !wait1st) !exit !ets =
   case edh'ctx'genr'caller $ edh'context ets of
-    Nothing -> throwEdh ets EvalError "can only be called as generator"
-    Just genr'caller ->
-      case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
-        Right !pargs -> timelyNotify ets pargs genr'caller exit
-        Left  !err   -> throwEdh ets UsageError err
+    Nothing          -> throwEdh ets EvalError "can only be called as generator"
+    Just genr'caller -> timelyNotify ets 1 interval wait1st genr'caller exit
 
 -- | host generator console.everyMillis(n, wait1st=true) - with fixed interval
-conEveryMillisProc :: EdhHostProc
-conEveryMillisProc !apk !exit !ets =
+conEveryMillisProc :: Decimal -> "wait1st" ?: Bool -> EdhHostProc
+conEveryMillisProc !interval (defaultArg True -> !wait1st) !exit !ets =
   case edh'ctx'genr'caller $ edh'context ets of
-    Nothing -> throwEdh ets EvalError "can only be called as generator"
-    Just genr'caller ->
-      case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
-        Right !pargs -> timelyNotify
-          ets
-          pargs { periodic'interval = 1000 * periodic'interval pargs }
-          genr'caller
-          exit
-        Left !err -> throwEdh ets UsageError err
+    Nothing          -> throwEdh ets EvalError "can only be called as generator"
+    Just genr'caller -> timelyNotify ets 1000 interval wait1st genr'caller exit
 
 -- | host generator console.everySeconds(n, wait1st=true) - with fixed interval
-conEverySecondsProc :: EdhHostProc
-conEverySecondsProc !apk !exit !ets =
+conEverySecondsProc :: Decimal -> "wait1st" ?: Bool -> EdhHostProc
+conEverySecondsProc !interval (defaultArg True -> !wait1st) !exit !ets =
   case edh'ctx'genr'caller $ edh'context ets of
     Nothing -> throwEdh ets EvalError "can only be called as generator"
     Just genr'caller ->
-      case parseArgsPack (PeriodicArgs 1 True) parsePeriodicArgs apk of
-        Right !pargs -> timelyNotify
-          ets
-          pargs { periodic'interval = 1000000 * periodic'interval pargs }
-          genr'caller
-          exit
-        Left !err -> throwEdh ets UsageError err
-
-parsePeriodicArgs :: ArgsPackParser PeriodicArgs
-parsePeriodicArgs =
-  ArgsPackParser
-      [ \ !arg pargs -> case arg of
-          EdhDecimal !d -> case decimalToInteger d of
-            Just !i -> Right $ pargs { periodic'interval = fromIntegral i }
-            _ -> Left $ "invalid interval, expect an integer but: " <> T.pack
-              (show arg)
-          _ -> Left $ "invalid interval, expect an integer but: " <> T.pack
-            (show arg)
-      ]
-    $ Map.fromList
-        [ ( "wait1st"
-          , \ !arg pargs -> case arg of
-            EdhBool !w -> Right pargs { periodic'wait1st = w }
-            _ -> Left $ "invalid wait1st, expect true or false but: " <> T.pack
-              (show arg)
-          )
-        ]
+      timelyNotify ets 1000000 interval wait1st genr'caller exit
 

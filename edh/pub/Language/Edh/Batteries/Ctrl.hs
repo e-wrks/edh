@@ -40,7 +40,7 @@ annoProc _ _ !exit = exitEdhTx exit nil
 --
 -- this being a host procedure so the tip context statement carries the
 -- right Edh source location reporting the error
-errorProc :: EdhHostProc
+errorProc :: ArgsPack -> EdhHostProc
 errorProc !apk _ !ets = edhThrow ets . EdhObject =<< edh'exception'wrapper
   (edh'ctx'world $ edh'context ets)
   (toException $ edhCreateError 1 ets EdhException apk)

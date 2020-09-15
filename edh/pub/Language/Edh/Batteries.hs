@@ -51,6 +51,7 @@ import qualified Text.Megaparsec.Char.Lexer    as L
 import           Data.Lossless.Decimal         as D
 
 import           Language.Edh.Runtime
+import           Language.Edh.InterOp
 
 import           Language.Edh.Batteries.Data
 import           Language.Edh.Batteries.Math
@@ -505,140 +506,45 @@ installEdhBatteries world =
     -- global procedures at world root scope
     !rootProcs <-
       sequence
-      $  [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp args
-         | (mc, nm, hp, args) <-
-           [ ( EdhMethod
-             , "__StringType_bytes__"
-             , strEncodeProc
-             , PackReceiver [mandatoryArg "str"]
-             )
-           , ( EdhMethod
-             , "__BlobType_utf8string__"
-             , blobDecodeProc
-             , PackReceiver [mandatoryArg "blob"]
-             )
-           , ( EdhMethod
-             , "Symbol"
-             , symbolCtorProc
-             , PackReceiver [mandatoryArg "repr", RecvRestPosArgs "reprs"]
-             )
-           , ( EdhMethod
-             , "UUID"
-             , uuidCtorProc
-             , PackReceiver [mandatoryArg "uuidText"]
-             )
-           , ( EdhMethod
-             , "__ArgsPackType_args__"
-             , apkArgsProc
-             , PackReceiver [mandatoryArg "apk"]
-             )
-           , ( EdhMethod
-             , "__ArgsPackType_kwargs__"
-             , apkKwrgsProc
-             , PackReceiver [mandatoryArg "apk"]
-             )
-           , (EdhMethod, "error", errorProc, WildReceiver)
-           , (EdhMethod, "repr", reprProc, WildReceiver)
-           , (EdhMethod, "cap", capProc, PackReceiver [mandatoryArg "container"])
-           , ( EdhMethod
-             , "grow"
-             , growProc
-             , PackReceiver
-               [mandatoryArg "container", mandatoryArg "newCapacity"]
-             )
-           , (EdhMethod, "len", lenProc, PackReceiver [mandatoryArg "container"])
-           , ( EdhMethod
-             , "mark"
-             , markProc
-             , PackReceiver [mandatoryArg "container", mandatoryArg "newLength"]
-             )
-           , (EdhMethod, "show", showProc  , PackReceiver [mandatoryArg "val"])
-           , (EdhMethod, "desc", descProc  , PackReceiver [mandatoryArg "val"])
-           , (EdhMethod, "dict", dictProc  , WildReceiver)
-           , (EdhMethod, "null", isNullProc, WildReceiver)
-           , (EdhMethod, "type", typeProc  , WildReceiver)
-           , ( EdhMethod
-             , "__IntrinsicType_name__"
-             , procNameProc
-             , PackReceiver [mandatoryArg "p"]
-             )
-           , ( EdhMethod
-             , "__MethodType_name__"
-             , procNameProc
-             , PackReceiver [mandatoryArg "p"]
-             )
-           , ( EdhMethod
-             , "__HostMethodType_name__"
-             , procNameProc
-             , PackReceiver [mandatoryArg "p"]
-             )
-           , ( EdhMethod
-             , "__OperatorType_name__"
-             , procNameProc
-             , PackReceiver [mandatoryArg "p"]
-             )
-           , ( EdhMethod
-             , "__HostOperType_name__"
-             , procNameProc
-             , PackReceiver [mandatoryArg "p"]
-             )
-           , ( EdhMethod
-             , "__GeneratorType_name__"
-             , procNameProc
-             , PackReceiver [mandatoryArg "p"]
-             )
-           , ( EdhMethod
-             , "__HostGenrType_name__"
-             , procNameProc
-             , PackReceiver [mandatoryArg "p"]
-             )
-           , ( EdhMethod
-             , "__InterpreterType_name__"
-             , procNameProc
-             , PackReceiver [mandatoryArg "p"]
-             )
-           , ( EdhMethod
-             , "__ProducerType_name__"
-             , procNameProc
-             , PackReceiver [mandatoryArg "p"]
-             )
-           , ( EdhMethod
-             , "__DescriptorType_name__"
-             , procNameProc
-             , PackReceiver [mandatoryArg "p"]
-             )
-           , ( EdhMethod
-             , "property"
-             , propertyProc
-             , PackReceiver
-               [mandatoryArg "getter", optionalArg "setter" $ LitExpr NilLiteral]
-             )
-           , (EdhMethod, "setter", setterProc, PackReceiver [mandatoryArg "mth"])
-           , (EdhMethod, "constructor", ctorProc, WildReceiver)
-           , (EdhMethod, "supers", supersProc, WildReceiver)
-           , ( EdhMethod
-             , "makeOp"
-             , makeOpProc
-             , PackReceiver
-               [mandatoryArg "lhe", mandatoryArg "opSym", mandatoryArg "rhe"]
-             )
-           , (EdhMethod, "mre", mreProc, PackReceiver [mandatoryArg "evs"])
-           , (EdhMethod, "eos", eosProc, PackReceiver [mandatoryArg "evs"])
-           , ( EdhMethod
-             , "__DictType_size__"
-             , dictSizeProc
-             , PackReceiver [mandatoryArg "d"]
-             )
-           , ( EdhMethod
-             , "__ListType_push__"
-             , listPushProc
-             , PackReceiver [mandatoryArg "l"]
-             )
-           , ( EdhMethod
-             , "__ListType_pop__"
-             , listPopProc
-             , PackReceiver [mandatoryArg "l"]
-             )
+      $  [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp
+         | (mc, nm, hp) <-
+           [ (EdhMethod, "__StringType_bytes__"    , wrapHostProc strEncodeProc)
+           , (EdhMethod, "__BlobType_utf8string__", wrapHostProc blobDecodeProc)
+           , (EdhMethod, "Symbol", wrapHostProc symbolCtorProc)
+           , (EdhMethod, "UUID"                    , wrapHostProc uuidCtorProc)
+           , (EdhMethod, "__ArgsPackType_args__"   , wrapHostProc apkArgsProc)
+           , (EdhMethod, "__ArgsPackType_kwargs__" , wrapHostProc apkKwrgsProc)
+           , (EdhMethod, "error"                   , wrapHostProc errorProc)
+           , (EdhMethod, "repr"                    , wrapHostProc reprProc)
+           , (EdhMethod, "cap"                     , wrapHostProc capProc)
+           , (EdhMethod, "grow"                    , wrapHostProc growProc)
+           , (EdhMethod, "len"                     , wrapHostProc lenProc)
+           , (EdhMethod, "mark"                    , wrapHostProc markProc)
+           , (EdhMethod, "show"                    , wrapHostProc showProc)
+           , (EdhMethod, "desc"                    , wrapHostProc descProc)
+           , (EdhMethod, "dict"                    , wrapHostProc dictProc)
+           , (EdhMethod, "null"                    , wrapHostProc isNullProc)
+           , (EdhMethod, "type"                    , wrapHostProc typeProc)
+           , (EdhMethod, "__IntrinsicType_name__"  , wrapHostProc procNameProc)
+           , (EdhMethod, "__MethodType_name__"     , wrapHostProc procNameProc)
+           , (EdhMethod, "__HostMethodType_name__" , wrapHostProc procNameProc)
+           , (EdhMethod, "__OperatorType_name__"   , wrapHostProc procNameProc)
+           , (EdhMethod, "__HostOperType_name__"   , wrapHostProc procNameProc)
+           , (EdhMethod, "__GeneratorType_name__"  , wrapHostProc procNameProc)
+           , (EdhMethod, "__HostGenrType_name__"   , wrapHostProc procNameProc)
+           , (EdhMethod, "__InterpreterType_name__", wrapHostProc procNameProc)
+           , (EdhMethod, "__ProducerType_name__"   , wrapHostProc procNameProc)
+           , (EdhMethod, "__DescriptorType_name__" , wrapHostProc procNameProc)
+           , (EdhMethod, "property"                , wrapHostProc propertyProc)
+           , (EdhMethod, "setter"                  , wrapHostProc setterProc)
+           , (EdhMethod, "constructor"             , wrapHostProc ctorProc)
+           , (EdhMethod, "supers"                  , wrapHostProc supersProc)
+           , (EdhMethod, "makeOp"                  , wrapHostProc makeOpProc)
+           , (EdhMethod, "mre"                     , wrapHostProc mreProc)
+           , (EdhMethod, "eos"                     , wrapHostProc eosProc)
+           , (EdhMethod, "__DictType_size__"       , wrapHostProc dictSizeProc)
+           , (EdhMethod, "__ListType_push__"       , wrapHostProc listPushProc)
+           , (EdhMethod, "__ListType_pop__"        , wrapHostProc listPopProc)
            ]
          ]
       ++ [(AttrByName "Vector", ) . EdhObject <$> createVectorClass rootScope]
@@ -659,43 +565,16 @@ installEdhBatteries world =
     !conScope <- fromJust <$> objectScope console
 
     !conArts  <- sequence
-      [ (AttrByName nm, ) <$> mkHostProc conScope vc nm hp args
-      | (vc, nm, hp, args) <-
-        [ (EdhMethod, "exit", conExitProc, PackReceiver [])
-        , ( EdhMethod
-          , "readSource"
-          , conReadSourceProc
-          , PackReceiver
-            [ optionalArg "ps1" $ LitExpr $ StringLiteral defaultEdhPS1
-            , optionalArg "ps2" $ LitExpr $ StringLiteral defaultEdhPS2
-            ]
-          )
-        , ( EdhMethod
-          , "readCommand"
-          , conReadCommandProc
-          , PackReceiver
-            [ optionalArg "ps1" $ LitExpr $ StringLiteral defaultEdhPS1
-            , optionalArg "ps2" $ LitExpr $ StringLiteral defaultEdhPS2
-            , optionalArg "inScopeOf" edhNoneExpr
-            ]
-          )
-        , (EdhMethod, "print", conPrintProc, WildReceiver)
-        , (EdhMethod, "now"  , conNowProc  , PackReceiver [])
-        , ( EdhGnrtor
-          , "everyMicros"
-          , conEveryMicrosProc
-          , PackReceiver [mandatoryArg "interval"]
-          )
-        , ( EdhGnrtor
-          , "everyMillis"
-          , conEveryMillisProc
-          , PackReceiver [mandatoryArg "interval"]
-          )
-        , ( EdhGnrtor
-          , "everySeconds"
-          , conEverySecondsProc
-          , PackReceiver [mandatoryArg "interval"]
-          )
+      [ (AttrByName nm, ) <$> mkHostProc conScope vc nm hp
+      | (vc, nm, hp) <-
+        [ (EdhMethod, "exit"        , wrapHostProc conExitProc)
+        , (EdhMethod, "readSource"  , wrapHostProc conReadSourceProc)
+        , (EdhMethod, "readCommand" , wrapHostProc conReadCommandProc)
+        , (EdhMethod, "print"       , wrapHostProc conPrintProc)
+        , (EdhMethod, "now"         , wrapHostProc conNowProc)
+        , (EdhGnrtor, "everyMicros" , wrapHostProc conEveryMicrosProc)
+        , (EdhGnrtor, "everyMillis" , wrapHostProc conEveryMillisProc)
+        , (EdhGnrtor, "everySeconds", wrapHostProc conEverySecondsProc)
         ]
       ]
     iopdUpdate conArts $ edh'scope'entity conScope

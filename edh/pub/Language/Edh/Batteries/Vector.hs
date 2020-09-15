@@ -19,6 +19,7 @@ import qualified Data.Vector.Mutable           as MV
 import qualified Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
+import           Language.Edh.InterOp
 import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.CoreLang
@@ -35,164 +36,53 @@ createVectorClass :: Scope -> STM Object
 createVectorClass !clsOuterScope =
   mkHostClass' clsOuterScope "Vector" vecAllocator [] $ \ !clsScope -> do
     !mths <- sequence
-      [ (AttrByName nm, ) <$> mkHostProc clsScope vc nm hp mthArgs
-      | (nm, vc, hp, mthArgs) <-
-        [ ( "append"
-          , EdhMethod
-          , vecAppendProc
-          , PackReceiver [mandatoryArg "values"]
-          )
-        , ("==", EdhMethod, vecEqProc id, PackReceiver [])
+      [ (AttrByName nm, ) <$> mkHostProc clsScope vc nm hp
+      | (nm, vc, hp) <-
+        [ ("append", EdhMethod, wrapHostProc vecAppendProc)
+        , ("=="    , EdhMethod, wrapHostProc $ vecEqProc id)
         , ( "!="
           , EdhMethod
-          , vecEqProc not
-          , PackReceiver []
+          , wrapHostProc $ vecEqProc not
           )
 -- TODO support vectorized comparitions
-        , ("[]", EdhMethod, vecIdxReadProc, PackReceiver [mandatoryArg "idx"])
-        , ( "[=]"
-          , EdhMethod
-          , vecIdxWriteProc
-          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
-          )
-        , ( "[+=]"
-          , EdhMethod
-          , vecIdxAssignWithOpProc addProc
-          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
-          )
-        , ( "[-=]"
-          , EdhMethod
-          , vecIdxAssignWithOpProc subtProc
-          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
-          )
-        , ( "[*=]"
-          , EdhMethod
-          , vecIdxAssignWithOpProc mulProc
-          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
-          )
-        , ( "[/=]"
-          , EdhMethod
-          , vecIdxAssignWithOpProc divProc
-          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
-          )
-        , ( "[//=]"
-          , EdhMethod
-          , vecIdxAssignWithOpProc divIntProc
-          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
-          )
-        , ( "[%=]"
-          , EdhMethod
-          , vecIdxAssignWithOpProc modIntProc
-          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
-          )
-        , ( "[**=]"
-          , EdhMethod
-          , vecIdxAssignWithOpProc powProc
-          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
-          )
+        , ("[]"   , EdhMethod, wrapHostProc vecIdxReadProc)
+        , ("[=]"  , EdhMethod, wrapHostProc vecIdxWriteProc)
+        , ("[+=]" , EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc addProc)
+        , ("[-=]" , EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc subtProc)
+        , ("[*=]" , EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc mulProc)
+        , ("[/=]" , EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc divProc)
+        , ("[//=]", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc divIntProc)
+        , ("[%=]" , EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc modIntProc)
+        , ("[**=]", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc powProc)
         , ( "[&&=]"
           , EdhMethod
-          , vecIdxAssignWithOpProc logicalAndProc
-          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
+          , wrapHostProc $ vecIdxAssignWithOpProc logicalAndProc
           )
         , ( "[||=]"
           , EdhMethod
-          , vecIdxAssignWithOpProc logicalOrProc
-          , PackReceiver [mandatoryArg "idx", mandatoryArg "val"]
+          , wrapHostProc $ vecIdxAssignWithOpProc logicalOrProc
           )
-        , ( "+"
-          , EdhMethod
-          , vecCopyWithOpProc addProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "-"
-          , EdhMethod
-          , vecCopyWithOpProc subtProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "*"
-          , EdhMethod
-          , vecCopyWithOpProc mulProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "/"
-          , EdhMethod
-          , vecCopyWithOpProc divProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "//"
-          , EdhMethod
-          , vecCopyWithOpProc divIntProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "%"
-          , EdhMethod
-          , vecCopyWithOpProc modIntProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "**"
-          , EdhMethod
-          , vecCopyWithOpProc powProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "&&"
-          , EdhMethod
-          , vecCopyWithOpProc logicalAndProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "||"
-          , EdhMethod
-          , vecCopyWithOpProc logicalOrProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "+="
-          , EdhMethod
-          , vecAssignWithOpProc addProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "-="
-          , EdhMethod
-          , vecAssignWithOpProc subtProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "*="
-          , EdhMethod
-          , vecAssignWithOpProc mulProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "/="
-          , EdhMethod
-          , vecAssignWithOpProc divProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "//="
-          , EdhMethod
-          , vecAssignWithOpProc divIntProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "%="
-          , EdhMethod
-          , vecAssignWithOpProc modIntProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "**="
-          , EdhMethod
-          , vecAssignWithOpProc powProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "&&="
-          , EdhMethod
-          , vecAssignWithOpProc logicalAndProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ( "||="
-          , EdhMethod
-          , vecAssignWithOpProc logicalOrProc
-          , PackReceiver [mandatoryArg "val"]
-          )
-        , ("__null__", EdhMethod, vecNullProc, PackReceiver [])
-        , ("__len__" , EdhMethod, vecLenProc , PackReceiver [])
-        , ("__repr__", EdhMethod, vecReprProc, PackReceiver [])
+        , ("+"       , EdhMethod, wrapHostProc $ vecCopyWithOpProc addProc)
+        , ("-"       , EdhMethod, wrapHostProc $ vecCopyWithOpProc subtProc)
+        , ("*"       , EdhMethod, wrapHostProc $ vecCopyWithOpProc mulProc)
+        , ("/"       , EdhMethod, wrapHostProc $ vecCopyWithOpProc divProc)
+        , ("//"      , EdhMethod, wrapHostProc $ vecCopyWithOpProc divIntProc)
+        , ("%"       , EdhMethod, wrapHostProc $ vecCopyWithOpProc modIntProc)
+        , ("**"      , EdhMethod, wrapHostProc $ vecCopyWithOpProc powProc)
+        , ("&&", EdhMethod, wrapHostProc $ vecCopyWithOpProc logicalAndProc)
+        , ("||", EdhMethod, wrapHostProc $ vecCopyWithOpProc logicalOrProc)
+        , ("+="      , EdhMethod, wrapHostProc $ vecAssignWithOpProc addProc)
+        , ("-="      , EdhMethod, wrapHostProc $ vecAssignWithOpProc subtProc)
+        , ("*="      , EdhMethod, wrapHostProc $ vecAssignWithOpProc mulProc)
+        , ("/="      , EdhMethod, wrapHostProc $ vecAssignWithOpProc divProc)
+        , ("//="     , EdhMethod, wrapHostProc $ vecAssignWithOpProc divIntProc)
+        , ("%="      , EdhMethod, wrapHostProc $ vecAssignWithOpProc modIntProc)
+        , ("**="     , EdhMethod, wrapHostProc $ vecAssignWithOpProc powProc)
+        , ("&&=", EdhMethod, wrapHostProc $ vecAssignWithOpProc logicalAndProc)
+        , ("||=", EdhMethod, wrapHostProc $ vecAssignWithOpProc logicalOrProc)
+        , ("__null__", EdhMethod, wrapHostProc vecNullProc)
+        , ("__len__" , EdhMethod, wrapHostProc vecLenProc)
+        , ("__repr__", EdhMethod, wrapHostProc vecReprProc)
         ]
       ]
     iopdUpdate mths $ edh'scope'entity clsScope
@@ -224,19 +114,18 @@ createVectorClass !clsOuterScope =
         throwEdh etsCtor UsageError $ "invalid length: " <> T.pack
           (show badLenVal)
 
-  vecAppendProc :: EdhHostProc
-  vecAppendProc (ArgsPack !args !kwargs) !exit !ets = if not (odNull kwargs)
-    then throwEdh ets UsageError "invalid args to Vector.append()"
-    else withThisHostObj ets $ \ !hsv (mvec :: EdhVector) -> do
+  vecAppendProc :: [EdhValue] -> EdhHostProc
+  vecAppendProc !args !exit !ets =
+    withThisHostObj ets $ \ !hsv (mvec :: EdhVector) -> do
       !mvec' <-
         unsafeIOToSTM $ V.thaw =<< (V.++ V.fromList args) <$> V.freeze mvec
       writeTVar hsv $ toDyn mvec'
       exitEdh ets exit $ EdhObject $ edh'scope'this $ contextScope $ edh'context
         ets
 
-  vecEqProc :: (Bool -> Bool) -> EdhHostProc
-  vecEqProc !inversion (ArgsPack !args _kwargs) !exit !ets = case args of
-    [EdhObject !objOther] -> withThisHostObj ets $ \_ (mvec :: EdhVector) ->
+  vecEqProc :: (Bool -> Bool) -> EdhValue -> EdhHostProc
+  vecEqProc !inversion !other !exit !ets = case other of
+    EdhObject !objOther -> withThisHostObj ets $ \_ (mvec :: EdhVector) ->
       withHostObject' objOther naExit $ \_ !mvecOther -> do
         !conclusion <- unsafeIOToSTM $ do
           -- TODO we're sacrificing thread safety for zero-copy performance
@@ -248,9 +137,9 @@ createVectorClass !clsOuterScope =
     _ -> naExit
     where naExit = exitEdh ets exit $ EdhBool $ inversion False
 
-  vecIdxReadProc :: EdhHostProc
-  vecIdxReadProc apk@(ArgsPack !args _kwargs) !exit !ets = case args of
-    [!idxVal] -> withHostObject ets thisVecObj $ \_ !mvec -> do
+  vecIdxReadProc :: EdhValue -> EdhHostProc
+  vecIdxReadProc !idxVal !exit !ets =
+    withHostObject ets thisVecObj $ \_ !mvec -> do
       let exitWith :: EdhVector -> STM ()
           exitWith !newVec = do
             !newStore <- HostStore <$> newTVar (toDyn newVec)
@@ -283,16 +172,13 @@ createVectorClass !clsOuterScope =
             $ \(!iStart, !iStop, !iStep) -> if iStep == 1
                 then exitWith $ MV.unsafeSlice iStart (iStop - iStart) mvec
                 else exitWithRange iStart iStop iStep
-
-    _ -> throwEdh ets UsageError $ "invalid index for a Vector: " <> T.pack
-      (show apk)
    where
     !scope      = contextScope $ edh'context ets
     !thisVecObj = edh'scope'this scope
 
-  vecIdxWriteProc :: EdhHostProc
-  vecIdxWriteProc apk@(ArgsPack !args _kwargs) !exit !ets = case args of
-    [!idxVal, !other] -> withThisHostObj ets $ \_ !mvec -> do
+  vecIdxWriteProc :: EdhValue -> EdhValue -> EdhHostProc
+  vecIdxWriteProc !idxVal !other !exit !ets =
+    withThisHostObj ets $ \_ !mvec -> do
       let exitWithRangeAssign :: Int -> Int -> Int -> STM ()
           exitWithRangeAssign !start !stop !step = case edhUltimate other of
             EdhObject !objOther ->
@@ -342,37 +228,26 @@ createVectorClass !clsOuterScope =
             $ \(!iStart, !iStop, !iStep) ->
                 exitWithRangeAssign iStart iStop iStep
 
-    _ ->
-      throwEdh ets UsageError
-        $  "invalid assigning index for a Vector: "
-        <> T.pack (show apk)
-
-
-  vecCopyWithOpProc :: EdhIntrinsicOp -> EdhHostProc
-  vecCopyWithOpProc !withOp apk@(ArgsPack !args _kwargs) !exit !ets =
-    case args of
-      [!other] -> withHostObject ets thisVecObj $ \_ !mvec ->
-        unsafeIOToSTM (MV.new $ MV.length mvec) >>= \ !newVec ->
-          let
-            copyAt :: Int -> STM ()
-            copyAt !n = if n < 0
-              then do
-                !newStore <- HostStore <$> newTVar (toDyn newVec)
-                edhMutCloneObj ets thisVecObj (edh'scope'that scope) newStore
-                  $ \ !thatObjClone -> exitEdh ets exit $ EdhObject thatObjClone
-              else unsafeIOToSTM (MV.read mvec n) >>= \ !srcVal ->
-                runEdhTx ets
-                  $ withOp (LitExpr $ ValueLiteral srcVal)
-                           (LitExpr $ ValueLiteral other)
-                  $ \ !opRtnV _ets -> do
-                      unsafeIOToSTM $ MV.unsafeWrite newVec n opRtnV
-                      copyAt (n - 1)
-          in
-            copyAt (MV.length mvec - 1)
-      _ ->
-        throwEdh ets UsageError
-          $  "invalid op assigning args for a Vector: "
-          <> T.pack (show apk)
+  vecCopyWithOpProc :: EdhIntrinsicOp -> EdhValue -> EdhHostProc
+  vecCopyWithOpProc !withOp !other !exit !ets =
+    withHostObject ets thisVecObj $ \_ !mvec ->
+      unsafeIOToSTM (MV.new $ MV.length mvec) >>= \ !newVec ->
+        let
+          copyAt :: Int -> STM ()
+          copyAt !n = if n < 0
+            then do
+              !newStore <- HostStore <$> newTVar (toDyn newVec)
+              edhMutCloneObj ets thisVecObj (edh'scope'that scope) newStore
+                $ \ !thatObjClone -> exitEdh ets exit $ EdhObject thatObjClone
+            else unsafeIOToSTM (MV.read mvec n) >>= \ !srcVal ->
+              runEdhTx ets
+                $ withOp (LitExpr $ ValueLiteral srcVal)
+                         (LitExpr $ ValueLiteral other)
+                $ \ !opRtnV _ets -> do
+                    unsafeIOToSTM $ MV.unsafeWrite newVec n opRtnV
+                    copyAt (n - 1)
+        in
+          copyAt (MV.length mvec - 1)
    where
     !scope      = contextScope $ edh'context ets
     !thisVecObj = edh'scope'this scope
@@ -402,17 +277,12 @@ createVectorClass !clsOuterScope =
               unsafeIOToSTM $ MV.unsafeWrite mvec n opRtnV
               assignAt (n + step)
 
-  vecAssignWithOpProc :: EdhIntrinsicOp -> EdhHostProc
-  vecAssignWithOpProc !withOp apk@(ArgsPack !args _kwargs) !exit !ets =
-    case args of
-      [!other] -> withHostObject ets thisVecObj $ \_ !mvec ->
-        opAssignElems ets withOp other mvec 0 (MV.length mvec) 1
-          $ exitEdh ets exit
-          $ EdhObject thisVecObj
-      _ ->
-        throwEdh ets UsageError
-          $  "invalid op assigning args for a Vector: "
-          <> T.pack (show apk)
+  vecAssignWithOpProc :: EdhIntrinsicOp -> EdhValue -> EdhHostProc
+  vecAssignWithOpProc !withOp !other !exit !ets =
+    withHostObject ets thisVecObj $ \_ !mvec ->
+      opAssignElems ets withOp other mvec 0 (MV.length mvec) 1
+        $ exitEdh ets exit
+        $ EdhObject thisVecObj
    where
     !scope      = contextScope $ edh'context ets
     !thisVecObj = edh'scope'this scope
@@ -464,46 +334,39 @@ createVectorClass !clsOuterScope =
               unsafeIOToSTM $ MV.unsafeWrite mvec n opRtnV
               assignWithVec (n + step) (i + 1) mvec'
 
-  vecIdxAssignWithOpProc :: EdhIntrinsicOp -> EdhHostProc
-  vecIdxAssignWithOpProc !withOp apk@(ArgsPack !args _kwargs) !exit !ets =
-    case args of
-      [!idxVal, !other] -> withThisHostObj ets $ \_ !mvec ->
-        parseEdhIndex ets idxVal $ \case
-          Left !err -> throwEdh ets UsageError err
-          Right (EdhIndex !i) ->
-            unsafeIOToSTM (MV.read mvec i) >>= \ !oldVal ->
-              runEdhTx ets
-                $ withOp (LitExpr $ ValueLiteral oldVal)
-                         (LitExpr $ ValueLiteral other)
-                $ \ !opRtnV _ets -> do
-                    unsafeIOToSTM $ MV.unsafeWrite mvec i opRtnV
-                    exitEdh ets exit opRtnV
-          Right EdhAny ->
-            opAssignElems ets withOp other mvec 0 (MV.length mvec) 1
-              $ exitEdh ets exit nil
-          Right EdhAll ->
-            opAssignRange ets withOp other mvec 0 (MV.length mvec) 1 exit
-          Right (EdhSlice !start !stop !step) ->
-            edhRegulateSlice ets (MV.length mvec) (start, stop, step)
-              $ \(!iStart, !iStop, !iStep) ->
-                  opAssignRange ets withOp other mvec iStart iStop iStep exit
-
-      _ ->
-        throwEdh ets UsageError
-          $  "invalid index op assigning args for a Vector: "
-          <> T.pack (show apk)
+  vecIdxAssignWithOpProc
+    :: EdhIntrinsicOp -> EdhValue -> EdhValue -> EdhHostProc
+  vecIdxAssignWithOpProc !withOp !idxVal !other !exit !ets =
+    withThisHostObj ets $ \_ !mvec -> parseEdhIndex ets idxVal $ \case
+      Left  !err          -> throwEdh ets UsageError err
+      Right (EdhIndex !i) -> unsafeIOToSTM (MV.read mvec i) >>= \ !oldVal ->
+        runEdhTx ets
+          $ withOp (LitExpr $ ValueLiteral oldVal)
+                   (LitExpr $ ValueLiteral other)
+          $ \ !opRtnV _ets -> do
+              unsafeIOToSTM $ MV.unsafeWrite mvec i opRtnV
+              exitEdh ets exit opRtnV
+      Right EdhAny ->
+        opAssignElems ets withOp other mvec 0 (MV.length mvec) 1
+          $ exitEdh ets exit nil
+      Right EdhAll ->
+        opAssignRange ets withOp other mvec 0 (MV.length mvec) 1 exit
+      Right (EdhSlice !start !stop !step) ->
+        edhRegulateSlice ets (MV.length mvec) (start, stop, step)
+          $ \(!iStart, !iStop, !iStep) ->
+              opAssignRange ets withOp other mvec iStart iStop iStep exit
 
 
   vecNullProc :: EdhHostProc
-  vecNullProc _ !exit !ets = withThisHostObj ets $ \_ (mvec :: EdhVector) ->
+  vecNullProc !exit !ets = withThisHostObj ets $ \_ (mvec :: EdhVector) ->
     exitEdh ets exit $ EdhBool $ MV.length mvec <= 0
 
   vecLenProc :: EdhHostProc
-  vecLenProc _ !exit !ets = withThisHostObj ets $ \_ (mvec :: EdhVector) ->
+  vecLenProc !exit !ets = withThisHostObj ets $ \_ (mvec :: EdhVector) ->
     exitEdh ets exit $ EdhDecimal $ fromIntegral $ MV.length mvec
 
   vecReprProc :: EdhHostProc
-  vecReprProc _ !exit !ets = withThisHostObj ets $ \_ (mvec :: EdhVector) -> do
+  vecReprProc !exit !ets = withThisHostObj ets $ \_ (mvec :: EdhVector) -> do
     let go :: [EdhValue] -> [Text] -> STM ()
         go [] !rs =
           exitEdh ets exit

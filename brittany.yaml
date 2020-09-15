@@ -1,10 +1,16 @@
 conf_forward:
   options_ghc:
     - -XNoImplicitPrelude
-    - -XOverloadedStrings
-    - -XLambdaCase
-    - -XBlockArguments
     - -XBangPatterns
-    - -XTupleSections
-    - -XScopedTypeVariables
+    - -XConstraintKinds
+    - -XDataKinds
+    - -XFlexibleContexts
+    - -XFlexibleInstances
     - -XGADTs
+    - -XKindSignatures
+    - -XLambdaCase
+    - -XOverloadedStrings
+    - -XScopedTypeVariables
+    - -XTupleSections
+    - -XTypeOperators
+    - -XViewPatterns
