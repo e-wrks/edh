@@ -144,8 +144,8 @@ valEqProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
     Nothing -> exitEdh ets exit =<< mkDefault (LitExpr $ BoolLiteral False)
 
 -- | operator (!=)
-idNeProc :: EdhIntrinsicOp
-idNeProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+valNeProc :: EdhIntrinsicOp
+valNeProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
   evalExpr rhExpr $ \ !rhVal !ets -> edhValueEqual ets lhVal rhVal $ \case
     Just !conclusion -> exitEdh ets exit $ EdhBool $ not conclusion
     -- allow magic methods to be invoked, but default to not equal

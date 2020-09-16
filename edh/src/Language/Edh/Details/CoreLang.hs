@@ -179,18 +179,18 @@ lookupEdhSelfAttr !this !key = case edh'obj'store this of
     where !clsObj = edh'obj'class this
 {-# INLINE lookupEdhSelfAttr #-}
 
--- note magic attributes can not be inherited
-lookupEdhMagicAttr :: Object -> AttrKey -> STM EdhValue
-lookupEdhMagicAttr !this !key = case edh'obj'store this of
+
+lookupEdhSelfMagic :: Object -> AttrKey -> STM EdhValue
+lookupEdhSelfMagic !this !key = case edh'obj'store this of
   HostStore{} -> -- a host object can only have magic attributes on its class
     lookupFromClass
   HashStore !es -> -- unlike in Python, here we honor magic attributes from
-    -- an object itself
+                   -- an object itself
                    iopdLookup key es >>= \case
     Just !v -> return v
     Nothing -> lookupFromClass
   ClassStore{} -> -- magic attributes on a class are assumed for its instances,
-    -- not for itself
+                  -- not for itself
     lookupFromClass
  where
   lookupFromClass = case edh'obj'store clsObj of
@@ -199,7 +199,18 @@ lookupEdhMagicAttr !this !key = case edh'obj'store this of
       Nothing -> return EdhNil -- don't resort to meta class here
     _ -> return EdhNil -- todo should complain loudly here?
     where !clsObj = edh'obj'class this
-{-# INLINE lookupEdhMagicAttr #-}
+{-# INLINE lookupEdhSelfMagic #-}
+
+
+lookupEdhObjMagic :: Object -> AttrKey -> STM (Object, EdhValue)
+lookupEdhObjMagic !this !key =
+  (this :) <$> readTVar (edh'obj'supers this) >>= searchMagic
+ where
+  searchMagic []           = return (this, EdhNil)
+  searchMagic (obj : rest) = lookupEdhSelfMagic obj key >>= \case
+    EdhNil -> searchMagic rest
+    !art   -> return (obj, art)
+{-# INLINE lookupEdhObjMagic #-}
 
 
 -- * import/export

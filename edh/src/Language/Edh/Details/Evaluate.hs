@@ -122,7 +122,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit !ets = case fromExpr of
 
   trySelfMagic :: Object -> EdhTx
   trySelfMagic !obj _ets = lookupEdhObjAttr obj key >>= \case
-    (_, EdhNil) -> lookupEdhMagicAttr obj (AttrByName "@") >>= \case
+    (_, EdhNil) -> lookupEdhSelfMagic obj (AttrByName "@") >>= \case
       EdhNil                          -> exitEdh ets exitNoAttr $ EdhObject obj
       EdhProcedure (EdhMethod !mth) _ -> callSelfMagic mth obj obj
       EdhBoundProc (EdhMethod !mth) !this !that _ ->
@@ -288,7 +288,7 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
     $ \ !valSet -> exitEdh ets exit valSet
    where
     tryMagic :: STM ()
-    tryMagic = lookupEdhMagicAttr obj (AttrByName "@=") >>= \case
+    tryMagic = lookupEdhSelfMagic obj (AttrByName "@=") >>= \case
       EdhNil ->
         writeObjAttr ets obj key val $ \ !valSet -> exitEdh ets exit valSet
       EdhProcedure (EdhMethod !mth) _ -> callSelfMagic mth obj obj
@@ -638,7 +638,7 @@ edhMutCloneObj !ets !fromThis !fromThat !newStore !exitEnd =
                                         }
                     return objClone
               modifyTVar' instMap $ Map.insert obj objClone
-              lookupEdhMagicAttr objClone (AttrByName "__clone__") >>= \case
+              lookupEdhSelfMagic objClone (AttrByName "__clone__") >>= \case
                 EdhNil -> exit1 objClone
                 EdhProcedure (EdhMethod !mth) _ ->
                   runEdhTx ets
@@ -3737,44 +3737,89 @@ edhNamelyEqual !ets !x !y !exit =
   -- may need to invoke magic methods or sth.
   edhValueEqual ets x y $ exit . fromMaybe False
 
+-- note __eq__ magic should supply scalar value-equality result, vectorized
+-- result should be provided by operator magics such as (==) and (!=)
 edhValueEqual
   :: EdhThreadState -> EdhValue -> EdhValue -> (Maybe Bool -> STM ()) -> STM ()
-edhValueEqual !ets !lhVal !rhVal !exit =
-  let
-    lhv = edhUltimate lhVal
-    rhv = edhUltimate rhVal
-  in
-    if lhv == rhv
-      then -- identity equal
-           exit $ Just True
-      else case lhv of
-        EdhList (List _ lhll) -> case rhv of
-          EdhList (List _ rhll) -> do
-            lhl <- readTVar lhll
-            rhl <- readTVar rhll
-            cmp2List lhl rhl $ exit . Just
-          _ -> exit $ Just False
-        EdhDict (Dict _ !lhd) -> case rhv of
-          EdhDict (Dict _ !rhd) -> do
-            lhl <- iopdToList lhd
-            rhl <- iopdToList rhd
-            -- regenerate the entry lists with HashMap to elide diffs in
-            -- entry order
-            cmp2Map (Map.toList $ Map.fromList lhl)
-                    (Map.toList $ Map.fromList rhl)
-              $ exit
-              . Just
-          _ -> exit $ Just False
-        -- don't conclude it if either of the two is an object, so magic
-        -- methods can get the chance to be invoked
-        -- there may be some magic to be invoked and some may even return
-        -- vectorized result
-        EdhObject{} -> exit Nothing
-        _           -> case rhv of
-          EdhObject{} -> exit Nothing
-          -- neither is object, not equal for sure
-          _           -> exit $ Just False
+edhValueEqual !ets !lhVal !rhVal !exit = if nonIsObj && lhv == rhv
+  then -- identity equal for non-object values, can conclude it to be value
+       -- equal now. and any object invloved, don't draw conclusion here, as
+       -- vectorized result may be desired when either the objects impl.
+       exit $ Just True
+  else case lhv of
+    EdhList (List _ lhll) -> case rhv of
+      EdhList (List _ rhll) -> do
+        !lhl <- readTVar lhll
+        !rhl <- readTVar rhll
+        cmp2List lhl rhl $ exit . Just
+      _ -> exit $ Just False
+    EdhDict (Dict _ !lhd) -> case rhv of
+      EdhDict (Dict _ !rhd) -> do
+        !lhl <- iopdToList lhd
+        !rhl <- iopdToList rhd
+        -- regenerate the entry lists with HashMap to elide diffs in
+        -- entry order
+        cmp2Map (Map.toList $ Map.fromList lhl) (Map.toList $ Map.fromList rhl)
+          $ exit
+          . Just
+      _ -> exit $ Just False
+    EdhObject !lhObj -> -- try left-hand magic
+                        lookupEdhObjMagic lhObj (AttrByName "__eq__") >>= \case
+      (_, EdhNil) -> tryRightHandMagic
+      (!this', EdhProcedure (EdhMethod !mth) _) ->
+        runEdhTx ets
+          $ callEdhMethod this' lhObj mth (ArgsPack [rhv] odEmpty) id
+          $ \ !magicRtn _ets -> chkMagicRtn tryRightHandMagic magicRtn
+      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+        runEdhTx ets
+          $ callEdhMethod this that mth (ArgsPack [rhv] odEmpty) id
+          $ \ !magicRtn _ets -> chkMagicRtn tryRightHandMagic magicRtn
+      (_, !badMagic) -> edhValueDesc ets badMagic $ \ !badDesc ->
+        throwEdh ets UsageError $ "malformed __eq__ magic: " <> badDesc
+    _ -> tryRightHandMagic
  where
+  !lhv      = edhUltimate lhVal
+  !rhv      = edhUltimate rhVal
+  !nonIsObj = case lhv of
+    EdhObject{} -> False
+    _           -> case rhv of
+      EdhObject{} -> False
+      _           -> True
+
+  chkMagicRtn !naExit = \case
+    EdhBool !conclusion -> exit $ Just conclusion
+    EdhNil              -> naExit
+    EdhDefault _ !exprDef !etsDef ->
+      runEdhTx (fromMaybe ets etsDef)
+        $ evalExpr (deExpr exprDef)
+        $ \ !defVal _ets -> case defVal of
+            EdhBool !conclusion -> exit $ Just conclusion
+            EdhNil              -> naExit
+            !badVal             -> edhValueDesc ets badVal $ \ !badDesc ->
+              throwEdh ets UsageError
+                $  "invalid return from __eq__ magic: "
+                <> badDesc
+    !badVal -> edhValueDesc ets badVal $ \ !badDesc ->
+      throwEdh ets UsageError $ "invalid return from __eq__ magic: " <> badDesc
+
+  -- in case no __eq__ magic draws a conclusion, don't conclude here, 
+  -- as they may implement (==) and (!=) for vectorized comparison
+  tryRightHandMagic :: STM ()
+  tryRightHandMagic = case rhv of
+    EdhObject !rhObj -> lookupEdhObjMagic rhObj (AttrByName "__eq__") >>= \case
+      (_, EdhNil) -> exit Nothing
+      (!this', EdhProcedure (EdhMethod !mth) _) ->
+        runEdhTx ets
+          $ callEdhMethod this' rhObj mth (ArgsPack [lhv] odEmpty) id
+          $ \ !magicRtn _ets -> chkMagicRtn (exit Nothing) magicRtn
+      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+        runEdhTx ets
+          $ callEdhMethod this that mth (ArgsPack [lhv] odEmpty) id
+          $ \ !magicRtn _ets -> chkMagicRtn (exit Nothing) magicRtn
+      (_, !badMagic) -> edhValueDesc ets badMagic $ \ !badDesc ->
+        throwEdh ets UsageError $ "malformed __eq__ magic: " <> badDesc
+    _ -> exit Nothing
+
   cmp2List :: [EdhValue] -> [EdhValue] -> (Bool -> STM ()) -> STM ()
   cmp2List []      []      !exit' = exit' True
   cmp2List (_ : _) []      !exit' = exit' False

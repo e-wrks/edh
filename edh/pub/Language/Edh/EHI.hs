@@ -158,6 +158,7 @@ module Language.Edh.EHI
   , lookupEdhCtxAttr
   , resolveEdhCtxAttr
   , lookupEdhObjAttr
+  , lookupEdhObjMagic
   , lookupEdhSuperAttr
   , resolveEdhInstance
   , objectScope

@@ -38,12 +38,11 @@ createVectorClass !clsOuterScope =
       [ (AttrByName nm, ) <$> mkHostProc clsScope vc nm hp
       | (nm, vc, hp) <-
         [ ("append", EdhMethod, wrapHostProc vecAppendProc)
-        , ("=="    , EdhMethod, wrapHostProc $ vecEqProc id)
-        , ( "!="
+        , ( "__eq__"
           , EdhMethod
-          , wrapHostProc $ vecEqProc not
+          , wrapHostProc vecEqProc
           )
--- TODO support vectorized comparitions
+-- TODO support vectorized (non)equality tests and ordering comparisons
         , ("[]"   , EdhMethod, wrapHostProc vecIdxReadProc)
         , ("[=]"  , EdhMethod, wrapHostProc vecIdxWriteProc)
         , ("[+=]" , EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc addProc)
@@ -122,8 +121,8 @@ createVectorClass !clsOuterScope =
       exitEdh ets exit $ EdhObject $ edh'scope'this $ contextScope $ edh'context
         ets
 
-  vecEqProc :: (Bool -> Bool) -> EdhValue -> EdhHostProc
-  vecEqProc !inversion !other !exit !ets = case other of
+  vecEqProc :: EdhValue -> EdhHostProc
+  vecEqProc !other !exit !ets = case other of
     EdhObject !objOther -> withThisHostObj ets $ \_ (mvec :: EdhVector) ->
       withHostObject' objOther naExit $ \_ !mvecOther -> do
         !conclusion <- unsafeIOToSTM $ do
@@ -132,9 +131,9 @@ createVectorClass !clsOuterScope =
           !vec      <- V.unsafeFreeze mvec
           !vecOther <- V.unsafeFreeze mvecOther
           return $ vec == vecOther
-        exitEdh ets exit $ EdhBool $ inversion conclusion
+        exitEdh ets exit $ EdhBool conclusion
     _ -> naExit
-    where naExit = exitEdh ets exit $ EdhBool $ inversion False
+    where naExit = exitEdh ets exit $ EdhBool False
 
   vecIdxReadProc :: EdhValue -> EdhHostProc
   vecIdxReadProc !idxVal !exit !ets =
