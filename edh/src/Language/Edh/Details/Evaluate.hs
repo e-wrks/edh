@@ -519,13 +519,14 @@ edhCreateObj !ets !clsObj !apk !exitEnd = newTVar Map.empty >>= \ !instMap ->
 
       createSelf :: Object -> ((Object, [Object]) -> STM ()) -> STM ()
       createSelf !c !exit = case edh'obj'store c of
-        ClassStore !cls -> edh'class'allocator cls ets apk $ \ !es -> do
-          !oid <- unsafeIOToSTM newUnique
-          !ss  <- newTVar []
-          let !o = Object oid es c ss
-          modifyTVar' instMap $ Map.insert c o
-          !mro <- readTVar (edh'class'mro cls)
-          exit (o, mro)
+        ClassStore !cls ->
+          runEdhTx ets $ edh'class'allocator cls apk $ \ !es -> do
+            !oid <- unsafeIOToSTM newUnique
+            !ss  <- newTVar []
+            let !o = Object oid es c ss
+            modifyTVar' instMap $ Map.insert c o
+            !mro <- readTVar (edh'class'mro cls)
+            exit (o, mro)
         _ ->
           throwEdh ets UsageError
             $  "can not create new object from a non-class object, which is a: "
@@ -1400,12 +1401,7 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doStmt !iterCollector !forLo
   scopeLooper = contextScope $ edh'context etsLoopPrep
 
   loopCallGenr
-    :: ArgsPacker
-    -> EdhProc
-    -> Object
-    -> Object
-    -> (Scope -> Scope)
-    -> STM ()
+    :: ArgsPacker -> EdhProc -> Object -> Object -> (Scope -> Scope) -> STM ()
   loopCallGenr argsSndr (EdhGnrtor !gnr'proc) !this !that !scopeMod =
     packEdhArgs etsLoopPrep argsSndr $ \ !apk ->
       case edh'procedure'body $ edh'procedure'decl gnr'proc of
@@ -3385,9 +3381,8 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
         evalExpr rhExpr $ \ !rhVal _ets ->
           tryMagicMethod lhVal rhVal $ notApplicable lhVal rhVal
       Just (!opVal, !op'lexi) -> case opVal of
-        EdhProcedure !callable _ -> callProc (edh'scope'this op'lexi)
-                                                 (edh'scope'that op'lexi)
-                                                 callable
+        EdhProcedure !callable _ ->
+          callProc (edh'scope'this op'lexi) (edh'scope'that op'lexi) callable
         EdhBoundProc !callable !this !that _ -> callProc this that callable
         _ ->
           throwEdh ets EvalError
@@ -3411,16 +3406,15 @@ evalExpr (ClassExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
     !cs    <- iopdEmpty
     !ss    <- newTVar []
     !mro   <- newTVar []
-    let allocator :: EdhObjectAllocator
-        allocator _etsCtor _apkCtor !exitCtor =
-          exitCtor =<< HashStore <$> iopdEmpty
+    let allocatorProc :: EdhObjectAllocator
+        allocatorProc !exitCtor _etsCtor = exitCtor =<< HashStore <$> iopdEmpty
 
         !clsProc = ProcDefi { edh'procedure'ident = idCls
                             , edh'procedure'name  = name
                             , edh'procedure'lexi  = scope
                             , edh'procedure'decl  = pd
                             }
-        !cls    = Class clsProc cs allocator mro
+        !cls    = Class clsProc cs (\_apkCtor -> allocatorProc) mro
         !clsObj = Object idCls (ClassStore cls) metaClass ss
 
         doExit _rtn _ets = readTVar ss >>= fillClassMRO cls >>= \case

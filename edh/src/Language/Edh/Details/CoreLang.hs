@@ -5,20 +5,12 @@ module Language.Edh.Details.CoreLang where
 import           Prelude
 -- import           Debug.Trace
 
-import           GHC.Conc                       ( unsafeIOToSTM )
-
-import           Control.Monad
 import           Control.Concurrent.STM
 
 import           Data.Either
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
-import           Data.Unique
-import           Data.Dynamic
 
-import           Text.Megaparsec
-
-import           Language.Edh.Control
 import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 
@@ -131,82 +123,6 @@ fillClassMRO !cls !superClasses =
         | h' == h = checkTail rest $ if null t' then neTails else t' : neTails
         | h `elem` t' = (False, [])
         | otherwise = checkTail rest (l2c : neTails)
-
-
-mkHostClass
-  :: Scope
-  -> AttrName
-  -> EdhObjectAllocator
-  -> EntityStore
-  -> [Object]
-  -> STM Object
-mkHostClass !scope !className !allocator !classStore !superClasses = do
-  !idCls  <- unsafeIOToSTM newUnique
-  !ssCls  <- newTVar superClasses
-  !mroCls <- newTVar []
-  let !clsProc = ProcDefi idCls (AttrByName className) scope
-        $ ProcDecl (NamedAttr className) (PackReceiver []) (Right fakeHostProc)
-      !cls    = Class clsProc classStore allocator mroCls
-      !clsObj = Object idCls (ClassStore cls) metaClassObj ssCls
-  !mroInvalid <- fillClassMRO cls superClasses
-  unless (T.null mroInvalid)
-    $ throwSTM
-    $ EdhError UsageError mroInvalid (toDyn nil)
-    $ EdhCallContext "<mkHostClass>" []
-  return clsObj
- where
-  fakeHostProc :: ArgsPack -> EdhHostProc
-  fakeHostProc _ !exit = exitEdhTx exit nil
-
-  !metaClassObj =
-    edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
-
-mkHostClass'
-  :: Scope
-  -> AttrName
-  -> EdhObjectAllocator
-  -> [Object]
-  -> (Scope -> STM ())
-  -> STM Object
-mkHostClass' !scope !className !allocator !superClasses !storeMod = do
-  !classStore <- iopdEmpty
-  !idCls      <- unsafeIOToSTM newUnique
-  !ssCls      <- newTVar superClasses
-  !mroCls     <- newTVar []
-  let !clsProc = ProcDefi idCls (AttrByName className) scope
-        $ ProcDecl (NamedAttr className) (PackReceiver []) (Right fakeHostProc)
-      !cls      = Class clsProc classStore allocator mroCls
-      !clsObj   = Object idCls (ClassStore cls) metaClassObj ssCls
-      !clsScope = scope { edh'scope'entity  = classStore
-                        , edh'scope'this    = clsObj
-                        , edh'scope'that    = clsObj
-                        , edh'excpt'hndlr   = defaultEdhExcptHndlr
-                        , edh'scope'proc    = clsProc
-                        , edh'scope'caller  = clsCreStmt
-                        , edh'effects'stack = []
-                        }
-  storeMod clsScope
-  !mroInvalid <- fillClassMRO cls superClasses
-  unless (T.null mroInvalid)
-    $ throwSTM
-    $ EdhError UsageError mroInvalid (toDyn nil)
-    $ EdhCallContext "<mkHostClass>" []
-  return clsObj
- where
-  fakeHostProc :: ArgsPack -> EdhHostProc
-  fakeHostProc _ !exit = exitEdhTx exit nil
-
-  !metaClassObj =
-    edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
-
-  clsCreStmt :: StmtSrc
-  clsCreStmt = StmtSrc
-    ( SourcePos { sourceName   = "<host-class-creation>"
-                , sourceLine   = mkPos 1
-                , sourceColumn = mkPos 1
-                }
-    , VoidStmt
-    )
 
 
 resolveEdhInstance :: Object -> Object -> STM (Maybe Object)

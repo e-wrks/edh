@@ -146,8 +146,6 @@ module Language.Edh.EHI
   , Class
   , edhClassName
   , objClassName
-  , mkHostClass
-  , mkHostClass'
   , edhCreateHostObj
   , edhCreateObj
   , edhConstructObj

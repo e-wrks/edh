@@ -1,11 +1,11 @@
 {-# LANGUAGE PatternSynonyms #-}
 
 module Language.Edh.Args
-  ( NamedArg(..)
+  ( NamedEdhArg(..) -- todo find a way to hide this from EHI
   , type (!:)
   , type (?:)
-  , pattern Arg
-  , arg
+  , pattern EdhArg
+  , mandatoryArg
   , optionalArg
   , defaultArg
   )
@@ -19,20 +19,20 @@ import           Data.Kind                      ( Type )
 import           Data.Maybe
 
 
-newtype NamedArg (t :: Type) (name :: Symbol) = NamedArg t
-type name !: t = NamedArg t name
-type name ?: t = NamedArg (Maybe t) name
+newtype NamedEdhArg (t :: Type) (name :: Symbol) = NamedEdhArg t
+type name !: t = NamedEdhArg t name
+type name ?: t = NamedEdhArg (Maybe t) name
 
-pattern Arg :: t -> name !: t
-pattern Arg t = NamedArg t
-{-# COMPLETE Arg #-}
+pattern EdhArg :: t -> name !: t
+pattern EdhArg t = NamedEdhArg t
+{-# COMPLETE EdhArg #-}
 
-arg ::  name !: t -> t 
-arg (NamedArg a) = a
+mandatoryArg ::  name !: t -> t 
+mandatoryArg (NamedEdhArg a) = a
 
 optionalArg :: name ?: t -> Maybe t
-optionalArg (NamedArg !ma) = ma
+optionalArg (NamedEdhArg !ma) = ma
 
 defaultArg :: t -> name ?: t -> t
-defaultArg !a (NamedArg !ma) = fromMaybe a ma
+defaultArg !a (NamedEdhArg !ma) = fromMaybe a ma
 

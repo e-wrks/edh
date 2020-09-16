@@ -25,6 +25,7 @@ import           Data.Dynamic
 import           Text.Megaparsec
 
 import           Language.Edh.Control
+import           Language.Edh.Args
 import           Language.Edh.InterOp
 import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
@@ -129,21 +130,19 @@ createEdhWorld !console = liftIO $ do
          , ("callerLoc", mthScopeCallerLoc  , Nothing)
          ]
        ]
-  let scopeAllocator !ets (ArgsPack _args !kwargs) !exit =
-        case odLookup (AttrByName "ofObj") kwargs of
-          Just !val -> case val of
-            EdhObject !obj -> objectScope obj >>= \case
-              Nothing ->
-                throwEdh ets UsageError
-                  $  "no scope from a host object of class: "
-                  <> objClassName obj
-              Just !objScope -> exit =<< HostStore <$> newTVar (toDyn objScope)
-            _ -> throwEdh ets UsageError $ "not an object but a " <> T.pack
-              (edhTypeNameOf val)
+  let scopeAllocator :: "ofObj" ?: Object -> EdhObjectAllocator
+      scopeAllocator (optionalArg -> !maybeOfObj) !exit !ets =
+        case maybeOfObj of
+          Just !obj -> objectScope obj >>= \case
+            Nothing ->
+              throwEdh ets UsageError
+                $  "no scope from a host object of class: "
+                <> objClassName obj
+            Just !objScope -> exit =<< HostStore <$> newTVar (toDyn objScope)
           Nothing -> exit =<< HostStore <$> newTVar
             (toDyn $ contextScope $ edh'context ets)
   !clsScope <- atomically
-    $ mkHostClass rootScope "scope" scopeAllocator hsScope []
+    $ mkHostClass' rootScope "scope" (allocEdhObj scopeAllocator) hsScope []
   let edhWrapScope :: Scope -> STM Object
       edhWrapScope !scope = do
         !idScope <- unsafeIOToSTM newUnique
@@ -176,24 +175,27 @@ createEdhWorld !console = liftIO $ do
          ]
        ]
   clsProgramHalt <- atomically
-    $ mkHostClass rootScope "ProgramHalt" haltAllocator hsErrCls []
+    $ mkHostClass' rootScope "ProgramHalt" haltAllocator hsErrCls []
   clsIOError <- atomically
-    $ mkHostClass rootScope "IOError" ioErrAllocator hsErrCls []
+    $ mkHostClass' rootScope "IOError" ioErrAllocator hsErrCls []
   clsPeerError <- atomically
-    $ mkHostClass rootScope "PeerError" peerErrAllocator hsErrCls []
+    $ mkHostClass' rootScope "PeerError" peerErrAllocator hsErrCls []
   clsException <- atomically
-    $ mkHostClass rootScope "Exception" (errAllocator EdhException) hsErrCls []
-  clsPackageError <- atomically $ mkHostClass rootScope
-                                              "PackageError"
-                                              (errAllocator PackageError)
-                                              hsErrCls
-                                              []
-  clsParseError <- atomically
-    $ mkHostClass rootScope "ParseError" (errAllocator ParseError) hsErrCls []
+    $ mkHostClass' rootScope "Exception" (errAllocator EdhException) hsErrCls []
+  clsPackageError <- atomically $ mkHostClass' rootScope
+                                               "PackageError"
+                                               (errAllocator PackageError)
+                                               hsErrCls
+                                               []
+  clsParseError <- atomically $ mkHostClass' rootScope
+                                             "ParseError"
+                                             (errAllocator ParseError)
+                                             hsErrCls
+                                             []
   clsEvalError <- atomically
-    $ mkHostClass rootScope "EvalError" (errAllocator EvalError) hsErrCls []
+    $ mkHostClass' rootScope "EvalError" (errAllocator EvalError) hsErrCls []
   clsUsageError <- atomically
-    $ mkHostClass rootScope "UsageError" (errAllocator UsageError) hsErrCls []
+    $ mkHostClass' rootScope "UsageError" (errAllocator UsageError) hsErrCls []
 
   let edhWrapException :: SomeException -> STM Object
       edhWrapException !exc = do
@@ -244,7 +246,7 @@ createEdhWorld !console = liftIO $ do
         ]
       ]
   !clsModule <- atomically
-    $ mkHostClass rootScope "module" moduleAllocator hsModuCls []
+    $ mkHostClass' rootScope "module" (allocEdhObj moduleAllocator) hsModuCls []
   atomically $ iopdUpdate [(AttrByName "module", EdhObject clsModule)] hsRoot
 
 
@@ -267,7 +269,8 @@ createEdhWorld !console = liftIO $ do
   return world
  where
 
-  phantomAllocator !ets _ _ =
+  phantomAllocator :: ArgsPack -> EdhObjectAllocator
+  phantomAllocator _ _ !ets =
     throwEdh ets EvalError "bug: allocating phantom object"
   phantomHostProc :: ArgsPack -> EdhHostProc
   phantomHostProc _apk _exit =
@@ -461,16 +464,16 @@ createEdhWorld !console = liftIO $ do
               -> [(AttrKey, EdhValue)]
               -> ([(AttrKey, EdhValue)] -> STM ())
               -> STM ()
-            putAttrs []           cumu !exit' = exit' cumu
-            putAttrs (arg : rest) cumu !exit' = case arg of
+            putAttrs []         cumu !exit' = exit' cumu
+            putAttrs (a : rest) cumu !exit' = case a of
               EdhPair (EdhString !k) !v ->
                 putAttrs rest ((AttrByName k, v) : cumu) exit'
               EdhPair (EdhSymbol !k) !v ->
                 putAttrs rest ((AttrBySym k, v) : cumu) exit'
-              _ ->
+              _ -> edhValueDesc ets a $ \ !badDesc ->
                 throwEdh ets UsageError
-                  $  "invalid key/value type to put into a scope - "
-                  <> T.pack (edhTypeNameOf arg)
+                  $  "invalid key/value pair to put into a scope - "
+                  <> badDesc
         putAttrs args [] $ \ !attrs -> do
           iopdUpdate (attrs ++ odToList kwargs) es
           exitEdh ets exit nil
@@ -536,7 +539,7 @@ createEdhWorld !console = liftIO $ do
 
 
   -- this is called in case a ProgramHalt is constructed by Edh code
-  haltAllocator _ !apk !exit = case apk of
+  haltAllocator !apk !exit _ = case apk of
     ArgsPack [] !kwargs | odNull kwargs -> createErr nil
     ArgsPack [v] !kwargs | odNull kwargs -> createErr v
     _ -> createErr $ EdhArgsPack apk
@@ -545,7 +548,7 @@ createEdhWorld !console = liftIO $ do
       (toDyn $ toException $ ProgramHalt $ toDyn hv)
 
   -- creating an IOError from Edh code
-  ioErrAllocator !ets apk@(ArgsPack !args !kwargs) !exit = case args of
+  ioErrAllocator apk@(ArgsPack !args !kwargs) !exit !ets = case args of
     [EdhString !m] | odNull kwargs -> createErr $ T.unpack m
     _                              -> edhValueRepr ets (EdhArgsPack apk)
       $ \ !repr -> createErr $ T.unpack repr
@@ -554,7 +557,7 @@ createEdhWorld !console = liftIO $ do
       (toDyn $ toException $ EdhIOError $ toException $ userError msg)
 
   -- a peer error is most prolly created from Edh code
-  peerErrAllocator _ !apk !exit = exit =<< HostStore <$> newTVar
+  peerErrAllocator !apk !exit _ = exit =<< HostStore <$> newTVar
     (toDyn $ toException peerError)
    where
     peerError = case apk of
@@ -563,7 +566,7 @@ createEdhWorld !console = liftIO $ do
       _ -> EdhPeerError "<bogus-peer>" $ T.pack $ show apk
 
   -- creating a tagged Edh error from Edh code
-  errAllocator !tag !ets !apk !exit = exit =<< HostStore <$> newTVar
+  errAllocator !tag !apk !exit !ets = exit =<< HostStore <$> newTVar
     (toDyn $ toException $ edhCreateError 0 ets tag apk)
 
   mthErrRepr :: EdhHostProc
@@ -682,14 +685,12 @@ createEdhWorld !console = liftIO $ do
     where !errObj = edh'scope'this $ contextScope $ edh'context ets
 
 
-  moduleAllocator :: EdhObjectAllocator
-  moduleAllocator !ets !apk !exit = case apk of
-    (ArgsPack [moduId] !kwargs) | odNull kwargs ->
-      exit =<< HashStore <$> iopdFromList
-        [ (AttrByName "__path__", moduId)
-        , (AttrByName "__file__", EdhString "<on-the-fly>")
-        ]
-    _ -> throwEdh ets UsageError "invalid args to module()"
+  moduleAllocator :: "moduId" !: Text -> EdhObjectAllocator
+  moduleAllocator (EdhArg !moduId) !exit _ets =
+    exit =<< HashStore <$> iopdFromList
+      [ (AttrByName "__path__", EdhString moduId)
+      , (AttrByName "__file__", EdhString "<on-the-fly>")
+      ]
 
   mthModuClsRepr :: EdhHostProc
   mthModuClsRepr !exit !ets = do

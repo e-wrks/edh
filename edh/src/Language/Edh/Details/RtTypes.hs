@@ -363,7 +363,7 @@ scopeLexiLoc !scope !exit = case pb of
 data Class = Class {
     edh'class'proc :: !ProcDefi
   , edh'class'store :: !EntityStore
-  , edh'class'allocator :: !EdhObjectAllocator
+  , edh'class'allocator :: !(ArgsPack -> EdhObjectAllocator)
     -- | the C3 linearized method resolution order, with self omitted
   , edh'class'mro :: !(TVar [Object])
   }
@@ -372,8 +372,8 @@ instance Eq Class where
 instance Hashable Class where
   hashWithSalt s (Class p _ _ _) = hashWithSalt s p
 
-type EdhObjectAllocator
-  = EdhThreadState -> ArgsPack -> (ObjectStore -> STM ()) -> STM ()
+type EdhObjectAllocator = EdhAllocExit -> EdhTx
+type EdhAllocExit = ObjectStore -> STM ()
 
 edhClassName :: Object -> Text
 edhClassName !clsObj = case edh'obj'store clsObj of

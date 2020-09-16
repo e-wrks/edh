@@ -22,7 +22,6 @@ import           Language.Edh.Control
 import           Language.Edh.InterOp
 import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
-import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
 
 import           Language.Edh.Batteries.Math
@@ -34,7 +33,7 @@ type EdhVector = IOVector EdhValue
 
 createVectorClass :: Scope -> STM Object
 createVectorClass !clsOuterScope =
-  mkHostClass' clsOuterScope "Vector" vecAllocator [] $ \ !clsScope -> do
+  mkHostClass clsOuterScope "Vector" vecAllocator [] $ \ !clsScope -> do
     !mths <- sequence
       [ (AttrByName nm, ) <$> mkHostProc clsScope vc nm hp
       | (nm, vc, hp) <-
@@ -90,8 +89,8 @@ createVectorClass !clsOuterScope =
  where
 
   -- | host constructor Vector(*elements,length=None)
-  vecAllocator :: EdhObjectAllocator
-  vecAllocator !etsCtor (ArgsPack !ctorArgs !ctorKwargs) !ctorExit = do
+  vecAllocator :: ArgsPack -> EdhObjectAllocator
+  vecAllocator (ArgsPack !ctorArgs !ctorKwargs) !ctorExit !etsCtor = do
     let doIt :: Int -> [EdhValue] -> STM ()
         -- note @vs@ got to be lazy
         doIt !len vs = do
