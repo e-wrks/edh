@@ -188,6 +188,25 @@ instance EdhAllocator fn' => EdhAllocator (Maybe Decimal -> fn') where
       allocEdhObj (fn (Just val')) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
 
+-- receive positional-only arg taking 'Integer'
+instance EdhAllocator fn' => EdhAllocator (Integer -> fn') where
+  allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
+    EdhDecimal !val' -> case D.decimalToInteger val' of
+      Just !i -> allocEdhObj (fn i) (ArgsPack args kwargs) exit
+      _       -> throwEdhTx UsageError "number type mismatch: anonymous"
+    _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
+  allocEdhObj _ _ _ = throwEdhTx UsageError "missing anonymous arg"
+
+-- receive positional-only, optional arg taking 'Integer'
+instance EdhAllocator fn' => EdhAllocator (Maybe Integer -> fn') where
+  allocEdhObj !fn (ArgsPack [] !kwargs) !exit =
+    allocEdhObj (fn Nothing) (ArgsPack [] kwargs) exit
+  allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
+    EdhDecimal !val' -> case D.decimalToInteger val' of
+      Just !i -> allocEdhObj (fn (Just i)) (ArgsPack args kwargs) exit
+      _       -> throwEdhTx UsageError "number type mismatch: anonymous"
+    _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
+
 -- receive positional-only arg taking 'Bool'
 instance EdhAllocator fn' => EdhAllocator (Bool -> fn') where
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
@@ -479,6 +498,47 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Mayb
           EdhDecimal !val' -> allocEdhObj (fn (NamedEdhArg (Just val')))
                                           (ArgsPack args' kwargs')
                                           exit
+          _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
+    where !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+
+-- receive named arg taking 'Integer'
+instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg Integer name -> fn') where
+  allocEdhObj !fn (ArgsPack !args !kwargs) !exit =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhDecimal !val' -> case D.decimalToInteger val' of
+          Just !i ->
+            allocEdhObj (fn (NamedEdhArg i)) (ArgsPack args kwargs') exit
+          _ -> throwEdhTx UsageError $ "number type mismatch: " <> argName
+        _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
+      (Nothing, !kwargs') -> case args of
+        []          -> throwEdhTx UsageError $ "missing named arg: " <> argName
+        val : args' -> case val of
+          EdhDecimal !val' -> case D.decimalToInteger val' of
+            Just !i ->
+              allocEdhObj (fn (NamedEdhArg i)) (ArgsPack args' kwargs') exit
+            _ -> throwEdhTx UsageError $ "number type mismatch: " <> argName
+          _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
+    where !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+
+-- receive named, optional arg taking 'Integer'
+instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Maybe Integer) name -> fn') where
+  allocEdhObj !fn (ArgsPack !args !kwargs) !exit =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhDecimal !val' -> case D.decimalToInteger val' of
+          Just !i ->
+            allocEdhObj (fn (NamedEdhArg (Just i))) (ArgsPack args kwargs') exit
+          _ -> throwEdhTx UsageError $ "number type mismatch: " <> argName
+        _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
+      (Nothing, !kwargs') -> case args of
+        [] -> allocEdhObj (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
+        val : args' -> case val of
+          EdhDecimal !val' -> case D.decimalToInteger val' of
+            Just !i -> allocEdhObj (fn (NamedEdhArg (Just i)))
+                                   (ArgsPack args' kwargs')
+                                   exit
+            _ -> throwEdhTx UsageError $ "number type mismatch: " <> argName
           _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
     where !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
@@ -1062,6 +1122,25 @@ instance EdhCallable fn' => EdhCallable (Maybe Decimal -> fn') where
       callFromEdh (fn (Just val')) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
 
+-- receive positional-only arg taking 'Integer'
+instance EdhCallable fn' => EdhCallable (Integer -> fn') where
+  callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
+    EdhDecimal !val' -> case D.decimalToInteger val' of
+      Just !i -> callFromEdh (fn i) (ArgsPack args kwargs) exit
+      _       -> throwEdhTx UsageError "number type mismatch: anonymous"
+    _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
+  callFromEdh _ _ _ = throwEdhTx UsageError "missing anonymous arg"
+
+-- receive positional-only, optional arg taking 'Integer'
+instance EdhCallable fn' => EdhCallable (Maybe Integer -> fn') where
+  callFromEdh !fn (ArgsPack [] !kwargs) !exit =
+    callFromEdh (fn Nothing) (ArgsPack [] kwargs) exit
+  callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
+    EdhDecimal !val' -> case D.decimalToInteger val' of
+      Just !i -> callFromEdh (fn (Just i)) (ArgsPack args kwargs) exit
+      _       -> throwEdhTx UsageError "number type mismatch: anonymous"
+    _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
+
 -- receive positional-only arg taking 'Bool'
 instance EdhCallable fn' => EdhCallable (Bool -> fn') where
   callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
@@ -1353,6 +1432,47 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Maybe 
           EdhDecimal !val' -> callFromEdh (fn (NamedEdhArg (Just val')))
                                           (ArgsPack args' kwargs')
                                           exit
+          _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
+    where !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+
+-- receive named arg taking 'Integer'
+instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg Integer name -> fn') where
+  callFromEdh !fn (ArgsPack !args !kwargs) !exit =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhDecimal !val' -> case D.decimalToInteger val' of
+          Just !i ->
+            callFromEdh (fn (NamedEdhArg i)) (ArgsPack args kwargs') exit
+          _ -> throwEdhTx UsageError $ "number type mismatch: " <> argName
+        _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
+      (Nothing, !kwargs') -> case args of
+        []          -> throwEdhTx UsageError $ "missing named arg: " <> argName
+        val : args' -> case val of
+          EdhDecimal !val' -> case D.decimalToInteger val' of
+            Just !i ->
+              callFromEdh (fn (NamedEdhArg i)) (ArgsPack args' kwargs') exit
+            _ -> throwEdhTx UsageError $ "number type mismatch: " <> argName
+          _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
+    where !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+
+-- receive named, optional arg taking 'Integer'
+instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Maybe Integer) name -> fn') where
+  callFromEdh !fn (ArgsPack !args !kwargs) !exit =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhDecimal !val' -> case D.decimalToInteger val' of
+          Just !i ->
+            callFromEdh (fn (NamedEdhArg (Just i))) (ArgsPack args kwargs') exit
+          _ -> throwEdhTx UsageError $ "number type mismatch: " <> argName
+        _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
+      (Nothing, !kwargs') -> case args of
+        [] -> callFromEdh (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
+        val : args' -> case val of
+          EdhDecimal !val' -> case D.decimalToInteger val' of
+            Just !i -> callFromEdh (fn (NamedEdhArg (Just i)))
+                                   (ArgsPack args' kwargs')
+                                   exit
+            _ -> throwEdhTx UsageError $ "number type mismatch: " <> argName
           _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
     where !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
