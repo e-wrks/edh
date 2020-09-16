@@ -3741,11 +3741,8 @@ edhNamelyEqual !ets !x !y !exit =
 -- result should be provided by operator magics such as (==) and (!=)
 edhValueEqual
   :: EdhThreadState -> EdhValue -> EdhValue -> (Maybe Bool -> STM ()) -> STM ()
-edhValueEqual !ets !lhVal !rhVal !exit = if nonIsObj && lhv == rhv
-  then -- identity equal for non-object values, can conclude it to be value
-       -- equal now. and any object invloved, don't draw conclusion here, as
-       -- vectorized result may be desired when either the objects impl.
-       exit $ Just True
+edhValueEqual !ets !lhVal !rhVal !exit = if lhv == rhv
+  then exit $ Just True
   else case lhv of
     EdhList (List _ lhll) -> case rhv of
       EdhList (List _ rhll) -> do
@@ -3778,13 +3775,8 @@ edhValueEqual !ets !lhVal !rhVal !exit = if nonIsObj && lhv == rhv
         throwEdh ets UsageError $ "malformed __eq__ magic: " <> badDesc
     _ -> tryRightHandMagic
  where
-  !lhv      = edhUltimate lhVal
-  !rhv      = edhUltimate rhVal
-  !nonIsObj = case lhv of
-    EdhObject{} -> False
-    _           -> case rhv of
-      EdhObject{} -> False
-      _           -> True
+  !lhv = edhUltimate lhVal
+  !rhv = edhUltimate rhVal
 
   chkMagicRtn !naExit = \case
     EdhBool !conclusion -> exit $ Just conclusion

@@ -135,21 +135,24 @@ logicalOrProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
     _ -> exitEdhTx exit edhNA
 
 
--- | operator (==)
-valEqProc :: EdhIntrinsicOp
-valEqProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal !ets -> edhValueEqual ets lhVal rhVal $ \case
-    Just !conclusion -> exitEdh ets exit $ EdhBool conclusion
+-- | operator (==) and (!=)
+valEqProc :: (Bool -> Bool) -> EdhIntrinsicOp
+valEqProc !inversion !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+  evalExpr rhExpr $ \ !rhVal !ets -> if lhVal == rhVal
+    then case lhVal of
+      EdhObject{} -> -- same object, give default result, so magic enabled,
+         -- vectorized equality test to itself is possible
+        exitEdh ets exit =<< mkDefault (LitExpr $ BoolLiteral $ inversion True)
+      _ -> -- identity equal and not an object, can conclude value equal here
+        exitEdh ets exit $ EdhBool $ inversion True
+    else vanillaTest ets lhVal rhVal
+ where
+  vanillaTest !ets !lhVal !rhVal = edhValueEqual ets lhVal rhVal $ \case
+    Just !conclusion -> exitEdh ets exit $ EdhBool $ inversion conclusion
     -- allow magic methods to be invoked, but default to not equal
-    Nothing -> exitEdh ets exit =<< mkDefault (LitExpr $ BoolLiteral False)
+    Nothing ->
+      exitEdh ets exit =<< mkDefault (LitExpr $ BoolLiteral $ inversion False)
 
--- | operator (!=)
-valNeProc :: EdhIntrinsicOp
-valNeProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal !ets -> edhValueEqual ets lhVal rhVal $ \case
-    Just !conclusion -> exitEdh ets exit $ EdhBool $ not conclusion
-    -- allow magic methods to be invoked, but default to not equal
-    Nothing -> exitEdh ets exit =<< mkDefault (LitExpr $ BoolLiteral True)
 
 -- | operator (is)
 idEqProc :: EdhIntrinsicOp
