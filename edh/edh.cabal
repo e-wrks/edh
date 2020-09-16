@@ -54,6 +54,7 @@ library
     OverloadedStrings
     ScopedTypeVariables
     TupleSections
+    TypeApplications
     TypeOperators
     ViewPatterns
 
@@ -111,6 +112,7 @@ library edh-internal
     OverloadedStrings
     ScopedTypeVariables
     TupleSections
+    TypeApplications
     TypeOperators
     ViewPatterns
 
@@ -155,6 +157,7 @@ executable edh
     OverloadedStrings
     ScopedTypeVariables
     TupleSections
+    TypeApplications
     TypeOperators
     ViewPatterns
 
@@ -201,6 +204,7 @@ executable runedh
     OverloadedStrings
     ScopedTypeVariables
     TupleSections
+    TypeApplications
     TypeOperators
     ViewPatterns
 

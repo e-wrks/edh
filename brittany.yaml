@@ -12,5 +12,6 @@ conf_forward:
     - -XOverloadedStrings
     - -XScopedTypeVariables
     - -XTupleSections
+    - -XTypeApplications
     - -XTypeOperators
     - -XViewPatterns
