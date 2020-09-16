@@ -2396,7 +2396,7 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
 -- Note the returned module object may still be under going initialization run
 importEdhModule :: Text -> EdhTxExit -> EdhTx
 importEdhModule !importSpec !exit =
-  importEdhModule'' importSpec (\_ _ -> pure ()) exit
+  importEdhModule'' importSpec (\_ !loadExit -> loadExit) exit
 
 -- | Import some Edh module into specified entity
 importEdhModule' :: EntityStore -> ArgsReceiver -> Text -> EdhTxExit -> EdhTx
@@ -2406,7 +2406,7 @@ importEdhModule' !tgtEnt !argsRcvr !importSpec !exit !ets =
     (\ !modu !loadExit ->
       -- an exception handler triggered during the import in post load action
       -- may appear executed later than subsequent code of the import
-      --  statement,this may be surprising
+      -- statement, this may be surprising
       runEdhTx ets $ importFromObject tgtEnt argsRcvr modu $ \_ _ -> loadExit
     )
     exit
