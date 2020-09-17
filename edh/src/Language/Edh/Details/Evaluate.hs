@@ -490,14 +490,15 @@ edhCreateHostObj !clsObj !hsd !supers = do
 -- 
 -- todo maybe check new storage data type matches the old one?
 edhCloneHostObj
-  :: EdhThreadState
+  :: Typeable h
+  => EdhThreadState
   -> Object
   -> Object
-  -> Dynamic
+  -> h
   -> (Object -> STM ())
   -> STM ()
 edhCloneHostObj !ets !fromThis !fromThat !newData !exit = do
-  !newStore <- HostStore <$> newTVar newData
+  !newStore <- HostStore <$> newTVar (toDyn newData)
   edhMutCloneObj ets fromThis fromThat newStore exit
 
 
