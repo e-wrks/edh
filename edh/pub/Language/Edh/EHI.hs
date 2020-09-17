@@ -104,7 +104,7 @@ module Language.Edh.EHI
   , runEdhTx
   , exitEdhTx
   , seqcontSTM
-  , foldl'contSTM
+  , foldcontSTM
   , mapcontSTM
     -- ** Sync utilities
   , edhDoSTM

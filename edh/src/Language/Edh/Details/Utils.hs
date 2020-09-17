@@ -12,14 +12,14 @@ seqcontSTM !xs !exit = go xs []
   go []         ys = exit $! reverse $! ys
   go (x : rest) ys = x $ \y -> go rest (y : ys)
 
-foldl'contSTM
+foldcontSTM
   :: forall a
    . a
   -> (a -> a -> a)
   -> [(a -> STM ()) -> STM ()]
   -> (a -> STM ())
   -> STM ()
-foldl'contSTM !i !f !xs !exit = go i xs
+foldcontSTM !i !f !xs !exit = go i xs
  where
   go :: a -> [(a -> STM ()) -> STM ()] -> STM ()
   go !i' []         = exit $! i'
