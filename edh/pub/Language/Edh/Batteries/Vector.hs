@@ -122,18 +122,16 @@ createVectorClass !clsOuterScope =
         ets
 
   vecEqProc :: EdhValue -> EdhHostProc
-  vecEqProc !other !exit !ets = case other of
-    EdhObject !objOther -> withThisHostObj ets $ \_ (mvec :: EdhVector) ->
-      withHostObject' objOther naExit $ \_ !mvecOther -> do
-        !conclusion <- unsafeIOToSTM $ do
-          -- TODO we're sacrificing thread safety for zero-copy performance
-          --      here, justify this decision
-          !vec      <- V.unsafeFreeze mvec
-          !vecOther <- V.unsafeFreeze mvecOther
-          return $ vec == vecOther
-        exitEdh ets exit $ EdhBool conclusion
-    _ -> naExit
-    where naExit = exitEdh ets exit $ EdhBool False
+  vecEqProc !other !exit !ets = castObjectStore' other >>= \case
+    Nothing              -> exitEdh ets exit $ EdhBool False
+    Just (_, !mvecOther) -> withThisHostObj ets $ \_ (mvec :: EdhVector) -> do
+      !conclusion <- unsafeIOToSTM $ do
+        -- TODO we're sacrificing thread safety for zero-copy performance
+        --      here, justify this decision
+        !vec      <- V.unsafeFreeze mvec
+        !vecOther <- V.unsafeFreeze mvecOther
+        return $ vec == vecOther
+      exitEdh ets exit $ EdhBool conclusion
 
   vecIdxReadProc :: EdhValue -> EdhHostProc
   vecIdxReadProc !idxVal !exit !ets =
@@ -178,13 +176,12 @@ createVectorClass !clsOuterScope =
   vecIdxWriteProc !idxVal !other !exit !ets =
     withThisHostObj ets $ \_ !mvec -> do
       let exitWithRangeAssign :: Int -> Int -> Int -> STM ()
-          exitWithRangeAssign !start !stop !step = case edhUltimate other of
-            EdhObject !objOther ->
-              withHostObject' objOther exitWithNonVecAssign $ \_ !mvecOther ->
-                do
-                  unsafeIOToSTM $ assignWithVec start 0 mvecOther
-                  exitEdh ets exit other
-            _ -> exitWithNonVecAssign
+          exitWithRangeAssign !start !stop !step =
+            castObjectStore' (edhUltimate other) >>= \case
+              Nothing              -> exitWithNonVecAssign
+              Just (_, !mvecOther) -> do
+                unsafeIOToSTM $ assignWithVec start 0 mvecOther
+                exitEdh ets exit other
            where
             (q, r)               = quotRem (stop - start) step
             !len                 = if r == 0 then abs q else 1 + abs q
@@ -296,10 +293,9 @@ createVectorClass !clsOuterScope =
     -> EdhTxExit
     -> STM ()
   opAssignRange !ets !withOp !rhVal !mvec !start !stop !step !exit =
-    case edhUltimate rhVal of
-      EdhObject !objOther -> withHostObject' objOther exitWithNonVecAssign
-        $ \_ !mvecOther -> assignWithVec start 0 mvecOther
-      _ -> exitWithNonVecAssign
+    castObjectStore' (edhUltimate rhVal) >>= \case
+      Nothing              -> exitWithNonVecAssign
+      Just (_, !mvecOther) -> assignWithVec start 0 mvecOther
    where
     (q, r)               = quotRem (stop - start) step
     !len                 = if r == 0 then abs q else 1 + abs q

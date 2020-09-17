@@ -136,6 +136,8 @@ module Language.Edh.EHI
   , ObjectStore(..)
   , castObjectStore
   , castObjectStore'
+  , castObjSelfStore
+  , castObjSelfStore'
   , withThisHostObj
   , withThisHostObj'
   , withHostObject

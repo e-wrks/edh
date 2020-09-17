@@ -418,15 +418,33 @@ data ObjectStore =
   | ClassStore !Class -- in case this is a class object
   | HostStore !(TVar Dynamic)
 
--- | Try cast and unveil an Object's storage of a known type
-castObjectStore :: forall a . (Typeable a) => Object -> STM (Maybe a)
-castObjectStore !obj = case edh'obj'store obj of
+-- | Try cast and unveil an Object's storage of a known type, while not
+-- considering any super object eligible
+castObjSelfStore :: forall a . (Typeable a) => Object -> STM (Maybe a)
+castObjSelfStore !obj = case edh'obj'store obj of
   HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
     Just (d :: a) -> return $ Just d
     Nothing       -> return Nothing
   _ -> return Nothing
+-- | Try cast and unveil a possible Object's storage of a known type, while not
+-- considering any super object eligible
+castObjSelfStore' :: forall a . (Typeable a) => EdhValue -> STM (Maybe a)
+castObjSelfStore' !val = case edhUltimate val of
+  EdhObject !obj -> castObjSelfStore obj
+  _              -> return Nothing
+
+-- | Try cast and unveil an Object's storage of a known type
+castObjectStore :: forall a . (Typeable a) => Object -> STM (Maybe (Object, a))
+castObjectStore !obj = (obj :) <$> readTVar (edh'obj'supers obj) >>= goSearch
+ where
+  goSearch []         = return Nothing
+  goSearch (o : rest) = castObjSelfStore o >>= \case
+    Just !d -> return $ Just (o, d)
+    Nothing -> goSearch rest
+
 -- | Try cast and unveil a possible Object's storage of a known type
-castObjectStore' :: forall a . (Typeable a) => EdhValue -> STM (Maybe a)
+castObjectStore'
+  :: forall a . (Typeable a) => EdhValue -> STM (Maybe (Object, a))
 castObjectStore' !val = case edhUltimate val of
   EdhObject !obj -> castObjectStore obj
   _              -> return Nothing
