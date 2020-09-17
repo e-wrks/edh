@@ -144,6 +144,107 @@ instance EdhAllocator fn' => EdhAllocator (OrderedDict AttrKey EdhValue -> fn') 
 instance EdhAllocator fn' => EdhAllocator (ArgsPack -> fn') where
   allocEdhObj !fn !apk !exit = allocEdhObj (fn apk) (ArgsPack [] odEmpty) exit
 
+
+-- receive positional-only arg taking specific host storage
+instance {-# OVERLAPPABLE #-} (EdhAllocator fn', Typeable h)
+  => EdhAllocator (h -> fn') where
+  allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit !ets = case val of
+    EdhObject !obj -> (obj :) <$> readTVar (edh'obj'supers obj) >>= tryObjs
+    _              -> throwEdh ets UsageError "arg type mismatch: anonymous"
+   where
+    tryObjs :: [Object] -> STM ()
+    tryObjs [] = throwEdh ets UsageError "arg host type mismatch: anonymous"
+    tryObjs (obj : rest) = case edh'obj'store obj of
+      HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+        Just (d :: h) ->
+          runEdhTx ets $ allocEdhObj (fn d) (ArgsPack args kwargs) exit
+        Nothing -> tryObjs rest
+      _ -> tryObjs rest
+  allocEdhObj _ _ _ !ets = throwEdh ets UsageError "missing anonymous arg"
+
+-- receive positional-only, optional arg taking specific host storage
+instance {-# OVERLAPPABLE #-} (EdhAllocator fn', Typeable h)
+  => EdhAllocator (Maybe h -> fn') where
+  allocEdhObj !fn (ArgsPack [] !kwargs) !exit !ets =
+    runEdhTx ets $ allocEdhObj (fn Nothing) (ArgsPack [] kwargs) exit
+  allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit !ets = case val of
+    EdhObject !obj -> (obj :) <$> readTVar (edh'obj'supers obj) >>= tryObjs
+    _              -> throwEdh ets UsageError "arg type mismatch: anonymous"
+   where
+    tryObjs :: [Object] -> STM ()
+    tryObjs [] = throwEdh ets UsageError "arg host type mismatch: anonymous"
+    tryObjs (obj : rest) = case edh'obj'store obj of
+      HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+        Just (d :: h) ->
+          runEdhTx ets $ allocEdhObj (fn (Just d)) (ArgsPack args kwargs) exit
+        Nothing -> tryObjs rest
+      _ -> tryObjs rest
+
+
+-- receive named arg taking specific host storage
+instance {-# OVERLAPPABLE #-} (KnownSymbol name, EdhAllocator fn', Typeable h)
+  => EdhAllocator (NamedEdhArg h name -> fn') where
+  allocEdhObj !fn (ArgsPack !args !kwargs) !exit !ets =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhObject !obj ->
+          (obj :) <$> readTVar (edh'obj'supers obj) >>= goSearch args kwargs'
+        _ -> throwEdh ets UsageError $ "arg type mismatch: " <> argName
+      (Nothing, !kwargs') -> case args of
+        [] -> throwEdh ets UsageError $ "missing named arg: " <> argName
+        val : args' -> case val of
+          EdhObject !obj ->
+            (obj :) <$> readTVar (edh'obj'supers obj) >>= goSearch args' kwargs'
+          _ -> throwEdh ets UsageError $ "arg type mismatch: " <> argName
+   where
+    !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+    goSearch :: [EdhValue] -> OrderedDict AttrKey EdhValue -> [Object] -> STM ()
+    goSearch args' kwargs' = tryObjs
+     where
+      tryObjs :: [Object] -> STM ()
+      tryObjs [] =
+        throwEdh ets UsageError $ "arg host type mismatch: " <> argName
+      tryObjs (obj : rest) = case edh'obj'store obj of
+        HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+          Just (d :: h) -> runEdhTx ets
+            $ allocEdhObj (fn (NamedEdhArg d)) (ArgsPack args' kwargs') exit
+          Nothing -> tryObjs rest
+        _ -> tryObjs rest
+
+-- receive named, optional arg taking specific host storage
+instance {-# OVERLAPPABLE #-} (KnownSymbol name, EdhAllocator fn', Typeable h)
+  => EdhAllocator (NamedEdhArg (Maybe h) name -> fn') where
+  allocEdhObj !fn (ArgsPack !args !kwargs) !exit !ets =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhObject !obj ->
+          (obj :) <$> readTVar (edh'obj'supers obj) >>= goSearch args kwargs'
+        _ -> throwEdh ets UsageError $ "arg type mismatch: " <> argName
+      (Nothing, !kwargs') -> case args of
+        [] -> runEdhTx ets
+          $ allocEdhObj (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
+        val : args' -> case val of
+          EdhObject !obj ->
+            (obj :) <$> readTVar (edh'obj'supers obj) >>= goSearch args' kwargs'
+          _ -> throwEdh ets UsageError $ "arg type mismatch: " <> argName
+   where
+    !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+    goSearch :: [EdhValue] -> OrderedDict AttrKey EdhValue -> [Object] -> STM ()
+    goSearch args' kwargs' = tryObjs
+     where
+      tryObjs :: [Object] -> STM ()
+      tryObjs [] =
+        throwEdh ets UsageError $ "arg host type mismatch: " <> argName
+      tryObjs (obj : rest) = case edh'obj'store obj of
+        HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+          Just (d :: h) -> runEdhTx ets $ allocEdhObj
+            (fn (NamedEdhArg (Just d)))
+            (ArgsPack args' kwargs')
+            exit
+          Nothing -> tryObjs rest
+        _ -> tryObjs rest
+
+
 -- receive positional-only arg taking 'EdhValue'
 instance EdhAllocator fn' => EdhAllocator (EdhValue -> fn') where
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit =
@@ -351,8 +452,8 @@ instance EdhAllocator fn' => EdhAllocator (Maybe List -> fn') where
 -- receive positional-only arg taking 'Object'
 instance EdhAllocator fn' => EdhAllocator (Object -> fn') where
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
-    EdhObject !val' -> allocEdhObj (fn val') (ArgsPack args kwargs) exit
-    _               -> throwEdhTx UsageError "arg type mismatch: anonymous"
+    EdhObject !obj -> allocEdhObj (fn obj) (ArgsPack args kwargs) exit
+    _              -> throwEdhTx UsageError "arg type mismatch: anonymous"
   allocEdhObj _ _ _ = throwEdhTx UsageError "missing anonymous arg"
 
 -- receive positional-only, optional arg taking 'Object'
@@ -360,8 +461,8 @@ instance EdhAllocator fn' => EdhAllocator (Maybe Object -> fn') where
   allocEdhObj !fn (ArgsPack [] !kwargs) !exit =
     allocEdhObj (fn Nothing) (ArgsPack [] kwargs) exit
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
-    EdhObject !val' -> allocEdhObj (fn (Just val')) (ArgsPack args kwargs) exit
-    _               -> throwEdhTx UsageError "arg type mismatch: anonymous"
+    EdhObject !obj -> allocEdhObj (fn (Just obj)) (ArgsPack args kwargs) exit
+    _              -> throwEdhTx UsageError "arg type mismatch: anonymous"
 
 -- receive positional-only arg taking 'EdhOrd'
 instance EdhAllocator fn' => EdhAllocator (Ordering -> fn') where
@@ -884,14 +985,14 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg Objec
   allocEdhObj !fn (ArgsPack !args !kwargs) !exit =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhObject !val' ->
-          allocEdhObj (fn (NamedEdhArg val')) (ArgsPack args kwargs') exit
+        EdhObject !obj ->
+          allocEdhObj (fn (NamedEdhArg obj)) (ArgsPack args kwargs') exit
         _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
       (Nothing, !kwargs') -> case args of
         []          -> throwEdhTx UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
-          EdhObject !val' ->
-            allocEdhObj (fn (NamedEdhArg val')) (ArgsPack args' kwargs') exit
+          EdhObject !obj ->
+            allocEdhObj (fn (NamedEdhArg obj)) (ArgsPack args' kwargs') exit
           _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
     where !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
@@ -900,16 +1001,15 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Mayb
   allocEdhObj !fn (ArgsPack !args !kwargs) !exit =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhObject !val' -> allocEdhObj (fn (NamedEdhArg (Just val')))
-                                       (ArgsPack args kwargs')
-                                       exit
+        EdhObject !obj ->
+          allocEdhObj (fn (NamedEdhArg (Just obj))) (ArgsPack args kwargs') exit
         _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
       (Nothing, !kwargs') -> case args of
         [] -> allocEdhObj (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
         val : args' -> case val of
-          EdhObject !val' -> allocEdhObj (fn (NamedEdhArg (Just val')))
-                                         (ArgsPack args' kwargs')
-                                         exit
+          EdhObject !obj -> allocEdhObj (fn (NamedEdhArg (Just obj)))
+                                        (ArgsPack args' kwargs')
+                                        exit
           _ -> throwEdhTx UsageError $ "arg type mismatch: " <> argName
     where !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
@@ -1141,6 +1241,107 @@ instance EdhCallable fn' => EdhCallable (OrderedDict AttrKey EdhValue -> fn') wh
 -- note it'll cause runtime error if @fn'@ takes further args
 instance EdhCallable fn' => EdhCallable (ArgsPack -> fn') where
   callFromEdh !fn !apk !exit = callFromEdh (fn apk) (ArgsPack [] odEmpty) exit
+
+
+-- receive positional-only arg taking specific host storage
+instance {-# OVERLAPPABLE #-} (EdhCallable fn', Typeable h)
+  => EdhCallable (h -> fn') where
+  callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit !ets = case val of
+    EdhObject !obj -> (obj :) <$> readTVar (edh'obj'supers obj) >>= tryObjs
+    _              -> throwEdh ets UsageError "arg type mismatch: anonymous"
+   where
+    tryObjs :: [Object] -> STM ()
+    tryObjs [] = throwEdh ets UsageError "arg host type mismatch: anonymous"
+    tryObjs (obj : rest) = case edh'obj'store obj of
+      HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+        Just (d :: h) ->
+          runEdhTx ets $ callFromEdh (fn d) (ArgsPack args kwargs) exit
+        Nothing -> tryObjs rest
+      _ -> tryObjs rest
+  callFromEdh _ _ _ !ets = throwEdh ets UsageError "missing anonymous arg"
+
+-- receive positional-only, optional arg taking specific host storage
+instance {-# OVERLAPPABLE #-} (EdhCallable fn', Typeable h)
+  => EdhCallable (Maybe h -> fn') where
+  callFromEdh !fn (ArgsPack [] !kwargs) !exit !ets =
+    runEdhTx ets $ callFromEdh (fn Nothing) (ArgsPack [] kwargs) exit
+  callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit !ets = case val of
+    EdhObject !obj -> (obj :) <$> readTVar (edh'obj'supers obj) >>= tryObjs
+    _              -> throwEdh ets UsageError "arg type mismatch: anonymous"
+   where
+    tryObjs :: [Object] -> STM ()
+    tryObjs [] = throwEdh ets UsageError "arg host type mismatch: anonymous"
+    tryObjs (obj : rest) = case edh'obj'store obj of
+      HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+        Just (d :: h) ->
+          runEdhTx ets $ callFromEdh (fn (Just d)) (ArgsPack args kwargs) exit
+        Nothing -> tryObjs rest
+      _ -> tryObjs rest
+
+
+-- receive named arg taking specific host storage
+instance {-# OVERLAPPABLE #-} (KnownSymbol name, EdhCallable fn', Typeable h)
+  => EdhCallable (NamedEdhArg h name -> fn') where
+  callFromEdh !fn (ArgsPack !args !kwargs) !exit !ets =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhObject !obj ->
+          (obj :) <$> readTVar (edh'obj'supers obj) >>= goSearch args kwargs'
+        _ -> throwEdh ets UsageError $ "arg type mismatch: " <> argName
+      (Nothing, !kwargs') -> case args of
+        [] -> throwEdh ets UsageError $ "missing named arg: " <> argName
+        val : args' -> case val of
+          EdhObject !obj ->
+            (obj :) <$> readTVar (edh'obj'supers obj) >>= goSearch args' kwargs'
+          _ -> throwEdh ets UsageError $ "arg type mismatch: " <> argName
+   where
+    !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+    goSearch :: [EdhValue] -> OrderedDict AttrKey EdhValue -> [Object] -> STM ()
+    goSearch args' kwargs' = tryObjs
+     where
+      tryObjs :: [Object] -> STM ()
+      tryObjs [] =
+        throwEdh ets UsageError $ "arg host type mismatch: " <> argName
+      tryObjs (obj : rest) = case edh'obj'store obj of
+        HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+          Just (d :: h) -> runEdhTx ets
+            $ callFromEdh (fn (NamedEdhArg d)) (ArgsPack args' kwargs') exit
+          Nothing -> tryObjs rest
+        _ -> tryObjs rest
+
+-- receive named, optional arg taking specific host storage
+instance {-# OVERLAPPABLE #-} (KnownSymbol name, EdhCallable fn', Typeable h)
+  => EdhCallable (NamedEdhArg (Maybe h) name -> fn') where
+  callFromEdh !fn (ArgsPack !args !kwargs) !exit !ets =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhObject !obj ->
+          (obj :) <$> readTVar (edh'obj'supers obj) >>= goSearch args kwargs'
+        _ -> throwEdh ets UsageError $ "arg type mismatch: " <> argName
+      (Nothing, !kwargs') -> case args of
+        [] -> runEdhTx ets
+          $ callFromEdh (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
+        val : args' -> case val of
+          EdhObject !obj ->
+            (obj :) <$> readTVar (edh'obj'supers obj) >>= goSearch args' kwargs'
+          _ -> throwEdh ets UsageError $ "arg type mismatch: " <> argName
+   where
+    !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+    goSearch :: [EdhValue] -> OrderedDict AttrKey EdhValue -> [Object] -> STM ()
+    goSearch args' kwargs' = tryObjs
+     where
+      tryObjs :: [Object] -> STM ()
+      tryObjs [] =
+        throwEdh ets UsageError $ "arg host type mismatch: " <> argName
+      tryObjs (obj : rest) = case edh'obj'store obj of
+        HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+          Just (d :: h) -> runEdhTx ets $ callFromEdh
+            (fn (NamedEdhArg (Just d)))
+            (ArgsPack args' kwargs')
+            exit
+          Nothing -> tryObjs rest
+        _ -> tryObjs rest
+
 
 -- receive positional-only arg taking 'EdhValue'
 instance EdhCallable fn' => EdhCallable (EdhValue -> fn') where
