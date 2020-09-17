@@ -2,19 +2,31 @@
 while true { # this is the *Loop* in so-called REPL
   # Read+Eval (console.readCommand) -> Print (console.print) -> Loop
 
-  case console.readCommand( ps1= "Đ: ", ps2= "Đ| " ) of {
-    batteries.quit -> { break }
-    batteries.dir -> printDir()
+  case console.readCommand(
+    ps1= "(" ++ __name__ ++ ")Đ: ",
+    ps2= "Đ| "
+  ) of {@
+    { { batteries.Command: cmd } } -> case cmd.cmd of {
+      # todo
+      #  *) enrich custom behaviors according to `cmd.apk`
+      #  *) support more commands
+      'quit' -> { break }
+      'dir' -> {
+        hereBlockScope = scope()
+        printDir( ofScope=hereBlockScope.outer )
+      }
+      _ -> console.print( 'Unsupported command: ' ++ cmd )
+    }
+
     { cmdVal } -> {
       console.print( cmdVal )
-      cmdVal = nil # clear it
     }
-  }
+  @}
 
 } $=> { # catch exceptions
 
-  { { IOError:exc } } -> {
-    console.fatal<| 'IO error - ' ++ exc
+  { { IOError: ioExc } } -> {
+    console.fatal<| 'IO error - ' ++ ioExc
     rethrow # escalate it to the program loop of the
     # host interpreter, let it decide what to do.
   }

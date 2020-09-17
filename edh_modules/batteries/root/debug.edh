@@ -45,8 +45,27 @@ export {
 
   }
 
-  # used to create unique command objects
-  class Command { __repr__ = 'Command()' }
+  # used to define parametric command objects
+  class Command {
+
+    method __init__( cmd as this.cmd, ***apk ) this.apk=apk
+
+    method __eq__( other ) case other of {
+      { { Command: otherCmd } }
+      -> this.cmd == otherCmd.cmd
+      && this.apk == otherCmd.apk
+
+      _ -> false
+    }
+
+    method __repr__ () case this.apk of {
+      { () } -> '' ++ this.cmd
+      this.cmd ++ this.apk
+    }
+
+    method __call__(*** apk ) constructor( that ) ( this.cmd, ***apk )
+
+  }
 
   # the default basic implementation for the `dir` command
   interpreter printDir( callerScope, ofScope=None, ) {
@@ -67,18 +86,18 @@ export {
     )
   }
 
-  # common shell commands
-  quit := Command()
-  dir := Command()
+  # common repl commands
+  quit = Command( 'quit' )
+  dir = Command( 'dir' )
 
-  interpreter shellHere( callerScope, prompt=None ) {
+  interpreter replHere( callerScope, prompt=None ) {
     prompt = prompt &> callerScope.eval( prompt ) |> repr( callerScope )
 
     console.print(
-      ' * entering a shell at ' ++ callerScope.lexiLoc,
+      ' * entering a repl at ' ++ callerScope.lexiLoc,
       ' * which is called from ' ++ callerScope.callerLoc )
     console.print(
-      ' * key in `quit` or `continue` to leave the shell and continue.' )
+      ' * key in `quit` or `continue` to leave the repl and continue.' )
 
     cmdArgs = ( ps1= '' ++prompt++ ' Đ: ', ps2= "Đ| ", inScopeOf=callerScope )
     while true {
@@ -110,15 +129,15 @@ export {
   }
 
   {#
-   # run a shell within an object's (probably a module) scope, e.g.
+   # run a repl within an object's (probably a module) scope, e.g.
   ```edh
-  case { import (**_) 'batteries/magic' } of { m } -> shellWith(m)
+  case { import (**_) 'batteries/magic' } of { m } -> replWith(m)
   ```
    #}
-  method shellWith( obj=this ) {
+  method replWith( obj=this ) {
 
-    console.print( ' * entering a shell within ' ++ obj )
-    console.print( ' * key in `quit` to leave the shell.' )
+    console.print( ' * entering a repl within ' ++ obj )
+    console.print( ' * key in `quit` to leave the repl.' )
 
     # use scope obj's repr for ps1
     cmdArgs = ( ps1=repr( obj ) ++ ' Đ: ', ps2= "Đ| ", inScopeOf=obj )
