@@ -102,15 +102,14 @@ export {
     cmdArgs = ( ps1= '' ++prompt++ ' Đ: ', ps2= "Đ| ", inScopeOf=callerScope )
     while true {
 
-      case console.readCommand(*** cmdArgs ) of {
+      case console.readCommand(*** cmdArgs ) of {@
         quit -> { break }
         { continue } -> { break }
         dir -> printDir( callerScope )
         { cmdVal } -> {
           console.print( cmdVal )
-          cmdVal = nil # clear it
         }
-      }
+      @}
 
     } $=> { # catch exceptions
 
@@ -121,7 +120,7 @@ export {
       }
 
       { cmdExc } -> {
-        console.print( 'Recovered from error', exception=cmdExc )
+        console.error<| 'Recovered from error: ' ++ desc( cmdExc )
       }
 
     }
@@ -131,7 +130,8 @@ export {
   {#
    # run a repl within an object's (probably a module) scope, e.g.
   ```edh
-  case { import (**_) 'batteries/magic' } of { m } -> replWith(m)
+  m = { import (**_) 'batteries/magic' }
+  replWith(m)
   ```
    #}
   method replWith( obj=this ) {
@@ -143,14 +143,13 @@ export {
     cmdArgs = ( ps1=repr( obj ) ++ ' Đ: ', ps2= "Đ| ", inScopeOf=obj )
     while true {
 
-      case console.readCommand(*** cmdArgs ) of {
+      case console.readCommand(*** cmdArgs ) of {@
         quit -> { break }
         dir -> printDir( scope( ofObj=obj ) )
         { cmdVal } -> {
           console.print( cmdVal )
-          cmdVal = nil # clear it
         }
-      }
+      @}
 
     } $=> { # catch exceptions
 
@@ -161,7 +160,7 @@ export {
       }
 
       { cmdExc } -> {
-        console.print( 'Recovered from error', exception=cmdExc )
+        console.error<| 'Recovered from error: ' ++ desc( cmdExc )
       }
 
     }
