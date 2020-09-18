@@ -309,9 +309,9 @@ reprProc (ArgsPack !args !kwargs) !exit !ets = go [] [] args (odToList kwargs)
     edhValueRepr ets v $ \ !r -> go reprs ((k, EdhString r) : kwReprs) [] rest
 
 
-capProc :: EdhValue -> OrderedDict AttrKey EdhValue -> EdhHostProc
+capProc :: EdhValue -> RestKwArgs -> EdhHostProc
 capProc !v !kwargs !exit !ets = case edhUltimate v of
-  EdhObject !o -> lookupEdhObjAttr o (AttrByName "__cap__") >>= \case
+  EdhObject !o -> lookupEdhObjMagic o (AttrByName "__cap__") >>= \case
     (_, EdhNil) -> exitEdh ets exit $ EdhDecimal D.nan
     (!this', EdhProcedure (EdhMethod !mth) _) ->
       runEdhTx ets $ callEdhMethod this' o mth (ArgsPack [] kwargs) id exit
@@ -325,9 +325,9 @@ capProc !v !kwargs !exit !ets = case edhUltimate v of
         <> objClassName o
   _ -> exitEdh ets exit $ EdhDecimal D.nan
 
-growProc :: EdhValue -> Decimal -> OrderedDict AttrKey EdhValue -> EdhHostProc
+growProc :: EdhValue -> Decimal -> RestKwArgs -> EdhHostProc
 growProc !v !newCap !kwargs !exit !ets = case edhUltimate v of
-  EdhObject !o -> lookupEdhObjAttr o (AttrByName "__grow__") >>= \case
+  EdhObject !o -> lookupEdhObjMagic o (AttrByName "__grow__") >>= \case
     (_, EdhNil) ->
       throwEdh ets UsageError
         $  "grow() not supported by the object of class "
@@ -355,9 +355,9 @@ growProc !v !newCap !kwargs !exit !ets = case edhUltimate v of
   !badVal -> edhValueDesc ets badVal $ \ !badDesc ->
     throwEdh ets UsageError $ "grow() not supported by: " <> badDesc
 
-lenProc :: EdhValue -> OrderedDict AttrKey EdhValue -> EdhHostProc
+lenProc :: EdhValue -> RestKwArgs -> EdhHostProc
 lenProc !v !kwargs !exit !ets = case edhUltimate v of
-  EdhObject !o -> lookupEdhObjAttr o (AttrByName "__len__") >>= \case
+  EdhObject !o -> lookupEdhObjMagic o (AttrByName "__len__") >>= \case
     (_, EdhNil) -> exitEdh ets exit $ EdhDecimal D.nan
     (!this', EdhProcedure (EdhMethod !mth) _) ->
       runEdhTx ets $ callEdhMethod this' o mth (ArgsPack [] kwargs) id exit
@@ -385,9 +385,9 @@ lenProc !v !kwargs !exit !ets = case edhUltimate v of
     "unresonable to get length of an apk with both positional and keyword args"
   _ -> exitEdh ets exit $ EdhDecimal D.nan
 
-markProc :: EdhValue -> Decimal -> OrderedDict AttrKey EdhValue -> EdhHostProc
+markProc :: EdhValue -> Decimal -> RestKwArgs -> EdhHostProc
 markProc !v !newLen !kwargs !exit !ets = case edhUltimate v of
-  EdhObject !o -> lookupEdhObjAttr o (AttrByName "__mark__") >>= \case
+  EdhObject !o -> lookupEdhObjMagic o (AttrByName "__mark__") >>= \case
     (_, EdhNil) ->
       throwEdh ets UsageError
         $  "mark() not supported by the object of class "
@@ -417,7 +417,7 @@ markProc !v !newLen !kwargs !exit !ets = case edhUltimate v of
       (edhTypeNameOf badVal)
 
 
-showProc :: EdhValue -> OrderedDict AttrKey EdhValue -> EdhHostProc
+showProc :: EdhValue -> RestKwArgs -> EdhHostProc
 showProc !v !kwargs !exit !ets = case v of
 
   -- show of named value
@@ -431,9 +431,9 @@ showProc !v !kwargs !exit !ets = case v of
   _ -> case edhUltimate v of
     EdhObject !o -> case edh'obj'store o of
       ClassStore{} ->
-        lookupEdhObjAttr (edh'obj'class o) (AttrByName "__show__")
+        lookupEdhObjMagic (edh'obj'class o) (AttrByName "__show__")
           >>= showWithMagic o
-      _ -> lookupEdhObjAttr o (AttrByName "__show__") >>= showWithMagic o
+      _ -> lookupEdhObjMagic o (AttrByName "__show__") >>= showWithMagic o
     EdhProcedure !callable Nothing ->
       exitEdh ets exit $ EdhString $ T.pack (show callable)
     EdhProcedure !callable Just{} ->
@@ -460,12 +460,12 @@ showProc !v !kwargs !exit !ets = case v of
   showWithNoMagic = edhValueStr ets v $ \ !s ->
     exitEdh ets exit $ EdhString $ T.pack (edhTypeNameOf v) <> ": " <> s
 
-descProc :: EdhValue -> OrderedDict AttrKey EdhValue -> EdhHostProc
+descProc :: EdhValue -> RestKwArgs -> EdhHostProc
 descProc !v !kwargs !exit !ets = case edhUltimate v of
   EdhObject !o -> case edh'obj'store o of
-    ClassStore{} -> lookupEdhObjAttr (edh'obj'class o) (AttrByName "__desc__")
+    ClassStore{} -> lookupEdhObjMagic (edh'obj'class o) (AttrByName "__desc__")
       >>= descWithMagic o
-    _ -> lookupEdhObjAttr o (AttrByName "__desc__") >>= descWithMagic o
+    _ -> lookupEdhObjMagic o (AttrByName "__desc__") >>= descWithMagic o
   EdhProcedure !callable Nothing ->
     exitEdh ets exit $ EdhString $ "It is a procedure: " <> T.pack
       (show callable)

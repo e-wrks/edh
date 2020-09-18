@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 
 module Language.Edh.Details.RtTypes where
 
@@ -54,8 +55,9 @@ edhSetValue !key !val !d = case val of
 -- Specifically, an empty apk is just considered an empty tuple.
 data ArgsPack = ArgsPack {
     positional'args :: ![EdhValue]
-    , keyword'args :: !(OrderedDict AttrKey EdhValue)
-  } deriving (Eq)
+  , keyword'args :: !KwArgs
+  } deriving Eq
+type KwArgs = (OrderedDict AttrKey EdhValue)
 instance Hashable ArgsPack where
   hashWithSalt s (ArgsPack !args !kwargs) =
     s `hashWithSalt` args `hashWithSalt` kwargs
@@ -69,6 +71,22 @@ instance Show ArgsPack where
            [ show kw ++ "=" ++ show v ++ ", " | (kw, v) <- odToList kwargs ]
       ++ ")"
 
+-- | Used to declare a repacking receiver
+type RestPosArgs = [EdhValue]
+-- | Used to declare a repacking receiver
+type RestKwArgs = KwArgs
+-- | Used to declare a repacking receiver
+type RestPackArgs = ArgsPack
+
+-- | Used to declare a positional-only args receiver,
+-- disambiguated from a repacking receiver
+newtype PositionalArgs = PositionalArgs [EdhValue]
+-- | Used to declare a keyword-only args receiver,
+-- disambiguated from a repacking receiver
+newtype KeywordArgs = KeywordArgs KwArgs
+-- | Used to declare an apk receiver,
+-- disambiguated from a repacking receiver
+newtype PackedArgs = PackedArgs ArgsPack
 
 -- | A dict in Edh is neither an object nor an entity, but just a
 -- mutable associative array.

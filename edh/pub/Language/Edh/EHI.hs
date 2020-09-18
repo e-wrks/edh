@@ -204,7 +204,6 @@ module Language.Edh.EHI
   , Dict(..)
   , ItemKey
   , List(..)
-  , ArgsPack(..)
   , ProcDefi(..)
   , EdhGenrCaller
   , symbolName
@@ -215,6 +214,14 @@ module Language.Edh.EHI
   , EdhVector
 
     -- * argument exchanging
+  , ArgsPack(..)
+  , KwArgs
+  , RestPosArgs
+  , RestKwArgs
+  , RestPackArgs
+  , PositionalArgs
+  , KeywordArgs
+  , PackedArgs
   , module Language.Edh.Args
   , module Language.Edh.InterOp
 

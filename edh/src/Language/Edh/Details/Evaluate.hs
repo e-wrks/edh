@@ -833,7 +833,7 @@ recvEdhArgs
   -> Context
   -> ArgsReceiver
   -> ArgsPack
-  -> (OrderedDict AttrKey EdhValue -> STM ())
+  -> (KwArgs -> STM ())
   -> STM ()
 recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
   = case argsRcvr of
@@ -935,7 +935,7 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit
     resolveArgValue
       :: AttrKey
       -> Maybe Expr
-      -> ((EdhValue, [EdhValue], OrderedDict AttrKey EdhValue) -> STM ())
+      -> ((EdhValue, [EdhValue], KwArgs) -> STM ())
       -> STM ()
     resolveArgValue !argKey !argDefault !exit'' = do
       let (inKwArgs, kwArgs'') = odTakeOut argKey kwArgs'
