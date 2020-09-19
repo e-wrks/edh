@@ -132,6 +132,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit !ets = case fromExpr of
       EdhProcedure (EdhMethod !mth) _ -> callSelfMagic mth o obj
       EdhBoundProc (EdhMethod !mth) !this !that _ ->
         callSelfMagic mth this that
+      -- todo honor default expr here?
       !magicVal ->
         throwEdh ets UsageError $ "invalid magic method type: " <> T.pack
           (edhTypeNameOf magicVal)
@@ -300,6 +301,7 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
       EdhProcedure (EdhMethod !mth) _ -> callSelfMagic mth o obj
       EdhBoundProc (EdhMethod !mth) !this !that _ ->
         callSelfMagic mth this that
+      -- todo honor default expr here?
       !magicVal ->
         throwEdh ets UsageError $ "invalid magic method type: " <> T.pack
           (edhTypeNameOf magicVal)
@@ -571,7 +573,7 @@ edhConstructObj !clsObj !apk !exit !ets =
     let callInit :: [Object] -> STM () -> STM ()
         callInit [] !initExit = initExit
         callInit (o : rest) !initExit =
-          callInit rest $ lookupEdhSelfAttr o (AttrByName "__init__") >>= \case
+          callInit rest $ lookupEdhSelfMagic o (AttrByName "__init__") >>= \case
             EdhNil -> initExit
             EdhProcedure (EdhMethod !mthInit) _ ->
               runEdhTx ets
@@ -677,7 +679,7 @@ edhObjExtends !ets !this !superObj !exit = case edh'obj'store this of
  where
   doExtends = do
     modifyTVar' (edh'obj'supers this) (++ [superObj])
-    lookupEdhSelfAttr superObj magicSpell >>= \case
+    lookupEdhSelfMagic superObj magicSpell >>= \case
       EdhNil    -> exit
       !magicMth -> runEdhTx ets $ withMagicMethod magicMth
 
