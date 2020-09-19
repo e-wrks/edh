@@ -219,9 +219,9 @@ module Language.Edh.EHI
   , RestPosArgs
   , RestKwArgs
   , RestPackArgs
-  , PositionalArgs
-  , KeywordArgs
-  , PackedArgs
+  , PositionalArgs(..)
+  , KeywordArgs(..)
+  , PackedArgs(..)
   , module Language.Edh.Args
   , module Language.Edh.InterOp
 
