@@ -554,7 +554,8 @@ edhCreateObj !ets !clsObj !apk !exitEnd = newTVar Map.empty >>= \ !instMap ->
 -- | Construct an Edh object from a class.
 --
 -- All `__init__()` methods provided by the specified class, and its super
--- classes will be called with the specified apk, and for each call:
+-- classes will be called with the specified apk, in order from most abstract
+-- to most concrete, and for each call:
 --
 -- - contextual `that` will always be the end object just created, unless
 --   one `__init__()` method itself being already bound to sth else, which
@@ -567,25 +568,25 @@ edhCreateObj !ets !clsObj !apk !exitEnd = newTVar Map.empty >>= \ !instMap ->
 edhConstructObj :: Object -> ArgsPack -> (Object -> EdhTx) -> EdhTx
 edhConstructObj !clsObj !apk !exit !ets =
   edhCreateObj ets clsObj apk $ \ !obj -> do
-    let
-      callInit :: [Object] -> STM ()
-      callInit [] = runEdhTx ets $ exit obj
-      callInit (o : rest) =
-        lookupEdhSelfAttr o (AttrByName "__init__") >>= \case
-          EdhNil -> callInit rest
-          EdhProcedure (EdhMethod !mthInit) _ ->
-            runEdhTx ets
-              $ callEdhMethod o obj mthInit apk id
-              $ \_initResult _ets -> callInit rest
-          EdhBoundProc (EdhMethod !mthInit) !this !that _ ->
-            runEdhTx ets
-              $ callEdhMethod this that mthInit apk id
-              $ \_initResult _ets -> callInit rest
-          !badInitMth ->
-            throwEdh ets UsageError
-              $  "invalid __init__ method of type: "
-              <> T.pack (edhTypeNameOf badInitMth)
-    callInit =<< (obj :) <$> readTVar (edh'obj'supers obj)
+    let callInit :: [Object] -> STM () -> STM ()
+        callInit [] !initExit = initExit
+        callInit (o : rest) !initExit =
+          callInit rest $ lookupEdhSelfAttr o (AttrByName "__init__") >>= \case
+            EdhNil -> initExit
+            EdhProcedure (EdhMethod !mthInit) _ ->
+              runEdhTx ets
+                $ callEdhMethod o obj mthInit apk id
+                $ \_initResult _ets -> initExit
+            EdhBoundProc (EdhMethod !mthInit) !this !that _ ->
+              runEdhTx ets
+                $ callEdhMethod this that mthInit apk id
+                $ \_initResult _ets -> initExit
+            !badInitMth ->
+              throwEdh ets UsageError
+                $  "invalid __init__ method of type: "
+                <> T.pack (edhTypeNameOf badInitMth)
+    flip callInit (runEdhTx ets $ exit obj) =<< (obj :) <$> readTVar
+      (edh'obj'supers obj)
 
 
 -- Clone `that` object with one of its super object (i.e. `this`) mutated
