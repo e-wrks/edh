@@ -149,7 +149,6 @@ module Language.Edh.EHI
   , edhClassName
   , objClassName
   , edhCreateHostObj
-  , edhCreateObj
   , edhConstructObj
   , edhMutCloneObj
   , edhCloneHostObj

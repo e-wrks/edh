@@ -510,85 +510,98 @@ edhCloneHostObj !ets !fromThis !fromThat !newData !exit = do
   edhMutCloneObj ets fromThis fromThat newStore exit
 
 
--- | Create an Edh object from a class, without calling any `__init__()`
--- method.
-edhCreateObj
-  :: EdhThreadState -> Object -> ArgsPack -> (Object -> STM ()) -> STM ()
-edhCreateObj !ets !clsObj !apk !exitEnd = newTVar Map.empty >>= \ !instMap ->
-  do
-    let
-      fillSupers :: Object -> [Object] -> [Object] -> STM ()
-      fillSupers !self [] !objSupers =
-        writeTVar (edh'obj'supers self) (reverse objSupers)
-      fillSupers !self (clsSuper : clsRest) !objSupers =
-        Map.lookup clsSuper <$> readTVar instMap >>= \case
-          Just !objSuper -> fillSupers self clsRest (objSuper : objSupers)
-          Nothing        -> error
-            "bug: some super class not appeared in a descendant class' mro"
-
-      createSelf :: Object -> ((Object, [Object]) -> STM ()) -> STM ()
-      createSelf !c !exit = case edh'obj'store c of
-        ClassStore !cls ->
-          runEdhTx ets $ edh'class'allocator cls apk $ \ !es -> do
-            !oid <- unsafeIOToSTM newUnique
-            !ss  <- newTVar []
-            let !o = Object oid es c ss
-            modifyTVar' instMap $ Map.insert c o
-            !mro <- readTVar (edh'class'mro cls)
-            exit (o, mro)
-        _ ->
-          throwEdh ets UsageError
-            $  "can not create new object from a non-class object, which is a: "
-            <> objClassName c
-
-      createSupers :: [Object] -> STM () -> STM ()
-      createSupers [] !exit = exit
-      createSupers (clsSuper : restSupers) !exit =
-        createSelf clsSuper $ \(!objSuper, !mroSuper) ->
-          createSupers restSupers $ do
-            fillSupers objSuper mroSuper []
-            exit
-
-    createSelf clsObj $ \(!that, !mro) -> createSupers mro $ do
-      fillSupers that mro []
-      exitEnd that
-
 -- | Construct an Edh object from a class.
---
--- All `__init__()` methods provided by the specified class, and its super
--- classes will be called with the specified apk, in order from most abstract
--- to most concrete, and for each call:
---
--- - contextual `that` will always be the end object just created, unless
---   one `__init__()` method itself being already bound to sth else, which
---   is unusual
---
--- - contextual `this` will be the object instance corresponding to the class
---   providing the respective `__init__()` method, unless the provided 
---   `__init__()` method itself being already bound to sth else, which is
---   unusual
 edhConstructObj :: Object -> ArgsPack -> (Object -> EdhTx) -> EdhTx
-edhConstructObj !clsObj !apk !exit !ets =
-  edhCreateObj ets clsObj apk $ \ !obj -> do
-    let callInit :: [Object] -> STM () -> STM ()
-        callInit [] !initExit = initExit
-        callInit (o : rest) !initExit =
-          callInit rest $ lookupEdhSelfMagic o (AttrByName "__init__") >>= \case
-            EdhNil -> initExit
-            EdhProcedure (EdhMethod !mthInit) _ ->
+edhConstructObj !clsObj !apk !exit !ets = newTVar Map.empty >>= \ !instMap ->
+  case edh'obj'store clsObj of
+    ClassStore !endClass -> do
+      let
+        createOne
+          :: Object -> [Object] -> ArgsPack -> (Object -> STM ()) -> STM ()
+        createOne !co !restSupers !apkCtor !exitOne = case edh'obj'store co of
+          ClassStore !cls -> reformCtorArgs co cls apkCtor $ \ !apkCtor' -> do
+            let
+              allocIt :: STM ()
+              allocIt = do
+                !mro <- readTVar (edh'class'mro cls)
+                !im  <- readTVar instMap
+                case
+                    sequence $ (\ !sco -> fst <$> Map.lookup sco im) <$> mro
+                  of
+                    Nothing -> throwEdh ets
+                                        EvalError
+                                        "bug: missing some instance by mro"
+                    Just !supers ->
+                      runEdhTx ets
+                        $ edh'class'allocator cls apkCtor'
+                        $ \ !es -> do
+                            !oid <- unsafeIOToSTM newUnique
+                            !ss  <- newTVar supers
+                            let !o = Object oid es co ss
+                            -- put into instance may by class
+                            modifyTVar' instMap $ Map.insert co (o, apkCtor')
+                            exitOne o
+            case restSupers of
+              [] -> allocIt
+              (nextSuper : restSupers') ->
+                createOne nextSuper restSupers' apkCtor'
+                  $ \_superObj -> allocIt
+          _ -> throwEdh ets EvalError "bug: non-class object in mro"
+      !superClasses <- readTVar (edh'class'mro endClass)
+      createOne clsObj superClasses apk $ \ !obj -> do
+        !im <- readTVar instMap
+        let
+          callInit :: [Object] -> STM () -> STM ()
+          callInit [] !initExit = initExit
+          callInit (o : rest) !initExit =
+            case Map.lookup (edh'obj'class o) im of
+              Nothing -> throwEdh ets EvalError "bug: ctor apk missing"
+              Just (_o, !apkCtor') ->
+                callInit rest
+                  $   lookupEdhSelfMagic o (AttrByName "__init__")
+                  >>= \case
+                        EdhNil -> initExit
+                        EdhProcedure (EdhMethod !mthInit) _ ->
+                          runEdhTx ets
+                            $ callEdhMethod o obj mthInit apkCtor' id
+                            $ \_initResult _ets -> initExit
+                        EdhBoundProc (EdhMethod !mthInit) !this !that _ ->
+                          runEdhTx ets
+                            $ callEdhMethod this that mthInit apkCtor' id
+                            $ \_initResult _ets -> initExit
+                        !badInitMth ->
+                          edhValueDesc ets badInitMth $ \ !badDesc ->
+                            throwEdh ets UsageError
+                              $  "invalid __init__ method on class "
+                              <> objClassName o
+                              <> " - "
+                              <> badDesc
+        !supers <- readTVar $ edh'obj'supers obj
+        callInit (obj : supers) $ runEdhTx ets $ exit obj
+    _ ->
+      throwEdh ets UsageError
+        $  "can not create new object from a non-class object, which is a: "
+        <> objClassName clsObj
+ where
+  reformCtorArgs
+    :: Object -> Class -> ArgsPack -> (ArgsPack -> STM ()) -> STM ()
+  reformCtorArgs !co !cls !apkCtor !exit' =
+    iopdLookup (AttrByName "__reform_ctor_args__") (edh'class'store cls)
+      >>= \case
+            Nothing -> exit' apkCtor
+            Just (EdhProcedure (EdhMethod !mth) _) ->
               runEdhTx ets
-                $ callEdhMethod o obj mthInit apk id
-                $ \_initResult _ets -> initExit
-            EdhBoundProc (EdhMethod !mthInit) !this !that _ ->
-              runEdhTx ets
-                $ callEdhMethod this that mthInit apk id
-                $ \_initResult _ets -> initExit
-            !badInitMth ->
+                $ callEdhMethod co clsObj mth apkCtor id
+                $ \ !magicRtn _ets -> case edhUltimate magicRtn of
+                    EdhArgsPack !apkReformed -> exit' apkReformed
+                    _ -> edhValueDesc ets magicRtn $ \ !badDesc ->
+                      throwEdh ets UsageError
+                        $  "invalid return from __reform_ctor_args__ magic: "
+                        <> badDesc
+            Just !badMagicVal -> edhValueDesc ets badMagicVal $ \ !badDesc ->
               throwEdh ets UsageError
-                $  "invalid __init__ method of type: "
-                <> T.pack (edhTypeNameOf badInitMth)
-    flip callInit (runEdhTx ets $ exit obj) =<< (obj :) <$> readTVar
-      (edh'obj'supers obj)
+                $  "bad __reform_ctor_args__ magic: "
+                <> badDesc
 
 
 -- Clone `that` object with one of its super object (i.e. `this`) mutated

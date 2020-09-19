@@ -1,6 +1,8 @@
 
 # https://en.wikipedia.org/wiki/C3_linearization
 
+# %%
+
 class O pass
 
 class A extends O
@@ -21,6 +23,7 @@ class K3 extends ( D, A )
 
 class Z extends ( K1, K2, K3 )
 
+# %%
 Z.mro
 
 # unlike other object systems (e.g. in Python), where all member attributes
@@ -31,17 +34,21 @@ Z.mro
 # super class induces shared object, there'll be no duplication of super
 # instances.
 
+# %%
 z = Z()
 supers( z )
 
+# %%
 # a specific super instance can be obtained via pattern matching:
-
 case z of { { K2: k2 } } -> k2
 
+# %%
 # check a super instance alone
 K2.mro
+# %%
 supers( k2 )
 
+# %%
 # check a super instance shared
 {
   (
