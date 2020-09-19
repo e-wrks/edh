@@ -121,14 +121,12 @@ attrDerefAddrProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal !ets ->
   in  edhValueAsAttrKey' ets rhVal naExit $ \ !key ->
         runEdhTx ets $ getEdhAttr lhExpr key (noAttr $ attrKeyStr key) exit
  where
-  noAttr !keyRepr !lhVal =
-    throwEdhTx EvalError
-      $  "no such attribute "
+  noAttr !keyRepr !lhVal !ets = edhValueDesc ets lhVal $ \ !badDesc ->
+    throwEdh ets EvalError
+      $  "no such attribute `"
       <> keyRepr
-      <> " from a "
-      <> T.pack (edhTypeNameOf lhVal)
-      <> ": "
-      <> T.pack (show lhVal)
+      <> "` from a "
+      <> badDesc
 
 -- | operator (?@) - attribute dereferencing tempter, 
 -- address an attribute off an object if possible, nil otherwise

@@ -122,16 +122,19 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit !ets = case fromExpr of
 
   trySelfMagic :: Object -> EdhTx
   trySelfMagic !obj _ets = lookupEdhObjAttr obj key >>= \case
-    (_, EdhNil) -> lookupEdhSelfMagic obj (AttrByName "@") >>= \case
-      EdhNil                          -> exitEdh ets exitNoAttr $ EdhObject obj
-      EdhProcedure (EdhMethod !mth) _ -> callSelfMagic mth obj obj
+    (_   , EdhNil) -> (obj :) <$> readTVar (edh'obj'supers obj) >>= trySelves
+    (this, !val  ) -> chkVanillaExit this obj val
+   where
+    trySelves :: [Object] -> STM ()
+    trySelves []         = exitEdh ets exitNoAttr $ EdhObject obj
+    trySelves (o : rest) = lookupEdhSelfMagic o (AttrByName "@") >>= \case
+      EdhNil                          -> trySelves rest
+      EdhProcedure (EdhMethod !mth) _ -> callSelfMagic mth o obj
       EdhBoundProc (EdhMethod !mth) !this !that _ ->
         callSelfMagic mth this that
       !magicVal ->
         throwEdh ets UsageError $ "invalid magic method type: " <> T.pack
           (edhTypeNameOf magicVal)
-    (this, !val) -> chkVanillaExit this obj val
-   where
     callSelfMagic :: ProcDefi -> Object -> Object -> STM ()
     callSelfMagic !magicMth !this !that =
       runEdhTx ets
@@ -288,10 +291,13 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
     $ \ !valSet -> exitEdh ets exit valSet
    where
     tryMagic :: STM ()
-    tryMagic = lookupEdhSelfMagic obj (AttrByName "@=") >>= \case
-      EdhNil ->
-        writeObjAttr ets obj key val $ \ !valSet -> exitEdh ets exit valSet
-      EdhProcedure (EdhMethod !mth) _ -> callSelfMagic mth obj obj
+    tryMagic = (obj :) <$> readTVar (edh'obj'supers obj) >>= trySelves
+    trySelves :: [Object] -> STM ()
+    trySelves [] =
+      writeObjAttr ets obj key val $ \ !valSet -> exitEdh ets exit valSet
+    trySelves (o : rest) = lookupEdhSelfMagic o (AttrByName "@=") >>= \case
+      EdhNil                          -> trySelves rest
+      EdhProcedure (EdhMethod !mth) _ -> callSelfMagic mth o obj
       EdhBoundProc (EdhMethod !mth) !this !that _ ->
         callSelfMagic mth this that
       !magicVal ->
@@ -2717,14 +2723,12 @@ evalAttrAddr !addr !exit !ets = case addr of
     runEdhTx ets $ getEdhAttr
       tgtExpr
       key
-      (\ !tgtVal _ets -> edhValueRepr ets tgtVal $ \ !tgtRepr ->
+      (\ !tgtVal _ets -> edhValueDesc ets tgtVal $ \ !tgtDesc ->
         throwEdh ets EvalError
-          $  "no such attribute "
+          $  "no such attribute `"
           <> T.pack (show key)
-          <> " from a "
-          <> T.pack (edhTypeNameOf tgtVal)
-          <> ": "
-          <> tgtRepr
+          <> "` from a "
+          <> tgtDesc
       )
       exit
  where
