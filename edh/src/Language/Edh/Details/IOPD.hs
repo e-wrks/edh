@@ -41,6 +41,25 @@ iopdClone (IOPD !mv !wpv !nhv !av) = do
     return a'
   return $ IOPD mv' wpv' nhv' av'
 
+iopdTransform
+  :: forall k v v'
+   . (Eq k, Hashable k)
+  => (v -> v')
+  -> IOPD k v
+  -> STM (IOPD k v')
+iopdTransform !trans (IOPD !mv !wpv !nhv !av) = do
+  !mv'  <- newTVar =<< readTVar mv
+  !wpv' <- newTVar =<< readTVar wpv
+  !nhv' <- newTVar =<< readTVar nhv
+  !av'  <- newTVar =<< do
+    !a  <- readTVar av
+    !a' <- flip V.mapM a $ \ !ev -> readTVar ev >>= \case
+      Nothing       -> newTVar Nothing
+      Just (!k, !v) -> newTVar $ Just (k, trans v)
+    let a'' = runST $ V.thaw a' >>= V.freeze
+    return a''
+  return $ IOPD mv' wpv' nhv' av'
+
 iopdEmpty :: forall k v . (Eq k, Hashable k) => STM (IOPD k v)
 iopdEmpty = do
   !mv  <- newTVar Map.empty
@@ -225,6 +244,15 @@ instance (Eq k, Hashable k, Eq v, Hashable v) => Eq (OrderedDict k v) where
 instance (Eq k, Hashable k, Eq v, Hashable v) => Hashable (OrderedDict k v) where
   hashWithSalt s od@(OrderedDict m _a) =
     s `hashWithSalt` m `hashWithSalt` odToList od
+
+odTransform
+  :: forall k v v'
+   . (Eq k, Hashable k)
+  => (v -> v')
+  -> OrderedDict k v
+  -> OrderedDict k v'
+odTransform !trans (OrderedDict !m !a) =
+  OrderedDict m $ flip V.map a $ fmap $ \(!k, !v) -> (k, trans v)
 
 odEmpty :: forall k v . (Eq k, Hashable k) => OrderedDict k v
 odEmpty = OrderedDict Map.empty V.empty
