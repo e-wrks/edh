@@ -109,9 +109,8 @@ powProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
     EdhDecimal !lhNum -> evalExpr rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
-        EdhDecimal (Decimal rh'd rh'e rh'n) -> if rh'd /= 1
-          then exitEdhTx exit edhNA
-          else exitEdhTx exit (EdhDecimal $ lhNum ^^ (rh'n * 10 ^ rh'e))
+        EdhDecimal !rhNum ->
+          exitEdhTx exit (EdhDecimal $ powerDecimal lhNum rhNum)
         _ -> exitEdhTx exit edhNA
     _ -> exitEdhTx exit edhNA
 

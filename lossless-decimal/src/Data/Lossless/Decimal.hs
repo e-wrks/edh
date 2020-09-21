@@ -4,8 +4,9 @@ module Data.Lossless.Decimal where
 
 import           Prelude
 
+import           GHC.Real
+
 import           Data.Char
-import           Data.Ratio
 import           Data.Hashable
 
 import qualified Data.Scientific               as Scientific
@@ -185,6 +186,12 @@ modIntDecimal x y = case decimalToInteger x of
   Just xi -> case decimalToInteger y of
     Nothing -> nan
     Just yi -> Decimal 1 0 $ xi `mod` yi
+
+powerDecimal :: Decimal -> Decimal -> Decimal
+powerDecimal x y = case decimalToInteger y of
+  Nothing  -> nan -- todo should otherwise support this case?
+  Just y'i -> fromRational $ toRational x ^^%^^ y'i
+
 
 showDecimal :: Decimal -> String
 showDecimal v
