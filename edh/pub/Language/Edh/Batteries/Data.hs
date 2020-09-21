@@ -416,6 +416,8 @@ markProc !v !newLen !kwargs !exit !ets = case edhUltimate v of
 
 
 showProc :: EdhValue -> RestKwArgs -> EdhHostProc
+showProc (EdhArgsPack (ArgsPack [!v] !kwargs')) !kwargs !exit !ets
+  | odNull kwargs = showProc v kwargs' exit ets
 showProc !v !kwargs !exit !ets = case v of
 
   -- show of named value
@@ -459,6 +461,8 @@ showProc !v !kwargs !exit !ets = case v of
     exitEdh ets exit $ EdhString $ T.pack (edhTypeNameOf v) <> ": " <> s
 
 descProc :: EdhValue -> RestKwArgs -> EdhHostProc
+descProc (EdhArgsPack (ArgsPack [!v] !kwargs')) !kwargs !exit !ets
+  | odNull kwargs = descProc v kwargs' exit ets
 descProc !v !kwargs !exit !ets = case edhUltimate v of
   EdhObject !o -> case edh'obj'store o of
     ClassStore{} -> lookupEdhObjMagic (edh'obj'class o) (AttrByName "__desc__")
