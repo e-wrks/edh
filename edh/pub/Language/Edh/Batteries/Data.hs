@@ -706,7 +706,7 @@ lstrvrsPrpdProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 --  * tuple append
 --      (,) =< (...) / [...] / {...}
 cprhProc :: EdhIntrinsicOp
-cprhProc !lhExpr !rhExpr !exit = case rhExpr of
+cprhProc !lhExpr !rhExpr !exit = case deParen rhExpr of
   ForExpr argsRcvr iterExpr doExpr -> evalExpr lhExpr $ \ !lhVal !ets ->
     case edhUltimate lhVal of
       EdhList (List _ !l) -> edhPrepareForLoop
