@@ -4002,14 +4002,14 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
       Just !iStop -> do
         let !iStart' = if iStart < 0 then len + iStart else iStart
             !iStop'  = if iStop < 0 then len + iStop else iStop
-        if iStart' < 0
+        if iStart' < 0 || iStart' > len
           then
             throwEdh ets UsageError
             $  "start index out of bounds: "
             <> T.pack (show iStart)
             <> " vs "
             <> T.pack (show len)
-          else if iStop' < 0
+          else if iStop' < 0 || iStop' > len
             then
               throwEdh ets EvalError
               $  "stop index out of bounds: "
@@ -4017,40 +4017,22 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
               <> " vs "
               <> T.pack (show len)
             else if iStart' <= iStop'
-              then
-                (if iStop' > len
-                  then
-                    throwEdh ets EvalError
-                    $  "stop index out of bounds: "
-                    <> T.pack (show iStop)
-                    <> " vs "
-                    <> T.pack (show len)
-                  else if iStart' >= len
-                    then
-                      throwEdh ets UsageError
-                      $  "start index out of bounds: "
-                      <> T.pack (show iStart)
-                      <> " vs "
-                      <> T.pack (show len)
-                    else exit (iStart', iStop', 1)
-                )
-              else
-                (if iStop' >= len
-                  then
-                    throwEdh ets EvalError
-                    $  "stop index out of bounds: "
-                    <> T.pack (show iStop)
-                    <> " vs "
-                    <> T.pack (show len)
-                  else if iStart' > len
-                    then
-                      throwEdh ets UsageError
-                      $  "start index out of bounds: "
-                      <> T.pack (show iStart)
-                      <> " vs "
-                      <> T.pack (show len)
-                    else exit (iStart', iStop', -1)
-                )
+              then if iStart' >= len
+                then
+                  throwEdh ets UsageError
+                  $  "start index out of bounds: "
+                  <> T.pack (show iStart)
+                  <> " vs "
+                  <> T.pack (show len)
+                else exit (iStart', iStop', 1)
+              else if iStart' > len
+                then
+                  throwEdh ets UsageError
+                  $  "start index out of bounds: "
+                  <> T.pack (show iStart)
+                  <> " vs "
+                  <> T.pack (show len)
+                else exit (iStart', iStop', -1)
 
   Just !iStep -> if iStep == 0
     then throwEdh ets UsageError "step can not be zero in slice"
@@ -4157,14 +4139,28 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
             Just !iStop -> do
               let !iStart' = if iStart < 0 then len + iStart else iStart
               let !iStop'  = if iStop < 0 then len + iStop else iStop
-              if iStart' > iStop'
+              if iStart' < 0 || iStart' > len
                 then
-                  throwEdh ets EvalError
-                  $  "can not step from "
+                  throwEdh ets UsageError
+                  $  "start index out of bounds: "
                   <> T.pack (show iStart)
-                  <> " to "
-                  <> T.pack (show iStop)
-                else exit (iStart', iStop', iStep)
+                  <> " vs "
+                  <> T.pack (show len)
+                else if iStop' < 0 || iStop' > len
+                  then
+                    throwEdh ets EvalError
+                    $  "stop index out of bounds: "
+                    <> T.pack (show iStop)
+                    <> " vs "
+                    <> T.pack (show len)
+                  else if iStart' > iStop'
+                    then
+                      throwEdh ets EvalError
+                      $  "can not step from "
+                      <> T.pack (show iStart)
+                      <> " to "
+                      <> T.pack (show iStop)
+                    else exit (iStart', iStop', iStep)
         )
 
 
