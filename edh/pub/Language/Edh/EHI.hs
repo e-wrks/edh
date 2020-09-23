@@ -90,6 +90,8 @@ module Language.Edh.EHI
   , EdhProc(..)
   , EdhHostProc
   , EdhTxExit
+  , EdhIntrinsicOp
+  , edhFlipOp
     -- ** Edh Runtime error
   , getEdhCallContext
   , edhCreateError

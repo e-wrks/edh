@@ -703,6 +703,12 @@ exitEdh !ets !exit !val = edhDoSTM ets $ exit val ets
 -- Note no stack frame is created/pushed when an intrinsic operator is called.
 type EdhIntrinsicOp = Expr -> Expr -> EdhTxExit -> EdhTx
 
+edhFlipOp :: EdhIntrinsicOp -> EdhIntrinsicOp
+edhFlipOp !op = flipped
+ where
+  flipped :: EdhIntrinsicOp
+  flipped !lhExpr !rhExpr !exit = op rhExpr lhExpr exit
+
 data IntrinOpDefi = IntrinOpDefi {
     intrinsic'op'uniq :: !Unique
   , intrinsic'op'symbol :: !AttrName
@@ -768,7 +774,6 @@ data EdhProc =
   | EdhGnrtor !ProcDefi
   | EdhIntrpr !ProcDefi
   | EdhPrducr !ProcDefi
-
   -- similar to Python Descriptor
   -- with a getter method and optionally a settor method, for properties
   -- (programmatically managed attributes) to be defined on objects
@@ -780,10 +785,10 @@ instance Show EdhProc where
     "intrinsic: (" ++ T.unpack opSym ++ ") " ++ show preced
   show (EdhOprtor !preced _ !pd) =
     "operator: (" ++ T.unpack (procedureName pd) ++ ") " ++ show preced
-  show (EdhMethod !pd) = T.unpack (procedureName pd)
-  show (EdhGnrtor !pd) = T.unpack (procedureName pd)
-  show (EdhIntrpr !pd) = T.unpack (procedureName pd)
-  show (EdhPrducr !pd) = T.unpack (procedureName pd)
+  show (EdhMethod !pd) = T.unpack ("method: " <> procedureName pd)
+  show (EdhGnrtor !pd) = T.unpack ("generator: " <> procedureName pd)
+  show (EdhIntrpr !pd) = T.unpack ("interpreter: " <> procedureName pd)
+  show (EdhPrducr !pd) = T.unpack ("producer: " <> procedureName pd)
 
   show (EdhDescriptor !getter !setter) =
     (<> T.unpack (procedureName getter) <> ">") $ case setter of

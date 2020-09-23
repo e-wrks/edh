@@ -287,6 +287,57 @@ apkKwrgsProc _ _ =
   throwEdhTx EvalError "bug: __ArgsPackType_kwargs__ got unexpected args"
 
 
+-- | utility str(*args,**kwargs) - convert to string
+strProc :: ArgsPack -> EdhHostProc
+strProc (ArgsPack !args !kwargs) !exit !ets = go [] [] args (odToList kwargs)
+ where
+  go
+    :: [EdhValue]
+    -> [(AttrKey, EdhValue)]
+    -> [EdhValue]
+    -> [(AttrKey, EdhValue)]
+    -> STM ()
+  go [str] kwStrs [] [] | null kwStrs = exitEdh ets exit str
+  go strs kwStrs [] [] =
+    exitEdh ets exit $ EdhArgsPack $ ArgsPack (reverse strs) $ odFromList kwStrs
+  go strs kwStrs (v : rest) kwps =
+    edhValueStr ets v $ \ !s -> go (EdhString s : strs) kwStrs rest kwps
+  go strs kwStrs [] ((k, v) : rest) =
+    edhValueStr ets v $ \ !s -> go strs ((k, EdhString s) : kwStrs) [] rest
+
+
+-- | operator (++) - string coercing concatenator
+concatProc :: EdhIntrinsicOp
+concatProc !lhExpr !rhExpr !exit !ets =
+  runEdhTx ets $ evalExpr lhExpr $ \ !lhVal -> evalExpr rhExpr $ \ !rhVal ->
+    case edhUltimate lhVal of
+      EdhString !lhStr -> case edhUltimate rhVal of
+        EdhString !rhStr -> exitEdhTx exit $ EdhString $ lhStr <> rhStr
+        _                -> \_ets -> defaultConvert lhVal rhVal
+      EdhBlob !lhBlob -> case edhUltimate rhVal of
+        EdhBlob !rhBlob -> exitEdhTx exit $ EdhBlob $ lhBlob <> rhBlob
+        EdhString !rhStr ->
+          exitEdhTx exit $ EdhBlob $ lhBlob <> TE.encodeUtf8 rhStr
+        _ -> exitEdhTx exit edhNA
+      _ -> \_ets -> defaultConvert lhVal rhVal
+ where
+  defaultConvert :: EdhValue -> EdhValue -> STM ()
+  defaultConvert !lhVal !rhVal = do
+    !u <- unsafeIOToSTM newUnique
+    exitEdh ets exit $ EdhDefault
+      u
+      (InfixExpr
+        "++"
+        (CallExpr (AttrExpr (DirectRef (NamedAttr "str")))
+                  [SendPosArg (LitExpr (ValueLiteral lhVal))]
+        )
+        (CallExpr (AttrExpr (DirectRef (NamedAttr "str")))
+                  [SendPosArg (LitExpr (ValueLiteral rhVal))]
+        )
+      )
+      (Just ets)
+
+
 -- | utility repr(*args,**kwargs) - repr extractor
 reprProc :: ArgsPack -> EdhHostProc
 reprProc (ArgsPack !args !kwargs) !exit !ets = go [] [] args (odToList kwargs)
@@ -499,24 +550,6 @@ descProc !v !kwargs !exit !ets = case edhUltimate v of
         <> objClassName o
   descWithNoMagic =
     edhValueDesc ets v $ \ !d -> exitEdh ets exit $ EdhString $ "It is a " <> d
-
-
--- | operator (++) - string coercing concatenator
-concatProc :: EdhIntrinsicOp
-concatProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> case edhUltimate lhVal of
-    EdhBlob !lhBlob -> case edhUltimate rhVal of
-      EdhBlob !rhBlob -> exitEdhTx exit $ EdhBlob $ lhBlob <> rhBlob
-      EdhString !rhStr ->
-        exitEdhTx exit $ EdhBlob $ lhBlob <> TE.encodeUtf8 rhStr
-      !rhv ->
-        throwEdhTx UsageError
-          $  "should not (++) a "
-          <> T.pack (edhTypeNameOf rhv)
-          <> " to a blob."
-    !lhv -> \ !ets -> edhValueStr ets lhv $ \ !lhs ->
-      edhValueStr ets (edhUltimate rhVal)
-        $ \ !rhs -> exitEdh ets exit (EdhString $ lhs <> rhs)
 
 
 -- | utility null(*args,**kwargs) - null tester

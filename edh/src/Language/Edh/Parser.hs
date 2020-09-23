@@ -369,9 +369,11 @@ parseProcDecl !si = do
   return (ProcDecl pn ar (Left body), si')
 
 parseMagicProcName :: Parser Text
-parseMagicProcName = between (symbol "(") (symbol ")") $ lexeme $ takeWhile1P
-  (Just "magic procedure name")
-  isMagicProcChar
+parseMagicProcName = do
+  !magicSym <- between (symbol "(") (symbol ")") $ lexeme $ takeWhile1P
+    (Just "magic procedure name")
+    isMagicProcChar
+  return $ "(" <> magicSym <> ")"
 
 -- to allow magic method names like ([]) ([=]) etc.
 isMagicProcChar :: Char -> Bool

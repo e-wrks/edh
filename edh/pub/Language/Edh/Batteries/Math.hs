@@ -6,8 +6,6 @@ import           Prelude
 
 import           Control.Concurrent.STM
 
-import qualified Data.Text                     as T
-import qualified Data.Text.Encoding            as TE
 import           Data.Maybe
 
 import           Data.Lossless.Decimal
@@ -18,27 +16,20 @@ import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
 
+import           Language.Edh.Batteries.Data
+
 
 -- | operator (+)
 addProc :: EdhIntrinsicOp
-addProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhv ->
-  case edhUltimate lhv of
+addProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+  case edhUltimate lhVal of
     EdhDecimal !lhNum -> evalExpr rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum + rhNum)
-        _                 -> exitEdhTx exit edhNA
-    EdhBlob !lhb -> evalExpr rhExpr $ \ !rhv -> case edhUltimate rhv of
-      EdhBlob   !rhb -> exitEdhTx exit (EdhBlob $ lhb <> rhb)
-      EdhString !rhs -> exitEdhTx exit (EdhBlob $ lhb <> TE.encodeUtf8 rhs)
-      rhVal ->
-        throwEdhTx UsageError
-          $  "should not (+) a "
-          <> T.pack (edhTypeNameOf rhVal)
-          <> " to a blob."
-    EdhString !lhs -> evalExpr rhExpr $ \ !rhv !ets ->
-      edhValueStr ets (edhUltimate rhv)
-        $ \ !rhs -> exitEdh ets exit (EdhString $ lhs <> rhs)
-    _ -> exitEdhTx exit edhNA
+        _                 -> concatProc (LitExpr (ValueLiteral lhVal))
+                                        (LitExpr (ValueLiteral rhVal))
+                                        exit
+    _ -> concatProc (LitExpr (ValueLiteral lhVal)) rhExpr exit
 
 
 -- | operator (-)

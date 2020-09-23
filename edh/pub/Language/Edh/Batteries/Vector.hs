@@ -8,6 +8,7 @@ import           GHC.Conc                       ( unsafeIOToSTM )
 
 import           Control.Concurrent.STM
 
+import           Data.Maybe
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import           Data.Dynamic
@@ -24,6 +25,7 @@ import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
 
+import           Language.Edh.Batteries.Data
 import           Language.Edh.Batteries.Math
 
 
@@ -60,24 +62,68 @@ createVectorClass !clsOuterScope =
           , EdhMethod
           , wrapHostProc $ vecIdxAssignWithOpProc logicalOrProc
           )
-        , ("+"       , EdhMethod, wrapHostProc $ vecCopyWithOpProc addProc)
-        , ("-"       , EdhMethod, wrapHostProc $ vecCopyWithOpProc subtProc)
-        , ("*"       , EdhMethod, wrapHostProc $ vecCopyWithOpProc mulProc)
-        , ("/"       , EdhMethod, wrapHostProc $ vecCopyWithOpProc divProc)
-        , ("//"      , EdhMethod, wrapHostProc $ vecCopyWithOpProc divIntProc)
-        , ("%"       , EdhMethod, wrapHostProc $ vecCopyWithOpProc modIntProc)
-        , ("**"      , EdhMethod, wrapHostProc $ vecCopyWithOpProc powProc)
-        , ("&&", EdhMethod, wrapHostProc $ vecCopyWithOpProc logicalAndProc)
-        , ("||", EdhMethod, wrapHostProc $ vecCopyWithOpProc logicalOrProc)
-        , ("+="      , EdhMethod, wrapHostProc $ vecAssignWithOpProc addProc)
-        , ("-="      , EdhMethod, wrapHostProc $ vecAssignWithOpProc subtProc)
-        , ("*="      , EdhMethod, wrapHostProc $ vecAssignWithOpProc mulProc)
-        , ("/="      , EdhMethod, wrapHostProc $ vecAssignWithOpProc divProc)
-        , ("//="     , EdhMethod, wrapHostProc $ vecAssignWithOpProc divIntProc)
-        , ("%="      , EdhMethod, wrapHostProc $ vecAssignWithOpProc modIntProc)
-        , ("**="     , EdhMethod, wrapHostProc $ vecAssignWithOpProc powProc)
-        , ("&&=", EdhMethod, wrapHostProc $ vecAssignWithOpProc logicalAndProc)
-        , ("||=", EdhMethod, wrapHostProc $ vecAssignWithOpProc logicalOrProc)
+        , ("(++)", EdhMethod, wrapHostProc $ vecCopyWithOpProc concatProc)
+        , ( "(++@)"
+          , EdhMethod
+          , wrapHostProc $ vecCopyWithOpProc $ edhFlipOp concatProc
+          )
+        , ("(+)", EdhMethod, wrapHostProc $ vecCopyWithOpProc addProc)
+        , ( "(+@)"
+          , EdhMethod
+          , wrapHostProc $ vecCopyWithOpProc $ edhFlipOp addProc
+          )
+        , ("(-)", EdhMethod, wrapHostProc $ vecCopyWithOpProc subtProc)
+        , ( "(-@)"
+          , EdhMethod
+          , wrapHostProc $ vecCopyWithOpProc $ edhFlipOp subtProc
+          )
+        , ("(*)", EdhMethod, wrapHostProc $ vecCopyWithOpProc mulProc)
+        , ( "(*@)"
+          , EdhMethod
+          , wrapHostProc $ vecCopyWithOpProc $ edhFlipOp mulProc
+          )
+        , ("(/)", EdhMethod, wrapHostProc $ vecCopyWithOpProc divProc)
+        , ( "(/@)"
+          , EdhMethod
+          , wrapHostProc $ vecCopyWithOpProc $ edhFlipOp divProc
+          )
+        , ("(//)", EdhMethod, wrapHostProc $ vecCopyWithOpProc divIntProc)
+        , ( "(//@)"
+          , EdhMethod
+          , wrapHostProc $ vecCopyWithOpProc $ edhFlipOp divIntProc
+          )
+        , ("(%)", EdhMethod, wrapHostProc $ vecCopyWithOpProc modIntProc)
+        , ( "(%@)"
+          , EdhMethod
+          , wrapHostProc $ vecCopyWithOpProc $ edhFlipOp modIntProc
+          )
+        , ("(**)", EdhMethod, wrapHostProc $ vecCopyWithOpProc powProc)
+        , ( "(**@)"
+          , EdhMethod
+          , wrapHostProc $ vecCopyWithOpProc $ edhFlipOp powProc
+          )
+        , ("(&&", EdhMethod, wrapHostProc $ vecCopyWithOpProc logicalAndProc)
+        , ( "(&&@"
+          , EdhMethod
+          , wrapHostProc $ vecCopyWithOpProc $ edhFlipOp logicalAndProc
+          )
+        , ("(||", EdhMethod, wrapHostProc $ vecCopyWithOpProc logicalOrProc)
+        , ( "(||@"
+          , EdhMethod
+          , wrapHostProc $ vecCopyWithOpProc $ edhFlipOp logicalOrProc
+          )
+        , ("(+=)" , EdhMethod, wrapHostProc $ vecAssignWithOpProc addProc)
+        , ("(-=)" , EdhMethod, wrapHostProc $ vecAssignWithOpProc subtProc)
+        , ("(*=)" , EdhMethod, wrapHostProc $ vecAssignWithOpProc mulProc)
+        , ("(/=)" , EdhMethod, wrapHostProc $ vecAssignWithOpProc divProc)
+        , ("(//=)", EdhMethod, wrapHostProc $ vecAssignWithOpProc divIntProc)
+        , ("(%=)" , EdhMethod, wrapHostProc $ vecAssignWithOpProc modIntProc)
+        , ("(**=)", EdhMethod, wrapHostProc $ vecAssignWithOpProc powProc)
+        , ( "(&&=)"
+          , EdhMethod
+          , wrapHostProc $ vecAssignWithOpProc logicalAndProc
+          )
+        , ("(||=)", EdhMethod, wrapHostProc $ vecAssignWithOpProc logicalOrProc)
         , ("__null__", EdhMethod, wrapHostProc vecNullProc)
         , ("__len__" , EdhMethod, wrapHostProc vecLenProc)
         , ("__repr__", EdhMethod, wrapHostProc vecReprProc)
@@ -238,9 +284,20 @@ createVectorClass !clsOuterScope =
               runEdhTx ets
                 $ withOp (LitExpr $ ValueLiteral srcVal)
                          (LitExpr $ ValueLiteral other)
-                $ \ !opRtnV _ets -> do
-                    unsafeIOToSTM $ MV.unsafeWrite newVec n opRtnV
-                    copyAt (n - 1)
+                $ \ !opRtnV _ets -> case edhUltimate opRtnV of
+                    EdhDefault _ !exprDef !etsDef ->
+                      runEdhTx (fromMaybe ets etsDef)
+                        $ evalExpr (deExpr exprDef)
+                        $ \ !defVal _ets -> case defVal of
+                            EdhNil -> do
+                              unsafeIOToSTM $ MV.unsafeWrite newVec n edhNA
+                              copyAt (n - 1)
+                            _ -> do
+                              unsafeIOToSTM $ MV.unsafeWrite newVec n defVal
+                              copyAt (n - 1)
+                    _ -> do
+                      unsafeIOToSTM $ MV.unsafeWrite newVec n opRtnV
+                      copyAt (n - 1)
         in
           copyAt (MV.length mvec - 1)
    where

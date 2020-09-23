@@ -3216,10 +3216,10 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
 
     tryMagicMethod :: EdhValue -> EdhValue -> STM () -> STM ()
     tryMagicMethod !lhVal !rhVal !naExit = case edhUltimate lhVal of
-      EdhObject !lhObj -> lookupEdhObjAttr lhObj (AttrByName opSym) >>= \case
+      EdhObject !lhObj -> lookupEdhObjAttr lhObj (AttrByName $ "("<> opSym <> ")") >>= \case
         (_, EdhNil) -> case edhUltimate rhVal of
           EdhObject !rhObj ->
-            lookupEdhObjAttr rhObj (AttrByName $ opSym <> "@") >>= \case
+            lookupEdhObjAttr rhObj (AttrByName $ "("<> opSym <> "@)" ) >>= \case
               (_, EdhNil) -> naExit
               (!this', EdhProcedure (EdhMethod !mth) _) ->
                 runEdhTx ets $ callEdhMethod this'
@@ -3272,7 +3272,7 @@ evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
             <> T.pack (show badEqMth)
       _ -> case edhUltimate rhVal of
         EdhObject !rhObj ->
-          lookupEdhObjAttr rhObj (AttrByName $ opSym <> "@") >>= \case
+          lookupEdhObjAttr rhObj (AttrByName $ "("<> opSym <> "@)") >>= \case
             (_, EdhNil) -> naExit
             (!this', EdhProcedure (EdhMethod !mth) _) ->
               runEdhTx ets $ callEdhMethod this'
