@@ -3202,217 +3202,8 @@ evalExpr (DefaultExpr !exprDef) !exit = \ !ets -> do
   u <- unsafeIOToSTM newUnique
   exitEdh ets exit $ EdhDefault u exprDef (Just ets)
 
-evalExpr expr@(InfixExpr !opSym !lhExpr !rhExpr) !exit = \ !ets ->
-  let
-    notApplicable !lhVal !rhVal = edhValueDesc ets lhVal $ \ !lhDesc ->
-      edhValueDesc ets rhVal $ \ !rhDesc ->
-        throwEdh ets EvalError
-          $  "operator ("
-          <> opSym
-          <> ") not applicable to "
-          <> lhDesc
-          <> " and "
-          <> rhDesc
-
-    tryMagicMethod :: EdhValue -> EdhValue -> STM () -> STM ()
-    tryMagicMethod !lhVal !rhVal !naExit = case edhUltimate lhVal of
-      EdhObject !lhObj -> lookupEdhObjAttr lhObj (AttrByName $ "("<> opSym <> ")") >>= \case
-        (_, EdhNil) -> case edhUltimate rhVal of
-          EdhObject !rhObj ->
-            lookupEdhObjAttr rhObj (AttrByName $ "("<> opSym <> "@)" ) >>= \case
-              (_, EdhNil) -> naExit
-              (!this', EdhProcedure (EdhMethod !mth) _) ->
-                runEdhTx ets $ callEdhMethod this'
-                                             rhObj
-                                             mth
-                                             (ArgsPack [lhVal] odEmpty)
-                                             id
-                                             chkExitMagic
-              (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-                runEdhTx ets $ callEdhMethod this
-                                             that
-                                             mth
-                                             (ArgsPack [lhVal] odEmpty)
-                                             id
-                                             chkExitMagic
-              (_, !badEqMth) ->
-                throwEdh ets UsageError
-                  $  "malformed magic method ("
-                  <> opSym
-                  <> "@) on "
-                  <> T.pack (show rhObj)
-                  <> " - "
-                  <> T.pack (edhTypeNameOf badEqMth)
-                  <> ": "
-                  <> T.pack (show badEqMth)
-          _ -> naExit
-        (!this', EdhProcedure (EdhMethod !mth) _) ->
-          runEdhTx ets $ callEdhMethod this'
-                                       lhObj
-                                       mth
-                                       (ArgsPack [rhVal] odEmpty)
-                                       id
-                                       chkExitMagic
-        (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-          runEdhTx ets $ callEdhMethod this
-                                       that
-                                       mth
-                                       (ArgsPack [rhVal] odEmpty)
-                                       id
-                                       chkExitMagic
-        (_, !badEqMth) ->
-          throwEdh ets UsageError
-            $  "malformed magic method ("
-            <> opSym
-            <> ") on "
-            <> T.pack (show lhObj)
-            <> " - "
-            <> T.pack (edhTypeNameOf badEqMth)
-            <> ": "
-            <> T.pack (show badEqMth)
-      _ -> case edhUltimate rhVal of
-        EdhObject !rhObj ->
-          lookupEdhObjAttr rhObj (AttrByName $ "("<> opSym <> "@)") >>= \case
-            (_, EdhNil) -> naExit
-            (!this', EdhProcedure (EdhMethod !mth) _) ->
-              runEdhTx ets $ callEdhMethod this'
-                                           rhObj
-                                           mth
-                                           (ArgsPack [lhVal] odEmpty)
-                                           id
-                                           chkExitMagic
-            (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-              runEdhTx ets $ callEdhMethod this
-                                           that
-                                           mth
-                                           (ArgsPack [lhVal] odEmpty)
-                                           id
-                                           chkExitMagic
-            (_, !badEqMth) ->
-              throwEdh ets UsageError
-                $  "malformed magic method ("
-                <> opSym
-                <> "@) on "
-                <> T.pack (show rhObj)
-                <> " - "
-                <> T.pack (edhTypeNameOf badEqMth)
-                <> ": "
-                <> T.pack (show badEqMth)
-        _ -> naExit
-     where
-      chkExitMagic :: EdhTxExit
-      chkExitMagic !result _ets = case edhUltimate result of
-        EdhDefault _ !exprDef !etsDef ->
-          -- eval default expression with possibly the designated thread state
-          runEdhTx (fromMaybe ets etsDef)
-            $ evalExpr (deExpr exprDef)
-            $ \ !defVal _ets -> case defVal of
-
-                -- `return default nil` means more defered default,
-                -- that's only possible from an operator, other than
-                -- the magic method we just called
-                EdhNil -> naExit
-
-                -- exit with original thread state
-                _      -> exitEdh ets exit defVal
-        _ -> exitEdh ets exit result
-
-    tryMagicWithDefault :: Expr -> Maybe EdhThreadState -> STM ()
-    tryMagicWithDefault !exprDef !etsDef =
-      runEdhTx ets $ evalExpr lhExpr $ \ !lhVal -> evalExpr rhExpr
-        $ \ !rhVal _ets -> tryMagicWithDefault' exprDef etsDef lhVal rhVal
-    tryMagicWithDefault'
-      :: Expr -> Maybe EdhThreadState -> EdhValue -> EdhValue -> STM ()
-    tryMagicWithDefault' !exprDef !etsDef !lhVal !rhVal =
-      tryMagicMethod lhVal rhVal
-        -- eval default expression with possibly the designated thread state
-        $ runEdhTx (fromMaybe ets etsDef)
-        $ evalExpr
-            (case exprDef of
-              ExprWithSrc !x _ -> x
-              _                -> exprDef
-            )
-        $ \ !resultDef _ets -> case resultDef of
-            EdhNil -> notApplicable lhVal rhVal
-            -- exit with original thread state
-            _      -> exitEdh ets exit resultDef
-
-    callProc :: Object -> Object -> EdhProc -> STM ()
-    callProc !this !that !callable = case callable of
-
-      -- calling an intrinsic operator
-      EdhIntrOp _ (IntrinOpDefi _ _ iop'proc) ->
-        runEdhTx ets $ iop'proc lhExpr rhExpr $ \ !rtnVal _ets ->
-          case edhUltimate rtnVal of
-            EdhDefault _ !exprDef !etsDef ->
-              tryMagicWithDefault (deExpr exprDef) etsDef
-            -- exit with original thread state
-            _ -> exitEdh ets exit rtnVal
-
-      -- calling an operator procedure
-      EdhOprtor _ !op'pred !op'proc ->
-        case edh'procedure'args $ edh'procedure'decl op'proc of
-
-          -- 2 pos-args - simple lh/rh value receiving operator
-          (PackReceiver [RecvArg{}, RecvArg{}]) ->
-            runEdhTx ets $ evalExpr lhExpr $ \ !lhVal ->
-              evalExpr rhExpr $ \ !rhVal ->
-                callEdhOperator this
-                                that
-                                op'proc
-                                op'pred
-                                [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
-                  $ \ !rtnVal _ets -> case edhUltimate rtnVal of
-                      EdhDefault _ !exprDef !etsDef ->
-                        tryMagicWithDefault' (deExpr exprDef) etsDef lhVal rhVal
-                      _ -> exitEdh ets exit rtnVal
-
-          -- 3 pos-args - caller scope + lh/rh expr receiving operator
-          (PackReceiver [RecvArg{}, RecvArg{}, RecvArg{}]) -> do
-            lhu          <- unsafeIOToSTM newUnique
-            rhu          <- unsafeIOToSTM newUnique
-            scopeWrapper <- mkScopeWrapper ctx scope
-            runEdhTx ets
-              $ callEdhOperator
-                  this
-                  that
-                  op'proc
-                  op'pred
-                  [ EdhObject scopeWrapper
-                  , EdhExpr lhu lhExpr ""
-                  , EdhExpr rhu rhExpr ""
-                  ]
-              $ \ !rtnVal _ets -> case edhUltimate rtnVal of
-                  EdhDefault _ !exprDef !etsDef ->
-                    tryMagicWithDefault (deExpr exprDef) etsDef
-                  _ -> exitEdh ets exit rtnVal
-
-          _ ->
-            throwEdh ets UsageError $ "invalid operator signature: " <> T.pack
-              (show $ edh'procedure'args $ edh'procedure'decl op'proc)
-
-      _ ->
-        throwEdh ets UsageError $ "invalid operator: " <> T.pack (show callable)
-
-    !ctx   = edh'context ets
-    !scope = contextScope ctx
-  in
-    resolveEdhCtxAttr scope (AttrByName opSym) >>= \case
-      Nothing -> runEdhTx ets $ evalExpr lhExpr $ \ !lhVal ->
-        evalExpr rhExpr $ \ !rhVal _ets ->
-          tryMagicMethod lhVal rhVal $ notApplicable lhVal rhVal
-      Just (!opVal, !op'lexi) -> case opVal of
-        EdhProcedure !callable _ ->
-          callProc (edh'scope'this op'lexi) (edh'scope'that op'lexi) callable
-        EdhBoundProc !callable !this !that _ -> callProc this that callable
-        _ ->
-          throwEdh ets EvalError
-            $  "not callable "
-            <> T.pack (edhTypeNameOf opVal)
-            <> ": "
-            <> T.pack (show opVal)
-            <> " expressed with: "
-            <> T.pack (show expr)
+evalExpr (InfixExpr !opSym !lhExpr !rhExpr) !exit =
+  evalInfix opSym lhExpr rhExpr exit
 
 -- defining an Edh class
 evalExpr (ClassExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
@@ -3658,6 +3449,217 @@ evalExpr (OpOvrdExpr !opSym !opProc !opPrec) !exit = \ !ets -> do
           !opVal = EdhProcedure op Nothing
       defineScopeAttr ets (AttrByName opSym) opVal
       exitEdh ets exit opVal
+
+
+evalInfix :: OpSymbol -> Expr -> Expr -> EdhHostProc
+evalInfix !opSym !lhExpr !rhExpr !exit !ets =
+  resolveEdhCtxAttr scope (AttrByName opSym) >>= \case
+    Nothing -> runEdhTx ets $ evalExpr lhExpr $ \ !lhVal ->
+      evalExpr rhExpr $ \ !rhVal _ets ->
+        tryMagicMethod lhVal rhVal $ notApplicable lhVal rhVal
+    Just (!opVal, !op'lexi) -> case opVal of
+      EdhProcedure !callable _ ->
+        callProc (edh'scope'this op'lexi) (edh'scope'that op'lexi) callable
+      EdhBoundProc !callable !this !that _ -> callProc this that callable
+      _ -> edhValueDesc ets opVal $ \ !badDesc ->
+        throwEdh ets EvalError
+          $  "not callable as operator ("
+          <> opSym
+          <> "): "
+          <> badDesc
+ where
+  notApplicable !lhVal !rhVal = edhValueDesc ets lhVal $ \ !lhDesc ->
+    edhValueDesc ets rhVal $ \ !rhDesc ->
+      throwEdh ets EvalError
+        $  "operator ("
+        <> opSym
+        <> ") not applicable to "
+        <> lhDesc
+        <> " and "
+        <> rhDesc
+
+  tryMagicMethod :: EdhValue -> EdhValue -> STM () -> STM ()
+  tryMagicMethod !lhVal !rhVal !naExit = case edhUltimate lhVal of
+    EdhObject !lhObj ->
+      lookupEdhObjAttr lhObj (AttrByName $ "(" <> opSym <> ")") >>= \case
+        (_, EdhNil) -> case edhUltimate rhVal of
+          EdhObject !rhObj ->
+            lookupEdhObjAttr rhObj (AttrByName $ "(" <> opSym <> "@)") >>= \case
+              (_, EdhNil) -> naExit
+              (!this', EdhProcedure (EdhMethod !mth) _) ->
+                runEdhTx ets $ callEdhMethod this'
+                                             rhObj
+                                             mth
+                                             (ArgsPack [lhVal] odEmpty)
+                                             id
+                                             chkExitMagic
+              (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+                runEdhTx ets $ callEdhMethod this
+                                             that
+                                             mth
+                                             (ArgsPack [lhVal] odEmpty)
+                                             id
+                                             chkExitMagic
+              (_, !badEqMth) ->
+                throwEdh ets UsageError
+                  $  "malformed magic method ("
+                  <> opSym
+                  <> "@) on "
+                  <> T.pack (show rhObj)
+                  <> " - "
+                  <> T.pack (edhTypeNameOf badEqMth)
+                  <> ": "
+                  <> T.pack (show badEqMth)
+          _ -> naExit
+        (!this', EdhProcedure (EdhMethod !mth) _) ->
+          runEdhTx ets $ callEdhMethod this'
+                                       lhObj
+                                       mth
+                                       (ArgsPack [rhVal] odEmpty)
+                                       id
+                                       chkExitMagic
+        (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+          runEdhTx ets $ callEdhMethod this
+                                       that
+                                       mth
+                                       (ArgsPack [rhVal] odEmpty)
+                                       id
+                                       chkExitMagic
+        (_, !badEqMth) ->
+          throwEdh ets UsageError
+            $  "malformed magic method ("
+            <> opSym
+            <> ") on "
+            <> T.pack (show lhObj)
+            <> " - "
+            <> T.pack (edhTypeNameOf badEqMth)
+            <> ": "
+            <> T.pack (show badEqMth)
+    _ -> case edhUltimate rhVal of
+      EdhObject !rhObj ->
+        lookupEdhObjAttr rhObj (AttrByName $ "(" <> opSym <> "@)") >>= \case
+          (_, EdhNil) -> naExit
+          (!this', EdhProcedure (EdhMethod !mth) _) ->
+            runEdhTx ets $ callEdhMethod this'
+                                         rhObj
+                                         mth
+                                         (ArgsPack [lhVal] odEmpty)
+                                         id
+                                         chkExitMagic
+          (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+            runEdhTx ets $ callEdhMethod this
+                                         that
+                                         mth
+                                         (ArgsPack [lhVal] odEmpty)
+                                         id
+                                         chkExitMagic
+          (_, !badEqMth) ->
+            throwEdh ets UsageError
+              $  "malformed magic method ("
+              <> opSym
+              <> "@) on "
+              <> T.pack (show rhObj)
+              <> " - "
+              <> T.pack (edhTypeNameOf badEqMth)
+              <> ": "
+              <> T.pack (show badEqMth)
+      _ -> naExit
+   where
+    chkExitMagic :: EdhTxExit
+    chkExitMagic !result _ets = case edhUltimate result of
+      EdhDefault _ !exprDef !etsDef ->
+        -- eval default expression with possibly the designated thread state
+        runEdhTx (fromMaybe ets etsDef)
+          $ evalExpr (deExpr exprDef)
+          $ \ !defVal _ets -> case defVal of
+
+              -- `return default nil` means more defered default,
+              -- that's only possible from an operator, other than
+              -- the magic method we just called
+              EdhNil -> naExit
+
+              -- exit with original thread state
+              _      -> exitEdh ets exit defVal
+      _ -> exitEdh ets exit result
+
+  tryMagicWithDefault :: Expr -> Maybe EdhThreadState -> STM ()
+  tryMagicWithDefault !exprDef !etsDef =
+    runEdhTx ets $ evalExpr lhExpr $ \ !lhVal -> evalExpr rhExpr
+      $ \ !rhVal _ets -> tryMagicWithDefault' exprDef etsDef lhVal rhVal
+  tryMagicWithDefault'
+    :: Expr -> Maybe EdhThreadState -> EdhValue -> EdhValue -> STM ()
+  tryMagicWithDefault' !exprDef !etsDef !lhVal !rhVal =
+    tryMagicMethod lhVal rhVal
+      -- eval default expression with possibly the designated thread state
+      $ runEdhTx (fromMaybe ets etsDef)
+      $ evalExpr
+          (case exprDef of
+            ExprWithSrc !x _ -> x
+            _                -> exprDef
+          )
+      $ \ !resultDef _ets -> case resultDef of
+          EdhNil -> notApplicable lhVal rhVal
+          -- exit with original thread state
+          _      -> exitEdh ets exit resultDef
+
+  callProc :: Object -> Object -> EdhProc -> STM ()
+  callProc !this !that !callable = case callable of
+
+    -- calling an intrinsic operator
+    EdhIntrOp _ (IntrinOpDefi _ _ iop'proc) ->
+      runEdhTx ets $ iop'proc lhExpr rhExpr $ \ !rtnVal _ets ->
+        case edhUltimate rtnVal of
+          EdhDefault _ !exprDef !etsDef ->
+            tryMagicWithDefault (deExpr exprDef) etsDef
+          -- exit with original thread state
+          _ -> exitEdh ets exit rtnVal
+
+    -- calling an operator procedure
+    EdhOprtor _ !op'pred !op'proc ->
+      case edh'procedure'args $ edh'procedure'decl op'proc of
+
+        -- 2 pos-args - simple lh/rh value receiving operator
+        (PackReceiver [RecvArg{}, RecvArg{}]) ->
+          runEdhTx ets $ evalExpr lhExpr $ \ !lhVal ->
+            evalExpr rhExpr $ \ !rhVal ->
+              callEdhOperator this
+                              that
+                              op'proc
+                              op'pred
+                              [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
+                $ \ !rtnVal _ets -> case edhUltimate rtnVal of
+                    EdhDefault _ !exprDef !etsDef ->
+                      tryMagicWithDefault' (deExpr exprDef) etsDef lhVal rhVal
+                    _ -> exitEdh ets exit rtnVal
+
+        -- 3 pos-args - caller scope + lh/rh expr receiving operator
+        (PackReceiver [RecvArg{}, RecvArg{}, RecvArg{}]) -> do
+          lhu          <- unsafeIOToSTM newUnique
+          rhu          <- unsafeIOToSTM newUnique
+          scopeWrapper <- mkScopeWrapper ctx scope
+          runEdhTx ets
+            $ callEdhOperator
+                this
+                that
+                op'proc
+                op'pred
+                [ EdhObject scopeWrapper
+                , EdhExpr lhu lhExpr ""
+                , EdhExpr rhu rhExpr ""
+                ]
+            $ \ !rtnVal _ets -> case edhUltimate rtnVal of
+                EdhDefault _ !exprDef !etsDef ->
+                  tryMagicWithDefault (deExpr exprDef) etsDef
+                _ -> exitEdh ets exit rtnVal
+
+        _ -> throwEdh ets UsageError $ "invalid operator signature: " <> T.pack
+          (show $ edh'procedure'args $ edh'procedure'decl op'proc)
+
+    _ ->
+      throwEdh ets UsageError $ "invalid operator: " <> T.pack (show callable)
+
+  !ctx   = edh'context ets
+  !scope = contextScope ctx
 
 
 validateOperDecl :: EdhThreadState -> ProcDecl -> STM ()

@@ -4,7 +4,6 @@ module Language.Edh.Batteries.Assign where
 import           Prelude
 -- import           Debug.Trace
 
-import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 
 import           Language.Edh.Control
@@ -70,8 +69,8 @@ assignProc !lhExpr !rhExpr !exit !ets = runEdhTx etsAssign $ case lhExpr of
 
 
 -- | operator (+=), (-=), (*=), (/=), (//=), (&&=), (||=) etc.
-assignWithOpProc :: Text -> EdhIntrinsicOp -> EdhIntrinsicOp
-assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit !ets =
+assignWithOpProc :: OpSymbol -> EdhIntrinsicOp
+assignWithOpProc !withOpSym !lhExpr !rhExpr !exit !ets =
   runEdhTx etsAssign $ case lhExpr of
     IndexExpr ixExpr tgtExpr -> evalExpr ixExpr $ \ !ixV -> do
       let !ixVal = edhDeCaseWrap ixV
@@ -83,8 +82,9 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit !ets =
           EdhDict (Dict _ !ds) ->
             iopdLookupDefault EdhNil ixVal ds >>= \ !dVal ->
               runEdhTx ets
-                $ withOp (LitExpr $ ValueLiteral dVal)
-                         (LitExpr $ ValueLiteral rhv)
+                $ evalInfix withOpSym
+                            (LitExpr $ ValueLiteral dVal)
+                            (LitExpr $ ValueLiteral rhv)
                 $ \ !opRtnV _ets -> do
                     case opRtnV of
                       EdhDefault{} -> pure ()
@@ -200,8 +200,9 @@ assignWithOpProc !withOpSym !withOp !lhExpr !rhExpr !exit !ets =
           EdhObject !rhObj -> \_ets -> tryRightHandMagic rhObj
 
           _ ->
-            withOp (LitExpr $ ValueLiteral lhVal)
-                   (LitExpr $ ValueLiteral $ edhDeCaseWrap rhVal)
+            evalInfix withOpSym
+                      (LitExpr $ ValueLiteral lhVal)
+                      (LitExpr $ ValueLiteral $ edhDeCaseWrap rhVal)
               $ \ !opRtnV -> case edhUltimate opRtnV of
                   EdhDefault{} -> edhSwitchState ets $ exitEdhTx exit opRtnV
                   _ ->

@@ -77,6 +77,7 @@ module Language.Edh.EHI
   , evalStmt'
   , evalExpr
   , evalExprs
+  , evalInfix
   , recvEdhArgs
   , packEdhExprs
   , packEdhArgs
@@ -121,6 +122,7 @@ module Language.Edh.EHI
   , Prefix(..)
   , Literal(..)
   , AttrName
+  , OpSymbol
   , AttrAddr(..)
   , AttrAddressor(..)
   , ArgsReceiver(..)
