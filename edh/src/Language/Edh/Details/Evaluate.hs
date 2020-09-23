@@ -91,7 +91,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit !ets = case fromExpr of
       -- give super objects the magical power to intercept
       -- attribute access on descendant objects, via obj ref
       EdhObject !obj -> runEdhTx ets
-        $ getObjAttrWSM (AttrByName "@<-") obj key (trySelfMagic obj) exit
+        $ getObjAttrWSM (AttrByName "(@<-)") obj key (trySelfMagic obj) exit
 
       -- getting attr from an apk
       EdhArgsPack (ArgsPack _ !kwargs) ->
@@ -127,7 +127,7 @@ getEdhAttr !fromExpr !key !exitNoAttr !exit !ets = case fromExpr of
    where
     trySelves :: [Object] -> STM ()
     trySelves []         = exitEdh ets exitNoAttr $ EdhObject obj
-    trySelves (o : rest) = lookupEdhSelfMagic o (AttrByName "@") >>= \case
+    trySelves (o : rest) = lookupEdhSelfMagic o (AttrByName "(@)") >>= \case
       EdhNil                          -> trySelves rest
       EdhProcedure (EdhMethod !mth) _ -> callSelfMagic mth o obj
       EdhBoundProc (EdhMethod !mth) !this !that _ ->
@@ -268,7 +268,7 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
 
     -- give super objects the magical power to intercept
     -- attribute assignment to descendant objects, via obj ref
-    EdhObject !tgtObj -> runEdhTx ets $ setObjAttrWSM (AttrByName "<-@")
+    EdhObject !tgtObj -> runEdhTx ets $ setObjAttrWSM (AttrByName "(<-@)")
                                                       tgtObj
                                                       key
                                                       val
@@ -296,7 +296,7 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
     trySelves :: [Object] -> STM ()
     trySelves [] =
       writeObjAttr ets obj key val $ \ !valSet -> exitEdh ets exit valSet
-    trySelves (o : rest) = lookupEdhSelfMagic o (AttrByName "@=") >>= \case
+    trySelves (o : rest) = lookupEdhSelfMagic o (AttrByName "(@=)") >>= \case
       EdhNil                          -> trySelves rest
       EdhProcedure (EdhMethod !mth) _ -> callSelfMagic mth o obj
       EdhBoundProc (EdhMethod !mth) !this !that _ ->
