@@ -222,8 +222,10 @@ parseAttrAddr = do
   followingPart :: Parser Expr
   followingPart = choice
     [ keyword "this" *> fail "unexpected this reference"
+    , keyword "that" *> fail "unexpected that reference"
+    , keyword "super" *> fail "unexpected super reference"
     , AttrExpr . DirectRef . SymbolicAttr <$> parseAttrSym
-    , AttrExpr . DirectRef . NamedAttr <$> parseAttrName
+    , AttrExpr . DirectRef . NamedAttr <$> parseIndirectAttrName
     ]
   moreAddr :: Expr -> Parser AttrAddr
   moreAddr p1 =
@@ -617,6 +619,9 @@ parseAttrAddressor =
 
 parseAttrName :: Parser Text
 parseAttrName = parseOpName <|> parseAlphaName
+
+parseIndirectAttrName :: Parser Text
+parseIndirectAttrName = ("(" <>) . (<> ")") <$> parseOpName <|> parseAlphaName
 
 parseAttrSym :: Parser AttrName
 parseAttrSym = char '@' *> optional sc *> parseAlphaName
