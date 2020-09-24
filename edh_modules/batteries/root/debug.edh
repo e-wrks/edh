@@ -46,9 +46,7 @@ export {
   }
 
   # used to define parametric command objects
-  class Command {
-
-    method __init__( cmd as this.cmd, ***apk ) this.apk=apk
+  data Command ( cmd, ***apk ) {
 
     method __eq__( other ) case other of {
       { { Command: otherCmd } }
@@ -59,7 +57,7 @@ export {
     }
 
     method __repr__ () case this.apk of {
-      { () } -> '' ++ this.cmd
+      { () } -> str( this.cmd )
       this.cmd ++ this.apk
     }
 
