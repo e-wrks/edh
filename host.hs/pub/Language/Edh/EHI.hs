@@ -168,6 +168,8 @@ module Language.Edh.EHI
   , resolveEdhInstance
   , objectScope
   , mkScopeWrapper
+  , mkHostClass
+  , mkHostClass'
 
     -- ** Value system
   , edhSetValue
@@ -214,6 +216,8 @@ module Language.Edh.EHI
   , mkSymbol
   , mkUUID
   , mkDefault
+  , mkHostProc
+  , mkSymbolicHostProc
   , EdhVector
 
     -- * argument exchanging
