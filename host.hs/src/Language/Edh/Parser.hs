@@ -738,6 +738,10 @@ parsePrefixExpr !si = choice
   , keyword "default" >> do
     (x, si') <- parseExpr si
     return (DefaultExpr x, si')
+    -- technically accept the new keyword anywhere as an expr prefix,
+    -- to better inter-op with some other languages like JavaScript
+    -- todo mandate it's actually calling a class (constructor) method?
+  , keyword "new" >> parseExpr si
   ]
 
 
