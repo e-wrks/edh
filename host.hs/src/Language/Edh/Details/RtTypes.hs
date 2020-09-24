@@ -128,8 +128,7 @@ type EntityStore = IOPD AttrKey EdhValue
 data AttrKey = AttrByName !AttrName | AttrBySym !Symbol
     deriving (Eq, Ord)
 instance Show AttrKey where
-  show (AttrByName attrName      ) = T.unpack attrName
-  show (AttrBySym  (Symbol _ sym)) = T.unpack sym
+  show = T.unpack . attrKeyStr
 instance Hashable AttrKey where
   hashWithSalt s (AttrByName name) =
     s `hashWithSalt` (0 :: Int) `hashWithSalt` name
@@ -1232,12 +1231,15 @@ data AttrAddressor =
     | SymbolicAttr !AttrName
   deriving (Eq)
 instance Show AttrAddressor where
-  show (NamedAttr    n) = T.unpack n
-  show (SymbolicAttr s) = "@" <> T.unpack s
+  show = T.unpack . attrAddrStr
 instance Hashable AttrAddressor where
   hashWithSalt s (NamedAttr name) = s `hashWithSalt` name
   hashWithSalt s (SymbolicAttr sym) =
     s `hashWithSalt` ("@" :: Text) `hashWithSalt` sym
+
+attrAddrStr :: AttrAddressor -> Text
+attrAddrStr (NamedAttr    n) = n
+attrAddrStr (SymbolicAttr s) = "@" <> s
 
 
 receivesNamedArg :: Text -> ArgsReceiver -> Bool
@@ -1654,4 +1656,49 @@ data EdhIndex = EdhIndex !Int | EdhAny | EdhAll | EdhSlice {
   , edh'slice'stop :: !(Maybe Int)
   , edh'slice'step :: !(Maybe Int)
   } deriving (Eq)
+
+
+mkHostProc
+  :: Scope
+  -> (ProcDefi -> EdhProc)
+  -> AttrName
+  -> (ArgsPack -> EdhHostProc, ArgsReceiver)
+  -> STM EdhValue
+mkHostProc !scope !vc !nm (!p, !args) = do
+  !u <- unsafeIOToSTM newUnique
+  return $ EdhProcedure
+    (vc ProcDefi
+      { edh'procedure'ident = u
+      , edh'procedure'name  = AttrByName nm
+      , edh'procedure'lexi  = scope
+      , edh'procedure'decl  = ProcDecl { edh'procedure'addr = NamedAttr nm
+                                       , edh'procedure'args = args
+                                       , edh'procedure'body = Right p
+                                       }
+      }
+    )
+    Nothing
+
+mkSymbolicHostProc
+  :: Scope
+  -> (ProcDefi -> EdhProc)
+  -> Symbol
+  -> (ArgsPack -> EdhHostProc, ArgsReceiver)
+  -> STM EdhValue
+mkSymbolicHostProc !scope !vc !sym (!p, !args) = do
+  !u <- unsafeIOToSTM newUnique
+  return $ EdhProcedure
+    (vc ProcDefi
+      { edh'procedure'ident = u
+      , edh'procedure'name  = AttrBySym sym
+      , edh'procedure'lexi  = scope
+      , edh'procedure'decl  = ProcDecl
+                                { edh'procedure'addr = SymbolicAttr
+                                                         $ symbolName sym
+                                , edh'procedure'args = args
+                                , edh'procedure'body = Right p
+                                }
+      }
+    )
+    Nothing
 

@@ -1,0 +1,23 @@
+
+# %%
+
+Point :: ( DecimalType, DecimalType ) -> Point
+data Point( x, y ) pass
+
+Circle :: ( Point, DecimalType ) -> Circle
+data Circle( center, radius ) {
+  property$
+  method area() 3.14 * this.radius**2
+}
+
+# %%
+origin = Point( 0, 0 )
+unit = Point( 1, 1 )
+c1 = Circle( Point( 3, 5 ), 2.61 )
+
+# %%
+case c1.center of {@
+  { { Point: c } } | abs( c.x ) > 1 && abs( c.y ) > 1
+  -> console.print( 'Got a circle far enough with area '
+    ++ c1.area ++ ' : ' ++ c1 )
+@}

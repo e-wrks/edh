@@ -12,7 +12,6 @@ import           GHC.TypeLits                   ( KnownSymbol
                                                 , symbolVal
                                                 )
 
-import           Control.Monad
 import           Control.Concurrent.STM
 
 import           Data.Unique
@@ -26,93 +25,14 @@ import           Data.Dynamic
 
 import qualified Data.UUID                     as UUID
 
-import           Text.Megaparsec
-
 import           Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
 import           Language.Edh.Args
 
 import           Language.Edh.Details.IOPD
-import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
-
-
-mkHostClass'
-  :: Scope
-  -> AttrName
-  -> (ArgsPack -> EdhObjectAllocator)
-  -> EntityStore
-  -> [Object]
-  -> STM Object
-mkHostClass' !scope !className !allocator !classStore !superClasses = do
-  !idCls  <- unsafeIOToSTM newUnique
-  !ssCls  <- newTVar superClasses
-  !mroCls <- newTVar []
-  let !clsProc = ProcDefi idCls (AttrByName className) scope
-        $ ProcDecl (NamedAttr className) (PackReceiver []) (Right fakeHostProc)
-      !cls    = Class clsProc classStore allocator mroCls
-      !clsObj = Object idCls (ClassStore cls) metaClassObj ssCls
-  !mroInvalid <- fillClassMRO cls superClasses
-  unless (T.null mroInvalid)
-    $ throwSTM
-    $ EdhError UsageError mroInvalid (toDyn nil)
-    $ EdhCallContext "<mkHostClass>" []
-  return clsObj
- where
-  fakeHostProc :: ArgsPack -> EdhHostProc
-  fakeHostProc _ !exit = exitEdhTx exit nil
-
-  !metaClassObj =
-    edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
-
-mkHostClass
-  :: Scope
-  -> AttrName
-  -> (ArgsPack -> EdhObjectAllocator)
-  -> [Object]
-  -> (Scope -> STM ())
-  -> STM Object
-mkHostClass !scope !className !allocator !superClasses !storeMod = do
-  !classStore <- iopdEmpty
-  !idCls      <- unsafeIOToSTM newUnique
-  !ssCls      <- newTVar superClasses
-  !mroCls     <- newTVar []
-  let !clsProc = ProcDefi idCls (AttrByName className) scope
-        $ ProcDecl (NamedAttr className) (PackReceiver []) (Right fakeHostProc)
-      !cls      = Class clsProc classStore allocator mroCls
-      !clsObj   = Object idCls (ClassStore cls) metaClassObj ssCls
-      !clsScope = scope { edh'scope'entity  = classStore
-                        , edh'scope'this    = clsObj
-                        , edh'scope'that    = clsObj
-                        , edh'excpt'hndlr   = defaultEdhExcptHndlr
-                        , edh'scope'proc    = clsProc
-                        , edh'scope'caller  = clsCreStmt
-                        , edh'effects'stack = []
-                        }
-  storeMod clsScope
-  !mroInvalid <- fillClassMRO cls superClasses
-  unless (T.null mroInvalid)
-    $ throwSTM
-    $ EdhError UsageError mroInvalid (toDyn nil)
-    $ EdhCallContext "<mkHostClass>" []
-  return clsObj
- where
-  fakeHostProc :: ArgsPack -> EdhHostProc
-  fakeHostProc _ !exit = exitEdhTx exit nil
-
-  !metaClassObj =
-    edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
-
-  clsCreStmt :: StmtSrc
-  clsCreStmt = StmtSrc
-    ( SourcePos { sourceName   = "<host-class-creation>"
-                , sourceLine   = mkPos 1
-                , sourceColumn = mkPos 1
-                }
-    , VoidStmt
-    )
 
 
 -- | Class for an object allocator implemented in the host language (which is
@@ -2858,26 +2778,6 @@ wrapHostProc !fn = -- TODO derive arg receivers (procedure signature)
   (callFromEdh fn, WildReceiver)
 
 
-mkHostProc
-  :: Scope
-  -> (ProcDefi -> EdhProc)
-  -> AttrName
-  -> (ArgsPack -> EdhHostProc, ArgsReceiver)
-  -> STM EdhValue
-mkHostProc !scope !vc !nm (!p, !args) = do
-  !u <- unsafeIOToSTM newUnique
-  return $ EdhProcedure
-    (vc ProcDefi
-      { edh'procedure'ident = u
-      , edh'procedure'name  = AttrByName nm
-      , edh'procedure'lexi  = scope
-      , edh'procedure'decl  = ProcDecl { edh'procedure'addr = NamedAttr nm
-                                       , edh'procedure'args = args
-                                       , edh'procedure'body = Right p
-                                       }
-      }
-    )
-    Nothing
 mkHostProc'
   :: EdhCallable fn
   => Scope
@@ -2888,28 +2788,6 @@ mkHostProc'
 mkHostProc' !scope !vc !nm !fn = mkHostProc scope vc nm $ wrapHostProc fn
 
 
-mkSymbolicHostProc
-  :: Scope
-  -> (ProcDefi -> EdhProc)
-  -> Symbol
-  -> (ArgsPack -> EdhHostProc, ArgsReceiver)
-  -> STM EdhValue
-mkSymbolicHostProc !scope !vc !sym (!p, !args) = do
-  !u <- unsafeIOToSTM newUnique
-  return $ EdhProcedure
-    (vc ProcDefi
-      { edh'procedure'ident = u
-      , edh'procedure'name  = AttrBySym sym
-      , edh'procedure'lexi  = scope
-      , edh'procedure'decl  = ProcDecl
-                                { edh'procedure'addr = SymbolicAttr
-                                                         $ symbolName sym
-                                , edh'procedure'args = args
-                                , edh'procedure'body = Right $ callFromEdh p
-                                }
-      }
-    )
-    Nothing
 mkSymbolicHostProc'
   :: EdhCallable fn
   => Scope

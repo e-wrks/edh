@@ -3206,7 +3206,7 @@ evalExpr (InfixExpr !opSym !lhExpr !rhExpr) !exit =
   evalInfix opSym lhExpr rhExpr exit
 
 -- defining an Edh class
-evalExpr (ClassExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
+evalExpr (ClassExpr pd@(ProcDecl !addr !argsRcvr _)) !exit = \ !ets ->
   resolveEdhAttrAddr ets addr $ \ !name -> do
     let !ctx       = edh'context ets
         !scope     = contextScope ctx
@@ -3218,15 +3218,36 @@ evalExpr (ClassExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
     !cs    <- iopdEmpty
     !ss    <- newTVar []
     !mro   <- newTVar []
-    let allocatorProc :: EdhObjectAllocator
-        allocatorProc !exitCtor _etsCtor = exitCtor =<< HashStore <$> iopdEmpty
+    let allocatorProc :: ArgsPack -> EdhObjectAllocator
+        allocatorProc !apkCtor !exitCtor !etsCtor = case argsRcvr of
+          -- a class (not ADT) or an ADT with empty receiver
+          PackReceiver [] -> exitCtor =<< HashStore <$> iopdEmpty
+          -- an ADT
+          _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
+            iopdFromList (odToList dataAttrs) >>= exitCtor . HashStore
+
+        adtReprProc :: ArgsPack -> EdhHostProc
+        adtReprProc _ !exitRepr !etsRepr =
+          case
+              edh'obj'store $ edh'scope'this $ contextScope $ edh'context
+                etsRepr
+            of
+              HashStore !hs -> iopdSnapshot hs >>= \ !dataAttrs ->
+                edhValueRepr etsRepr (EdhArgsPack (ArgsPack [] dataAttrs))
+                  $ \ !dataAttrsRepr ->
+                      exitEdh etsRepr exitRepr
+                        $  EdhString
+                        $  attrAddrStr addr
+                        <> dataAttrsRepr
+              _ ->
+                throwEdh ets EvalError "bug: adt object not bearing HashStore"
 
         !clsProc = ProcDefi { edh'procedure'ident = idCls
                             , edh'procedure'name  = name
                             , edh'procedure'lexi  = scope
                             , edh'procedure'decl  = pd
                             }
-        !cls    = Class clsProc cs (\_apkCtor -> allocatorProc) mro
+        !cls    = Class clsProc cs allocatorProc mro
         !clsObj = Object idCls (ClassStore cls) metaClass ss
 
         doExit _rtn _ets = readTVar ss >>= fillClassMRO cls >>= \case
@@ -3251,6 +3272,13 @@ evalExpr (ClassExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
                       , edh'ctx'eff'defining = False
                       }
         !etsCls = ets { edh'context = clsCtx }
+
+    case argsRcvr of
+      -- a class (not ADT) or an ADT with empty receiver
+      PackReceiver [] -> pure ()
+      -- an ADT
+      _ -> mkHostProc clsScope EdhMethod "__repr__" (adtReprProc, WildReceiver)
+        >>= \ !reprMth -> iopdInsert (AttrByName "__repr__") reprMth cs
 
     case edh'procedure'body pd of
       -- calling a host class definition
@@ -4179,4 +4207,80 @@ edhRegulateIndex !ets !len !idx !exit =
           <> " vs "
           <> T.pack (show len)
         else exit posIdx
+
+
+mkHostClass'
+  :: Scope
+  -> AttrName
+  -> (ArgsPack -> EdhObjectAllocator)
+  -> EntityStore
+  -> [Object]
+  -> STM Object
+mkHostClass' !scope !className !allocator !classStore !superClasses = do
+  !idCls  <- unsafeIOToSTM newUnique
+  !ssCls  <- newTVar superClasses
+  !mroCls <- newTVar []
+  let !clsProc = ProcDefi idCls (AttrByName className) scope
+        $ ProcDecl (NamedAttr className) (PackReceiver []) (Right fakeHostProc)
+      !cls    = Class clsProc classStore allocator mroCls
+      !clsObj = Object idCls (ClassStore cls) metaClassObj ssCls
+  !mroInvalid <- fillClassMRO cls superClasses
+  unless (T.null mroInvalid)
+    $ throwSTM
+    $ EdhError UsageError mroInvalid (toDyn nil)
+    $ EdhCallContext "<mkHostClass>" []
+  return clsObj
+ where
+  fakeHostProc :: ArgsPack -> EdhHostProc
+  fakeHostProc _ !exit = exitEdhTx exit nil
+
+  !metaClassObj =
+    edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
+
+mkHostClass
+  :: Scope
+  -> AttrName
+  -> (ArgsPack -> EdhObjectAllocator)
+  -> [Object]
+  -> (Scope -> STM ())
+  -> STM Object
+mkHostClass !scope !className !allocator !superClasses !storeMod = do
+  !classStore <- iopdEmpty
+  !idCls      <- unsafeIOToSTM newUnique
+  !ssCls      <- newTVar superClasses
+  !mroCls     <- newTVar []
+  let !clsProc = ProcDefi idCls (AttrByName className) scope
+        $ ProcDecl (NamedAttr className) (PackReceiver []) (Right fakeHostProc)
+      !cls      = Class clsProc classStore allocator mroCls
+      !clsObj   = Object idCls (ClassStore cls) metaClassObj ssCls
+      !clsScope = scope { edh'scope'entity  = classStore
+                        , edh'scope'this    = clsObj
+                        , edh'scope'that    = clsObj
+                        , edh'excpt'hndlr   = defaultEdhExcptHndlr
+                        , edh'scope'proc    = clsProc
+                        , edh'scope'caller  = clsCreStmt
+                        , edh'effects'stack = []
+                        }
+  storeMod clsScope
+  !mroInvalid <- fillClassMRO cls superClasses
+  unless (T.null mroInvalid)
+    $ throwSTM
+    $ EdhError UsageError mroInvalid (toDyn nil)
+    $ EdhCallContext "<mkHostClass>" []
+  return clsObj
+ where
+  fakeHostProc :: ArgsPack -> EdhHostProc
+  fakeHostProc _ !exit = exitEdhTx exit nil
+
+  !metaClassObj =
+    edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
+
+  clsCreStmt :: StmtSrc
+  clsCreStmt = StmtSrc
+    ( SourcePos { sourceName   = "<host-class-creation>"
+                , sourceLine   = mkPos 1
+                , sourceColumn = mkPos 1
+                }
+    , VoidStmt
+    )
 

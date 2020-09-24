@@ -314,6 +314,18 @@ parseClassExpr !si = do
   (body, si') <- parseProcBody si
   return (ClassExpr $ ProcDecl pn (PackReceiver []) (Left body), si')
 
+parseDataExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseDataExpr !si = do
+  void $ keyword "data"
+  pn <- choice
+    [ SymbolicAttr <$> parseAttrSym
+    , NamedAttr <$> parseMagicProcName
+    , NamedAttr <$> parseAlphaName
+    ]
+  ar          <- parseArgsReceiver
+  (body, si') <- parseProcBody si
+  return (ClassExpr $ ProcDecl pn ar (Left body), si')
+
 parseExtendsStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseExtendsStmt !si = do
   void $ keyword "extends"
@@ -834,6 +846,7 @@ parseExprPrec prec !si = lookAhead illegalExprStart >>= \case
       , parseImportExpr si
       , parseNamespaceExpr si
       , parseClassExpr si
+      , parseDataExpr si
       , parseMethodExpr si
       , parseGeneratorExpr si
       , parseInterpreterExpr si
