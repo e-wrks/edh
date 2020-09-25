@@ -433,15 +433,15 @@ instance Show Object where
 data ObjectStore =
     HashStore !EntityStore
   | ClassStore !Class -- in case this is a class object
-  | HostStore !(TVar Dynamic)
+  | HostStore !Dynamic
 
 -- | Try cast and unveil an Object's storage of a known type, while not
 -- considering any super object eligible
 castObjSelfStore :: forall a . (Typeable a) => Object -> STM (Maybe a)
 castObjSelfStore !obj = case edh'obj'store obj of
-  HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
-    Just (d :: a) -> return $ Just d
-    Nothing       -> return Nothing
+  HostStore !hsd -> case fromDynamic hsd of
+    Just (hsv :: a) -> return $ Just hsv
+    Nothing         -> return Nothing
   _ -> return Nothing
 -- | Try cast and unveil a possible Object's storage of a known type, while not
 -- considering any super object eligible

@@ -86,7 +86,7 @@ instance {-# OVERLAPPABLE #-} (EdhAllocator fn', Typeable h)
     tryObjs :: [Object] -> STM ()
     tryObjs [] = throwEdh ets UsageError "arg host type mismatch: anonymous"
     tryObjs (obj : rest) = case edh'obj'store obj of
-      HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+      HostStore !hsd -> case fromDynamic hsd of
         Just (d :: h) ->
           runEdhTx ets $ allocEdhObj (fn d) (ArgsPack args kwargs) exit
         Nothing -> tryObjs rest
@@ -105,7 +105,7 @@ instance {-# OVERLAPPABLE #-} (EdhAllocator fn', Typeable h)
     tryObjs :: [Object] -> STM ()
     tryObjs [] = throwEdh ets UsageError "arg host type mismatch: anonymous"
     tryObjs (obj : rest) = case edh'obj'store obj of
-      HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+      HostStore !hsd -> case fromDynamic hsd of
         Just (d :: h) ->
           runEdhTx ets $ allocEdhObj (fn (Just d)) (ArgsPack args kwargs) exit
         Nothing -> tryObjs rest
@@ -136,7 +136,7 @@ instance {-# OVERLAPPABLE #-} (KnownSymbol name, EdhAllocator fn', Typeable h)
       tryObjs [] =
         throwEdh ets UsageError $ "arg host type mismatch: " <> argName
       tryObjs (obj : rest) = case edh'obj'store obj of
-        HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+        HostStore !hsd -> case fromDynamic hsd of
           Just (d :: h) -> runEdhTx ets
             $ allocEdhObj (fn (NamedEdhArg d)) (ArgsPack args' kwargs') exit
           Nothing -> tryObjs rest
@@ -167,7 +167,7 @@ instance {-# OVERLAPPABLE #-} (KnownSymbol name, EdhAllocator fn', Typeable h)
       tryObjs [] =
         throwEdh ets UsageError $ "arg host type mismatch: " <> argName
       tryObjs (obj : rest) = case edh'obj'store obj of
-        HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+        HostStore !hsd -> case fromDynamic hsd of
           Just (d :: h) -> runEdhTx ets $ allocEdhObj
             (fn (NamedEdhArg (Just d)))
             (ArgsPack args' kwargs')
@@ -1464,7 +1464,7 @@ instance {-# OVERLAPPABLE #-} (EdhCallable fn', Typeable h)
     tryObjs :: [Object] -> STM ()
     tryObjs [] = throwEdh ets UsageError "arg host type mismatch: anonymous"
     tryObjs (obj : rest) = case edh'obj'store obj of
-      HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+      HostStore !hsd -> case fromDynamic hsd of
         Just (d :: h) ->
           runEdhTx ets $ callFromEdh (fn d) (ArgsPack args kwargs) exit
         Nothing -> tryObjs rest
@@ -1483,7 +1483,7 @@ instance {-# OVERLAPPABLE #-} (EdhCallable fn', Typeable h)
     tryObjs :: [Object] -> STM ()
     tryObjs [] = throwEdh ets UsageError "arg host type mismatch: anonymous"
     tryObjs (obj : rest) = case edh'obj'store obj of
-      HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+      HostStore !hsd -> case fromDynamic hsd of
         Just (d :: h) ->
           runEdhTx ets $ callFromEdh (fn (Just d)) (ArgsPack args kwargs) exit
         Nothing -> tryObjs rest
@@ -1514,7 +1514,7 @@ instance {-# OVERLAPPABLE #-} (KnownSymbol name, EdhCallable fn', Typeable h)
       tryObjs [] =
         throwEdh ets UsageError $ "arg host type mismatch: " <> argName
       tryObjs (obj : rest) = case edh'obj'store obj of
-        HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+        HostStore !hsd -> case fromDynamic hsd of
           Just (d :: h) -> runEdhTx ets
             $ callFromEdh (fn (NamedEdhArg d)) (ArgsPack args' kwargs') exit
           Nothing -> tryObjs rest
@@ -1545,7 +1545,7 @@ instance {-# OVERLAPPABLE #-} (KnownSymbol name, EdhCallable fn', Typeable h)
       tryObjs [] =
         throwEdh ets UsageError $ "arg host type mismatch: " <> argName
       tryObjs (obj : rest) = case edh'obj'store obj of
-        HostStore !dsv -> fromDynamic <$> readTVar dsv >>= \case
+        HostStore !hsd -> case fromDynamic hsd of
           Just (d :: h) -> runEdhTx ets $ callFromEdh
             (fn (NamedEdhArg (Just d)))
             (ArgsPack args' kwargs')

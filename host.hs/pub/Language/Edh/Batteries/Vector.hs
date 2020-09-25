@@ -107,8 +107,8 @@ createVectorClass !clsOuterScope =
                 _ | len < 0 -> V.fromList vs
                 _           -> V.fromListN len vs
           !mvec <- unsafeIOToSTM $ V.thaw vec
-          !hsv  <- newTVar $ toDyn mvec
-          ctorExit $ HostStore hsv
+          !mvv  <- newTVar mvec
+          ctorExit $ HostStore $ toDyn mvv
     case odLookup (AttrByName "length") ctorKwargs of
       Nothing              -> doIt (-1) ctorArgs
       Just (EdhDecimal !d) -> case D.decimalToInteger d of
@@ -124,31 +124,39 @@ createVectorClass !clsOuterScope =
 
   vecAppendProc :: [EdhValue] -> EdhHostProc
   vecAppendProc !args !exit !ets =
-    withThisHostObj ets $ \ !hsv (mvec :: EdhVector) -> do
-      !mvec' <-
-        unsafeIOToSTM $ V.thaw =<< (V.++ V.fromList args) <$> V.freeze mvec
-      writeTVar hsv $ toDyn mvec'
-      exitEdh ets exit $ EdhObject $ edh'scope'this $ contextScope $ edh'context
-        ets
+    withThisHostObj ets $ \(mvv :: TVar EdhVector) ->
+      readTVar mvv >>= \ !mvec -> do
+        !mvec' <-
+          unsafeIOToSTM $ V.thaw =<< (V.++ V.fromList args) <$> V.freeze mvec
+        writeTVar mvv mvec'
+        exitEdh ets exit
+          $ EdhObject
+          $ edh'scope'this
+          $ contextScope
+          $ edh'context ets
 
   vecEqProc :: EdhValue -> EdhHostProc
   vecEqProc !other !exit !ets = castObjectStore' other >>= \case
     Nothing              -> exitEdh ets exit $ EdhBool False
-    Just (_, !mvecOther) -> withThisHostObj ets $ \_ (mvec :: EdhVector) -> do
-      !conclusion <- unsafeIOToSTM $ do
-        -- TODO we're sacrificing thread safety for zero-copy performance
-        --      here, justify this decision
-        !vec      <- V.unsafeFreeze mvec
-        !vecOther <- V.unsafeFreeze mvecOther
-        return $ vec == vecOther
-      exitEdh ets exit $ EdhBool conclusion
+    Just (_, !mvecOther) -> withThisHostObj ets $ \(mvv :: TVar EdhVector) ->
+      readTVar mvv >>= \ !mvec -> do
+        !conclusion <- unsafeIOToSTM $ do
+          -- TODO we're sacrificing thread safety for zero-copy performance
+          --      here, justify this decision
+          !vec      <- V.unsafeFreeze mvec
+          !vecOther <- V.unsafeFreeze mvecOther
+          return $ vec == vecOther
+        exitEdh ets exit $ EdhBool conclusion
 
   vecIdxReadProc :: EdhValue -> EdhHostProc
   vecIdxReadProc !idxVal !exit !ets =
-    withHostObject ets thisVecObj $ \_ !mvec -> do
-      let exitWith :: EdhVector -> STM ()
+    withThisHostObj ets $ \(mvv :: TVar EdhVector) ->
+      readTVar mvv >>= \ !mvec -> do
+        let
+          exitWith :: EdhVector -> STM ()
           exitWith !newVec = do
-            !newStore <- HostStore <$> newTVar (toDyn newVec)
+            !newVV <- newTVar newVec
+            let !newStore = HostStore (toDyn newVV)
             edhMutCloneObj ets thisVecObj (edh'scope'that scope) newStore
               $ \ !thatObjClone -> exitEdh ets exit $ EdhObject thatObjClone
           exitWithRange :: Int -> Int -> Int -> STM ()
@@ -167,98 +175,101 @@ createVectorClass !clsOuterScope =
               return newVec
             exitWith newVec
 
-      parseEdhIndex ets idxVal $ \case
-        Left !err -> throwEdh ets UsageError err
-        Right (EdhIndex !i) ->
-          unsafeIOToSTM (MV.read mvec i) >>= exitEdh ets exit
-        Right EdhAny -> exitEdh ets exit $ EdhObject thisVecObj
-        Right EdhAll -> exitEdh ets exit $ EdhObject thisVecObj
-        Right (EdhSlice !start !stop !step) ->
-          edhRegulateSlice ets (MV.length mvec) (start, stop, step)
-            $ \(!iStart, !iStop, !iStep) -> if iStep == 1
-                then exitWith $ MV.unsafeSlice iStart (iStop - iStart) mvec
-                else exitWithRange iStart iStop iStep
+        parseEdhIndex ets idxVal $ \case
+          Left !err -> throwEdh ets UsageError err
+          Right (EdhIndex !i) ->
+            unsafeIOToSTM (MV.read mvec i) >>= exitEdh ets exit
+          Right EdhAny -> exitEdh ets exit $ EdhObject thisVecObj
+          Right EdhAll -> exitEdh ets exit $ EdhObject thisVecObj
+          Right (EdhSlice !start !stop !step) ->
+            edhRegulateSlice ets (MV.length mvec) (start, stop, step)
+              $ \(!iStart, !iStop, !iStep) -> if iStep == 1
+                  then exitWith $ MV.unsafeSlice iStart (iStop - iStart) mvec
+                  else exitWithRange iStart iStop iStep
    where
     !scope      = contextScope $ edh'context ets
     !thisVecObj = edh'scope'this scope
 
   vecIdxWriteProc :: EdhValue -> EdhValue -> EdhHostProc
   vecIdxWriteProc !idxVal !other !exit !ets =
-    withThisHostObj ets $ \_ !mvec -> do
-      let exitWithRangeAssign :: Int -> Int -> Int -> STM ()
-          exitWithRangeAssign !start !stop !step =
-            castObjectStore' (edhUltimate other) >>= \case
-              Nothing              -> exitWithNonVecAssign
-              Just (_, !mvecOther) -> do
-                unsafeIOToSTM $ assignWithVec start 0 mvecOther
-                exitEdh ets exit other
-           where
-            (q, r)               = quotRem (stop - start) step
-            !len                 = if r == 0 then abs q else 1 + abs q
-            exitWithNonVecAssign = case edhUltimate other of
-              EdhArgsPack (ArgsPack !args' _) -> do
-                unsafeIOToSTM $ assignWithList start $ take len args'
-                exitEdh ets exit other
-              EdhList (List _ !lsv) -> do
-                !ls <- readTVar lsv
-                unsafeIOToSTM $ assignWithList start $ take len ls
-                exitEdh ets exit other
-              !badList ->
-                throwEdh ets UsageError
-                  $  "not assignable to indexed vector: "
-                  <> T.pack (edhTypeNameOf badList)
-            assignWithList :: Int -> [EdhValue] -> IO ()
-            assignWithList _  []       = return ()
-            assignWithList !n (x : xs) = do
-              MV.unsafeWrite mvec n x
-              assignWithList (n + step) xs
-            assignWithVec :: Int -> Int -> EdhVector -> IO ()
-            assignWithVec !n !i !mvec' = if i >= len || i >= MV.length mvec'
-              then return ()
-              else do
-                MV.unsafeRead mvec' i >>= MV.unsafeWrite mvec n
-                assignWithVec (n + step) (i + 1) mvec'
+    withThisHostObj ets $ \(mvv :: TVar EdhVector) ->
+      readTVar mvv >>= \ !mvec -> do
+        let exitWithRangeAssign :: Int -> Int -> Int -> STM ()
+            exitWithRangeAssign !start !stop !step =
+              castObjectStore' (edhUltimate other) >>= \case
+                Nothing              -> exitWithNonVecAssign
+                Just (_, !mvecOther) -> do
+                  unsafeIOToSTM $ assignWithVec start 0 mvecOther
+                  exitEdh ets exit other
+             where
+              (q, r)               = quotRem (stop - start) step
+              !len                 = if r == 0 then abs q else 1 + abs q
+              exitWithNonVecAssign = case edhUltimate other of
+                EdhArgsPack (ArgsPack !args' _) -> do
+                  unsafeIOToSTM $ assignWithList start $ take len args'
+                  exitEdh ets exit other
+                EdhList (List _ !lsv) -> do
+                  !ls <- readTVar lsv
+                  unsafeIOToSTM $ assignWithList start $ take len ls
+                  exitEdh ets exit other
+                !badList ->
+                  throwEdh ets UsageError
+                    $  "not assignable to indexed vector: "
+                    <> T.pack (edhTypeNameOf badList)
+              assignWithList :: Int -> [EdhValue] -> IO ()
+              assignWithList _  []       = return ()
+              assignWithList !n (x : xs) = do
+                MV.unsafeWrite mvec n x
+                assignWithList (n + step) xs
+              assignWithVec :: Int -> Int -> EdhVector -> IO ()
+              assignWithVec !n !i !mvec' = if i >= len || i >= MV.length mvec'
+                then return ()
+                else do
+                  MV.unsafeRead mvec' i >>= MV.unsafeWrite mvec n
+                  assignWithVec (n + step) (i + 1) mvec'
 
-      parseEdhIndex ets idxVal $ \case
-        Left  !err          -> throwEdh ets UsageError err
-        Right (EdhIndex !i) -> do
-          unsafeIOToSTM $ MV.unsafeWrite mvec i other
-          exitEdh ets exit other
-        Right EdhAny -> do
-          unsafeIOToSTM $ MV.set mvec other
-          exitEdh ets exit other
-        Right EdhAll -> exitWithRangeAssign 0 (MV.length mvec) 1
-        Right (EdhSlice !start !stop !step) ->
-          edhRegulateSlice ets (MV.length mvec) (start, stop, step)
-            $ \(!iStart, !iStop, !iStep) ->
-                exitWithRangeAssign iStart iStop iStep
+        parseEdhIndex ets idxVal $ \case
+          Left  !err          -> throwEdh ets UsageError err
+          Right (EdhIndex !i) -> do
+            unsafeIOToSTM $ MV.unsafeWrite mvec i other
+            exitEdh ets exit other
+          Right EdhAny -> do
+            unsafeIOToSTM $ MV.set mvec other
+            exitEdh ets exit other
+          Right EdhAll -> exitWithRangeAssign 0 (MV.length mvec) 1
+          Right (EdhSlice !start !stop !step) ->
+            edhRegulateSlice ets (MV.length mvec) (start, stop, step)
+              $ \(!iStart, !iStop, !iStep) ->
+                  exitWithRangeAssign iStart iStop iStep
 
   vecCopyWithOpProc :: Bool -> OpSymbol -> EdhValue -> EdhHostProc
   vecCopyWithOpProc !flipOperands !opSym !other !exit !ets =
-    withHostObject ets thisVecObj $ \_ !mvec ->
-      unsafeIOToSTM (MV.new $ MV.length mvec) >>= \ !newVec ->
-        let
-          copyAt :: Int -> STM ()
-          copyAt !n = if n < 0
-            then do
-              !newStore <- HostStore <$> newTVar (toDyn newVec)
-              edhMutCloneObj ets thisVecObj (edh'scope'that scope) newStore
-                $ \ !thatObjClone -> exitEdh ets exit $ EdhObject thatObjClone
-            else unsafeIOToSTM (MV.read mvec n) >>= \ !srcVal ->
-              runEdhTx ets
-                $ (if flipOperands
-                    then evalInfix opSym
-                                   (LitExpr $ ValueLiteral other)
-                                   (LitExpr $ ValueLiteral srcVal)
-                    else evalInfix opSym
-                                   (LitExpr $ ValueLiteral srcVal)
-                                   (LitExpr $ ValueLiteral other)
-                  )
-                $ \ !rv _ets -> do
-                    unsafeIOToSTM $ MV.unsafeWrite newVec n rv
-                    copyAt (n - 1)
-        in
-          copyAt (MV.length mvec - 1)
+    withThisHostObj ets $ \(mvv :: TVar EdhVector) ->
+      readTVar mvv >>= \ !mvec ->
+        unsafeIOToSTM (MV.new $ MV.length mvec) >>= \ !newVec ->
+          let
+            copyAt :: Int -> STM ()
+            copyAt !n = if n < 0
+              then do
+                !newVV <- newTVar newVec
+                let !newStore = HostStore (toDyn newVV)
+                edhMutCloneObj ets thisVecObj (edh'scope'that scope) newStore
+                  $ \ !thatObjClone -> exitEdh ets exit $ EdhObject thatObjClone
+              else unsafeIOToSTM (MV.read mvec n) >>= \ !srcVal ->
+                runEdhTx ets
+                  $ (if flipOperands
+                      then evalInfix opSym
+                                     (LitExpr $ ValueLiteral other)
+                                     (LitExpr $ ValueLiteral srcVal)
+                      else evalInfix opSym
+                                     (LitExpr $ ValueLiteral srcVal)
+                                     (LitExpr $ ValueLiteral other)
+                    )
+                  $ \ !rv _ets -> do
+                      unsafeIOToSTM $ MV.unsafeWrite newVec n rv
+                      copyAt (n - 1)
+          in
+            copyAt (MV.length mvec - 1)
    where
     !scope      = contextScope $ edh'context ets
     !thisVecObj = edh'scope'this scope
@@ -291,10 +302,11 @@ createVectorClass !clsOuterScope =
 
   vecAssignWithOpProc :: OpSymbol -> EdhValue -> EdhHostProc
   vecAssignWithOpProc !opSym !other !exit !ets =
-    withHostObject ets thisVecObj $ \_ !mvec ->
-      opAssignElems ets opSym other mvec 0 (MV.length mvec) 1
-        $ exitEdh ets exit
-        $ EdhObject thisVecObj
+    withThisHostObj ets $ \(mvv :: TVar EdhVector) ->
+      readTVar mvv >>= \ !mvec ->
+        opAssignElems ets opSym other mvec 0 (MV.length mvec) 1
+          $ exitEdh ets exit
+          $ EdhObject thisVecObj
    where
     !scope      = contextScope $ edh'context ets
     !thisVecObj = edh'scope'this scope
@@ -350,45 +362,48 @@ createVectorClass !clsOuterScope =
 
   vecIdxAssignWithOpProc :: OpSymbol -> EdhValue -> EdhValue -> EdhHostProc
   vecIdxAssignWithOpProc !opSym !idxVal !other !exit !ets =
-    withThisHostObj ets $ \_ !mvec -> parseEdhIndex ets idxVal $ \case
-      Left  !err          -> throwEdh ets UsageError err
-      Right (EdhIndex !i) -> unsafeIOToSTM (MV.read mvec i) >>= \ !oldVal ->
-        runEdhTx ets
-          $ evalInfix opSym
-                      (LitExpr $ ValueLiteral oldVal)
-                      (LitExpr $ ValueLiteral other)
-          $ \ !opRtnV _ets -> do
-              unsafeIOToSTM $ MV.unsafeWrite mvec i opRtnV
-              exitEdh ets exit opRtnV
-      Right EdhAny ->
-        opAssignElems ets opSym other mvec 0 (MV.length mvec) 1
-          $ exitEdh ets exit nil
-      Right EdhAll ->
-        opAssignRange ets opSym other mvec 0 (MV.length mvec) 1 exit
-      Right (EdhSlice !start !stop !step) ->
-        edhRegulateSlice ets (MV.length mvec) (start, stop, step)
-          $ \(!iStart, !iStop, !iStep) ->
-              opAssignRange ets opSym other mvec iStart iStop iStep exit
+    withThisHostObj ets $ \(mvv :: TVar EdhVector) ->
+      readTVar mvv >>= \ !mvec -> parseEdhIndex ets idxVal $ \case
+        Left  !err          -> throwEdh ets UsageError err
+        Right (EdhIndex !i) -> unsafeIOToSTM (MV.read mvec i) >>= \ !oldVal ->
+          runEdhTx ets
+            $ evalInfix opSym
+                        (LitExpr $ ValueLiteral oldVal)
+                        (LitExpr $ ValueLiteral other)
+            $ \ !opRtnV _ets -> do
+                unsafeIOToSTM $ MV.unsafeWrite mvec i opRtnV
+                exitEdh ets exit opRtnV
+        Right EdhAny ->
+          opAssignElems ets opSym other mvec 0 (MV.length mvec) 1
+            $ exitEdh ets exit nil
+        Right EdhAll ->
+          opAssignRange ets opSym other mvec 0 (MV.length mvec) 1 exit
+        Right (EdhSlice !start !stop !step) ->
+          edhRegulateSlice ets (MV.length mvec) (start, stop, step)
+            $ \(!iStart, !iStop, !iStep) ->
+                opAssignRange ets opSym other mvec iStart iStop iStep exit
 
 
   vecNullProc :: EdhHostProc
-  vecNullProc !exit !ets = withThisHostObj ets $ \_ (mvec :: EdhVector) ->
-    exitEdh ets exit $ EdhBool $ MV.length mvec <= 0
+  vecNullProc !exit !ets = withThisHostObj ets $ \(mvv :: TVar EdhVector) ->
+    readTVar mvv >>= \ !mvec -> exitEdh ets exit $ EdhBool $ MV.length mvec <= 0
 
   vecLenProc :: EdhHostProc
-  vecLenProc !exit !ets = withThisHostObj ets $ \_ (mvec :: EdhVector) ->
-    exitEdh ets exit $ EdhDecimal $ fromIntegral $ MV.length mvec
+  vecLenProc !exit !ets = withThisHostObj ets $ \(mvv :: TVar EdhVector) ->
+    readTVar mvv >>= \ !mvec ->
+      exitEdh ets exit $ EdhDecimal $ fromIntegral $ MV.length mvec
 
   vecReprProc :: EdhHostProc
-  vecReprProc !exit !ets = withThisHostObj ets $ \_ (mvec :: EdhVector) -> do
-    let go :: [EdhValue] -> [Text] -> STM ()
-        go [] !rs =
-          exitEdh ets exit
-            $  EdhString
-            $  "Vector("
-            <> T.intercalate "," (reverse rs)
-            <> ")"
-        go (v : rest) rs = edhValueRepr ets v $ \ !r -> go rest (r : rs)
-    !vec <- unsafeIOToSTM $ V.freeze mvec
-    go (V.toList vec) []
+  vecReprProc !exit !ets = withThisHostObj ets $ \(mvv :: TVar EdhVector) ->
+    readTVar mvv >>= \ !mvec -> do
+      let go :: [EdhValue] -> [Text] -> STM ()
+          go [] !rs =
+            exitEdh ets exit
+              $  EdhString
+              $  "Vector("
+              <> T.intercalate "," (reverse rs)
+              <> ")"
+          go (v : rest) rs = edhValueRepr ets v $ \ !r -> go rest (r : rs)
+      !vec <- unsafeIOToSTM $ V.freeze mvec
+      go (V.toList vec) []
 

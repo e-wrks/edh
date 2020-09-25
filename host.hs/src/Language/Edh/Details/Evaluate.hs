@@ -488,9 +488,8 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
 edhCreateHostObj :: Object -> Dynamic -> [Object] -> STM Object
 edhCreateHostObj !clsObj !hsd !supers = do
   !oid <- unsafeIOToSTM newUnique
-  !es  <- HostStore <$> newTVar hsd
   !ss  <- newTVar supers
-  return $ Object oid es clsObj ss
+  return $ Object oid (HostStore hsd) clsObj ss
 
 
 -- Clone `that` object with one of its super object (i.e. `this`) mutated
@@ -505,9 +504,8 @@ edhCloneHostObj
   -> h
   -> (Object -> STM ())
   -> STM ()
-edhCloneHostObj !ets !fromThis !fromThat !newData !exit = do
-  !newStore <- HostStore <$> newTVar (toDyn newData)
-  edhMutCloneObj ets fromThis fromThat newStore exit
+edhCloneHostObj !ets !fromThis !fromThat !newData !exit =
+  edhMutCloneObj ets fromThis fromThat (HostStore $ toDyn newData) exit
 
 
 -- | Construct an Edh object from a class.
@@ -653,10 +651,9 @@ edhMutCloneObj !ets !fromThis !fromThat !newStore !exitEnd =
                           , edh'obj'supers = supersNew
                           }
                     return clsClone
-                  HostStore !hsv -> do
-                    !hsv' <- newTVar =<< readTVar hsv
+                  HostStore !hsd -> do
                     let !objClone = obj { edh'obj'ident  = oidNew
-                                        , edh'obj'store  = HostStore hsv'
+                                        , edh'obj'store  = HostStore hsd
                                         , edh'obj'supers = supersNew
                                         }
                     return objClone
@@ -1725,7 +1722,7 @@ edhThrow !ets !exv = propagateExc exv $ NE.toList $ edh'ctx'stack $ edh'context
 edhErrorUncaught :: EdhThreadState -> EdhValue -> STM ()
 edhErrorUncaught !ets !exv = case exv of
   EdhObject !exo -> case edh'obj'store exo of
-    HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+    HostStore !hsd -> case fromDynamic hsd of
       Just (exc :: SomeException) -> case edhKnownError exc of
         Just !err -> throwSTM err
         Nothing   -> throwSTM $ EdhIOError exc
@@ -1817,7 +1814,7 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
  where
   isProgramHalt !exv = case exv of
     EdhObject !exo -> case edh'obj'store exo of
-      HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+      HostStore !hsd -> case fromDynamic hsd of
         Just (exc :: SomeException) -> case fromException exc of
           Just ProgramHalt{} -> return True
           _                  -> return False
@@ -1883,11 +1880,7 @@ evalEdh' !srcName !lineNo !srcCode !exit !ets = do
 
 
 withThisHostObj
-  :: forall a
-   . Typeable a
-  => EdhThreadState
-  -> (TVar Dynamic -> a -> STM ())
-  -> STM ()
+  :: forall a . Typeable a => EdhThreadState -> (a -> STM ()) -> STM ()
 withThisHostObj !ets =
   withHostObject ets (edh'scope'this $ contextScope $ edh'context ets)
 
@@ -1896,7 +1889,7 @@ withThisHostObj'
    . Typeable a
   => EdhThreadState
   -> STM ()
-  -> (TVar Dynamic -> a -> STM ())
+  -> (a -> STM ())
   -> STM ()
 withThisHostObj' !ets =
   withHostObject' (edh'scope'this $ contextScope $ edh'context ets)
@@ -1906,7 +1899,7 @@ withHostObject
    . Typeable a
   => EdhThreadState
   -> Object
-  -> (TVar Dynamic -> a -> STM ())
+  -> (a -> STM ())
   -> STM ()
 withHostObject !ets !obj !exit = withHostObject' obj naExit exit
  where
@@ -1916,15 +1909,10 @@ withHostObject !ets !obj !exit = withHostObject' obj naExit exit
       <> T.pack (show $ typeRep (Proxy :: Proxy a))
 
 withHostObject'
-  :: forall a
-   . Typeable a
-  => Object
-  -> STM ()
-  -> (TVar Dynamic -> a -> STM ())
-  -> STM ()
+  :: forall a . Typeable a => Object -> STM () -> (a -> STM ()) -> STM ()
 withHostObject' !obj !naExit !exit = case edh'obj'store obj of
-  HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
-    Just (hsd :: a) -> exit hsv hsd
+  HostStore !hsd -> case fromDynamic hsd of
+    Just (hsv :: a) -> exit hsv
     _               -> naExit
   _ -> naExit
 
@@ -1934,7 +1922,7 @@ withDerivedHostObject
    . Typeable a
   => EdhThreadState
   -> Object
-  -> (Object -> TVar Dynamic -> a -> STM ())
+  -> (Object -> a -> STM ())
   -> STM ()
 withDerivedHostObject !ets !endObj !exit = withDerivedHostObject' endObj
                                                                   naExit
@@ -1950,19 +1938,19 @@ withDerivedHostObject'
    . Typeable a
   => Object
   -> STM ()
-  -> (Object -> TVar Dynamic -> a -> STM ())
+  -> (Object -> a -> STM ())
   -> STM ()
 withDerivedHostObject' !endObj !naExit !exit = case edh'obj'store endObj of
-  HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
-    Just (hsd :: a) -> exit endObj hsv hsd
+  HostStore !hsd -> case fromDynamic hsd of
+    Just (hsv :: a) -> exit endObj hsv
     _               -> readTVar (edh'obj'supers endObj) >>= checkSupers
   _ -> readTVar (edh'obj'supers endObj) >>= checkSupers
  where
   checkSupers :: [Object] -> STM ()
   checkSupers []                = naExit
   checkSupers (superObj : rest) = case edh'obj'store superObj of
-    HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
-      Just (hsd :: a) -> exit superObj hsv hsd
+    HostStore !hsd -> case fromDynamic hsd of
+      Just (hsv :: a) -> exit superObj hsv
       _               -> checkSupers rest
     _ -> checkSupers rest
 

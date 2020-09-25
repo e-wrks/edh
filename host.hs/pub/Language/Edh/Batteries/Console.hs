@@ -181,7 +181,7 @@ conReadCommandProc (defaultArg defaultEdhPS1 -> !ps1) (defaultArg defaultEdhPS2 
             -- eval cmd source in scope of the specified object
             Just !inScope -> doReadCmd inScope
             Nothing       -> case edh'obj'store so of
-              HostStore !hsv -> fromDynamic <$> readTVar hsv >>= \case
+              HostStore !hsd -> case fromDynamic hsd of
                 -- the specified objec is a scope object, eval cmd source in
                 -- the wrapped scope
                 Just (inScope :: Scope) -> doReadCmd inScope
