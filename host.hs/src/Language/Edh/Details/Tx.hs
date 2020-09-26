@@ -231,8 +231,11 @@ driveEdhProgram !haltResult !bootCtx !prog = do
           Just !err -> throwIO err
 
           -- give a chance for the Edh code to handle an unknown exception
-          Nothing   -> atomically $ edhWrapException e >>= \ !exo ->
-            writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets $ EdhObject exo
+          Nothing   -> do
+            atomically $ edhWrapException e >>= \ !exo ->
+              writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets $ EdhObject exo
+            -- continue running this thread for the queued exception handler
+            taskLoop
 
   goSTM :: EdhThreadState -> STM () -> IO Bool
   goSTM !etsTask !actTask = loopSTM
