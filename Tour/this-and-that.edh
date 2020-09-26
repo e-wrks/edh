@@ -1,0 +1,29 @@
+
+# %%
+class C {
+  method someMethod() {
+    "What's this? " ++ desc( this ) | console.print
+    "What's that? " ++ desc( that ) | console.print
+  }
+}
+C.someMethod()
+
+# %%
+class D extends C
+D.someMethod()
+
+# %%
+o = C()
+o.someMethod()
+
+# %%
+d = D()
+d.someMethod()
+
+# %%
+class E extends D
+E.someMethod()
+
+# %%
+e = E()
+e.someMethod()

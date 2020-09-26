@@ -142,8 +142,19 @@ resolveEdhInstance !classObj !that = if classObj == edh'obj'class that
 
 lookupEdhObjAttr :: Object -> AttrKey -> STM (Object, EdhValue)
 lookupEdhObjAttr !this !key = lookupEdhSelfAttr this key >>= \case
-  EdhNil -> lookupEdhSuperAttr this key
-  !val   -> return (this, val)
+  EdhNil -> case edh'obj'store this of
+    ClassStore !cls -> readTVar (edh'class'mro cls) >>= searchSuperClasses
+    _               -> lookupEdhSuperAttr this key
+  !val -> return (this, val)
+ where
+  searchSuperClasses :: [Object] -> STM (Object, EdhValue)
+  searchSuperClasses !supers = lookupFromSupers supers
+   where
+    lookupFromSupers [] = return (this, EdhNil)
+    lookupFromSupers (super : rest) =
+      lookupEdhSelfAttr super key >>= \ !val -> case val of
+        EdhNil -> lookupFromSupers rest
+        _      -> return (super, val)
 {-# INLINE lookupEdhObjAttr #-}
 
 lookupEdhSuperAttr :: Object -> AttrKey -> STM (Object, EdhValue)
