@@ -63,8 +63,8 @@ createEdhWorld !console = liftIO $ do
       $ ProcDecl (NamedAttr "<root>") (PackReceiver []) (Right phantomHostProc)
     rootObj  = Object idRoot (HashStore hsRoot) nsClassObj ssRoot
 
-    metaProc = ProcDefi idMeta (AttrByName "<meta>") rootScope
-      $ ProcDecl (NamedAttr "<meta>") (PackReceiver []) (Right phantomHostProc)
+    metaProc = ProcDefi idMeta (AttrByName "class") rootScope
+      $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right phantomHostProc)
     metaClass    = Class metaProc hsMeta phantomAllocator mroMeta
     metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
 
