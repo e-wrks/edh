@@ -138,61 +138,51 @@ conReadCommandProc (defaultArg defaultEdhPS1 -> !ps1) (defaultArg defaultEdhPS2 
                   UsageError
                   "you don't read console from within a transaction"
     else
-      let
-        doReadCmd :: Scope -> STM ()
-        doReadCmd !cmdScope = do
-          !cmdIn <- newEmptyTMVar
-          writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
-          runEdhTx ets
-            $   edhContSTM
-            $   readTMVar cmdIn
-            >>= \(EdhInput !name !lineNo !lines_) ->
-                  runEdhTx etsCmd
-                    $ evalEdh'
-                        (if T.null name then "<console>" else T.unpack name)
-                        lineNo
-                        (T.unlines lines_)
-                    $ edhSwitchState ets
-                    . exitEdhTx exit
-         where
-          !etsCmd = ets
-            { edh'context = ctx
-              { edh'ctx'stack =
-                cmdScope
-                    {
-                      -- mind to inherit caller's exception handler anyway
-                      edh'excpt'hndlr  = edh'excpt'hndlr callerScope
-                      -- use a meaningful caller stmt
-                    , edh'scope'caller = StmtSrc
-                                           ( SourcePos
-                                             { sourceName   = "<console-cmd>"
-                                             , sourceLine   = mkPos 1
-                                             , sourceColumn = mkPos 1
-                                             }
-                                           , VoidStmt
-                                           )
-                    }
-                  NE.:| NE.tail (edh'ctx'stack ctx)
+      let doReadCmd :: Scope -> STM ()
+          doReadCmd !cmdScope = do
+            !cmdIn <- newEmptyTMVar
+            writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
+            runEdhTx ets
+              $   edhContSTM
+              $   readTMVar cmdIn
+              >>= \(EdhInput !name !lineNo !lines_) ->
+                    runEdhTx etsCmd
+                      $ evalEdh'
+                          (if T.null name then "<console>" else T.unpack name)
+                          lineNo
+                          (T.unlines lines_)
+                      $ edhSwitchState ets
+                      . exitEdhTx exit
+           where
+            !etsCmd = ets
+              { edh'context = ctx
+                { edh'ctx'stack =
+                  cmdScope
+                      {
+                        -- mind to inherit caller's exception handler anyway
+                        edh'excpt'hndlr  = edh'excpt'hndlr callerScope
+                        -- use a meaningful caller stmt
+                      , edh'scope'caller = StmtSrc
+                                             ( SourcePos
+                                               { sourceName   = "<console-cmd>"
+                                               , sourceLine   = mkPos 1
+                                               , sourceColumn = mkPos 1
+                                               }
+                                             , VoidStmt
+                                             )
+                      }
+                    NE.:| NE.tail (edh'ctx'stack ctx)
+                }
               }
-            }
-      in
-        case inScopeOf of
-          Just !so -> objectScope so >>= \case
-            -- eval cmd source in scope of the specified object
-            Just !inScope -> doReadCmd inScope
-            Nothing       -> case edh'obj'store so of
-              HostStore !hsd -> case fromDynamic hsd of
-                -- the specified objec is a scope object, eval cmd source in
-                -- the wrapped scope
-                Just (inScope :: Scope) -> doReadCmd inScope
-                _                       -> throwEdh
-                  ets
-                  UsageError
-                  "you don't read command inScopeOf a host object"
-              _ -> error "bug: objectScope not working for non-host object"
-
-          -- eval cmd source with caller's scope
-          _ -> doReadCmd callerScope
+      in  case inScopeOf of
+            Just !so -> castObjSelfStore so >>= \case
+              -- the specified objec is a scope object, eval cmd source in
+              -- the wrapped scope
+              Just (inScope :: Scope) -> doReadCmd inScope
+              -- eval cmd source in scope of the specified object
+              Nothing -> objectScope so >>= \ !inScope -> doReadCmd inScope
+            -- eval cmd source with caller's scope
+            _ -> doReadCmd callerScope
 
  where
   !ctx         = edh'context ets

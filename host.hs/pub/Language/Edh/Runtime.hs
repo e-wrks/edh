@@ -133,12 +133,8 @@ createEdhWorld !console = liftIO $ do
   let scopeAllocator :: "ofObj" ?: Object -> EdhObjectAllocator
       scopeAllocator (optionalArg -> !maybeOfObj) !exit !ets =
         case maybeOfObj of
-          Just !obj -> objectScope obj >>= \case
-            Nothing ->
-              throwEdh ets UsageError
-                $  "no scope from a host object of class: "
-                <> objClassName obj
-            Just !objScope -> exit $ HostStore $ toDyn objScope
+          Just !obj ->
+            objectScope obj >>= \ !objScope -> exit $ HostStore $ toDyn objScope
           Nothing -> exit $ HostStore $ toDyn $ contextScope $ edh'context ets
   !clsScope <- atomically
     $ mkHostClass' rootScope "scope" (allocEdhObj scopeAllocator) hsScope []

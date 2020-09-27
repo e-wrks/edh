@@ -132,7 +132,7 @@ export {
   replWith(m)
   ```
    #}
-  method replWith( obj=this ) {
+  method replWith( obj ) {
 
     console.print( ' * entering a repl within ' ++ obj )
     console.print( ' * key in `quit` to leave the repl.' )

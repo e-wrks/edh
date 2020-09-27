@@ -695,12 +695,8 @@ edhObjExtends !ets !this !superObj !exit = case edh'obj'store this of
 
   !magicSpell = AttrByName "<-^"
 
-  callMagicMethod !mthThis !mthThat !mth = objectScope this >>= \case
-    Nothing ->
-      runEdhTx ets
-        $ callEdhMethod mthThis mthThat mth (ArgsPack [edhNone] odEmpty) id
-        $ \_magicRtn _ets -> exit
-    Just !objScope -> do
+  callMagicMethod !mthThis !mthThat !mth = objectScope this >>= \ !objScope ->
+    do
       !scopeObj <- mkScopeWrapper (edh'context ets) objScope
       runEdhTx ets
         $ callEdhMethod mthThis
@@ -2500,11 +2496,9 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp = if edh'in'tx etsImp
                 _ -> return $ "/" <> relModuName -- todo this confusing?
           -- allocate a loading slot
           !modu         <- edhCreateModule world moduName moduId moduFile
-          !loadingScope <- objectScope modu >>= \case
-            Nothing         -> error "bug: module object has no scope"
-            Just !scopeLoad -> return scopeLoad
-          !postLoads   <- newTVar []
-          !moduSlotVar <- newTVar $ ModuLoading loadingScope postLoads
+          !loadingScope <- objectScope modu
+          !postLoads    <- newTVar []
+          !moduSlotVar  <- newTVar $ ModuLoading loadingScope postLoads
           -- update into world wide module map
           putTMVar worldModules $ Map.insert moduId moduSlotVar moduMap'
           -- try load the module in next transaction
@@ -2568,13 +2562,11 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp = if edh'in'tx etsImp
             normalizedSpec
 
 moduleContext :: EdhWorld -> Object -> STM Context
-moduleContext !world !modu = objectScope modu >>= \case
-  Nothing         -> error "bug: module object has no scope"
-  Just !moduScope -> return worldCtx
-    { edh'ctx'stack        = moduScope <| edh'ctx'stack worldCtx
-    , edh'ctx'exporting    = False
-    , edh'ctx'eff'defining = False
-    }
+moduleContext !world !modu = objectScope modu >>= \ !moduScope -> return
+  worldCtx { edh'ctx'stack        = moduScope <| edh'ctx'stack worldCtx
+           , edh'ctx'exporting    = False
+           , edh'ctx'eff'defining = False
+           }
   where !worldCtx = worldContext world
 
 

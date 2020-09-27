@@ -1546,12 +1546,29 @@ edhProcTypeOf = \case
   EdhDescriptor{} -> DescriptorType
 
 
-objectScope :: Object -> STM (Maybe Scope)
+objectScope :: Object -> STM Scope
 objectScope !obj = case edh'obj'store obj of
 
-  HostStore  _                   -> return Nothing
+  HostStore _ -> do
+    -- provide the scope for a host object with an ad-hoc empty hash entity
+    !hs <- iopdEmpty
+    return Scope
+      { edh'scope'entity  = hs
+      , edh'scope'this    = obj
+      , edh'scope'that    = obj
+      , edh'excpt'hndlr   = defaultEdhExcptHndlr
+      , edh'scope'proc    = ocProc
+      , edh'scope'caller  = StmtSrc
+                              ( SourcePos { sourceName   = "<host-object-scope>"
+                                          , sourceLine   = mkPos 1
+                                          , sourceColumn = mkPos 1
+                                          }
+                              , VoidStmt
+                              )
+      , edh'effects'stack = []
+      }
 
-  ClassStore (Class !cp !cs _ _) -> return $ Just Scope
+  ClassStore (Class !cp !cs _ _) -> return Scope
     { edh'scope'entity  = cs
     , edh'scope'this    = obj
     , edh'scope'that    = obj
@@ -1568,77 +1585,73 @@ objectScope !obj = case edh'obj'store obj of
     }
 
   HashStore !hs ->
-    let !objClass = edh'obj'class obj
+    let mustStr !v = case edhUltimate v of
+          EdhString !s -> s
+          _            -> error $ "bug: not a string - " <> show v
     in
-      case edh'obj'store objClass of
-        ClassStore !cls ->
-          let
-            !cp = edh'class'proc cls
-            mustStr !v = case edhUltimate v of
-              EdhString !s -> s
-              _            -> error $ "bug: not a string - " <> show v
-          in
-            case procedureName cp of
-              "module" -> do
-                !moduPath <-
-                  mustStr
-                    <$> iopdLookupDefault (EdhString "<anonymous>")
-                                          (AttrByName "__path__")
-                                          hs
-                !moduFile <-
-                  mustStr
-                    <$> iopdLookupDefault (EdhString "<on-the-fly>")
-                                          (AttrByName "__file__")
-                                          hs
-                return $ Just Scope
-                  { edh'scope'entity  = hs
-                  , edh'scope'this    = obj
-                  , edh'scope'that    = obj
-                  , edh'excpt'hndlr   = defaultEdhExcptHndlr
-                  , edh'scope'proc    = ProcDefi
-                    { edh'procedure'ident = edh'obj'ident obj
-                    , edh'procedure'name  = AttrByName moduPath
-                    , edh'procedure'lexi  = edh'procedure'lexi cp
-                    , edh'procedure'decl  = ProcDecl
-                      { edh'procedure'addr = NamedAttr moduPath
-                      , edh'procedure'args = PackReceiver []
-                      , edh'procedure'body = Left $ StmtSrc
-                                               ( SourcePos
-                                                 { sourceName   = T.unpack
-                                                                    moduFile
-                                                 , sourceLine   = mkPos 1
-                                                 , sourceColumn = mkPos 1
-                                                 }
-                                               , VoidStmt
-                                               )
-                      }
-                    }
-                  , edh'scope'caller  = StmtSrc
-                                          ( SourcePos { sourceName = "<run-edh>"
-                                                      , sourceLine = mkPos 1
-                                                      , sourceColumn = mkPos 1
-                                                      }
-                                          , VoidStmt
-                                          )
-                  , edh'effects'stack = []
-                  }
-              _ -> return $ Just Scope
-                { edh'scope'entity  = hs
-                , edh'scope'this    = obj
-                , edh'scope'that    = obj
-                , edh'excpt'hndlr   = defaultEdhExcptHndlr
-                , edh'scope'proc    = cp
-                , edh'scope'caller  = StmtSrc
-                                        ( SourcePos
-                                          { sourceName   = "<object-scope>"
-                                          , sourceLine   = mkPos 1
-                                          , sourceColumn = mkPos 1
-                                          }
-                                        , VoidStmt
-                                        )
-                , edh'effects'stack = []
+      case procedureName ocProc of
+        "module" -> do
+          !moduPath <-
+            mustStr
+              <$> iopdLookupDefault (EdhString "<anonymous>")
+                                    (AttrByName "__path__")
+                                    hs
+          !moduFile <-
+            mustStr
+              <$> iopdLookupDefault (EdhString "<on-the-fly>")
+                                    (AttrByName "__file__")
+                                    hs
+          return Scope
+            { edh'scope'entity  = hs
+            , edh'scope'this    = obj
+            , edh'scope'that    = obj
+            , edh'excpt'hndlr   = defaultEdhExcptHndlr
+            , edh'scope'proc    = ProcDefi
+              { edh'procedure'ident = edh'obj'ident obj
+              , edh'procedure'name  = AttrByName moduPath
+              , edh'procedure'lexi  = edh'procedure'lexi ocProc
+              , edh'procedure'decl  = ProcDecl
+                { edh'procedure'addr = NamedAttr moduPath
+                , edh'procedure'args = PackReceiver []
+                , edh'procedure'body = Left $ StmtSrc
+                                         ( SourcePos
+                                           { sourceName   = T.unpack moduFile
+                                           , sourceLine   = mkPos 1
+                                           , sourceColumn = mkPos 1
+                                           }
+                                         , VoidStmt
+                                         )
                 }
-        _ -> error "bug: class of an object not bearing ClassStore"
+              }
+            , edh'scope'caller  = StmtSrc
+                                    ( SourcePos { sourceName   = "<run-edh>"
+                                                , sourceLine   = mkPos 1
+                                                , sourceColumn = mkPos 1
+                                                }
+                                    , VoidStmt
+                                    )
+            , edh'effects'stack = []
+            }
+        _ -> return Scope
+          { edh'scope'entity  = hs
+          , edh'scope'this    = obj
+          , edh'scope'that    = obj
+          , edh'excpt'hndlr   = defaultEdhExcptHndlr
+          , edh'scope'proc    = ocProc
+          , edh'scope'caller  = StmtSrc
+                                  ( SourcePos { sourceName   = "<object-scope>"
+                                              , sourceLine   = mkPos 1
+                                              , sourceColumn = mkPos 1
+                                              }
+                                  , VoidStmt
+                                  )
+          , edh'effects'stack = []
+          }
+ where
+  !oc = case edh'obj'store $ edh'obj'class obj of
+    ClassStore !cls -> cls
+    _               -> error "bug: class of an object not bearing ClassStore"
+  ocProc = edh'class'proc oc
 
 
 -- | Create a reflective object capturing the specified scope as from the

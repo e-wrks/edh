@@ -28,7 +28,6 @@ import           Control.Monad.Reader
 import           Control.Concurrent
 import           Control.Concurrent.STM
 
-import           Data.Maybe
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.Text.IO                  as TIO
@@ -570,7 +569,7 @@ installEdhBatteries world =
         , EdhDecimal (fromIntegral $ consoleLogLevel $ edh'world'console world)
         )
       ]
-    !conScope <- fromJust <$> objectScope console
+    !conScope <- objectScope console
 
     !conArts  <- sequence
       [ (AttrByName nm, ) <$> mkHostProc conScope vc nm hp
