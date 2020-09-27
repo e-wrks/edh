@@ -3775,6 +3775,7 @@ edhValueEqual
 edhValueEqual !ets !lhVal !rhVal !exit = if lhv == rhv
   then exit $ Just True
   else case lhv of
+    EdhNil                -> exit $ Just False
     EdhList (List _ lhll) -> case rhv of
       EdhList (List _ rhll) -> do
         !lhl <- readTVar lhll
@@ -3791,19 +3792,21 @@ edhValueEqual !ets !lhVal !rhVal !exit = if lhv == rhv
           $ exit
           . Just
       _ -> exit $ Just False
-    EdhObject !lhObj -> -- try left-hand magic
-                        lookupEdhObjMagic lhObj (AttrByName "__eq__") >>= \case
-      (_, EdhNil) -> tryRightHandMagic
-      (!this', EdhProcedure (EdhMethod !mth) _) ->
-        runEdhTx ets
-          $ callEdhMethod this' lhObj mth (ArgsPack [rhv] odEmpty) id
-          $ \ !magicRtn _ets -> chkMagicRtn tryRightHandMagic magicRtn
-      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-        runEdhTx ets
-          $ callEdhMethod this that mth (ArgsPack [rhv] odEmpty) id
-          $ \ !magicRtn _ets -> chkMagicRtn tryRightHandMagic magicRtn
-      (_, !badMagic) -> edhValueDesc ets badMagic $ \ !badDesc ->
-        throwEdh ets UsageError $ "malformed __eq__ magic: " <> badDesc
+    EdhObject !lhObj -> case rhv of
+      EdhNil -> exit $ Just False
+      -- try left-hand magic
+      _      -> lookupEdhObjMagic lhObj (AttrByName "__eq__") >>= \case
+        (_, EdhNil) -> tryRightHandMagic
+        (!this', EdhProcedure (EdhMethod !mth) _) ->
+          runEdhTx ets
+            $ callEdhMethod this' lhObj mth (ArgsPack [rhv] odEmpty) id
+            $ \ !magicRtn _ets -> chkMagicRtn tryRightHandMagic magicRtn
+        (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+          runEdhTx ets
+            $ callEdhMethod this that mth (ArgsPack [rhv] odEmpty) id
+            $ \ !magicRtn _ets -> chkMagicRtn tryRightHandMagic magicRtn
+        (_, !badMagic) -> edhValueDesc ets badMagic $ \ !badDesc ->
+          throwEdh ets UsageError $ "malformed __eq__ magic: " <> badDesc
     _ -> tryRightHandMagic
  where
   !lhv = edhUltimate lhVal
