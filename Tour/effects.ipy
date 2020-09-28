@@ -1,0 +1,28 @@
+import asyncio
+from edh import *
+
+
+def effectful_hello():
+    print("Hello, ", effect("user_name"), "!")
+
+
+def effectful_consumer():
+    effect(user_name="wrold")
+
+    effectful_hello()
+
+
+effectful_consumer()
+
+
+async def effectful_hello():
+    print("Hello, ", effect("user_name"), "!")
+
+
+async def effectful_consumer():
+    effect(user_name="wrold")
+
+    await effectful_hello()
+
+
+asyncio.run(effectful_consumer())

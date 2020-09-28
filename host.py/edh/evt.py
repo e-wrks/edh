@@ -137,9 +137,10 @@ class EventSink:
         subsequent events from this sink.
 
         """
-        if self.seqn > 0 and self.mrv is EndOfStream:
-            return  # already at eos
-        yield self.mrv
+        if self.seqn > 0:
+            if self.mrv is EndOfStream:
+                return  # already at eos
+            yield self.mrv
         nxt = self.chan.nxt
         while True:
             (ev, nxt) = await asyncio.shield(nxt)

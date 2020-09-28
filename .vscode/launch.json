@@ -1,0 +1,22 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Pretty Exports",
+            "type": "python",
+            "request": "launch",
+            "env": {},
+            "cwd": "${env:EPM_HOME}/edh-universe",
+            "program": "${env:EPM_HOME}/edh-universe/pretty-exports.py",
+            "args": [],
+            "console": "integratedTerminal"
+        }
+    ]
+}
