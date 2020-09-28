@@ -2,7 +2,7 @@
 Environment variable controlled logger tree from root package.
 
 """
-__all__ = ["root_logger", "get_logger"]
+__all__ = ()
 
 import logging
 import os

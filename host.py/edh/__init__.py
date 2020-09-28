@@ -23,9 +23,6 @@ __all__ = [
     # exports from .expr
     'expr',
 
-    # exports from .log
-    'root_logger', 'get_logger',
-
     # exports from .sym
     'Symbol',
 
@@ -37,5 +34,4 @@ from .ctrl import *
 from .eff import *
 from .evt import *
 from .expr import *
-from .log import *
 from .sym import *

@@ -2,9 +2,9 @@ __all__ = [
     "Symbol",
 ]
 
-from .log import *
+from . import log
 
-logger = get_logger(__name__)
+logger = log.get_logger(__name__)
 
 
 class Symbol:

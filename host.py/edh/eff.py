@@ -7,9 +7,9 @@ from typing import *
 import asyncio
 import inspect
 
-from .log import *
+from . import log
 
-logger = get_logger(__name__)
+logger = log.get_logger(__name__)
 
 
 EFFSKEY = "__effects__"
