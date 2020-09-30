@@ -399,9 +399,9 @@ installEdhBatteries world =
         )
         -- prepand to list
         --     l = [3,7,5]
-        --     2 => l
+        --     2 :> l
         --     [2,3,7,5]
-      , ( "=>"
+      , ( ":>"
         , 2
         )
       -- the pair constructor, creates pairs in Edh
@@ -469,7 +469,7 @@ installEdhBatteries world =
         , ("?<="   , elemProc)
         , ("|*"    , isPrefixOfProc)
         , ("*|"    , hasSuffixProc)
-        , ("=>"    , prpdProc)
+        , (":>"    , prpdProc)
         , (">>"    , lstrvrsPrpdProc)
         , ("<-"    , evtPubProc)
         , ("+"     , addProc)

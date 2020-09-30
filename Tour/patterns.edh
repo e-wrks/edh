@@ -10,7 +10,7 @@ case 3:2 of { ( x:y ) } -> 'the pair pattern can be parenthesised'
 
 case 3*7-5 of { result } -> 'a wild capture pattern receives the ' ++ result
 
-case [ 7, 3, 5 ] of { head => tail } -> 'uncons pattern does uncons, got ' ++ ( head, tail )
+case [ 7, 3, 5 ] of { head :> tail } -> 'uncons pattern does uncons, got ' ++ ( head, tail )
 
 case ( 3, 5, 7 ) of { ( x, y, z ) } -> 'tuple pattern matches the length'
 

@@ -246,7 +246,7 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
           _ -> exitEdh ets exit EdhCaseOther
 
       -- { head => tail } -- uncons pattern
-      [StmtSrc (_, ExprStmt (InfixExpr "=>" (AttrExpr (DirectRef (NamedAttr headName))) (AttrExpr (DirectRef (NamedAttr tailName)))))]
+      [StmtSrc (_, ExprStmt (InfixExpr ":>" (AttrExpr (DirectRef (NamedAttr headName))) (AttrExpr (DirectRef (NamedAttr tailName)))))]
         -> let doMatched headVal tailVal =
                    matchExit
                      [ (AttrByName headName, headVal)

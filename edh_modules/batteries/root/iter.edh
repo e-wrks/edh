@@ -81,8 +81,8 @@ export {
   # resembles `zip` in Haskell
   generator zip( xs, ys ) {
     while true case xs of {
-      { x => xs } -> case ys of {
-        { y => ys } -> {
+      { x :> xs } -> case ys of {
+        { y :> ys } -> {
           yield ( x, y )
         } return nil
       } return nil
@@ -92,9 +92,9 @@ export {
   # resembles `zip3` in Haskell
   generator zip3( xs, ys, zs ) {
     while true case xs of {
-      { x => xs } -> case ys of {
-        { y => ys } -> case zs of {
-          { z => zs } -> {
+      { x :> xs } -> case ys of {
+        { y :> ys } -> case zs of {
+          { z :> zs } -> {
             yield ( x, y, z )
           } return nil
         } return nil

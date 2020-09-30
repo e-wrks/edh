@@ -682,7 +682,7 @@ hasSuffixProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
         $ \ !rhStr -> exitEdh ets exit $ EdhBool $ rhStr `T.isSuffixOf` lhStr
 
 
--- | operator (=>) - prepender
+-- | operator (:>) - prepender
 prpdProc :: EdhIntrinsicOp
 prpdProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
   evalExpr rhExpr $ \ !rhVal ->
