@@ -108,6 +108,56 @@ finallyProc !tryExpr !finallyExpr !exit !etsOuter =
                   rethrow exv
 
 
+-- | operator (=>) - arrow, define an anonymous, bound method
+--
+-- similar to fat arrow in JavaScript
+arrowProc :: EdhIntrinsicOp
+arrowProc !lhExpr !rhExpr !exit !ets =
+  pkr2rcvr (deParen1 lhExpr) $ \ !argsRcvr -> do
+    !idProc <- unsafeIOToSTM newUnique
+    let !pd = ProcDecl (NamedAttr arrowName) argsRcvr $ Left $ StmtSrc
+          (ctxSrcPos, ExprStmt rhExpr)
+        !mth = EdhMethod ProcDefi { edh'procedure'ident = idProc
+                                  , edh'procedure'name  = AttrByName arrowName
+                                  , edh'procedure'lexi  = scope
+                                  , edh'procedure'decl  = pd
+                                  }
+        !boundMth = EdhBoundProc mth
+                                 (edh'scope'this scope)
+                                 (edh'scope'that scope)
+                                 Nothing
+    exitEdh ets exit boundMth
+ where
+  !ctx                           = edh'context ets
+  !scope                         = contextScope ctx
+  StmtSrc (!ctxSrcPos, _ctxStmt) = edh'ctx'stmt ctx
+  !arrowName                     = "<arrow>"
+  pkr2rcvr :: Expr -> (ArgsReceiver -> STM ()) -> STM ()
+  pkr2rcvr (AttrExpr (DirectRef !argAttr)) !rcvrExit =
+    rcvrExit $ SingleReceiver $ RecvArg argAttr Nothing Nothing
+  pkr2rcvr (ArgsPackExpr !argSndrs) !rcvrExit = cnvrt argSndrs []
+   where
+    cnvrt :: [ArgSender] -> [ArgReceiver] -> STM ()
+    cnvrt []            !rcvrs = rcvrExit $ PackReceiver $ reverse rcvrs
+    cnvrt (sndr : rest) !rcvrs = case sndr of
+      UnpackPosArgs (AttrExpr (DirectRef (NamedAttr !argName))) ->
+        cnvrt rest (RecvRestPosArgs argName : rcvrs)
+      UnpackKwArgs (AttrExpr (DirectRef (NamedAttr !argName))) ->
+        cnvrt rest (RecvRestKwArgs argName : rcvrs)
+      UnpackPkArgs (AttrExpr (DirectRef (NamedAttr !argName))) ->
+        cnvrt rest (RecvRestPkArgs argName : rcvrs)
+      SendPosArg (AttrExpr (DirectRef !argAttr)) ->
+        cnvrt rest (RecvArg argAttr Nothing Nothing : rcvrs)
+      SendKwArg !argAttr !defExpr ->
+        cnvrt rest (RecvArg argAttr Nothing (Just defExpr) : rcvrs)
+      !badSndr ->
+        throwEdh ets UsageError $ "invalid argument expr for arrow: " <> T.pack
+          (show badSndr)
+  pkr2rcvr !badArgs _ =
+    throwEdh ets UsageError $ "invalid argument expr for arrow: " <> T.pack
+      (show badArgs)
+
+
 -- | operator (->) - the brancher, if its left-hand matches, early stop its
 -- enclosing code block (commonly a case-of block, but other blocks as well),
 -- with eval-ed result of its right-hand, unless the right-hand result is
