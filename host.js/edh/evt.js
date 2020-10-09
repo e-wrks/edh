@@ -117,7 +117,7 @@ export class EventSink {
     this.chan.write(ev);
   }
 
-  async oneMore() {
+  async next() {
     if (this.seqn > 0 && null === this.mrv) {
       return null; // already at eos
     }
