@@ -11,9 +11,24 @@ while true { # this is the *Loop* in so-called REPL
       #  *) enrich custom behaviors according to `cmd.apk`
       #  *) support more commands
       'quit' -> { break }
-      'dir' -> {
-        hereBlockScope = scope()
-        printDir( ofScope=hereBlockScope.outer )
+      'dir' -> case cmd.apk of {
+        # bare dir command
+        { () } -> {
+          hereBlockScope = scope()
+          printDir( ofScope=hereBlockScope.outer )
+        }
+        # single arg as the target scope
+        { ( tgtScope ) } -> case tgtScope of {
+          { { scope:_ } } -> printDir( ofScope=tgtScope )
+          # todo special treatment for module/namespace ?
+          # { { module:_ } } -> printDir( ofScope=scope( ofObj=tgtScope ) )
+          # { { namespace:_ } } -> printDir( ofScope=scope( ofObj=tgtScope ) )
+          ; | type( tgtScope ) is ObjectType -> printDir(
+            ofScope=scope( ofObj=tgtScope )
+          )
+          _ -> console.print( 'Unexpected args to dir command: ' ++ cmd.apk )
+        }
+        _ -> console.print( 'Unexpected args to dir command: ' ++ cmd.apk )
       }
       _ -> console.print( 'Unsupported command: ' ++ cmd )
     }
