@@ -596,20 +596,10 @@ installEdhBatteries world =
       $  rootOperators
       ++ rootProcs
       ++ [
-
           -- console module
-           ( AttrByName "console"
-           , EdhObject console
-           )
-
-          -- math constants
-          -- todo figure out proper ways to make these really **constant**,
-          --      i.e. not rebindable to other values
-         , ( AttrByName "pi"
-           , EdhDecimal
-             $ Decimal 1 (-40) 31415926535897932384626433832795028841971
-           )
-         ]
+          (AttrByName "console", EdhObject console)
+          --
+                                                   ]
 
     -- import the parts written in Edh 
     runEdhTx ets
