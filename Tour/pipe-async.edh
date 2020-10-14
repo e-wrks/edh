@@ -6,24 +6,21 @@ producer add3( intake, outlet ) {
   for x from intake do outlet <- {
     x+3
   }
-  outlet <- nil # mark end-of-stream
-}
+} @=> outlet <- nil # finally mark end-of-stream
 
 # %%
 producer mul5( intake, outlet ) {
   for x from intake do outlet <- {
     x*5
   }
-  outlet <- nil # mark end-of-stream
-}
+} @=> outlet <- nil # finally mark end-of-stream
 
 # %%
 producer somePipeline ( intake, outlet ) {
   for y from (
     intake | add3 | mul5
   ) do outlet <- y
-  outlet <- nil # mark end-of-stream
-}
+} @=> outlet <- nil # finally mark end-of-stream
 
 # %}
 
