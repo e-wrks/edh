@@ -1,0 +1,48 @@
+
+# %{
+
+# %%
+producer add3( intake, outlet ) {
+  for x from intake do outlet <- {
+    x+3
+  }
+  outlet <- nil # mark end-of-stream
+}
+
+# %%
+producer mul5( intake, outlet ) {
+  for x from intake do outlet <- {
+    x*5
+  }
+  outlet <- nil # mark end-of-stream
+}
+
+# %%
+producer somePipeline ( intake, outlet ) {
+  for y from (
+    intake | add3 | mul5
+  ) do outlet <- y
+  outlet <- nil # mark end-of-stream
+}
+
+# %}
+
+# %%
+producer someStreamIn( bias, outlet ) {
+  outlet <- 3+bias
+  outlet <- 11+bias
+  outlet <- 2+bias
+  outlet <- nil # mark end-of-stream
+}
+
+# %%
+console.print$ ' * the input series:'
+for y from someStreamIn( 300 ) do {
+  console.print( y )
+}
+
+# %%
+console.print$ ' * the output series:'
+for y from someStreamIn( 300 ) | somePipeline do {
+  console.print( y )
+}

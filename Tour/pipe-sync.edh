@@ -1,0 +1,48 @@
+
+# %{
+
+# %%
+generator add3( intake ) {
+  for x from intake() do yield {
+    x+3
+  }
+}
+
+# %%
+generator mul5( intake ) {
+  for x from intake() do yield {
+    x*5
+  }
+}
+
+# %%
+generator somePipeline ( intake ) {
+  for y from mul5( () =>
+    for y' from add3( intake )
+    do yield y'
+  ) do yield y
+}
+
+# %}
+
+# %%
+generator someStreamIn( bias ) {
+  yield 3+bias
+  yield 11+bias
+  yield 2+bias
+}
+
+# %%
+console.print$ ' * the input series:'
+for y from someStreamIn( bias=300 ) do {
+  console.print( y )
+}
+
+# %%
+console.print$ ' * the output series:'
+for y from somePipeline( () =>
+  for y' from someStreamIn( bias=300 )
+  do yield y'
+) do {
+  console.print( y )
+}
