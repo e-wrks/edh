@@ -525,6 +525,7 @@ installEdhBatteries world =
            , (EdhMethod, "__ArgsPackType_args__"   , wrapHostProc apkArgsProc)
            , (EdhMethod, "__ArgsPackType_kwargs__" , wrapHostProc apkKwrgsProc)
            , (EdhMethod, "error"                   , wrapHostProc errorProc)
+           , (EdhMethod, "id"                      , wrapHostProc idProc)
            , (EdhMethod, "str"                     , wrapHostProc strProc)
            , (EdhMethod, "repr"                    , wrapHostProc reprProc)
            , (EdhMethod, "cap"                     , wrapHostProc capProc)
