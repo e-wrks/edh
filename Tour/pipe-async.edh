@@ -1,4 +1,8 @@
 
+# producer procedures are syntatically very appealing to be used in data pipeline
+# definition and assembling
+
+
 # %{
 
 # %%
@@ -45,9 +49,28 @@ for y from someStreamIn( 300 ) | somePipeline do {
 }
 
 
+# %{
+
 # %%
-perceive feedIn=sink | add3 | mul5 { y }
--> console.info<| 'pipe yielded a value: ' ++ y
+# producer based pipelines can be fed lazily / interactively,
+# due to the async nature
+feedIn = sink
+perceive (
+  feedIn | add3 | mul5
+) { y } -> {
+  # note the output to terminal via console.print can be blocked by repl,
+  # so better to use console log here
+  console.info<| 'pipe yielded a value: ' ++ y
+}
+
+
+# %%
+# wait a tiny bit, as following interactive cells may be at run before
+# producer procedures in the pipeline are started
+for _ from console.everyMillis( 10 ) do { break }
+# note for real cases, the race condition should be solved by putting feeding
+# code into another producer procedure with outlet=feedIn
+
 
 # %%
 void feedIn <- 3 + 300
@@ -57,3 +80,11 @@ void feedIn <- 11 + 300
 
 # %%
 void feedIn <- 2 + 300
+
+# %}
+
+
+# %%
+# wait a tiny bit to see all async induced logs, in case this file
+# is run by runedh instead of interactively
+for _ from console.everyMillis( 10 ) do { break }
