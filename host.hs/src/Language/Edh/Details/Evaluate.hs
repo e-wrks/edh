@@ -2576,6 +2576,7 @@ intplExpr !ets !x !exit = case x of
     exit $ LitExpr $ ValueLiteral val
   PrefixExpr !pref !x' ->
     intplExpr ets x' $ \ !x'' -> exit $ PrefixExpr pref x''
+  VoidExpr   !x'          -> intplExpr ets x' $ \ !x'' -> exit $ VoidExpr x''
   AtoIsoExpr !x'          -> intplExpr ets x' $ \ !x'' -> exit $ AtoIsoExpr x''
   IfExpr !cond !cons !alt -> intplExpr ets cond $ \ !cond' ->
     intplStmtSrc ets cons $ \ !cons' -> case alt of
@@ -2969,6 +2970,8 @@ evalExpr (PrefixExpr Guard !expr') !exit = \ !ets -> do
     (ArgsPack [EdhString "standalone guard treated as plain value."] odEmpty)
   runEdhTx ets $ evalExpr expr' exit
 
+evalExpr (VoidExpr !expr) !exit =
+  evalExpr expr $ \_val -> exitEdhTx exit EdhNil
 
 evalExpr (AtoIsoExpr !expr) !exit = \ !ets ->
   runEdhTx ets { edh'in'tx = True } -- ensure in'tx state
@@ -2977,7 +2980,6 @@ evalExpr (AtoIsoExpr !expr) !exit = \ !ets ->
     -- here, so in case a pure context intended, double-parenthesis quoting
     -- will work
     $ \ !val -> edhSwitchState ets $ exit $ edhDeCaseWrap val
-
 
 evalExpr (IfExpr !cond !cseq !alt) !exit = evalExpr cond $ \ !val ->
   case edhUltimate $ edhDeCaseWrap val of

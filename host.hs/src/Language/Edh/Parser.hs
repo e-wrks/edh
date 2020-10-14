@@ -744,6 +744,9 @@ parsePrefixExpr !si = choice
   , (symbol "|" >> notFollowedBy (satisfy isOperatorChar)) >> do
     (x, si') <- parseExprPrec 1 si
     return (PrefixExpr Guard x, si')
+  , keyword "void" >> do
+    (x, si') <- parseExpr si
+    return (VoidExpr x, si')
   , keyword "ai" >> do
     (x, si') <- parseExpr si
     return (AtoIsoExpr x, si')

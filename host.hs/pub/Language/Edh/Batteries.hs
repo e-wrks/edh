@@ -47,8 +47,6 @@ import           Text.Megaparsec
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer    as L
 
-import           Data.Lossless.Decimal         as D
-
 import           Language.Edh.Runtime
 import           Language.Edh.InterOp
 

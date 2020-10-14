@@ -1333,9 +1333,13 @@ data DictKeyExpr =
   deriving (Eq, Show)
 
 data Expr =
+    -- | the expr will be evaluated with result discarded,
+    -- should always result in nil
+    VoidExpr !Expr
+
     -- | atomically isolated, mark an expression to be evaluated in a single
     -- STM transaction as a whole
-    AtoIsoExpr !Expr
+  | AtoIsoExpr !Expr
 
   | LitExpr !Literal
   | PrefixExpr !Prefix !Expr

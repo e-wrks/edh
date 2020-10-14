@@ -16,7 +16,6 @@ import           System.Clock
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.List.NonEmpty            as NE
-import           Data.Dynamic
 
 import           Text.Megaparsec
 
