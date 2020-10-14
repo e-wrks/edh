@@ -43,3 +43,17 @@ console.print$ ' * the output series:'
 for y from someStreamIn( 300 ) | somePipeline do {
   console.print( y )
 }
+
+
+# %%
+perceive feedIn=sink | add3 | mul5 { y }
+-> console.info<| 'pipe yielded a value: ' ++ y
+
+# %%
+void feedIn <- 3 + 300
+
+# %%
+void feedIn <- 11 + 300
+
+# %%
+void feedIn <- 2 + 300
