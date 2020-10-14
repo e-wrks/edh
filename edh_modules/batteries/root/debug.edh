@@ -157,6 +157,10 @@ export {
   ```
    #}
   method replWith( obj ) {
+    if type( obj ) is not ObjectType
+    # if we don't throw here, the while-loop below will loop infinitely,
+    # as it'll try recover from errors
+    then error( 'Not an object but: ' ++ desc( obj ) )
 
     console.print( ' * entering a repl within ' ++ desc( obj ) )
     console.print( ' * key in `quit` or `continue` to leave the repl.' )
