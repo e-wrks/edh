@@ -117,11 +117,11 @@ arrowProc !lhExpr !rhExpr !exit !ets =
     !idProc <- unsafeIOToSTM newUnique
     let !pd = ProcDecl (NamedAttr arrowName) argsRcvr $ Left $ StmtSrc
           (ctxSrcPos, ExprStmt rhExpr)
-        !mth = EdhMethod ProcDefi { edh'procedure'ident = idProc
-                                  , edh'procedure'name  = AttrByName arrowName
-                                  , edh'procedure'lexi  = scope
-                                  , edh'procedure'decl  = pd
-                                  }
+        !mth = procType ProcDefi { edh'procedure'ident = idProc
+                                 , edh'procedure'name  = AttrByName arrowName
+                                 , edh'procedure'lexi  = scope
+                                 , edh'procedure'decl  = pd
+                                 }
         !boundMth = EdhBoundProc mth
                                  (edh'scope'this scope)
                                  (edh'scope'that scope)
@@ -156,6 +156,36 @@ arrowProc !lhExpr !rhExpr !exit !ets =
   pkr2rcvr !badArgs _ =
     throwEdh ets UsageError $ "invalid argument expr for arrow: " <> T.pack
       (show badArgs)
+
+  -- to be a generator if there's a yield somewhere, or to be a vanilla method
+  procType :: ProcDefi -> EdhProc
+  procType = if containsYield rhExpr then EdhGnrtor else EdhMethod
+
+  containsYield :: Expr -> Bool
+  containsYield YieldExpr{}           = True
+  containsYield (ParenExpr       !x ) = containsYield x
+  containsYield (BlockExpr       !bs) = blockContainsYield bs
+  containsYield (ScopedBlockExpr !bs) = blockContainsYield bs
+  containsYield (AtoIsoExpr      !x ) = containsYield x
+  containsYield (PrefixExpr _ !x    ) = containsYield x
+  containsYield (IfExpr !cnd !csq !alt) =
+    containsYield cnd || blockContainsYield [csq] || case alt of
+      Nothing    -> False
+      Just !body -> blockContainsYield [body]
+  containsYield (CaseExpr !t !x   ) = containsYield t || containsYield x
+  containsYield (ForExpr _ !x !b  ) = containsYield x || blockContainsYield [b]
+  containsYield (IndexExpr !t !x  ) = containsYield t || containsYield x
+  containsYield (CallExpr  !x _   ) = containsYield x
+  containsYield (InfixExpr _ !l !r) = containsYield l || containsYield r
+  containsYield _                   = False
+
+  blockContainsYield :: [StmtSrc] -> Bool
+  blockContainsYield []                          = False
+  blockContainsYield (StmtSrc (_, !stmt) : rest) = case stmt of
+    WhileStmt !cnd !body ->
+      containsYield cnd || blockContainsYield [body] || blockContainsYield rest
+    ExprStmt !x -> containsYield x || blockContainsYield rest
+    _           -> blockContainsYield rest
 
 
 -- | operator (->) - the brancher, if its left-hand matches, early stop its
