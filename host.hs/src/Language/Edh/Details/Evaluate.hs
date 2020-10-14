@@ -27,6 +27,8 @@ import           Data.Unique
 import           Data.Dynamic
 import           Data.Typeable
 
+import qualified Data.UUID                     as UUID
+
 import           Text.Megaparsec
 
 import           Data.Lossless.Decimal         as D
@@ -2867,6 +2869,7 @@ edhValueReprTx !val !exit !ets =
 
 edhValueStr :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
 edhValueStr _    (EdhString !s) !exit = exit s
+edhValueStr _    (EdhUUID   !u) !exit = exit $ UUID.toText u
 edhValueStr !ets !v             !exit = edhValueRepr ets v exit
 
 edhValueStrTx :: EdhValue -> EdhTxExit -> EdhTx
