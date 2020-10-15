@@ -9,6 +9,7 @@ import           GHC.Conc                       ( unsafeIOToSTM )
 import           Control.Monad.Reader
 import           Control.Concurrent.STM
 
+import           Data.Maybe
 import           Data.Unique
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
@@ -36,6 +37,39 @@ strEncodeProc !str !exit = exitEdhTx exit $ EdhBlob $ TE.encodeUtf8 str
 
 blobDecodeProc :: ByteString -> EdhHostProc
 blobDecodeProc !blob !exit = exitEdhTx exit $ EdhString $ TE.decodeUtf8 blob
+
+
+blobProc :: EdhValue -> RestKwArgs -> EdhHostProc
+blobProc !val !kwargs !exit !ets = case edhUltimate val of
+  b@EdhBlob{}      -> exitEdh ets exit b
+  (EdhString !str) -> exitEdh ets exit $ EdhBlob $ TE.encodeUtf8 str
+  (EdhObject !o  ) -> lookupEdhObjMagic o (AttrByName "__blob__") >>= \case
+    (_     , EdhNil                         ) -> naExit
+    (!this', EdhProcedure (EdhMethod !mth) _) -> runEdhTx ets
+      $ callEdhMethod this' o mth (ArgsPack [] kwargs) id chkMagicRtn
+    (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+      runEdhTx ets
+        $ callEdhMethod this that mth (ArgsPack [] kwargs) id chkMagicRtn
+    (_, !badMagic) ->
+      throwEdh ets UsageError
+        $  "bad magic __blob__ of "
+        <> T.pack (edhTypeNameOf badMagic)
+        <> " on class "
+        <> objClassName o
+  _ -> naExit
+ where
+  chkMagicRtn !rtn _ets = case edhUltimate rtn of
+    EdhDefault _ !exprDef !etsDef ->
+      runEdhTx (fromMaybe ets etsDef)
+        $ evalExpr (deExpr exprDef)
+        $ \ !defVal _ets -> case defVal of
+            EdhNil -> naExit
+            _      -> exitEdh ets exit defVal
+    _ -> exitEdh ets exit rtn
+  naExit = case odLookup (AttrByName "orElse") kwargs of
+    Just !altVal -> exitEdh ets exit altVal
+    Nothing      -> edhValueDesc ets val $ \ !badDesc ->
+      throwEdh ets UsageError $ "not convertible to blob: " <> badDesc
 
 
 propertyProc :: EdhValue -> Maybe EdhValue -> EdhHostProc
