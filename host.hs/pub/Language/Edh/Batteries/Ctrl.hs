@@ -20,7 +20,7 @@ import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
 
 
--- | operator (::) - arbitrary annotation
+-- | operator (::) - silent annotation
 --
 -- this should have lowest possible precedence and do nothing when eval'ed
 -- so an arbitrary expression, so long as it's syntactically correct,
@@ -32,8 +32,20 @@ import           Language.Edh.Details.Evaluate
 --   x :: StringType
 --   x = 'Hello'
 --
-annoProc :: EdhIntrinsicOp
-annoProc _ _ !exit = exitEdhTx exit nil
+silentAnnoProc :: EdhIntrinsicOp
+silentAnnoProc _ _ !exit = exitEdhTx exit nil
+
+-- | operator (!) - left-dropping annotation
+--
+-- left-hand expression is for static analysing tools only, right-hand
+-- expression takes full effect, e.g.
+--
+--   `js!expr {value: 5}`
+--
+-- can be used to tell the analyzer that the expression is gonna be executed
+-- by a JavaScript interpreter.
+leftAnnoProc :: EdhIntrinsicOp
+leftAnnoProc _ !rhExpr !exit = evalExpr rhExpr exit
 
 
 -- | error(***) - throw an @Exception@

@@ -268,9 +268,10 @@ installEdhBatteries world =
       "<batteries>"
       [ -- format: (symbol, precedence)
 
-        -- annotation
-        ( "::"
-        , -9
+        -- annotations
+        ("::", -9)
+      , ( "!"
+        , 0
         )
 
         -- arrow, make it higher than (=), so an arrow procedure can be
@@ -508,7 +509,8 @@ installEdhBatteries world =
         , ("->"    , branchProc)
         , ("$=>"   , catchProc)
         , ("@=>"   , finallyProc)
-        , ("::"    , annoProc)
+        , ("::"    , silentAnnoProc)
+        , ("!"     , leftAnnoProc)
         , ("<|"    , loggingProc)
         ]
       ]
