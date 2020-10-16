@@ -12,3 +12,88 @@ method effectfulConsumer() {
 
 # %%
 effectfulConsumer()
+
+
+# %%
+
+# simple mockup of a user record
+data User( id, name ) pass
+
+# mockup of interactive password based authentication
+# would consult some hierarchical storage to obtain user info as well as
+# valid the password
+method authenticateUser() {
+  case userId = perform ctxUserId() of {
+    'world' -> {
+      if perform ctxUserToken() is 'valid'
+      then return User( userId, 'World' )
+      else {
+        passPrompt = 'please login'
+        while true case perform requestUserPassword( passPrompt ) of {
+          nil -> { throw BusinessProcessCancelled() }
+          'secret' -> {
+            perform ctxGrantUserToken( 'valid' )
+            return User( userId, 'World' )
+          }
+          _ -> passPrompt = 'your password is incorrect'
+        }
+      }
+    }
+    _ -> error( 'no such user: ' ++ userId )
+  }
+}
+
+# entry point of some business enabling framework
+method lib'doBusiness( businessLogic ) {
+  # prepare the dynamic scoped effects as an environment that businessLogic
+  # expects
+  effect loginUser = authenticateUser()
+  # then do the business in context
+  businessLogic()
+}
+
+# demostrate some reused library function
+method lib'Greet() {
+  user = perform loginUser
+  console.print$ 'Hello, ' ++ user.name ++ '!'
+}
+
+# demostrate some application defined business service, of proper granularity
+method app'SomeService() {
+  lib'doBusiness( () => {
+      # be polite
+      lib'Greet()
+      # do more processing
+      console.print$ 'You are awesome!'
+  } )
+}
+
+# mockup an http endpoint for some service
+method app'mockHttpEndPoint() {
+  # mockup of an http adaptor for a service
+  # it would be from url or post form of the http request
+  namespace requestCtxData(
+    _userToken = None # would be from some cookie
+  ) pass
+  effect {
+    method ctxUserId() 'world' # would be from some request parameter
+    method ctxUserToken() requestCtxData._userToken
+    method ctxGrantUserToken( userToken ) {
+      requestCtxData._userToken = userToken
+      # then set cookie into the response, or some ajax channel
+    }
+    method requestUserPassword( promptMsg ) {
+      if someCancelCondition!false then return nil
+      # would be from some request parameter, or some ajax channel
+      return 'secret'
+    }
+  }
+
+  app'SomeService()
+}
+
+pass
+
+
+# %%
+app'mockHttpEndPoint()
