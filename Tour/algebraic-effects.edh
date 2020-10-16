@@ -1,0 +1,121 @@
+
+# the STATE example at: https://www.eff-lang.org/try/
+
+{
+  # convention: retrieve the state which is an int
+  Get = Symbol( 'Get' )
+  # convention: set the state, should be an int
+  Set = Symbol( 'Set' )
+
+  method better_state ( initial ) {
+    # this anonymous class procedure constructs an object instance,
+    # serving as the state storage
+    # the magic method __init__ receives construction args
+    class _ method __init__ ( act ) {
+      this.s = initial
+      effect method @Get () this.s
+      effect method @Set ( s' ) this.s = s'
+      return ( act(), this.s )
+    }
+  }
+
+  better_state ( 30 ) (
+    # this anonymous nullary procedure simulates a niladic computation
+    { method _ () {
+
+        let x = perform @Get ()
+        perform @Set ( 2 * x )
+        perform @Get () + 10
+
+    } }
+  )
+}
+
+{
+  # convention: retrieve the state which is an int
+  Get = Symbol( 'Get' )
+  # convention: set the state, should be an int
+  Set = Symbol( 'Set' )
+
+  generator better_state ( initial ) {
+    yield {
+      # this anonymous class procedure constructs an object instance,
+      # serving as the state storage
+      # the magic method __init__ receives construction args
+      class _ method __init__ ( act ) {
+        this.s = initial
+        effect method @Get () this.s
+        effect method @Set ( s' ) this.s = s'
+        return ( act(), this.s )
+      }
+    }
+    return initial
+  }
+
+  final'result = for handler from better_state ( 30 ) do
+  block'result = handler (
+    # this anonymous nullary procedure simulates a niladic computation
+    { method _ () {
+
+        let x = perform @Get ()
+        perform @Set ( 2 * x )
+        perform @Get () + 10
+
+    } }
+  )
+
+  console.print( final'result=final'result, block'result=block'result )
+}
+
+
+export mattersLot = Symbol( 'mattersLot' )
+
+{
+
+  method effectsConsumer ( data ) {
+
+    # put 'dataType' into current procedure scope
+    dataType = type( data )
+
+    # put 'dataType' into effect namespace,
+    # so a called effect method can pull it by `behave`,
+    # kinda like a callback mechanism but for effects
+    effect dataType = dataType
+
+    # `perform` pulls out an effect method (could be other values as well),
+    # from effect namespace
+    perform @mattersLot
+    # then we call it from here, just like a vanilla procedure
+    ( 'the data is of ' ++ dataType )
+
+  }
+
+
+  method effectsStaker () {
+
+    # define an effect method into effect namespace
+    effect method @mattersLot( msg ) {
+      console.print( 'It matters a lot: ' ++ msg )
+
+      # `behave` can pull effects (either methods or other values) from
+      # the effect caller, while `perform` can only pull effects from
+      # outer stack relative to where the effect method is defined
+      console.print( 'No doubt the data is of ' ++ behave dataType )
+    }
+    # now we have the effect procedure in context
+
+    # call some procedures make use of the effects
+    # something like `effectsConsumer` should really be imported from
+    # some library modules in real cases
+    effectsConsumer( 3 )
+    effectsConsumer( Symbol( 'awesome' ) )
+
+  }
+
+}
+
+
+effectsStaker()
+
+
+quit
