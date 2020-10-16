@@ -79,7 +79,7 @@ parseStmts !si !ss = (eof >> return (reverse ss, si)) <|> do
   parseStmts si' (s : ss)
 
 parseVoidStmt :: Parser Stmt
-parseVoidStmt = VoidStmt <$ symbol "pass" -- same as Python
+parseVoidStmt = VoidStmt <$ keyword "pass" -- same as Python
 
 parseGoStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseGoStmt !si = do
