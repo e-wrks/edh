@@ -1,0 +1,54 @@
+
+{#
+ # perceiver/defer expressions run as separate Edh threads, though
+ # on the same GHC thread
+ #}
+
+# %{
+
+# %%
+xs = sink
+xsReady = sink
+go {
+  defer {
+    console.info<| 'the thread done.'
+  }
+  {
+    perceive ( outlet=xs ) | producer _( outlet ) {
+      xsReady <- true
+    } {
+      nil -> { break }
+      { x } -> { throw x }
+    }
+    for _ from console.everySeconds( 5 ) do {
+      throw Exception( 'nothing broken in 5 seconds' )
+    }
+  } $=> { exc } -> {
+    # catch blocks run on the thrower's Edh thread, and in case of rethrowing,
+    # outer catch blocks run similarly
+    console.fatal<| 'caught: ' ++ show( exc )
+    # the repl will catch & recover any exception, so the thread will keep
+    # running even we rethrow here.
+    #
+    # in case an exception from a perceiver is uncaught, the whole Edh program
+    # will be terminated, as uncaught exceptions propagate to main thread of
+    # the Edh program, unless the main Edh thread has a root exception handler
+    # installed which does recovery
+    rethrow
+  } @=> {
+    # finally blocks never fire in case some event perceiver throws
+    { exc } -> {
+      console.error<| 'finally got exc: ' ++ show( exc )
+    }
+    console.info<| 'finally block done.'
+  }
+}
+
+# %%
+for _ from xsReady do break
+void xs <- 555
+
+# %}
+
+# %%
+xs <- nil
