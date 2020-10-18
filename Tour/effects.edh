@@ -1,4 +1,29 @@
+{#
+ # dynamic scoped effects
+ #   -- an imperative counterpart of functional monads
+ #
+ # with mathematical methodologies, monads is a mature and powerful machinery
+ # best implemented in a functional programming language, to vend and consume
+ # provisional effects with well defined contexts.
+ # (there is algebraic effects & handlers under active development at time
+ # of speaking - 2020)
+ #
+ # with procedural methodologies, such contextual semantics of APIs are
+ # largely ended up defined and consulted as specifications in descriptive
+ # documentation form, in lieu of language constructs to encode the
+ # applicability of certain effects contextual-wise.
+ #
+ # *dynamic scoped effects* essentially is *dynamic scoping* with a separate
+ # effect registration & resolution space, avoided the failure of traditional
+ # dynamic scoping that lexical artifacts get mixed with callstack provided
+ # artifacts, which has things confusingly messed up.
+ #
+ #}
 
+
+# %{ # technical basics
+
+# %% #
 method effectfulHello() {
   console.print$ 'Hello, ' ++ perform userName ++ '!'
 }
@@ -9,15 +34,20 @@ method effectfulConsumer() {
   effectfulHello()
 }
 
-
-# %%
+# %% # run it
 effectfulConsumer()
 
+# %} # end of technical basics
 
-# %%
 
-# simple mockup of a user record
-data User( id, name ) pass
+# %{ # mockup a services & applications framework
+
+# %% # simple mockup of a user record
+
+data User( id_, name ) pass
+
+
+# %% # middle-ware / library functions leveraging the framework
 
 # mockup of interactive password based authentication
 # would consult some hierarchical storage to obtain user info as well as
@@ -43,7 +73,7 @@ method authenticateUser() {
   }
 }
 
-# entry point of some business enabling framework
+# entry point of the business enabling framework
 method lib'doBusiness( businessLogic ) {
   # prepare the dynamic scoped effects as an environment that businessLogic
   # expects
@@ -58,6 +88,8 @@ method lib'Greet() {
   console.print$ 'Hello, ' ++ user.name ++ '!'
 }
 
+# %% # business services
+
 # demostrate some application defined business service, of proper granularity
 method app'SomeService() {
   lib'doBusiness( () => {
@@ -67,6 +99,8 @@ method app'SomeService() {
       console.print$ 'You are awesome!'
   } )
 }
+
+# %% # technology adapters
 
 # mockup an http endpoint for some service
 method app'mockHttpEndPoint() {
@@ -93,7 +127,9 @@ method app'mockHttpEndPoint() {
 }
 
 pass
+# %} # end of the framework mockup
 
 
-# %%
+# %% # demo/test the mockup
+
 app'mockHttpEndPoint()
