@@ -85,7 +85,7 @@ method lib'doBusiness( businessLogic ) {
 # demostrate some reused library function
 method lib'Greet() {
   user = perform loginUser
-  console.print$ 'Hello, ' ++ user.name ++ '!'
+  perform toCtxUserShow( 'Hello, ' ++ user.name ++ '!' )
 }
 
 # %% # business services
@@ -96,7 +96,7 @@ method app'SomeService() {
       # be polite
       lib'Greet()
       # do more processing
-      console.print$ 'You are awesome!'
+      perform toCtxUserShow( 'You are awesome!' )
   } )
 }
 
@@ -110,6 +110,11 @@ method app'mockHttpEndPoint() {
     _userToken = None # would be from some cookie
   ) pass
   effect {
+    method toCtxUserShow( msg, **formatting'specs ) {
+      # would write the http response body,
+      # or post to some ajax channel
+      console.print( msg, **formatting'specs )
+    }
     method ctxUserId() 'world' # would be from some request parameter
     method ctxUserToken() requestCtxData._userToken
     method ctxGrantUserToken( userToken ) {
