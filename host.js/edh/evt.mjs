@@ -175,7 +175,7 @@ export class EventSink {
             yield ev;
             ev = null;
           }
-          let [curr, _resolve, _reject] = nxt;
+          [curr, _resolve, _reject] = nxt;
         }
       } else {
         // producer still running, next event produced
