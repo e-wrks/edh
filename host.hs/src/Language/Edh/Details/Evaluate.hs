@@ -3360,18 +3360,37 @@ evalExpr (InterpreterExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
     defineScopeAttr ets name mthVal
     exitEdh ets exit mthVal
 
-evalExpr (ProducerExpr pd@(ProcDecl !addr _ _)) !exit = \ !ets ->
-  resolveEdhAttrAddr ets addr $ \ !name -> do
+evalExpr (ProducerExpr !pd) !exit = \ !ets ->
+  resolveEdhAttrAddr ets (edh'procedure'addr pd) $ \ !name -> do
     !idProc <- unsafeIOToSTM newUnique
-    let !mth = EdhPrducr ProcDefi
-          { edh'procedure'ident = idProc
-          , edh'procedure'name  = name
-          , edh'procedure'lexi  = contextScope $ edh'context ets
-          , edh'procedure'decl  = pd
+    let
+      !mth = EdhPrducr ProcDefi
+        { edh'procedure'ident = idProc
+        , edh'procedure'name  = name
+        , edh'procedure'lexi  = contextScope $ edh'context ets
+        , edh'procedure'decl  = pd
+          { edh'procedure'args = alwaysWithOutlet $ edh'procedure'args pd
           }
-        !mthVal = EdhProcedure mth Nothing
+        }
+      !mthVal = EdhProcedure mth Nothing
     defineScopeAttr ets name mthVal
     exitEdh ets exit mthVal
+ where
+  bypassOutlet :: ArgReceiver
+  bypassOutlet = RecvArg (NamedAttr "outlet")
+                         (Just (DirectRef (NamedAttr "_")))
+                         (Just (LitExpr SinkCtor))
+  alwaysWithOutlet :: ArgsReceiver -> ArgsReceiver
+  alwaysWithOutlet asr@(PackReceiver !ars) = go ars
+   where
+    go :: [ArgReceiver] -> ArgsReceiver
+    go []         = PackReceiver $ bypassOutlet : ars
+    go (RecvArg (NamedAttr "outlet") _ _ : _) = asr
+    go (_ : ars') = go ars'
+  alwaysWithOutlet asr@(SingleReceiver (RecvArg (NamedAttr "outlet") _ _)) =
+    asr
+  alwaysWithOutlet (SingleReceiver !sr) = PackReceiver [bypassOutlet, sr]
+  alwaysWithOutlet wr@WildReceiver{}    = wr
 
 evalExpr (OpDeclExpr !opSym !opPrec opProc@(ProcDecl _ _ !pb)) !exit =
   \ !ets -> do

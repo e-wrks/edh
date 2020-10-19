@@ -37,3 +37,14 @@
   }
 
 }
+
+# %%
+chan = sink
+chan <- nil
+
+# %%
+for _ from ( outlet=chan ) | producer _ () { console.info<| 'xxx' } do break
+
+# %%
+( outlet=chan ) | producer _ () { console.info<| 'xxx' }
+chan.latest
