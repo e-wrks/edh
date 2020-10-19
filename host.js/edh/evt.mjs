@@ -103,7 +103,7 @@ export class EventSink {
   constructor() {
     this.seqn = 0;
     this.mrv = null;
-    this.chan = PubChan();
+    this.chan = new PubChan();
   }
 
   publish(ev) {
@@ -131,10 +131,12 @@ export class EventSink {
     subsequent events from this sink.
   */
   async *stream() {
-    if (this.seqn > 0 && null === this.mrv) {
-      return; // already at eos
+    if (this.seqn > 0) {
+      if (null === this.mrv) {
+        return; // already at eos
+      }
+      yield this.mrv;
     }
-    yield this.mrv;
     var nxt = this.chan.nxt;
     while (true) {
       const [curr, _resolve, _reject] = nxt;
