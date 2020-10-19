@@ -274,9 +274,10 @@ installEdhBatteries world =
         , 0
         )
 
-        -- arrow, make it higher than (=), so an arrow procedure can be
+        -- arrows, make it higher than (=), so an arrow procedure can be
         -- assigned to some attribute without quoting
-      , ( "=>"
+      , ("=>", 1)
+      , ( "=>*"
         , 1
         )
         -- branch
@@ -506,6 +507,7 @@ installEdhBatteries world =
         , ("||="   , assignWithOpProc "||")
         , ("?="    , assignMissingProc)
         , ("=>"    , arrowProc)
+        , ("=>*"   , prodArrowProc)
         , ("->"    , branchProc)
         , ("$=>"   , catchProc)
         , ("@=>"   , finallyProc)

@@ -43,8 +43,8 @@ chan = sink
 chan <- nil
 
 # %%
-for _ from ( outlet=chan ) | producer _ () { console.info<| 'xxx' } do break
+for _ from ( outlet=chan ) | () =>* { console.info<| 'xxx' } do break
 
 # %%
-( outlet=chan ) | producer _ () { console.info<| 'xxx' }
+( outlet=chan ) | () =>* { console.info<| 'xxx' }
 chan.latest
