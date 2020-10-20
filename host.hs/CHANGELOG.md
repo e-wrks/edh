@@ -2,6 +2,63 @@
 
 ## 0.3.0.0
 
+- Compositional Class
+
+  Pre _0.3_, there is only the class procedure, but no class object, version
+  _0.3_ introduced the class object (whose class is meta class object).
+
+  **Edh** class is similar to **Python** class in how multiple inheritance
+  is supported with
+  [C3 linearized](https://en.wikipedia.org/wiki/C3_linearization)
+  **mro** list, but unlike **Python**, each super class in the **mro** list
+  of an **Edh** class will instantiate a separate object instance, on
+  construction from an end **Edh** class. Each object instance is constructed
+  with a super object list corresponding to its class' **mro** list, and
+  individual constituent objects can be obtained from an end object by
+  pattern-matching against the desired super class, this is a bit like
+  dynamic upcasting to base class in **C++**.
+
+  As pre _0.3_, an **Edh** object is open to `extends` more super objects
+  after constructed from its class.
+
+- Dynamic Scoped Effects
+
+  Keyword `effect` is introduced for effectful artifact registration, and
+  `perform` / `behave` introduced for the resolution.
+
+- Exception Handling wrt Structured Concurrency
+
+  _0.3_ comes with a working exception handling mechanism, similar to that
+  in **JavaScript** and **Python**.
+
+  Additionally in tackling structured concurrency, spawned threads (go
+  routines) will invoke its spawner's exception handler enclosing the
+  spawn point, for exceptions not handled by inner _catch_ blocks. While
+  _finally_ blocks will never be triggered by spawned threads.
+
+  Especially note that in **Edh**, call frames keep stacking up for a
+  spawned thread atop its spawner's call stack, unlike traditional mechanisms
+  in most other languages/runtimes adhere to POSIX fork semantics. **Edh**
+  made this design choice so as to allow descendant threads to resolve
+  dynamic scoped effects against the call stack even cross the thread
+  boundaries. And the **hosting pattern** can be used to break call stack
+  inheritance, that is technically to have a desirable spawner thread loop
+  against an event stream of callable procedures, and spawn the call for
+  each one there.
+
+- Preemptive Event Perceiver
+
+  The `reactor` procedure before _0.3_ is dropped, `perceive` keyword is
+  introduced since _0.3_ to install a pattern-matching expression (block
+  or single branch) against each event value received from an event sink.
+
+  Event perceivers preempt the execution of the trunk sequence of transactions
+  on the thread.
+
+
+# WIP here
+
+
 - exception throwing and handling work now, but using operators instead of
   keyword based syntax
   - `throw` statement /w syntax unchanged
