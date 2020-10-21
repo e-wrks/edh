@@ -80,10 +80,7 @@ class EdhLexer(RegexLexer):
             include("commentsandwhitespace"),
             # Numeric literal
             (r"([0-9]+\.[0-9]*|[0-9]+)([eE][-+]?[0-9]+)?", Number.Float),
-            (
-                r"[\\=\\~\\!\\@\\#\\$\\%\\^\\&\\|\\:\\<\\>\\?\\+\\-\\*/\\[\\]]+",
-                Operator,
-            ),
+            (r"[\=\~\!\@\#\$\%\^\&\|\:\<\>\?\+\-\*/\[\]]+", Operator,),
             (r"[{(\[;,})\].]", Punctuation),
             (
                 r"(while|for|from|do|break|continue|return|default|case|of|if|then|else|"
