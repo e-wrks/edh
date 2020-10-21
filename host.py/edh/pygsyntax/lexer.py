@@ -5,7 +5,6 @@ Pygments syntax support for Edh
 
 __all__ = [
     "EdhLexer",
-    "setup",
 ]
 
 
