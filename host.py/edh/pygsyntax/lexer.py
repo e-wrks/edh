@@ -95,7 +95,7 @@ class EdhLexer(RegexLexer):
             ),
             (r"(true|false|nil|nan|inf|Nothing|None|NA|EQ|LT|GT)\b", Keyword.Constant),
             (
-                r"(namespace|scope|null|type|constructor|supers|property|setter|dict|"
+                r"(namespace|module|scope|null|type|constructor|supers|property|setter|dict|"
                 r"error|assert|print|abs|max|min|Symbol|id|blob|str|repr|show|desc|cap|"
                 r"grow|len|mark|range|enumerate|replicate|zip|zip3|scope|makeOp|makeExpr|"
                 r"partial|console|batteries|debug)\b",
