@@ -24,15 +24,20 @@
 # %{ # technical basics
 
 # %% #
-method effectfulHello() {
-  console.print$ 'Hello, ' ++ perform userName ++ '!'
+method effectfulHello() void {
+  effect greetingWord = 'Hello'
+
+  perform greetingPhrase() | console.print
 }
 
-method effectfulConsumer() {
-  effect userName = 'world'
+method effectfulConsumer() void {
+  effect method greetingPhrase() {
+    return behave greetingWord ++ ', world!'
+  }
 
   effectfulHello()
 }
+
 
 # %% # run it
 effectfulConsumer()
