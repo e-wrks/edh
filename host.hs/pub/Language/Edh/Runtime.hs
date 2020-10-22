@@ -689,12 +689,21 @@ createEdhWorld !console = liftIO $ do
     where !errObj = edh'scope'this $ contextScope $ edh'context ets
 
 
-  moduleAllocator :: "moduId" !: Text -> EdhObjectAllocator
-  moduleAllocator (EdhArg !moduId) !exit _ets =
-    exit =<< HashStore <$> iopdFromList
-      [ (AttrByName "__path__", EdhString moduId)
-      , (AttrByName "__file__", EdhString "<on-the-fly>")
-      ]
+  moduleAllocator
+    :: "__name__" !: Text
+    -> "__path__" ?: Text
+    -> "__file__" ?: Text
+    -> RestKwArgs
+    -> EdhObjectAllocator
+  moduleAllocator (mandatoryArg -> !moduName) (defaultArg "<ad-hoc>" -> !moduPath) (defaultArg "<on-the-fly>" -> !moduFile) !extraArts !exit _ets
+    = exit =<< HashStore <$> iopdFromList moduArts
+   where
+    moduArts =
+      odToList extraArts
+        ++ [ (AttrByName "__name__", EdhString moduName)
+           , (AttrByName "__path__", EdhString moduPath)
+           , (AttrByName "__file__", EdhString moduFile)
+           ]
 
   mthModuClsRepr :: EdhHostProc
   mthModuClsRepr !exit !ets = do
