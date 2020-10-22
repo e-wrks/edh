@@ -31,7 +31,7 @@ import qualified Data.UUID                     as UUID
 
 import           Text.Megaparsec
 
-import           Data.Lossless.Decimal         as D
+import qualified Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
 import           Language.Edh.Parser
@@ -3779,7 +3779,9 @@ edhIdentEqual (EdhNamedValue x'n x'v) (EdhNamedValue y'n y'v) =
   x'n == y'n && edhIdentEqual x'v y'v
 edhIdentEqual EdhNamedValue{} _               = False
 edhIdentEqual _               EdhNamedValue{} = False
-edhIdentEqual x               y               = x == y
+edhIdentEqual (EdhDecimal (D.Decimal 0 0 0)) (EdhDecimal (D.Decimal 0 0 0)) =
+  True
+edhIdentEqual x y = x == y
 
 edhNamelyEqual
   :: EdhThreadState -> EdhValue -> EdhValue -> (Bool -> STM ()) -> STM ()
