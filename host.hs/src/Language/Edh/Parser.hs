@@ -312,7 +312,7 @@ parseClassExpr !si = do
     , NamedAttr <$> parseAlphaName
     ]
   (body, si') <- parseProcBody si
-  return (ClassExpr $ ProcDecl pn (PackReceiver []) (Left body), si')
+  return (ClassExpr $ ProcDecl pn WildReceiver (Left body), si')
 
 parseDataExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseDataExpr !si = do

@@ -1,4 +1,8 @@
 
+# Edh ADT is similar to Python's PEP 557 -- Data Classes
+# https://www.python.org/dev/peps/pep-0557
+
+
 # %%
 
 Point :: ( DecimalType, DecimalType ) -> Point
@@ -14,6 +18,11 @@ data Circle( center, radius ) {
 origin = Point( 0, 0 )
 unit = Point( 1, 1 )
 c1 = Circle( Point( 3, 5 ), 2.61 )
+
+# %%
+assert$ c1 == Circle( Point( 3, 5 ), 2.61 )
+assert$ c1 != Circle( Point( 3, 5 ), 2.60 )
+
 
 # %%
 case c1.center of {@
