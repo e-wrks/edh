@@ -92,7 +92,10 @@ class EdhLexer(RegexLexer):
                 r"extends|super|import|into|perform|behave|new)\b",
                 Keyword.Reserved,
             ),
-            (r"(true|false|nil|nan|inf|Nothing|None|NA|EQ|LT|GT)\b", Keyword.Constant),
+            (
+                r"(true|false|nil|nan|inf|Nothing|None|NA|All|Any|EQ|LT|GT)\b",
+                Keyword.Constant,
+            ),
             (
                 r"(namespace|module|scope|null|type|constructor|supers|property|setter|dict|"
                 r"error|assert|print|abs|max|min|Symbol|id|blob|str|repr|show|desc|cap|"
