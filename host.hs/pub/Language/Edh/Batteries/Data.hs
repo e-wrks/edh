@@ -686,6 +686,13 @@ isNullProc (ArgsPack !args !kwargs) !exit !ets = if odNull kwargs
           )
 
 
+-- | utility compare(v1, v2) - value comparator
+cmpProc :: EdhValue -> EdhValue -> EdhHostProc
+cmpProc !v1 !v2 !exit !ets = doEdhComparison ets v1 v2 $ \case
+  Nothing          -> exitEdh ets exit edhNA
+  Just !conclusion -> exitEdh ets exit $ EdhOrd conclusion
+
+
 -- | utility type(*args,**kwargs) - value type introspector
 typeProc :: ArgsPack -> EdhHostProc
 typeProc (ArgsPack !args !kwargs) !exit =

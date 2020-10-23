@@ -541,6 +541,7 @@ installEdhBatteries world =
            , (EdhMethod, "desc"                    , wrapHostProc descProc)
            , (EdhMethod, "dict"                    , wrapHostProc dictProc)
            , (EdhMethod, "null"                    , wrapHostProc isNullProc)
+           , (EdhMethod, "compare"                 , wrapHostProc cmpProc)
            , (EdhMethod, "type"                    , wrapHostProc typeProc)
            , (EdhMethod, "__IntrinsicType_name__"  , wrapHostProc procNameProc)
            , (EdhMethod, "__MethodType_name__"     , wrapHostProc procNameProc)

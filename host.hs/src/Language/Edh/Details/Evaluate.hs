@@ -2766,6 +2766,19 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
       <> "`"
 
 
+adtReprProc :: ArgsPack -> EdhHostProc
+adtReprProc _ !exitRepr !ets = case edh'obj'store thisObj of
+  HashStore !hs -> iopdSnapshot hs >>= \ !dataAttrs ->
+    edhValueRepr ets (EdhArgsPack (ArgsPack [] dataAttrs))
+      $ \ !dataAttrsRepr ->
+          exitEdh ets exitRepr
+            $  EdhString
+            $  (edhClassName thisObj)
+            <> dataAttrsRepr
+  _ -> throwEdh ets EvalError "bug: adt object not bearing HashStore"
+  where !thisObj = edh'scope'this $ contextScope $ edh'context ets
+
+
 edhValueRepr :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
 edhValueRepr !ets !val !exitRepr = case val of
 
@@ -3203,69 +3216,27 @@ evalExpr (ClassExpr pd@(ProcDecl !addr !argsRcvr _)) !exit = \ !ets ->
     !cs    <- iopdEmpty
     !ss    <- newTVar []
     !mro   <- newTVar []
-    let
-      allocatorProc :: ArgsPack -> EdhObjectAllocator
-      allocatorProc !apkCtor !exitCtor !etsCtor = case argsRcvr of
-        -- a normal class
-        WildReceiver -> exitCtor =<< HashStore <$> iopdEmpty
-        -- a simple class (ADT)
-        _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
-          iopdFromList (odToList dataAttrs) >>= exitCtor . HashStore
+    let allocatorProc :: ArgsPack -> EdhObjectAllocator
+        allocatorProc !apkCtor !exitCtor !etsCtor = case argsRcvr of
+          -- a normal class
+          WildReceiver -> exitCtor =<< HashStore <$> iopdEmpty
+          -- a simple class (ADT)
+          _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
+            iopdFromList (odToList dataAttrs) >>= exitCtor . HashStore
 
-      adtReprProc :: ArgsPack -> EdhHostProc
-      adtReprProc _ !exitRepr !etsRepr =
-        case
-            edh'obj'store $ edh'scope'this $ contextScope $ edh'context etsRepr
-          of
-            HashStore !hs -> iopdSnapshot hs >>= \ !dataAttrs ->
-              edhValueRepr etsRepr (EdhArgsPack (ArgsPack [] dataAttrs))
-                $ \ !dataAttrsRepr ->
-                    exitEdh etsRepr exitRepr
-                      $  EdhString
-                      $  attrAddrStr addr
-                      <> dataAttrsRepr
-            _ -> throwEdh ets EvalError "bug: adt object not bearing HashStore"
+        !clsProc = ProcDefi { edh'procedure'ident = idCls
+                            , edh'procedure'name  = name
+                            , edh'procedure'lexi  = scope
+                            , edh'procedure'decl  = pd
+                            }
+        !cls    = Class clsProc cs allocatorProc mro
+        !clsObj = Object idCls (ClassStore cls) metaClass ss
 
-      adtEqProc :: ArgsPack -> EdhHostProc
-      adtEqProc !apk !exitEq !etsEq = case apk of
-        ArgsPack [EdhObject !objOther] !kwargs | odNull kwargs ->
-          case
-              edh'obj'store $ edh'scope'this $ contextScope $ edh'context etsEq
-            of
-              HashStore !hs -> iopdSnapshot hs >>= \ !dataAttrs ->
-                resolveEdhInstance clsObj objOther >>= \case
-                  Nothing            -> exitEdh etsEq exitEq $ EdhBool False
-                  Just !dataObjOther -> case edh'obj'store dataObjOther of
-                    HashStore !hsOther ->
-                      iopdSnapshot hsOther >>= \ !dataAttrsOther ->
-                        edhValueEqual
-                            etsEq
-                            (EdhArgsPack (ArgsPack [] dataAttrs))
-                            (EdhArgsPack (ArgsPack [] dataAttrsOther))
-                          $ \case
-                              Nothing -> exitEdh etsEq exitEq nil
-                              Just !conclusion ->
-                                exitEdh etsEq exitEq $ EdhBool conclusion
-                    _ -> throwEdh ets
-                                  EvalError
-                                  "bug: adt object not bearing HashStore"
-              _ ->
-                throwEdh ets EvalError "bug: adt object not bearing HashStore"
-        _ -> exitEdh etsEq exitEq $ EdhBool False
-
-      !clsProc = ProcDefi { edh'procedure'ident = idCls
-                          , edh'procedure'name  = name
-                          , edh'procedure'lexi  = scope
-                          , edh'procedure'decl  = pd
-                          }
-      !cls    = Class clsProc cs allocatorProc mro
-      !clsObj = Object idCls (ClassStore cls) metaClass ss
-
-      doExit _rtn _ets = readTVar ss >>= fillClassMRO cls >>= \case
-        "" -> do
-          defineScopeAttr ets name $ EdhObject clsObj
-          exitEdh ets exit $ EdhObject clsObj
-        !mroInvalid -> throwEdh ets UsageError mroInvalid
+        doExit _rtn _ets = readTVar ss >>= fillClassMRO cls >>= \case
+          "" -> do
+            defineScopeAttr ets name $ EdhObject clsObj
+            exitEdh ets exit $ EdhObject clsObj
+          !mroInvalid -> throwEdh ets UsageError mroInvalid
 
     let !clsScope = Scope { edh'scope'entity  = cs
                           , edh'scope'this    = clsObj
@@ -3293,19 +3264,22 @@ evalExpr (ClassExpr pd@(ProcDecl !addr !argsRcvr _)) !exit = \ !ets ->
           sequence
             $ [ (AttrByName nm, ) <$> mkHostProc clsScope mc nm hp
               | (mc, nm, hp) <-
-                [ ( EdhMethod
-                  , "__repr__"
-                  , (adtReprProc, WildReceiver)
-                  )
+                [ (EdhMethod, "__repr__", (adtReprProc, WildReceiver))
+                , (EdhMethod, "__str__" , (adtReprProc, WildReceiver))
                 , ( EdhMethod
                   , "__eq__"
                   , ( adtEqProc
                     , PackReceiver [RecvArg (NamedAttr "other") Nothing Nothing]
                     )
                   )
+                , ( EdhMethod
+                  , "__compare__"
+                  , ( adtCmpProc
+                    , PackReceiver [RecvArg (NamedAttr "other") Nothing Nothing]
+                    )
+                  )
                 ]
               ]
-              -- TODO impl. __compare__
         iopdUpdate clsArts cs
 
     case edh'procedure'body pd of
@@ -3944,6 +3918,175 @@ edhValueEqual !ets !lhVal !rhVal !exit = if lhv == rhv
       else edhValueEqual ets lhVal' rhVal' $ \case
         Just True        -> cmp2Map lhRest rhRest exit'
         !maybeConclusion -> exit' maybeConclusion
+
+
+adtEqProc :: ArgsPack -> EdhHostProc
+adtEqProc !apk !exit !ets = case apk of
+  ArgsPack [EdhObject !objOther] !kwargs | odNull kwargs ->
+    case edh'obj'store $ edh'scope'this $ contextScope $ edh'context ets of
+      HashStore !hs -> iopdSnapshot hs >>= \ !dataAttrs ->
+        resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
+          Nothing            -> exitEdh ets exit $ EdhBool False
+          Just !dataObjOther -> case edh'obj'store dataObjOther of
+            HashStore !hsOther ->
+              iopdSnapshot hsOther >>= \ !dataAttrsOther ->
+                edhValueEqual ets
+                              (EdhArgsPack (ArgsPack [] dataAttrs))
+                              (EdhArgsPack (ArgsPack [] dataAttrsOther))
+                  $ \case
+                      Nothing          -> exitEdh ets exit edhNA
+                      Just !conclusion -> exitEdh ets exit $ EdhBool conclusion
+            _ -> throwEdh ets EvalError "bug: adt object not bearing HashStore"
+      _ -> throwEdh ets EvalError "bug: adt object not bearing HashStore"
+  _ -> exitEdh ets exit edhNA -- todo interpret kwargs or throw?
+  where !thisObj = edh'scope'this $ contextScope $ edh'context ets
+
+
+adtCmpProc :: ArgsPack -> EdhHostProc
+adtCmpProc !apk !exit !ets = case apk of
+  ArgsPack [EdhObject !objOther] !kwargs | odNull kwargs ->
+    case edh'obj'store $ edh'scope'this $ contextScope $ edh'context ets of
+      HashStore !hs -> iopdSnapshot hs >>= \ !dataAttrs ->
+        resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
+          Nothing            -> exitEdh ets exit $ EdhBool False
+          Just !dataObjOther -> case edh'obj'store dataObjOther of
+            HashStore !hsOther ->
+              iopdSnapshot hsOther >>= \ !dataAttrsOther ->
+                doEdhComparison ets
+                                (EdhArgsPack (ArgsPack [] dataAttrs))
+                                (EdhArgsPack (ArgsPack [] dataAttrsOther))
+                  $ \case
+                      Nothing          -> exitEdh ets exit edhNA
+                      Just !conclusion -> exitEdh ets exit $ EdhOrd conclusion
+            _ -> throwEdh ets EvalError "bug: adt object not bearing HashStore"
+      _ -> throwEdh ets EvalError "bug: adt object not bearing HashStore"
+  _ -> exitEdh ets exit edhNA -- todo interpret kwargs or throw?
+  where !thisObj = edh'scope'this $ contextScope $ edh'context ets
+
+cmpMagicKey :: AttrKey
+cmpMagicKey = AttrByName "__compare__"
+
+doEdhComparison
+  :: EdhThreadState
+  -> EdhValue
+  -> EdhValue
+  -> (Maybe Ordering -> STM ())
+  -> STM ()
+doEdhComparison !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
+  EdhObject !lhObj -> case edh'obj'store lhObj of
+    ClassStore{} ->
+      lookupEdhObjAttr (edh'obj'class lhObj) cmpMagicKey
+        >>= tryMagic id lhObj rhVal tryRightHandMagic
+    _ ->
+      lookupEdhObjAttr lhObj cmpMagicKey
+        >>= tryMagic id lhObj rhVal tryRightHandMagic
+  _ -> tryRightHandMagic
+ where
+
+  inverse :: Ordering -> Ordering
+  inverse = \case
+    EQ -> EQ
+    LT -> GT
+    GT -> LT
+
+  tryRightHandMagic = case edhUltimate rhVal of
+    EdhObject !rhObj -> case edh'obj'store rhObj of
+      ClassStore{} ->
+        lookupEdhObjAttr (edh'obj'class rhObj) cmpMagicKey
+          >>= tryMagic inverse rhObj lhVal noMagic
+      _ ->
+        lookupEdhObjAttr rhObj cmpMagicKey
+          >>= tryMagic inverse rhObj lhVal noMagic
+    _ -> noMagic
+
+  tryMagic
+    :: (Ordering -> Ordering)
+    -> Object
+    -> EdhValue
+    -> STM ()
+    -> (Object, EdhValue)
+    -> STM ()
+  tryMagic !reorder !obj !opponent !naExit = \case
+    (_     , EdhNil                         ) -> naExit
+    (!this', EdhProcedure (EdhMethod !mth) _) -> runEdhTx ets $ callEdhMethod
+      this'
+      obj
+      mth
+      (ArgsPack [opponent] odEmpty)
+      id
+      chkMagicRtn
+    (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+      runEdhTx ets $ callEdhMethod this
+                                   that
+                                   mth
+                                   (ArgsPack [opponent] odEmpty)
+                                   id
+                                   chkMagicRtn
+    (_, !badCmpMagic) -> edhValueDesc ets badCmpMagic $ \ !badDesc ->
+      throwEdh ets UsageError $ "bad __compare__ magic: " <> badDesc
+   where
+    chkMagicRtn :: EdhTxExit
+    chkMagicRtn !magicRtn _ets = case edhUltimate magicRtn of
+      EdhDefault _ !exprDef !etsDef ->
+        runEdhTx (fromMaybe ets etsDef)
+          $ evalExpr (deExpr exprDef)
+          $ \ !defVal _ets -> chkMagicExit defVal
+      _ -> chkMagicExit magicRtn
+     where
+      chkMagicExit :: EdhValue -> STM ()
+      chkMagicExit = \case
+        EdhNil      -> naExit
+        EdhOrd !ord -> exit $ Just $ reorder ord
+        _           -> edhValueDesc ets magicRtn $ \ !badDesc ->
+          throwEdh ets UsageError
+            $  "invalid result from __compare__: "
+            <> badDesc
+
+  noMagic :: STM ()
+  noMagic = case edhUltimate lhVal of
+    EdhDecimal !lhNum -> case edhUltimate rhVal of
+      EdhDecimal !rhNum -> exit $ Just $ compare lhNum rhNum
+      _                 -> exit Nothing
+    EdhString lhStr -> case edhUltimate rhVal of
+      EdhString rhStr -> exit $ Just $ compare lhStr rhStr
+      _               -> exit Nothing
+    EdhBool lhCnd -> case edhUltimate rhVal of
+      EdhBool rhCnd -> exit $ Just $ compare lhCnd rhCnd
+      _             -> exit Nothing
+    EdhArgsPack (ArgsPack !lhArgs !lhKwArgs) -> case edhUltimate rhVal of
+      EdhArgsPack (ArgsPack !rhArgs !rhKwArgs) ->
+        cmpPosArgs lhArgs rhArgs $ \case
+          Nothing     -> exit Nothing
+          Just EQ     -> cmpKwArgs (odToList lhKwArgs) (odToList rhKwArgs) exit
+          !conclusion -> exit conclusion
+      _ -> exit Nothing
+    _ -> exit Nothing
+
+  cmpPosArgs :: [EdhValue] -> [EdhValue] -> (Maybe Ordering -> STM ()) -> STM ()
+  cmpPosArgs []      []      exit' = exit' $ Just EQ
+  cmpPosArgs []      (_ : _) exit' = exit' $ Just LT
+  cmpPosArgs (_ : _) []      exit' = exit' $ Just GT
+  cmpPosArgs (lhHead : lhTail) (rhHead : rhTail) exit' =
+    doEdhComparison ets lhHead rhHead $ \case
+      Nothing     -> exit' Nothing
+      Just EQ     -> cmpPosArgs lhTail rhTail exit'
+      !conclusion -> exit' conclusion
+
+  cmpKwArgs
+    :: [(AttrKey, EdhValue)]
+    -> [(AttrKey, EdhValue)]
+    -> (Maybe Ordering -> STM ())
+    -> STM ()
+  cmpKwArgs []      []      exit' = exit' $ Just EQ
+  cmpKwArgs []      (_ : _) exit' = exit' $ Just LT
+  cmpKwArgs (_ : _) []      exit' = exit' $ Just GT
+  cmpKwArgs ((lhKey, lhHead) : lhTail) ((rhKey, rhHead) : rhTail) exit' =
+    if lhKey /= rhKey
+      then exit' Nothing
+      else doEdhComparison ets lhHead rhHead $ \case
+        Nothing     -> exit' Nothing
+        Just EQ     -> cmpKwArgs lhTail rhTail exit'
+        !conclusion -> exit' conclusion
 
 
 resolveEdhPerform :: EdhThreadState -> AttrKey -> (EdhValue -> STM ()) -> STM ()

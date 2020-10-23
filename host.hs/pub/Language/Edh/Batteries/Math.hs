@@ -4,16 +4,9 @@ module Language.Edh.Batteries.Math where
 import           Prelude
 -- import           Debug.Trace
 
-import           Control.Concurrent.STM
-
-import           Data.Maybe
-
 import           Data.Lossless.Decimal
 
-import           Language.Edh.Control
-import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
-import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.Evaluate
 
 import           Language.Edh.Batteries.Data
@@ -192,94 +185,4 @@ doEdhComparison' !exit !lhVal !rhVal !cm !ets =
   doEdhComparison ets lhVal rhVal $ \case
     Nothing   -> exitEdh ets exit edhNA
     Just !ord -> exitEdh ets exit $ EdhBool $ cm ord
-
-doEdhComparison
-  :: EdhThreadState
-  -> EdhValue
-  -> EdhValue
-  -> (Maybe Ordering -> STM ())
-  -> STM ()
-doEdhComparison !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
-  EdhObject !lhObj -> case edh'obj'store lhObj of
-    ClassStore{} ->
-      lookupEdhObjAttr (edh'obj'class lhObj) cmpMagicKey
-        >>= tryMagic id lhObj rhVal tryRightHandMagic
-    _ ->
-      lookupEdhObjAttr lhObj cmpMagicKey
-        >>= tryMagic id lhObj rhVal tryRightHandMagic
-  _ -> tryRightHandMagic
- where
-  cmpMagicKey = AttrByName "__compare__"
-
-  inverse :: Ordering -> Ordering
-  inverse = \case
-    EQ -> EQ
-    LT -> GT
-    GT -> LT
-
-  tryRightHandMagic = case edhUltimate rhVal of
-    EdhObject !rhObj -> case edh'obj'store rhObj of
-      ClassStore{} ->
-        lookupEdhObjAttr (edh'obj'class rhObj) cmpMagicKey
-          >>= tryMagic inverse rhObj lhVal noMagic
-      _ ->
-        lookupEdhObjAttr rhObj cmpMagicKey
-          >>= tryMagic inverse rhObj lhVal noMagic
-    _ -> noMagic
-
-  tryMagic
-    :: (Ordering -> Ordering)
-    -> Object
-    -> EdhValue
-    -> STM ()
-    -> (Object, EdhValue)
-    -> STM ()
-  tryMagic !reorder !obj !opponent !naExit = \case
-    (_     , EdhNil                         ) -> naExit
-    (!this', EdhProcedure (EdhMethod !mth) _) -> runEdhTx ets $ callEdhMethod
-      this'
-      obj
-      mth
-      (ArgsPack [opponent] odEmpty)
-      id
-      chkMagicRtn
-    (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-      runEdhTx ets $ callEdhMethod this
-                                   that
-                                   mth
-                                   (ArgsPack [opponent] odEmpty)
-                                   id
-                                   chkMagicRtn
-    (_, !badCmpMagic) -> edhValueDesc ets badCmpMagic $ \ !badDesc ->
-      throwEdh ets UsageError $ "bad __compare__ magic: " <> badDesc
-   where
-    chkMagicRtn :: EdhTxExit
-    chkMagicRtn !magicRtn _ets = case edhUltimate magicRtn of
-      EdhDefault _ !exprDef !etsDef ->
-        runEdhTx (fromMaybe ets etsDef)
-          $ evalExpr (deExpr exprDef)
-          $ \ !defVal _ets -> chkMagicExit defVal
-      _ -> chkMagicExit magicRtn
-     where
-      chkMagicExit :: EdhValue -> STM ()
-      chkMagicExit = \case
-        EdhNil      -> naExit
-        EdhOrd !ord -> exit $ Just $ reorder ord
-        _           -> edhValueDesc ets magicRtn $ \ !badDesc ->
-          throwEdh ets UsageError
-            $  "invalid result from __compare__: "
-            <> badDesc
-
-  noMagic :: STM ()
-  noMagic = case edhUltimate lhVal of
-    EdhDecimal !lhNum -> case edhUltimate rhVal of
-      EdhDecimal !rhNum -> exit $ Just $ compare lhNum rhNum
-      _                 -> exit Nothing
-    EdhString lhStr -> case edhUltimate rhVal of
-      EdhString rhStr -> exit $ Just $ compare lhStr rhStr
-      _               -> exit Nothing
-    EdhBool lhCnd -> case edhUltimate rhVal of
-      EdhBool rhCnd -> exit $ Just $ compare lhCnd rhCnd
-      _             -> exit Nothing
-    _ -> exit Nothing
 
