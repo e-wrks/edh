@@ -22,8 +22,6 @@ import qualified Data.HashMap.Strict           as Map
 import           Data.Unique
 import           Data.Dynamic
 
-import           Text.Megaparsec
-
 import           Language.Edh.Control
 import           Language.Edh.Args
 import           Language.Edh.InterOp
@@ -275,13 +273,7 @@ createEdhWorld !console = liftIO $ do
     throwEdhTx EvalError "bug: calling phantom procedure"
 
   genesisStmt :: StmtSrc
-  genesisStmt = StmtSrc
-    ( SourcePos { sourceName   = "<genesis>"
-                , sourceLine   = mkPos 1
-                , sourceColumn = mkPos 1
-                }
-    , VoidStmt
-    )
+  genesisStmt = StmtSrc (startPosOfFile "<genesis>", VoidStmt)
 
 
   mthClassRepr :: EdhHostProc
@@ -382,14 +374,14 @@ createEdhWorld !console = liftIO $ do
             $  "#scope@ "
             <> lexiLoc
             <> "\n#called by: "
-            <> T.pack (sourcePosPretty callerSrcLoc)
+            <> T.pack (prettySourceLoc callerSrcLoc)
 
   mthScopeCallerLoc :: EdhHostProc
   mthScopeCallerLoc !exit !ets =
     withThisHostObj' ets (exitEdh ets exit $ EdhString "<bogus scope object>")
       $ \(scope :: Scope) -> do
           let StmtSrc (!callerSrcLoc, _) = edh'scope'caller scope
-          exitEdh ets exit $ EdhString $ T.pack (sourcePosPretty callerSrcLoc)
+          exitEdh ets exit $ EdhString $ T.pack (prettySourceLoc callerSrcLoc)
 
   mthScopeLexiLoc :: EdhHostProc
   mthScopeLexiLoc !exit !ets =

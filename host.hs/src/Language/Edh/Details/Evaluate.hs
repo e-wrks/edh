@@ -2982,7 +2982,7 @@ evalExpr (PrefixExpr Guard !expr') !exit = \ !ets -> do
       (StmtSrc (!srcPos, _)) = edh'ctx'stmt ctx
   (consoleLogger $ edh'world'console world)
     30
-    (Just $ sourcePosPretty srcPos)
+    (Just $ prettySourceLoc srcPos)
     (ArgsPack [EdhString "standalone guard treated as plain value."] odEmpty)
   runEdhTx ets $ evalExpr expr' exit
 
@@ -3475,7 +3475,7 @@ evalExpr (OpOvrdExpr !opSym !opProc !opPrec) !exit = \ !ets -> do
             !opVal                              -> do
               (consoleLogger $ edh'world'console $ edh'ctx'world ctx)
                   30
-                  (Just $ sourcePosPretty srcPos)
+                  (Just $ prettySourceLoc srcPos)
                 $ ArgsPack
                     [ EdhString
                       $  "overriding an invalid operator "
@@ -4478,11 +4478,5 @@ mkHostClass !scope !className !allocator !superClasses !storeMod = do
     edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
 
   clsCreStmt :: StmtSrc
-  clsCreStmt = StmtSrc
-    ( SourcePos { sourceName   = "<host-class-creation>"
-                , sourceLine   = mkPos 1
-                , sourceColumn = mkPos 1
-                }
-    , VoidStmt
-    )
+  clsCreStmt = StmtSrc (startPosOfFile "<host-class-creation>", VoidStmt)
 

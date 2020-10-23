@@ -36,6 +36,44 @@ sc :: Parser ()
 sc =
   L.space space1 (L.skipLineComment "#") (L.skipBlockCommentNested "{#" "#}")
 
+-- | doc comments must start with "{##", this will return effective lines of
+-- the comments on success
+--
+-- note this consumes whitespaces without backtracking
+docComments :: Parser [Text]
+docComments = findIt <|> (sc >> findIt)
+ where
+  findIt :: Parser [Text]
+  findIt = string "{##" >> cmtLines []
+
+  cmtLines :: [Text] -> Parser [Text]
+  cmtLines cumLines = do
+    s          <- getInput
+    o          <- getOffset
+    (o', done) <- findEoL
+    let line      = maybe "" fst $ takeN_ (o' - o) s
+        cumLines' = cmtLine line : cumLines
+    if done
+      then return
+        $! reverse (if T.null (T.strip line) then cumLines else cumLines')
+      else cmtLines cumLines'
+
+  findEoL :: Parser (Int, Bool)
+  findEoL = doneCmt <|> midCmt <|> (anySingle >> findEoL)
+   where
+    doneCmt = string "#}" >> (, True) <$> getOffset
+    midCmt  = eol >> (, False) <$> getOffset
+
+  cmtLine :: Text -> Text
+  cmtLine s0 =
+    let s1 = T.strip s0
+    in  case T.stripPrefix "#" s1 of
+          Nothing -> s0 -- no leading #, formatter should have stripped all
+                        -- leading spaces, return original content anyway
+          -- with leading #, remove 1 single leading space if present
+          Just s2 -> fromMaybe s2 $ T.stripPrefix " " s2
+
+
 symbol :: Text -> Parser Text
 symbol = L.symbol sc
 
@@ -50,6 +88,7 @@ optionalComma = fromMaybe False <$> optional (True <$ symbol ",")
 
 optionalSemicolon :: Parser Bool
 optionalSemicolon = fromMaybe False <$> optional (True <$ symbol ";")
+
 
 isIdentStart :: Char -> Bool
 isIdentStart !c = c == '_' || Char.isAlpha c
@@ -449,7 +488,7 @@ parseThrowStmt !si = do
 parseStmt' :: Int -> IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
 parseStmt' !prec !si = do
   void optionalSemicolon
-  srcPos      <- getSourcePos
+  startPos    <- getSourcePos
   (stmt, si') <- choice
     [ parseGoStmt si
     , parseDeferStmt si
@@ -474,7 +513,8 @@ parseStmt' !prec !si = do
       -- `illegalExprStart` as invalid start for an expr
     , parseExprPrec prec si >>= \(x, si') -> return (ExprStmt x, si')
     ]
-  return (StmtSrc (srcPos, stmt), si')
+  (SourcePos _ end'line end'col) <- getSourcePos
+  return (StmtSrc (SourceSpan startPos end'line end'col, stmt), si')
 
 parseStmt :: IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
 parseStmt !si = parseStmt' (-10) si

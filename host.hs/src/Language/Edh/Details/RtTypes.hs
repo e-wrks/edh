@@ -266,7 +266,7 @@ defaultEdhExcptHndlr _etsThrower !exv !rethrow = rethrow exv
 -- | Construct an call context from thread state
 getEdhCallContext :: Int -> EdhThreadState -> EdhCallContext
 getEdhCallContext !unwind !ets = EdhCallContext
-  (T.pack $ sourcePosPretty tip)
+  (T.pack $ prettySourceLoc tip)
   frames
  where
   unwindStack :: Int -> [Scope] -> [Scope]
@@ -281,7 +281,7 @@ getEdhCallContext !unwind !ets = EdhCallContext
         (\sfs (Scope _ _ _ _ pd@(ProcDefi _ _ _ (ProcDecl _ _ !procBody)) (StmtSrc (!callerPos, _)) _) ->
           EdhCallFrame (procedureName pd)
                        (procSrcLoc procBody)
-                       (T.pack $ sourcePosPretty callerPos)
+                       (T.pack $ prettySourceLoc callerPos)
             : sfs
         )
         []
@@ -289,7 +289,7 @@ getEdhCallContext !unwind !ets = EdhCallContext
       $ NE.init (edh'ctx'stack ctx)
   procSrcLoc :: Either StmtSrc (ArgsPack -> EdhHostProc) -> Text
   procSrcLoc !procBody = case procBody of
-    Left  (StmtSrc (spos, _)) -> T.pack (sourcePosPretty spos)
+    Left  (StmtSrc (spos, _)) -> T.pack (prettySourceLoc spos)
     Right _                   -> "<host-code>"
 
 edhCreateError :: Int -> EdhThreadState -> EdhErrorTag -> ArgsPack -> EdhError
@@ -338,11 +338,11 @@ data Scope = Scope {
   }
 instance Show Scope where
   show (Scope _ _ _ _ (ProcDefi _ _ _ (ProcDecl !addr _ !procBody)) (StmtSrc (!cPos, _)) _)
-    = "📜 " ++ show addr ++ " 🔎 " ++ defLoc ++ " 👈 " ++ sourcePosPretty cPos
+    = "📜 " ++ show addr ++ " 🔎 " ++ defLoc ++ " 👈 " ++ prettySourceLoc cPos
    where
     defLoc = case procBody of
       Right _                   -> "<host-code>"
-      Left  (StmtSrc (dPos, _)) -> sourcePosPretty dPos
+      Left  (StmtSrc (dPos, _)) -> prettySourceLoc dPos
 
 outerScopeOf :: Scope -> Maybe Scope
 outerScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
@@ -358,7 +358,7 @@ rootScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
 
 scopeLexiLoc :: Scope -> (Text -> STM ()) -> STM ()
 scopeLexiLoc !scope !exit = case pb of
-  Left (StmtSrc (srcLoc, _)) -> exit $ T.pack $ sourcePosPretty srcLoc
+  Left (StmtSrc (srcLoc, _)) -> exit $ T.pack $ prettySourceLoc srcLoc
   Right{} ->
     iopdLookup (AttrByName "__file__") (edh'scope'entity scope) >>= \case
       Nothing           -> exit $ "<host-procedure: " <> procedureName pd <> ">"
@@ -528,13 +528,7 @@ worldContext !world = Context
   , edh'ctx'stack        = edh'world'root world :| []
   , edh'ctx'genr'caller  = Nothing
   , edh'ctx'match        = true
-  , edh'ctx'stmt         = StmtSrc
-                             ( SourcePos { sourceName   = "<world>"
-                                         , sourceLine   = mkPos 1
-                                         , sourceColumn = mkPos 1
-                                         }
-                             , VoidStmt
-                             )
+  , edh'ctx'stmt         = StmtSrc (startPosOfFile "<world>", VoidStmt)
   , edh'ctx'pure         = False
   , edh'ctx'exporting    = False
   , edh'ctx'eff'defining = False
@@ -1154,7 +1148,21 @@ false :: EdhValue
 false = EdhBool False
 
 
-newtype StmtSrc = StmtSrc (SourcePos, Stmt)
+data SourceSpan = SourceSpan {
+  source'span'start :: {-# UNPACK #-} !SourcePos
+  , source'span'end'line :: {-# UNPACK #-} !Pos
+  , source'span'end'column :: {-# UNPACK #-} !Pos
+  }
+instance Eq SourceSpan where
+  (SourceSpan x'start x'end'line x'end'col) == (SourceSpan y'start y'end'line y'end'col)
+    = x'start == y'start && x'end'line == y'end'line && x'end'col == y'end'col
+startPosOfFile :: FilePath -> SourceSpan
+startPosOfFile !n = SourceSpan (initialPos n) pos1 pos1
+prettySourceLoc :: SourceSpan -> String
+prettySourceLoc (SourceSpan !start _ _) = sourcePosPretty start
+
+
+newtype StmtSrc = StmtSrc (SourceSpan, Stmt)
 instance Eq StmtSrc where
   StmtSrc (x'sp, _) == StmtSrc (y'sp, _) = x'sp == y'sp
 instance Show StmtSrc where
@@ -1563,12 +1571,7 @@ objectScope !obj = case edh'obj'store obj of
       , edh'excpt'hndlr   = defaultEdhExcptHndlr
       , edh'scope'proc    = ocProc
       , edh'scope'caller  = StmtSrc
-                              ( SourcePos { sourceName   = "<host-object-scope>"
-                                          , sourceLine   = mkPos 1
-                                          , sourceColumn = mkPos 1
-                                          }
-                              , VoidStmt
-                              )
+                              (startPosOfFile "<host-object-scope>", VoidStmt)
       , edh'effects'stack = []
       }
 
@@ -1578,13 +1581,7 @@ objectScope !obj = case edh'obj'store obj of
     , edh'scope'that    = obj
     , edh'excpt'hndlr   = defaultEdhExcptHndlr
     , edh'scope'proc    = cp
-    , edh'scope'caller  = StmtSrc
-                            ( SourcePos { sourceName   = "<class-scope>"
-                                        , sourceLine   = mkPos 1
-                                        , sourceColumn = mkPos 1
-                                        }
-                            , VoidStmt
-                            )
+    , edh'scope'caller  = StmtSrc (startPosOfFile "<class-scope>", VoidStmt)
     , edh'effects'stack = []
     }
 
@@ -1617,23 +1614,11 @@ objectScope !obj = case edh'obj'store obj of
               , edh'procedure'decl  = ProcDecl
                 { edh'procedure'addr = NamedAttr moduPath
                 , edh'procedure'args = PackReceiver []
-                , edh'procedure'body = Left $ StmtSrc
-                                         ( SourcePos
-                                           { sourceName   = T.unpack moduFile
-                                           , sourceLine   = mkPos 1
-                                           , sourceColumn = mkPos 1
-                                           }
-                                         , VoidStmt
-                                         )
+                , edh'procedure'body = Left
+                  $ StmtSrc (startPosOfFile $ T.unpack moduFile, VoidStmt)
                 }
               }
-            , edh'scope'caller  = StmtSrc
-                                    ( SourcePos { sourceName   = "<run-edh>"
-                                                , sourceLine   = mkPos 1
-                                                , sourceColumn = mkPos 1
-                                                }
-                                    , VoidStmt
-                                    )
+            , edh'scope'caller  = StmtSrc (startPosOfFile "<run-edh>", VoidStmt)
             , edh'effects'stack = []
             }
         _ -> return Scope
@@ -1643,12 +1628,7 @@ objectScope !obj = case edh'obj'store obj of
           , edh'excpt'hndlr   = defaultEdhExcptHndlr
           , edh'scope'proc    = ocProc
           , edh'scope'caller  = StmtSrc
-                                  ( SourcePos { sourceName   = "<object-scope>"
-                                              , sourceLine   = mkPos 1
-                                              , sourceColumn = mkPos 1
-                                              }
-                                  , VoidStmt
-                                  )
+                                  (startPosOfFile "<object-scope>", VoidStmt)
           , edh'effects'stack = []
           }
  where

@@ -17,8 +17,6 @@ import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import qualified Data.List.NonEmpty            as NE
 
-import           Text.Megaparsec
-
 import           Data.Lossless.Decimal          ( Decimal
                                                 , decimalToInteger
                                                 )
@@ -44,7 +42,7 @@ loggingProc !lhExpr !rhExpr !exit !ets =
         then do
           !th <- unsafeIOToSTM myThreadId
           let !tracePrefix =
-                " 🐞 " <> show th <> " 👉 " <> sourcePosPretty srcPos <> " ❗ "
+                " 🐞 " <> show th <> " 👉 " <> prettySourceLoc srcPos <> " ❗ "
           runEdhTx ets $ evalExpr rhExpr $ \ !rhVal _ets ->
             edhValueStr ets (edhDeCaseWrap rhVal) $ \ !logStr ->
               trace (tracePrefix ++ T.unpack logStr) $ exitEdh ets exit nil
@@ -55,7 +53,7 @@ loggingProc !lhExpr !rhExpr !exit !ets =
             let !rhv    = edhDeCaseWrap rhVal
                 !srcLoc = if conLogLevel <= 20
                   then -- with source location info
-                       Just $ sourcePosPretty srcPos
+                       Just $ prettySourceLoc srcPos
                   else -- no source location info
                        Nothing
             case rhv of
@@ -137,51 +135,47 @@ conReadCommandProc (defaultArg defaultEdhPS1 -> !ps1) (defaultArg defaultEdhPS2 
                   UsageError
                   "you don't read console from within a transaction"
     else
-      let doReadCmd :: Scope -> STM ()
-          doReadCmd !cmdScope = do
-            !cmdIn <- newEmptyTMVar
-            writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
-            runEdhTx ets
-              $   edhContSTM
-              $   readTMVar cmdIn
-              >>= \(EdhInput !name !lineNo !lines_) ->
-                    runEdhTx etsCmd
-                      $ evalEdh'
-                          (if T.null name then "<console>" else T.unpack name)
-                          lineNo
-                          (T.unlines lines_)
-                      $ edhSwitchState ets
-                      . exitEdhTx exit
-           where
-            !etsCmd = ets
-              { edh'context = ctx
-                { edh'ctx'stack =
-                  cmdScope
-                      {
-                        -- mind to inherit caller's exception handler anyway
-                        edh'excpt'hndlr  = edh'excpt'hndlr callerScope
-                        -- use a meaningful caller stmt
-                      , edh'scope'caller = StmtSrc
-                                             ( SourcePos
-                                               { sourceName   = "<console-cmd>"
-                                               , sourceLine   = mkPos 1
-                                               , sourceColumn = mkPos 1
-                                               }
-                                             , VoidStmt
-                                             )
-                      }
-                    NE.:| NE.tail (edh'ctx'stack ctx)
-                }
+      let
+        doReadCmd :: Scope -> STM ()
+        doReadCmd !cmdScope = do
+          !cmdIn <- newEmptyTMVar
+          writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
+          runEdhTx ets
+            $   edhContSTM
+            $   readTMVar cmdIn
+            >>= \(EdhInput !name !lineNo !lines_) ->
+                  runEdhTx etsCmd
+                    $ evalEdh'
+                        (if T.null name then "<console>" else T.unpack name)
+                        lineNo
+                        (T.unlines lines_)
+                    $ edhSwitchState ets
+                    . exitEdhTx exit
+         where
+          !etsCmd = ets
+            { edh'context = ctx
+              { edh'ctx'stack =
+                cmdScope
+                    {
+                      -- mind to inherit caller's exception handler anyway
+                      edh'excpt'hndlr  = edh'excpt'hndlr callerScope
+                      -- use a meaningful caller stmt
+                    , edh'scope'caller = StmtSrc
+                      (startPosOfFile "<console-cmd>", VoidStmt)
+                    }
+                  NE.:| NE.tail (edh'ctx'stack ctx)
               }
-      in  case inScopeOf of
-            Just !so -> castObjSelfStore so >>= \case
-              -- the specified objec is a scope object, eval cmd source in
-              -- the wrapped scope
-              Just (inScope :: Scope) -> doReadCmd inScope
-              -- eval cmd source in scope of the specified object
-              Nothing -> objectScope so >>= \ !inScope -> doReadCmd inScope
-            -- eval cmd source with caller's scope
-            _ -> doReadCmd callerScope
+            }
+      in
+        case inScopeOf of
+          Just !so -> castObjSelfStore so >>= \case
+            -- the specified objec is a scope object, eval cmd source in
+            -- the wrapped scope
+            Just (inScope :: Scope) -> doReadCmd inScope
+            -- eval cmd source in scope of the specified object
+            Nothing -> objectScope so >>= \ !inScope -> doReadCmd inScope
+          -- eval cmd source with caller's scope
+          _ -> doReadCmd callerScope
 
  where
   !ctx         = edh'context ets
