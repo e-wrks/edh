@@ -1,6 +1,6 @@
 
-{#
- # this module will be imported by the interpreter into a world's root scope
+{##
+ # this module is imported by the interpreter into every world's root scope
  #}
 
 export {
