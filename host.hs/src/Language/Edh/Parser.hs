@@ -32,63 +32,104 @@ import           Language.Edh.Details.RtTypes
 -- passed around to collect final @[SourceSeg]@ for an expr literal.
 type IntplSrcInfo = (Text, Int, [SourceSeg])
 
+
 sc :: Parser ()
 sc =
   L.space space1 (L.skipLineComment "#") (L.skipBlockCommentNested "{#" "#}")
 
--- | doc comments must start with "{##", this will return effective lines of
--- the comments on success
+-- | doc comment must start with "{##", this will return effective lines of
+-- the comment or Nothing if none there.
 --
--- note this consumes whitespaces without backtracking
-docComments :: Parser [Text]
-docComments = findIt <|> (sc >> findIt)
+-- note whitespaces and a semicolon will be consumed (i.e. no back tracking),
+-- even when Nothing is returned.
+docComments :: Parser (Maybe [Text])
+docComments = findIt
  where
-  findIt :: Parser [Text]
-  findIt = string "{##" >> cmtLines []
+  -- consumer of whitespaces except block comment, plus optional semicolons
+  nbsc   = L.space space1 (L.skipLineComment "#") (void $ char ';')
+
+  -- ignore leading whitespaces and optional semicolons in between,
+  -- then try get a doc comment block
+  findIt = nbsc >> getIt >>= \case
+    Nothing -> optional (L.skipBlockCommentNested "{#" "#}") >>= \case
+      -- there may be a block comment following
+      Nothing -> return Nothing -- no, we are sure there's no doc cmt
+      Just{}  -> findIt -- try again after a block comment consumed
+    gotCmt@Just{} -> return gotCmt -- got doc comment
+
+  getIt = optional (string "{##") >>= \case
+    Nothing -> return Nothing
+    Just{}  -> do
+      -- treat the 1st line specially
+      s          <- getInput
+      o          <- getOffset
+      (o', done) <- findEoL
+      let line     = maybe "" fst $ takeN_ (o' - o) s
+          cumLines = if T.null $ T.strip line then [] else [line]
+      if done then return $ Just $! cumLines else Just <$> cmtLines cumLines
 
   cmtLines :: [Text] -> Parser [Text]
   cmtLines cumLines = do
     s          <- getInput
     o          <- getOffset
     (o', done) <- findEoL
-    let line      = maybe "" fst $ takeN_ (o' - o) s
-        cumLines' = cmtLine line : cumLines
+    let line = maybe "" fst $ takeN_ (o' - o) s
     if done
-      then return
-        $! reverse (if T.null (T.strip line) then cumLines else cumLines')
-      else cmtLines cumLines'
+      then return $! reverse
+        (if T.null (T.strip line) then cumLines else cmtLine line : cumLines)
+      else cmtLines $ cmtLine line : cumLines
 
   findEoL :: Parser (Int, Bool)
-  findEoL = doneCmt <|> midCmt <|> (anySingle >> findEoL)
-   where
-    doneCmt = string "#}" >> (, True) <$> getOffset
-    midCmt  = eol >> (, False) <$> getOffset
+  findEoL = getOffset >>= \ !o -> choice
+    [ string "#}" >> return (o, True)
+    , eol >> return (o, False)
+    , anySingle >> findEoL
+    ]
 
   cmtLine :: Text -> Text
   cmtLine s0 =
     let s1 = T.strip s0
     in  case T.stripPrefix "#" s1 of
-          Nothing -> s0 -- no leading #, formatter should have stripped all
-                        -- leading spaces, return original content anyway
+          Nothing -> s0 -- no leading #, return original content anyway
           -- with leading #, remove 1 single leading space if present
           Just s2 -> fromMaybe s2 $ T.stripPrefix " " s2
 
+-- | get the doc comment immediately before next non-whitespace lexeme, return
+-- the last one if multiple consecutive doc comment blocks present.
+--
+-- note whitespaces will be consumed without back tracking anyway.
+immediateDocComments :: Parser (Maybe [Text])
+immediateDocComments = docComments >>= moreAfter
+ where
+  moreAfter Nothing = return Nothing
+  moreAfter !gotCmt = docComments >>= \case
+    Nothing        -> return gotCmt
+    gotMore@Just{} -> moreAfter gotMore
 
-symbol :: Text -> Parser Text
-symbol = L.symbol sc
 
 lexeme :: Parser a -> Parser a
-lexeme = L.lexeme sc
+lexeme = (sc *>)
+
+symbol :: Text -> Parser Text
+-- TODO backtracking (try) for a symbol seems unnecessarily costly,
+-- if `empty` or sth can silently consume whitespaces, should use that
+-- to avoid unparsing the possible whitespaces before the expected symbol
+symbol = try . lexeme . string
 
 keyword :: Text -> Parser Text
-keyword kw = try $ lexeme (string kw <* notFollowedBy (satisfy isIdentChar))
+keyword !kw = try $ lexeme (string kw <* notFollowedBy (satisfy isIdentChar))
+
 
 optionalComma :: Parser Bool
 optionalComma = fromMaybe False <$> optional (True <$ symbol ",")
 
-optionalSemicolon :: Parser Bool
-optionalSemicolon = fromMaybe False <$> optional (True <$ symbol ";")
-
+optionalSemicolons :: Parser Bool
+optionalSemicolons = chkMore False
+ where
+  chkMore gotIt =
+    choice [spc >> chkMore gotIt, char ';' >> chkMore True, return gotIt]
+  spc = some $ choice
+    [space1, L.skipLineComment "#", L.skipBlockCommentNested "{#" "#}"]
 
 isIdentStart :: Char -> Bool
 isIdentStart !c = c == '_' || Char.isAlpha c
@@ -106,16 +147,20 @@ isOperatorChar c = if c > toEnum 128
 
 parseProgram :: Parser [StmtSrc]
 parseProgram = do
-  s <- getInput
-  void sc
-  (ss, _) <- parseStmts (s, 0, []) []
+  -- TODO use the module doc cmt somewhere
+  _maybeDocCmt <- docComments
+  s            <- getInput
+  (ss, _)      <- parseStmts (s, 0, []) []
   return ss
 
 parseStmts :: IntplSrcInfo -> [StmtSrc] -> Parser ([StmtSrc], IntplSrcInfo)
-parseStmts !si !ss = (eof >> return (reverse ss, si)) <|> do
-  void optionalSemicolon
-  (s, si') <- parseStmt si
-  parseStmts si' (s : ss)
+parseStmts !si !ss = moreStmt <|> done
+ where
+  done     = sc >> eof >> return (reverse ss, si)
+  moreStmt = try $ do
+    (s, si') <- parseStmt si
+    parseStmts si' (s : ss)
+
 
 parseVoidStmt :: Parser Stmt
 parseVoidStmt = VoidStmt <$ keyword "pass" -- same as Python
@@ -222,9 +267,11 @@ parseRetarget = do
   parseAttrAddr
 
 parseKwRecv :: Bool -> Parser ArgReceiver
-parseKwRecv !inPack = do
-  addr    <- parseAttrAddressor
-  retgt   <- optional parseRetarget
+parseKwRecv !inPack = sc >> do
+  addr <- parseAttrAddressor
+  sc
+  retgt <- optional parseRetarget
+  sc
   defExpr <- if inPack then optional parseDefaultExpr else return Nothing
   return $ RecvArg addr (validateTgt retgt) defExpr
  where
@@ -411,7 +458,7 @@ parseWhileStmt !si = do
   return (WhileStmt cnd act, si'')
 
 parseProcDecl :: IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)
-parseProcDecl !si = do
+parseProcDecl !si = sc >> do
   pn <- choice
     [ SymbolicAttr <$> parseAttrSym
     , NamedAttr <$> parseMagicProcName
@@ -487,34 +534,42 @@ parseThrowStmt !si = do
 
 parseStmt' :: Int -> IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
 parseStmt' !prec !si = do
-  void optionalSemicolon
-  startPos    <- getSourcePos
-  (stmt, si') <- choice
-    [ parseGoStmt si
-    , parseDeferStmt si
-    , parseEffectStmt si
-    , parseLetStmt si
-    , parseExtendsStmt si
-    , parsePerceiveStmt si
-    , parseWhileStmt si
-          -- TODO validate <break> must within a loop construct
-    , (BreakStmt, si) <$ keyword "break"
-          -- note <continue> can be the eval'ed value of a proc,
-          --      carrying NotImplemented semantics as in Python
-    , (ContinueStmt, si) <$ keyword "continue"
-          -- TODO validate fallthrough must within a branch block
-    , (FallthroughStmt, si) <$ keyword "fallthrough"
-    , (RethrowStmt, si) <$ keyword "rethrow"
-    , parseReturnStmt si
-    , parseThrowStmt si
-    , (, si) <$> parseVoidStmt
+  -- TODO use docCmt somewhere
+  _maybeDocCmt <- immediateDocComments
+  -- ignore whitespaces and an optional semicolon in between
+  void optionalSemicolons
+  -- TODO in case there have been whitespaces and/or semicolon consumed above,
+  -- empty can't un-consume them, so this is destined to err out at eof.
+  -- if there is any way to become a unit parser here, should go that way
+  (eof >> empty) <|> do
+    -- parse a stmt with source span recorded
+    startPos    <- getSourcePos
+    (stmt, si') <- choice
+      [ parseGoStmt si
+      , parseDeferStmt si
+      , parseEffectStmt si
+      , parseLetStmt si
+      , parseExtendsStmt si
+      , parsePerceiveStmt si
+      , parseWhileStmt si
+            -- TODO validate <break> must within a loop construct
+      , (BreakStmt, si) <$ keyword "break"
+            -- note <continue> can be the eval'ed value of a proc,
+            --      carrying NotImplemented semantics as in Python
+      , (ContinueStmt, si) <$ keyword "continue"
+            -- TODO validate fallthrough must within a branch block
+      , (FallthroughStmt, si) <$ keyword "fallthrough"
+      , (RethrowStmt, si) <$ keyword "rethrow"
+      , parseReturnStmt si
+      , parseThrowStmt si
+      , (, si) <$> parseVoidStmt
 
-      -- NOTE: statements above should probably all be detected by
-      -- `illegalExprStart` as invalid start for an expr
-    , parseExprPrec prec si >>= \(x, si') -> return (ExprStmt x, si')
-    ]
-  (SourcePos _ end'line end'col) <- getSourcePos
-  return (StmtSrc (SourceSpan startPos end'line end'col, stmt), si')
+        -- NOTE: statements above should probably all be detected by
+        -- `illegalExprStart` as invalid start for an expr
+      , parseExprPrec prec si >>= \(x, si') -> return (ExprStmt x, si')
+      ]
+    (SourcePos _ end'line end'col) <- getSourcePos
+    return (StmtSrc (SourceSpan startPos end'line end'col, stmt), si')
 
 parseStmt :: IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
 parseStmt !si = parseStmt' (-10) si
@@ -695,7 +750,7 @@ parseScopedBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseScopedBlock !si0 = void (symbol "{@") >> parseRest [] si0
  where
   parseRest :: [StmtSrc] -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
-  parseRest !t !si = optionalSemicolon *> choice
+  parseRest !t !si = optionalSemicolons *> choice
     [ symbol "@}" $> (ScopedBlockExpr $ reverse t, si)
     , do
       (ss, si') <- parseStmt si
@@ -707,7 +762,7 @@ parseDictOrBlock !si0 = symbol "{"
   *> choice [try $ parseDictEntries si0 [], parseBlockRest [] si0]
  where
   parseBlockRest :: [StmtSrc] -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
-  parseBlockRest !t !si = optionalSemicolon *> choice
+  parseBlockRest !t !si = optionalSemicolons *> choice
     [ symbol "}" $> (BlockExpr $ reverse t, si)
     , do
       (ss, si') <- parseStmt si
@@ -715,7 +770,7 @@ parseDictOrBlock !si0 = symbol "{"
     ]
   parseDictEntries
     :: IntplSrcInfo -> [(DictKeyExpr, Expr)] -> Parser (Expr, IntplSrcInfo)
-  parseDictEntries !si !es = optionalSemicolon >>= \case
+  parseDictEntries !si !es = optionalSemicolons >>= \case
     True  -> fail "should be block instead of dict"
     -- note: keep the order of entries reversed here as written in source
     False -> optionalComma *> (symbol "}" $> (DictExpr es, si)) <|> do
@@ -869,7 +924,7 @@ parseIntplExpr (s, o, sss) = do
   return (IntplExpr x, (s', o'', sss''))
 
 parseExprPrec :: Precedence -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
-parseExprPrec prec !si = lookAhead illegalExprStart >>= \case
+parseExprPrec prec !si = sc >> lookAhead illegalExprStart >>= \case
   True  -> fail "illegal expression"
   False -> ((, si) <$> parseExprLit) <|> parseIntplExpr si <|> do
     (x, si') <- choice
