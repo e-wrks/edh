@@ -1,4 +1,27 @@
 
+# to define the mid-dot operator
+# for how to input it, see: https://middot.net/
+
+operator · 0 ( f, g ) x => { x | g | f }
+
+# %%
+
+let ( f, g, ) = (
+  x => x+5,
+  x => x*3,
+)
+
+let p = f · g
+
+# %%
+p|desc
+
+# %%
+2 | p
+
+
+# %%
+
 # Some fancy chars can be used in operators
 #
 # 🔀🔁🔂⏩⏪🔼⏫🔽⏬⏹️

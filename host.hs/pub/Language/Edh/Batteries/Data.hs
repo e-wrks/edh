@@ -637,25 +637,25 @@ descProc !v !kwargs !exit !ets = case edhUltimate v of
   EdhProcedure !callable Nothing ->
     exitEdh ets exit
       $  EdhString
-      $  "It is a procedure: "
+      $  "It is a "
       <> T.pack (show callable)
       <> docString (callableDoc callable)
   EdhProcedure !callable Just{} ->
     exitEdh ets exit
       $  EdhString
-      $  "It is an effectful procedure: "
+      $  "It is an effectful "
       <> T.pack (show callable)
       <> docString (callableDoc callable)
   EdhBoundProc !callable _ _ Nothing ->
     exitEdh ets exit
       $  EdhString
-      $  "It is a bound procedure: "
+      $  "It is a bound "
       <> T.pack (show callable)
       <> docString (callableDoc callable)
   EdhBoundProc !callable _ _ Just{} ->
     exitEdh ets exit
       $  EdhString
-      $  "It is an effectful bound procedure: "
+      $  "It is an effectful bound "
       <> T.pack (show callable)
       <> docString (callableDoc callable)
   _ ->

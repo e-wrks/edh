@@ -126,9 +126,20 @@ isDigit :: Char -> Bool
 isDigit = flip elem ['0' .. '9']
 
 isOperatorChar :: Char -> Bool
-isOperatorChar c = if c > toEnum 128
-  then Char.isSymbol c
-  else elem c ("=~!@#$%^&|:<>?+-*/" :: [Char])
+isOperatorChar c = if c < toEnum 128
+  then elem c ("=~!@#$%^&|:<>?+-*/" :: [Char])
+  else case Char.generalCategory c of
+    Char.MathSymbol           -> True
+    Char.CurrencySymbol       -> True
+    Char.ModifierSymbol       -> True
+    Char.OtherSymbol          -> True
+
+    Char.ConnectorPunctuation -> True
+    Char.DashPunctuation      -> True
+    Char.OtherPunctuation     -> True
+
+    _                         -> False
+
 
 parseProgram :: Parser ([StmtSrc], Maybe DocComment)
 parseProgram = do
@@ -463,10 +474,12 @@ isMagicProcChar c = isOperatorChar c || elem c ("[]" :: [Char])
 parseOpDeclOvrdExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseOpDeclOvrdExpr !si = do
   void $ keyword "operator"
-  srcPos      <- getSourcePos
-  errRptPos   <- getOffset
-  opSym       <- parseOpLit
-  precDecl    <- optional $ L.decimal <* sc
+  srcPos    <- getSourcePos
+  errRptPos <- getOffset
+  opSym     <- parseOpLit
+  void sc
+  -- can be any integer, no space allowed after +/- sign
+  precDecl    <- optional $ L.signed (pure ()) L.decimal <* sc
   -- todo restrict forms of valid args receiver for operators, e.g. 
   --  * 2 pos-args - simple lh/rh value receiving operator
   --  * 3 pos-args - caller scope + lh/rh expr receiving operator
@@ -483,22 +496,23 @@ parseOpDeclOvrdExpr !si = do
           <> T.unpack opSym
           <> " ?"
       Just (opPrec, _) -> return (OpOvrdExpr opSym procDecl opPrec, si')
-    Just opPrec -> do
-      when (opPrec < 0 || opPrec >= 10) $ do
-        setOffset errRptPos
-        fail $ "invalid operator precedence: " <> show opPrec
-      case Map.lookup opSym opPD of
-        Nothing       -> return ()
-        Just (_, odl) -> do
+    Just opPrec -> case Map.lookup opSym opPD of
+      Nothing -> do
+        put $ Map.insert opSym (opPrec, T.pack $ sourcePosPretty srcPos) opPD
+        return (OpDeclExpr opSym opPrec procDecl, si')
+      Just (prevPrec, odl) -> if prevPrec == opPrec
+        then return (OpOvrdExpr opSym procDecl opPrec, si')
+        else do
           setOffset errRptPos
           fail
             $  "redeclaring operator "
             <> T.unpack opSym
-            <> " which has been declared at "
+            <> " with a different precedence ("
+            <> show opPrec
+            <> " vs "
+            <> show prevPrec
+            <> "), it has been declared at "
             <> T.unpack odl
-            <> ", omit the precedence if you mean to override it."
-      put $ Map.insert opSym (opPrec, T.pack $ sourcePosPretty srcPos) opPD
-      return (OpDeclExpr opSym opPrec procDecl, si')
 
 parseReturnStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseReturnStmt !si = do
