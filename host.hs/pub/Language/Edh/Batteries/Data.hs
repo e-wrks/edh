@@ -629,28 +629,59 @@ descProc (EdhArgsPack (ArgsPack [!v] !kwargs')) !kwargs !exit !ets
   | odNull kwargs = descProc v kwargs' exit ets
 descProc !v !kwargs !exit !ets = case edhUltimate v of
   EdhObject !o -> case edh'obj'store o of
-    ClassStore{} -> lookupEdhObjMagic (edh'obj'class o) (AttrByName "__desc__")
-      >>= descWithMagic o
+    ClassStore{} ->
+      lookupEdhObjMagic (edh'obj'class o) (AttrByName "__desc__") >>= \case
+        (_, EdhNil) -> exitEdh ets exit $ EdhString $ classDocString o
+        !magicMth   -> descWithMagic o magicMth
     _ -> lookupEdhObjMagic o (AttrByName "__desc__") >>= descWithMagic o
   EdhProcedure !callable Nothing ->
-    exitEdh ets exit $ EdhString $ "It is a procedure: " <> T.pack
-      (show callable)
+    exitEdh ets exit
+      $  EdhString
+      $  "It is a procedure: "
+      <> T.pack (show callable)
+      <> docString (callableDoc callable)
   EdhProcedure !callable Just{} ->
-    exitEdh ets exit $ EdhString $ "It is an effectful procedure: " <> T.pack
-      (show callable)
+    exitEdh ets exit
+      $  EdhString
+      $  "It is an effectful procedure: "
+      <> T.pack (show callable)
+      <> docString (callableDoc callable)
   EdhBoundProc !callable _ _ Nothing ->
-    exitEdh ets exit $ EdhString $ "It is a bound procedure: " <> T.pack
-      (show callable)
+    exitEdh ets exit
+      $  EdhString
+      $  "It is a bound procedure: "
+      <> T.pack (show callable)
+      <> docString (callableDoc callable)
   EdhBoundProc !callable _ _ Just{} ->
     exitEdh ets exit
       $  EdhString
       $  "It is an effectful bound procedure: "
       <> T.pack (show callable)
-  _ -> descWithNoMagic
- where -- TODO specialize more informative description (statistical wise) for
-      --      intrinsic types of values
+      <> docString (callableDoc callable)
+  _ ->
+    edhValueDesc ets v $ \ !d -> exitEdh ets exit $ EdhString $ "It is a " <> d
+ where
+  docString :: Maybe DocComment -> Text
+  -- todo process ReST formatting?
+  docString !docCmt =
+    maybe "" (("\n * doc comments *\n" <>) . T.unlines) docCmt
+
+  classDocString :: Object -> Text
+  classDocString !c = case edh'obj'store c of
+    ClassStore (Class !cp _ _ _) ->
+      "class "
+        <> procedureName cp
+        -- TODO show super classes it extends
+        <> docString (edh'procedure'doc cp)
+        -- TODO show member methods / properties / static attrs etc.
+    _ -> "class " <> edhClassName c
+
+  -- TODO specialize more informative description (statistical wise) for
+  --      intrinsic types of values
   descWithMagic !o = \case
-    (_, EdhNil) -> descWithNoMagic
+    (_, EdhNil) ->
+      exitEdh ets exit $ EdhString $ "It is an object of " <> classDocString
+        (edh'obj'class o)
     (!this', EdhProcedure (EdhMethod !mth) _) ->
       runEdhTx ets $ callEdhMethod this' o mth (ArgsPack [] kwargs) id exit
     (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
@@ -661,8 +692,6 @@ descProc !v !kwargs !exit !ets = case edhUltimate v of
         <> T.pack (edhTypeNameOf badMagic)
         <> " on class "
         <> objClassName o
-  descWithNoMagic =
-    edhValueDesc ets v $ \ !d -> exitEdh ets exit $ EdhString $ "It is a " <> d
 
 
 -- | utility null(*args,**kwargs) - null tester

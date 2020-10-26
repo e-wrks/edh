@@ -278,7 +278,7 @@ getEdhCallContext !unwind !ets = EdhCallContext
   (StmtSrc (!tip, _)) = edh'ctx'stmt ctx
   !frames =
     foldl'
-        (\sfs (Scope _ _ _ _ pd@(ProcDefi _ _ _ (ProcDecl _ _ !procBody)) (StmtSrc (!callerPos, _)) _) ->
+        (\sfs (Scope _ _ _ _ pd@(ProcDefi _ _ _ _ (ProcDecl _ _ !procBody)) (StmtSrc (!callerPos, _)) _) ->
           EdhCallFrame (procedureName pd)
                        (procSrcLoc procBody)
                        (T.pack $ prettySourceLoc callerPos)
@@ -337,7 +337,7 @@ data Scope = Scope {
   , edh'effects'stack :: [Scope]
   }
 instance Show Scope where
-  show (Scope _ _ _ _ (ProcDefi _ _ _ (ProcDecl !addr _ !procBody)) (StmtSrc (!cPos, _)) _)
+  show (Scope _ _ _ _ (ProcDefi _ _ _ _ (ProcDecl !addr _ !procBody)) (StmtSrc (!cPos, _)) _)
     = "📜 " ++ show addr ++ " 🔎 " ++ defLoc ++ " 👈 " ++ prettySourceLoc cPos
    where
     defLoc = case procBody of
@@ -826,6 +826,18 @@ callableName = \case
       Nothing -> "<readonly property "
       Just _  -> "<property "
 
+callableDoc :: EdhProc -> Maybe DocComment
+callableDoc = \case
+  EdhIntrOp _preced _                -> Nothing
+  EdhOprtor _preced _ !pd            -> edh'procedure'doc pd
+  EdhMethod !pd                      -> edh'procedure'doc pd
+  EdhGnrtor !pd                      -> edh'procedure'doc pd
+  EdhIntrpr !pd                      -> edh'procedure'doc pd
+  EdhPrducr !pd                      -> edh'procedure'doc pd
+  EdhDescriptor !getter !maybeSetter -> case maybeSetter of
+    Nothing     -> edh'procedure'doc getter
+    Just setter -> edh'procedure'doc setter
+
 
 -- Atop Haskell, most types in Edh the surface language, are for
 -- immutable values, besides dict and list, the only other mutable
@@ -1168,6 +1180,8 @@ instance Eq StmtSrc where
 instance Show StmtSrc where
   show (StmtSrc (_sp, stmt)) = show stmt
 
+type DocComment = [Text]
+
 
 data Stmt =
       -- | literal `pass` to fill a place where a statement needed,
@@ -1182,7 +1196,7 @@ data Stmt =
       -- | artifacts introduced within an `effect` statement will be put
       -- into effect namespace, which as currently implemented, a dict
       -- resides in current scope entity addressed by name `__exports__`
-    | EffectStmt !Expr
+    | EffectStmt !Expr !(Maybe DocComment)
       -- | assignment with args (un/re)pack sending/receiving syntax
     | LetStmt !ArgsReceiver !ArgsPacker
       -- | super object declaration for a descendant object
@@ -1220,7 +1234,7 @@ data Stmt =
       -- | early stop from a procedure
     | ReturnStmt !Expr
       -- | expression with precedence
-    | ExprStmt !Expr
+    | ExprStmt !Expr !(Maybe DocComment)
   deriving (Show)
 
 -- Attribute addressor
@@ -1309,16 +1323,17 @@ data ProcDefi = ProcDefi {
     edh'procedure'ident :: !Unique
   , edh'procedure'name :: !AttrKey
   , edh'procedure'lexi :: !Scope
+  , edh'procedure'doc :: Maybe DocComment
   , edh'procedure'decl :: {-# UNPACK #-} !ProcDecl
   }
 instance Eq ProcDefi where
-  ProcDefi x'u _ _ _ == ProcDefi y'u _ _ _ = x'u == y'u
+  ProcDefi x'u _ _ _ _ == ProcDefi y'u _ _ _ _ = x'u == y'u
 instance Ord ProcDefi where
-  compare (ProcDefi x'u _ _ _) (ProcDefi y'u _ _ _) = compare x'u y'u
+  compare (ProcDefi x'u _ _ _ _) (ProcDefi y'u _ _ _ _) = compare x'u y'u
 instance Hashable ProcDefi where
-  hashWithSalt s (ProcDefi u _ _ _) = s `hashWithSalt` u
+  hashWithSalt s (ProcDefi u _ _ _ _) = s `hashWithSalt` u
 instance Show ProcDefi where
-  show (ProcDefi _ !name _ (ProcDecl !addr _ !pb)) = case pb of
+  show (ProcDefi _ !name _ _ (ProcDecl !addr _ !pb)) = case pb of
     Left  _ -> "<edh-proc " <> show name <> " : " <> show addr <> ">"
     Right _ -> "<host-proc " <> show name <> " : " <> show addr <> ">"
 
@@ -1544,13 +1559,13 @@ edhTypeOf EdhExpr{}               = ExprType
 edhProcTypeOf :: EdhProc -> EdhTypeValue
 edhProcTypeOf = \case
   EdhIntrOp{} -> IntrinsicType
-  EdhOprtor _ _ (ProcDefi _ _ _ (ProcDecl _ _ pb)) -> case pb of
+  EdhOprtor _ _ (ProcDefi _ _ _ _ (ProcDecl _ _ pb)) -> case pb of
     Left  _ -> OperatorType
     Right _ -> HostOperType
-  EdhMethod (ProcDefi _ _ _ (ProcDecl _ _ pb)) -> case pb of
+  EdhMethod (ProcDefi _ _ _ _ (ProcDecl _ _ pb)) -> case pb of
     Left  _ -> MethodType
     Right _ -> HostMethodType
-  EdhGnrtor (ProcDefi _ _ _ (ProcDecl _ _ pb)) -> case pb of
+  EdhGnrtor (ProcDefi _ _ _ _ (ProcDecl _ _ pb)) -> case pb of
     Left  _ -> GeneratorType
     Right _ -> HostGenrType
   EdhIntrpr{}     -> InterpreterType
@@ -1611,6 +1626,7 @@ objectScope !obj = case edh'obj'store obj of
               { edh'procedure'ident = edh'obj'ident obj
               , edh'procedure'name  = AttrByName moduPath
               , edh'procedure'lexi  = edh'procedure'lexi ocProc
+              , edh'procedure'doc   = Nothing
               , edh'procedure'decl  = ProcDecl
                 { edh'procedure'addr = NamedAttr moduPath
                 , edh'procedure'args = PackReceiver []
@@ -1668,6 +1684,7 @@ mkHostProc !scope !vc !nm (!p, !args) = do
       { edh'procedure'ident = u
       , edh'procedure'name  = AttrByName nm
       , edh'procedure'lexi  = scope
+      , edh'procedure'doc   = Nothing
       , edh'procedure'decl  = ProcDecl { edh'procedure'addr = NamedAttr nm
                                        , edh'procedure'args = args
                                        , edh'procedure'body = Right p
@@ -1689,6 +1706,7 @@ mkSymbolicHostProc !scope !vc !sym (!p, !args) = do
       { edh'procedure'ident = u
       , edh'procedure'name  = AttrBySym sym
       , edh'procedure'lexi  = scope
+      , edh'procedure'doc   = Nothing
       , edh'procedure'decl  = ProcDecl
                                 { edh'procedure'addr = SymbolicAttr
                                                          $ symbolName sym

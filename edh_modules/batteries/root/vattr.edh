@@ -2,11 +2,25 @@
 # virtual attributes of various value (non-object) types
 
 export method __DictType_push__ ( d )
+{##
+ # update the dict for the specified key to associate with specified value
+ #
+ # :k: the key
+ # :v: the value
+ #}
 method push ( k, v ) {
   d[ k ] = v
 }
 
 export method __DictType_pop__ ( d )
+{##
+ # try remove the entry associated with the specified key
+ #
+ # :k: the key
+ # :defVal: return this value in case the specified key is not associated
+ #          with the dict
+ # :returns: value from the removed entry, or @defVal@
+ #}
 method pop ( k, defVal=None ) ai case d[ k ] of {
   { v } -> { d[ k ] = nil; v }
   defVal

@@ -45,7 +45,9 @@ export {
 
   }
 
-  # used to define parametric command objects
+  {##
+   # Class @Command@ is used to define parametric command objects
+   #}
   data Command ( cmd, ***apk ) {
 
     method __eq__( other ) case other of {

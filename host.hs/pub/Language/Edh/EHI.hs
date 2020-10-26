@@ -89,6 +89,8 @@ module Language.Edh.EHI
   , Context(..)
   , Scope(..)
   , EdhProc(..)
+  , callableName
+  , callableDoc
   , EdhHostProc
   , EdhTxExit
   , EdhIntrinsicOp

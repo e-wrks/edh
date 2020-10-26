@@ -32,46 +32,72 @@ import           Language.Edh.Details.RtTypes
 -- passed around to collect final @[SourceSeg]@ for an expr literal.
 type IntplSrcInfo = (Text, Int, [SourceSeg])
 
+
 sc :: Parser ()
-sc =
-  L.space space1 (L.skipLineComment "#") (L.skipBlockCommentNested "{#" "#}")
+sc = L.space space1 (L.skipLineComment "#") edhSkipBlockCommentNested
 
--- | doc comments must start with "{##", this will return effective lines of
--- the comments on success
---
--- note this consumes whitespaces without backtracking
-docComments :: Parser [Text]
-docComments = findIt <|> (sc >> findIt)
+edhSkipBlockCommentNested :: Parser ()
+edhSkipBlockCommentNested =
+  try (string "{#" >> notFollowedBy (char '#')) >> void
+    (manyTill (L.skipBlockCommentNested "{#" "#}" <|> void anySingle)
+              (string "#}")
+    )
+
+-- | doc comment must start with "{##", this will return effective lines of
+-- the comment
+docComment :: Parser DocComment
+docComment = do
+  void $ string "{##"
+  -- treat the 1st line specially
+  s          <- getInput
+  o          <- getOffset
+  (o', done) <- findEoL
+  let line     = maybe "" fst $ takeN_ (o' - o) s
+      cumLines = [ line | not $ T.null $ T.strip line ]
+  if done
+    then do
+      void sc
+      return $! cumLines
+    else cmtLines cumLines
  where
-  findIt :: Parser [Text]
-  findIt = string "{##" >> cmtLines []
-
   cmtLines :: [Text] -> Parser [Text]
   cmtLines cumLines = do
     s          <- getInput
     o          <- getOffset
     (o', done) <- findEoL
-    let line      = maybe "" fst $ takeN_ (o' - o) s
-        cumLines' = cmtLine line : cumLines
+    let line = maybe "" fst $ takeN_ (o' - o) s
     if done
-      then return
-        $! reverse (if T.null (T.strip line) then cumLines else cumLines')
-      else cmtLines cumLines'
+      then do
+        void sc
+        return
+          $! reverse
+               (if T.null (T.strip line)
+                 then cumLines
+                 else cmtLine line : cumLines
+               )
+      else cmtLines $ cmtLine line : cumLines
 
   findEoL :: Parser (Int, Bool)
-  findEoL = doneCmt <|> midCmt <|> (anySingle >> findEoL)
-   where
-    doneCmt = string "#}" >> (, True) <$> getOffset
-    midCmt  = eol >> (, False) <$> getOffset
+  findEoL = getOffset >>= \ !o -> choice
+    [ string "#}" >> return (o, True)
+    , eol >> return (o, False)
+    , anySingle >> findEoL
+    ]
 
   cmtLine :: Text -> Text
   cmtLine s0 =
     let s1 = T.strip s0
     in  case T.stripPrefix "#" s1 of
-          Nothing -> s0 -- no leading #, formatter should have stripped all
-                        -- leading spaces, return original content anyway
+          Nothing -> s0 -- no leading #, return original content anyway
           -- with leading #, remove 1 single leading space if present
           Just s2 -> fromMaybe s2 $ T.stripPrefix " " s2
+
+-- | get the doc comment immediately before next non-whitespace lexeme, return
+-- the last one if multiple consecutive doc comment blocks present.
+immediateDocComment :: Parser DocComment
+immediateDocComment = docComment >>= moreAfter
+ where
+  moreAfter !gotCmt = (try (sc >> docComment) >>= moreAfter) <|> return gotCmt
 
 
 symbol :: Text -> Parser Text
@@ -104,12 +130,13 @@ isOperatorChar c = if c > toEnum 128
   then Char.isSymbol c
   else elem c ("=~!@#$%^&|:<>?+-*/" :: [Char])
 
-parseProgram :: Parser [StmtSrc]
+parseProgram :: Parser ([StmtSrc], Maybe DocComment)
 parseProgram = do
-  s <- getInput
   void sc
+  docCmt  <- optional docComment
+  s       <- getInput
   (ss, _) <- parseStmts (s, 0, []) []
-  return ss
+  return (ss, docCmt)
 
 parseStmts :: IntplSrcInfo -> [StmtSrc] -> Parser ([StmtSrc], IntplSrcInfo)
 parseStmts !si !ss = (eof >> return (reverse ss, si)) <|> do
@@ -151,10 +178,11 @@ parseDeferStmt !si = do
   return (DeferStmt expr, si')
 
 parseEffectStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseEffectStmt !si = do
+parseEffectStmt !si = try $ do
+  docCmt <- optional immediateDocComment
   void $ keyword "effect"
   (s, si') <- parseExpr si
-  return (EffectStmt s, si')
+  return (EffectStmt s docCmt, si')
 
 parseExportExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseExportExpr !si = do
@@ -511,7 +539,10 @@ parseStmt' !prec !si = do
 
       -- NOTE: statements above should probably all be detected by
       -- `illegalExprStart` as invalid start for an expr
-    , parseExprPrec prec si >>= \(x, si') -> return (ExprStmt x, si')
+    , do
+      docCmt   <- optional immediateDocComment
+      (x, si') <- parseExprPrec prec si
+      return (ExprStmt x docCmt, si')
     ]
   (SourcePos _ end'line end'col) <- getSourcePos
   return (StmtSrc (SourceSpan startPos end'line end'col, stmt), si')
