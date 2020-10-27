@@ -372,37 +372,76 @@ parseArgSends !si !closeSym !commaAppeared !ss =
 parseNamespaceExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseNamespaceExpr !si = do
   void $ keyword "namespace"
-  pn <- choice
+  nameStartPos <- getSourcePos
+  pn           <- choice
     [ SymbolicAttr <$> parseAttrSym
     , NamedAttr <$> parseMagicProcName
     , NamedAttr <$> parseAlphaName
     ]
+  nameEndPos        <- getSourcePos
   (argSender, si' ) <- parseArgsSender si
   (body     , si'') <- parseProcBody si'
-  return (NamespaceExpr (ProcDecl pn WildReceiver (Left body)) argSender, si'')
+  return
+    ( NamespaceExpr
+      (ProcDecl
+        pn
+        WildReceiver
+        body
+        (SourceSpan
+          nameStartPos
+          (RelSourcePos (sourceLine nameEndPos) (sourceColumn nameEndPos))
+        )
+      )
+      argSender
+    , si''
+    )
 
 parseClassExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseClassExpr !si = do
   void $ keyword "class"
-  pn <- choice
+  nameStartPos <- getSourcePos
+  pn           <- choice
     [ SymbolicAttr <$> parseAttrSym
     , NamedAttr <$> parseMagicProcName
     , NamedAttr <$> parseAlphaName
     ]
+  nameEndPos  <- getSourcePos
   (body, si') <- parseProcBody si
-  return (ClassExpr $ ProcDecl pn WildReceiver (Left body), si')
+  return
+    ( ClassExpr $ ProcDecl
+      pn
+      WildReceiver
+      body
+      (SourceSpan
+        nameStartPos
+        (RelSourcePos (sourceLine nameEndPos) (sourceColumn nameEndPos))
+      )
+    , si'
+    )
 
 parseDataExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseDataExpr !si = do
   void $ keyword "data"
-  pn <- choice
+  nameStartPos <- getSourcePos
+  pn           <- choice
     [ SymbolicAttr <$> parseAttrSym
     , NamedAttr <$> parseMagicProcName
     , NamedAttr <$> parseAlphaName
     ]
+  nameEndPos  <- getSourcePos
   ar          <- parseArgsReceiver
   (body, si') <- parseProcBody si
-  return (ClassExpr $ ProcDecl pn ar (Left body), si')
+  return
+    ( ClassExpr $ ProcDecl
+      pn
+      ar
+      body
+      (SourceSpan
+        nameStartPos
+        (RelSourcePos (sourceLine nameEndPos) (sourceColumn nameEndPos))
+      )
+    , si'
+    )
 
 parseExtendsStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseExtendsStmt !si = do
@@ -451,14 +490,26 @@ parseWhileStmt !si = do
 
 parseProcDecl :: IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)
 parseProcDecl !si = do
-  pn <- choice
+  nameStartPos <- getSourcePos
+  pn           <- choice
     [ SymbolicAttr <$> parseAttrSym
     , NamedAttr <$> parseMagicProcName
     , NamedAttr <$> parseAlphaName
     ]
+  nameEndPos  <- getSourcePos
   ar          <- parseArgsReceiver
   (body, si') <- parseProcBody si
-  return (ProcDecl pn ar (Left body), si')
+  return
+    ( ProcDecl
+      pn
+      ar
+      body
+      (SourceSpan
+        nameStartPos
+        (RelSourcePos (sourceLine nameEndPos) (sourceColumn nameEndPos))
+      )
+    , si'
+    )
 
 parseMagicProcName :: Parser Text
 parseMagicProcName = do
@@ -474,9 +525,10 @@ isMagicProcChar c = isOperatorChar c || elem c ("[]" :: [Char])
 parseOpDeclOvrdExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseOpDeclOvrdExpr !si = do
   void $ keyword "operator"
-  srcPos    <- getSourcePos
-  errRptPos <- getOffset
-  opSym     <- parseOpLit
+  errRptPos    <- getOffset
+  nameStartPos <- getSourcePos
+  opSym        <- parseOpLit
+  nameEndPos   <- getSourcePos
   void sc
   -- can be any integer, no space allowed after +/- sign
   precDecl    <- optional $ L.signed (pure ()) L.decimal <* sc
@@ -485,7 +537,14 @@ parseOpDeclOvrdExpr !si = do
   --  * 3 pos-args - caller scope + lh/rh expr receiving operator
   argRcvr     <- parseArgsReceiver
   (body, si') <- parseProcBody si
-  let procDecl = ProcDecl (NamedAttr opSym) argRcvr (Left body)
+  let procDecl = ProcDecl
+        (NamedAttr opSym)
+        argRcvr
+        body
+        (SourceSpan
+          nameStartPos
+          (RelSourcePos (sourceLine nameEndPos) (sourceColumn nameEndPos))
+        )
   opPD <- get
   case precDecl of
     Nothing -> case Map.lookup opSym opPD of
@@ -498,7 +557,9 @@ parseOpDeclOvrdExpr !si = do
       Just (opPrec, _) -> return (OpOvrdExpr opSym procDecl opPrec, si')
     Just opPrec -> case Map.lookup opSym opPD of
       Nothing -> do
-        put $ Map.insert opSym (opPrec, T.pack $ sourcePosPretty srcPos) opPD
+        put $ Map.insert opSym
+                         (opPrec, T.pack $ sourcePosPretty nameStartPos)
+                         opPD
         return (OpDeclExpr opSym opPrec procDecl, si')
       Just (prevPrec, odl) -> if prevPrec == opPrec
         then return (OpOvrdExpr opSym procDecl opPrec, si')
@@ -559,7 +620,8 @@ parseStmt' !prec !si = do
       return (ExprStmt x docCmt, si')
     ]
   (SourcePos _ end'line end'col) <- getSourcePos
-  return (StmtSrc (SourceSpan startPos end'line end'col, stmt), si')
+  return
+    (StmtSrc (SourceSpan startPos (RelSourcePos end'line end'col), stmt), si')
 
 parseStmt :: IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
 parseStmt !si = parseStmt' (-10) si

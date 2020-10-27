@@ -278,19 +278,19 @@ getEdhCallContext !unwind !ets = EdhCallContext
   (StmtSrc (!tip, _)) = edh'ctx'stmt ctx
   !frames =
     foldl'
-        (\sfs (Scope _ _ _ _ pd@(ProcDefi _ _ _ _ (ProcDecl _ _ !procBody)) (StmtSrc (!callerPos, _)) _) ->
-          EdhCallFrame (procedureName pd)
-                       (procSrcLoc procBody)
-                       (T.pack $ prettySourceLoc callerPos)
+        (\sfs (Scope _ _ _ _ !pd (StmtSrc (!callerPos, _)) _) ->
+          EdhCallFrame
+              (procedureName pd)
+              (case edh'procedure'decl pd of
+                HostDecl _           -> "<host-code>"
+                ProcDecl _ _ _ !spos -> T.pack (prettySourceLoc spos)
+              )
+              (T.pack $ prettySourceLoc callerPos)
             : sfs
         )
         []
       $ unwindStack unwind
       $ NE.init (edh'ctx'stack ctx)
-  procSrcLoc :: Either StmtSrc (ArgsPack -> EdhHostProc) -> Text
-  procSrcLoc !procBody = case procBody of
-    Left  (StmtSrc (spos, _)) -> T.pack (prettySourceLoc spos)
-    Right _                   -> "<host-code>"
 
 edhCreateError :: Int -> EdhThreadState -> EdhErrorTag -> ArgsPack -> EdhError
 edhCreateError !unwindDef !ets !tag apk@(ArgsPack !args !kwargs) = case args of
@@ -337,12 +337,17 @@ data Scope = Scope {
   , edh'effects'stack :: [Scope]
   }
 instance Show Scope where
-  show (Scope _ _ _ _ (ProcDefi _ _ _ _ (ProcDecl !addr _ !procBody)) (StmtSrc (!cPos, _)) _)
-    = "📜 " ++ show addr ++ " 🔎 " ++ defLoc ++ " 👈 " ++ prettySourceLoc cPos
+  show (Scope _ _ _ _ !pd (StmtSrc (!cPos, _)) _) =
+    "📜 "
+      ++ (T.unpack $ procedureName pd)
+      ++ " 🔎 "
+      ++ defLoc
+      ++ " 👈 "
+      ++ prettySourceLoc cPos
    where
-    defLoc = case procBody of
-      Right _                   -> "<host-code>"
-      Left  (StmtSrc (dPos, _)) -> prettySourceLoc dPos
+    defLoc = case edh'procedure'decl pd of
+      HostDecl _      -> "<host-code>"
+      decl@ProcDecl{} -> prettySourceLoc $ edh'procedure'name'span decl
 
 outerScopeOf :: Scope -> Maybe Scope
 outerScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
@@ -357,17 +362,15 @@ rootScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
   where !outerScope = edh'procedure'lexi $ edh'scope'proc scope
 
 scopeLexiLoc :: Scope -> (Text -> STM ()) -> STM ()
-scopeLexiLoc !scope !exit = case pb of
-  Left (StmtSrc (srcLoc, _)) -> exit $ T.pack $ prettySourceLoc srcLoc
-  Right{} ->
+scopeLexiLoc !scope !exit = case edh'procedure'decl pd of
+  ProcDecl _ _ _ !nameSpan -> exit $ T.pack $ prettySourceLoc nameSpan
+  HostDecl _ ->
     iopdLookup (AttrByName "__file__") (edh'scope'entity scope) >>= \case
       Nothing           -> exit $ "<host-procedure: " <> procedureName pd <> ">"
       Just !moduFileVal -> case moduFileVal of
         EdhString !moduFile -> exit moduFile
         _                   -> exit $ "<procedure: " <> procedureName pd <> ">"
- where
-  !pd = edh'scope'proc scope
-  !pb = edh'procedure'body $ edh'procedure'decl pd
+  where !pd = edh'scope'proc scope
 
 
 -- | A class is wrapped as an object per se, the object's storage structure is
@@ -1161,17 +1164,23 @@ false = EdhBool False
 
 
 data SourceSpan = SourceSpan {
-  source'span'start :: {-# UNPACK #-} !SourcePos
-  , source'span'end'line :: {-# UNPACK #-} !Pos
-  , source'span'end'column :: {-# UNPACK #-} !Pos
+    source'span'start :: {-# UNPACK #-} !SourcePos
+  , source'span'end   :: {-# UNPACK #-} !RelSourcePos
   }
 instance Eq SourceSpan where
-  (SourceSpan x'start x'end'line x'end'col) == (SourceSpan y'start y'end'line y'end'col)
-    = x'start == y'start && x'end'line == y'end'line && x'end'col == y'end'col
+  (SourceSpan x'start x'end) == (SourceSpan y'start y'end) =
+    x'start == y'start && x'end == y'end
+data RelSourcePos = RelSourcePos {
+    source'end'line   :: {-# UNPACK #-} !Pos
+  , source'end'column :: {-# UNPACK #-} !Pos
+  }
+instance Eq RelSourcePos where
+  (RelSourcePos x'line x'col) == (RelSourcePos y'line y'col) =
+    x'line == y'line && x'col == y'col
 startPosOfFile :: FilePath -> SourceSpan
-startPosOfFile !n = SourceSpan (initialPos n) pos1 pos1
+startPosOfFile !n = SourceSpan (initialPos n) (RelSourcePos pos1 pos1)
 prettySourceLoc :: SourceSpan -> String
-prettySourceLoc (SourceSpan !start _ _) = sourcePosPretty start
+prettySourceLoc (SourceSpan !start _) = sourcePosPretty start
 
 
 newtype StmtSrc = StmtSrc (SourceSpan, Stmt)
@@ -1305,17 +1314,17 @@ data ArgSender = UnpackPosArgs !Expr
   deriving (Eq, Show)
 
 -- | Procedure declaration, result of parsing
-data ProcDecl = ProcDecl {
+data ProcDecl = HostDecl (ArgsPack -> EdhHostProc) | ProcDecl {
     edh'procedure'addr :: !AttrAddressor
   , edh'procedure'args :: !ArgsReceiver
-  , edh'procedure'body :: !(Either StmtSrc (ArgsPack -> EdhHostProc))
+  , edh'procedure'body :: !StmtSrc
+  , edh'procedure'name'span :: !SourceSpan
   }
 instance Eq ProcDecl where
-  ProcDecl{} == ProcDecl{} = False
+  _ == _ = False
 instance Show ProcDecl where
-  show (ProcDecl !addr _ !pb) = case pb of
-    Left  _ -> "<edh-proc " <> show addr <> ">"
-    Right _ -> "<host-proc " <> show addr <> ">"
+  show (HostDecl _          ) = "<host-proc>"
+  show (ProcDecl !addr _ _ _) = "<edh-proc " <> show addr <> ">"
 
 
 -- | Procedure definition, result of execution of the declaration
@@ -1323,8 +1332,8 @@ data ProcDefi = ProcDefi {
     edh'procedure'ident :: !Unique
   , edh'procedure'name :: !AttrKey
   , edh'procedure'lexi :: !Scope
-  , edh'procedure'doc :: Maybe DocComment
-  , edh'procedure'decl :: {-# UNPACK #-} !ProcDecl
+  , edh'procedure'doc :: !(Maybe DocComment)
+  , edh'procedure'decl :: !ProcDecl
   }
 instance Eq ProcDefi where
   ProcDefi x'u _ _ _ _ == ProcDefi y'u _ _ _ _ = x'u == y'u
@@ -1333,9 +1342,9 @@ instance Ord ProcDefi where
 instance Hashable ProcDefi where
   hashWithSalt s (ProcDefi u _ _ _ _) = s `hashWithSalt` u
 instance Show ProcDefi where
-  show (ProcDefi _ !name _ _ (ProcDecl !addr _ !pb)) = case pb of
-    Left  _ -> "<edh-proc " <> show name <> " : " <> show addr <> ">"
-    Right _ -> "<host-proc " <> show name <> " : " <> show addr <> ">"
+  show (ProcDefi _ !name _ _ (HostDecl _)) = "<host-proc " <> show name <> ">"
+  show (ProcDefi _ !name _ _ (ProcDecl !addr _ _ _)) =
+    "<edh-proc " <> show name <> " : " <> show addr <> ">"
 
 procedureName :: ProcDefi -> Text
 procedureName !pd = case edh'procedure'name pd of
@@ -1532,11 +1541,10 @@ edhTypeOf EdhDict{}     = DictType
 edhTypeOf EdhList{}     = ListType
 
 edhTypeOf (EdhObject o) = case edh'obj'store o of
-  HashStore{} -> ObjectType
-  ClassStore !cls ->
-    case edh'procedure'body $ edh'procedure'decl $ edh'class'proc cls of
-      Left{}  -> ClassType
-      Right{} -> HostClassType
+  HashStore{}     -> ObjectType
+  ClassStore !cls -> case edh'procedure'decl $ edh'class'proc cls of
+    ProcDecl{} -> ClassType
+    HostDecl{} -> HostClassType
   HostStore{} -> ObjectType -- TODO add a @HostObjectType@ to distinguish?
 
 edhTypeOf (EdhProcedure pc _    ) = edhProcTypeOf pc
@@ -1558,16 +1566,16 @@ edhTypeOf EdhExpr{}               = ExprType
 
 edhProcTypeOf :: EdhProc -> EdhTypeValue
 edhProcTypeOf = \case
-  EdhIntrOp{} -> IntrinsicType
-  EdhOprtor _ _ (ProcDefi _ _ _ _ (ProcDecl _ _ pb)) -> case pb of
-    Left  _ -> OperatorType
-    Right _ -> HostOperType
-  EdhMethod (ProcDefi _ _ _ _ (ProcDecl _ _ pb)) -> case pb of
-    Left  _ -> MethodType
-    Right _ -> HostMethodType
-  EdhGnrtor (ProcDefi _ _ _ _ (ProcDecl _ _ pb)) -> case pb of
-    Left  _ -> GeneratorType
-    Right _ -> HostGenrType
+  EdhIntrOp{}       -> IntrinsicType
+  EdhOprtor _ _ !pd -> case edh'procedure'decl pd of
+    HostDecl{} -> HostOperType
+    ProcDecl{} -> OperatorType
+  EdhMethod !pd -> case edh'procedure'decl pd of
+    HostDecl{} -> HostMethodType
+    ProcDecl{} -> MethodType
+  EdhGnrtor !pd -> case edh'procedure'decl pd of
+    HostDecl{} -> HostGenrType
+    ProcDecl{} -> GeneratorType
   EdhIntrpr{}     -> InterpreterType
   EdhPrducr{}     -> ProducerType
   EdhDescriptor{} -> DescriptorType
@@ -1617,6 +1625,7 @@ objectScope !obj = case edh'obj'store obj of
               <$> iopdLookupDefault (EdhString "<on-the-fly>")
                                     (AttrByName "__file__")
                                     hs
+          let !srcSpan = startPosOfFile $ T.unpack moduFile
           return Scope
             { edh'scope'entity  = hs
             , edh'scope'this    = obj
@@ -1628,10 +1637,10 @@ objectScope !obj = case edh'obj'store obj of
               , edh'procedure'lexi  = edh'procedure'lexi ocProc
               , edh'procedure'doc   = Nothing
               , edh'procedure'decl  = ProcDecl
-                { edh'procedure'addr = NamedAttr moduPath
-                , edh'procedure'args = PackReceiver []
-                , edh'procedure'body = Left
-                  $ StmtSrc (startPosOfFile $ T.unpack moduFile, VoidStmt)
+                { edh'procedure'addr      = NamedAttr moduPath
+                , edh'procedure'args      = PackReceiver []
+                , edh'procedure'body      = StmtSrc (srcSpan, VoidStmt)
+                , edh'procedure'name'span = srcSpan
                 }
               }
             , edh'scope'caller  = StmtSrc (startPosOfFile "<run-edh>", VoidStmt)
@@ -1677,19 +1686,15 @@ mkHostProc
   -> AttrName
   -> (ArgsPack -> EdhHostProc, ArgsReceiver)
   -> STM EdhValue
-mkHostProc !scope !vc !nm (!p, !args) = do
+mkHostProc !scope !vc !nm (!p, _args) = do
   !u <- unsafeIOToSTM newUnique
   return $ EdhProcedure
-    (vc ProcDefi
-      { edh'procedure'ident = u
-      , edh'procedure'name  = AttrByName nm
-      , edh'procedure'lexi  = scope
-      , edh'procedure'doc   = Nothing
-      , edh'procedure'decl  = ProcDecl { edh'procedure'addr = NamedAttr nm
-                                       , edh'procedure'args = args
-                                       , edh'procedure'body = Right p
-                                       }
-      }
+    (vc ProcDefi { edh'procedure'ident = u
+                 , edh'procedure'name  = AttrByName nm
+                 , edh'procedure'lexi  = scope
+                 , edh'procedure'doc   = Nothing
+                 , edh'procedure'decl  = HostDecl p
+                 }
     )
     Nothing
 
@@ -1699,21 +1704,15 @@ mkSymbolicHostProc
   -> Symbol
   -> (ArgsPack -> EdhHostProc, ArgsReceiver)
   -> STM EdhValue
-mkSymbolicHostProc !scope !vc !sym (!p, !args) = do
+mkSymbolicHostProc !scope !vc !sym (!p, _args) = do
   !u <- unsafeIOToSTM newUnique
   return $ EdhProcedure
-    (vc ProcDefi
-      { edh'procedure'ident = u
-      , edh'procedure'name  = AttrBySym sym
-      , edh'procedure'lexi  = scope
-      , edh'procedure'doc   = Nothing
-      , edh'procedure'decl  = ProcDecl
-                                { edh'procedure'addr = SymbolicAttr
-                                                         $ symbolName sym
-                                , edh'procedure'args = args
-                                , edh'procedure'body = Right p
-                                }
-      }
+    (vc ProcDefi { edh'procedure'ident = u
+                 , edh'procedure'name  = AttrBySym sym
+                 , edh'procedure'lexi  = scope
+                 , edh'procedure'doc   = Nothing
+                 , edh'procedure'decl  = HostDecl p
+                 }
     )
     Nothing
 

@@ -57,32 +57,26 @@ createEdhWorld !console = liftIO $ do
   let
     rootScope =
       Scope hsRoot rootObj rootObj defaultEdhExcptHndlr rootProc genesisStmt []
-    rootProc =
-      ProcDefi idRoot
-               (AttrByName "<root>")
-               rootScope
-               (Just ["the root namespace"])
-        $ ProcDecl
-            (NamedAttr "<root>")
-            (PackReceiver [])
-            (Right phantomHostProc)
-    rootObj = Object idRoot (HashStore hsRoot) nsClassObj ssRoot
+    rootProc = ProcDefi idRoot
+                        (AttrByName "<root>")
+                        rootScope
+                        (Just ["the root namespace"])
+                        (HostDecl phantomHostProc)
+    rootObj  = Object idRoot (HashStore hsRoot) nsClassObj ssRoot
 
-    metaProc =
-      ProcDefi idMeta (AttrByName "class") rootScope (Just ["the meta class"])
-        $ ProcDecl (NamedAttr "class") (PackReceiver []) (Right phantomHostProc)
+    metaProc = ProcDefi idMeta
+                        (AttrByName "class")
+                        rootScope
+                        (Just ["the meta class"])
+                        (HostDecl phantomHostProc)
     metaClass    = Class metaProc hsMeta phantomAllocator mroMeta
     metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
 
-    nsProc =
-      ProcDefi idNamespace
-               (AttrByName "<namespace>")
-               rootScope
-               (Just ["the namespace class"])
-        $ ProcDecl
-            (NamedAttr "<namespace>")
-            (PackReceiver [])
-            (Right phantomHostProc)
+    nsProc       = ProcDefi idNamespace
+                            (AttrByName "<namespace>")
+                            rootScope
+                            (Just ["the namespace class"])
+                            (HostDecl phantomHostProc)
     nsClass = Class nsProc hsNamespace phantomAllocator mroNamespace
     nsClassObj =
       Object idNamespace (ClassStore nsClass) metaClassObj ssNamespace

@@ -127,8 +127,10 @@ arrowProc :: EdhIntrinsicOp
 arrowProc !lhExpr !rhExpr !exit !ets =
   pkr2rcvr (deParen1 lhExpr) $ \ !argsRcvr -> do
     !idProc <- unsafeIOToSTM newUnique
-    let !pd = ProcDecl (NamedAttr arrowName) argsRcvr $ Left $ StmtSrc
-          (ctxSrcPos, ExprStmt rhExpr Nothing)
+    let !pd = ProcDecl (NamedAttr arrowName)
+                       argsRcvr
+                       (StmtSrc (ctxSrcPos, ExprStmt rhExpr Nothing))
+                       (startPosOfFile "<lambda>")
         !mth = procType ProcDefi { edh'procedure'ident = idProc
                                  , edh'procedure'name  = AttrByName arrowName
                                  , edh'procedure'lexi  = scope
@@ -206,8 +208,10 @@ prodArrowProc :: EdhIntrinsicOp
 prodArrowProc !lhExpr !rhExpr !exit !ets =
   pkr2rcvr (deParen1 lhExpr) $ \ !argsRcvr -> do
     !idProc <- unsafeIOToSTM newUnique
-    let !pd = ProcDecl (NamedAttr arrowName) argsRcvr $ Left $ StmtSrc
-          (ctxSrcPos, ExprStmt rhExpr Nothing)
+    let !pd = ProcDecl (NamedAttr arrowName)
+                       argsRcvr
+                       (StmtSrc (ctxSrcPos, ExprStmt rhExpr Nothing))
+                       (startPosOfFile "<lambda>")
         !mth = EdhPrducr ProcDefi { edh'procedure'ident = idProc
                                   , edh'procedure'name  = AttrByName arrowName
                                   , edh'procedure'lexi  = scope

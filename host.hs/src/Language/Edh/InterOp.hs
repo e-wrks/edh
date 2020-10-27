@@ -2808,17 +2808,12 @@ mkHostProperty
 mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
   getter <- do
     u <- unsafeIOToSTM newUnique
-    return $ ProcDefi
-      { edh'procedure'ident = u
-      , edh'procedure'name  = AttrByName nm
-      , edh'procedure'lexi  = scope
-      , edh'procedure'doc   = Nothing
-      , edh'procedure'decl  = ProcDecl
-        { edh'procedure'addr = NamedAttr nm
-        , edh'procedure'args = PackReceiver []
-        , edh'procedure'body = Right $ callFromEdh getterProc
-        }
-      }
+    return $ ProcDefi { edh'procedure'ident = u
+                      , edh'procedure'name  = AttrByName nm
+                      , edh'procedure'lexi  = scope
+                      , edh'procedure'doc   = Nothing
+                      , edh'procedure'decl  = HostDecl $ callFromEdh getterProc
+                      }
   setter <- case maybeSetterProc of
     Nothing          -> return Nothing
     Just !setterProc -> do
@@ -2828,16 +2823,7 @@ mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
         , edh'procedure'name  = AttrByName nm
         , edh'procedure'lexi  = scope
         , edh'procedure'doc   = Nothing
-        , edh'procedure'decl  = ProcDecl
-          { edh'procedure'addr = NamedAttr nm
-          , edh'procedure'args = PackReceiver
-            [ RecvArg (NamedAttr "newValue") Nothing
-              $ Just
-              $ LitExpr
-              $ ValueLiteral edhNone
-            ]
-          , edh'procedure'body = Right $ callFromEdh setterProc
-          }
+        , edh'procedure'decl  = HostDecl $ callFromEdh setterProc
         }
   return $ EdhProcedure (EdhDescriptor getter setter) Nothing
 
