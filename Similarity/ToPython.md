@@ -1,37 +1,8 @@
 # Đ (Edh) is similar to **Python** in that:
 
-## Zen of Đ (Edh)
+## Zen
 
-- Always keep in mind that **Đ** the language and its ecosystem can become as
-  horrible as **JavaScript** is, if overly used in wrong ways.
-
-  Clues for the language as described
-  [here](https://medium.com/javascript-non-grata/he-top-10-things-wrong-with-javascript-58f440d6b3d8)
-  , some issues have been fixed in **Đ** while others remain pretty
-  the same.
-
-  And `edh_modules` has the potential to become bloated `node_modules` as well.
-
-  So do programing, modeling and thinking in
-  [**Haskell**](https://www.haskell.org)
-  (i.e. be a _Haskeller_), as much as you can.
-
-  For the ones who you must work with but hasn't feel comfortable with
-  **Haskell**, ask him/her to use **Đ**, and write
-  [host procedures](../Tour#host-procedures)
-  wrapping idiomatic solutions in **Haskell** to help get his/her job done.
-
-- Under certain circumstances, there are sweet spots balanced between
-  _imperative_ and _declarative_ stylish, when put together, **Đ**
-  code can be made even more concise than **Haskell** code (
-  [see proof here](https://github.com/e-wrks/edhim#full-%C4%91-edh-code-95-loc)
-  ). Do **Đ** programming around such sweet spots when you can find
-  them, and when you do, be _Edhic_, that to be _Edhic_, is to be
-  more _Pythonic_ than being
-  [**Pythonic**](https://www.python.org/dev/peps/pep-0020).
-
-- Whenever you're not sure how to get a bullshit job done, think about how a
-  [**Gopher**](https://blog.golang.org/gopher) would do it
+See [The Zen of Python](https://www.python.org/dev/peps/pep-0020)
 
 ## Overall Syntax
 
