@@ -1,60 +1,79 @@
 # Đ (Edh) is similar to **Python** in that:
 
+- [Zen](#zen)
+- [Overall Syntax](#overall-syntax)
+  - [Call Operator](#call-operator)
+  - [Dot Notation](#dot-notation)
+  - [Indexing](#indexing)
+- [First Class Procedures](#first-class-procedures)
+- [Dynamicity](#dynamicity)
+- [Object System](#object-system)
+  - [Being Class Based](#being-class-based)
+  - [Multiple Inheritance](#multiple-inheritance)
+  - [Property by Getter / Setter methods](#property-by-getter--setter-methods)
+  - [Magic Methods](#magic-methods)
+- [Conditional Operator Implementation](#conditional-operator-implementation)
+- [Decorators](#decorators)
+- [Data Classes (PEP557)](#data-classes-pep557)
+- [Asynchronous Constructs](#asynchronous-constructs)
+- [Seamless Integration with the Host Language / Runtime](#seamless-integration-with-the-host-language--runtime)
+- [Namespace Modules and Entry Modules](#namespace-modules-and-entry-modules)
+- [Reflective Meta Data](#reflective-meta-data)
+- [**Sphinx** based Auto Documentation](#sphinx-based-auto-documentation)
+- [Nice **REPL**](#nice-repl)
+
 ## Zen
 
-See [The Zen of Python](https://www.python.org/dev/peps/pep-0020)
+> See [The Zen of Python](https://www.python.org/dev/peps/pep-0020)
 
 ## Overall Syntax
 
-- Call Operator
+### Call Operator
 
-  e.g. `f( g( x, y ) )`, where `new` keyword is not
-  needed for constructor call (but can be there for compatibility with
-  **JavaScript** etc.)
+> e.g. `f( g( x, y ) )`, where `new` keyword is not
+> needed for constructor call (but can be there for compatibility with
+> **JavaScript** etc.)
 
-- Dot Notation
+### Dot Notation
 
-  e.g. `obj.attr`, `obj.attr = 3*7`
+> e.g. `obj.attr`, `obj.attr = 3*7`
 
-- Indexing
+### Indexing
 
-  e.g. `obj[idx]`, `obj[idx] = 3*7`
-
-- etc. etc.
+> e.g. `obj[idx]`, `obj[idx] = 3*7`
 
 ## First Class Procedures
 
-    Including `=>` to `lambda` functions.
+> Including `=>` to `lambda` functions.
 
 ## Dynamicity
 
-...
+> ...
 
 ## Object System
 
-- Class based
+### Being Class Based
 
-  while being prototype based at the same time)
+> While _Đ_ **OO** being prototype based at the same time
 
-- Multiple Inheritance
+### Multiple Inheritance
 
-  with
-  [C3 linearization](https://en.wikipedia.org/wiki/C3_linearization)
+> With [C3 linearization](https://en.wikipedia.org/wiki/C3_linearization)
 
-- Property by Getter / Setter methods
+### Property by Getter / Setter methods
 
-- Magic Methods
+### Magic Methods
 
-  Class definition syntax and semantics in **Đ (Edh)** are vastly the
-  same as in **Python**, e.g. the magic methods `__init__()`, `__str__()`,
-  `__repr__()` have exactly the same semantics.
+Class definition syntax and semantics in **Đ (Edh)** are vastly the
+same as in **Python**, e.g. the magic methods `__init__()`, `__str__()`,
+`__repr__()` have exactly the same semantics.
 
-  While in **Python** you can rely on the language to translate `obj + val`
-  to `obj.__add__(val)`, `val + obj` to `obj.__radd__(val)`, in **Đ (Edh)**
-  the same surface syntax is translated to `obj.(+)(val)` and
-  `obj.(+@)(val)` respectively.
+While in **Python** you can rely on the language to translate `obj + val`
+to `obj.__add__(val)`, `val + obj` to `obj.__radd__(val)`, in **Đ (Edh)**
+the same surface syntax is translated to `obj.(+)(val)` and
+`obj.(+@)(val)` respectively.
 
-  More examples:
+More examples:
 
 | Surface Syntax   | Python Translation          | Đ (Edh) Translation   |
 | ---------------- | --------------------------- | --------------------- |
