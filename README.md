@@ -198,7 +198,8 @@ at it since inception.
   , some issues have been fixed in **Đ** while others remain pretty
   the same.
 
-  And `edh_modules` has the potential to become bloated `node_modules` as well.
+  And [epm](https://github.com/e-wrks/epm) homes for `edh_modules` has the
+  potential to become bloated `node_modules` as well.
 
   So do programing, modeling and thinking in
   [**Haskell**](https://www.haskell.org)
