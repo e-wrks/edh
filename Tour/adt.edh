@@ -1,6 +1,92 @@
 
-# Edh ADT is similar to Python's PEP 557 -- Data Classes
+# similar to Python's PEP 557 -- Edh has Data Classes too
 # https://www.python.org/dev/peps/pep-0557
+
+# %%
+data D0 () pass
+d0 = D0()
+
+# %%
+data D1 d pass
+d1 = D1( 333 )
+
+# %%
+data D2 ( d1, d2 ) pass
+d2 = D2( 333, 777 )
+
+# %%
+data D3 ( d1, d2, d3 ) pass
+d3 = D3( 333, 777, 555 )
+
+# %%
+
+data D( a, b, c, d ) pass
+
+d = D( 3, 2, 5, 11 )
+
+# %%
+assert$ d is not D( 3, 2, 5, 11 )
+assert$ d == D( 3, 2, 5, 11 )
+assert$ d > D( 3, 1, 5, 9 )
+d <= D( 3, 1, 5, 9 )
+
+
+# %{
+# data classes can be used to simulate ADT in Haskell, but due to it's openness
+# nature, exhaustiveness detection is not possible. While this should not be
+# surprising as Edh is highly dynamicly typed, as so generally lacks type-safty
+# compared to Haskell.
+
+data SomeNumber (*** _ ) {
+  n = nan
+}
+
+data One () { extends SomeNumber
+  n = 1
+}
+data Two () { extends SomeNumber
+  n = 2
+}
+data Three () { extends SomeNumber
+  n = 3
+}
+data Many ( n=4 ) { extends SomeNumber
+  method __init__(*** _ ) {
+    if not ( this.n > 3 )
+    then throw UsageError( 'bad Many() for n to be ' ++ this.n )
+  }
+}
+
+v = Many( 99 )
+
+# %%
+case v of {
+  { { SomeNumber:_ } } -> {
+    { { One:_ } } -> {
+      'got 1'
+    }
+    { { Two:_ } } -> {
+      'got 2'
+    }
+    { { Three:_ } } -> {
+      'got 3'
+    }
+    { { Many:m } } | m.n > 999 -> {
+      'got too many'
+    }
+    _ -> {
+      'got as many as ' ++ v.n
+    }
+  }
+  _ -> {
+    'got sth else than some number'
+  }
+}
+
+# %%
+Many(- 1 )
+
+# %}
 
 
 # %%

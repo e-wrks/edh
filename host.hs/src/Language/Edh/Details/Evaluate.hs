@@ -2793,16 +2793,57 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
       <> "`"
 
 
+adtFields
+  :: EdhThreadState -> Object -> ([(AttrKey, EdhValue)] -> STM ()) -> STM ()
+adtFields !ets !obj !exit = adtFields'
+  ets
+  obj
+  (  throwEdh ets EvalError
+  $  "bug: data class instance expected but given "
+  <> objClassName obj
+  )
+  exit
+adtFields'
+  :: EdhThreadState
+  -> Object
+  -> STM ()
+  -> ([(AttrKey, EdhValue)] -> STM ())
+  -> STM ()
+adtFields' !ets !obj !naExit !exit = case edh'obj'store obj of
+  HashStore !hs -> iopdSnapshot hs >>= \ !ds ->
+    case edh'obj'store $ edh'obj'class obj of
+      ClassStore !cls ->
+        case edh'procedure'args $ edh'procedure'decl $ edh'class'proc cls of
+          WildReceiver        -> naExit -- "bug: not a data class for adtFields"
+          PackReceiver   !drs -> go drs ds []
+          SingleReceiver !dr  -> go [dr] ds []
+      _ -> naExit -- "bug: data class not bearing ClassStore"
+  _ -> naExit -- "bug: data class instance not bearing HashStore"
+ where
+  go
+    :: [ArgReceiver]
+    -> OrderedDict AttrKey EdhValue
+    -> [(AttrKey, EdhValue)]
+    -> STM ()
+  go []          _   !fs = exit $ reverse fs
+  go (dr : rest) !ds !fs = case dr of
+    RecvArg _ Just{} _ ->
+      throwEdh ets UsageError "rename of data class field not supported yet"
+    RecvArg SymbolicAttr{} _ _ ->
+      throwEdh ets UsageError "symbolic data class field not supported yet"
+    RecvArg (NamedAttr !fn) Nothing _ -> case odLookup (AttrByName fn) ds of
+      Just !fv -> go rest ds ((AttrByName fn, fv) : fs)
+      Nothing  -> throwEdh ets UsageError $ "missing data field: " <> fn
+    _ -> throwEdh ets UsageError "rest data class field not supported yet"
+
+
 adtReprProc :: ArgsPack -> EdhHostProc
-adtReprProc _ !exitRepr !ets = case edh'obj'store thisObj of
-  HashStore !hs -> iopdSnapshot hs >>= \ !dataAttrs ->
-    edhValueRepr ets (EdhArgsPack (ArgsPack [] dataAttrs))
-      $ \ !dataAttrsRepr ->
-          exitEdh ets exitRepr
-            $  EdhString
-            $  (edhClassName thisObj)
-            <> dataAttrsRepr
-  _ -> throwEdh ets EvalError "bug: adt object not bearing HashStore"
+adtReprProc _ !exit !ets = adtFields ets thisObj $ \ !dfs ->
+  let !dfApk = if length dfs < 3
+        then ArgsPack (snd <$> dfs) odEmpty
+        else ArgsPack [] $ odFromList dfs
+  in  edhValueRepr ets (EdhArgsPack dfApk) $ \ !dfRepr ->
+        exitEdh ets exit $ EdhString $ objClassName thisObj <> dfRepr
   where !thisObj = edh'scope'this $ contextScope $ edh'context ets
 
 
@@ -3267,7 +3308,7 @@ evalExpr' (ClassExpr pd@(ProcDecl !addr !argsRcvr _ _)) !docCmt !exit =
         allocatorProc !apkCtor !exitCtor !etsCtor = case argsRcvr of
           -- a normal class
           WildReceiver -> exitCtor =<< HashStore <$> iopdEmpty
-          -- a simple class (ADT)
+          -- a data class (ADT)
           _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
             iopdFromList (odToList dataAttrs) >>= exitCtor . HashStore
 
@@ -3306,7 +3347,7 @@ evalExpr' (ClassExpr pd@(ProcDecl !addr !argsRcvr _ _)) !docCmt !exit =
     case argsRcvr of
       -- a normal class
       WildReceiver -> pure ()
-      -- a simple class (ADT)
+      -- a data class (ADT)
       _            -> do
         !clsArts <-
           sequence
@@ -3994,21 +4035,16 @@ edhValueEqual !ets !lhVal !rhVal !exit = if lhv == rhv
 adtEqProc :: ArgsPack -> EdhHostProc
 adtEqProc !apk !exit !ets = case apk of
   ArgsPack [EdhObject !objOther] !kwargs | odNull kwargs ->
-    case edh'obj'store $ edh'scope'this $ contextScope $ edh'context ets of
-      HashStore !hs -> iopdSnapshot hs >>= \ !dataAttrs ->
-        resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
-          Nothing            -> exitEdh ets exit $ EdhBool False
-          Just !dataObjOther -> case edh'obj'store dataObjOther of
-            HashStore !hsOther ->
-              iopdSnapshot hsOther >>= \ !dataAttrsOther ->
-                edhValueEqual ets
-                              (EdhArgsPack (ArgsPack [] dataAttrs))
-                              (EdhArgsPack (ArgsPack [] dataAttrsOther))
-                  $ \case
-                      Nothing          -> exitEdh ets exit edhNA
-                      Just !conclusion -> exitEdh ets exit $ EdhBool conclusion
-            _ -> throwEdh ets EvalError "bug: adt object not bearing HashStore"
-      _ -> throwEdh ets EvalError "bug: adt object not bearing HashStore"
+    adtFields ets thisObj $ \ !thisFields ->
+      resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
+        Nothing            -> exitEdh ets exit $ EdhBool False
+        Just !dataObjOther -> adtFields ets dataObjOther $ \ !otherFields ->
+          edhValueEqual ets
+                        (EdhArgsPack (ArgsPack [] $ odFromList thisFields))
+                        (EdhArgsPack (ArgsPack [] $ odFromList otherFields))
+            $ \case
+                Nothing          -> exitEdh ets exit $ EdhBool False
+                Just !conclusion -> exitEdh ets exit $ EdhBool conclusion
   _ -> exitEdh ets exit edhNA -- todo interpret kwargs or throw?
   where !thisObj = edh'scope'this $ contextScope $ edh'context ets
 
@@ -4016,21 +4052,16 @@ adtEqProc !apk !exit !ets = case apk of
 adtCmpProc :: ArgsPack -> EdhHostProc
 adtCmpProc !apk !exit !ets = case apk of
   ArgsPack [EdhObject !objOther] !kwargs | odNull kwargs ->
-    case edh'obj'store $ edh'scope'this $ contextScope $ edh'context ets of
-      HashStore !hs -> iopdSnapshot hs >>= \ !dataAttrs ->
-        resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
-          Nothing            -> exitEdh ets exit $ EdhBool False
-          Just !dataObjOther -> case edh'obj'store dataObjOther of
-            HashStore !hsOther ->
-              iopdSnapshot hsOther >>= \ !dataAttrsOther ->
-                doEdhComparison ets
-                                (EdhArgsPack (ArgsPack [] dataAttrs))
-                                (EdhArgsPack (ArgsPack [] dataAttrsOther))
-                  $ \case
-                      Nothing          -> exitEdh ets exit edhNA
-                      Just !conclusion -> exitEdh ets exit $ EdhOrd conclusion
-            _ -> throwEdh ets EvalError "bug: adt object not bearing HashStore"
-      _ -> throwEdh ets EvalError "bug: adt object not bearing HashStore"
+    adtFields ets thisObj $ \ !thisFields ->
+      resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
+        Nothing            -> exitEdh ets exit edhNA
+        Just !dataObjOther -> adtFields ets dataObjOther $ \ !otherFields ->
+          doEdhComparison ets
+                          (EdhArgsPack (ArgsPack [] $ odFromList thisFields))
+                          (EdhArgsPack (ArgsPack [] $ odFromList otherFields))
+            $ \case
+                Nothing          -> exitEdh ets exit edhNA
+                Just !conclusion -> exitEdh ets exit $ EdhOrd conclusion
   _ -> exitEdh ets exit edhNA -- todo interpret kwargs or throw?
   where !thisObj = edh'scope'this $ contextScope $ edh'context ets
 
