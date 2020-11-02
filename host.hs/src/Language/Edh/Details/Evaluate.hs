@@ -2795,30 +2795,17 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
 
 adtFields
   :: EdhThreadState -> Object -> ([(AttrKey, EdhValue)] -> STM ()) -> STM ()
-adtFields !ets !obj !exit = adtFields'
-  ets
-  obj
-  (  throwEdh ets EvalError
-  $  "bug: data class instance expected but given "
-  <> objClassName obj
-  )
-  exit
-adtFields'
-  :: EdhThreadState
-  -> Object
-  -> STM ()
-  -> ([(AttrKey, EdhValue)] -> STM ())
-  -> STM ()
-adtFields' !ets !obj !naExit !exit = case edh'obj'store obj of
+adtFields !ets !obj !exit = case edh'obj'store obj of
   HashStore !hs -> iopdSnapshot hs >>= \ !ds ->
     case edh'obj'store $ edh'obj'class obj of
       ClassStore !cls ->
         case edh'procedure'args $ edh'procedure'decl $ edh'class'proc cls of
-          WildReceiver        -> naExit -- "bug: not a data class for adtFields"
+          WildReceiver ->
+            throwEdh ets EvalError "bug: not a data class for adtFields"
           PackReceiver   !drs -> go drs ds []
           SingleReceiver !dr  -> go [dr] ds []
-      _ -> naExit -- "bug: data class not bearing ClassStore"
-  _ -> naExit -- "bug: data class instance not bearing HashStore"
+      _ -> throwEdh ets EvalError "bug: data class not bearing ClassStore"
+  _ -> throwEdh ets EvalError "bug: data class instance not bearing HashStore"
  where
   go
     :: [ArgReceiver]
