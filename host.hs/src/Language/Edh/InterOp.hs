@@ -1400,13 +1400,13 @@ mkIntrinsicOp !world !opSym !iop = do
   Map.lookup opSym <$> readTMVar (edh'world'operators world) >>= \case
     Nothing ->
       throwSTM
-        $ EdhError
-            UsageError
-            ("no precedence declared in the world for operator: " <> opSym)
-            (toDyn nil)
+        $ EdhError UsageError
+                   ("operator (" <> opSym <> ") not declared in this world")
+                   (toDyn nil)
         $ EdhCallContext "<edh>" []
-    Just (preced, _) -> return
-      $ EdhProcedure (EdhIntrOp preced $ IntrinOpDefi u opSym iop) Nothing
+    Just (fixity, preced, _) -> return $ EdhProcedure
+      (EdhIntrOp fixity preced $ IntrinOpDefi u opSym iop)
+      Nothing
 
 
 -- | Class for a procedure implemented in the host language (which is Haskell)

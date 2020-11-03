@@ -3512,96 +3512,28 @@ evalExpr' (ProducerExpr !pd) !docCmt !exit = \ !ets ->
   alwaysWithOutlet (SingleReceiver !sr) = PackReceiver [bypassOutlet, sr]
   alwaysWithOutlet wr@WildReceiver{}    = wr
 
-evalExpr' (OpDeclExpr !opSym !opPrec !opProc) !docCmt !exit = \ !ets -> do
-  let !ctx   = edh'context ets
+
+evalExpr' (OpDefiExpr !opFixity !opPrec !opSym !opProc) !docCmt !exit =
+  defineOperator opFixity opPrec opSym opProc docCmt exit Nothing
+
+evalExpr' (OpOvrdExpr !opFixity !opPrec !opSym !opProc) !docCmt !exit =
+  \ !ets ->
+    let
+      !ctx   = edh'context ets
       !scope = contextScope ctx
-  if edh'ctx'eff'defining ctx
-    then throwEdh ets UsageError "why should an operator be effectful?"
-    else case opProc of
-      -- support re-declaring an existing operator to another name,
-      -- with possibly a different precedence
-      ProcDecl _ _ (StmtSrc (_, ExprStmt (AttrExpr (DirectRef (NamedAttr !origOpSym))) Nothing)) _
-        -> do
-          let redeclareOp !origOp = do
-                defineScopeAttr ets (AttrByName opSym) origOp
-                exitEdh ets exit origOp
-
-
-          lookupEdhCtxAttr scope (AttrByName origOpSym) >>= \case
-            EdhNil ->
-              throwEdh ets EvalError
-                $  "original operator ("
-                <> origOpSym
-                <> ") not in scope"
-            origOp@(EdhProcedure EdhIntrOp{} _    ) -> redeclareOp origOp
-            origOp@(EdhProcedure EdhOprtor{} _    ) -> redeclareOp origOp
-            origOp@(EdhBoundProc EdhIntrOp{} _ _ _) -> redeclareOp origOp
-            origOp@(EdhBoundProc EdhOprtor{} _ _ _) -> redeclareOp origOp
-            !val ->
-              throwEdh ets EvalError
-                $  "can not re-declare a "
-                <> T.pack (edhTypeNameOf val)
-                <> ": "
-                <> T.pack (show val)
-                <> " as an operator"
-      _ -> do
-        validateOperDecl ets opProc
-        !idProc <- unsafeIOToSTM newUnique
-        let !op = EdhOprtor
-              opPrec
-              Nothing
-              ProcDefi { edh'procedure'ident = idProc
-                       , edh'procedure'name  = AttrByName opSym
-                       , edh'procedure'lexi  = scope
-                       , edh'procedure'doc   = docCmt
-                       , edh'procedure'decl  = opProc
-                       }
-            !opVal = EdhProcedure op Nothing
-        defineScopeAttr ets (AttrByName opSym) opVal
-        exitEdh ets exit opVal
-
-evalExpr' (OpOvrdExpr !opSym !opProc !opPrec) !docCmt !exit = \ !ets -> do
-  let !ctx                   = edh'context ets
-      !scope                 = contextScope ctx
-      (StmtSrc (!srcPos, _)) = edh'ctx'stmt ctx
-  if edh'ctx'eff'defining ctx
-    then throwEdh ets UsageError "why should an operator be effectful?"
-    else do
-      validateOperDecl ets opProc
-      let findPredecessor :: STM (Maybe EdhValue)
-          findPredecessor = lookupEdhCtxAttr scope (AttrByName opSym) >>= \case
-            EdhNil                              -> return Nothing
-            op@(EdhProcedure EdhIntrOp{} _    ) -> return $ Just op
-            op@(EdhProcedure EdhOprtor{} _    ) -> return $ Just op
-            op@(EdhBoundProc EdhIntrOp{} _ _ _) -> return $ Just op
-            op@(EdhBoundProc EdhOprtor{} _ _ _) -> return $ Just op
-            !opVal                              -> do
-              (consoleLogger $ edh'world'console $ edh'ctx'world ctx)
-                  30
-                  (Just $ prettySourceLoc srcPos)
-                $ ArgsPack
-                    [ EdhString
-                      $  "overriding an invalid operator "
-                      <> T.pack (edhTypeNameOf opVal)
-                      <> ": "
-                      <> T.pack (show opVal)
-                    ]
-                    odEmpty
-              return Nothing
-      !predecessor <- findPredecessor
-      !idProc      <- unsafeIOToSTM newUnique
-      let !op = EdhOprtor
-            opPrec
-            predecessor
-            ProcDefi { edh'procedure'ident = idProc
-                     , edh'procedure'name  = AttrByName opSym
-                     , edh'procedure'lexi  = scope
-                     , edh'procedure'doc   = docCmt
-                     , edh'procedure'decl  = opProc
-                     }
-          !opVal = EdhProcedure op Nothing
-      defineScopeAttr ets (AttrByName opSym) opVal
-      exitEdh ets exit opVal
+      withOverridden =
+        runEdhTx ets . defineOperator opFixity opPrec opSym opProc docCmt exit
+    in
+      lookupEdhCtxAttr scope (AttrByName opSym) >>= \case
+        EdhNil                              -> withOverridden Nothing
+        op@(EdhProcedure EdhIntrOp{} _    ) -> withOverridden $ Just op
+        op@(EdhProcedure EdhOprtor{} _    ) -> withOverridden $ Just op
+        op@(EdhBoundProc EdhIntrOp{} _ _ _) -> withOverridden $ Just op
+        op@(EdhBoundProc EdhOprtor{} _ _ _) -> withOverridden $ Just op
+        !opVal -> edhValueDesc ets opVal $ \ !badDesc ->
+          throwEdh ets UsageError
+            $  "overriding an invalid operator: "
+            <> badDesc
 
 
 evalInfix :: OpSymbol -> Expr -> Expr -> EdhHostProc
@@ -3761,7 +3693,7 @@ evalInfix !opSym !lhExpr !rhExpr !exit !ets =
   callProc !this !that !callable = case callable of
 
     -- calling an intrinsic operator
-    EdhIntrOp _ (IntrinOpDefi _ _ iop'proc) ->
+    EdhIntrOp _ _ (IntrinOpDefi _ _ iop'proc) ->
       runEdhTx ets $ iop'proc lhExpr rhExpr $ \ !rtnVal _ets ->
         case edhUltimate rtnVal of
           EdhDefault _ !exprDef !etsDef ->
@@ -3770,7 +3702,7 @@ evalInfix !opSym !lhExpr !rhExpr !exit !ets =
           _ -> exitEdh ets exit rtnVal
 
     -- calling an operator procedure
-    EdhOprtor _ !op'pred !op'proc ->
+    EdhOprtor _ _ !op'pred !op'proc ->
       case edh'procedure'args $ edh'procedure'decl op'proc of
 
         -- 2 pos-args - simple lh/rh value receiving operator
@@ -3817,17 +3749,150 @@ evalInfix !opSym !lhExpr !rhExpr !exit !ets =
   !scope = contextScope ctx
 
 
-validateOperDecl :: EdhThreadState -> ProcDecl -> STM ()
-validateOperDecl !ets HostDecl{} =
-  throwEdh ets EvalError "bug: eval host op decl"
-validateOperDecl !ets (ProcDecl _ !op'args _ _) = case op'args of
-  -- 2 pos-args - simple lh/rh value receiving operator
-  (PackReceiver [RecvArg _lhName Nothing Nothing, RecvArg _rhName Nothing Nothing])
-    -> return ()
-  -- 3 pos-args - caller scope + lh/rh expr receiving operator
-  (PackReceiver [RecvArg _scopeName Nothing Nothing, RecvArg _lhName Nothing Nothing, RecvArg _rhName Nothing Nothing])
-    -> return ()
-  _ -> throwEdh ets EvalError "invalid operator signature"
+defineOperator
+  :: OpFixity
+  -> Precedence
+  -> OpSymbol
+  -> ProcDecl
+  -> Maybe DocComment
+  -> EdhTxExit
+  -> Maybe EdhValue
+  -> EdhTx
+defineOperator !opFixity !opPrec !opSym !opProc !docCmt !exit !predecessor !ets
+  = if edh'ctx'eff'defining ctx
+    then throwEdh ets UsageError "unreasonable for an operator to be effectful"
+    else case opProc of
+      HostDecl{} -> throwEdh ets EvalError "bug: eval host op decl"
+      -- support re-declaring an existing operator or method as a new operator,
+      -- with separate fixity & precedence
+      ProcDecl _ (PackReceiver []) (StmtSrc (_, ExprStmt (AttrExpr (DirectRef !refPreExisting)) Nothing)) _
+        -> resolveEdhAttrAddr ets refPreExisting $ \ !preKey ->
+          lookupEdhCtxAttr scope preKey >>= \case
+            EdhNil ->
+              throwEdh ets UsageError
+                $  "no existing operator or method ("
+                <> attrAddrStr refPreExisting
+                <> ") in scope"
+            EdhProcedure (EdhIntrOp _fixity _prec !opDefi) !effOuter ->
+              defineOpVal $ EdhProcedure
+                (EdhIntrOp opFixity
+                           opPrec
+                           opDefi { intrinsic'op'symbol = opSym }
+                )
+                effOuter
+            EdhProcedure (EdhOprtor _fixity _prec _pred !opDefi) !effOuter ->
+              defineOpVal $ EdhProcedure
+                (EdhOprtor
+                  opFixity
+                  opPrec
+                  predecessor
+                  opDefi { edh'procedure'name = AttrByName opSym
+                         , edh'procedure'doc  = docCmt
+                         }
+                )
+                effOuter
+            EdhBoundProc (EdhIntrOp _fixity _prec !opDefi) !boundThis !boundThat !effOuter
+              -> defineOpVal $ EdhBoundProc
+                (EdhIntrOp opFixity
+                           opPrec
+                           opDefi { intrinsic'op'symbol = opSym }
+                )
+                boundThis
+                boundThat
+                effOuter
+            EdhBoundProc (EdhOprtor _fixity _prec _pred !opDefi) !boundThis !boundThat !effOuter
+              -> defineOpVal $ EdhBoundProc
+                (EdhOprtor
+                  opFixity
+                  opPrec
+                  predecessor
+                  opDefi { edh'procedure'name = AttrByName opSym
+                         , edh'procedure'doc  = docCmt
+                         }
+                )
+                boundThis
+                boundThat
+                effOuter
+            -- TODO the method/interpreter should have 2/3 args, validate that
+            EdhProcedure (EdhMethod !mthDefi) !effOuter ->
+              defineOpVal $ EdhProcedure
+                (EdhOprtor
+                  opFixity
+                  opPrec
+                  predecessor
+                  mthDefi { edh'procedure'name = AttrByName opSym
+                          , edh'procedure'doc  = docCmt
+                          }
+                )
+                effOuter
+            EdhProcedure (EdhIntrpr !mthDefi) !effOuter ->
+              defineOpVal $ EdhProcedure
+                (EdhOprtor
+                  opFixity
+                  opPrec
+                  predecessor
+                  mthDefi { edh'procedure'name = AttrByName opSym
+                          , edh'procedure'doc  = docCmt
+                          }
+                )
+                effOuter
+            EdhBoundProc (EdhMethod !mthDefi) !boundThis !boundThat !effOuter
+              -> defineOpVal $ EdhBoundProc
+                (EdhOprtor
+                  opFixity
+                  opPrec
+                  predecessor
+                  mthDefi { edh'procedure'name = AttrByName opSym
+                          , edh'procedure'doc  = docCmt
+                          }
+                )
+                boundThis
+                boundThat
+                effOuter
+            EdhBoundProc (EdhIntrpr !mthDefi) !boundThis !boundThat !effOuter
+              -> defineOpVal $ EdhBoundProc
+                (EdhOprtor
+                  opFixity
+                  opPrec
+                  predecessor
+                  mthDefi { edh'procedure'name = AttrByName opSym
+                          , edh'procedure'doc  = docCmt
+                          }
+                )
+                boundThis
+                boundThat
+                effOuter
+            !val -> edhValueDesc ets val $ \ !badDesc ->
+              throwEdh ets UsageError
+                $  "can not re-declare as an operator from a "
+                <> badDesc
+      ProcDecl{} -> case edh'procedure'args opProc of
+        -- 2 pos-args - simple lh/rh value receiving operator
+        (PackReceiver [RecvArg _lhName Nothing Nothing, RecvArg _rhName Nothing Nothing])
+          -> defineEdhOp
+        -- 3 pos-args - caller scope + lh/rh expr receiving operator
+        (PackReceiver [RecvArg _scopeName Nothing Nothing, RecvArg _lhName Nothing Nothing, RecvArg _rhName Nothing Nothing])
+          -> defineEdhOp
+        _ -> throwEdh ets EvalError "invalid operator arguments signature"
+ where
+  !ctx   = edh'context ets
+  !scope = contextScope ctx
+  defineOpVal !opVal = do
+    defineScopeAttr ets (AttrByName opSym) opVal
+    exitEdh ets exit opVal
+  defineEdhOp = do
+    !idProc <- unsafeIOToSTM newUnique
+    let !op = EdhOprtor
+          opFixity
+          opPrec
+          predecessor
+          ProcDefi { edh'procedure'ident = idProc
+                   , edh'procedure'name  = AttrByName opSym
+                   , edh'procedure'lexi  = scope
+                   , edh'procedure'doc   = docCmt
+                   , edh'procedure'decl  = opProc
+                   }
+    defineOpVal $ EdhProcedure op Nothing
 
 
 val2DictEntry

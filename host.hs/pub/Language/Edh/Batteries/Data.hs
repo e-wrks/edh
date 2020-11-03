@@ -389,8 +389,9 @@ idProc !val !exit = exitEdhTx exit $ identityOf val
   idOfProcDefi !def = idFromInt $ hashUnique $ edh'procedure'ident def
 
   idOfProc :: EdhProc -> EdhValue
-  idOfProc (EdhIntrOp _ !def) = idFromInt $ hashUnique $ intrinsic'op'uniq def
-  idOfProc (EdhOprtor _ _ !def                ) = idOfProcDefi def
+  idOfProc (EdhIntrOp _ _ !def) =
+    idFromInt $ hashUnique $ intrinsic'op'uniq def
+  idOfProc (EdhOprtor _ _ _ !def              ) = idOfProcDefi def
   idOfProc (EdhMethod !def                    ) = idOfProcDefi def
   idOfProc (EdhGnrtor !def                    ) = idOfProcDefi def
   idOfProc (EdhIntrpr !def                    ) = idOfProcDefi def
@@ -749,13 +750,13 @@ procNameProc !p !exit !ets = case p of
  where
   cpName :: EdhProc -> STM ()
   cpName = \case
-    EdhIntrOp _ (IntrinOpDefi _ !opSym _) ->
+    EdhIntrOp _ _ (IntrinOpDefi _ !opSym _) ->
       exitEdh ets exit $ EdhString $ "(" <> opSym <> ")"
-    EdhOprtor _ _ !pd -> exitEdh ets exit $ EdhString $ procedureName pd
-    EdhMethod !pd     -> exitEdh ets exit $ EdhString $ procedureName pd
-    EdhGnrtor !pd     -> exitEdh ets exit $ EdhString $ procedureName pd
-    EdhIntrpr !pd     -> exitEdh ets exit $ EdhString $ procedureName pd
-    EdhPrducr !pd     -> exitEdh ets exit $ EdhString $ procedureName pd
+    EdhOprtor _ _ _ !pd -> exitEdh ets exit $ EdhString $ procedureName pd
+    EdhMethod !pd       -> exitEdh ets exit $ EdhString $ procedureName pd
+    EdhGnrtor !pd       -> exitEdh ets exit $ EdhString $ procedureName pd
+    EdhIntrpr !pd       -> exitEdh ets exit $ EdhString $ procedureName pd
+    EdhPrducr !pd       -> exitEdh ets exit $ EdhString $ procedureName pd
     EdhDescriptor !getter _setter ->
       exitEdh ets exit $ EdhString $ procedureName getter
 

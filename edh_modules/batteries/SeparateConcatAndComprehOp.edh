@@ -1,14 +1,19 @@
+{##
+ # The (=<) operator does comprehension as well as concat by default,
+ # import this module then (=<) can not be used to comprehend into
+ # list/dict/tuple with existing data anymore, only (<=<) can
+ # be used for concat.
+ #}
 
-# The (=<) operator does comprehension as well as concat by default,
-# import this module then (=<) can not be used to comprehend into
-# list/dict/tuple with existing data anymore, only (<=<) can
-# be used for concat.
+{##
+ # re-declare (=<) as the concat operator (<=<)
+ #}
+export infixr 1 (<=<) () (=<)
 
-# re-declare (=<) as the concat operator (<=<)
-export operator <=< 1 () (=<)
-
-# Override operator (=<) to comprehend into empty ones only
-export operator =< ( callerScope, lhe, rhe ) {
+{##
+ # Override operator (=<) to comprehend into empty ones only
+ #}
+export infixr (=<) ( callerScope, lhe, rhe ) {
   lhv = callerScope.eval( lhe )
 
   not null( lhv )

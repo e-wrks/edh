@@ -125,6 +125,9 @@ module Language.Edh.EHI
   , Literal(..)
   , AttrName
   , OpSymbol
+  , OpFixity(..)
+  , Precedence
+  , OpDeclLoc
   , AttrAddr(..)
   , AttrAddressor(..)
   , ArgsReceiver(..)

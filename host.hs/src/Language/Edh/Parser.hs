@@ -524,56 +524,85 @@ isMagicProcChar c = isOperatorChar c || elem c ("[]" :: [Char])
 
 parseOpDeclOvrdExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseOpDeclOvrdExpr !si = do
-  void $ keyword "operator"
-  errRptPos    <- getOffset
-  nameStartPos <- getSourcePos
-  opSym        <- parseOpLit
-  nameEndPos   <- getSourcePos
+  fixity <- choice
+    [ InfixL <$ keyword "infixl"
+    , InfixR <$ keyword "infixr"
+    , Infix <$ keyword "infix"
+    , Infix <$ keyword "operator"
+    ]
   void sc
-  -- can be any integer, no space allowed after +/- sign
-  precDecl    <- optional $ L.signed (pure ()) L.decimal <* sc
-  -- todo restrict forms of valid args receiver for operators, e.g. 
+  -- can be any integer, no space allowed between +/- sign and digit(s)
+  precDecl      <- optional $ L.signed (pure ()) L.decimal <* sc
+  errRptPos     <- getOffset
+  nameStartPos  <- getSourcePos
+  opSym         <- between (symbol "(") (symbol ")") parseOpLit
+  nameEndPos    <- getSourcePos
+  argsErrRptPos <- getOffset
+  argsRcvr      <- parseArgsReceiver
+  -- valid forms of args receiver for operators:
+  --  * nullary - redeclare a pre-existing procedure as operator
   --  * 2 pos-args - simple lh/rh value receiving operator
   --  * 3 pos-args - caller scope + lh/rh expr receiving operator
-  argRcvr     <- parseArgsReceiver
-  (body, si') <- parseProcBody si
-  let procDecl = ProcDecl
-        (NamedAttr opSym)
-        argRcvr
-        body
-        (SourceSpan
-          nameStartPos
-          (RelSourcePos (sourceLine nameEndPos) (sourceColumn nameEndPos))
-        )
-  opPD <- get
-  case precDecl of
-    Nothing -> case Map.lookup opSym opPD of
-      Nothing -> do
-        setOffset errRptPos
-        fail
-          $  "you forget to specify the precedence for operator: "
-          <> T.unpack opSym
-          <> " ?"
-      Just (opPrec, _) -> return (OpOvrdExpr opSym procDecl opPrec, si')
-    Just opPrec -> case Map.lookup opSym opPD of
-      Nothing -> do
-        put $ Map.insert opSym
-                         (opPrec, T.pack $ sourcePosPretty nameStartPos)
-                         opPD
-        return (OpDeclExpr opSym opPrec procDecl, si')
-      Just (prevPrec, odl) -> if prevPrec == opPrec
-        then return (OpOvrdExpr opSym procDecl opPrec, si')
-        else do
-          setOffset errRptPos
-          fail
-            $  "redeclaring operator "
-            <> T.unpack opSym
-            <> " with a different precedence ("
-            <> show opPrec
-            <> " vs "
-            <> show prevPrec
-            <> "), it has been declared at "
-            <> T.unpack odl
+  case argsRcvr of
+    PackReceiver ars | length ars `elem` [0, 2, 3] -> do
+      (body, si') <- parseProcBody si
+      let procDecl = ProcDecl
+            (NamedAttr opSym)
+            argsRcvr
+            body
+            (SourceSpan
+              nameStartPos
+              (RelSourcePos (sourceLine nameEndPos) (sourceColumn nameEndPos))
+            )
+      opPD <- get
+      case precDecl of
+        Nothing -> case Map.lookup opSym opPD of
+          Nothing -> do
+            setOffset errRptPos
+            fail
+              $  "you forget to specify the precedence for operator: "
+              <> T.unpack opSym
+              <> " ?"
+          Just (origFixity, origPrec, _) ->
+            return (OpOvrdExpr origFixity origPrec opSym procDecl, si')
+        Just opPrec -> case Map.lookup opSym opPD of
+          Nothing -> do
+            put $ Map.insert
+              opSym
+              (fixity, opPrec, T.pack $ sourcePosPretty nameStartPos)
+              opPD
+            return (OpDefiExpr fixity opPrec opSym procDecl, si')
+          Just (origFixity, origPrec, odl) -> if origPrec /= opPrec
+            then do
+              setOffset errRptPos
+              fail
+                $  "redeclaring operator "
+                <> T.unpack opSym
+                <> " with a different precedence ("
+                <> show opPrec
+                <> " vs "
+                <> show origPrec
+                <> "), it has been declared at "
+                <> T.unpack odl
+            else case fixity of
+              Infix -> -- follow whatever fixity orignally declared
+                return (OpOvrdExpr origFixity opPrec opSym procDecl, si')
+              _ -> if fixity /= origFixity
+                then do
+                  setOffset errRptPos
+                  fail
+                    $  "redeclaring operator "
+                    <> T.unpack opSym
+                    <> " with a different fixity ("
+                    <> show fixity
+                    <> " vs "
+                    <> show origFixity
+                    <> "), it has been declared at "
+                    <> T.unpack odl
+                else return (OpOvrdExpr fixity opPrec opSym procDecl, si')
+    _ -> do
+      setOffset argsErrRptPos
+      fail "invalid operator arguments receiver"
 
 parseReturnStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseReturnStmt !si = do
@@ -616,7 +645,7 @@ parseStmt' !prec !si = do
       -- `illegalExprStart` as invalid start for an expr
     , do
       docCmt   <- optional immediateDocComment
-      (x, si') <- parseExprPrec prec si
+      (x, si') <- parseExprPrec Nothing prec si
       return (ExprStmt x docCmt, si')
     ]
   (SourcePos _ end'line end'col) <- getSourcePos
@@ -843,8 +872,8 @@ parseDictOrBlock !si0 = symbol "{"
       (v, si') <- parseExpr si
       return ((AddrDictKey k, v), si')
     exprEntry = try $ do
-      -- assuming (:) has precedence of 2
-      (k, si') <- parseExprPrec 2 si
+      -- (:) should be infixl 2, cross check please
+      (k, si') <- parseExprPrec (Just (":", InfixL)) 2 si
       void $ symbol ":"
       (v, si'') <- parseExpr si'
       return ((ExprDictKey k, v), si'')
@@ -880,16 +909,16 @@ parseIndexer !si = symbol "[" *> parseApkRest si "]" False
 parsePrefixExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parsePrefixExpr !si = choice
   [ (symbol "+" >> notFollowedBy (satisfy isOperatorChar)) >> do
-    (x, si') <- parseExprPrec 9 si
+    (x, si') <- parseExprPrec Nothing 9 si
     return (PrefixExpr PrefixPlus x, si')
   , (symbol "-" >> notFollowedBy (satisfy isOperatorChar)) >> do
-    (x, si') <- parseExprPrec 9 si
+    (x, si') <- parseExprPrec Nothing 9 si
     return (PrefixExpr PrefixMinus x, si')
   , keyword "not" >> do
-    (x, si') <- parseExprPrec 4 si
+    (x, si') <- parseExprPrec Nothing 4 si
     return (PrefixExpr Not x, si')
   , (symbol "|" >> notFollowedBy (satisfy isOperatorChar)) >> do
-    (x, si') <- parseExprPrec 1 si
+    (x, si') <- parseExprPrec Nothing 1 si
     return (PrefixExpr Guard x, si')
   , keyword "void" >> do
     (x, si') <- parseExpr si
@@ -939,7 +968,7 @@ parseExprLit = do
   void $ keyword "expr"
   s                  <- getInput
   o                  <- getOffset
-  (x, (s', o', sss)) <- parseExprPrec (-20) (s, o, [])
+  (x, (s', o', sss)) <- parseExprPrec Nothing (-20) (s, o, [])
   o''                <- getOffset
   sss'               <- if o'' <= o'
     then return sss
@@ -958,7 +987,7 @@ parseIntplExpr (s, o, sss) = do
   void $ symbol "{$"
   ie's                        <- getInput
   ie'o                        <- getOffset
-  (x, (ie's', ie'o', ie'sss)) <- parseExprPrec (-30) (ie's, ie'o, [])
+  (x, (ie's', ie'o', ie'sss)) <- parseExprPrec Nothing (-30) (ie's, ie'o, [])
   let !sss' = if o' > o
         then SrcSeg (maybe "" fst $ takeN_ (o' - o) s) : sss
         else sss
@@ -975,8 +1004,12 @@ parseIntplExpr (s, o, sss) = do
   void $ optional sc -- but consume the optional spaces wrt parsing
   return (IntplExpr x, (s', o'', sss''))
 
-parseExprPrec :: Precedence -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
-parseExprPrec prec !si = lookAhead illegalExprStart >>= \case
+parseExprPrec
+  :: Maybe (OpSymbol, OpFixity)
+  -> Precedence
+  -> IntplSrcInfo
+  -> Parser (Expr, IntplSrcInfo)
+parseExprPrec precedingOp prec !si = lookAhead illegalExprStart >>= \case
   True  -> fail "illegal expression"
   False -> ((, si) <$> parseExprLit) <|> parseIntplExpr si <|> do
     (x, si') <- choice
@@ -1005,45 +1038,80 @@ parseExprPrec prec !si = lookAhead illegalExprStart >>= \case
       , (, si) . LitExpr <$> parseLitExpr
       , (, si) . AttrExpr <$> parseAttrAddr
       ]
-    parseMoreOps si' x
+    parseMoreOps precedingOp si' x
  where
-  parseMoreOps :: IntplSrcInfo -> Expr -> Parser (Expr, IntplSrcInfo)
-  parseMoreOps si' expr = choice
+  parseMoreOps
+    :: Maybe (OpSymbol, OpFixity)
+    -> IntplSrcInfo
+    -> Expr
+    -> Parser (Expr, IntplSrcInfo)
+  parseMoreOps pOp si' expr = choice
     [ parseIndexer si'
-      >>= \(idx, si'') -> parseMoreOps si'' $ IndexExpr idx expr
+      >>= \(idx, si'') -> parseMoreOps pOp si'' $ IndexExpr idx expr
     , parseArgsPacker si'
-      >>= \(aps, si'') -> parseMoreOps si'' $ CallExpr expr aps
-    , parseMoreInfix si' expr
+      >>= \(aps, si'') -> parseMoreOps pOp si'' $ CallExpr expr aps
+    , parseMoreInfix pOp si' expr
     ]
-  parseMoreInfix :: IntplSrcInfo -> Expr -> Parser (Expr, IntplSrcInfo)
-  parseMoreInfix si' leftExpr = higherOp prec >>= \case
-    Nothing              -> return (leftExpr, si')
-    Just (opPrec, opSym) -> do
-      (rightExpr, si'') <- parseExprPrec opPrec si'
-      parseMoreInfix si'' $ InfixExpr opSym leftExpr rightExpr
-
-  higherOp :: Precedence -> Parser (Maybe (Precedence, OpSymbol))
-  higherOp prec' = do
-    beforeOp  <- getParserState
-    errRptPos <- getOffset
-    optional (try (parseOpLit <* -- or it's an augmented closing bracket
-                                 notFollowedBy (oneOf ("}])" :: [Char]))))
-      >>= \case
-            Nothing    -> return Nothing
-            Just opSym -> do
-              opPD <- get
-              case Map.lookup opSym opPD of
-                Nothing -> do
-                  setOffset errRptPos
-                  fail $ "undeclared operator: " <> T.unpack opSym
-                Just (opPrec, _) -> if opPrec > prec'
-                  then return $ Just (opPrec, opSym)
-                  else do
-                    -- leave this op to be encountered later, i.e.
-                    -- after left-hand expr collapsed into one
-                    setParserState beforeOp
-                    return Nothing
+  parseMoreInfix
+    :: Maybe (OpSymbol, OpFixity)
+    -> IntplSrcInfo
+    -> Expr
+    -> Parser (Expr, IntplSrcInfo)
+  parseMoreInfix pOp si' leftExpr = tighterOp prec >>= \case
+    Nothing                        -> return (leftExpr, si')
+    Just (opFixity, opPrec, opSym) -> do
+      (rightExpr, si'') <- parseExprPrec (Just (opSym, opFixity)) opPrec si'
+      parseMoreInfix pOp si'' $ InfixExpr opSym leftExpr rightExpr
+   where
+    tighterOp :: Precedence -> Parser (Maybe (OpFixity, Precedence, OpSymbol))
+    tighterOp prec' = do
+      beforeOp  <- getParserState
+      errRptPos <- getOffset
+      optional (try (parseOpLit <* -- or it's an augmented closing bracket
+                                   notFollowedBy (oneOf ("}])" :: [Char]))))
+        >>= \case
+              Nothing    -> return Nothing
+              Just opSym -> do
+                opPD <- get
+                case Map.lookup opSym opPD of
+                  Nothing -> do
+                    setOffset errRptPos
+                    fail $ "undeclared operator: " <> T.unpack opSym
+                  Just (opFixity, opPrec, _) -> if opPrec == prec'
+                    then case opFixity of
+                      InfixL -> do
+                        -- leave this op to be encountered later, i.e.
+                        -- after left-hand expr collapsed into one
+                        setParserState beforeOp
+                        return Nothing
+                      InfixR -> return $ Just (opFixity, opPrec, opSym)
+                      Infix  -> case pOp of
+                        Nothing -> return $ Just (opFixity, opPrec, opSym)
+                        Just (pSym, pFixity) -> case pFixity of
+                          Infix ->
+                            fail
+                              $  "cannot mix [infix "
+                              <> show prec'
+                              <> " ("
+                              <> T.unpack pSym
+                              <> ")] and [infix "
+                              <> show opPrec
+                              <> " ("
+                              <> T.unpack opSym
+                              <> ")] in the same infix expression"
+                          _ -> do
+                            -- leave this op to be encountered later, i.e.
+                            -- after left-hand expr collapsed into one
+                            setParserState beforeOp
+                            return Nothing
+                    else if opPrec > prec'
+                      then return $ Just (opFixity, opPrec, opSym)
+                      else do
+                        -- leave this op to be encountered later, i.e.
+                        -- after left-hand expr collapsed into one
+                        setParserState beforeOp
+                        return Nothing
 
 
 parseExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
-parseExpr = parseExprPrec (-10)
+parseExpr = parseExprPrec Nothing (-10)

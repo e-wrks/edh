@@ -723,7 +723,8 @@ createEdhWorld !console = liftIO $ do
     where !this = edh'scope'this $ contextScope $ edh'context ets
 
 
-declareEdhOperators :: EdhWorld -> Text -> [(OpSymbol, Precedence)] -> STM ()
+declareEdhOperators
+  :: EdhWorld -> OpDeclLoc -> [(OpSymbol, OpFixity, Precedence)] -> STM ()
 declareEdhOperators world declLoc opps = do
   opPD  <- takeTMVar wops
   opPD' <-
@@ -731,18 +732,18 @@ declareEdhOperators world declLoc opps = do
     $ Map.unionWithKey chkCompatible (return <$> opPD)
     $ Map.fromList
     $ (<$> opps)
-    $ \(op, p) -> (op, return (p, declLoc))
+    $ \(sym, fixity, precedence) -> (sym, return (fixity, precedence, declLoc))
   putTMVar wops opPD'
  where
   !wops = edh'world'operators world
   chkCompatible
     :: OpSymbol
-    -> STM (Precedence, Text)
-    -> STM (Precedence, Text)
-    -> STM (Precedence, Text)
-  chkCompatible op prev newly = do
-    (prevPrec, prevDeclLoc) <- prev
-    (newPrec , newDeclLoc ) <- newly
+    -> STM (OpFixity, Precedence, Text)
+    -> STM (OpFixity, Precedence, Text)
+    -> STM (OpFixity, Precedence, Text)
+  chkCompatible sym prev newly = do
+    (prevFixity, prevPrec, prevDeclLoc) <- prev
+    (newFixity , newPrec , newDeclLoc ) <- newly
     if prevPrec /= newPrec
       then
         throwSTM
@@ -750,18 +751,38 @@ declareEdhOperators world declLoc opps = do
             UsageError
             (  "precedence change from "
             <> T.pack (show prevPrec)
-            <> " (declared "
+            <> " (declared at "
             <> prevDeclLoc
             <> ") to "
             <> T.pack (show newPrec)
-            <> " (declared "
+            <> " (declared at "
             <> T.pack (show newDeclLoc)
             <> ") for operator: "
-            <> op
+            <> sym
             )
             (toDyn nil)
         $ EdhCallContext "<edh>" []
-      else return (prevPrec, prevDeclLoc)
+      else case newFixity of
+        Infix -> return (prevFixity, prevPrec, prevDeclLoc)
+        _     -> if newFixity /= prevFixity
+          then
+            throwSTM
+            $ EdhError
+                UsageError
+                (  "fixity change from "
+                <> T.pack (show prevFixity)
+                <> " (declared at "
+                <> prevDeclLoc
+                <> ") to "
+                <> T.pack (show newFixity)
+                <> " (declared at "
+                <> T.pack (show newDeclLoc)
+                <> ") for operator: "
+                <> sym
+                )
+                (toDyn nil)
+            $ EdhCallContext "<edh>" []
+          else return (newFixity, prevPrec, prevDeclLoc)
 
 
 haltEdhProgram :: EdhThreadState -> EdhValue -> STM ()

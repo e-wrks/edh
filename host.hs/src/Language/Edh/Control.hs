@@ -16,15 +16,21 @@ import           Text.Megaparsec         hiding ( State )
 
 
 type OpSymbol = Text
+data OpFixity = InfixL | InfixR | Infix
+  deriving Eq
+instance Show OpFixity where
+  show InfixL = "infixl"
+  show InfixR = "infixr"
+  show Infix = "infix"
 type Precedence = Int
+type OpDeclLoc = Text
 
--- use such a dict as the parsing state, to implement
--- object-language-declarable operator precendence
-type OpPrecDict = Map.HashMap OpSymbol (Precedence, Text)
+-- global dict for operator info, as the parsing state
+type GlobalOpDict = Map.HashMap OpSymbol (OpFixity, Precedence, OpDeclLoc)
 
 -- no backtracking needed for precedence dict, so it
 -- can live in the inner monad of 'ParsecT'.
-type Parser = ParsecT Void Text (State OpPrecDict)
+type Parser = ParsecT Void Text (State GlobalOpDict)
 
 -- so goes this simplified parsing err type name
 type ParserError = ParseErrorBundle Text Void

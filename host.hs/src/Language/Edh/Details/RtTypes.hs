@@ -476,7 +476,7 @@ data EdhWorld = EdhWorld {
     edh'world'root :: !Scope
     -- | all operators declared in this world, this also used as the
     -- _world lock_ in parsing source code to be executed in this world
-  , edh'world'operators :: !(TMVar OpPrecDict)
+  , edh'world'operators :: !(TMVar GlobalOpDict)
     -- | all modules loaded, being loaded, or failed loading into this world
   , edh'world'modules :: !(TMVar (Map.HashMap ModuleId (TVar ModuSlot)))
     -- | for console logging, input and output
@@ -764,8 +764,8 @@ launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerTx !etsConsume
 
 -- | executable precedures
 data EdhProc =
-    EdhIntrOp !Precedence !IntrinOpDefi
-  | EdhOprtor !Precedence !(Maybe EdhValue) !ProcDefi
+    EdhIntrOp !OpFixity !Precedence !IntrinOpDefi
+  | EdhOprtor !OpFixity !Precedence !(Maybe EdhValue) !ProcDefi
   | EdhMethod !ProcDefi
   | EdhGnrtor !ProcDefi
   | EdhIntrpr !ProcDefi
@@ -777,10 +777,22 @@ data EdhProc =
   | EdhDescriptor !ProcDefi !(Maybe ProcDefi)
 
 instance Show EdhProc where
-  show (EdhIntrOp !preced (IntrinOpDefi _ !opSym _)) =
-    "intrinsic: (" ++ T.unpack opSym ++ ") " ++ show preced
-  show (EdhOprtor !preced _ !pd) =
-    "operator: (" ++ T.unpack (procedureName pd) ++ ") " ++ show preced
+  show (EdhIntrOp !fixity !prec (IntrinOpDefi _ !opSym _)) =
+    "intrinsic: "
+      ++ show fixity
+      ++ " "
+      ++ show prec
+      ++ " ("
+      ++ T.unpack opSym
+      ++ ")"
+  show (EdhOprtor !fixity !prec _pred !pd) =
+    "operator: "
+      ++ show fixity
+      ++ " "
+      ++ show prec
+      ++ " ("
+      ++ T.unpack (procedureName pd)
+      ++ ")"
   show (EdhMethod !pd) = T.unpack ("method: " <> procedureName pd)
   show (EdhGnrtor !pd) = T.unpack ("generator: " <> procedureName pd)
   show (EdhIntrpr !pd) = T.unpack ("interpreter: " <> procedureName pd)
@@ -792,13 +804,13 @@ instance Show EdhProc where
       Just _  -> "property "
 
 instance Eq EdhProc where
-  EdhIntrOp _ (IntrinOpDefi x'u _ _) == EdhIntrOp _ (IntrinOpDefi y'u _ _) =
-    x'u == y'u
-  EdhOprtor _ _ x == EdhOprtor _ _ y = x == y
-  EdhMethod x     == EdhMethod y     = x == y
-  EdhGnrtor x     == EdhGnrtor y     = x == y
-  EdhIntrpr x     == EdhIntrpr y     = x == y
-  EdhPrducr x     == EdhPrducr y     = x == y
+  EdhIntrOp _ _ (IntrinOpDefi x'u _ _) == EdhIntrOp _ _ (IntrinOpDefi y'u _ _)
+    = x'u == y'u
+  EdhOprtor _ _ _ x == EdhOprtor _ _ _ y = x == y
+  EdhMethod x       == EdhMethod y       = x == y
+  EdhGnrtor x       == EdhGnrtor y       = x == y
+  EdhIntrpr x       == EdhIntrpr y       = x == y
+  EdhPrducr x       == EdhPrducr y       = x == y
 
   EdhDescriptor x'getter x'setter == EdhDescriptor y'getter y'setter =
     x'getter == y'getter && x'setter == y'setter
@@ -806,24 +818,24 @@ instance Eq EdhProc where
   _ == _ = False
 
 instance Hashable EdhProc where
-  hashWithSalt s (EdhIntrOp _ (IntrinOpDefi x'u _ _)) = hashWithSalt s x'u
-  hashWithSalt s (EdhMethod x                       ) = hashWithSalt s x
-  hashWithSalt s (EdhOprtor _ _ x                   ) = hashWithSalt s x
-  hashWithSalt s (EdhGnrtor x                       ) = hashWithSalt s x
-  hashWithSalt s (EdhIntrpr x                       ) = hashWithSalt s x
-  hashWithSalt s (EdhPrducr x                       ) = hashWithSalt s x
+  hashWithSalt s (EdhIntrOp _ _ (IntrinOpDefi x'u _ _)) = hashWithSalt s x'u
+  hashWithSalt s (EdhMethod x                         ) = hashWithSalt s x
+  hashWithSalt s (EdhOprtor _ _ _ x                   ) = hashWithSalt s x
+  hashWithSalt s (EdhGnrtor x                         ) = hashWithSalt s x
+  hashWithSalt s (EdhIntrpr x                         ) = hashWithSalt s x
+  hashWithSalt s (EdhPrducr x                         ) = hashWithSalt s x
 
   hashWithSalt s (EdhDescriptor getter setter) =
     s `hashWithSalt` getter `hashWithSalt` setter
 
 callableName :: EdhProc -> Text
 callableName = \case
-  EdhIntrOp _preced (IntrinOpDefi _ !opSym _) -> "(" <> opSym <> ")"
-  EdhOprtor _preced _ !pd                     -> "(" <> procedureName pd <> ")"
-  EdhMethod !pd                               -> procedureName pd
-  EdhGnrtor !pd                               -> procedureName pd
-  EdhIntrpr !pd                               -> procedureName pd
-  EdhPrducr !pd                               -> procedureName pd
+  EdhIntrOp _fixity _preced (IntrinOpDefi _ !opSym _) -> "(" <> opSym <> ")"
+  EdhOprtor _fixity _preced _ !pd -> "(" <> procedureName pd <> ")"
+  EdhMethod !pd                   -> procedureName pd
+  EdhGnrtor !pd                   -> procedureName pd
+  EdhIntrpr !pd                   -> procedureName pd
+  EdhPrducr !pd                   -> procedureName pd
   EdhDescriptor !getter !setter ->
     (<> procedureName getter <> ">") $ case setter of
       Nothing -> "<readonly property "
@@ -831,8 +843,8 @@ callableName = \case
 
 callableDoc :: EdhProc -> Maybe DocComment
 callableDoc = \case
-  EdhIntrOp _preced _                -> Nothing
-  EdhOprtor _preced _ !pd            -> edh'procedure'doc pd
+  EdhIntrOp _fixity _preced _        -> Nothing
+  EdhOprtor _fixity _preced _ !pd    -> edh'procedure'doc pd
   EdhMethod !pd                      -> edh'procedure'doc pd
   EdhGnrtor !pd                      -> edh'procedure'doc pd
   EdhIntrpr !pd                      -> edh'procedure'doc pd
@@ -1409,10 +1421,10 @@ data Expr =
     -- `callerScope` as first argument
   | InterpreterExpr !ProcDecl
   | ProducerExpr !ProcDecl
-    -- | operator declaration
-  | OpDeclExpr !OpSymbol !Precedence !ProcDecl
+    -- | operator definition
+  | OpDefiExpr !OpFixity !Precedence !OpSymbol !ProcDecl
     -- | operator override
-  | OpOvrdExpr !OpSymbol !ProcDecl !Precedence
+  | OpOvrdExpr !OpFixity !Precedence !OpSymbol !ProcDecl
 
   | BlockExpr ![StmtSrc]
   | ScopedBlockExpr ![StmtSrc]
@@ -1566,8 +1578,8 @@ edhTypeOf EdhExpr{}               = ExprType
 
 edhProcTypeOf :: EdhProc -> EdhTypeValue
 edhProcTypeOf = \case
-  EdhIntrOp{}       -> IntrinsicType
-  EdhOprtor _ _ !pd -> case edh'procedure'decl pd of
+  EdhIntrOp{}         -> IntrinsicType
+  EdhOprtor _ _ _ !pd -> case edh'procedure'decl pd of
     HostDecl{} -> HostOperType
     ProcDecl{} -> OperatorType
   EdhMethod !pd -> case edh'procedure'decl pd of

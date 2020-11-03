@@ -47,6 +47,7 @@ import           Text.Megaparsec
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer    as L
 
+import           Language.Edh.Control
 import           Language.Edh.Runtime
 import           Language.Edh.InterOp
 
@@ -269,115 +270,135 @@ installEdhBatteries world =
       [ -- format: (symbol, precedence)
 
         -- annotations
-        ("::", -9)
+        ("::", Infix, -9)
       , ( "!"
+        , InfixR
         , 0
         )
 
         -- arrows, make it higher than (=), so an arrow procedure can be
         -- assigned to some attribute without quoting
-      , ("=>", 1)
+      , ("=>", InfixR, 1)
       , ( "=>*"
+        , InfixR
         , 1
         )
         -- branch
       , ( "->"
+        , InfixR
         , -1
         )
         -- catch
       , ( "$=>"
+        , InfixL
         , -2
         )
         -- finally
       , ( "@=>"
+        , InfixL
         , -2
         )
 
       -- the attribute key dereferencing operator
       , ( "@"
+        , InfixL
         , 10
         )
       -- attribute tempter, 
       -- address an attribute off an object if possible, nil otherwise
-      , ("?", 10)
+      , ("?", InfixL, 10)
       , ( "?@"
+        , InfixL
         , 10
         )
 
       -- the function application operator
       , ( "$"
+        , InfixR
         , -5 -- make it lower than procedure body definition (i.e. -3 to be
         -- cross checked with `parseProcBody`), or decorators can go wrong
         )
       -- the flipped function application operator, in UNIX pipe semantics
       , ( "|"
+        , InfixL
         , 0 -- make it slightly higher than (->),
             -- so the guard syntax in pattern matching works nicely
         )
       -- the flipped function application operator, in Haskell convention
       , ( "&"
+        , InfixL
         , -4 -- make it one higher than ($) as in Haskell
         )
 
       -- assignments, make them lower than (++),
       -- so don't need to quote `a = b ++ c`
-      , ("=", 0)
+      , ("=", InfixR, 0)
       , ( "?="
+        , InfixR
         , 0
         )
       -- the definition operator, creates named value in Edh
-      , (":=", 1)
+      , (":=", InfixR, 1)
       , ( "?:="
+        , InfixR
         , 1
         )
 
       -- syntactic sugars for (=)
-      , ("++=", 2)
-      , ("+=" , 2)
-      , ("-=" , 2)
-      , ("*=" , 2)
-      , ("/=" , 2)
-      , ("//=", 2)
-      , ("%=" , 2)
-      , ( "**="
-        , 2
+      , ("++=", InfixR, 2)
+      , ("+=" , InfixR, 2)
+      , ("-=" , InfixR, 2)
+      , ("*=" , InfixR, 2)
+      , ("/=" , InfixR, 2)
+      , ("//=", InfixR, 2)
+      , ("%=" , InfixR, 2)
+      , ("**=", InfixR, 2)
+      , ("&&=", InfixR, 3)
+      , ( "||="
+        , InfixR
+        , 3
         )
 
       -- arithmetic
-      , ("+" , 6)
-      , ("-" , 6)
-      , ("*" , 7)
-      , ("/" , 7)
-      , ("//", 7)
-      , ("%" , 7)
+      , ("+" , InfixL, 6)
+      , ("-" , InfixL, 6)
+      , ("*" , InfixL, 7)
+      , ("/" , InfixL, 7)
+      , ("//", InfixL, 7)
+      , ("%" , InfixL, 7)
       , ( "**"
+        , InfixL
         , 8
         )
       -- comparations
       , ( "=="
+        , Infix
         , 4
         ) -- deep-value-wise equality test
       , ( "!="
+        , Infix
         , 4
         ) -- inversed identity-wise equality test
           -- C style here, as (/=) is used for inplace division
       , ( "is not"
+        , Infix
         , 4
         ) -- identity-wise negative equality test
       , ( "is"
+        , Infix
         , 4
         ) -- identity-wise equality test
-      , (">" , 4)
-      , (">=", 4)
-      , ("<" , 4)
+      , (">" , Infix, 4)
+      , (">=", Infix, 4)
+      , ("<" , Infix, 4)
       , ( "<="
+        , Infix
         , 4
         )
         -- logical arithmetic
-      , ("&&" , 3)
-      , ("||" , 3)
-      , ("&&=", 3)
-      , ( "||="
+      , ("&&", InfixL, 3)
+      , ( "||"
+        , InfixL
         , 3
         )
 
@@ -387,8 +408,9 @@ installEdhBatteries world =
         --       onCnd and oneThing or theOther
         --  * Edh
         --       onCnd &> oneThing |> theOther
-      , ("&>", 3)
+      , ("&>", InfixL, 3)
       , ( "|>"
+        , InfixL
         , 3
         )
 
@@ -400,6 +422,7 @@ installEdhBatteries world =
         --  * tuple comprehension:
         --     (,) =< for x from range(100) do x*x
       , ( "=<"
+        , InfixR
         , 2
         )
         -- prepand to list
@@ -407,10 +430,12 @@ installEdhBatteries world =
         --     2 :> l
         --     [2,3,7,5]
       , ( ":>"
+        , InfixR
         , 2
         )
       -- the pair constructor, creates pairs in Edh
       , ( ":"
+        , InfixL
         , 2
         )
         -- reverse left-list and prepend to right-list
@@ -418,42 +443,50 @@ installEdhBatteries world =
         --     [9,2] >> l
         --     [2,9,3,7,5]
       , ( ">>"
+        , InfixR
         , 2
         )
         -- element-of test
       , ( "?<="
-        , 3
+        , Infix
+        , 4
         )
         -- prefix test
       , ( "|*"
-        , 3
+        , Infix
+        , 4
         )
         -- suffix test
       , ( "*|"
-        , 3
+        , Infix
+        , 4
         )
         -- prefix cut (pattern only)
       , ( ">@"
+        , InfixL
         , 3
         )
         -- suffix cut (pattern only)
       , ( "@<"
+        , InfixL
         , 3
         )
 
         -- publish to sink
         --     evsPub <- outEvent
       , ( "<-"
+        , InfixR
         , 1
         )
 
         -- string coercing concatenation
       , ( "++"
+        , InfixL
         , 2
         )
 
         -- logging
-      , ("<|", 1)
+      , ("<|", Infix, 1)
       ]
 
     -- global operators at world root scope
