@@ -1,27 +1,23 @@
 
-# to define the mid-dot operator
-# for how to input it, see: https://middot.net/
+# to define mid-dot as the function composition operator
+# see: https://middot.net for how to input a mid-dot
 
-infixr 9 ( · ) ( f, g ) x => { f $ g $ x }
+infixr 9 ( · ) ( f, g ) x => f ( g ( x ) )
 
-# %%
-
-let ( f, g, ) = (
-  x => x+5,
-  x => x*3,
-)
-
-let p = f · g
+show$ ( · )
 
 # %%
+method f x x+5
+method g x x*3
+
+p = f · g
+
 p|desc
 
 # %%
 2 | p
-
 # %%
 p $ 2
-
 # %%
 p( 2 )
 
