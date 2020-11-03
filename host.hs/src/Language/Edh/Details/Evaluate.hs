@@ -3377,7 +3377,10 @@ evalExpr' (NamespaceExpr pd@(ProcDecl !addr _ _ _) !argsSndr) !docCmt !exit =
         let !ctx       = edh'context ets
             !scope     = contextScope ctx
             !rootScope = edh'world'root $ edh'ctx'world ctx
-            !nsClass   = edh'obj'class $ edh'scope'this rootScope
+            !nsClsObj  = edh'obj'class $ edh'scope'this rootScope
+            !nsClass   = case edh'obj'store nsClsObj of
+              ClassStore !cls -> cls
+              _ -> error "bug: namespace class not bearing ClassStore"
 
         !idNs <- unsafeIOToSTM newUnique
         !hs   <-
@@ -3391,7 +3394,13 @@ evalExpr' (NamespaceExpr pd@(ProcDecl !addr _ _ _) !argsSndr) !docCmt !exit =
                                , edh'procedure'doc   = docCmt
                                , edh'procedure'decl  = pd
                                }
-            !nsObj = Object idNs (HashStore hs) nsClass ss
+            !nsObj = Object
+              idNs
+              (HashStore hs)
+              nsClsObj
+                { edh'obj'store = ClassStore nsClass { edh'class'proc = nsProc }
+                }
+              ss
 
             doExit _rtn _ets = do
               defineScopeAttr ets name $ EdhObject nsObj
