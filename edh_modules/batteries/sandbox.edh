@@ -1,0 +1,35 @@
+
+{##
+ # this module is imported by the interpreter into every world's sandbox scope
+ #}
+
+genuineConsole = console
+
+export {
+
+  import * './root/vattr'
+  import * './root/ops'
+  import * './root/ho'
+  import * './root/iter'
+  import * './root/str'
+  import * './root/concur'
+  import * './root/evt'
+  import * './root/math'
+  import * './root/slice'
+  import * './root/reflect'
+
+  {##
+   # define the censored console object
+   #
+   # import from the genuine console, only those artifacts considered safe for
+   # sandboxed envs
+   #}
+  namespace console() import (
+    debug, info, warn, error, fatal,
+    print, everyMicros, everyMillis, everySeconds,
+    # censored:
+    # logLevel, now, exit, readSource, readCommand,
+    **_
+  ) genuineConsole
+
+}

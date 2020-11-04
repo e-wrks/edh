@@ -46,7 +46,14 @@ createEdhWorld !console = liftIO $ do
   !idRoot  <- newUnique
   !hsRoot  <- atomically
     $ iopdFromList [(AttrByName "__name__", EdhString "<root>")]
-  !ssRoot       <- newTVarIO []
+  !ssRoot    <- newTVarIO []
+
+  -- the sandbox object and sandbox scope
+  !idSandbox <- newUnique
+  !hsSandbox <- atomically
+    $ iopdFromList [(AttrByName "__name__", EdhString "<sandbox>")]
+  !ssSandbox    <- newTVarIO []
+  !mroSandbox   <- newTVarIO [] -- no super class, and self is not stored
 
   -- the namespace class, root object is a special instance of namespace class
   !idNamespace  <- newUnique
@@ -62,7 +69,25 @@ createEdhWorld !console = liftIO $ do
                         rootScope
                         (Just ["the root namespace"])
                         (HostDecl phantomHostProc)
-    rootObj  = Object idRoot (HashStore hsRoot) nsClassObj ssRoot
+    rootObj      = Object idRoot (HashStore hsRoot) nsClassObj ssRoot
+
+    sandboxScope = Scope hsSandbox
+                         sandboxObj
+                         sandboxObj
+                         defaultEdhExcptHndlr
+                         sandboxProc
+                         genesisStmt
+                         []
+    sandboxProc = ProcDefi idSandbox
+                           (AttrByName "<sandbox>")
+                           sandboxScope
+                           (Just ["the sandbox namespace"])
+                           (HostDecl phantomHostProc)
+    sandboxObj =
+      Object idSandbox (HashStore hsSandbox) sandboxClassObj ssSandbox
+    sandboxClass = Class sandboxProc hsSandbox phantomAllocator mroSandbox
+    sandboxClassObj =
+      Object idSandbox (ClassStore sandboxClass) metaClassObj ssSandbox
 
     metaProc = ProcDefi idMeta
                         (AttrByName "class")
@@ -259,6 +284,7 @@ createEdhWorld !console = liftIO $ do
 
   -- assembly the world with pieces prepared above
   let world = EdhWorld { edh'world'root        = rootScope
+                       , edh'world'sandbox     = sandboxScope
                        , edh'world'operators   = opPD
                        , edh'world'modules     = modus
                        , edh'world'console     = console

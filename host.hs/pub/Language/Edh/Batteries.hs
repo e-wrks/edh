@@ -490,7 +490,7 @@ installEdhBatteries world =
       ]
 
     -- global operators at world root scope
-    !rootOperators <- sequence
+    !basicOperators <- sequence
       [ (AttrByName sym, ) <$> mkIntrinsicOp world sym iop
       | (sym, iop) <-
         [ ("@"     , attrDerefAddrProc)
@@ -551,7 +551,7 @@ installEdhBatteries world =
       ]
 
     -- global procedures at world root scope
-    !rootProcs <-
+    !basicProcs <-
       sequence
       $  [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp
          | (mc, nm, hp) <-
@@ -601,21 +601,9 @@ installEdhBatteries world =
       ++ [(AttrByName "Vector", ) . EdhObject <$> createVectorClass rootScope]
 
 
-    !console <- createNamespace
-      world
-      "console"
-      [ (AttrByName "debug", EdhDecimal 10)
-      , (AttrByName "info" , EdhDecimal 20)
-      , (AttrByName "warn" , EdhDecimal 30)
-      , (AttrByName "error", EdhDecimal 40)
-      , (AttrByName "fatal", EdhDecimal 50)
-      , ( AttrByName "logLevel"
-        , EdhDecimal (fromIntegral $ consoleLogLevel $ edh'world'console world)
-        )
-      ]
+    !console  <- createNamespace world "console" []
     !conScope <- objectScope console
-
-    !conArts  <- sequence
+    !conMths  <- sequence
       [ (AttrByName nm, ) <$> mkHostProc conScope vc nm hp
       | (vc, nm, hp) <-
         [ (EdhMethod, "exit"        , wrapHostProc conExitProc)
@@ -628,22 +616,51 @@ installEdhBatteries world =
         , (EdhGnrtor, "everySeconds", wrapHostProc conEverySecondsProc)
         ]
       ]
-    iopdUpdate conArts $ edh'scope'entity conScope
+    let
+      !conArts =
+        conMths
+          ++ [ (AttrByName "debug", EdhDecimal 10)
+             , (AttrByName "info" , EdhDecimal 20)
+             , (AttrByName "warn" , EdhDecimal 30)
+             , (AttrByName "error", EdhDecimal 40)
+             , (AttrByName "fatal", EdhDecimal 50)
+             , ( AttrByName "logLevel"
+               , EdhDecimal
+                 (fromIntegral $ consoleLogLevel $ edh'world'console world)
+               )
+             ]
+    !conExps <- EdhDict
+      <$> createEdhDict [ (attrKeyValue k, v) | (k, v) <- conArts ]
+    flip iopdUpdate (edh'scope'entity conScope)
+      $  conArts
+      ++ [(AttrByName "__exports__", conExps)]
 
-    flip iopdUpdate rootEntity
-      $  rootOperators
-      ++ rootProcs
-      ++ [
-          -- console module
-          (AttrByName "console", EdhObject console)
-          --
-                                                   ]
 
-    -- import the parts written in Edh 
+    -- artifacts considered safe for sandboxed envs, to afford basic Edh source
+    -- evaluation
+    let !basicArts = basicOperators ++ basicProcs
+
+    !privilegedProcs <-
+      sequence
+        $ [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp
+          | (mc, nm, hp) <- [(EdhMethod, "sandbox", wrapHostProc sandboxProc)]
+          ]
+    let !privilegedArts =
+          (AttrByName "console", EdhObject console) : privilegedProcs
+    iopdUpdate (basicArts ++ privilegedArts) rootEntity
     runEdhTx ets
       $ importEdhModule' rootEntity WildReceiver "batteries/root" endOfEdh
 
+    iopdUpdate basicArts sandboxEntity
+    runEdhTx ets $ importEdhModule' sandboxEntity
+                                    WildReceiver
+                                    "batteries/sandbox"
+                                    endOfEdh
+
  where
 
-  !rootScope  = edh'world'root world
-  !rootEntity = edh'scope'entity rootScope
+  !rootScope     = edh'world'root world
+  !rootEntity    = edh'scope'entity rootScope
+
+  !sandboxScope  = edh'world'sandbox world
+  !sandboxEntity = edh'scope'entity sandboxScope

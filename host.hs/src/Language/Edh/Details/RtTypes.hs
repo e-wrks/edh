@@ -351,13 +351,13 @@ instance Show Scope where
 
 outerScopeOf :: Scope -> Maybe Scope
 outerScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
-  then Nothing -- already at world root scope
+  then Nothing -- already at a root scope
   else Just outerScope
   where !outerScope = edh'procedure'lexi $ edh'scope'proc scope
 
 rootScopeOf :: Scope -> Scope
 rootScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
-  then scope -- found world root scope
+  then scope -- found a root scope
   else rootScopeOf outerScope
   where !outerScope = edh'procedure'lexi $ edh'scope'proc scope
 
@@ -474,6 +474,8 @@ castObjectStore' !val = case edhUltimate val of
 data EdhWorld = EdhWorld {
     -- | root scope of this world
     edh'world'root :: !Scope
+    -- | sandbox scope of this world
+  , edh'world'sandbox :: !Scope
     -- | all operators declared in this world, this also used as the
     -- _world lock_ in parsing source code to be executed in this world
   , edh'world'operators :: !(TMVar GlobalOpDict)

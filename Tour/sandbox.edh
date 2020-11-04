@@ -1,0 +1,55 @@
+{##
+ # Edh worlds have native sandbox support
+ #}
+
+virtualEpoch = console.now()
+
+sandbox$
+namespace sb (
+  x=3, y=2, z=5,
+) { # methods defined here have privileged access to full lexical environment
+
+  # we can provide a similar functionality to censored ones, with security
+  # concerns well controlled.
+  method virtualNow() {
+    return console.now() - virtualEpoch
+  }
+
+}
+
+sbs = scope( sb )
+
+dir$ sb
+
+# %%
+# a sandbox environment has a console object other than the genuine one, with
+# *unsafe* artifacts censored
+assert$ sbs.eval( expr console ) is not console
+
+# %%
+# e.g. genuine console object's `now()` method is censored from a sandbox's
+# console object, as system clock reading is consider a security risk
+
+# this is destined to fail
+sbs.eval( expr
+  console.now()
+)
+
+# %%
+# it's prohibited to import modules from filesystem, for sandboxed envs
+sbs.eval( expr
+  import * 'batteries/root'
+)
+
+# %%
+# only explicitly granted artifacts (including procedures) can be called
+sbs.eval( expr
+  virtualNow()
+)
+
+# %%
+# import from accessible objects or apks is allowed
+sbs.eval( expr
+  import * ( a=5, c=9 )
+)
+dir$ sb

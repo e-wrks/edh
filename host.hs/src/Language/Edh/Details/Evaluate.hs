@@ -2312,15 +2312,21 @@ evalStmt' !stmt !exit = case stmt of
   VoidStmt -> exitEdhTx exit nil
 
 
-importInto :: EntityStore -> ArgsReceiver -> Expr -> EdhTxExit -> EdhTx
-importInto !tgtEnt !argsRcvr !srcExpr !exit = case srcExpr of
-  LitExpr (StringLiteral !importSpec) ->
-    -- import from specified path
-    importEdhModule' tgtEnt argsRcvr importSpec exit
+type FileSystemImportCheck = Text -> EdhTx -> EdhTx
+
+importInto
+  :: FileSystemImportCheck
+  -> EntityStore
+  -> ArgsReceiver
+  -> Expr
+  -> EdhTxExit
+  -> EdhTx
+importInto !fsChk !tgtEnt !argsRcvr !srcExpr !exit = case srcExpr of
+  LitExpr (StringLiteral !importSpec) -> -- import from specified path
+    fsChk importSpec $ importEdhModule' tgtEnt argsRcvr importSpec exit
   _ -> evalExpr' srcExpr Nothing $ \ !srcVal -> case edhDeCaseClose srcVal of
-    EdhString !importSpec ->
-      -- import from dynamic path
-      importEdhModule' tgtEnt argsRcvr importSpec exit
+    EdhString !importSpec -> -- import from dynamic path
+      fsChk importSpec $ importEdhModule' tgtEnt argsRcvr importSpec exit
     EdhObject !fromObj ->
       -- import from an object
       importFromObject tgtEnt argsRcvr fromObj exit
@@ -3249,25 +3255,40 @@ evalExpr' (ExportExpr !exps) !docCmt !exit = \ !ets ->
     $ \ !rtn -> edhSwitchState ets $ exitEdhTx exit rtn
 
 evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
-  case maybeInto of
-    Nothing ->
-      let !scope = contextScope $ edh'context ets
-      in  runEdhTx ets
-            $ importInto (edh'scope'entity scope) argsRcvr srcExpr exit
-    Just !intoExpr -> runEdhTx ets $ evalExpr' intoExpr docCmt $ \ !intoVal ->
-      case intoVal of
-        EdhObject !intoObj -> case edh'obj'store intoObj of
-          HashStore !hs -> importInto hs argsRcvr srcExpr exit
-          ClassStore !cls ->
-            importInto (edh'class'store cls) argsRcvr srcExpr exit
-          HostStore{} ->
+  do
+    let !ctx   = edh'context ets
+        !world = edh'ctx'world ctx
+        !scope = contextScope ctx
+        !fsChk =
+          if edh'scope'proc (rootScopeOf scope)
+               == edh'scope'proc (edh'world'sandbox world)
+            -- fs access from sandboxed scope is totally denied
+            then forbidSandboxImp
+            else allowFsImp
+    case maybeInto of
+      Nothing -> runEdhTx ets
+        $ importInto fsChk (edh'scope'entity scope) argsRcvr srcExpr exit
+      Just !intoExpr ->
+        runEdhTx ets $ evalExpr' intoExpr docCmt $ \ !intoVal -> case intoVal of
+          EdhObject !intoObj -> case edh'obj'store intoObj of
+            HashStore !hs -> importInto fsChk hs argsRcvr srcExpr exit
+            ClassStore !cls ->
+              importInto fsChk (edh'class'store cls) argsRcvr srcExpr exit
+            HostStore{} ->
+              throwEdhTx UsageError
+                $  "can not import into a host object of class "
+                <> objClassName intoObj
+          _ ->
             throwEdhTx UsageError
-              $  "can not import into a host object of class "
-              <> objClassName intoObj
-        _ ->
-          throwEdhTx UsageError
-            $  "can only import into an object, not a "
-            <> T.pack (edhTypeNameOf intoVal)
+              $  "can only import into an object, not a "
+              <> T.pack (edhTypeNameOf intoVal)
+ where
+  allowFsImp :: FileSystemImportCheck
+  allowFsImp _impSpec doImp = doImp
+  forbidSandboxImp :: FileSystemImportCheck
+  forbidSandboxImp _impSpec _doImp = throwEdhTx
+    EvalError
+    "import from filesystem is prohibited from a sandboxed environment"
 
 evalExpr' (DefaultExpr !exprDef) _docCmt !exit = \ !ets -> do
   u <- unsafeIOToSTM newUnique

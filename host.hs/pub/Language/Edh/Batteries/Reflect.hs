@@ -6,12 +6,15 @@ import           Prelude
 
 import           GHC.Conc                       ( unsafeIOToSTM )
 
+import           Control.Monad
+
 import           Control.Concurrent.STM
 
 import qualified Data.Text                     as T
 import           Data.Unique
 
 import           Language.Edh.Control
+import           Language.Edh.Args
 import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.RtTypes
 import           Language.Edh.Details.Evaluate
@@ -67,6 +70,50 @@ supersProc (ArgsPack !args !kwargs) !exit !ets = do
       map EdhObject <$> readTVar (edh'obj'supers o) >>= \ !supers ->
         return $ EdhArgsPack $ ArgsPack supers odEmpty
     _ -> return edhNone
+
+
+-- | utility sandbox(nsObject) - transform a vanilla namespace object into a
+-- sandbox object. 
+--
+-- idiomatic usage: 
+--
+--    sandbox$
+--    namespace name'of'the'sandbox( ... ) {
+--      ...
+--    }
+--
+-- the sandbox object will retain the identity of the original object, while its
+-- class procedure's lexcical scope will be changed to the world's sandbox scope
+-- so as for reflective scopes created from it to have their outer scopes be the
+-- world's sandbox scope.
+sandboxProc :: "nsObject" !: Object -> EdhHostProc
+sandboxProc (mandatoryArg -> nsObject) !exit !ets =
+  case edh'obj'store nsClsObj of
+    ClassStore !nsCls -> case edhClassName nsClsObj of
+      "_"     -> throwEdh ets UsageError "anonymous sandbox is not reasonable"
+      !sbName -> do
+        let
+          !nsProc = edh'class'proc nsCls
+          !sbVal  = EdhObject nsObject
+            { edh'obj'class = nsClsObj
+              { edh'obj'store = ClassStore nsCls
+                { edh'class'proc = nsProc
+                                     { edh'procedure'lexi = edh'world'sandbox
+                                                              world
+                                     }
+                }
+              }
+            }
+        unless (edh'ctx'pure ctx) $ iopdInsert
+          (AttrByName sbName)
+          sbVal
+          (edh'scope'entity $ contextScope ctx)
+        exitEdh ets exit sbVal
+    _ -> throwEdh ets EvalError "bug: class object not bearing ClassStore"
+ where
+  !ctx      = edh'context ets
+  !world    = edh'ctx'world ctx
+  !nsClsObj = edh'obj'class nsObject
 
 
 -- | utility makeOp(lhExpr, opSym, rhExpr)
