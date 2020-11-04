@@ -1,7 +1,4 @@
 
-# similar to Python's PEP 557 -- Edh has Data Classes too
-# https://www.python.org/dev/peps/pep-0557
-
 # %%
 data D0 () pass
 d0 = D0()

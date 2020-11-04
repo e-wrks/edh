@@ -1,0 +1,65 @@
+
+# similar to Python's PEP 557 -- Edh has Data Classes too
+# https://www.python.org/dev/peps/pep-0557
+
+
+# %%
+# written as a data class
+data D ( x, y= nan, ) {
+  method __init__(*** _ ) {
+    this.total = this.x + this.y
+  }
+}
+
+
+# %%
+# it satisfies
+d = D( 3, 11 )
+assert$ d < D( 3, 17 )
+assert$ d == D( 3, 11 )
+assert$ d is not D( 3, 11 )
+d | show
+
+
+# %%
+# equivalent written as a normal class
+
+class D {
+  method __init__(
+    x as this.x,
+    y as this.y= nan,
+  ) {
+    this.total = this.x + this.y
+  }
+
+  method __repr__() {
+    return 'D( ' ++ this.x ++ ', ' ++ this.y ++ ", )"
+  }
+  __str__ = __repr__
+
+  method __eq__( other ) case other of {
+    { { D:d' } } -> {
+      this.x != d'.x -> false
+      this.y != d'.y -> false
+      true
+    }
+    _ -> false
+  }
+
+  method __compare__( other ) case other of {
+    { { D:d' } } -> {
+      case compare( this.x, d'.x ) of {
+        EQ -> { pass }
+        { [ LT, GT ] } -> { conclusion } -> conclusion
+        _ -> NA
+      }
+      case compare( this.y, d'.y ) of {
+        EQ -> { pass }
+        { [ LT, GT ] } -> { conclusion } -> conclusion
+        _ -> NA
+      }
+      EQ
+    }
+    _ -> NA
+  }
+}
