@@ -36,6 +36,15 @@ sbs.eval( expr
 )
 
 # %%
+# and scope() is not accessible from the sandbox too, or it can be used for
+# some sorta escape
+
+# this is destined to fail
+sbs.eval( expr
+  s = scope()
+)
+
+# %%
 # it's prohibited to import modules from filesystem, for sandboxed envs
 sbs.eval( expr
   import * 'batteries/root'
