@@ -177,6 +177,7 @@ module Language.Edh.EHI
   , mkScopeWrapper
   , mkHostClass
   , mkHostClass'
+  , mkSandbox
 
     -- ** Value system
   , edhSetValue

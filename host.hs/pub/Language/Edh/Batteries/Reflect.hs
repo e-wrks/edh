@@ -88,32 +88,16 @@ supersProc (ArgsPack !args !kwargs) !exit !ets = do
 -- world's sandbox scope.
 sandboxProc :: "nsObject" !: Object -> EdhHostProc
 sandboxProc (mandatoryArg -> nsObject) !exit !ets =
-  case edh'obj'store nsClsObj of
-    ClassStore !nsCls -> case edhClassName nsClsObj of
-      "_"     -> throwEdh ets UsageError "anonymous sandbox is not reasonable"
-      !sbName -> do
-        let
-          !nsProc = edh'class'proc nsCls
-          !sbVal  = EdhObject nsObject
-            { edh'obj'class = nsClsObj
-              { edh'obj'store = ClassStore nsCls
-                { edh'class'proc = nsProc
-                                     { edh'procedure'lexi = edh'world'sandbox
-                                                              world
-                                     }
-                }
-              }
-            }
-        unless (edh'ctx'pure ctx) $ iopdInsert
-          (AttrByName sbName)
-          sbVal
-          (edh'scope'entity $ contextScope ctx)
-        exitEdh ets exit sbVal
-    _ -> throwEdh ets EvalError "bug: class object not bearing ClassStore"
- where
-  !ctx      = edh'context ets
-  !world    = edh'ctx'world ctx
-  !nsClsObj = edh'obj'class nsObject
+  mkSandbox ets nsObject $ \ !sbScope -> case objClassName nsObject of
+    "_"     -> throwEdh ets UsageError "anonymous sandbox is not reasonable"
+    !sbName -> do
+      let !sbVal = EdhObject $ edh'scope'this sbScope
+      unless (edh'ctx'pure ctx) $ iopdInsert
+        (AttrByName sbName)
+        sbVal
+        (edh'scope'entity $ contextScope ctx)
+      exitEdh ets exit sbVal
+  where !ctx = edh'context ets
 
 
 -- | utility makeOp(lhExpr, opSym, rhExpr)

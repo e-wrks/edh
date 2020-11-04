@@ -4670,3 +4670,46 @@ mkHostClass !scope !className !allocator !superClasses !storeMod = do
   clsCreStmt :: StmtSrc
   clsCreStmt = StmtSrc (startPosOfFile "<host-class-creation>", VoidStmt)
 
+
+-- | make a sandbox scope from a vanilla object
+--
+-- the sandbox scope's this/that will be a sandbox object based off the original
+-- object, the scope procedure's lexcical scope will be the world's sandbox
+-- scope.
+--
+-- the sandbox object will retain the identity of the original object, while its
+-- class procedure's lexcical scope will be changed to the world's sandbox scope
+-- so as for reflective scopes created from it to have their outer scopes be the
+-- world's sandbox scope.
+mkSandbox :: EdhThreadState -> Object -> (Scope -> STM ()) -> STM ()
+mkSandbox !ets !obj !exit = case edh'obj'store obj of
+  HashStore !hs -> case edh'obj'store clsObj of
+    ClassStore !objCls -> do
+      let
+        !clsProc = edh'class'proc objCls
+        !sbProc  = clsProc { edh'procedure'lexi = edh'world'sandbox world }
+        !sbObj   = obj
+          { edh'obj'class = clsObj
+                              { edh'obj'store = ClassStore objCls
+                                                  { edh'class'proc = sbProc
+                                                  }
+                              }
+          }
+        !sbScope = Scope
+          { edh'scope'entity  = hs
+          , edh'scope'this    = sbObj
+          , edh'scope'that    = sbObj
+          , edh'excpt'hndlr   = defaultEdhExcptHndlr
+          , edh'scope'proc    = sbProc
+          , edh'scope'caller  = StmtSrc
+                                  (startPosOfFile "<sandbox-scope>", VoidStmt)
+          , edh'effects'stack = []
+          }
+      exit sbScope
+    _ -> throwEdh ets EvalError "bug: class object not bearing ClassStore"
+  _ ->
+    throwEdh ets UsageError "can only make sandbox from a vanilla Edh object"
+ where
+  !ctx    = edh'context ets
+  !world  = edh'ctx'world ctx
+  !clsObj = edh'obj'class obj
