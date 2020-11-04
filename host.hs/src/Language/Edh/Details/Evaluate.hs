@@ -4230,8 +4230,10 @@ doEdhComparison !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
   noMagic :: STM ()
   noMagic = case edhUltimate lhVal of
     EdhDecimal !lhNum -> case edhUltimate rhVal of
-      EdhDecimal !rhNum -> exit $ Just $ compare lhNum rhNum
-      _                 -> exit Nothing
+      EdhDecimal !rhNum -> if D.decimalIsNaN lhNum || D.decimalIsNaN rhNum
+        then exit Nothing
+        else exit $ Just $ compare lhNum rhNum
+      _ -> exit Nothing
     EdhString lhStr -> case edhUltimate rhVal of
       EdhString rhStr -> exit $ Just $ compare lhStr rhStr
       _               -> exit Nothing
