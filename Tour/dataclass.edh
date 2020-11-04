@@ -39,8 +39,8 @@ class D {
 
   method __eq__( other ) case other of {
     { { D:d' } } -> {
-      this.x != d'.x -> false
-      this.y != d'.y -> false
+      ; | this.x != d'.x -> false
+      ; | this.y != d'.y -> false
       true
     }
     _ -> false
