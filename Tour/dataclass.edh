@@ -50,13 +50,13 @@ class D {
     { { D:d' } } -> {
       case compare( this.x, d'.x ) of {
         EQ -> { pass }
-        { [ LT, GT ] } -> { conclusion } -> conclusion
-        _ -> NA
+        { [ LT, GT ] } -> { conclusion } -> { return conclusion }
+        _ -> return NA
       }
       case compare( this.y, d'.y ) of {
         EQ -> { pass }
-        { [ LT, GT ] } -> { conclusion } -> conclusion
-        _ -> NA
+        { [ LT, GT ] } -> { conclusion } -> { return conclusion }
+        _ -> return NA
       }
       EQ
     }
