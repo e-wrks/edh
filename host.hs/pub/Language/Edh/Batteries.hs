@@ -590,6 +590,7 @@ installEdhBatteries world =
            , (EdhMethod, "setter"                  , wrapHostProc setterProc)
            , (EdhMethod, "constructor"             , wrapHostProc ctorProc)
            , (EdhMethod, "supers"                  , wrapHostProc supersProc)
+           , (EdhMethod, "parseEdh"                , wrapHostProc parseEdhProc)
            , (EdhMethod, "makeOp"                  , wrapHostProc makeOpProc)
            , (EdhMethod, "__SinkType_mrv__"        , wrapHostProc sink'mrvProc)
            , (EdhMethod, "__SinkType_eos__"        , wrapHostProc sink'eosProc)

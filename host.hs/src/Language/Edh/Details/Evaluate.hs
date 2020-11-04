@@ -1883,9 +1883,7 @@ parseEdh' !world !srcName !lineNo !srcCode = do
 evalEdh :: String -> Text -> EdhTxExit -> EdhTx
 evalEdh !srcName = evalEdh' srcName 1
 evalEdh' :: String -> Int -> Text -> EdhTxExit -> EdhTx
-evalEdh' !srcName !lineNo !srcCode !exit !ets = do
-  let ctx   = edh'context ets
-      world = edh'ctx'world ctx
+evalEdh' !srcName !lineNo !srcCode !exit !ets =
   parseEdh' world srcName lineNo srcCode >>= \case
     Left !err -> do
       let !msg = T.pack $ errorBundlePretty err
@@ -1896,6 +1894,9 @@ evalEdh' !srcName !lineNo !srcCode !exit !ets = do
       edhWrapException (toException edhErr)
         >>= \ !exo -> edhThrow ets (EdhObject exo)
     Right (!stmts, _docCmt) -> runEdhTx ets $ evalBlock stmts exit
+ where
+  ctx   = edh'context ets
+  world = edh'ctx'world ctx
 
 
 withThisHostObj

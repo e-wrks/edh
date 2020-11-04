@@ -102,7 +102,7 @@ class EdhLexer(RegexLexer):
                 r"(namespace|module|scope|null|compare|type|constructor|supers|"
                 r"property|setter|error|assert|print|abs|max|min|Symbol|id|"
                 r"blob|str|repr|show|desc|cap|grow|len|mark|"
-                r"range|enumerate|replicate|zip|zip3|makeOp|makeExpr|"
+                r"range|enumerate|replicate|zip|zip3|parseEdh|makeOp|makeExpr|"
                 r"scope|sandbox|dict|partial|console|batteries|debug)\b",
                 Name.Builtin,
             ),
