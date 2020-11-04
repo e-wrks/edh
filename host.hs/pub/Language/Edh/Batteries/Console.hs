@@ -100,8 +100,9 @@ defaultEdhPS1 = "Đ: "
 defaultEdhPS2 = "Đ| "
 
 -- | host method console.readSource(ps1="(db)Đ: ", ps2="(db)Đ| ")
-conReadSourceProc :: "ps1" ?: Text -> "ps2" ?: Text -> EdhHostProc
-conReadSourceProc (defaultArg defaultEdhPS1 -> !ps1) (defaultArg defaultEdhPS2 -> ps2) !exit !ets
+conReadSourceProc
+  :: "ps1" ?: Text -> "ps2" ?: Text -> "locInfo" ?: Bool -> EdhHostProc
+conReadSourceProc (defaultArg defaultEdhPS1 -> !ps1) (defaultArg defaultEdhPS2 -> ps2) (defaultArg False -> locInfo) !exit !ets
   = if edh'in'tx ets
     then throwEdh ets
                   UsageError
@@ -112,16 +113,15 @@ conReadSourceProc (defaultArg defaultEdhPS1 -> !ps1) (defaultArg defaultEdhPS2 -
       runEdhTx ets
         $   edhContSTM
         $   readTMVar cmdIn
-        >>= \(EdhInput !name !lineNo !lines_) -> case name of
-              "" -> exitEdh ets exit $ EdhString $ T.unlines lines_
-              _ ->
+        >>= \(EdhInput !name !lineNo !lines_) -> if locInfo
+              then
                 exitEdh ets exit
-                  $ EdhPair
-                      (EdhPair (EdhString name)
-                               (EdhDecimal $ fromIntegral lineNo)
-                      )
-                  $ EdhString
-                  $ T.unlines lines_
+                $ EdhPair
+                    (EdhPair (EdhString name) (EdhDecimal $ fromIntegral lineNo)
+                    )
+                $ EdhString
+                $ T.unlines lines_
+              else exitEdh ets exit $ EdhString $ T.unlines lines_
  where
   !ctx = edh'context ets
   !ioQ = consoleIO $ edh'world'console $ edh'ctx'world ctx
