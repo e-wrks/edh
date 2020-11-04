@@ -86,10 +86,12 @@ class EdhLexer(RegexLexer):
                 r"throw|rethrow|ai|go|expr|sink|void|is|not|yield|this|that)\b",
                 Keyword,
             ),
-            (r"(effect|let|as)\b", Keyword.Declaration),
             (
-                r"(export|data|class|method|generator|producer|interpreter|operator|"
-                r"extends|super|import|into|perform|behave|new)\b",
+                r"(data|class|method|generator|producer|interpreter|operator|infix|infixl|infixr)\b",
+                Keyword.Declaration,
+            ),
+            (
+                r"(import|into|export|let|as|extends|super|perform|behave|effect|new)\b",
                 Keyword.Reserved,
             ),
             (
