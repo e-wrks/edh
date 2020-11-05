@@ -4716,3 +4716,21 @@ mkSandbox !ets !obj !exit = case edh'obj'store obj of
   !ctx    = edh'context ets
   !world  = edh'ctx'world ctx
   !clsObj = edh'obj'class obj
+
+
+runEdhTxInSandbox :: Scope -> EdhHostProc -> EdhTxExit -> EdhTx
+runEdhTxInSandbox !sandbox !act !exit !ets =
+  runEdhInSandbox ets sandbox act exit
+
+runEdhInSandbox :: EdhThreadState -> Scope -> EdhHostProc -> EdhTxExit -> STM ()
+runEdhInSandbox !ets !sandbox !act !exit =
+  runEdhTx etsSandbox $ act $ \ !result ->
+    edhSwitchState ets $ exitEdhTx exit result
+ where
+  !ctxPriv    = edh'context ets
+  !etsSandbox = ets
+    { edh'context = ctxPriv
+                      { edh'ctx'stack = NE.cons sandbox (edh'ctx'stack ctxPriv)
+                      }
+    }
+

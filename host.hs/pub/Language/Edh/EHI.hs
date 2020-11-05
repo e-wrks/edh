@@ -178,6 +178,8 @@ module Language.Edh.EHI
   , mkHostClass
   , mkHostClass'
   , mkSandbox
+  , runEdhInSandbox
+  , runEdhTxInSandbox
 
     -- ** Value system
   , edhSetValue
