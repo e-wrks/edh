@@ -141,7 +141,7 @@ library edh-internal
 
 executable edh
   main-is:            Main.hs
-  hs-source-dirs:     runmodu
+  hs-source-dirs:     repl
   other-modules:      Repl
   default-language:   Haskell2010
   default-extensions:
@@ -190,6 +190,53 @@ executable edh
 executable runedh
   main-is:            Main.hs
   hs-source-dirs:     runfile
+  default-language:   Haskell2010
+  default-extensions:
+    NoImplicitPrelude
+    BangPatterns
+    ConstraintKinds
+    DataKinds
+    FlexibleContexts
+    FlexibleInstances
+    GADTs
+    KindSignatures
+    LambdaCase
+    OverloadedStrings
+    ScopedTypeVariables
+    TupleSections
+    TypeApplications
+    TypeOperators
+    ViewPatterns
+
+  ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-maxN31
+
+  -- same dependencies as edh-internal, so you can:
+  -- cabal v2-repl "--repl-options=-isrc -ipub" edh xxx
+  build-depends:
+    , base                  >=4.12  && <5
+    , bytestring
+    , clock
+    , containers
+    , directory
+    , edh
+    , filepath
+    , ghc                   >=8.6.5
+    , hashable
+    , haskeline
+    , lossless-decimal
+    , megaparsec            >7.0
+    , mtl
+    , scientific
+    , stm                   >=2.5
+    , text
+    , time
+    , transformers
+    , unordered-containers
+    , vector
+
+executable edhm
+  main-is:            Main.hs
+  hs-source-dirs:     runmodu
   default-language:   Haskell2010
   default-extensions:
     NoImplicitPrelude
