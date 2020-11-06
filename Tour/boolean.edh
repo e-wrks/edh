@@ -5,7 +5,7 @@
 #
 # they don't require or coerce either operand to `BoolType`, and use `null()`
 # testing semantic to decide which operand to return, so they respect magic
-# method `__null__()` for object values
+# method `__null__()` for object values (similar to `__bool__()` in Python)
 #
 # an important property of these operators are short-circuiting according to
 # their left-hand operand.
