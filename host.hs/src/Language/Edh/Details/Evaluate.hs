@@ -3067,18 +3067,11 @@ evalExpr' (AtoIsoExpr !expr) !docCmt !exit = \ !ets ->
     $ \ !val -> edhSwitchState ets $ exit $ edhDeCaseWrap val
 
 evalExpr' (IfExpr !cond !cseq !alt) _docCmt !exit =
-  evalExpr' cond Nothing $ \ !val -> case edhUltimate $ edhDeCaseWrap val of
-    (EdhBool True ) -> evalStmt cseq exit
-    (EdhBool False) -> case alt of
-      Just !elseClause -> evalStmt elseClause exit
-      _                -> exitEdhTx exit nil
-    !v -> -- we are so strongly typed, don't coerce anything to bool
-      throwEdhTx EvalError
-        $  "expecting a boolean value but got a "
-        <> T.pack (edhTypeNameOf v)
-        <> ": "
-        <> T.pack (show v)
-        <> " ❌"
+  evalExpr' cond Nothing $ \ !val !ets -> edhValueNull ets val $ \case
+    False -> runEdhTx ets $ evalStmt cseq exit
+    True  -> case alt of
+      Just !elseClause -> runEdhTx ets $ evalStmt elseClause exit
+      _                -> exitEdh ets exit nil
 
 evalExpr' (DictExpr !entries) _docCmt !exit = evalDictLit entries [] exit
 
