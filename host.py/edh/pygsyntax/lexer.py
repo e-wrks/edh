@@ -79,11 +79,14 @@ class EdhLexer(RegexLexer):
             include("commentsandwhitespace"),
             # Numeric literal
             (r"([0-9]+\.[0-9]*|[0-9]+)([eE][-+]?[0-9]+)?", Number.Float),
-            (r"[\=\~\!\@\#\$\%\^\&\|\:\<\>\?\+\-\*/\[\]]+", Operator,),
+            (
+                r"((is|not|and|or)\b|[\=\~\!\@\#\$\%\^\&\|\:\<\>\?\+\-\*/\[\]]+)",
+                Operator,
+            ),
             (r"[{(\[;,})\].]", Punctuation),
             (
                 r"(while|for|from|do|break|continue|return|default|case|of|if|then|else|"
-                r"throw|rethrow|ai|go|expr|sink|void|is|not|yield|this|that)\b",
+                r"throw|rethrow|ai|go|expr|sink|void|yield|this|that)\b",
                 Keyword,
             ),
             (
