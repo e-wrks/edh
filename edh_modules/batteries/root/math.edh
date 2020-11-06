@@ -1,5 +1,5 @@
 
-export method abs( n ) n<0 &> (- n ) |> n
+export method abs( n ) n<0 and (- n ) or n
 
 export method max( n, *rest ) {
   for i from rest do if i > n then n = i

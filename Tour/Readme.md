@@ -712,29 +712,24 @@ in **C** you do:
 onCnd ? oneThing : theOther
 ```
 
-and in **Python** you do:
+and in **Python** as well as **Edh** you do it the **Pythonic** way:
 
 ```python
 onCnd and oneThing or theOther
 ```
 
-well in **Edh** you do:
+```bash
+(repl)Đ: 2 < 1 and 'no way!' or 'of coz'
+of coz
+```
 
-the **Haskellish** way:
+a difference to **Python** is that in **Edh** an object customize its behavior
+with `__null__()` magic method, instead of `__bool__()` as in **Python**
+
+also, in **Edh** you can do it the **Haskellish** way:
 
 ```haskell
 if onCnd then oneThing else theOther
-```
-
-or the **Pythonic** way:
-
-```haskell
-onCnd &> oneThing |> theOther
-```
-
-```bash
-Đ: 2 < 1 &> 'no way!' |> 'of coz'
-of coz
 ```
 
 simulating the `Maybe` monad:
@@ -748,10 +743,10 @@ simulating the `Maybe` monad:
 Đ|  5:   method getFriedEgg () Symbol('FriedEgg')
 Đ|  6:
 Đ|  7:   method cookMeal () fetchEgg()
-Đ|  8:     &> lightFire()
-Đ|  9:     &> putPanOnFire()
-Đ| 10:     &> putEggInPan()
-Đ| 11:     &> getFriedEgg()
+Đ|  8:     and lightFire()
+Đ|  9:     and putPanOnFire()
+Đ| 10:     and putEggInPan()
+Đ| 11:     and getFriedEgg()
 Đ| 12:
 Đ| 13:   'got meal - ' ++ cookMeal()
 Đ| 14: }
@@ -891,7 +886,7 @@ yeath
 Đ| 12:     SymbolType -> {quiz='mistery attracts most people' fallthrough}
 Đ| 13:
 Đ| 14:     ObjectType -> {
-Đ| 15:       quiz = 'I live in ' ++ v?__name__ |> 'no where';
+Đ| 15:       quiz = 'I live in ' ++ v?__name__ or 'no where';
 Đ| 16:       fallthrough
 Đ| 17:     }
 Đ| 18:
@@ -2455,12 +2450,12 @@ implemented as overridable **operator**s in **Edh**:
 
 - branch
   - (`->`)
+- arrows
+  - (`=>`), (`=>*`)
 - assignment
   - (`=`), (`+=`), (`-=`), (`*=`), (`/=`)
 - logical arithmetic
   - (`&&`), (`||`)
-- ternary
-  - (`&>`), (`|>`)
 - list/dict/tuple comprehension/concatenation
   - (`=<`)
 - list prepend / dict insert/update

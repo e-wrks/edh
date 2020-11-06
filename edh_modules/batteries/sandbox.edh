@@ -8,7 +8,6 @@ genuineConsole = console
 export {
 
   import * './root/vattr'
-  import * './root/ops'
   import * './root/ho'
   import * './root/iter'
   import * './root/str'

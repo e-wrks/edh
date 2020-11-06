@@ -30,7 +30,7 @@ export {
       } @}
 
       error(
-        msg &> callerScope.eval( msg ) |> 'assertion failed',
+        msg and callerScope.eval( msg ) or 'assertion failed',
         # following goes as the thrown exception's @.details@
         result=result, ***detailsResult
       )
@@ -69,14 +69,14 @@ export {
 
   # the default basic implementation for the `dir` command
   interpreter printDir( callerScope, ofScope=None, ) {
-    ofScope = ofScope &> callerScope.eval( ofScope ) |> callerScope
+    ofScope = ofScope and callerScope.eval( ofScope ) or callerScope
     console.print( ofScope.lexiLoc, **ofScope.attrs() )
   }
 
   # basic implementation of a string form for `dir` command to
   # output to a remote console
   interpreter sprintDir( callerScope, ofScope=None, ) {
-    ofScope = ofScope &> callerScope.eval( ofScope ) |> callerScope
+    ofScope = ofScope and callerScope.eval( ofScope ) or callerScope
 
     return join(
       ofScope.lexiLoc,
@@ -91,7 +91,7 @@ export {
   dir = Command( 'dir' )
 
   interpreter replHere( callerScope, prompt=None ) {
-    prompt = prompt &> callerScope.eval( prompt ) |> repr( callerScope )
+    prompt = prompt and callerScope.eval( prompt ) or repr( callerScope )
 
     console.print(
       ' * entering a repl at ' ++ callerScope.lexiLoc,

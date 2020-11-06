@@ -9,7 +9,6 @@ export {
   batteries = this
 
   import * './vattr'
-  import * './ops'
   import * './ho'
   import * './iter'
   import * './str'

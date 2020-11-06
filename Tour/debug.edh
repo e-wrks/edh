@@ -3,7 +3,7 @@
   method f () {
     n = 5
 
-    console.logLevel<=console.debug &> shellHere()
+    console.logLevel<=console.debug and shellHere()
 
     console.debug <| 'now n is: ' ++ n
   }
@@ -21,4 +21,3 @@ dir
 n = 3
 
 continue
-

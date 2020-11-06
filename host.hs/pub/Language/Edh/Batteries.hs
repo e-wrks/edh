@@ -395,9 +395,11 @@ installEdhBatteries world =
         , Infix
         , 4
         )
-        -- logical arithmetic
-      , ("&&", InfixL, 3)
-      , ( "||"
+        -- logical/nullish boolean
+      , ("&&" , InfixL, 3)
+      , ("||" , InfixL, 3)
+      , ("and", InfixL, 3)
+      , ( "or"
         , InfixL
         , 3
         )
@@ -519,6 +521,8 @@ installEdhBatteries world =
         , ("**"    , powProc)
         , ("&&"    , logicalAndProc)
         , ("||"    , logicalOrProc)
+        , ("and"   , nullishAndProc)
+        , ("or"    , nullishOrProc)
         , ("=="    , valEqProc id)
         , ("!="    , valEqProc not)
         , ("is not", idNotEqProc)

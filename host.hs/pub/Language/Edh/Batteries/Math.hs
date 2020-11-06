@@ -99,6 +99,25 @@ powProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
     _ -> exitEdhTx exit edhNA
 
 
+-- | operator (and)
+nullishAndProc :: EdhIntrinsicOp
+nullishAndProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal !ets ->
+  edhValueNull ets lhVal $ \case
+    -- short-circuiting, avoid eval of rhe
+    True  -> exitEdh ets exit lhVal
+    -- give right-hand value out
+    False -> runEdhTx ets $ evalExpr rhExpr exit
+
+-- | operator (or)
+nullishOrProc :: EdhIntrinsicOp
+nullishOrProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal !ets ->
+  edhValueNull ets lhVal $ \case
+    -- short-circuiting, avoid eval of rhe
+    False -> exitEdh ets exit lhVal
+    -- give right-hand value out
+    True  -> runEdhTx ets $ evalExpr rhExpr exit
+
+
 -- | operator (&&)
 logicalAndProc :: EdhIntrinsicOp
 logicalAndProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->

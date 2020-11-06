@@ -824,7 +824,8 @@ parseOpName :: Parser Text
 parseOpName = between (symbol "(") (symbol ")") parseOpLit
 
 parseOpLit :: Parser Text
-parseOpLit = choice [keyword "is not", keyword "is", lexeme opLit]
+parseOpLit = choice
+  [keyword "is not", keyword "is", keyword "and", keyword "or", lexeme opLit]
   where opLit = takeWhile1P (Just "operator symbol") isOperatorChar
 
 parseScopedBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
