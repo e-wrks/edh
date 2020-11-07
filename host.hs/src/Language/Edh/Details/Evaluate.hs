@@ -2869,8 +2869,8 @@ edhValueRepr !ets !val !exitRepr = case val of
   -- object repr
   EdhObject !o -> do
     let withMagic = \case
-          (_, EdhNil        ) -> exitRepr $ T.pack (show o)
-          (_, EdhString repr) -> exitRepr repr
+          (_, EdhNil         ) -> exitRepr $ T.pack (show o)
+          (_, EdhString !repr) -> exitRepr repr
           (!this', EdhProcedure (EdhMethod !mth) _) ->
             runEdhTx ets
               $ callEdhMethod this' o mth (ArgsPack [] odEmpty) id
@@ -2883,7 +2883,7 @@ edhValueRepr !ets !val !exitRepr = case val of
               $ \ !mthRtn _ets -> case mthRtn of
                   EdhString !repr -> exitRepr repr
                   _               -> edhValueRepr ets mthRtn exitRepr
-          (_, reprVal) -> edhValueRepr ets reprVal exitRepr
+          (_, !reprVal) -> edhValueRepr ets reprVal exitRepr
     case edh'obj'store o of
       ClassStore{} ->
         lookupEdhObjAttr (edh'obj'class o) (AttrByName "__repr__") >>= withMagic
@@ -2943,9 +2943,30 @@ edhValueReprTx !val !exit !ets =
 
 
 edhValueStr :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
-edhValueStr _    (EdhString !s) !exit = exit s
-edhValueStr _    (EdhUUID   !u) !exit = exit $ UUID.toText u
-edhValueStr !ets !v             !exit = edhValueRepr ets v exit
+edhValueStr _   (EdhString !s) !exit = exit s
+edhValueStr _   (EdhUUID   !u) !exit = exit $ UUID.toText u
+edhValueStr ets (EdhObject !o) !exit = case edh'obj'store o of
+  ClassStore{} ->
+    lookupEdhObjAttr (edh'obj'class o) (AttrByName "__str__") >>= withMagic
+  _ -> lookupEdhObjAttr o (AttrByName "__str__") >>= withMagic
+ where
+  withMagic = \case
+    (_, EdhNil        ) -> exit $ "<" <> objClassName o <> " object>"
+    (_, EdhString !str) -> exit str
+    (!this', EdhProcedure (EdhMethod !mth) _) ->
+      runEdhTx ets
+        $ callEdhMethod this' o mth (ArgsPack [] odEmpty) id
+        $ \ !mthRtn _ets -> case mthRtn of
+            EdhString !str -> exit str
+            _              -> edhValueRepr ets mthRtn exit
+    (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+      runEdhTx ets
+        $ callEdhMethod this that mth (ArgsPack [] odEmpty) id
+        $ \ !mthRtn _ets -> case mthRtn of
+            EdhString !str -> exit str
+            _              -> edhValueRepr ets mthRtn exit
+    (_, !strVal) -> edhValueStr ets strVal exit
+edhValueStr !ets !v !exit = edhValueRepr ets v exit
 
 edhValueStrTx :: EdhValue -> EdhTxExit -> EdhTx
 edhValueStrTx !v !exit !ets =
