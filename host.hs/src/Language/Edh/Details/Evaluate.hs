@@ -3060,7 +3060,7 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
     $ \ !reprs -> exit $ "{ " <> T.intercalate ", " reprs <> " }"
    where
     go :: [Text] -> [(AttrKey, EdhValue)] -> ([Text] -> STM ()) -> STM ()
-    go entries []              !exit' = exit' entries
+    go entries []              !exit' = exit' $ reverse entries
     go entries ((k, v) : rest) exit'  = valJson v $ \ !vJson ->
       go ((strJson (attrKeyStr k) <> ": " <> vJson) : entries) rest exit'
 
