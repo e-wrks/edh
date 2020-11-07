@@ -142,9 +142,9 @@ driveEdhProgram !haltResult !bootCtx !prog = do
   nextTaskFromQueue :: TBQueue EdhTask -> STM (Maybe EdhTask)
   nextTaskFromQueue = orElse (Nothing <$ readTMVar haltResult) . tryReadTBQueue
 
-  driveDefers :: [DeferRecord] -> IO ()
-  driveDefers [] = return ()
-  driveDefers ((DeferRecord !etsDefer !deferredProc) : restDefers) = do
+  driveDefers :: IO () -> [DeferRecord] -> IO ()
+  driveDefers !done [] = done
+  driveDefers !done ((DeferRecord !etsDefer !deferredProc) : restDefers) = do
 
     !deferPerceivers <- newTVarIO []
     !deferDefers     <- newTVarIO []
@@ -157,7 +157,7 @@ driveEdhProgram !haltResult !bootCtx !prog = do
                }
     driveEdhThread deferDefers deferTaskQueue
 
-    driveDefers restDefers
+    driveDefers done restDefers
 
   drivePerceiver :: EdhValue -> PerceiveRecord -> IO Bool
   drivePerceiver !ev (PerceiveRecord _ !etsOrigin !reaction) = do
@@ -196,7 +196,7 @@ driveEdhProgram !haltResult !bootCtx !prog = do
     taskLoop = atomically (nextTaskFromQueue tq) >>= \case
 
       -- this thread is done, run defers lastly
-      Nothing                    -> readTVarIO defers >>= driveDefers
+      Nothing -> readTVarIO defers >>= driveDefers (return ())
 
       -- note during actIO, perceivers won't fire, program termination won't
       -- stop this thread
@@ -208,7 +208,7 @@ driveEdhProgram !haltResult !bootCtx !prog = do
         Left  (e :: SomeException) -> case edhKnownError e of
 
           -- this'll propagate to main thread if not on it
-          Just !err -> throwIO err
+          Just !err -> readTVarIO defers >>= driveDefers (throwIO err)
 
           -- give a chance for the Edh code to handle an unknown exception
           Nothing   -> do
@@ -220,15 +220,15 @@ driveEdhProgram !haltResult !bootCtx !prog = do
       Just (EdhDoSTM !ets !actSTM) -> try (goSTM ets actSTM) >>= \case
 
         -- terminate this thread, after running defers lastly
-        Right True                 -> readTVarIO defers >>= driveDefers
+        Right True -> readTVarIO defers >>= driveDefers (return ())
 
         -- continue running this thread
-        Right False                -> taskLoop
+        Right False -> taskLoop
 
-        Left  (e :: SomeException) -> case edhKnownError e of
+        Left (e :: SomeException) -> case edhKnownError e of
 
           -- this'll propagate to main thread if not on it
-          Just !err -> throwIO err
+          Just !err -> readTVarIO defers >>= driveDefers (throwIO err)
 
           -- give a chance for the Edh code to handle an unknown exception
           Nothing   -> do
