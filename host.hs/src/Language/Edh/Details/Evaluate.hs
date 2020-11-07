@@ -2973,6 +2973,98 @@ edhValueStrTx !v !exit !ets =
   edhValueStr ets v $ \ !s -> exitEdh ets exit $ EdhString s
 
 
+-- | Coercing an Edh value to valid JSON in string form
+--
+-- *) nil translates to null
+-- *) decimal as its repr (todo fractional format and scientific notation)
+-- *) `__json__()` magic method from an object is honored
+-- *) other value is coerced to a string
+--
+-- *) a key is always coerced to string
+-- *) no trailing comma
+-- *)
+--
+edhValueJson :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
+edhValueJson !ets !value !exitJson = valJson value exitJson
+ where
+
+  valJson :: EdhValue -> (Text -> STM ()) -> STM ()
+  valJson !val !exit = case val of
+    EdhNil                               -> exit "null"
+    EdhString   !str                     -> exit $ strJson str
+    -- todo deal with fractional format and scientific notation
+    EdhDecimal  !d                       -> exit $ T.pack $ show d
+    EdhList     (List     _     !lv    ) -> readTVar lv >>= flip listJson exit
+    EdhDict     (Dict     _     !ds    ) -> iopdToList ds >>= flip dictJson exit
+    EdhArgsPack (ArgsPack !args !kwargs) -> if null args
+      then kwsJson (odToList kwargs) exit
+      else if odNull kwargs
+        then listJson args exit
+        else kwsJson
+          (  odToList kwargs
+          ++ zip (AttrByName . T.pack . show <$> [0 :: Int ..]) args
+          )
+          exit
+    EdhObject !o -> do
+      let withMagic = \case
+            (_, EdhNil         ) -> edhValueStr ets value $ exit . strJson
+            (_, EdhString !json) -> exit json
+            (!this', EdhProcedure (EdhMethod !mth) _) ->
+              runEdhTx ets
+                $ callEdhMethod this' o mth (ArgsPack [] odEmpty) id
+                $ \ !mthRtn _ets -> case mthRtn of
+                    EdhString !json -> exit json
+                    _               -> edhValueRepr ets mthRtn exit
+            (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+              runEdhTx ets
+                $ callEdhMethod this that mth (ArgsPack [] odEmpty) id
+                $ \ !mthRtn _ets -> case mthRtn of
+                    EdhString !json -> exit json
+                    _               -> edhValueRepr ets mthRtn exit
+            (_, !jsonVal) -> valJson jsonVal exit
+      case edh'obj'store o of
+        ClassStore{} ->
+          lookupEdhObjAttr (edh'obj'class o) (AttrByName "__json__")
+            >>= withMagic
+        _ -> lookupEdhObjAttr o (AttrByName "__json__") >>= withMagic
+    _ -> edhValueStr ets value $ exit . strJson
+
+
+  strJson :: Text -> Text
+  strJson = T.pack . show -- todo need to sophisticate this?
+
+  listJson :: [EdhValue] -> (Text -> STM ()) -> STM ()
+  listJson []  !exit = exit "[]"
+  listJson !vs !exit = go [] vs
+    $ \ !jsons -> exit $ "[ " <> T.intercalate ", " jsons <> " ]"
+   where
+    go :: [Text] -> [EdhValue] -> ([Text] -> STM ()) -> STM ()
+    go jsons [] !exit' = exit' $ reverse jsons
+    go jsons (v : rest) !exit' =
+      valJson v $ \ !json -> go (json : jsons) rest exit'
+
+  dictJson :: [(EdhValue, EdhValue)] -> (Text -> STM ()) -> STM ()
+  dictJson []           !exit = exit "{}"
+  dictJson !dictEntries !exit = go [] dictEntries
+    $ \ !reprs -> exit $ "{ " <> T.intercalate ", " reprs <> " }"
+   where
+    go :: [Text] -> [(EdhValue, EdhValue)] -> ([Text] -> STM ()) -> STM ()
+    go entries []              !exit' = exit' $ reverse entries
+    go entries ((k, v) : rest) exit'  = edhValueStr ets k $ \ !kStr ->
+      valJson v $ \ !vJson ->
+        go ((strJson kStr <> ": " <> vJson) : entries) rest exit'
+
+  kwsJson :: [(AttrKey, EdhValue)] -> (Text -> STM ()) -> STM ()
+  kwsJson []          !exit = exit "{}"
+  kwsJson !kwsEntries !exit = go [] kwsEntries
+    $ \ !reprs -> exit $ "{ " <> T.intercalate ", " reprs <> " }"
+   where
+    go :: [Text] -> [(AttrKey, EdhValue)] -> ([Text] -> STM ()) -> STM ()
+    go entries []              !exit' = exit' entries
+    go entries ((k, v) : rest) exit'  = valJson v $ \ !vJson ->
+      go ((strJson (attrKeyStr k) <> ": " <> vJson) : entries) rest exit'
+
+
 defineScopeAttr :: EdhThreadState -> AttrKey -> EdhValue -> STM ()
 defineScopeAttr !ets !key !val = when (key /= AttrByName "_") $ do
   if edh'ctx'eff'defining ctx

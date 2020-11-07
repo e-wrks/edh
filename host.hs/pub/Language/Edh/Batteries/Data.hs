@@ -420,6 +420,26 @@ strProc (ArgsPack !args !kwargs) !exit !ets = go [] [] args (odToList kwargs)
     edhValueStr ets v $ \ !s -> go strs ((k, EdhString s) : kwStrs) [] rest
 
 
+-- | utility json(*args,**kwargs) - convert to json string
+jsonProc :: ArgsPack -> EdhHostProc
+jsonProc (ArgsPack !args !kwargs) !exit !ets = go [] [] args (odToList kwargs)
+ where
+  go
+    :: [EdhValue]
+    -> [(AttrKey, EdhValue)]
+    -> [EdhValue]
+    -> [(AttrKey, EdhValue)]
+    -> STM ()
+  go [json] kwStrs [] [] | null kwStrs = exitEdh ets exit json
+  go jsons kwStrs [] [] =
+    exitEdh ets exit $ EdhArgsPack $ ArgsPack (reverse jsons) $ odFromList
+      kwStrs
+  go jsons kwStrs (v : rest) kwps =
+    edhValueJson ets v $ \ !s -> go (EdhString s : jsons) kwStrs rest kwps
+  go jsons kwStrs [] ((k, v) : rest) =
+    edhValueJson ets v $ \ !s -> go jsons ((k, EdhString s) : kwStrs) [] rest
+
+
 -- | operator (++) - string coercing concatenator
 concatProc :: EdhIntrinsicOp
 concatProc !lhExpr !rhExpr !exit !ets =
@@ -778,7 +798,6 @@ dictProc (ArgsPack !args !kwargs) !exit !ets = do
 dictSizeProc :: Dict -> EdhHostProc
 dictSizeProc (Dict _ !ds) !exit !ets =
   exitEdh ets exit . EdhDecimal . fromIntegral =<< iopdSize ds
-
 
 listPushProc :: List -> EdhHostProc
 listPushProc l@(List _ !lv) !exit !ets =

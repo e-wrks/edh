@@ -569,6 +569,7 @@ installEdhBatteries world =
            , (EdhMethod, "id"                      , wrapHostProc idProc)
            , (EdhMethod, "blob"                    , wrapHostProc blobProc)
            , (EdhMethod, "str"                     , wrapHostProc strProc)
+           , (EdhMethod, "json"                    , wrapHostProc jsonProc)
            , (EdhMethod, "repr"                    , wrapHostProc reprProc)
            , (EdhMethod, "cap"                     , wrapHostProc capProc)
            , (EdhMethod, "grow"                    , wrapHostProc growProc)
