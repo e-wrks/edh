@@ -2951,7 +2951,7 @@ edhValueStr ets (EdhObject !o) !exit = case edh'obj'store o of
   _ -> lookupEdhObjAttr o (AttrByName "__str__") >>= withMagic
  where
   withMagic = \case
-    (_, EdhNil        ) -> exit $ "<" <> objClassName o <> " object>"
+    (_, EdhNil        ) -> exit $ T.pack $ show o
     (_, EdhString !str) -> exit str
     (!this', EdhProcedure (EdhMethod !mth) _) ->
       runEdhTx ets
