@@ -13,7 +13,6 @@ import           Control.Monad.Reader
 import           Control.Concurrent
 import           Control.Concurrent.STM
 
-import           Data.Text                      ( Text )
 import           Data.Unique
 import           Data.Dynamic
 
@@ -58,17 +57,17 @@ subscribeEvents (EventSink _ !mrv !bcc !subc) =
 
 
 -- | Post an event into a sink
-postEvent :: EventSink -> EdhValue -> STM (Either Text ())
+postEvent :: EventSink -> EdhValue -> STM Bool
 postEvent (EventSink _ !mrv !chan !subc) !val =
   readTVar subc >>= \ !oldSubc -> if oldSubc < 0
-    then return $ Left "passing end of event stream"
+    then return False
     else do
       writeTChan chan val
       case mrv of
         Nothing    -> pure ()
         Just !mrvv -> writeTVar mrvv val
       when (val == EdhNil) $ writeTVar subc (-1) -- mark end-of-stream
-      return $ Right ()
+      return True
 
 
 -- | Fork a new thread to do event producing, with current thread assumed

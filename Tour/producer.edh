@@ -40,7 +40,7 @@
 
 # %%
 chan = sink
-chan <- nil
+chan <-nil
 
 # %%
 for _ from ( outlet=chan ) | () =>* { console.info<| 'xxx' } do break

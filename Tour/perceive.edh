@@ -41,4 +41,4 @@ stopSig <- "that's enough!"; pass
 # wait a second
 for _ from console.everySeconds( 1 ) do break
 evs <- '  ☎️  ling.ling..ling...'; pass
-# stopSig <- nil
+# stopSig <-nil

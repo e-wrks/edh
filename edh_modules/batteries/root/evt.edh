@@ -14,7 +14,10 @@
  #   in case no other live thread can reach this sink, GHC will detect an stm
  #   deadlock thus crash the process
  #}
-export method __SinkType_latest__ ( s ) for e from s do return e
+export method __SinkType_latest__ ( s ) for (*** apk ) from s do case apk of {
+  { ( v ) } -> { return v }
+  return apk
+}
 
 
 {##
@@ -24,4 +27,7 @@ export method __SinkType_latest__ ( s ) for e from s do return e
  #   in case no other live thread can reach this sink, GHC will detect an stm
  #   deadlock thus crash the process
  #}
-export method __SinkType_next__ ( s ) for e from s.subseq do return e
+export method __SinkType_next__ ( s ) for (*** apk ) from s do case apk of {
+  { ( v ) } -> { return v }
+  return apk
+}

@@ -4765,8 +4765,10 @@ edhRegulateIndex !ets !len !idx !exit =
 
 publishEvent :: EventSink -> EdhValue -> EdhTxExit -> EdhTx
 publishEvent !sink !val !exit !ets = postEvent sink val >>= \case
-  Left  !err -> throwEdh ets UsageError err
-  Right ()   -> exitEdh ets exit val
+  True  -> exitEdh ets exit val
+  False -> if val == EdhNil
+    then exitEdh ets exit EdhNil -- allow repeated marking of eos
+    else throwEdh ets UsageError "attempt to publish into a sink at eos"
 
 -- | Fork a new Edh thread to run the specified event producer, but hold the 
 -- production until current thread has later started consuming events from the
