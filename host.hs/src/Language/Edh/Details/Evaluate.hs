@@ -2947,12 +2947,19 @@ edhValueStr :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
 edhValueStr _   (EdhString !s) !exit = exit s
 edhValueStr _   (EdhUUID   !u) !exit = exit $ UUID.toText u
 edhValueStr ets (EdhObject !o) !exit = case edh'obj'store o of
-  ClassStore{} ->
-    lookupEdhObjAttr (edh'obj'class o) (AttrByName "__str__") >>= withMagic
-  _ -> lookupEdhObjAttr o (AttrByName "__str__") >>= withMagic
+  ClassStore{} -> lookupEdhObjAttr (edh'obj'class o) (AttrByName "__str__")
+    >>= withMagic tryRepr
+  _ -> lookupEdhObjAttr o (AttrByName "__str__") >>= withMagic tryRepr
  where
-  withMagic = \case
-    (_, EdhNil        ) -> exit $ T.pack $ show o
+  tryRepr = case edh'obj'store o of
+    ClassStore{} ->
+      lookupEdhObjAttr (edh'obj'class o) (AttrByName "__repr__")
+        >>= (withMagic $ exit $ T.pack $ show o)
+    _ ->
+      lookupEdhObjAttr o (AttrByName "__repr__")
+        >>= (withMagic $ exit $ T.pack $ show o)
+  withMagic !altOpt = \case
+    (_, EdhNil        ) -> altOpt
     (_, EdhString !str) -> exit str
     (!this', EdhProcedure (EdhMethod !mth) _) ->
       runEdhTx ets
