@@ -164,11 +164,12 @@ parseGoStmt !si = do
   errRptPos   <- getOffset
   (expr, si') <- parseExpr si
   case expr of
-    BlockExpr{} -> return ()
-    CaseExpr{}  -> return ()
-    CallExpr{}  -> return ()
-    ForExpr{}   -> return ()
-    _           -> do
+    BlockExpr{}       -> return ()
+    ScopedBlockExpr{} -> return ()
+    CaseExpr{}        -> return ()
+    CallExpr{}        -> return ()
+    ForExpr{}         -> return ()
+    _                 -> do
       setOffset errRptPos
       fail "a block, case, call or for loop should be here"
   return (GoStmt expr, si')
@@ -179,11 +180,12 @@ parseDeferStmt !si = do
   errRptPos   <- getOffset
   (expr, si') <- parseExpr si
   case expr of
-    BlockExpr{} -> return ()
-    CaseExpr{}  -> return ()
-    CallExpr{}  -> return ()
-    ForExpr{}   -> return ()
-    _           -> do
+    BlockExpr{}       -> return ()
+    ScopedBlockExpr{} -> return ()
+    CaseExpr{}        -> return ()
+    CallExpr{}        -> return ()
+    ForExpr{}         -> return ()
+    _                 -> do
       setOffset errRptPos
       fail "a block, case, call or for loop should be here"
   return (DeferStmt expr, si')
