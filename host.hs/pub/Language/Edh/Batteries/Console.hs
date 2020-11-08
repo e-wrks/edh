@@ -50,18 +50,29 @@ loggingProc !lhExpr !rhExpr !exit !ets =
           then -- drop log msg without even eval it
                exitEdh ets exit nil
           else runEdhTx ets $ evalExpr rhExpr $ \ !rhVal _ets -> do
-            let !rhv    = edhDeCaseWrap rhVal
-                !srcLoc = if conLogLevel <= 20
+            let !srcLoc = if conLogLevel <= 20
                   then -- with source location info
                        Just $ prettySourceLoc srcPos
                   else -- no source location info
                        Nothing
-            case rhv of
-              EdhArgsPack !apk -> do
-                logger logLevel srcLoc apk
-                exitEdh ets exit nil
-              _ -> do
-                logger logLevel srcLoc $ ArgsPack [rhv] odEmpty
+            -- convert all args to EdhString before passing to logger
+            case edhDeCaseWrap rhVal of
+              EdhArgsPack (ArgsPack !args !kwargs) ->
+                edhProcessReprs ets ((\ !v -> (v, EdhString)) <$> args)
+                  $ \ !argsReprs ->
+                      edhProcessReprs
+                          ets
+                          (   (\(!k, !v) -> (v, \ !r -> (k, EdhString r)))
+                          <$> odToList kwargs
+                          )
+                        $ \ !kwargsReprs -> do
+                            logger
+                              logLevel
+                              srcLoc
+                              (ArgsPack argsReprs (odFromList kwargsReprs))
+                            exitEdh ets exit nil
+              !rhv -> edhValueStr ets rhv $ \ !logStr -> do
+                logger logLevel srcLoc $ ArgsPack [EdhString logStr] odEmpty
                 exitEdh ets exit nil
       _ ->
         throwEdh ets EvalError $ "invalid log target: " <> T.pack (show lhVal)
