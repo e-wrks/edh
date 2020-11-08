@@ -23,6 +23,7 @@ module Language.Edh.EHI
   , EventSink(..)
   , newEventSink
   , subscribeEvents
+  , postEvent
   , publishEvent
   , forkEventProducer
   , forkEventConsumer
