@@ -13,6 +13,7 @@ import           Control.Monad.Reader
 import           Control.Concurrent
 import           Control.Concurrent.STM
 
+import           Data.Text                      ( Text )
 import           Data.Unique
 import           Data.Dynamic
 
@@ -23,14 +24,12 @@ import           Language.Edh.Details.RtTypes
 -- | Create a new event sink
 newEventSink :: STM EventSink
 newEventSink = do
-  u    <- unsafeIOToSTM newUnique
-  seqn <- newTVar 0
-  mrv  <- newTVar nil
-  chan <- newBroadcastTChan
-  subc <- newTVar 0
+  !u    <- unsafeIOToSTM newUnique
+  !mrv  <- newTVar nil
+  !chan <- newBroadcastTChan
+  !subc <- newTVar 0
   return EventSink { evs'uniq = u
-                   , evs'seqn = seqn
-                   , evs'mrv  = mrv
+                   , evs'mrv  = Just mrv
                    , evs'chan = chan
                    , evs'subc = subc
                    }
@@ -43,37 +42,33 @@ newEventSink = do
 --
 -- CAVEAT: should not by other means be dup'ing the broadcast channel,
 --         to obtain a subscriber's channel.
-subscribeEvents :: EventSink -> STM (TChan EdhValue, Maybe EdhValue)
-subscribeEvents (EventSink _ !seqn !mrv !bcc !subc) = do
-  subChan <- dupTChan bcc
-  modifyTVar' subc $ \oldSubc ->
-    let newSubc = oldSubc + 1
-    in  if newSubc <= 0
-         -- work with int64 overflow, wrap back to 1
-          then 1
-          else newSubc
-  tryReadTChan subChan >>= \case
-    Just ev -> return (subChan, Just ev)
-    Nothing -> do
-      sn <- readTVar seqn
-      if sn == 0 -- no event ever posted yet
-        then return (subChan, Nothing)
-        else do
-          lv <- readTVar mrv
-          return (subChan, Just lv)
+subscribeEvents :: EventSink -> STM (Maybe (TChan EdhValue, Maybe EdhValue))
+subscribeEvents (EventSink _ !mrv !bcc !subc) =
+  readTVar subc >>= \ !oldSubc -> if oldSubc < 0
+    then return Nothing
+    else do
+      writeTVar subc -- work with int64 overflow, wrap back to 1
+        $ let !newSubc = oldSubc + 1 in if newSubc <= 0 then 1 else newSubc
+      !subChan <- dupTChan bcc
+      case mrv of
+        Nothing    -> return $ Just (subChan, Nothing)
+        Just !mrvv -> readTVar mrvv >>= \case
+          EdhNil -> return $ Just (subChan, Nothing)
+          !ev    -> return $ Just (subChan, Just ev)
 
 
--- | Publish (post) an event to a sink
-publishEvent :: EventSink -> EdhValue -> STM ()
-publishEvent (EventSink _ !seqn !mrv !chan _) val = do
-  modifyTVar' seqn $ \oldSeq ->
-    let newSeq = oldSeq + 1
-    in  if newSeq <= 0
-          -- work with int64 overflow, wrap back to 1
-          then 1
-          else newSeq
-  writeTVar mrv val
-  writeTChan chan val
+-- | Post an event into a sink
+postEvent :: EventSink -> EdhValue -> STM (Either Text ())
+postEvent (EventSink _ !mrv !chan !subc) !val =
+  readTVar subc >>= \ !oldSubc -> if oldSubc < 0
+    then return $ Left "passing end of event stream"
+    else do
+      writeTChan chan val
+      case mrv of
+        Nothing    -> pure ()
+        Just !mrvv -> writeTVar mrvv val
+      when (val == EdhNil) $ writeTVar subc (-1) -- mark end-of-stream
+      return $ Right ()
 
 
 -- | Fork a new thread to do event producing, with current thread assumed
@@ -90,14 +85,14 @@ publishEvent (EventSink _ !seqn !mrv !chan _) val = do
 --         get killed.
 forkEventProducer :: (EventSink -> IO ()) -> IO EventSink
 forkEventProducer !producingAct = do
-  (sink, subcBefore) <- atomically $ do
-    sink <- newEventSink
+  (!sink, !subcBefore) <- atomically $ do
+    !sink <- newEventSink
     (sink, ) <$> readTVar (evs'subc sink)
-  consumerThId  <- myThreadId
+  !consumerThId <- myThreadId
   _producerThId <- forkIOWithUnmask $ \unmask ->
     handle (\(e :: SomeException) -> throwTo consumerThId e) $ unmask $ do
       atomically $ do
-        subcNow <- readTVar $ evs'subc sink
+        !subcNow <- readTVar $ evs'subc sink
         when (subcNow == subcBefore) retry
       producingAct sink
   return sink
@@ -113,11 +108,11 @@ forkEventProducer !producingAct = do
 -- current thread as an asynchronous exception.
 forkEventConsumer :: (EventSink -> IO ()) -> IO EventSink
 forkEventConsumer !consumingAct = do
-  (sink, subcBefore) <- atomically $ do
-    sink <- newEventSink
+  (!sink, !subcBefore) <- atomically $ do
+    !sink <- newEventSink
     (sink, ) <$> readTVar (evs'subc sink)
-  consumerDone  <- newEmptyTMVarIO
-  producerThId  <- myThreadId
+  !consumerDone <- newEmptyTMVarIO
+  !producerThId <- myThreadId
   _consumerThId <- forkIOWithUnmask $ \unmask ->
     flip finally (atomically $ putTMVar consumerDone ())
       $ handle (\(e :: SomeException) -> throwTo producerThId e)
@@ -132,7 +127,7 @@ forkEventConsumer !consumingAct = do
                )
              )
     `orElse` do
-               subcNow <- readTVar $ evs'subc sink
+               !subcNow <- readTVar $ evs'subc sink
                when (subcNow == subcBefore) retry
   return sink
 
@@ -151,16 +146,16 @@ forkEventConsumer !consumingAct = do
 --         get killed.
 waitEventConsumer :: (EventSink -> IO ()) -> IO EventSink
 waitEventConsumer !consumingAct = do
-  (sink, subcBefore) <- atomically $ do
-    sink <- newEventSink
+  (!sink, !subcBefore) <- atomically $ do
+    !sink <- newEventSink
     (sink, ) <$> readTVar (evs'subc sink)
-  producerThId  <- myThreadId
+  !producerThId <- myThreadId
   _consumerThId <- forkIOWithUnmask $ \unmask ->
     handle (\(e :: SomeException) -> throwTo producerThId e)
       $ unmask
       $ consumingAct sink
   atomically $ do
-    subcNow <- readTVar $ evs'subc sink
+    !subcNow <- readTVar $ evs'subc sink
     when (subcNow == subcBefore) retry
   return sink
 

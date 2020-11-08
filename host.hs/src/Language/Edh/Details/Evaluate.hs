@@ -1599,12 +1599,11 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doStmt !iterCollector !forLo
     case edhUltimate iterVal of
 
       -- loop from an event sink
-      (EdhSink !sink) -> subscribeEvents sink >>= \(!subChan, !mrv) ->
-        case mrv of
+      (EdhSink !sink) -> subscribeEvents sink >>= \case
+        Nothing               -> exitEdh ets exit nil -- already at eos
+        Just (!subChan, !mrv) -> case mrv of
           Nothing  -> iterEvt subChan
           Just !ev -> case ev of
-            EdhNil -> -- this sink is already marked at end-of-stream
-              exitEdh ets exit nil
             EdhArgsPack !apk -> do1 apk $ iterEvt subChan
             !v               -> do1 (ArgsPack [v] odEmpty) $ iterEvt subChan
 
@@ -2237,9 +2236,11 @@ evalStmt' !stmt !exit = case stmt of
                   -- todo warn or even err out in case return/continue/default
                   --      etc. are returned to here?
                   _        -> return ()
-        (perceiverChan, _) <- subscribeEvents sink
-        modifyTVar' (edh'perceivers ets)
-                    (PerceiveRecord perceiverChan ets reactor :)
+        subscribeEvents sink >>= \case
+          Nothing                  -> pure () -- already at eos
+          Just (!perceiverChan, _) -> modifyTVar'
+            (edh'perceivers ets)
+            (PerceiveRecord perceiverChan ets reactor :)
         exitEdh ets exit nil
       _ ->
         throwEdh ets EvalError
@@ -4702,6 +4703,30 @@ edhRegulateIndex !ets !len !idx !exit =
           <> " vs "
           <> T.pack (show len)
         else exit posIdx
+
+
+publishEvent :: EventSink -> EdhValue -> EdhTxExit -> EdhTx
+publishEvent !sink !val !exit !ets = postEvent sink val >>= \case
+  Left  !err -> throwEdh ets UsageError err
+  Right ()   -> exitEdh ets exit val
+
+-- | Fork a new Edh thread to run the specified event producer, but hold the 
+-- production until current thread has later started consuming events from the
+-- sink returned here.
+launchEventProducer :: EdhTxExit -> EventSink -> EdhTx -> EdhTx
+launchEventProducer !exit sink@(EventSink _ _ _ !subc) !producerTx !etsConsumer
+  = readTVar subc >>= \ !subcBefore -> if subcBefore < 0
+    then throwEdh etsConsumer UsageError "producer outlet already at eos"
+    else
+      let prodThAct !etsProducer = do
+            !subcNow <- readTVar subc
+            when (subcNow == subcBefore) retry
+            producerTx etsProducer
+      in  runEdhTx etsConsumer
+          $ forkEdh id prodThAct
+          $ const
+          $ exitEdhTx exit
+          $ EdhSink sink
 
 
 mkHostClass'

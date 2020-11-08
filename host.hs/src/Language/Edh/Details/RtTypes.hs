@@ -9,7 +9,6 @@ import           GHC.Conc                       ( unsafeIOToSTM )
 import           System.IO.Unsafe               ( unsafePerformIO )
 
 import           Control.Exception
-import           Control.Monad
 import           Control.Concurrent.STM
 
 import           Data.Foldable
@@ -724,44 +723,30 @@ type EdhHostProc -- such a procedure servs as the callee
 -- in nature, in contrast to the unicast nature of channels in Go.
 data EventSink = EventSink {
     evs'uniq :: !Unique
-    -- | sequence number, increased on every new event posting.
-    -- must read zero when no event has ever been posted to this sink,
-    -- non-zero otherwise. monotonicly increasing most of the time,
-    -- but allowed to wrap back to 1 when exceeded 'maxBound::Int'
-    -- negative values can be used to indicate abnormal conditions.
-    , evs'seqn :: !(TVar Int)
-    -- | most recent value, not valid until evs'seqn turns non-zero
-    , evs'mrv :: !(TVar EdhValue)
+    -- | most recent value for the lingering copy of an event sink
+    --
+    -- an event sink always starts out being the original lingering copy,
+    -- then one or more non-lingering, shadow copies of the original copy can
+    -- be obtained by `s.subseq` where `s` is either a lingering copy or
+    -- non-lingering copy
+    --
+    -- a non-lingering copy has this field being Nothing
+    , evs'mrv :: !(Maybe (TVar EdhValue))
     -- | the broadcast channel
     , evs'chan :: !(TChan EdhValue)
-    -- | subscriber counter
+    -- | subscriber counter, will remain negative once the sink is marked eos
+    -- (by publishing a `nil` value into it), or increase every time the sink
+    -- is subscribed (a subscriber's channel dup'ped from `evs'chan`)
     , evs'subc :: !(TVar Int)
   }
 instance Eq EventSink where
-  EventSink x'u _ _ _ _ == EventSink y'u _ _ _ _ = x'u == y'u
+  EventSink x'u _ _ _ == EventSink y'u _ _ _ = x'u == y'u
 instance Ord EventSink where
-  compare (EventSink x'u _ _ _ _) (EventSink y'u _ _ _ _) = compare x'u y'u
+  compare (EventSink x'u _ _ _) (EventSink y'u _ _ _) = compare x'u y'u
 instance Hashable EventSink where
-  hashWithSalt s (EventSink s'u _ _ _ _) = hashWithSalt s s'u
+  hashWithSalt s (EventSink s'u _ _ _) = hashWithSalt s s'u
 instance Show EventSink where
   show EventSink{} = "<sink>"
-
--- | Fork a new Edh thread to run the specified event producer, but hold the 
--- production until current thread has later started consuming events from the
--- sink returned here.
-launchEventProducer :: EdhTxExit -> EventSink -> EdhTx -> EdhTx
-launchEventProducer !exit sink@(EventSink _ _ _ _ !subc) !producerTx !etsConsumer
-  = do
-    subcBefore <- readTVar subc
-    let prodThAct !etsProducer = do
-          subcNow <- readTVar subc
-          when (subcNow == subcBefore) retry
-          producerTx etsProducer
-    runEdhTx etsConsumer
-      $ forkEdh id prodThAct
-      $ const
-      $ exitEdhTx exit
-      $ EdhSink sink
 
 
 -- | executable precedures

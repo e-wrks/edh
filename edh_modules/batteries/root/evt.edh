@@ -1,8 +1,27 @@
 
-# get the latest event data from an event sink
-#
-# CAVEAT:
-# unlike `<sink>.mrv`, `<sink>.latest` will block waiting the 1st event into
-# the sink if no one has yet been posted, so if no other live thread can
-# reach this sink, GHC will detect an stm deadlock and crash the process.
+{#
+ # get the latest event data from an event sink
+ #
+ #  *) for a lingering sink:
+ #       block wait for the 1st event value published into the sink, or
+ #       (equivalent to `<sink>.mrv`)
+ #       return most recent event value published into the sink
+ #  *) for a non-lingering sink:
+ #       (equivalent to `<sink>.next`)
+ #       block wait for the next event value published into the sink
+ #
+ # CAVEAT:
+ #   in case no other live thread can reach this sink, GHC will detect an stm
+ #   deadlock thus crash the process
+ #}
 export method __SinkType_latest__ ( s ) for e from s do return e
+
+
+{##
+ # block wait for the next event value published into the sink
+ #
+ # CAVEAT:
+ #   in case no other live thread can reach this sink, GHC will detect an stm
+ #   deadlock thus crash the process
+ #}
+export method __SinkType_next__ ( s ) for e from s.subseq do return e

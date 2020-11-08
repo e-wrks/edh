@@ -24,7 +24,6 @@ import           Data.Lossless.Decimal         as D
 import           Language.Edh.Control
 import           Language.Edh.Args
 import           Language.Edh.InterOp
-import           Language.Edh.Event
 import           Language.Edh.Details.IOPD
 import           Language.Edh.Details.CoreLang
 import           Language.Edh.Details.RtTypes
@@ -861,11 +860,8 @@ prpdProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 evtPubProc :: EdhIntrinsicOp
 evtPubProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
-    EdhSink !es -> evalExpr rhExpr $ \ !rhVal !ets ->
-      let !rhv = edhDeCaseWrap rhVal
-      in  do
-            publishEvent es rhv
-            exitEdh ets exit rhv
+    EdhSink !es ->
+      evalExpr rhExpr $ \ !rhVal -> publishEvent es (edhDeCaseWrap rhVal) exit
     _ -> exitEdhTx exit edhNA
 
 
