@@ -195,22 +195,10 @@ conPrintProc (ArgsPack !args !kwargs) !exit !ets = printVS args
   printVS [] []              = exitEdh ets exit nil
   printVS [] ((k, v) : rest) = case v of
     EdhString !s -> do
-      writeTBQueue ioQ
-        $  ConsoleOut
-        $  "  "
-        <> T.pack (show k)
-        <> "="
-        <> s
-        <> "\n"
+      writeTBQueue ioQ $ ConsoleOut $ "  " <> attrKeyStr k <> "= " <> s <> "\n"
       printVS [] rest
     _ -> edhValueRepr ets v $ \ !s -> do
-      writeTBQueue ioQ
-        $  ConsoleOut
-        $  "  "
-        <> T.pack (show k)
-        <> "="
-        <> s
-        <> "\n"
+      writeTBQueue ioQ $ ConsoleOut $ "  " <> attrKeyStr k <> "= " <> s <> "\n"
       printVS [] rest
   printVS (v : rest) !kvs = case v of
     EdhString !s -> do

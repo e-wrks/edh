@@ -190,7 +190,7 @@ module Language.Edh.EHI
   , edhTypeNameOf
   , edhTypeOf
   , edhValueNull
-  , doEdhComparison
+  , edhCompareValue
   , edhIdentEqual
   , edhNamelyEqual
   , edhValueEqual

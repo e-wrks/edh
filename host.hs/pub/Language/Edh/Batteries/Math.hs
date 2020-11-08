@@ -171,14 +171,14 @@ idNotEqProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 -- | operator (>)
 isGtProc :: EdhIntrinsicOp
 isGtProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> doEdhComparison' exit lhVal rhVal $ \case
+  evalExpr rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
     GT -> True
     _  -> False
 
 -- | operator (>=)
 isGeProc :: EdhIntrinsicOp
 isGeProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> doEdhComparison' exit lhVal rhVal $ \case
+  evalExpr rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
     GT -> True
     EQ -> True
     _  -> False
@@ -186,22 +186,22 @@ isGeProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 -- | operator (<)
 isLtProc :: EdhIntrinsicOp
 isLtProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> doEdhComparison' exit lhVal rhVal $ \case
+  evalExpr rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
     LT -> True
     _  -> False
 
 -- | operator (<=)
 isLeProc :: EdhIntrinsicOp
 isLeProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> doEdhComparison' exit lhVal rhVal $ \case
+  evalExpr rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
     LT -> True
     EQ -> True
     _  -> False
 
-doEdhComparison'
+edhCompareValue'
   :: EdhTxExit -> EdhValue -> EdhValue -> (Ordering -> Bool) -> EdhTx
-doEdhComparison' !exit !lhVal !rhVal !cm !ets =
-  doEdhComparison ets lhVal rhVal $ \case
+edhCompareValue' !exit !lhVal !rhVal !cm !ets =
+  edhCompareValue ets lhVal rhVal $ \case
     Nothing   -> exitEdh ets exit edhNA
     Just !ord -> exitEdh ets exit $ EdhBool $ cm ord
 

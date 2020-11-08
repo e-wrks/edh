@@ -2802,44 +2802,71 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
 
 
 adtFields
-  :: EdhThreadState -> Object -> ([(AttrKey, EdhValue)] -> STM ()) -> STM ()
+  :: EdhThreadState -> Object -> ([(Text, EdhValue)] -> STM ()) -> STM ()
 adtFields !ets !obj !exit = case edh'obj'store obj of
-  HashStore !hs -> iopdSnapshot hs >>= \ !ds ->
+  HashStore !hs -> iopdSnapshot hs >>= \ !ds -> do
+    let
+      go :: [ArgReceiver] -> [(Text, EdhValue)] -> STM ()
+      go []          !fs = exit $ reverse fs
+      go (dr : rest) !fs = case dr of
+        RecvArg _ Just{} _ ->
+          throwEdh ets UsageError "rename of data class field not supported yet"
+        RecvArg SymbolicAttr{} _ _ ->
+          throwEdh ets UsageError "symbolic data class field not supported yet"
+        RecvArg (NamedAttr !fn) Nothing _ ->
+          case odLookup (AttrByName fn) ds of
+            Just !fv -> go rest ((fn <> "= ", fv) : fs)
+            Nothing  -> throwEdh ets EvalError $ "missing data field: " <> fn
+        RecvRestPosArgs !fn -> case odLookup (AttrByName fn) ds of
+          Just !fv -> go rest (("*", fv) : fs)
+          Nothing  -> throwEdh ets EvalError $ "missing data field: " <> fn
+        RecvRestKwArgs !fn -> case odLookup (AttrByName fn) ds of
+          Just !fv -> go rest (("**", fv) : fs)
+          Nothing  -> throwEdh ets EvalError $ "missing data field: " <> fn
+        RecvRestPkArgs !fn -> case odLookup (AttrByName fn) ds of
+          Just !fv -> go rest (("***", fv) : fs)
+          Nothing  -> throwEdh ets EvalError $ "missing data field: " <> fn
     case edh'obj'store $ edh'obj'class obj of
       ClassStore !cls ->
         case edh'procedure'args $ edh'procedure'decl $ edh'class'proc cls of
           WildReceiver ->
             throwEdh ets EvalError "bug: not a data class for adtFields"
-          PackReceiver   !drs -> go drs ds []
-          SingleReceiver !dr  -> go [dr] ds []
+          PackReceiver   !drs -> go drs []
+          SingleReceiver !dr  -> go [dr] []
       _ -> throwEdh ets EvalError "bug: data class not bearing ClassStore"
   _ -> throwEdh ets EvalError "bug: data class instance not bearing HashStore"
- where
-  go
-    :: [ArgReceiver]
-    -> OrderedDict AttrKey EdhValue
-    -> [(AttrKey, EdhValue)]
-    -> STM ()
-  go []          _   !fs = exit $ reverse fs
-  go (dr : rest) !ds !fs = case dr of
-    RecvArg _ Just{} _ ->
-      throwEdh ets UsageError "rename of data class field not supported yet"
-    RecvArg SymbolicAttr{} _ _ ->
-      throwEdh ets UsageError "symbolic data class field not supported yet"
-    RecvArg (NamedAttr !fn) Nothing _ -> case odLookup (AttrByName fn) ds of
-      Just !fv -> go rest ds ((AttrByName fn, fv) : fs)
-      Nothing  -> throwEdh ets UsageError $ "missing data field: " <> fn
-    _ -> throwEdh ets UsageError "rest data class field not supported yet"
 
 
 adtReprProc :: ArgsPack -> EdhHostProc
 adtReprProc _ !exit !ets = adtFields ets thisObj $ \ !dfs ->
-  let !dfApk = if length dfs < 3
-        then ArgsPack (snd <$> dfs) odEmpty
-        else ArgsPack [] $ odFromList dfs
-  in  edhValueRepr ets (EdhArgsPack dfApk) $ \ !dfRepr ->
-        exitEdh ets exit $ EdhString $ objClassName thisObj <> dfRepr
-  where !thisObj = edh'scope'this $ contextScope $ edh'context ets
+  let rp = if length dfs < 3 then unnamed else named
+  in  edhProcessReprs ets (rp <$> dfs) $ \ !dfTokens ->
+        exitEdh ets exit
+          $  EdhString
+          $  objClassName thisObj
+          <> "("
+          <> T.intercalate ", " dfTokens
+          <> ")"
+ where
+  !thisObj = edh'scope'this $ contextScope $ edh'context ets
+  unnamed :: (Text, EdhValue) -> (EdhValue, Text -> Text)
+  unnamed (!k, !v) = if "*" `T.isPrefixOf` k then (v, (k <>)) else (v, id)
+  named :: (Text, EdhValue) -> (EdhValue, Text -> Text)
+  named (!k, !v) = (v, (k <>))
+
+
+edhProcessReprs
+  :: forall a
+   . EdhThreadState
+  -> [(EdhValue, Text -> a)]
+  -> ([a] -> STM ())
+  -> STM ()
+edhProcessReprs !ets !srcList !exit = go srcList []
+ where
+  go :: [(EdhValue, Text -> a)] -> [a] -> STM ()
+  go [] !result = exit $ reverse result
+  go ((!v, !p) : rest) !result =
+    edhValueRepr ets v $ \ !r -> go rest (p r : result)
 
 
 edhValueRepr :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
@@ -2852,20 +2879,30 @@ edhValueRepr !ets !val !exitRepr = case val of
   -- apk repr
   EdhArgsPack (ArgsPack !args !kwargs) -> if null args && odNull kwargs
     then exitRepr "()"
-    else reprCSR [] args $ \ !argsCSR ->
-      reprKwArgsCSR [] (odToReverseList kwargs)
-        $ \ !kwargsCSR -> exitRepr $ "( " <> argsCSR <> kwargsCSR <> ")"
+    else edhProcessReprs ets ((\ !v -> (v, id)) <$> args) $ \ !posReprs ->
+      edhProcessReprs
+          ets
+          (   (\(!k, !v) -> (v, (\ !r -> attrKeyStr k <> "= " <> r)))
+          <$> odToList kwargs
+          )
+        $ \ !kwReprs ->
+            exitRepr
+              $  "( "
+              <> T.concat ((<> ", ") <$> (posReprs ++ kwReprs))
+              <> ")"
 
   -- list repr
   EdhList (List _ !ls) -> readTVar ls >>= \ !vs -> if null vs
     then exitRepr "[]"
-    else reprCSR [] vs $ \ !csRepr -> exitRepr $ "[ " <> csRepr <> "]"
+    else edhProcessReprs ets ((\ !v -> (v, id)) <$> vs) $ \ !posReprs ->
+      exitRepr $ "[ " <> T.concat ((<> ", ") <$> posReprs) <> "]"
 
   -- dict repr
   EdhDict (Dict _ !ds) -> iopdToReverseList ds >>= \case
     []       -> exitRepr "{}"
     !entries -> reprDictCSR [] entries
       $ \ !entriesCSR -> exitRepr $ "{ " <> entriesCSR <> "}"
+
 
   -- object repr
   EdhObject !o -> do
@@ -2911,23 +2948,11 @@ edhValueRepr !ets !val !exitRepr = case val of
 
  where
 
-  -- comma separated repr string
-  reprCSR :: [Text] -> [EdhValue] -> (Text -> STM ()) -> STM ()
-  reprCSR reprs [] !exit = exit $ T.concat [ i <> ", " | i <- reverse reprs ]
-  reprCSR reprs (v : rest) !exit =
-    edhValueRepr ets v $ \ !repr -> reprCSR (repr : reprs) rest exit
-  -- comma separated repr string for kwargs
-  reprKwArgsCSR
-    :: [(Text, Text)] -> [(AttrKey, EdhValue)] -> (Text -> STM ()) -> STM ()
-  reprKwArgsCSR !entries [] !exit' =
-    exit' $ T.concat [ k <> "=" <> v <> ", " | (k, v) <- entries ]
-  reprKwArgsCSR !entries ((k, v) : rest) exit' = edhValueRepr ets v
-    $ \ !repr -> reprKwArgsCSR ((T.pack (show k), repr) : entries) rest exit'
   -- comma separated repr string for dict entries
   reprDictCSR
     :: [(Text, Text)] -> [(EdhValue, EdhValue)] -> (Text -> STM ()) -> STM ()
   reprDictCSR entries [] !exit' =
-    exit' $ T.concat [ k <> ":" <> v <> ", " | (k, v) <- entries ]
+    exit' $ T.concat [ k <> ": " <> v <> ", " | (k, v) <- entries ]
   reprDictCSR entries ((k, v) : rest) exit' = edhValueRepr ets k $ \ !kRepr ->
     do
       let vrDecor :: Text -> Text
@@ -2937,6 +2962,7 @@ edhValueRepr !ets !val !exitRepr = case val of
             _         -> id
       edhValueRepr ets v $ \ !vRepr ->
         reprDictCSR ((kRepr, vrDecor vRepr) : entries) rest exit'
+
 
 edhValueReprTx :: EdhValue -> EdhTxExit -> EdhTx
 edhValueReprTx !val !exit !ets =
@@ -4130,15 +4156,16 @@ edhValueEqual !ets !lhVal !rhVal !exit = if lhv == rhv
     EdhNil -> exit $ Just False
     EdhArgsPack (ArgsPack !lhArgs !lhKwArgs) -> case rhv of
       EdhArgsPack (ArgsPack !rhArgs !rhKwArgs) ->
-        cmp2List lhArgs rhArgs $ \case
-          Just True -> cmp2Map (odToList lhKwArgs) (odToList rhKwArgs) exit
+        edhListEq ets lhArgs rhArgs $ \case
+          Just True ->
+            edhKeyedListEq ets (odToList lhKwArgs) (odToList rhKwArgs) exit
           !maybeConclusion -> exit maybeConclusion
       _ -> exit $ Just False
     EdhList (List _ lhll) -> case rhv of
       EdhList (List _ rhll) -> do
         !lhl <- readTVar lhll
         !rhl <- readTVar rhll
-        cmp2List lhl rhl $ exit
+        edhListEq ets lhl rhl $ exit
       _ -> exit $ Just False
     EdhDict (Dict _ !lhd) -> case rhv of
       EdhDict (Dict _ !rhd) -> do
@@ -4146,9 +4173,10 @@ edhValueEqual !ets !lhVal !rhVal !exit = if lhv == rhv
         !rhl <- iopdToList rhd
         -- regenerate the entry lists with HashMap to elide diffs in
         -- entry order
-        cmp2Map (Map.toList $ Map.fromList lhl)
-                (Map.toList $ Map.fromList rhl)
-                exit
+        edhKeyedListEq ets
+                       (Map.toList $ Map.fromList lhl)
+                       (Map.toList $ Map.fromList rhl)
+                       exit
       _ -> exit $ Just False
     EdhObject !lhObj -> case rhv of
       EdhNil -> exit $ Just False
@@ -4204,29 +4232,42 @@ edhValueEqual !ets !lhVal !rhVal !exit = if lhv == rhv
         throwEdh ets UsageError $ "malformed __eq__ magic: " <> badDesc
     _ -> exit Nothing
 
-  cmp2List :: [EdhValue] -> [EdhValue] -> (Maybe Bool -> STM ()) -> STM ()
-  cmp2List []      []      !exit' = exit' $ Just True
-  cmp2List (_ : _) []      !exit' = exit' $ Just False
-  cmp2List []      (_ : _) !exit' = exit' $ Just False
-  cmp2List (lhVal' : lhRest) (rhVal' : rhRest) !exit' =
+edhListEq
+  :: EdhThreadState
+  -> [EdhValue]
+  -> [EdhValue]
+  -> (Maybe Bool -> STM ())
+  -> STM ()
+edhListEq !ets !l1 !l2 !exit = go l1 l2
+ where
+  go :: [EdhValue] -> [EdhValue] -> STM ()
+  go []      []      = exit $ Just True
+  go (_ : _) []      = exit $ Just False
+  go []      (_ : _) = exit $ Just False
+  go (lhVal' : lhRest) (rhVal' : rhRest) =
     edhValueEqual ets lhVal' rhVal' $ \case
-      Just True        -> cmp2List lhRest rhRest exit'
-      !maybeConclusion -> exit' maybeConclusion
-  cmp2Map
-    :: (Eq k)
-    => [(k, EdhValue)]
-    -> [(k, EdhValue)]
-    -> (Maybe Bool -> STM ())
-    -> STM ()
-  cmp2Map []      []      !exit' = exit' $ Just True
-  cmp2Map (_ : _) []      !exit' = exit' $ Just False
-  cmp2Map []      (_ : _) !exit' = exit' $ Just False
-  cmp2Map ((lhKey, lhVal') : lhRest) ((rhKey, rhVal') : rhRest) !exit' =
-    if lhKey /= rhKey
-      then exit' $ Just False
-      else edhValueEqual ets lhVal' rhVal' $ \case
-        Just True        -> cmp2Map lhRest rhRest exit'
-        !maybeConclusion -> exit' maybeConclusion
+      Just True        -> go lhRest rhRest
+      !maybeConclusion -> exit maybeConclusion
+
+edhKeyedListEq
+  :: forall k
+   . Eq k
+  => EdhThreadState
+  -> [(k, EdhValue)]
+  -> [(k, EdhValue)]
+  -> (Maybe Bool -> STM ())
+  -> STM ()
+edhKeyedListEq !ets !l1 !l2 !exit = go l1 l2
+ where
+  go :: [(k, EdhValue)] -> [(k, EdhValue)] -> STM ()
+  go []                         []                         = exit $ Just True
+  go (_ : _)                    []                         = exit $ Just False
+  go []                         (_               : _     ) = exit $ Just False
+  go ((lhKey, lhVal') : lhRest) ((rhKey, rhVal') : rhRest) = if lhKey /= rhKey
+    then exit $ Just False
+    else edhValueEqual ets lhVal' rhVal' $ \case
+      Just True        -> go lhRest rhRest
+      !maybeConclusion -> exit maybeConclusion
 
 
 adtEqProc :: ArgsPack -> EdhHostProc
@@ -4236,12 +4277,9 @@ adtEqProc !apk !exit !ets = case apk of
       resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
         Nothing            -> exitEdh ets exit $ EdhBool False
         Just !dataObjOther -> adtFields ets dataObjOther $ \ !otherFields ->
-          edhValueEqual ets
-                        (EdhArgsPack (ArgsPack [] $ odFromList thisFields))
-                        (EdhArgsPack (ArgsPack [] $ odFromList otherFields))
-            $ \case
-                Nothing          -> exitEdh ets exit $ EdhBool False
-                Just !conclusion -> exitEdh ets exit $ EdhBool conclusion
+          edhKeyedListEq ets thisFields otherFields $ \case
+            Nothing          -> exitEdh ets exit $ EdhBool False
+            Just !conclusion -> exitEdh ets exit $ EdhBool conclusion
   _ -> exitEdh ets exit edhNA -- todo interpret kwargs or throw?
   where !thisObj = edh'scope'this $ contextScope $ edh'context ets
 
@@ -4253,25 +4291,63 @@ adtCmpProc !apk !exit !ets = case apk of
       resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
         Nothing            -> exitEdh ets exit edhNA
         Just !dataObjOther -> adtFields ets dataObjOther $ \ !otherFields ->
-          doEdhComparison ets
-                          (EdhArgsPack (ArgsPack [] $ odFromList thisFields))
-                          (EdhArgsPack (ArgsPack [] $ odFromList otherFields))
-            $ \case
-                Nothing          -> exitEdh ets exit edhNA
-                Just !conclusion -> exitEdh ets exit $ EdhOrd conclusion
+          edhCmpKeyedList ets thisFields otherFields $ \case
+            Nothing          -> exitEdh ets exit edhNA
+            Just !conclusion -> exitEdh ets exit $ EdhOrd conclusion
   _ -> exitEdh ets exit edhNA -- todo interpret kwargs or throw?
   where !thisObj = edh'scope'this $ contextScope $ edh'context ets
+
+
+edhCmpList
+  :: EdhThreadState
+  -> [EdhValue]
+  -> [EdhValue]
+  -> (Maybe Ordering -> STM ())
+  -> STM ()
+edhCmpList !ets !l1 !l2 !exit = go l1 l2
+ where
+  go :: [EdhValue] -> [EdhValue] -> STM ()
+  go []      []      = exit $ Just EQ
+  go []      (_ : _) = exit $ Just LT
+  go (_ : _) []      = exit $ Just GT
+  go (lhHead : lhTail) (rhHead : rhTail) =
+    edhCompareValue ets lhHead rhHead $ \case
+      Nothing     -> exit Nothing
+      Just EQ     -> go lhTail rhTail
+      !conclusion -> exit conclusion
+
+edhCmpKeyedList
+  :: forall k
+   . Eq k
+  => EdhThreadState
+  -> [(k, EdhValue)]
+  -> [(k, EdhValue)]
+  -> (Maybe Ordering -> STM ())
+  -> STM ()
+edhCmpKeyedList !ets !l1 !l2 !exit = go l1 l2
+ where
+  go :: [(k, EdhValue)] -> [(k, EdhValue)] -> STM ()
+  go []                         []                         = exit $ Just EQ
+  go []                         (_ : _)                    = exit $ Just LT
+  go (_               : _     ) []                         = exit $ Just GT
+  go ((lhKey, lhHead) : lhTail) ((rhKey, rhHead) : rhTail) = if lhKey /= rhKey
+    then exit Nothing
+    else edhCompareValue ets lhHead rhHead $ \case
+      Nothing     -> exit Nothing
+      Just EQ     -> go lhTail rhTail
+      !conclusion -> exit conclusion
+
 
 cmpMagicKey :: AttrKey
 cmpMagicKey = AttrByName "__compare__"
 
-doEdhComparison
+edhCompareValue
   :: EdhThreadState
   -> EdhValue
   -> EdhValue
   -> (Maybe Ordering -> STM ())
   -> STM ()
-doEdhComparison !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
+edhCompareValue !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
   EdhObject !lhObj -> case edh'obj'store lhObj of
     ClassStore{} ->
       lookupEdhObjAttr (edh'obj'class lhObj) cmpMagicKey
@@ -4356,38 +4432,13 @@ doEdhComparison !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
       _             -> exit Nothing
     EdhArgsPack (ArgsPack !lhArgs !lhKwArgs) -> case edhUltimate rhVal of
       EdhArgsPack (ArgsPack !rhArgs !rhKwArgs) ->
-        cmpPosArgs lhArgs rhArgs $ \case
-          Nothing     -> exit Nothing
-          Just EQ     -> cmpKwArgs (odToList lhKwArgs) (odToList rhKwArgs) exit
+        edhCmpList ets lhArgs rhArgs $ \case
+          Nothing -> exit Nothing
+          Just EQ ->
+            edhCmpKeyedList ets (odToList lhKwArgs) (odToList rhKwArgs) exit
           !conclusion -> exit conclusion
       _ -> exit Nothing
     _ -> exit Nothing
-
-  cmpPosArgs :: [EdhValue] -> [EdhValue] -> (Maybe Ordering -> STM ()) -> STM ()
-  cmpPosArgs []      []      exit' = exit' $ Just EQ
-  cmpPosArgs []      (_ : _) exit' = exit' $ Just LT
-  cmpPosArgs (_ : _) []      exit' = exit' $ Just GT
-  cmpPosArgs (lhHead : lhTail) (rhHead : rhTail) exit' =
-    doEdhComparison ets lhHead rhHead $ \case
-      Nothing     -> exit' Nothing
-      Just EQ     -> cmpPosArgs lhTail rhTail exit'
-      !conclusion -> exit' conclusion
-
-  cmpKwArgs
-    :: [(AttrKey, EdhValue)]
-    -> [(AttrKey, EdhValue)]
-    -> (Maybe Ordering -> STM ())
-    -> STM ()
-  cmpKwArgs []      []      exit' = exit' $ Just EQ
-  cmpKwArgs []      (_ : _) exit' = exit' $ Just LT
-  cmpKwArgs (_ : _) []      exit' = exit' $ Just GT
-  cmpKwArgs ((lhKey, lhHead) : lhTail) ((rhKey, rhHead) : rhTail) exit' =
-    if lhKey /= rhKey
-      then exit' Nothing
-      else doEdhComparison ets lhHead rhHead $ \case
-        Nothing     -> exit' Nothing
-        Just EQ     -> cmpKwArgs lhTail rhTail exit'
-        !conclusion -> exit' conclusion
 
 
 resolveEdhPerform :: EdhThreadState -> AttrKey -> (EdhValue -> STM ()) -> STM ()

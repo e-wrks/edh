@@ -81,7 +81,7 @@ export {
     return join(
       ofScope.lexiLoc,
       *() =< for ( k, v ) from ofScope.attrs() do
-      '  ' ++ k ++ '=' ++ v,
+      '  ' ++ k ++ '= ' ++ v,
       sep= '\n',
     )
   }
