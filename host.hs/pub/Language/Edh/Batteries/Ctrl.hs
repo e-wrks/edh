@@ -467,7 +467,7 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
       [StmtSrc (_, ExprStmt (ArgsPackExpr !argSenders) _docCmt)] ->
         if null argSenders
           then case ctxMatch of
-    -- an empty apk pattern matches any empty sequence
+            -- an empty apk pattern matches any empty sequence
             EdhArgsPack (ArgsPack [] !kwargs) | odNull kwargs -> matchExit []
             EdhList (List _ !l) ->
               readTVar l
