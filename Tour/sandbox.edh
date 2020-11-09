@@ -58,7 +58,7 @@ sbs.eval( expr
 )
 
 # %%
-# it's prohibited to import modules from filesystem, for sandboxed envs
+# it's prohibited to import host and/or file modules, for sandboxed envs
 sbs.eval( expr
   import * 'batteries/root'
 )

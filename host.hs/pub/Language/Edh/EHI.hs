@@ -178,7 +178,8 @@ module Language.Edh.EHI
   , mkScopeWrapper
   , mkHostClass
   , mkHostClass'
-  , mkSandbox
+  , mkObjSandbox
+  , mkScopeSandbox
   , runEdhInSandbox
   , runEdhTxInSandbox
 

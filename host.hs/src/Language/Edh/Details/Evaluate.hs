@@ -4875,8 +4875,8 @@ mkHostClass !scope !className !allocator !superClasses !storeMod = do
 -- class procedure's lexcical scope will be changed to the world's sandbox scope
 -- so as for reflective scopes created from it to have their outer scopes be the
 -- world's sandbox scope.
-mkSandbox :: EdhThreadState -> Object -> (Scope -> STM ()) -> STM ()
-mkSandbox !ets !obj !exit = case edh'obj'store obj of
+mkObjSandbox :: EdhThreadState -> Object -> (Scope -> STM ()) -> STM ()
+mkObjSandbox !ets !obj !exit = case edh'obj'store obj of
   HashStore !hs -> case edh'obj'store clsObj of
     ClassStore !objCls -> do
       let
@@ -4895,8 +4895,7 @@ mkSandbox !ets !obj !exit = case edh'obj'store obj of
           , edh'scope'that    = sbObj
           , edh'excpt'hndlr   = defaultEdhExcptHndlr
           , edh'scope'proc    = sbProc
-          , edh'scope'caller  = StmtSrc
-                                  (startPosOfFile "<sandbox-scope>", VoidStmt)
+          , edh'scope'caller  = StmtSrc (startPosOfFile "<sandbox>", VoidStmt)
           , edh'effects'stack = []
           }
       exit sbScope
@@ -4907,6 +4906,19 @@ mkSandbox !ets !obj !exit = case edh'obj'store obj of
   !ctx    = edh'context ets
   !world  = edh'ctx'world ctx
   !clsObj = edh'obj'class obj
+
+
+-- | make a scope a sandbox
+mkScopeSandbox :: EdhThreadState -> Scope -> (Scope -> STM ()) -> STM ()
+mkScopeSandbox !ets !origScope !exit = exit origScope
+  { edh'scope'proc   = sbProc
+  , edh'scope'caller = StmtSrc (startPosOfFile "<sandbox>", VoidStmt)
+  }
+ where
+  !ctx      = edh'context ets
+  !world    = edh'ctx'world ctx
+  !origProc = edh'scope'proc origScope
+  !sbProc   = origProc { edh'procedure'lexi = edh'world'sandbox world }
 
 
 runEdhTxInSandbox :: Scope -> EdhHostProc -> EdhTxExit -> EdhTx

@@ -17,6 +17,7 @@ export {
   import * './math'
   import * './slice'
   import * './reflect'
+  import * './cmd'
   import * './debug'
 
 }

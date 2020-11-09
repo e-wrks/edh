@@ -1,0 +1,20 @@
+
+{##
+ # Class @Command@ is used to define parametric command objects
+ #}
+export data Command ( cmd, ***apk ) {
+
+  method __repr__ () case this.apk of {
+    { () } -> str( this.cmd )
+    this.cmd ++ this.apk
+  }
+
+  method __call__(*** apk ) constructor( that ) ( this.cmd, ***apk )
+
+}
+
+export {
+  # common repl commands
+  quit = Command( 'quit' )
+  dir = Command( 'dir' )
+}

@@ -1,4 +1,5 @@
 
+import * './cmd'
 import * './str'
 
 export {
@@ -45,50 +46,41 @@ export {
 
   }
 
-  {##
-   # Class @Command@ is used to define parametric command objects
-   #}
-  data Command ( cmd, ***apk ) {
-
-    method __eq__( other ) case other of {
-      { { Command: otherCmd } }
-      -> this.cmd == otherCmd.cmd
-      && this.apk == otherCmd.apk
-
-      _ -> false
-    }
-
-    method __repr__ () case this.apk of {
-      { () } -> str( this.cmd )
-      this.cmd ++ this.apk
-    }
-
-    method __call__(*** apk ) constructor( that ) ( this.cmd, ***apk )
-
-  }
-
   # the default basic implementation for the `dir` command
-  interpreter printDir( callerScope, ofScope=None, ) {
-    ofScope = ofScope and callerScope.eval( ofScope ) or callerScope
-    console.print( ofScope.lexiLoc, **ofScope.attrs() )
+  interpreter printDir( callerScope, ofThe= None, )
+  case if ofThe is not None
+  then callerScope.eval( ofThe )
+  else callerScope of {
+    { { scope: ofScope } }
+    -> console.print( ofScope.lexiLoc, **ofScope.attrs() )
+    { otherVal } | type( otherVal ) is ObjectType -> {
+      ofScope = scope( ofObj= otherVal )
+      console.print( desc( otherVal ), **ofScope.attrs() )
+    }
+    console.print( 'Not an object but - ' ++ desc( otherVal ) )
   }
 
   # basic implementation of a string form for `dir` command to
   # output to a remote console
-  interpreter sprintDir( callerScope, ofScope=None, ) {
-    ofScope = ofScope and callerScope.eval( ofScope ) or callerScope
-
-    return join(
+  interpreter sprintDir( callerScope, ofThe= None, )
+  case if ofThe is not None
+  then callerScope.eval( ofThe )
+  else callerScope of {
+    { { scope: ofScope } } -> join( sep= '\n',
       ofScope.lexiLoc,
       *() =< for ( k, v ) from ofScope.attrs() do
-      '  ' ++ k ++ '= ' ++ v,
-      sep= '\n',
+      '  ' ++ k ++ '= ' ++ v
     )
+    { otherVal } | type( otherVal ) is ObjectType -> {
+      ofScope = scope( ofObj= otherVal )
+      join( sep= '\n',
+        desc( otherVal ),
+        *() =< for ( k, v ) from ofScope.attrs() do
+        '  ' ++ k ++ '= ' ++ v
+      )
+    }
+    'Not an object but - ' ++ desc( otherVal )
   }
-
-  # common repl commands
-  quit = Command( 'quit' )
-  dir = Command( 'dir' )
 
   interpreter replHere( callerScope, prompt=None ) {
     prompt = prompt and callerScope.eval( prompt ) or repr( callerScope )
@@ -112,16 +104,16 @@ export {
           'dir' -> case cmd.apk of {
             # bare dir command
             { () } -> {
-              printDir( ofScope=callerScope )
+              printDir( ofThe= callerScope )
             }
             # single arg as the target scope
             { ( tgtScope ) } -> case tgtScope of {
-              { { scope:_ } } -> printDir( ofScope=tgtScope )
+              { { scope:_ } } -> printDir( ofThe= tgtScope )
               # todo special treatment for module/namespace ?
-              # { { module:_ } } -> printDir( ofScope=scope( ofObj=tgtScope ) )
-              # { { namespace:_ } } -> printDir( ofScope=scope( ofObj=tgtScope ) )
+              # { { module:_ } } -> printDir( ofThe= scope( ofObj=tgtScope ) )
+              # { { namespace:_ } } -> printDir( ofThe= scope( ofObj=tgtScope ) )
               ; | type( tgtScope ) is ObjectType -> printDir(
-                ofScope=scope( ofObj=tgtScope )
+                ofThe= scope( ofObj=tgtScope )
               )
               _ -> console.print( 'Unexpected args to dir command: ' ++ cmd.apk )
             }
@@ -185,12 +177,12 @@ export {
             }
             # single arg as the target scope
             { ( tgtScope ) } -> case tgtScope of {
-              { { scope:_ } } -> printDir( ofScope=tgtScope )
+              { { scope:_ } } -> printDir( ofThe= tgtScope )
               # todo special treatment for module/namespace ?
-              # { { module:_ } } -> printDir( ofScope=scope( ofObj=tgtScope ) )
-              # { { namespace:_ } } -> printDir( ofScope=scope( ofObj=tgtScope ) )
+              # { { module:_ } } -> printDir( ofThe= scope( ofObj=tgtScope ) )
+              # { { namespace:_ } } -> printDir( ofThe= scope( ofObj=tgtScope ) )
               ; | type( tgtScope ) is ObjectType -> printDir(
-                ofScope=scope( ofObj=tgtScope )
+                ofThe= scope( ofObj=tgtScope )
               )
               _ -> console.print( 'Unexpected args to dir command: ' ++ cmd.apk )
             }

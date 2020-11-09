@@ -77,8 +77,7 @@ supersProc (ArgsPack !args !kwargs) !exit !ets = do
     _ -> return edhNone
 
 
--- | utility sandbox(nsObject) - transform a vanilla namespace object into a
--- sandbox object. 
+-- | utility sandbox(origObj) - transform a vanilla object into a sandbox object
 --
 -- idiomatic usage: 
 --
@@ -91,9 +90,23 @@ supersProc (ArgsPack !args !kwargs) !exit !ets = do
 -- class procedure's lexcical scope will be changed to the world's sandbox scope
 -- so as for reflective scopes created from it to have their outer scopes be the
 -- world's sandbox scope.
-sandboxProc :: "nsObject" !: Object -> EdhHostProc
-sandboxProc (mandatoryArg -> nsObject) !exit !ets =
-  mkSandbox ets nsObject $ \ !sbScope -> case objClassName nsObject of
+--
+-- in case the original object is a `scope` object, a shadow copy of the
+-- original scope object is returned, which is made a sandbox scope object
+--
+sandboxProc :: "origObj" !: Object -> EdhHostProc
+sandboxProc (mandatoryArg -> !origObj) !exit !ets =
+  case edh'obj'store origObj of
+    HostStore !hsd -> case fromDynamic hsd of
+      Just (scope :: Scope) -> mkScopeSandbox ets scope $ \ !sbScope ->
+        exitEdh ets exit $ EdhObject $ origObj
+          { edh'obj'store = HostStore $ toDyn sbScope
+          }
+      Nothing -> goObj
+    _ -> goObj
+ where
+  !ctx  = edh'context ets
+  goObj = mkObjSandbox ets origObj $ \ !sbScope -> case objClassName origObj of
     "_"     -> throwEdh ets UsageError "anonymous sandbox is not reasonable"
     !sbName -> do
       let !sbVal = EdhObject $ edh'scope'this sbScope
@@ -102,7 +115,6 @@ sandboxProc (mandatoryArg -> nsObject) !exit !ets =
         sbVal
         (edh'scope'entity $ contextScope ctx)
       exitEdh ets exit sbVal
-  where !ctx = edh'context ets
 
 
 -- | utility makeOp(lhExpr, opSym, rhExpr)
