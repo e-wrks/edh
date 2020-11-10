@@ -85,6 +85,7 @@ module Language.Edh.EHI
   , implantEffect
   , implantEffects
   , EdhTx
+  , EdhProgState(..)
   , EdhThreadState(..)
   , EdhTask(..)
   , Context(..)

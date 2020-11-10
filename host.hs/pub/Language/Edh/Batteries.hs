@@ -258,411 +258,405 @@ defaultEdhConsole !inputSettings = do
 
 
 installEdhBatteries :: MonadIO m => EdhWorld -> m ()
-installEdhBatteries world =
-  liftIO $ void $ runEdhProgram' (worldContext world) $ \ !ets -> do
+installEdhBatteries world = liftIO $ void $ runEdhProgram' world $ \ !ets -> do
 
-      -- TODO survey for best practices & advices on precedences here
-      --      once it's declared, can not be changed in the world.
+  declareEdhOperators
+    world
+    "<batteries>"
+    [ -- format: (symbol, precedence)
 
-    declareEdhOperators
-      world
-      "<batteries>"
-      [ -- format: (symbol, precedence)
+      -- annotations
+      ("::", Infix, -9)
+    , ( "!"
+      , InfixR
+      , 0
+      )
 
-        -- annotations
-        ("::", Infix, -9)
-      , ( "!"
-        , InfixR
-        , 0
-        )
+      -- arrows, make it higher than (=), so an arrow procedure can be
+      -- assigned to some attribute without quoting
+    , ("=>", InfixR, 1)
+    , ( "=>*"
+      , InfixR
+      , 1
+      )
+      -- branch
+    , ( "->"
+      , InfixR
+      , -1
+      )
+      -- catch
+    , ( "$=>"
+      , InfixL
+      , -2
+      )
+      -- finally
+    , ( "@=>"
+      , InfixL
+      , -2
+      )
 
-        -- arrows, make it higher than (=), so an arrow procedure can be
-        -- assigned to some attribute without quoting
-      , ("=>", InfixR, 1)
-      , ( "=>*"
-        , InfixR
-        , 1
-        )
-        -- branch
-      , ( "->"
-        , InfixR
-        , -1
-        )
-        -- catch
-      , ( "$=>"
-        , InfixL
-        , -2
-        )
-        -- finally
-      , ( "@=>"
-        , InfixL
-        , -2
-        )
+    -- the attribute key dereferencing operator
+    , ( "@"
+      , InfixL
+      , 10
+      )
+    -- attribute tempter, 
+    -- address an attribute off an object if possible, nil otherwise
+    , ("?", InfixL, 10)
+    , ( "?@"
+      , InfixL
+      , 10
+      )
 
-      -- the attribute key dereferencing operator
-      , ( "@"
-        , InfixL
-        , 10
-        )
-      -- attribute tempter, 
-      -- address an attribute off an object if possible, nil otherwise
-      , ("?", InfixL, 10)
-      , ( "?@"
-        , InfixL
-        , 10
-        )
+    -- the function application operator
+    , ( "$"
+      , InfixR
+      , -5 -- make it lower than procedure body definition (i.e. -3 to be
+      -- cross checked with `parseProcBody`), or decorators can go wrong
+      )
+    -- the flipped function application operator, in UNIX pipe semantics
+    , ( "|"
+      , InfixL
+      , 0 -- make it slightly higher than (->),
+          -- so the guard syntax in pattern matching works nicely
+      )
+    -- the flipped function application operator, in Haskell convention
+    , ( "&"
+      , InfixL
+      , -4 -- make it one higher than ($) as in Haskell
+      )
 
-      -- the function application operator
-      , ( "$"
-        , InfixR
-        , -5 -- make it lower than procedure body definition (i.e. -3 to be
-        -- cross checked with `parseProcBody`), or decorators can go wrong
-        )
-      -- the flipped function application operator, in UNIX pipe semantics
-      , ( "|"
-        , InfixL
-        , 0 -- make it slightly higher than (->),
-            -- so the guard syntax in pattern matching works nicely
-        )
-      -- the flipped function application operator, in Haskell convention
-      , ( "&"
-        , InfixL
-        , -4 -- make it one higher than ($) as in Haskell
-        )
+    -- assignments, make them lower than (++),
+    -- so don't need to quote `a = b ++ c`
+    , ("=", InfixR, 0)
+    , ( "?="
+      , InfixR
+      , 0
+      )
+    -- the definition operator, creates named value in Edh
+    , (":=", InfixR, 1)
+    , ( "?:="
+      , InfixR
+      , 1
+      )
 
-      -- assignments, make them lower than (++),
-      -- so don't need to quote `a = b ++ c`
-      , ("=", InfixR, 0)
-      , ( "?="
-        , InfixR
-        , 0
-        )
-      -- the definition operator, creates named value in Edh
-      , (":=", InfixR, 1)
-      , ( "?:="
-        , InfixR
-        , 1
-        )
+    -- syntactic sugars for (=)
+    , ("++=", InfixR, 2)
+    , ("+=" , InfixR, 2)
+    , ("-=" , InfixR, 2)
+    , ("*=" , InfixR, 2)
+    , ("/=" , InfixR, 2)
+    , ("//=", InfixR, 2)
+    , ("%=" , InfixR, 2)
+    , ("**=", InfixR, 2)
+    , ("&&=", InfixR, 3)
+    , ( "||="
+      , InfixR
+      , 3
+      )
 
-      -- syntactic sugars for (=)
-      , ("++=", InfixR, 2)
-      , ("+=" , InfixR, 2)
-      , ("-=" , InfixR, 2)
-      , ("*=" , InfixR, 2)
-      , ("/=" , InfixR, 2)
-      , ("//=", InfixR, 2)
-      , ("%=" , InfixR, 2)
-      , ("**=", InfixR, 2)
-      , ("&&=", InfixR, 3)
-      , ( "||="
-        , InfixR
-        , 3
-        )
+    -- arithmetic
+    , ("+" , InfixL, 6)
+    , ("-" , InfixL, 6)
+    , ("*" , InfixL, 7)
+    , ("/" , InfixL, 7)
+    , ("//", InfixL, 7)
+    , ("%" , InfixL, 7)
+    , ( "**"
+      , InfixL
+      , 8
+      )
+    -- comparations
+    , ( "=="
+      , Infix
+      , 4
+      ) -- deep-value-wise equality test
+    , ( "!="
+      , Infix
+      , 4
+      ) -- inversed identity-wise equality test
+        -- C style here, as (/=) is used for inplace division
+    , ( "is not"
+      , Infix
+      , 4
+      ) -- identity-wise negative equality test
+    , ( "is"
+      , Infix
+      , 4
+      ) -- identity-wise equality test
+    , (">" , Infix, 4)
+    , (">=", Infix, 4)
+    , ("<" , Infix, 4)
+    , ( "<="
+      , Infix
+      , 4
+      )
+      -- logical/nullish boolean
+    , ("&&" , InfixL, 3)
+    , ("||" , InfixL, 3)
+    , ("and", InfixL, 3)
+    , ( "or"
+      , InfixL
+      , 3
+      )
 
-      -- arithmetic
-      , ("+" , InfixL, 6)
-      , ("-" , InfixL, 6)
-      , ("*" , InfixL, 7)
-      , ("/" , InfixL, 7)
-      , ("//", InfixL, 7)
-      , ("%" , InfixL, 7)
-      , ( "**"
-        , InfixL
-        , 8
-        )
-      -- comparations
-      , ( "=="
-        , Infix
-        , 4
-        ) -- deep-value-wise equality test
-      , ( "!="
-        , Infix
-        , 4
-        ) -- inversed identity-wise equality test
-          -- C style here, as (/=) is used for inplace division
-      , ( "is not"
-        , Infix
-        , 4
-        ) -- identity-wise negative equality test
-      , ( "is"
-        , Infix
-        , 4
-        ) -- identity-wise equality test
-      , (">" , Infix, 4)
-      , (">=", Infix, 4)
-      , ("<" , Infix, 4)
-      , ( "<="
-        , Infix
-        , 4
-        )
-        -- logical/nullish boolean
-      , ("&&" , InfixL, 3)
-      , ("||" , InfixL, 3)
-      , ("and", InfixL, 3)
-      , ( "or"
-        , InfixL
-        , 3
-        )
+      -- emulate the ternary operator in C:
+      --       onCnd ? oneThing : theOther
+      --  * Python
+      --       onCnd and oneThing or theOther
+      --  * Edh
+      --       onCnd &> oneThing |> theOther
+    , ("&>", InfixL, 3)
+    , ( "|>"
+      , InfixL
+      , 3
+      )
 
-        -- emulate the ternary operator in C:
-        --       onCnd ? oneThing : theOther
-        --  * Python
-        --       onCnd and oneThing or theOther
-        --  * Edh
-        --       onCnd &> oneThing |> theOther
-      , ("&>", InfixL, 3)
-      , ( "|>"
-        , InfixL
-        , 3
-        )
+      -- comprehension
+      --  * list comprehension:
+      --     [] =< for x from range(100) do x*x
+      --  * dict comprehension:
+      --     {} =< for x from range(100) do (x, x*x)
+      --  * tuple comprehension:
+      --     (,) =< for x from range(100) do x*x
+    , ( "=<"
+      , InfixR
+      , 2
+      )
+      -- prepand to list
+      --     l = [3,7,5]
+      --     2 :> l
+      --     [2,3,7,5]
+    , ( ":>"
+      , InfixR
+      , 2
+      )
+    -- the pair constructor, creates pairs in Edh
+    , ( ":"
+      , InfixL
+      , 2
+      )
+      -- reverse left-list and prepend to right-list
+      --     l = [3,7,5]
+      --     [9,2] >> l
+      --     [2,9,3,7,5]
+    , ( ">>"
+      , InfixR
+      , 2
+      )
+      -- element-of test
+    , ( "?<="
+      , Infix
+      , 4
+      )
+      -- prefix test
+    , ( "|*"
+      , Infix
+      , 4
+      )
+      -- suffix test
+    , ( "*|"
+      , Infix
+      , 4
+      )
+      -- prefix cut (pattern only)
+    , ( ">@"
+      , InfixL
+      , 3
+      )
+      -- suffix cut (pattern only)
+    , ( "@<"
+      , InfixL
+      , 3
+      )
 
-        -- comprehension
-        --  * list comprehension:
-        --     [] =< for x from range(100) do x*x
-        --  * dict comprehension:
-        --     {} =< for x from range(100) do (x, x*x)
-        --  * tuple comprehension:
-        --     (,) =< for x from range(100) do x*x
-      , ( "=<"
-        , InfixR
-        , 2
-        )
-        -- prepand to list
-        --     l = [3,7,5]
-        --     2 :> l
-        --     [2,3,7,5]
-      , ( ":>"
-        , InfixR
-        , 2
-        )
-      -- the pair constructor, creates pairs in Edh
-      , ( ":"
-        , InfixL
-        , 2
-        )
-        -- reverse left-list and prepend to right-list
-        --     l = [3,7,5]
-        --     [9,2] >> l
-        --     [2,9,3,7,5]
-      , ( ">>"
-        , InfixR
-        , 2
-        )
-        -- element-of test
-      , ( "?<="
-        , Infix
-        , 4
-        )
-        -- prefix test
-      , ( "|*"
-        , Infix
-        , 4
-        )
-        -- suffix test
-      , ( "*|"
-        , Infix
-        , 4
-        )
-        -- prefix cut (pattern only)
-      , ( ">@"
-        , InfixL
-        , 3
-        )
-        -- suffix cut (pattern only)
-      , ( "@<"
-        , InfixL
-        , 3
-        )
+      -- publish to sink
+      --     evsPub <- outEvent
+    , ( "<-"
+      , InfixR
+      , 1
+      )
 
-        -- publish to sink
-        --     evsPub <- outEvent
-      , ( "<-"
-        , InfixR
-        , 1
-        )
+      -- string coercing concatenation
+    , ( "++"
+      , InfixL
+      , 2
+      )
 
-        -- string coercing concatenation
-      , ( "++"
-        , InfixL
-        , 2
-        )
+      -- logging
+    , ("<|", Infix, 1)
+    ]
 
-        -- logging
-      , ("<|", Infix, 1)
+  -- global operators at world root scope
+  !basicOperators <- sequence
+    [ (AttrByName sym, ) <$> mkIntrinsicOp world sym iop
+    | (sym, iop) <-
+      [ ("@"     , attrDerefAddrProc)
+      , ("$"     , fapProc)
+      , ("|"     , ffapProc)
+      , ("&"     , ffapProc)
+      , (":="    , defProc)
+      , ("?:="   , defMissingProc)
+      , (":"     , pairCtorProc)
+      , ("?"     , attrTemptProc)
+      , ("?@"    , attrDerefTemptProc)
+      , ("++"    , concatProc)
+      , ("=<"    , cprhProc)
+      , ("?<="   , elemProc)
+      , ("|*"    , isPrefixOfProc)
+      , ("*|"    , hasSuffixProc)
+      , (":>"    , prpdProc)
+      , (">>"    , lstrvrsPrpdProc)
+      , ("<-"    , evtPubProc)
+      , ("+"     , addProc)
+      , ("-"     , subtProc)
+      , ("*"     , mulProc)
+      , ("/"     , divProc)
+      , ("//"    , divIntProc)
+      , ("%"     , modIntProc)
+      , ("**"    , powProc)
+      , ("&&"    , logicalAndProc)
+      , ("||"    , logicalOrProc)
+      , ("and"   , nullishAndProc)
+      , ("or"    , nullishOrProc)
+      , ("=="    , valEqProc id)
+      , ("!="    , valEqProc not)
+      , ("is not", idNotEqProc)
+      , ("is"    , idEqProc)
+      , (">"     , isGtProc)
+      , (">="    , isGeProc)
+      , ("<"     , isLtProc)
+      , ("<="    , isLeProc)
+      , ("="     , assignProc)
+      , ("++="   , assignWithOpProc "++")
+      , ("+="    , assignWithOpProc "+")
+      , ("-="    , assignWithOpProc "-")
+      , ("*="    , assignWithOpProc "*")
+      , ("/="    , assignWithOpProc "/")
+      , ("//="   , assignWithOpProc "//")
+      , ("%="    , assignWithOpProc "%")
+      , ("**="   , assignWithOpProc "**")
+      , ("&&="   , assignWithOpProc "&&")
+      , ("||="   , assignWithOpProc "||")
+      , ("?="    , assignMissingProc)
+      , ("=>"    , arrowProc)
+      , ("=>*"   , prodArrowProc)
+      , ("->"    , branchProc)
+      , ("$=>"   , catchProc)
+      , ("@=>"   , finallyProc)
+      , ("::"    , silentAnnoProc)
+      , ("!"     , leftAnnoProc)
+      , ("<|"    , loggingProc)
       ]
+    ]
 
-    -- global operators at world root scope
-    !basicOperators <- sequence
-      [ (AttrByName sym, ) <$> mkIntrinsicOp world sym iop
-      | (sym, iop) <-
-        [ ("@"     , attrDerefAddrProc)
-        , ("$"     , fapProc)
-        , ("|"     , ffapProc)
-        , ("&"     , ffapProc)
-        , (":="    , defProc)
-        , ("?:="   , defMissingProc)
-        , (":"     , pairCtorProc)
-        , ("?"     , attrTemptProc)
-        , ("?@"    , attrDerefTemptProc)
-        , ("++"    , concatProc)
-        , ("=<"    , cprhProc)
-        , ("?<="   , elemProc)
-        , ("|*"    , isPrefixOfProc)
-        , ("*|"    , hasSuffixProc)
-        , (":>"    , prpdProc)
-        , (">>"    , lstrvrsPrpdProc)
-        , ("<-"    , evtPubProc)
-        , ("+"     , addProc)
-        , ("-"     , subtProc)
-        , ("*"     , mulProc)
-        , ("/"     , divProc)
-        , ("//"    , divIntProc)
-        , ("%"     , modIntProc)
-        , ("**"    , powProc)
-        , ("&&"    , logicalAndProc)
-        , ("||"    , logicalOrProc)
-        , ("and"   , nullishAndProc)
-        , ("or"    , nullishOrProc)
-        , ("=="    , valEqProc id)
-        , ("!="    , valEqProc not)
-        , ("is not", idNotEqProc)
-        , ("is"    , idEqProc)
-        , (">"     , isGtProc)
-        , (">="    , isGeProc)
-        , ("<"     , isLtProc)
-        , ("<="    , isLeProc)
-        , ("="     , assignProc)
-        , ("++="   , assignWithOpProc "++")
-        , ("+="    , assignWithOpProc "+")
-        , ("-="    , assignWithOpProc "-")
-        , ("*="    , assignWithOpProc "*")
-        , ("/="    , assignWithOpProc "/")
-        , ("//="   , assignWithOpProc "//")
-        , ("%="    , assignWithOpProc "%")
-        , ("**="   , assignWithOpProc "**")
-        , ("&&="   , assignWithOpProc "&&")
-        , ("||="   , assignWithOpProc "||")
-        , ("?="    , assignMissingProc)
-        , ("=>"    , arrowProc)
-        , ("=>*"   , prodArrowProc)
-        , ("->"    , branchProc)
-        , ("$=>"   , catchProc)
-        , ("@=>"   , finallyProc)
-        , ("::"    , silentAnnoProc)
-        , ("!"     , leftAnnoProc)
-        , ("<|"    , loggingProc)
-        ]
-      ]
-
-    -- global procedures at world root scope
-    !basicProcs <-
-      sequence
-      $  [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp
-         | (mc, nm, hp) <-
-           [ (EdhMethod, "__StringType_bytes__"    , wrapHostProc strEncodeProc)
-           , (EdhMethod, "__BlobType_utf8string__", wrapHostProc blobDecodeProc)
-           , (EdhMethod, "Symbol", wrapHostProc symbolCtorProc)
-           , (EdhMethod, "UUID"                    , wrapHostProc uuidCtorProc)
-           , (EdhMethod, "__ArgsPackType_args__"   , wrapHostProc apkArgsProc)
-           , (EdhMethod, "__ArgsPackType_kwargs__" , wrapHostProc apkKwrgsProc)
-           , (EdhMethod, "error"                   , wrapHostProc errorProc)
-           , (EdhMethod, "id"                      , wrapHostProc idProc)
-           , (EdhMethod, "blob"                    , wrapHostProc blobProc)
-           , (EdhMethod, "str"                     , wrapHostProc strProc)
-           , (EdhMethod, "json"                    , wrapHostProc jsonProc)
-           , (EdhMethod, "repr"                    , wrapHostProc reprProc)
-           , (EdhMethod, "cap"                     , wrapHostProc capProc)
-           , (EdhMethod, "grow"                    , wrapHostProc growProc)
-           , (EdhMethod, "len"                     , wrapHostProc lenProc)
-           , (EdhMethod, "mark"                    , wrapHostProc markProc)
-           , (EdhMethod, "show"                    , wrapHostProc showProc)
-           , (EdhMethod, "desc"                    , wrapHostProc descProc)
-           , (EdhMethod, "dict"                    , wrapHostProc dictProc)
-           , (EdhMethod, "null"                    , wrapHostProc isNullProc)
-           , (EdhMethod, "compare"                 , wrapHostProc cmpProc)
-           , (EdhMethod, "type"                    , wrapHostProc typeProc)
-           , (EdhMethod, "__IntrinsicType_name__"  , wrapHostProc procNameProc)
-           , (EdhMethod, "__MethodType_name__"     , wrapHostProc procNameProc)
-           , (EdhMethod, "__HostMethodType_name__" , wrapHostProc procNameProc)
-           , (EdhMethod, "__OperatorType_name__"   , wrapHostProc procNameProc)
-           , (EdhMethod, "__HostOperType_name__"   , wrapHostProc procNameProc)
-           , (EdhMethod, "__GeneratorType_name__"  , wrapHostProc procNameProc)
-           , (EdhMethod, "__HostGenrType_name__"   , wrapHostProc procNameProc)
-           , (EdhMethod, "__InterpreterType_name__", wrapHostProc procNameProc)
-           , (EdhMethod, "__ProducerType_name__"   , wrapHostProc procNameProc)
-           , (EdhMethod, "__DescriptorType_name__" , wrapHostProc procNameProc)
-           , (EdhMethod, "property"                , wrapHostProc propertyProc)
-           , (EdhMethod, "setter"                  , wrapHostProc setterProc)
-           , (EdhMethod, "constructor"             , wrapHostProc ctorProc)
-           , (EdhMethod, "supers"                  , wrapHostProc supersProc)
-           , (EdhMethod, "parseEdh"                , wrapHostProc parseEdhProc)
-           , (EdhMethod, "makeOp"                  , wrapHostProc makeOpProc)
-           , (EdhMethod, "__SinkType_subseq__", wrapHostProc sink'subseqProc)
-           , (EdhMethod, "__SinkType_mrv__"        , wrapHostProc sink'mrvProc)
-           , (EdhMethod, "__SinkType_eos__"        , wrapHostProc sink'eosProc)
-           , (EdhMethod, "__DictType_size__"       , wrapHostProc dictSizeProc)
-           , (EdhMethod, "__ListType_push__"       , wrapHostProc listPushProc)
-           , (EdhMethod, "__ListType_pop__"        , wrapHostProc listPopProc)
-           ]
+  -- global procedures at world root scope
+  !basicProcs <-
+    sequence
+    $  [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp
+       | (mc, nm, hp) <-
+         [ (EdhMethod, "__StringType_bytes__"    , wrapHostProc strEncodeProc)
+         , (EdhMethod, "__BlobType_utf8string__" , wrapHostProc blobDecodeProc)
+         , (EdhMethod, "Symbol"                  , wrapHostProc symbolCtorProc)
+         , (EdhMethod, "UUID"                    , wrapHostProc uuidCtorProc)
+         , (EdhMethod, "__ArgsPackType_args__"   , wrapHostProc apkArgsProc)
+         , (EdhMethod, "__ArgsPackType_kwargs__" , wrapHostProc apkKwrgsProc)
+         , (EdhMethod, "error"                   , wrapHostProc errorProc)
+         , (EdhMethod, "id"                      , wrapHostProc idProc)
+         , (EdhMethod, "blob"                    , wrapHostProc blobProc)
+         , (EdhMethod, "str"                     , wrapHostProc strProc)
+         , (EdhMethod, "json"                    , wrapHostProc jsonProc)
+         , (EdhMethod, "repr"                    , wrapHostProc reprProc)
+         , (EdhMethod, "cap"                     , wrapHostProc capProc)
+         , (EdhMethod, "grow"                    , wrapHostProc growProc)
+         , (EdhMethod, "len"                     , wrapHostProc lenProc)
+         , (EdhMethod, "mark"                    , wrapHostProc markProc)
+         , (EdhMethod, "show"                    , wrapHostProc showProc)
+         , (EdhMethod, "desc"                    , wrapHostProc descProc)
+         , (EdhMethod, "dict"                    , wrapHostProc dictProc)
+         , (EdhMethod, "null"                    , wrapHostProc isNullProc)
+         , (EdhMethod, "compare"                 , wrapHostProc cmpProc)
+         , (EdhMethod, "type"                    , wrapHostProc typeProc)
+         , (EdhMethod, "__IntrinsicType_name__"  , wrapHostProc procNameProc)
+         , (EdhMethod, "__MethodType_name__"     , wrapHostProc procNameProc)
+         , (EdhMethod, "__HostMethodType_name__" , wrapHostProc procNameProc)
+         , (EdhMethod, "__OperatorType_name__"   , wrapHostProc procNameProc)
+         , (EdhMethod, "__HostOperType_name__"   , wrapHostProc procNameProc)
+         , (EdhMethod, "__GeneratorType_name__"  , wrapHostProc procNameProc)
+         , (EdhMethod, "__HostGenrType_name__"   , wrapHostProc procNameProc)
+         , (EdhMethod, "__InterpreterType_name__", wrapHostProc procNameProc)
+         , (EdhMethod, "__ProducerType_name__"   , wrapHostProc procNameProc)
+         , (EdhMethod, "__DescriptorType_name__" , wrapHostProc procNameProc)
+         , (EdhMethod, "property"                , wrapHostProc propertyProc)
+         , (EdhMethod, "setter"                  , wrapHostProc setterProc)
+         , (EdhMethod, "constructor"             , wrapHostProc ctorProc)
+         , (EdhMethod, "supers"                  , wrapHostProc supersProc)
+         , (EdhMethod, "parseEdh"                , wrapHostProc parseEdhProc)
+         , (EdhMethod, "makeOp"                  , wrapHostProc makeOpProc)
+         , (EdhMethod, "__SinkType_subseq__"     , wrapHostProc sink'subseqProc)
+         , (EdhMethod, "__SinkType_mrv__"        , wrapHostProc sink'mrvProc)
+         , (EdhMethod, "__SinkType_eos__"        , wrapHostProc sink'eosProc)
+         , (EdhMethod, "__DictType_size__"       , wrapHostProc dictSizeProc)
+         , (EdhMethod, "__ListType_push__"       , wrapHostProc listPushProc)
+         , (EdhMethod, "__ListType_pop__"        , wrapHostProc listPopProc)
          ]
-      ++ [(AttrByName "Vector", ) . EdhObject <$> createVectorClass rootScope]
+       ]
+    ++ [(AttrByName "Vector", ) . EdhObject <$> createVectorClass rootScope]
 
 
-    !console  <- createNamespace world "console" []
-    !conScope <- objectScope console
-    !conMths  <- sequence
-      [ (AttrByName nm, ) <$> mkHostProc conScope vc nm hp
-      | (vc, nm, hp) <-
-        [ (EdhMethod, "exit"        , wrapHostProc conExitProc)
-        , (EdhMethod, "readSource"  , wrapHostProc conReadSourceProc)
-        , (EdhMethod, "readCommand" , wrapHostProc conReadCommandProc)
-        , (EdhMethod, "print"       , wrapHostProc conPrintProc)
-        , (EdhMethod, "now"         , wrapHostProc conNowProc)
-        , (EdhGnrtor, "everyMicros" , wrapHostProc conEveryMicrosProc)
-        , (EdhGnrtor, "everyMillis" , wrapHostProc conEveryMillisProc)
-        , (EdhGnrtor, "everySeconds", wrapHostProc conEverySecondsProc)
-        ]
+  !console  <- createNamespace world "console" []
+  !conScope <- objectScope console
+  !conMths  <- sequence
+    [ (AttrByName nm, ) <$> mkHostProc conScope vc nm hp
+    | (vc, nm, hp) <-
+      [ (EdhMethod, "exit"        , wrapHostProc conExitProc)
+      , (EdhMethod, "readSource"  , wrapHostProc conReadSourceProc)
+      , (EdhMethod, "readCommand" , wrapHostProc conReadCommandProc)
+      , (EdhMethod, "print"       , wrapHostProc conPrintProc)
+      , (EdhMethod, "now"         , wrapHostProc conNowProc)
+      , (EdhGnrtor, "everyMicros" , wrapHostProc conEveryMicrosProc)
+      , (EdhGnrtor, "everyMillis" , wrapHostProc conEveryMillisProc)
+      , (EdhGnrtor, "everySeconds", wrapHostProc conEverySecondsProc)
       ]
-    let
-      !conArts =
-        conMths
-          ++ [ (AttrByName "debug", EdhDecimal 10)
-             , (AttrByName "info" , EdhDecimal 20)
-             , (AttrByName "warn" , EdhDecimal 30)
-             , (AttrByName "error", EdhDecimal 40)
-             , (AttrByName "fatal", EdhDecimal 50)
-             , ( AttrByName "logLevel"
-               , EdhDecimal
-                 (fromIntegral $ consoleLogLevel $ edh'world'console world)
-               )
-             ]
-    !conExps <- EdhDict
-      <$> createEdhDict [ (attrKeyValue k, v) | (k, v) <- conArts ]
-    flip iopdUpdate (edh'scope'entity conScope)
-      $  conArts
-      ++ [(AttrByName "__exports__", conExps)]
+    ]
+  let
+    !conArts =
+      conMths
+        ++ [ (AttrByName "debug", EdhDecimal 10)
+           , (AttrByName "info" , EdhDecimal 20)
+           , (AttrByName "warn" , EdhDecimal 30)
+           , (AttrByName "error", EdhDecimal 40)
+           , (AttrByName "fatal", EdhDecimal 50)
+           , ( AttrByName "logLevel"
+             , EdhDecimal
+               (fromIntegral $ consoleLogLevel $ edh'world'console world)
+             )
+           ]
+  !conExps <- EdhDict
+    <$> createEdhDict [ (attrKeyValue k, v) | (k, v) <- conArts ]
+  flip iopdUpdate (edh'scope'entity conScope)
+    $  conArts
+    ++ [(AttrByName "__exports__", conExps)]
 
 
-    -- artifacts considered safe for sandboxed envs, to afford basic Edh source
-    -- evaluation
-    let !basicArts = basicOperators ++ basicProcs
+  -- artifacts considered safe for sandboxed envs, to afford basic Edh source
+  -- evaluation
+  let !basicArts = basicOperators ++ basicProcs
 
-    !privilegedProcs <-
-      sequence
-        $ [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp
-          | (mc, nm, hp) <- [(EdhMethod, "sandbox", wrapHostProc sandboxProc)]
-          ]
-    let !privilegedArts =
-          (AttrByName "console", EdhObject console) : privilegedProcs
-    iopdUpdate (basicArts ++ privilegedArts) rootEntity
-    runEdhTx ets
-      $ importEdhModule' rootEntity WildReceiver "batteries/root" endOfEdh
+  !privilegedProcs <-
+    sequence
+      $ [ (AttrByName nm, ) <$> mkHostProc rootScope mc nm hp
+        | (mc, nm, hp) <- [(EdhMethod, "sandbox", wrapHostProc sandboxProc)]
+        ]
+  let !privilegedArts =
+        (AttrByName "console", EdhObject console) : privilegedProcs
+  iopdUpdate (basicArts ++ privilegedArts) rootEntity
+  runEdhTx ets
+    $ importEdhModule' rootEntity WildReceiver "batteries/root" endOfEdh
 
-    iopdUpdate basicArts sandboxEntity
-    runEdhTx ets $ importEdhModule' sandboxEntity
-                                    WildReceiver
-                                    "batteries/sandbox"
-                                    endOfEdh
+  iopdUpdate basicArts sandboxEntity
+  runEdhTx ets
+    $ importEdhModule' sandboxEntity WildReceiver "batteries/sandbox" endOfEdh
 
  where
 

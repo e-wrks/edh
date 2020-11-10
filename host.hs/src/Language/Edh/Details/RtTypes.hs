@@ -208,10 +208,8 @@ instance Show List where
 
 -- | The execution context of an Edh thread
 data Context = Context {
-    -- | the Edh world in context
-    edh'ctx'world :: !EdhWorld
     -- | the call stack frames of Edh procedures
-  , edh'ctx'stack :: !(NonEmpty Scope)
+    edh'ctx'stack :: !(NonEmpty Scope)
     -- | the direct generator caller
   , edh'ctx'genr'caller :: !(Maybe EdhGenrCaller)
     -- | the match target value in context, normally be `true`, or the
@@ -528,8 +526,7 @@ edhCreateModule !world !moduName !moduId !srcName = do
 
 worldContext :: EdhWorld -> Context
 worldContext !world = Context
-  { edh'ctx'world        = world
-  , edh'ctx'stack        = edh'world'root world :| []
+  { edh'ctx'stack        = edh'world'root world :| []
   , edh'ctx'genr'caller  = Nothing
   , edh'ctx'match        = true
   , edh'ctx'stmt         = StmtSrc (startPosOfFile "<world>", VoidStmt)
@@ -564,14 +561,21 @@ type EdhLogger = LogLevel -> Maybe String -> ArgsPack -> STM ()
 type LogLevel = Int
 
 
--- | The states of a thread of an Edh program
+-- | The state of an Edh program
+data EdhProgState = EdhProgState {
+    edh'prog'world :: !EdhWorld
+  , edh'prog'result :: !(TMVar (Either SomeException EdhValue))
+  , edh'fork'queue :: !(TBQueue (EdhThreadState, EdhThreadState -> STM ()))
+  }
+
+-- | The state of an Edh thread belonging to an Edh program
 data EdhThreadState = EdhThreadState {
-    edh'in'tx :: !Bool
+    edh'thread'prog :: !EdhProgState
+  , edh'in'tx :: !Bool
   , edh'task'queue :: !(TBQueue EdhTask)
   , edh'perceivers :: !(TVar [PerceiveRecord])
   , edh'defers :: !(TVar [DeferRecord])
   , edh'context :: !Context
-  , edh'fork'queue :: !(TBQueue (EdhThreadState, EdhThreadState -> STM ()))
   }
 
 -- | The task to be queued for execution of an Edh thread.
@@ -640,7 +644,8 @@ endOfEdh _ _ = return ()
 --      any subsequent Edh code within the tx throws without recovered
 forkEdh :: (EdhThreadState -> EdhThreadState) -> EdhTx -> EdhTxExit -> EdhTx
 forkEdh !bootMod !p !exit !etsForker = do
-  writeTBQueue (edh'fork'queue etsForker) (etsForker, p . bootMod)
+  writeTBQueue (edh'fork'queue $ edh'thread'prog etsForker)
+               (etsForker, p . bootMod)
   exitEdh etsForker exit nil
 {-# INLINE forkEdh #-}
 
@@ -1678,9 +1683,11 @@ objectScope !obj = case edh'obj'store obj of
 --
 -- todo currently only lexical context is recorded, the call frames may
 --      be needed in the future
-mkScopeWrapper :: Context -> Scope -> STM Object
-mkScopeWrapper !ctx !scope = edhWrapScope scope
-  where edhWrapScope = edh'scope'wrapper $ edh'ctx'world ctx
+mkScopeWrapper :: EdhThreadState -> Scope -> STM Object
+mkScopeWrapper !ets !scope = edhWrapScope scope
+ where
+  !world       = edh'prog'world $ edh'thread'prog ets
+  edhWrapScope = edh'scope'wrapper world
 
 
 data EdhIndex = EdhIndex !Int | EdhAny | EdhAll | EdhSlice {

@@ -78,7 +78,7 @@ loggingProc !lhExpr !rhExpr !exit !ets =
         throwEdh ets EvalError $ "invalid log target: " <> T.pack (show lhVal)
  where
   !ctx         = edh'context ets
-  !console     = edh'world'console $ edh'ctx'world ctx
+  !console     = edh'world'console $ edh'prog'world $ edh'thread'prog ets
   !conLogLevel = consoleLogLevel console
   !logger      = consoleLogger console
 
@@ -134,8 +134,7 @@ conReadSourceProc (defaultArg defaultEdhPS1 -> !ps1) (defaultArg defaultEdhPS2 -
                 $ T.unlines lines_
               else exitEdh ets exit $ EdhString $ T.unlines lines_
  where
-  !ctx = edh'context ets
-  !ioQ = consoleIO $ edh'world'console $ edh'ctx'world ctx
+  !ioQ = consoleIO $ edh'world'console $ edh'prog'world $ edh'thread'prog ets
 
 -- | host method console.readCommand(ps1="Đ: ", ps2="Đ| ", inScopeOf=None)
 conReadCommandProc
@@ -189,9 +188,9 @@ conReadCommandProc (defaultArg defaultEdhPS1 -> !ps1) (defaultArg defaultEdhPS2 
           _ -> doReadCmd callerScope
 
  where
-  !ctx         = edh'context ets
+  !ctx = edh'context ets
   !callerScope = contextFrame ctx 1
-  !ioQ         = consoleIO $ edh'world'console $ edh'ctx'world ctx
+  !ioQ = consoleIO $ edh'world'console $ edh'prog'world $ edh'thread'prog ets
 
 
 -- | host method console.print(*args, **kwargs)
@@ -199,8 +198,7 @@ conPrintProc :: ArgsPack -> EdhHostProc
 conPrintProc (ArgsPack !args !kwargs) !exit !ets = printVS args
   $ odToList kwargs
  where
-  !ctx = edh'context ets
-  !ioQ = consoleIO $ edh'world'console $ edh'ctx'world ctx
+  !ioQ = consoleIO $ edh'world'console $ edh'prog'world $ edh'thread'prog ets
 
   printVS :: [EdhValue] -> [(AttrKey, EdhValue)] -> STM ()
   printVS [] []              = exitEdh ets exit nil

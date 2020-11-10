@@ -91,7 +91,6 @@ library edh-internal
     Language.Edh.Details.IOPD
     Language.Edh.Details.PkgMan
     Language.Edh.Details.RtTypes
-    Language.Edh.Details.Tx
     Language.Edh.Details.Utils
     Language.Edh.Event
     Language.Edh.InterOp

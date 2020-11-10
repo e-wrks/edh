@@ -54,7 +54,7 @@ leftAnnoProc _ !rhExpr !exit = evalExpr rhExpr exit
 -- right Edh source location reporting the error
 errorProc :: ArgsPack -> EdhHostProc
 errorProc !apk _ !ets = edhThrow ets . EdhObject =<< edh'exception'wrapper
-  (edh'ctx'world $ edh'context ets)
+  (edh'prog'world $ edh'thread'prog ets)
   (toException $ edhCreateError 1 ets EdhException apk)
 
 

@@ -29,7 +29,12 @@ import           Data.Typeable
 
 import qualified Data.UUID                     as UUID
 
-import           Text.Megaparsec
+import           Text.Megaparsec                ( State(..)
+                                                , PosState(..)
+                                                , errorBundlePretty
+                                                , runParserT'
+                                                )
+import           Text.Megaparsec.Pos
 
 import qualified Data.Lossless.Decimal         as D
 
@@ -700,7 +705,7 @@ edhObjExtends !ets !this !superObj !exit = case edh'obj'store this of
 
   callMagicMethod !mthThis !mthThat !mth = objectScope this >>= \ !objScope ->
     do
-      !scopeObj <- mkScopeWrapper (edh'context ets) objScope
+      !scopeObj <- mkScopeWrapper ets objScope
       runEdhTx ets
         $ callEdhMethod mthThis
                         mthThat
@@ -1209,7 +1214,7 @@ edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker
         HostDecl{} -> return apk
         ProcDecl{} -> do
           let callerCtx = edh'context etsCallPrep
-          !argCallerScope <- mkScopeWrapper callerCtx $ contextScope callerCtx
+          !argCallerScope <- mkScopeWrapper etsCallPrep $ contextScope callerCtx
           return $ ArgsPack (EdhObject argCallerScope : args) kwargs
       callMaker $ \ !exit -> callEdhMethod this that mth apk' scopeMod exit
 
@@ -1702,9 +1707,10 @@ throwEdh'
 throwEdh' !ets !tag !msg !details = edhWrapException (toException edhErr)
   >>= \ !exo -> edhThrow ets $ EdhObject exo
  where
-  !edhWrapException = edh'exception'wrapper (edh'ctx'world $ edh'context ets)
-  !cc               = getEdhCallContext 0 ets
-  !errDetails       = case details of
+  !edhWrapException =
+    edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
+  !cc         = getEdhCallContext 0 ets
+  !errDetails = case details of
     [] -> toDyn nil
     _  -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
   !edhErr = EdhError tag msg errDetails cc
@@ -1885,17 +1891,14 @@ evalEdh' :: String -> Int -> Text -> EdhTxExit -> EdhTx
 evalEdh' !srcName !lineNo !srcCode !exit !ets =
   parseEdh' world srcName lineNo srcCode >>= \case
     Left !err -> do
-      let !msg = T.pack $ errorBundlePretty err
-          !edhWrapException =
-            edh'exception'wrapper (edh'ctx'world $ edh'context ets)
-          !cc     = getEdhCallContext 0 ets
-          !edhErr = EdhError ParseError msg (toDyn nil) cc
+      let !msg              = T.pack $ errorBundlePretty err
+          !edhWrapException = edh'exception'wrapper world
+          !cc               = getEdhCallContext 0 ets
+          !edhErr           = EdhError ParseError msg (toDyn nil) cc
       edhWrapException (toException edhErr)
         >>= \ !exo -> edhThrow ets (EdhObject exo)
     Right (!stmts, _docCmt) -> runEdhTx ets $ evalBlock stmts exit
- where
-  ctx   = edh'context ets
-  world = edh'ctx'world ctx
+  where !world = edh'prog'world $ edh'thread'prog ets
 
 
 withThisHostObj
@@ -2237,10 +2240,17 @@ evalStmt' !stmt !exit = case stmt of
                   --      etc. are returned to here?
                   _        -> return ()
         subscribeEvents sink >>= \case
-          Nothing                  -> pure () -- already at eos
-          Just (!perceiverChan, _) -> modifyTVar'
-            (edh'perceivers ets)
-            (PerceiveRecord perceiverChan ets reactor :)
+          Nothing -> case evs'mrv sink of -- already at eos
+            Nothing -> pure () -- non-lingering, nothing to do
+            Just{} -> -- a lingering sink, trigger an immediate nil perceiving
+              runEdhTx ets $ edhContIO' $ drivePerceiver nil ets reactor
+          Just (!perceiverChan, !lingerVal) -> do
+            modifyTVar' (edh'perceivers ets)
+                        (PerceiveRecord perceiverChan ets reactor :)
+            case lingerVal of
+              Nothing -> pure ()
+              Just !mrv -> -- mrv lingering, trigger an immediate perceiving
+                runEdhTx ets $ edhContIO' $ drivePerceiver mrv ets reactor
         exitEdh ets exit nil
       _ ->
         throwEdh ets EvalError
@@ -2372,7 +2382,7 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
     runEdhTx ets $ importFromApk tgtEnt argsRcvr (ArgsPack [] arts') $ \_ ->
       exitEdhTx exit $ EdhObject fromObj
  where
-  moduClass = edh'module'class $ edh'ctx'world $ edh'context ets
+  moduClass = edh'module'class $ edh'prog'world $ edh'thread'prog ets
 
   doBindTo :: Object -> Object -> EdhValue -> EdhValue
   doBindTo !this !that = \case
@@ -2501,7 +2511,7 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp = if edh'in'tx etsImp
       Nothing           -> importFromFS
    where
     !ctx           = edh'context etsImp
-    !world         = edh'ctx'world ctx
+    !world         = edh'prog'world $ edh'thread'prog etsImp
     !worldModules  = edh'world'modules world
 
     normalizedSpec = normalizeImpSpec importSpec
@@ -3202,7 +3212,7 @@ evalExpr' (PrefixExpr Not !expr') !docCmt !exit =
 
 evalExpr' (PrefixExpr Guard !expr') !docCmt !exit = \ !ets -> do
   let !ctx                   = edh'context ets
-      !world                 = edh'ctx'world ctx
+      !world                 = edh'prog'world $ edh'thread'prog ets
       (StmtSrc (!srcPos, _)) = edh'ctx'stmt ctx
   (consoleLogger $ edh'world'console world)
     30
@@ -3407,7 +3417,7 @@ evalExpr' (ExportExpr !exps) !docCmt !exit = \ !ets ->
 evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
   do
     let !ctx   = edh'context ets
-        !world = edh'ctx'world ctx
+        !world = edh'prog'world $ edh'thread'prog ets
         !scope = contextScope ctx
         !fsChk =
           if edh'scope'proc (rootScopeOf scope)
@@ -3454,7 +3464,7 @@ evalExpr' (ClassExpr pd@(ProcDecl !addr !argsRcvr _ _)) !docCmt !exit =
   \ !ets -> resolveEdhAttrAddr ets addr $ \ !name -> do
     let !ctx       = edh'context ets
         !scope     = contextScope ctx
-        !rootScope = edh'world'root $ edh'ctx'world ctx
+        !rootScope = edh'world'root $ edh'prog'world $ edh'thread'prog ets
         !nsClass   = edh'obj'class $ edh'scope'this rootScope
         !metaClass = edh'obj'class nsClass
 
@@ -3547,7 +3557,7 @@ evalExpr' (NamespaceExpr pd@(ProcDecl !addr _ _ _) !argsSndr) !docCmt !exit =
       else resolveEdhAttrAddr ets addr $ \ !name -> do
         let !ctx       = edh'context ets
             !scope     = contextScope ctx
-            !rootScope = edh'world'root $ edh'ctx'world ctx
+            !rootScope = edh'world'root $ edh'prog'world $ edh'thread'prog ets
             !nsClsObj  = edh'obj'class $ edh'scope'this rootScope
             !nsClass   = case edh'obj'store nsClsObj of
               ClassStore !cls -> cls
@@ -3892,9 +3902,9 @@ evalInfix !opSym !lhExpr !rhExpr !exit !ets =
 
         -- 3 pos-args - caller scope + lh/rh expr receiving operator
         (PackReceiver [RecvArg{}, RecvArg{}, RecvArg{}]) -> do
-          lhu          <- unsafeIOToSTM newUnique
-          rhu          <- unsafeIOToSTM newUnique
-          scopeWrapper <- mkScopeWrapper ctx scope
+          !lhu          <- unsafeIOToSTM newUnique
+          !rhu          <- unsafeIOToSTM newUnique
+          !scopeWrapper <- mkScopeWrapper ets scope
           runEdhTx ets
             $ callEdhOperator
                 this
@@ -4912,8 +4922,7 @@ mkObjSandbox !ets !obj !exit = case edh'obj'store obj of
   _ ->
     throwEdh ets UsageError "can only make sandbox from a vanilla Edh object"
  where
-  !ctx    = edh'context ets
-  !world  = edh'ctx'world ctx
+  !world  = edh'prog'world $ edh'thread'prog ets
   !clsObj = edh'obj'class obj
 
 
@@ -4924,8 +4933,7 @@ mkScopeSandbox !ets !origScope !exit = exit origScope
   , edh'scope'caller = StmtSrc (startPosOfFile "<sandbox>", VoidStmt)
   }
  where
-  !ctx      = edh'context ets
-  !world    = edh'ctx'world ctx
+  !world    = edh'prog'world $ edh'thread'prog ets
   !origProc = edh'scope'proc origScope
   !sbProc   = origProc { edh'procedure'lexi = edh'world'sandbox world }
 
@@ -4945,4 +4953,295 @@ runEdhInSandbox !ets !sandbox !act !exit =
                       { edh'ctx'stack = NE.cons sandbox (edh'ctx'stack ctxPriv)
                       }
     }
+
+
+
+-- | Uncaught exception in any thread (main or a descendant) will terminate the
+-- whole Edh program, see:
+--   https://github.com/e-wrks/edh/tree/master/Tour#program--threading-model
+driveEdhProgram
+  :: TMVar (Either SomeException EdhValue) -> EdhWorld -> EdhTx -> IO ()
+driveEdhProgram !haltResult !world !prog = do
+  -- check async exception mask state
+  getMaskingState >>= \case
+    Unmasked -> return ()
+    _ ->
+      throwIO
+        $ EdhError UsageError
+                   "Edh program should not run with async exceptions masked"
+                   (toDyn nil)
+        $ EdhCallContext "<edh>" []
+
+  -- prepare program environment
+  !mainThId <- myThreadId
+  let onDescendantExc :: SomeException -> IO ()
+      onDescendantExc e = case asyncExceptionFromException e of
+        Just (asyncExc :: SomeAsyncException) ->
+          -- todo special handling here ?
+          throwTo mainThId asyncExc
+        _ -> throwTo mainThId e
+  -- prepare the go routine forker
+  !forkQueue <- newTBQueueIO 100
+
+  let
+    !eps = EdhProgState { edh'prog'world  = world
+                        , edh'prog'result = haltResult
+                        , edh'fork'queue  = forkQueue
+                        }
+    forkDescendants :: IO ()
+    forkDescendants =
+      atomically
+          (        (Nothing <$ readTMVar haltResult)
+          `orElse` (Just <$> readTBQueue forkQueue)
+          )
+        >>= \case
+              -- Edh program halted, done
+              Nothing                       -> return ()
+              Just (!etsForker, !actForkee) -> do
+                etsForkee <- deriveForkeeState etsForker
+                -- bootstrap on the descendant thread
+                atomically
+                  $  writeTBQueue (edh'task'queue etsForkee)
+                  $  EdhDoSTM etsForkee
+                  $  False
+                  <$ actForkee etsForkee
+                void $ mask_ $ forkIOWithUnmask $ \unmask -> catch
+                  (unmask $ driveEdhThread eps
+                                           (edh'defers etsForkee)
+                                           (edh'task'queue etsForkee)
+                  )
+                  onDescendantExc
+                -- keep the forker running
+                forkDescendants
+     where
+      -- derive thread state for the descendant thread
+      deriveForkeeState :: EdhThreadState -> IO EdhThreadState
+      deriveForkeeState !etsForker = do
+        !descQueue  <- newTBQueueIO 200
+        !perceivers <- newTVarIO []
+        !defers     <- newTVarIO []
+        return EdhThreadState
+          { edh'thread'prog = edh'thread'prog etsForker
+          , edh'in'tx       = False
+          , edh'task'queue  = descQueue
+          , edh'perceivers  = perceivers
+          , edh'defers      = defers
+          -- forkee inherits call stack etc in the context from forker, so
+          -- effect resolution and far-reaching exception handlers can work.
+          , edh'context     = fromCtx { edh'ctx'genr'caller  = Nothing
+                                      , edh'ctx'match        = true
+                                      , edh'ctx'pure         = False
+                                      , edh'ctx'exporting    = False
+                                      , edh'ctx'eff'defining = False
+                                      }
+          }
+        where !fromCtx = edh'context etsForker
+  -- start forker thread
+  void $ mask_ $ forkIOWithUnmask $ \unmask ->
+    catch (unmask forkDescendants) onDescendantExc
+  -- run the main thread
+  flip finally
+       (
+        -- set halt result after the main thread done, anyway if not already,
+        -- so all descendant threads will terminate. or else hanging STM jobs
+        -- may cause the whole process killed by GHC deadlock detector.
+        atomically $ void $ tryPutTMVar haltResult (Right nil)
+        -- TODO is it good idea to let all live Edh threads go through
+        --      ProgramHalt propagation? Their `defer` actions can do cleanup
+        --      already, need such a chance with exception handlers too?
+                                                              )
+    $ handle
+        (\(e :: SomeException) -> case fromException e :: Maybe EdhError of
+          Just (ProgramHalt phd) -> case fromDynamic phd :: Maybe EdhValue of
+            Just phv -> atomically $ void $ tryPutTMVar haltResult $ Right phv
+            _        -> case fromDynamic phd :: Maybe SomeException of
+              Just phe -> atomically $ void $ tryPutTMVar haltResult (Left phe)
+              _        -> atomically $ void $ tryPutTMVar haltResult (Left e)
+          Just _  -> atomically $ void $ tryPutTMVar haltResult (Left e)
+          Nothing -> do
+            atomically $ void $ tryPutTMVar haltResult (Left e)
+            throwIO e -- re-throw if the exception is unknown
+        )
+    $ do
+        -- prepare program state for main Edh thread
+        !mainQueue  <- newTBQueueIO 300
+        !perceivers <- newTVarIO []
+        !defers     <- newTVarIO []
+        let !etsAtBoot = EdhThreadState { edh'thread'prog = eps
+                                        , edh'in'tx       = False
+                                        , edh'task'queue  = mainQueue
+                                        , edh'perceivers  = perceivers
+                                        , edh'defers      = defers
+                                        , edh'context     = worldContext world
+                                        }
+        -- bootstrap the program on main Edh thread
+        atomically
+          $  writeTBQueue mainQueue
+          $  EdhDoSTM etsAtBoot
+          $  False
+          <$ prog etsAtBoot
+        -- drive the main Edh thread
+        driveEdhThread eps defers mainQueue
+
+
+drivePerceiver :: EdhValue -> EdhThreadState -> (TVar Bool -> EdhTx) -> IO Bool
+drivePerceiver !ev !etsOrigin !reaction = do
+  !breakThread     <- newTVarIO False
+  !reactPerceivers <- newTVarIO []
+  !reactDefers     <- newTVarIO []
+  !reactTaskQueue  <- newTBQueueIO 100
+  let
+    !etsPerceiver = etsOrigin
+      { edh'in'tx      = False
+      , edh'task'queue = reactTaskQueue
+      , edh'perceivers = reactPerceivers
+      , edh'defers     = reactDefers
+      , edh'context    = (edh'context etsOrigin) { edh'ctx'genr'caller = Nothing
+                                                 , edh'ctx'match        = ev
+        -- todo should set pure to True or False here? or just inherit as is?
+                                            -- , edh'ctx'pure         = True
+                                                 , edh'ctx'exporting    = False
+                                                 , edh'ctx'eff'defining = False
+                                                 }
+      }
+  atomically
+    $  writeTBQueue reactTaskQueue
+    $  EdhDoSTM etsPerceiver
+    $  False
+    <$ reaction breakThread etsPerceiver
+  driveEdhThread (edh'thread'prog etsOrigin) reactDefers reactTaskQueue
+  readTVarIO breakThread
+
+
+driveEdhThread :: EdhProgState -> TVar [DeferRecord] -> TBQueue EdhTask -> IO ()
+driveEdhThread !eps !defers !tq = taskLoop
+ where
+  !edhWrapException = edh'exception'wrapper $ edh'prog'world eps
+
+  nextTaskFromQueue :: TBQueue EdhTask -> STM (Maybe EdhTask)
+  nextTaskFromQueue =
+    orElse (Nothing <$ readTMVar (edh'prog'result eps)) . tryReadTBQueue
+
+  driveDefers :: IO () -> [DeferRecord] -> IO ()
+  driveDefers !done [] = done
+  driveDefers !done ((DeferRecord !etsDefer !deferredProc) : restDefers) = do
+
+    !deferPerceivers <- newTVarIO []
+    !deferDefers     <- newTVarIO []
+    !deferTaskQueue  <- newTBQueueIO 100
+    atomically
+      $  writeTBQueue deferTaskQueue
+      $  EdhDoSTM etsDefer
+      $  False
+      <$ deferredProc etsDefer { edh'in'tx      = False
+                               , edh'task'queue = deferTaskQueue
+                               , edh'perceivers = deferPerceivers
+                               , edh'defers     = deferDefers
+                               }
+    driveEdhThread eps deferDefers deferTaskQueue
+
+    driveDefers done restDefers
+
+  drivePerceivers :: [(EdhValue, PerceiveRecord)] -> IO Bool
+  drivePerceivers [] = return False
+  drivePerceivers ((!ev, PerceiveRecord _ !etsOrigin !reaction) : rest) =
+    drivePerceiver ev etsOrigin reaction >>= \case
+      True  -> return True
+      False -> drivePerceivers rest
+
+  taskLoop = atomically (nextTaskFromQueue tq) >>= \case
+
+    -- this thread is done, run defers lastly
+    Nothing                    -> readTVarIO defers >>= driveDefers (return ())
+
+    -- note during actIO, perceivers won't fire, program termination won't
+    -- stop this thread
+    Just (EdhDoIO !ets !actIO) -> try actIO >>= \case
+
+      -- terminate this thread, after running defers lastly
+      Right True -> readTVarIO defers >>= driveDefers (return ())
+
+      -- continue running this thread
+      Right False -> taskLoop
+
+      Left (e :: SomeException) -> case edhKnownError e of
+
+        -- this'll propagate to main thread if not on it
+        Just !err -> readTVarIO defers >>= driveDefers (throwIO err)
+
+        -- give a chance for the Edh code to handle an unknown exception
+        Nothing   -> do
+          atomically
+            $   edhWrapException e
+            >>= \ !exo -> writeTBQueue tq $ EdhDoSTM ets $ False <$ edhThrow
+                  ets
+                  (EdhObject exo)
+          -- continue running this thread for the queued exception handler
+          taskLoop
+
+    Just (EdhDoSTM !ets !actSTM) -> try (goSTM ets actSTM) >>= \case
+
+      -- terminate this thread, after running defers lastly
+      Right True -> readTVarIO defers >>= driveDefers (return ())
+
+      -- continue running this thread
+      Right False -> taskLoop
+
+      Left (e :: SomeException) -> case edhKnownError e of
+
+        -- this'll propagate to main thread if not on it
+        Just !err -> readTVarIO defers >>= driveDefers (throwIO err)
+
+        -- give a chance for the Edh code to handle an unknown exception
+        Nothing   -> do
+          atomically
+            $   edhWrapException e
+            >>= \ !exo -> writeTBQueue tq $ EdhDoSTM ets $ False <$ edhThrow
+                  ets
+                  (EdhObject exo)
+          -- continue running this thread for the queued exception handler
+          taskLoop
+
+
+  goSTM :: EdhThreadState -> STM Bool -> IO Bool
+  goSTM !etsTask !actTask = loopSTM
+   where
+
+    loopSTM :: IO Bool
+    loopSTM = atomically stmJob >>= \case
+      Nothing -> return True -- to terminate as program halted
+      Just (Right !toTerm) ->
+        -- no perceiver has fired, the tx job has already been executed
+        return toTerm
+      Just (Left !gotevl) -> drivePerceivers gotevl >>= \case
+        True -> -- a perceiver is terminating this thread
+          return True
+        False ->
+          -- there've been one or more perceivers fired, the tx job have
+          -- been skipped, as no perceiver is terminating the thread,
+          -- continue with this tx job
+          loopSTM
+
+    -- this is the STM work package, where perceivers can preempt the inline
+    -- job on an Edh thread
+    stmJob :: STM (Maybe (Either [(EdhValue, PerceiveRecord)] Bool))
+    stmJob = tryReadTMVar (edh'prog'result eps) >>= \case
+      Just _ -> return Nothing -- program halted
+      Nothing -> -- program still running
+        (readTVar (edh'perceivers etsTask) >>= perceiverChk []) >>= \gotevl ->
+          if null gotevl
+            then -- no perceiver fires, execute the tx job
+                 Just . Right <$> actTask
+            else -- skip the tx job if at least one perceiver fires
+                 return $ Just $ Left gotevl
+
+    perceiverChk
+      :: [(EdhValue, PerceiveRecord)]
+      -> [PerceiveRecord]
+      -> STM [(EdhValue, PerceiveRecord)]
+    perceiverChk !gotevl [] = return gotevl
+    perceiverChk !gotevl (r@(PerceiveRecord !evc _ _) : rest) =
+      tryReadTChan evc >>= \case
+        Just !ev -> perceiverChk ((ev, r) : gotevl) rest
+        Nothing  -> perceiverChk gotevl rest
 

@@ -133,16 +133,14 @@ parseEdhProc
 parseEdhProc (mandatoryArg  -> !srcCode) (defaultArg  "<edh>"  -> !srcName) (defaultArg  1 -> !lineNo) !exit !ets
   = parseEdh' world (T.unpack srcName) lineNo srcCode >>= \case
     Left !err -> do
-      let !msg = T.pack $ errorBundlePretty err
-          !edhWrapException =
-            edh'exception'wrapper (edh'ctx'world $ edh'context ets)
-          !cc     = getEdhCallContext 0 ets
-          !edhErr = EdhError ParseError msg (toDyn nil) cc
+      let !msg              = T.pack $ errorBundlePretty err
+          !edhWrapException = edh'exception'wrapper world
+          !cc               = getEdhCallContext 0 ets
+          !edhErr           = EdhError ParseError msg (toDyn nil) cc
       edhWrapException (toException edhErr)
         >>= \ !exo -> edhThrow ets (EdhObject exo)
     Right (!stmts, _docCmt) -> do
       !u <- unsafeIOToSTM newUnique
       exitEdh ets exit $ EdhExpr u (BlockExpr stmts) srcCode
  where
-  ctx   = edh'context ets
-  world = edh'ctx'world ctx
+  world = edh'prog'world $ edh'thread'prog ets
