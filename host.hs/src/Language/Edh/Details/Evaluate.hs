@@ -3024,10 +3024,13 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
 
   valJson :: EdhValue -> (Text -> STM ()) -> STM ()
   valJson !val !exit = case val of
-    EdhNil                               -> exit "null"
-    EdhString   !str                     -> exit $ strJson str
+    EdhString  !str                      -> exit $ strJson str
     -- todo deal with fractional format and scientific notation
-    EdhDecimal  !d                       -> exit $ T.pack $ show d
+    EdhDecimal !d                        -> exit $ T.pack $ show d
+    EdhNil                               -> exit "null"
+    EdhNamedValue _ EdhNil               -> exit "null"
+    EdhBool     True                     -> exit "true"
+    EdhBool     False                    -> exit "false"
     EdhList     (List     _     !lv    ) -> readTVar lv >>= flip listJson exit
     EdhDict     (Dict     _     !ds    ) -> iopdToList ds >>= flip dictJson exit
     EdhArgsPack (ArgsPack !args !kwargs) -> if null args
@@ -3041,7 +3044,7 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
           exit
     EdhObject !o -> do
       let withMagic = \case
-            (_, EdhNil         ) -> edhValueStr ets value $ exit . strJson
+            (_, EdhNil         ) -> edhValueStr ets val chkExitStr
             (_, EdhString !json) -> exit json
             (!this', EdhProcedure (EdhMethod !mth) _) ->
               runEdhTx ets
@@ -3061,7 +3064,13 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
           lookupEdhObjAttr (edh'obj'class o) (AttrByName "__json__")
             >>= withMagic
         _ -> lookupEdhObjAttr o (AttrByName "__json__") >>= withMagic
-    _ -> edhValueStr ets value $ exit . strJson
+    _ -> edhValueStr ets val chkExitStr
+   where
+    chkExitStr :: Text -> STM ()
+    chkExitStr = \case
+      "null" -> exit "null"
+      !s     -> exit $ strJson s
+
 
 
   strJson :: Text -> Text
@@ -3073,8 +3082,8 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
     $ \ !jsons -> exit $ "[ " <> T.intercalate ", " jsons <> " ]"
    where
     go :: [Text] -> [EdhValue] -> ([Text] -> STM ()) -> STM ()
-    go jsons [] !exit' = exit' $ reverse jsons
-    go jsons (v : rest) !exit' =
+    go !jsons [] !exit' = exit' $ reverse jsons
+    go !jsons (v : rest) !exit' =
       valJson v $ \ !json -> go (json : jsons) rest exit'
 
   dictJson :: [(EdhValue, EdhValue)] -> (Text -> STM ()) -> STM ()
@@ -3083,8 +3092,8 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
     $ \ !reprs -> exit $ "{ " <> T.intercalate ", " reprs <> " }"
    where
     go :: [Text] -> [(EdhValue, EdhValue)] -> ([Text] -> STM ()) -> STM ()
-    go entries []              !exit' = exit' $ reverse entries
-    go entries ((k, v) : rest) exit'  = edhValueStr ets k $ \ !kStr ->
+    go !entries []              !exit' = exit' $ reverse entries
+    go !entries ((k, v) : rest) !exit' = edhValueStr ets k $ \ !kStr ->
       valJson v $ \ !vJson ->
         go ((strJson kStr <> ": " <> vJson) : entries) rest exit'
 
@@ -3094,8 +3103,8 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
     $ \ !reprs -> exit $ "{ " <> T.intercalate ", " reprs <> " }"
    where
     go :: [Text] -> [(AttrKey, EdhValue)] -> ([Text] -> STM ()) -> STM ()
-    go entries []              !exit' = exit' $ reverse entries
-    go entries ((k, v) : rest) exit'  = valJson v $ \ !vJson ->
+    go !entries []                !exit' = exit' $ reverse entries
+    go !entries ((!k, !v) : rest) !exit' = valJson v $ \ !vJson ->
       go ((strJson (attrKeyStr k) <> ": " <> vJson) : entries) rest exit'
 
 
