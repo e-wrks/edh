@@ -4,8 +4,6 @@ module Language.Edh.Details.Tx where
 import           Prelude
 -- import           Debug.Trace
 
--- import           System.IO.Unsafe               ( unsafePerformIO )
-
 import           Control.Exception
 import           Control.Monad
 
@@ -59,9 +57,10 @@ driveEdhProgram !haltResult !bootCtx !prog = do
                 etsForkee <- deriveForkeeState etsForker
                 -- bootstrap on the descendant thread
                 atomically
-                  $ writeTBQueue (edh'task'queue etsForkee)
-                  $ EdhDoSTM etsForkee
-                  $ actForkee etsForkee
+                  $  writeTBQueue (edh'task'queue etsForkee)
+                  $  EdhDoSTM etsForkee
+                  $  False
+                  <$ actForkee etsForkee
                 void $ mask_ $ forkIOWithUnmask $ \unmask -> catch
                   (unmask $ driveEdhThread (edh'defers etsForkee)
                                            (edh'task'queue etsForkee)
@@ -131,8 +130,11 @@ driveEdhProgram !haltResult !bootCtx !prog = do
                                         , edh'fork'queue = forkQueue
                                         }
         -- bootstrap the program on main Edh thread
-        atomically $ writeTBQueue mainQueue $ EdhDoSTM etsAtBoot $ prog
-          etsAtBoot
+        atomically
+          $  writeTBQueue mainQueue
+          $  EdhDoSTM etsAtBoot
+          $  False
+          <$ prog etsAtBoot
         -- drive the main Edh thread
         driveEdhThread defers mainQueue
 
@@ -149,12 +151,15 @@ driveEdhProgram !haltResult !bootCtx !prog = do
     !deferPerceivers <- newTVarIO []
     !deferDefers     <- newTVarIO []
     !deferTaskQueue  <- newTBQueueIO 100
-    atomically $ writeTBQueue deferTaskQueue $ EdhDoSTM etsDefer $ deferredProc
-      etsDefer { edh'in'tx      = False
-               , edh'task'queue = deferTaskQueue
-               , edh'perceivers = deferPerceivers
-               , edh'defers     = deferDefers
-               }
+    atomically
+      $  writeTBQueue deferTaskQueue
+      $  EdhDoSTM etsDefer
+      $  False
+      <$ deferredProc etsDefer { edh'in'tx      = False
+                               , edh'task'queue = deferTaskQueue
+                               , edh'perceivers = deferPerceivers
+                               , edh'defers     = deferDefers
+                               }
     driveEdhThread deferDefers deferTaskQueue
 
     driveDefers done restDefers
@@ -179,9 +184,11 @@ driveEdhProgram !haltResult !bootCtx !prog = do
                                                 , edh'ctx'eff'defining = False
                                                 }
         }
-    atomically $ writeTBQueue reactTaskQueue $ EdhDoSTM etsPerceiver $ reaction
-      breakThread
-      etsPerceiver
+    atomically
+      $  writeTBQueue reactTaskQueue
+      $  EdhDoSTM etsPerceiver
+      $  False
+      <$ reaction breakThread etsPerceiver
     driveEdhThread reactDefers reactTaskQueue
     readTVarIO breakThread
   drivePerceivers :: [(EdhValue, PerceiveRecord)] -> IO Bool
@@ -202,18 +209,24 @@ driveEdhProgram !haltResult !bootCtx !prog = do
       -- stop this thread
       Just (EdhDoIO !ets !actIO) -> try actIO >>= \case
 
-        -- continue running this thread
-        Right ()                   -> taskLoop
+        -- terminate this thread, after running defers lastly
+        Right True -> readTVarIO defers >>= driveDefers (return ())
 
-        Left  (e :: SomeException) -> case edhKnownError e of
+        -- continue running this thread
+        Right False -> taskLoop
+
+        Left (e :: SomeException) -> case edhKnownError e of
 
           -- this'll propagate to main thread if not on it
           Just !err -> readTVarIO defers >>= driveDefers (throwIO err)
 
           -- give a chance for the Edh code to handle an unknown exception
           Nothing   -> do
-            atomically $ edhWrapException e >>= \ !exo ->
-              writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets $ EdhObject exo
+            atomically
+              $   edhWrapException e
+              >>= \ !exo -> writeTBQueue tq $ EdhDoSTM ets $ False <$ edhThrow
+                    ets
+                    (EdhObject exo)
             -- continue running this thread for the queued exception handler
             taskLoop
 
@@ -232,21 +245,24 @@ driveEdhProgram !haltResult !bootCtx !prog = do
 
           -- give a chance for the Edh code to handle an unknown exception
           Nothing   -> do
-            atomically $ edhWrapException e >>= \ !exo ->
-              writeTBQueue tq $ EdhDoSTM ets $ edhThrow ets $ EdhObject exo
+            atomically
+              $   edhWrapException e
+              >>= \ !exo -> writeTBQueue tq $ EdhDoSTM ets $ False <$ edhThrow
+                    ets
+                    (EdhObject exo)
             -- continue running this thread for the queued exception handler
             taskLoop
 
-  goSTM :: EdhThreadState -> STM () -> IO Bool
+  goSTM :: EdhThreadState -> STM Bool -> IO Bool
   goSTM !etsTask !actTask = loopSTM
    where
 
     loopSTM :: IO Bool
     loopSTM = atomically stmJob >>= \case
       Nothing -> return True -- to terminate as program halted
-      Just (Right ()) ->
+      Just (Right !toTerm) ->
         -- no perceiver has fired, the tx job has already been executed
-        return False
+        return toTerm
       Just (Left !gotevl) -> drivePerceivers gotevl >>= \case
         True -> -- a perceiver is terminating this thread
           return True
@@ -258,7 +274,7 @@ driveEdhProgram !haltResult !bootCtx !prog = do
 
     -- this is the STM work package, where perceivers can preempt the inline
     -- job on an Edh thread
-    stmJob :: STM (Maybe (Either [(EdhValue, PerceiveRecord)] ()))
+    stmJob :: STM (Maybe (Either [(EdhValue, PerceiveRecord)] Bool))
     stmJob = tryReadTMVar haltResult >>= \case
       Just _ -> return Nothing -- program halted
       Nothing -> -- program still running

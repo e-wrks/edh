@@ -577,10 +577,14 @@ data EdhThreadState = EdhThreadState {
 -- | The task to be queued for execution of an Edh thread.
 --
 -- the thread state provides the context, into which an exception should be
--- thrown, if one ever occurs during the action
+-- thrown, if one ever occurs during the action.
+--
+-- an action should return True to signal intended termination of the thread,
+-- or False to continue normally.
 data EdhTask =
-    EdhDoIO  !EdhThreadState !(IO ())
-  | EdhDoSTM !EdhThreadState !(STM ())
+    EdhDoIO  !EdhThreadState !(IO Bool)
+  | EdhDoSTM !EdhThreadState !(STM Bool)
+
 data PerceiveRecord  = PerceiveRecord
   -- | chan subscribed to source event sink
   !(TChan EdhValue)
@@ -588,6 +592,7 @@ data PerceiveRecord  = PerceiveRecord
   !EdhThreadState
   -- | reacting action per event received, event value is context match
   !(TVar Bool -> EdhTx)
+
 data DeferRecord = DeferRecord
   -- | origin ets upon the deferred action is scheduled
   !EdhThreadState
@@ -606,7 +611,7 @@ data DeferRecord = DeferRecord
 edhDoSTM :: EdhThreadState -> STM () -> STM ()
 edhDoSTM !ets !act = if edh'in'tx ets
   then act
-  else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets act
+  else writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets $ False <$ act
 {-# INLINE edhDoSTM #-}
 
 
@@ -649,9 +654,12 @@ forkEdh !bootMod !p !exit !etsForker = do
 -- CAVEAT pay special attention in using this, to not break the semantics of
 --       `ai` keyword at scripting level
 edhContSTM :: STM () -> EdhTx
-edhContSTM !actSTM !ets =
-  writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets actSTM
+edhContSTM !actSTM = edhContSTM' (False <$ actSTM)
 {-# INLINE edhContSTM #-}
+edhContSTM' :: STM Bool -> EdhTx
+edhContSTM' !actSTM !ets =
+  writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets actSTM
+{-# INLINE edhContSTM' #-}
 
 -- | Schedule an IO action to be performed in current Edh thread, but after
 -- current STM tx committed, and after some txs, those possibly already
@@ -663,8 +671,11 @@ edhContSTM !actSTM !ets =
 -- CAVEAT pay special attention in using this, to not break the semantics of
 --       `ai` keyword at scripting level
 edhContIO :: IO () -> EdhTx
-edhContIO !actIO !ets = writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
+edhContIO !actIO = edhContIO' (False <$ actIO)
 {-# INLINE edhContIO #-}
+edhContIO' :: IO Bool -> EdhTx
+edhContIO' !actIO !ets = writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
+{-# INLINE edhContIO' #-}
 
 -- | Start the specified Edh computation for running in current Edh thread with
 -- the specified state.
