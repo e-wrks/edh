@@ -296,16 +296,14 @@ parseAttrAddr = do
     [ AttrExpr ThisRef <$ keyword "this"
     , AttrExpr ThatRef <$ keyword "that"
     , AttrExpr SuperRef <$ keyword "super"
-    , AttrExpr . DirectRef . SymbolicAttr <$> parseAttrSym
-    , AttrExpr . DirectRef . NamedAttr <$> parseAttrName
+    , AttrExpr . DirectRef <$> parseAttrAddressor
     ]
   followingPart :: Parser Expr
   followingPart = choice
     [ keyword "this" *> fail "unexpected this reference"
     , keyword "that" *> fail "unexpected that reference"
     , keyword "super" *> fail "unexpected super reference"
-    , AttrExpr . DirectRef . SymbolicAttr <$> parseAttrSym
-    , AttrExpr . DirectRef . NamedAttr <$> parseIndirectAttrName
+    , AttrExpr . DirectRef <$> parseAttrAddressor
     ]
   moreAddr :: Expr -> Parser AttrAddr
   moreAddr p1 =
@@ -374,12 +372,8 @@ parseArgSends !si !closeSym !commaAppeared !ss =
 parseNamespaceExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseNamespaceExpr !si = do
   void $ keyword "namespace"
-  nameStartPos <- getSourcePos
-  pn           <- choice
-    [ SymbolicAttr <$> parseAttrSym
-    , NamedAttr <$> parseMagicProcName
-    , NamedAttr <$> parseAlphaName
-    ]
+  nameStartPos      <- getSourcePos
+  pn                <- parseAttrAddressor
   nameEndPos        <- getSourcePos
   (argSender, si' ) <- parseArgsSender si
   (body     , si'') <- parseProcBody si'
@@ -402,13 +396,9 @@ parseClassExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseClassExpr !si = do
   void $ keyword "class"
   nameStartPos <- getSourcePos
-  pn           <- choice
-    [ SymbolicAttr <$> parseAttrSym
-    , NamedAttr <$> parseMagicProcName
-    , NamedAttr <$> parseAlphaName
-    ]
-  nameEndPos  <- getSourcePos
-  (body, si') <- parseProcBody si
+  pn           <- parseAttrAddressor
+  nameEndPos   <- getSourcePos
+  (body, si')  <- parseProcBody si
   return
     ( ClassExpr $ ProcDecl
       pn
@@ -425,14 +415,10 @@ parseDataExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseDataExpr !si = do
   void $ keyword "data"
   nameStartPos <- getSourcePos
-  pn           <- choice
-    [ SymbolicAttr <$> parseAttrSym
-    , NamedAttr <$> parseMagicProcName
-    , NamedAttr <$> parseAlphaName
-    ]
-  nameEndPos  <- getSourcePos
-  ar          <- parseArgsReceiver
-  (body, si') <- parseProcBody si
+  pn           <- parseAttrAddressor
+  nameEndPos   <- getSourcePos
+  ar           <- parseArgsReceiver
+  (body, si')  <- parseProcBody si
   return
     ( ClassExpr $ ProcDecl
       pn
@@ -493,14 +479,10 @@ parseWhileStmt !si = do
 parseProcDecl :: IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)
 parseProcDecl !si = do
   nameStartPos <- getSourcePos
-  pn           <- choice
-    [ SymbolicAttr <$> parseAttrSym
-    , NamedAttr <$> parseMagicProcName
-    , NamedAttr <$> parseAlphaName
-    ]
-  nameEndPos  <- getSourcePos
-  ar          <- parseArgsReceiver
-  (body, si') <- parseProcBody si
+  pn           <- parseAttrAddressor
+  nameEndPos   <- getSourcePos
+  ar           <- parseArgsReceiver
+  (body, si')  <- parseProcBody si
   return
     ( ProcDecl
       pn
@@ -512,17 +494,6 @@ parseProcDecl !si = do
       )
     , si'
     )
-
-parseMagicProcName :: Parser Text
-parseMagicProcName = do
-  !magicSym <- between (symbol "(") (symbol ")") $ lexeme $ takeWhile1P
-    (Just "magic procedure name")
-    isMagicProcChar
-  return $ "(" <> magicSym <> ")"
-
--- to allow magic method names like ([]) ([=]) etc.
-isMagicProcChar :: Char -> Bool
-isMagicProcChar c = isOperatorChar c || elem c ("[]" :: [Char])
 
 parseOpDeclOvrdExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseOpDeclOvrdExpr !si = do
@@ -804,31 +775,34 @@ parseLitExpr = choice
         litKw = hidden . keyword
 
 parseAttrAddressor :: Parser AttrAddressor
-parseAttrAddressor =
-  choice [SymbolicAttr <$> parseAttrSym, NamedAttr <$> parseAttrName]
+parseAttrAddressor = parseAtNotation <|> NamedAttr <$> parseAttrName
+ where
+  parseAtNotation :: Parser AttrAddressor
+  parseAtNotation = char '@' *> sc *> choice
+    [NamedAttr <$> parseStringLit, SymbolicAttr <$> parseAlphNumName]
 
 parseAttrName :: Parser Text
-parseAttrName = parseOpName <|> parseAlphaName
+parseAttrName = ("(" <>) . (<> ")") <$> parseMagicName <|> parseAlphNumName
+ where
+  parseMagicName :: Parser Text
+  parseMagicName = between (symbol "(") (symbol ")") (parseOpLit' isMagicChar)
+  -- to allow magic method names like ([]) ([=]) etc.
+  isMagicChar :: Char -> Bool
+  isMagicChar c = isOperatorChar c || elem c ("[]" :: [Char])
 
-parseIndirectAttrName :: Parser Text
-parseIndirectAttrName = ("(" <>) . (<> ")") <$> parseOpName <|> parseAlphaName
-
-parseAttrSym :: Parser AttrName
-parseAttrSym = char '@' *> optional sc *> parseAlphaName
-
-parseAlphaName :: Parser AttrName
-parseAlphaName = lexeme $ do
+parseAlphNumName :: Parser AttrName
+parseAlphNumName = lexeme $ do
   anStart <- takeWhile1P (Just "attribute name") isIdentStart
   anRest  <- takeWhileP Nothing isIdentChar
   return $ anStart <> anRest
 
-parseOpName :: Parser Text
-parseOpName = between (symbol "(") (symbol ")") parseOpLit
-
 parseOpLit :: Parser Text
-parseOpLit = choice
+parseOpLit = parseOpLit' isOperatorChar
+
+parseOpLit' :: (Char -> Bool) -> Parser Text
+parseOpLit' p = choice
   [keyword "is not", keyword "is", keyword "and", keyword "or", lexeme opLit]
-  where opLit = takeWhile1P (Just "operator symbol") isOperatorChar
+  where opLit = takeWhile1P (Just "operator symbol") p
 
 parseScopedBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseScopedBlock !si0 = void (symbol "{@") >> parseRest [] si0
