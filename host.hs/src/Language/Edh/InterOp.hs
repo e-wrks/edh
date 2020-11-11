@@ -30,9 +30,9 @@ import           Data.Lossless.Decimal         as D
 import           Language.Edh.Control
 import           Language.Edh.Args
 
-import           Language.Edh.Details.IOPD
-import           Language.Edh.Details.RtTypes
-import           Language.Edh.Details.Evaluate
+import           Language.Edh.IOPD
+import           Language.Edh.RtTypes
+import           Language.Edh.Evaluate
 
 
 -- | Class for an object allocator implemented in the host language (which is

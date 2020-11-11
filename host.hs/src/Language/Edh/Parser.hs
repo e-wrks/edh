@@ -25,7 +25,7 @@ import qualified Text.Megaparsec.Char.Lexer    as L
 import           Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
-import           Language.Edh.Details.RtTypes
+import           Language.Edh.RtTypes
 
 
 -- | To preserve original source for expr literals, this data struct is

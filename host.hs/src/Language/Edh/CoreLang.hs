@@ -1,6 +1,6 @@
 
 -- | core language functionalities
-module Language.Edh.Details.CoreLang where
+module Language.Edh.CoreLang where
 
 import           Prelude
 -- import           Debug.Trace
@@ -11,8 +11,8 @@ import           Data.Either
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 
-import           Language.Edh.Details.IOPD
-import           Language.Edh.Details.RtTypes
+import           Language.Edh.IOPD
+import           Language.Edh.RtTypes
 
 
 -- * Edh lexical attribute resolution

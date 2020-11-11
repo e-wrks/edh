@@ -86,12 +86,12 @@ library edh-internal
   exposed-modules:
     Language.Edh.Args
     Language.Edh.Control
-    Language.Edh.Details.CoreLang
-    Language.Edh.Details.Evaluate
-    Language.Edh.Details.IOPD
-    Language.Edh.Details.PkgMan
-    Language.Edh.Details.RtTypes
-    Language.Edh.Details.Utils
+    Language.Edh.CoreLang
+    Language.Edh.Evaluate
+    Language.Edh.IOPD
+    Language.Edh.PkgMan
+    Language.Edh.RtTypes
+    Language.Edh.Utils
     Language.Edh.Event
     Language.Edh.InterOp
     Language.Edh.Parser

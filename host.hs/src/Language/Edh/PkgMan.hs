@@ -1,6 +1,6 @@
 
 -- | Edh package management functionalities
-module Language.Edh.Details.PkgMan where
+module Language.Edh.PkgMan where
 
 import           Prelude
 -- import           Debug.Trace
@@ -17,8 +17,8 @@ import           Data.List
 import           Data.Dynamic
 
 import           Language.Edh.Control
-import           Language.Edh.Details.IOPD
-import           Language.Edh.Details.RtTypes
+import           Language.Edh.IOPD
+import           Language.Edh.RtTypes
 
 
 data ImportName = RelativeName !Text | AbsoluteName !Text

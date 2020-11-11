@@ -20,9 +20,9 @@ import           Text.Megaparsec
 
 import           Language.Edh.Control
 import           Language.Edh.Args
-import           Language.Edh.Details.IOPD
-import           Language.Edh.Details.RtTypes
-import           Language.Edh.Details.Evaluate
+import           Language.Edh.IOPD
+import           Language.Edh.RtTypes
+import           Language.Edh.Evaluate
 
 
 -- | utility constructor(*args,**kwargs)

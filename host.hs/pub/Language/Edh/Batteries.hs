@@ -60,9 +60,9 @@ import           Language.Edh.Batteries.Console
 import           Language.Edh.Batteries.Evt
 import           Language.Edh.Batteries.Vector
 
-import           Language.Edh.Details.IOPD
-import           Language.Edh.Details.RtTypes
-import           Language.Edh.Details.Evaluate
+import           Language.Edh.IOPD
+import           Language.Edh.RtTypes
+import           Language.Edh.Evaluate
 
 
 defaultEdhConsoleSettings :: Settings IO

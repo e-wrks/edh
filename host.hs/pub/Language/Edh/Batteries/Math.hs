@@ -6,8 +6,8 @@ import           Prelude
 
 import           Data.Lossless.Decimal
 
-import           Language.Edh.Details.RtTypes
-import           Language.Edh.Details.Evaluate
+import           Language.Edh.RtTypes
+import           Language.Edh.Evaluate
 
 import           Language.Edh.Batteries.Data
 

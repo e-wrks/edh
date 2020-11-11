@@ -20,9 +20,9 @@ import qualified Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
 import           Language.Edh.InterOp
-import           Language.Edh.Details.IOPD
-import           Language.Edh.Details.RtTypes
-import           Language.Edh.Details.Evaluate
+import           Language.Edh.IOPD
+import           Language.Edh.RtTypes
+import           Language.Edh.Evaluate
 
 
 -- Boxed Vector for Edh values, non-transactional, mutable anytime

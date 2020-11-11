@@ -1,6 +1,6 @@
 {-# LANGUAGE PatternSynonyms #-}
 
-module Language.Edh.Details.RtTypes where
+module Language.Edh.RtTypes where
 
 import           Prelude
 -- import           Debug.Trace
@@ -32,7 +32,7 @@ import           Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
 
-import           Language.Edh.Details.IOPD
+import           Language.Edh.IOPD
 
 
 -- | `nil` carries deletion semantics in Edh

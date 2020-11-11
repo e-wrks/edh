@@ -24,11 +24,11 @@ import           Data.Lossless.Decimal         as D
 import           Language.Edh.Control
 import           Language.Edh.Args
 import           Language.Edh.InterOp
-import           Language.Edh.Details.IOPD
-import           Language.Edh.Details.CoreLang
-import           Language.Edh.Details.RtTypes
-import           Language.Edh.Details.Evaluate
-import           Language.Edh.Details.Utils
+import           Language.Edh.IOPD
+import           Language.Edh.CoreLang
+import           Language.Edh.RtTypes
+import           Language.Edh.Evaluate
+import           Language.Edh.Utils
 
 
 strEncodeProc :: Text -> EdhHostProc

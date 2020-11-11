@@ -17,7 +17,7 @@ import           Data.Unique
 import           Data.Dynamic
 
 import           Language.Edh.Control
-import           Language.Edh.Details.RtTypes
+import           Language.Edh.RtTypes
 
 
 -- | Create a new event sink

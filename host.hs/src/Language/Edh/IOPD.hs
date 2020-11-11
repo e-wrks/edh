@@ -1,5 +1,5 @@
 
-module Language.Edh.Details.IOPD where
+module Language.Edh.IOPD where
 
 import           Prelude
 -- import           Debug.Trace

@@ -25,11 +25,11 @@ import           Data.Dynamic
 import           Language.Edh.Control
 import           Language.Edh.Args
 import           Language.Edh.InterOp
-import           Language.Edh.Details.IOPD
-import           Language.Edh.Details.RtTypes
-import           Language.Edh.Details.PkgMan
-import           Language.Edh.Details.CoreLang
-import           Language.Edh.Details.Evaluate
+import           Language.Edh.IOPD
+import           Language.Edh.RtTypes
+import           Language.Edh.PkgMan
+import           Language.Edh.CoreLang
+import           Language.Edh.Evaluate
 
 
 createEdhWorld :: MonadIO m => EdhConsole -> m EdhWorld

@@ -253,7 +253,7 @@ module Language.Edh.EHI
   , edhRegulateIndex
 
     -- * standalone modules
-  , module Language.Edh.Details.IOPD
+  , module Language.Edh.IOPD
   )
 where
 
@@ -267,9 +267,9 @@ import           Language.Edh.Control
 import           Language.Edh.Batteries
 import           Language.Edh.Runtime
 import           Language.Edh.Event
-import           Language.Edh.Details.IOPD
-import           Language.Edh.Details.RtTypes
-import           Language.Edh.Details.CoreLang
-import           Language.Edh.Details.Evaluate
-import           Language.Edh.Details.Utils
+import           Language.Edh.IOPD
+import           Language.Edh.RtTypes
+import           Language.Edh.CoreLang
+import           Language.Edh.Evaluate
+import           Language.Edh.Utils
 

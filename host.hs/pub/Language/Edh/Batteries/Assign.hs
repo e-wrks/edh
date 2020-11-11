@@ -7,10 +7,10 @@ import           Prelude
 import qualified Data.Text                     as T
 
 import           Language.Edh.Control
-import           Language.Edh.Details.IOPD
-import           Language.Edh.Details.RtTypes
-import           Language.Edh.Details.CoreLang
-import           Language.Edh.Details.Evaluate
+import           Language.Edh.IOPD
+import           Language.Edh.RtTypes
+import           Language.Edh.CoreLang
+import           Language.Edh.Evaluate
 
 
 -- | operator (=)

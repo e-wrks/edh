@@ -8,8 +8,8 @@ import           Control.Concurrent.STM
 
 import           Language.Edh.Args
 import           Language.Edh.Control
-import           Language.Edh.Details.RtTypes
-import           Language.Edh.Details.Evaluate
+import           Language.Edh.RtTypes
+import           Language.Edh.Evaluate
 
 
 -- | virtual property <sink>.subseq

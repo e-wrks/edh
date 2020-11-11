@@ -1,4 +1,4 @@
-module Language.Edh.Details.Utils where
+module Language.Edh.Utils where
 
 import           Prelude
 

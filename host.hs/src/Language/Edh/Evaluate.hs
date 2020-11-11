@@ -1,5 +1,5 @@
 
-module Language.Edh.Details.Evaluate where
+module Language.Edh.Evaluate where
 
 import           Prelude
 -- import           Debug.Trace
@@ -42,11 +42,11 @@ import           Language.Edh.Control
 import           Language.Edh.Parser
 import           Language.Edh.Event
 
-import           Language.Edh.Details.IOPD
-import           Language.Edh.Details.RtTypes
-import           Language.Edh.Details.CoreLang
-import           Language.Edh.Details.PkgMan
-import           Language.Edh.Details.Utils
+import           Language.Edh.IOPD
+import           Language.Edh.RtTypes
+import           Language.Edh.CoreLang
+import           Language.Edh.PkgMan
+import           Language.Edh.Utils
 
 
 edhValueAsAttrKey :: EdhThreadState -> EdhValue -> (AttrKey -> STM ()) -> STM ()
