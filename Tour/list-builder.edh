@@ -6,11 +6,9 @@ let myArray = [ 3, 2, 5 ]
 # %%
 let outlineArray = [
   "a"
-] =< [
   if foo < bar
   then "b"
   else "c"
-] =< [
   "d"
 ] =< (
   for item from myArray
