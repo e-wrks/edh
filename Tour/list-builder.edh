@@ -16,3 +16,18 @@ let outlineArray = [
 } ) () do i
 
 outlineArray
+
+# %%
+let outlineArray = [] =< for i from ( () => {
+    yield "a"
+    yield if foo < bar
+    then "b"
+    else "c"
+    yield "d"
+    for item from myArray do {
+      yield item
+      yield item * 2
+    }
+} ) () do i
+
+outlineArray
