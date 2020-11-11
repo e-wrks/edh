@@ -417,10 +417,10 @@ installEdhBatteries world = liftIO $ void $ runEdhProgram' world $ \ !ets -> do
       --     [] =< for x from range(100) do x*x
       --  * dict comprehension:
       --     {} =< for x from range(100) do (x, x*x)
-      --  * tuple comprehension:
-      --     (,) =< for x from range(100) do x*x
+      --  * args comprehension:
+      --     () =< for x from range(100) do x*x
     , ( "=<"
-      , InfixR
+      , InfixL
       , 2
       )
       -- prepand to list

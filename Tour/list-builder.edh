@@ -1,0 +1,21 @@
+
+# %%
+let ( foo, bar ) = ( 77, 88 )
+let myArray = [ 3, 2, 5 ]
+
+# %%
+let outlineArray = [
+  "a"
+] =< [
+  if foo < bar
+  then "b"
+  else "c"
+] =< (
+  for item from myArray
+  do item
+) =< (
+  for item from myArray
+  do item * 2
+)
+
+outlineArray

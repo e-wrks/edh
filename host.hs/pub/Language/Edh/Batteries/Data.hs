@@ -887,14 +887,14 @@ lstrvrsPrpdProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 --     [] =< for x from range(10) do x*x
 --  * dict comprehension:
 --     {} =< for x from range(10) do (x, x*x)
---  * tuple comprehension:
---     (,) =< for x from range(10) do x*x
+--  * args comprehension:
+--     () =< for x from range(10) do x*x
 --  * list append
 --      [] =< (...) / [...] / {...}
 --  * dict append
 --      {} =< (...) / [...] / {...}
---  * tuple append
---      (,) =< (...) / [...] / {...}
+--  * args append
+--      () =< (...) / [...] / {...}
 cprhProc :: EdhIntrinsicOp
 cprhProc !lhExpr !rhExpr !exit = case deParen rhExpr of
   ForExpr argsRcvr iterExpr doExpr -> evalExpr lhExpr $ \ !lhVal !ets ->
