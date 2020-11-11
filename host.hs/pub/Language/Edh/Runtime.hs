@@ -195,27 +195,29 @@ createEdhWorld !console = liftIO $ do
          , ("details", mthErrDetailsGetter, Nothing)
          ]
        ]
-  clsProgramHalt <- atomically
+  !clsProgramHalt <- atomically
     $ mkHostClass' rootScope "ProgramHalt" haltAllocator hsErrCls []
-  clsIOError <- atomically
+  !clsThreadTerminate <- atomically
+    $ mkHostClass' rootScope "ThreadTerminate" thTermAllocator hsErrCls []
+  !clsIOError <- atomically
     $ mkHostClass' rootScope "IOError" ioErrAllocator hsErrCls []
-  clsPeerError <- atomically
+  !clsPeerError <- atomically
     $ mkHostClass' rootScope "PeerError" peerErrAllocator hsErrCls []
-  clsException <- atomically
+  !clsException <- atomically
     $ mkHostClass' rootScope "Exception" (errAllocator EdhException) hsErrCls []
-  clsPackageError <- atomically $ mkHostClass' rootScope
-                                               "PackageError"
-                                               (errAllocator PackageError)
-                                               hsErrCls
-                                               []
-  clsParseError <- atomically $ mkHostClass' rootScope
-                                             "ParseError"
-                                             (errAllocator ParseError)
-                                             hsErrCls
-                                             []
-  clsEvalError <- atomically
+  !clsPackageError <- atomically $ mkHostClass' rootScope
+                                                "PackageError"
+                                                (errAllocator PackageError)
+                                                hsErrCls
+                                                []
+  !clsParseError <- atomically $ mkHostClass' rootScope
+                                              "ParseError"
+                                              (errAllocator ParseError)
+                                              hsErrCls
+                                              []
+  !clsEvalError <- atomically
     $ mkHostClass' rootScope "EvalError" (errAllocator EvalError) hsErrCls []
-  clsUsageError <- atomically
+  !clsUsageError <- atomically
     $ mkHostClass' rootScope "UsageError" (errAllocator UsageError) hsErrCls []
 
   let edhWrapException :: SomeException -> STM Object
@@ -226,6 +228,7 @@ createEdhWorld !console = liftIO $ do
           Just !err -> do
             let !clsErr = case err of
                   ProgramHalt{}      -> clsProgramHalt
+                  ThreadTerminate    -> clsThreadTerminate
                   EdhIOError{}       -> clsIOError
                   EdhPeerError{}     -> clsPeerError
                   EdhError !et _ _ _ -> case et of
@@ -248,6 +251,7 @@ createEdhWorld !console = liftIO $ do
     [ (AttrByName $ edhClassName clsObj, EdhObject clsObj)
     | clsObj <-
       [ clsProgramHalt
+      , clsThreadTerminate
       , clsIOError
       , clsPeerError
       , clsException
@@ -567,6 +571,10 @@ createEdhWorld !console = liftIO $ do
     createErr !hv =
       exit $ HostStore $ toDyn $ toException $ ProgramHalt $ toDyn hv
 
+  -- this is called in case a ThreadTerminate is constructed by Edh code
+  thTermAllocator _ !exit _ =
+    exit $ HostStore $ toDyn $ toException ThreadTerminate
+
   -- creating an IOError from Edh code
   ioErrAllocator apk@(ArgsPack !args !kwargs) !exit !ets = case args of
     [EdhString !m] | odNull kwargs -> createErr $ T.unpack m
@@ -603,6 +611,7 @@ createEdhWorld !console = liftIO $ do
           Just (val :: EdhValue) -> edhValueRepr ets val $ \ !repr ->
             exitEdh ets exit $ EdhString $ errClsName <> "(" <> repr <> ")"
           Nothing -> exitEdh ets exit $ EdhString $ errClsName <> "()"
+        Just ThreadTerminate -> exitEdh ets exit $ EdhString "ThreadTerminate"
         Just (EdhIOError !exc') ->
           exitEdh ets exit
             $  EdhString
@@ -814,6 +823,13 @@ haltEdhProgram :: EdhThreadState -> EdhValue -> STM ()
 haltEdhProgram !ets !hv =
   edhWrapException (toException $ ProgramHalt $ toDyn hv)
     >>= \ !exo -> edhThrow ets $ EdhObject exo
+ where
+  !edhWrapException =
+    edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
+
+terminateEdhThread :: EdhThreadState -> STM ()
+terminateEdhThread !ets = edhWrapException (toException ThreadTerminate)
+  >>= \ !exo -> edhThrow ets $ EdhObject exo
  where
   !edhWrapException =
     edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)

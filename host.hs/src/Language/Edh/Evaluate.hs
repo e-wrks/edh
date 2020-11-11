@@ -4,7 +4,6 @@ module Language.Edh.Evaluate where
 import           Prelude
 -- import           Debug.Trace
 -- import           GHC.Stack
--- import           System.IO.Unsafe
 
 import           GHC.Conc
 
@@ -26,6 +25,7 @@ import qualified Data.List.NonEmpty            as NE
 import           Data.Unique
 import           Data.Dynamic
 import           Data.Typeable
+import           Data.IORef
 
 import qualified Data.UUID                     as UUID
 
@@ -1793,6 +1793,7 @@ edhCatch
      )
   -> STM ()
 edhCatch !etsOuter !tryAct !exit !passOn = do
+  !handlerThId <- unsafeIOToSTM myThreadId
   let
     !ctxOuter   = edh'context etsOuter
     !scopeOuter = contextScope ctxOuter
@@ -1802,24 +1803,26 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
     !etsTry = etsOuter { edh'context = tryCtx }
 
     hndlr :: EdhExcptHndlr
-    hndlr !etsThrower !exv !rethrow = passOn etsThrower exv goRecover goRethrow
-     where
+    hndlr !etsThrower !exv !rethrow = do
+      !throwerThId <- unsafeIOToSTM myThreadId
+      let
 
-      -- the catch block is providing a result value to recover
-      goRecover :: EdhValue -> STM ()
-      goRecover !result = isProgramHalt exv >>= \case
-        -- but never recover from ProgramHalt
-        True  -> goRethrow exv
-        False -> if edh'task'queue etsOuter /= edh'task'queue etsThrower
-          then -- not on same thread, cease the recovery continuation
-               return ()
-          else -- on the same thread, continue the recovery
-               exit result
+          -- the catch block is providing a result value to recover
+          goRecover :: EdhValue -> STM ()
+          goRecover !result = isRecoverable exv >>= \case
+            False -> goRethrow exv
+            True  -> if throwerThId /= handlerThId
+              then -- not on same thread, cease the recovery continuation
+                   return ()
+              else -- on the same thread, continue the recovery
+                   exit result
 
-      -- the catch block doesn't want to catch this exception, propagate it
-      -- outward
-      goRethrow :: EdhValue -> STM ()
-      goRethrow !exv' = edh'excpt'hndlr scopeOuter etsThrower exv' rethrow
+          -- the catch block doesn't want to catch this exception, propagate it
+          -- outward
+          goRethrow :: EdhValue -> STM ()
+          goRethrow !exv' = edh'excpt'hndlr scopeOuter etsThrower exv' rethrow
+
+      passOn etsThrower exv goRecover goRethrow
 
   runEdhTx etsTry $ tryAct $ \ !tryResult _ets ->
     -- no exception has occurred, the @passOn@ may be a finally block and we
@@ -1828,15 +1831,17 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
       $ const
       $ exit tryResult
  where
-  isProgramHalt !exv = case exv of
+  isRecoverable !exv = case exv of
     EdhObject !exo -> case edh'obj'store exo of
       HostStore !hsd -> case fromDynamic hsd of
         Just (exc :: SomeException) -> case fromException exc of
-          Just ProgramHalt{} -> return True
-          _                  -> return False
-        _ -> return False
-      _ -> return False
-    _ -> return False
+          Just ProgramHalt{} -> return False
+          _                  -> case fromException exc of
+            Just ThreadTerminate -> return False
+            _                    -> return True
+        _ -> return True
+      _ -> return True
+    _ -> return True
 {-# INLINE edhCatch #-}
 
 
@@ -4974,22 +4979,20 @@ driveEdhProgram !haltResult !world !prog = do
 
   -- prepare program environment
   !mainThId <- myThreadId
-  let onDescendantExc :: SomeException -> IO ()
-      onDescendantExc e = case asyncExceptionFromException e of
-        Just (asyncExc :: SomeAsyncException) ->
-          -- todo special handling here ?
-          throwTo mainThId asyncExc
-        _ -> throwTo mainThId e
-  -- prepare the go routine forker
-  !forkQueue <- newTBQueueIO 100
+  let onSideThreadExc :: SomeException -> IO ()
+      onSideThreadExc !exc = case fromException exc of
+        Just ThreadTerminate -> pure () -- not to affect main thread
+        _                    -> throwTo mainThId exc
+  -- prepare the Edh thread forker
+  !forkQueue <- newTBQueueIO 10
 
   let
     !eps = EdhProgState { edh'prog'world  = world
                         , edh'prog'result = haltResult
                         , edh'fork'queue  = forkQueue
                         }
-    forkDescendants :: IO ()
-    forkDescendants =
+    keepForking :: IO ()
+    keepForking =
       atomically
           (        (Nothing <$ readTMVar haltResult)
           `orElse` (Just <$> readTBQueue forkQueue)
@@ -4998,26 +5001,25 @@ driveEdhProgram !haltResult !world !prog = do
               -- Edh program halted, done
               Nothing                       -> return ()
               Just (!etsForker, !actForkee) -> do
-                etsForkee <- deriveForkeeState etsForker
-                -- bootstrap on the descendant thread
+                !etsForkee <- deriveForkeeState etsForker
+                -- bootstrap on the forkee thread
                 atomically
                   $  writeTBQueue (edh'task'queue etsForkee)
                   $  EdhDoSTM etsForkee
                   $  False
                   <$ actForkee etsForkee
-                void $ mask_ $ forkIOWithUnmask $ \unmask -> catch
+                void $ mask_ $ forkIOWithUnmask $ \ !unmask -> catch
                   (unmask $ driveEdhThread eps
                                            (edh'defers etsForkee)
                                            (edh'task'queue etsForkee)
                   )
-                  onDescendantExc
-                -- keep the forker running
-                forkDescendants
+                  onSideThreadExc
+                keepForking
      where
-      -- derive thread state for the descendant thread
+      -- derive thread state for the forkee thread
       deriveForkeeState :: EdhThreadState -> IO EdhThreadState
       deriveForkeeState !etsForker = do
-        !descQueue  <- newTBQueueIO 200
+        !descQueue  <- newTBQueueIO 20
         !perceivers <- newTVarIO []
         !defers     <- newTVarIO []
         return EdhThreadState
@@ -5037,26 +5039,21 @@ driveEdhProgram !haltResult !world !prog = do
           }
         where !fromCtx = edh'context etsForker
   -- start forker thread
-  void $ mask_ $ forkIOWithUnmask $ \unmask ->
-    catch (unmask forkDescendants) onDescendantExc
-  -- run the main thread
+  void $ mask_ $ forkIOWithUnmask $ \ !unmask ->
+    catch (unmask keepForking) onSideThreadExc
+  -- start the main thread
   flip finally
-       (
         -- set halt result after the main thread done, anyway if not already,
-        -- so all descendant threads will terminate. or else hanging STM jobs
-        -- may cause the whole process killed by GHC deadlock detector.
-        atomically $ void $ tryPutTMVar haltResult (Right nil)
-        -- TODO is it good idea to let all live Edh threads go through
-        --      ProgramHalt propagation? Their `defer` actions can do cleanup
-        --      already, need such a chance with exception handlers too?
-                                                              )
+        -- so all side threads will terminate
+       (atomically $ void $ tryPutTMVar haltResult (Right nil))
     $ handle
         (\(e :: SomeException) -> case fromException e :: Maybe EdhError of
-          Just (ProgramHalt phd) -> case fromDynamic phd :: Maybe EdhValue of
-            Just phv -> atomically $ void $ tryPutTMVar haltResult $ Right phv
-            _        -> case fromDynamic phd :: Maybe SomeException of
-              Just phe -> atomically $ void $ tryPutTMVar haltResult (Left phe)
-              _        -> atomically $ void $ tryPutTMVar haltResult (Left e)
+          Just (ProgramHalt !phd) -> case fromDynamic phd :: Maybe EdhValue of
+            Just !phv -> atomically $ void $ tryPutTMVar haltResult $ Right phv
+            _         -> case fromDynamic phd :: Maybe SomeException of
+              Just !phe ->
+                atomically $ void $ tryPutTMVar haltResult (Left phe)
+              Nothing -> atomically $ void $ tryPutTMVar haltResult (Left e)
           Just _  -> atomically $ void $ tryPutTMVar haltResult (Left e)
           Nothing -> do
             atomically $ void $ tryPutTMVar haltResult (Left e)
@@ -5064,7 +5061,7 @@ driveEdhProgram !haltResult !world !prog = do
         )
     $ do
         -- prepare program state for main Edh thread
-        !mainQueue  <- newTBQueueIO 300
+        !mainQueue  <- newTBQueueIO 30
         !perceivers <- newTVarIO []
         !defers     <- newTVarIO []
         let !etsAtBoot = EdhThreadState { edh'thread'prog = eps
@@ -5089,7 +5086,7 @@ drivePerceiver !ev !etsOrigin !reaction = do
   !breakThread     <- newTVarIO False
   !reactPerceivers <- newTVarIO []
   !reactDefers     <- newTVarIO []
-  !reactTaskQueue  <- newTBQueueIO 100
+  !reactTaskQueue  <- newTBQueueIO 10
   let
     !etsPerceiver = etsOrigin
       { edh'in'tx      = False
@@ -5117,30 +5114,9 @@ driveEdhThread :: EdhProgState -> TVar [DeferRecord] -> TBQueue EdhTask -> IO ()
 driveEdhThread !eps !defers !tq = taskLoop
  where
   !edhWrapException = edh'exception'wrapper $ edh'prog'world eps
-
   nextTaskFromQueue :: TBQueue EdhTask -> STM (Maybe EdhTask)
   nextTaskFromQueue =
     orElse (Nothing <$ readTMVar (edh'prog'result eps)) . tryReadTBQueue
-
-  driveDefers :: IO () -> [DeferRecord] -> IO ()
-  driveDefers !done [] = done
-  driveDefers !done ((DeferRecord !etsDefer !deferredProc) : restDefers) = do
-
-    !deferPerceivers <- newTVarIO []
-    !deferDefers     <- newTVarIO []
-    !deferTaskQueue  <- newTBQueueIO 100
-    atomically
-      $  writeTBQueue deferTaskQueue
-      $  EdhDoSTM etsDefer
-      $  False
-      <$ deferredProc etsDefer { edh'in'tx      = False
-                               , edh'task'queue = deferTaskQueue
-                               , edh'perceivers = deferPerceivers
-                               , edh'defers     = deferDefers
-                               }
-    driveEdhThread eps deferDefers deferTaskQueue
-
-    driveDefers done restDefers
 
   drivePerceivers :: [(EdhValue, PerceiveRecord)] -> IO Bool
   drivePerceivers [] = return False
@@ -5149,28 +5125,154 @@ driveEdhThread !eps !defers !tq = taskLoop
       True  -> return True
       False -> drivePerceivers rest
 
+  driveDefers :: IO () -> [DeferRecord] -> IO ()
+  driveDefers !done !records = newIORef done >>= \ !doneVar -> do
+    let go :: [DeferRecord] -> IO ()
+        go [] = join $ readIORef doneVar
+        go ((DeferRecord !etsDefer !deferredProc) : restDefers) = do
+
+          !deferPerceivers <- newTVarIO []
+          !deferDefers     <- newTVarIO []
+          !deferTaskQueue  <- newTBQueueIO 10
+          atomically
+            $  writeTBQueue deferTaskQueue
+            $  EdhDoSTM etsDefer
+            $  False
+            <$ deferredProc etsDefer { edh'in'tx      = False
+                                     , edh'task'queue = deferTaskQueue
+                                     , edh'perceivers = deferPerceivers
+                                     , edh'defers     = deferDefers
+                                     }
+          try (driveEdhThread eps deferDefers deferTaskQueue) >>= \case
+            Left (err :: SomeException) -> do
+              -- schedule it to be re-thrown after all defers executed
+              -- todo this overwrites previous ones if multiple errors occurred,
+              -- is it okay?
+              writeIORef doneVar (throwIO err)
+              driveDefers done restDefers
+            Right{} -> driveDefers done restDefers
+    go records
+
+  terminateThread :: IO () -> IO ()
+  terminateThread !done = do
+    !doneVar <- newIORef done
+    !tqTerm  <- newTBQueueIO 10
+    let driveOut :: IO ()
+        driveOut = atomically (nextTaskFromQueue tqTerm) >>= \case
+
+          -- termination done, run defers lastly
+          Nothing -> do
+            !toBeDone <- readIORef doneVar
+            readTVarIO defers >>= driveDefers toBeDone
+
+          -- note during actIO, perceivers won't fire
+          Just (EdhDoIO !ets !actIO) -> try actIO >>= \case
+
+            -- terminate this thread, we are already doing it
+            Right True                 -> driveOut
+
+            -- continue running rest cleanup txs
+            Right False                -> driveOut
+
+            Left  (e :: SomeException) -> case edhKnownError e of
+
+              -- terminate this thread, we are already doing it
+              Just ThreadTerminate -> driveOut
+
+              -- uncaught error on cleanup, schedule it to be finally
+              -- propagated to main thread
+              -- todo this overwrites previous errors when multiple occurred,
+              -- is it okay?
+              Just !err            -> do
+                writeIORef doneVar (throwIO err)
+                driveOut
+
+              -- give a chance for the Edh code to handle an unknown exception
+              Nothing -> do
+                atomically $ edhWrapException e >>= \ !exo ->
+                  writeTBQueue tqTerm $ EdhDoSTM ets $ False <$ edhThrow
+                    ets
+                    (EdhObject exo)
+                -- continue running rest cleanup txs
+                driveOut
+
+          Just (EdhDoSTM !ets !actSTM) -> try (goSTM ets actSTM) >>= \case
+
+            -- terminate this thread, we are already doing it
+            Right True                 -> driveOut
+
+            -- continue running rest cleanup txs
+            Right False                -> driveOut
+
+            Left  (e :: SomeException) -> case edhKnownError e of
+
+              -- terminate this thread, we are already doing it
+              Just ThreadTerminate -> driveOut
+
+              -- uncaught error on cleanup, schedule it to be finally
+              -- propagated to main thread
+              -- todo this overwrites previous errors when multiple occurred,
+              -- is it okay?
+              Just !err            -> do
+                writeIORef doneVar (throwIO err)
+                driveOut
+
+              -- give a chance for the Edh code to handle an unknown exception
+              Nothing -> do
+                atomically $ edhWrapException e >>= \ !exo ->
+                  writeTBQueue tqTerm $ EdhDoSTM ets $ False <$ edhThrow
+                    ets
+                    (EdhObject exo)
+                -- continue running rest cleanup txs
+                driveOut
+
+    atomically (edhWrapException $ toException ThreadTerminate)
+      >>= \ !termExObj ->
+            let !termExVal = EdhObject termExObj
+                throwIn :: IO ()
+                throwIn = atomically (nextTaskFromQueue tq) >>= \case
+
+                  -- all pending txs got a ThreadTerminate() thrown in,
+                  -- drive their consequences out
+                  Nothing                    -> driveOut
+
+                  Just (EdhDoIO !ets _actIO) -> do
+                    atomically
+                      $ edhThrow ets { edh'task'queue = tqTerm } termExVal
+                    throwIn
+
+                  Just (EdhDoSTM !ets _actSTM) -> do
+                    atomically
+                      $ edhThrow ets { edh'task'queue = tqTerm } termExVal
+                    throwIn
+            in  throwIn
+
+
   taskLoop = atomically (nextTaskFromQueue tq) >>= \case
 
-    -- this thread is done, run defers lastly
-    Nothing                    -> readTVarIO defers >>= driveDefers (return ())
+    -- this thread is done, go terminate it
+    Nothing                    -> terminateThread (return ())
 
     -- note during actIO, perceivers won't fire, program termination won't
     -- stop this thread
     Just (EdhDoIO !ets !actIO) -> try actIO >>= \case
 
-      -- terminate this thread, after running defers lastly
-      Right True -> readTVarIO defers >>= driveDefers (return ())
+      -- terminate this thread
+      Right True                 -> terminateThread (return ())
 
       -- continue running this thread
-      Right False -> taskLoop
+      Right False                -> taskLoop
 
-      Left (e :: SomeException) -> case edhKnownError e of
+      Left  (e :: SomeException) -> case edhKnownError e of
+
+        -- explicit terminate requested
+        Just ThreadTerminate -> terminateThread (return ())
 
         -- this'll propagate to main thread if not on it
-        Just !err -> readTVarIO defers >>= driveDefers (throwIO err)
+        Just !err            -> terminateThread (throwIO err)
 
         -- give a chance for the Edh code to handle an unknown exception
-        Nothing   -> do
+        Nothing              -> do
           atomically
             $   edhWrapException e
             >>= \ !exo -> writeTBQueue tq $ EdhDoSTM ets $ False <$ edhThrow
@@ -5181,19 +5283,22 @@ driveEdhThread !eps !defers !tq = taskLoop
 
     Just (EdhDoSTM !ets !actSTM) -> try (goSTM ets actSTM) >>= \case
 
-      -- terminate this thread, after running defers lastly
-      Right True -> readTVarIO defers >>= driveDefers (return ())
+      -- terminate this thread
+      Right True                 -> terminateThread (return ())
 
       -- continue running this thread
-      Right False -> taskLoop
+      Right False                -> taskLoop
 
-      Left (e :: SomeException) -> case edhKnownError e of
+      Left  (e :: SomeException) -> case edhKnownError e of
+
+        -- explicit terminate requested
+        Just ThreadTerminate -> terminateThread (return ())
 
         -- this'll propagate to main thread if not on it
-        Just !err -> readTVarIO defers >>= driveDefers (throwIO err)
+        Just !err            -> terminateThread (throwIO err)
 
         -- give a chance for the Edh code to handle an unknown exception
-        Nothing   -> do
+        Nothing              -> do
           atomically
             $   edhWrapException e
             >>= \ !exo -> writeTBQueue tq $ EdhDoSTM ets $ False <$ edhThrow
@@ -5209,12 +5314,17 @@ driveEdhThread !eps !defers !tq = taskLoop
 
     loopSTM :: IO Bool
     loopSTM = atomically stmJob >>= \case
-      Nothing -> return True -- to terminate as program halted
+      Nothing -> return True -- program halted, terminate this thread
       Just (Right !toTerm) ->
         -- no perceiver has fired, the tx job has already been executed
         return toTerm
       Just (Left !gotevl) -> drivePerceivers gotevl >>= \case
-        True -> -- a perceiver is terminating this thread
+        True -> do -- a perceiver is terminating this thread, the task action
+          -- has not been executed, re-queue it so it can get notified by a
+          -- ThreadTerminate exception. note the actTask won't be used anyway
+          -- as True is being returned here, but etsTask provides the target
+          -- context to where a ThreadTerminate exception will be thrown at
+          atomically $ writeTBQueue tq $ EdhDoSTM etsTask actTask
           return True
         False ->
           -- there've been one or more perceivers fired, the tx job have

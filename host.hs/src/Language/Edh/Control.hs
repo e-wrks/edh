@@ -21,7 +21,7 @@ data OpFixity = InfixL | InfixR | Infix
 instance Show OpFixity where
   show InfixL = "infixl"
   show InfixR = "infixr"
-  show Infix = "infix"
+  show Infix  = "infix"
 type Precedence = Int
 type OpDeclLoc = Text
 
@@ -59,27 +59,40 @@ dispEdhCallContext (EdhCallContext !tip !frames) =
 
 
 data EdhError =
-    -- | thrown to halt the whole Edh program with a result, this is not
-    -- catchable by Edh code
+  -- | thrown to halt the whole Edh program with a result
+  --
+  -- this is not recoverable by Edh code
+  --
+  -- caveat: never make this available to a sandboxed environment
     ProgramHalt !Dynamic
 
-    -- | arbitrary realworld error happened in IO, propagated into the Edh
-    -- world
+  -- | thrown when an Edh thread is terminated, usually incurred by {break}
+  -- from an event perceiver, but can also be thrown explicitly from normal
+  -- Edh code
+  --
+  -- this is not recoverable by Edh code
+  --
+  -- caveat: never make this available to a sandboxed environment
+  | ThreadTerminate
+
+  -- | arbitrary realworld error happened in IO, propagated into the Edh
+  -- world
   | EdhIOError !SomeException
 
-    -- | error occurred remotely, detailed text captured for display on the
-    -- throwing site
+  -- | error occurred remotely, detailed text captured for display on the
+  -- throwing site
   | EdhPeerError !Text !Text
 
-    -- | tagged error, with a msg and context information of the throwing Edh
-    -- thread
+  -- | tagged error, with a msg and context information of the throwing Edh
+  -- thread
   | EdhError !EdhErrorTag !Text !Dynamic !EdhCallContext
 
 instance Exception EdhError
 
 instance Show EdhError where
-  show (ProgramHalt _  ) = "Edh⏹️Halt"
-  show (EdhIOError  ioe) = show ioe
+  show (ProgramHalt _)  = "Edh⏹️Halt"
+  show ThreadTerminate  = "ThreadTerminate"
+  show (EdhIOError ioe) = show ioe
   show (EdhPeerError peerSite details) = --
     "🏗️ traceback: " <> T.unpack peerSite <> "\n" <> T.unpack details
   show (EdhError EdhException !msg _details !cc) = --

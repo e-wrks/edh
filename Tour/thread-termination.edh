@@ -1,0 +1,39 @@
+
+# %%
+termSig = sink
+msgSink = sink
+
+method withCleanup() {
+
+  {
+    perceive termSig nil -> { break }
+
+    for msg from msgSink do {
+      console.info<| 'got msg: ' ++ msg
+    }
+    console.info<| 'so you marked msgSink eos before termSig, right?'
+
+  } $=> { { ThreadTerminate:_ } } -> {
+
+    console.info<| 'got expected ThreadTerminate'
+
+  } @=> {
+
+    console.info<| 'finally do some cleanup'
+
+  }
+
+  # but ThreadTerminate as well as ProgramHalt, is not recoverable,
+  # so here is actually unreachable
+  console.fatal<| '''This is not supposed to run,
+it must be some bug if you see this!'''
+
+}
+
+go withCleanup()
+
+# %%
+msgSink <- 'appears the thread is still alive'
+
+# %%
+termSig <-nil

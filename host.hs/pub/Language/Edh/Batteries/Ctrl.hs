@@ -12,6 +12,7 @@ import           Control.Exception
 import           Data.Maybe
 import           Data.Unique
 import qualified Data.Text                     as T
+import           Data.Dynamic
 
 import           Language.Edh.Control
 import           Language.Edh.IOPD
@@ -72,25 +73,40 @@ errorProc !apk _ !ets = edhThrow ets . EdhObject =<< edh'exception'wrapper
 --   thread forked by the @tryExpr@ will trigger the right-hand-expr to be
 --   executed on that thread
 catchProc :: EdhIntrinsicOp
-catchProc !tryExpr !catchExpr !exit !etsOuter =
+catchProc !tryExpr !catchExpr !exit !etsOuter = do
+  !handlerThId <- unsafeIOToSTM myThreadId
   edhCatch etsOuter (evalExpr tryExpr) (exitEdh etsOuter exit)
-    $ \ !etsThrower !exv recover rethrow -> case exv of
-        EdhNil -> rethrow nil -- no exception has occurred, no catch
-        _ -> -- eval the catch expression to see if it recovers or not
-          let !ctxOuter = edh'context etsOuter
-              !ctxHndl  = ctxOuter { edh'ctx'match = exv }
-              !etsHndl  = etsThrower { edh'context = ctxHndl }
-          in  runEdhTx etsHndl $ evalExpr catchExpr $ \ !catchResult _ets ->
-                case edhDeCaseClose catchResult of
+    $ \ !etsThrower !exv recover rethrow -> do
+        !throwerThId <- unsafeIOToSTM myThreadId
+        let !isThreadTerminate = case exv of
+              EdhObject !exo -> case edh'obj'store exo of
+                HostStore !hsd -> case fromDynamic hsd of
+                  Just (e :: SomeException) -> case fromException e of
+                    Just ThreadTerminate -> True
+                    _                    -> False
+                  _ -> False
+                _ -> False
+              _ -> False
+        if throwerThId /= handlerThId && isThreadTerminate
+          then rethrow exv -- ThreadTerminate not to cross thread boundaries
+          else case exv of
+            EdhNil -> rethrow nil -- no exception has occurred, no catch
+            _ -> -- eval the catch expression to see if it recovers or not
+              let !ctxOuter = edh'context etsOuter
+                  !ctxHndl  = ctxOuter { edh'ctx'match = exv }
+                  !etsHndl  = etsThrower { edh'context = ctxHndl }
+              in  runEdhTx etsHndl
+                    $ evalExpr catchExpr
+                    $ \ !catchResult _ets -> case edhDeCaseClose catchResult of
 
-                  -- these results all mean no recovery, i.e. to rethrow
-                  EdhRethrow     -> rethrow exv -- explicit rethrow
-                  EdhFallthrough -> rethrow exv -- explicit fallthrough
-                  EdhCaseOther   -> rethrow exv -- implicit none-match
+                        -- these results all mean no recovery, i.e. to rethrow
+                        EdhRethrow     -> rethrow exv -- explicit rethrow
+                        EdhFallthrough -> rethrow exv -- explicit fallthrough
+                        EdhCaseOther   -> rethrow exv -- implicit none-match
 
-                  -- other results are regarded as valid recovery
-                  -- note `nil` included
-                  !recoverVal    -> recover recoverVal
+                        -- other results are regarded as valid recovery
+                        -- note `nil` included
+                        !recoverVal    -> recover recoverVal
 
 -- | operator (@=>) - the `finally`
 --
@@ -104,12 +120,14 @@ catchProc !tryExpr !catchExpr !exit !etsOuter =
 -- - especially note asynchronous exceptions won't trigger the right-hand-expr
 --   to be executed
 finallyProc :: EdhIntrinsicOp
-finallyProc !tryExpr !finallyExpr !exit !etsOuter =
+finallyProc !tryExpr !finallyExpr !exit !etsOuter = do
+  !handlerThId <- unsafeIOToSTM myThreadId
   edhCatch etsOuter (evalExpr tryExpr) (exitEdh etsOuter exit)
-    $ \ !etsThrower !exv _recover !rethrow ->
+    $ \ !etsThrower !exv _recover !rethrow -> do
+        !throwerThId <- unsafeIOToSTM myThreadId
         -- note we deliberately avoid executing a finally block on a
         -- descendant thread here
-        if edh'task'queue etsOuter /= edh'task'queue etsThrower
+        if throwerThId /= handlerThId
           then -- not on same thread, bypass finally block
                rethrow exv
           else -- on the same thread, eval the finally block
