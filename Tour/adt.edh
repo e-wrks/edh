@@ -28,12 +28,19 @@ assert$ d > D( 3, 1, 5, 9 )
 d <= D( 3, 1, 5, 9 )
 
 
+# %%
+case d of { D( a, b= bAsMatched, c ) } -> {
+  'got a=' ++ a ++ ', bAsMatched=' ++ bAsMatched ++ ', c=' ++ c
+}
+
+
 # %{
 # data classes can be used to simulate ADT in Haskell, but due to it's openness
 # nature, exhaustiveness detection is not possible. While this should not be
 # surprising as Edh is highly dynamicly typed, as so generally lacks type-safty
 # compared to Haskell.
 
+# %%
 data SomeNumber (*** _ ) {
   n = nan
 }
@@ -58,6 +65,10 @@ v = Many( 99 )
 
 # %%
 case v of {
+  { SomeNumber( n ) } -> {
+    console.info<| "We know it's numeric value is " ++ n ++ ' now'
+    fallthrough
+  }
   { { SomeNumber:_ } } -> {
     { { One:_ } } -> {
       'got 1'

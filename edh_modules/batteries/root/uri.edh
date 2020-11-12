@@ -1,0 +1,84 @@
+{##
+
+http://tools.ietf.org/html/rfc3986
+
+  foo://example.com:8042/over/there?name=ferret#nose
+  \_/   \______________/\_________/ \_________/ \__/
+   |           |            |            |        |
+scheme     authority       path        query   fragment
+   |   _____________________|__
+  / \ /                        \
+  urn:example:animal:ferret:nose
+
+ #}
+
+
+{##
+ # a pattern eanbled data class for URI
+ #
+
+```edh
+ # %%
+case 'https://code.visualstudio.com/docs/extensions/overview#frag'
+of { URI( scheme, authority, path, query, fragment ) } -> {
+  assert$ scheme is 'https'
+  assert$ authority is 'code.visualstudio.com'
+  assert$ path is '/docs/extensions/overview'
+  assert$ query is ''
+  assert$ fragment is 'frag'
+  uri = URI( scheme, authority, path, query, fragment )
+  assert$ str( uri ) is 'https://code.visualstudio.com/docs/extensions/overview#frag'
+  console.print$ repr$ uri
+  console.print$ str$ uri
+}
+ # %%
+```
+ #}
+export data URI(
+  scheme= 'file',
+  authority= '',
+  path= '',
+  query= '',
+  fragment= '',
+) {
+
+  {##
+   # convert the URI object to string form
+   #}
+  method __str__() {
+    uri = this.scheme ++ '://' ++ this.authority ++ this.path
+    if this.query then uri += ( '?' ++ this.query )
+    if this.fragment then uri += ( '#' ++ this.fragment )
+    return uri
+  }
+
+  {##
+   # parse a string as URI object
+   #}
+  method parse( s ) {
+    # init default values of fields
+    scheme= 'file'
+    authority= ''
+    path= ''
+    query= ''
+    fragment= ''
+    # parse fields
+    case s of {
+      { schema @< '://' >@ rest } -> {
+        case rest of { rest @< '#' >@ fragment } -> { pass }
+        case rest of { rest @< '?' >@ query } -> { pass }
+        case rest of { authority @< '/' >@ path } -> {
+          path = '/' ++ path
+        }
+        return URI( schema, authority, path, query, fragment )
+      }
+    }
+    return nil
+  }
+
+  {##
+   # enable pattern matching of string to parsed URI
+   #}
+  __match__ = parse
+
+}

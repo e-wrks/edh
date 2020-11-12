@@ -17,6 +17,7 @@ export {
   import * './root/slice'
   import * './root/reflect'
   import * './root/cmd'
+  import * './root/uri'
 
   {##
    # define the censored console object

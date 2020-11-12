@@ -532,6 +532,14 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
                     <> show clsVal
           _ -> exitEdh ets exit EdhCaseOther
 
+      -- { DataClass( field1, field2, ... ) } -- data class pattern
+      [StmtSrc (_, ExprStmt (CallExpr (AttrExpr !clsAddr) !apkr) _docCmt)] ->
+        dcFieldsExtractor apkr $ \ !fieldExtractors ->
+          runEdhTx ets $ evalAttrAddr clsAddr $ \ !clsVal _ets -> case clsVal of
+            EdhObject !clsObj -> matchDataClass clsObj fieldExtractors
+            !badClsVal        -> edhValueRepr ets badClsVal $ \ !badDesc ->
+              throwEdh ets UsageError $ "invalid class: " <> badDesc
+
       -- {[ x,y,z,... ]} -- any-of pattern
       [StmtSrc (_, ExprStmt (ListExpr vExprs) _docCmt)] -> if null vExprs
         then exitEdh ets exit EdhCaseOther
@@ -602,4 +610,54 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
                 _ -> Nothing
           _ -> Just (Nothing, [])
       _ -> Nothing
+
+    dcFieldsExtractor
+      :: ArgsPacker -> ([(AttrKey, AttrKey)] -> STM ()) -> STM ()
+    dcFieldsExtractor !apkr !exit' = go apkr []
+     where
+      go []                 !keys = exit' keys
+      go (argSender : rest) !keys = case argSender of
+        SendPosArg (AttrExpr (DirectRef !rcvAttr)) ->
+          resolveEdhAttrAddr ets rcvAttr $ \ !key -> go rest $ (key, key) : keys
+        SendKwArg !srcAttr (AttrExpr (DirectRef !tgtAttr)) ->
+          resolveEdhAttrAddr ets srcAttr $ \ !srcKey ->
+            resolveEdhAttrAddr ets tgtAttr
+              $ \ !tgtKey -> go rest $ (srcKey, tgtKey) : keys
+        _ ->
+          throwEdh ets UsageError $ "bad data class field extractor: " <> T.pack
+            (show argSender)
+
+    matchDataClass :: Object -> [(AttrKey, AttrKey)] -> STM ()
+    matchDataClass !clsObj !dcfxs = case edhUltimate ctxMatch of
+      EdhObject !ctxObj -> withObj ctxObj tryCoerceMatch
+      _                 -> tryCoerceMatch
+     where
+      withObj !obj !alt = resolveEdhInstance clsObj obj >>= \case
+        Just _superObj -> withMatched obj
+        Nothing        -> alt
+      withMatched !matchedObj = go dcfxs []
+       where
+        go :: [(AttrKey, AttrKey)] -> [(AttrKey, EdhValue)] -> STM ()
+        go [] !arts = matchExit arts
+        go ((!srcKey, !tgtKey) : rest) !arts =
+          lookupEdhObjAttr matchedObj srcKey >>= \case
+            (_, !artVal) -> go rest $ (tgtKey, noneNil artVal) : arts
+
+      tryCoerceMatch =
+        lookupEdhObjAttr clsObj (AttrByName "__match__") >>= \case
+          (_, EdhNil) -> exitEdh ets exit EdhCaseOther
+          (!this', EdhProcedure (EdhMethod !mth) _) ->
+            runEdhTx ets
+              $ callEdhMethod this' clsObj mth (ArgsPack [ctxMatch] odEmpty) id
+              $ \ !mthRtn _ets -> case mthRtn of
+                  EdhObject !obj -> withObj obj $ exitEdh ets exit EdhCaseOther
+                  _              -> exitEdh ets exit EdhCaseOther
+          (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+            runEdhTx ets
+              $ callEdhMethod this that mth (ArgsPack [ctxMatch] odEmpty) id
+              $ \ !mthRtn _ets -> case mthRtn of
+                  EdhObject !obj -> withObj obj $ exitEdh ets exit EdhCaseOther
+                  _              -> exitEdh ets exit EdhCaseOther
+          (_, !badMagic) -> edhValueDesc ets badMagic $ \ !badDesc ->
+            throwEdh ets UsageError $ "bad __match__ magic: " <> badDesc
 

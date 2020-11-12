@@ -1267,8 +1267,7 @@ data AttrAddr = ThisRef | ThatRef | SuperRef
     | IndirectRef !Expr !AttrAddressor
   deriving (Eq, Show)
 
--- | the key to address attributes against a left hand entity object or
--- current scope
+-- | the key to address attributes against a left hand object or current scope
 data AttrAddressor =
     -- | vanilla form, by alphanumeric name
     NamedAttr !AttrName
