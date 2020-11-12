@@ -91,7 +91,7 @@ instance Exception EdhError
 
 instance Show EdhError where
   show (ProgramHalt _)  = "Edh⏹️Halt"
-  show ThreadTerminate  = "ThreadTerminate"
+  show ThreadTerminate  = "Edh🛑Terminate"
   show (EdhIOError ioe) = show ioe
   show (EdhPeerError peerSite details) = --
     "🏗️ traceback: " <> T.unpack peerSite <> "\n" <> T.unpack details

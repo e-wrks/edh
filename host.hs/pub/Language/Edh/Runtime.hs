@@ -611,7 +611,8 @@ createEdhWorld !console = liftIO $ do
           Just (val :: EdhValue) -> edhValueRepr ets val $ \ !repr ->
             exitEdh ets exit $ EdhString $ errClsName <> "(" <> repr <> ")"
           Nothing -> exitEdh ets exit $ EdhString $ errClsName <> "()"
-        Just ThreadTerminate -> exitEdh ets exit $ EdhString "ThreadTerminate"
+        Just ThreadTerminate ->
+          exitEdh ets exit $ EdhString "ThreadTerminate()"
         Just (EdhIOError !exc') ->
           exitEdh ets exit
             $  EdhString
