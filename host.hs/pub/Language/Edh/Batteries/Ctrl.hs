@@ -367,7 +367,7 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
     BlockExpr patternExpr -> case patternExpr of
 
       -- {( x )} -- single arg 
-      [StmtSrc (_, ExprStmt (ParenExpr (AttrExpr (DirectRef (NamedAttr attrName)))) _docCmt)]
+      [StmtSrc (_, ExprStmt (ParenExpr (AttrExpr (DirectRef (NamedAttr !attrName)))) _docCmt)]
         -> case ctxMatch of
           EdhArgsPack (ArgsPack [argVal] !kwargs) | odNull kwargs ->
             matchExit [(AttrByName attrName, argVal)]
@@ -398,7 +398,7 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
         _                -> exitEdh ets exit EdhCaseOther
 
       -- { return xx } -- match with value return
-      [StmtSrc (_, ReturnStmt (AttrExpr (DirectRef (NamedAttr attrName))))] ->
+      [StmtSrc (_, ReturnStmt (AttrExpr (DirectRef (NamedAttr !attrName))))] ->
         case ctxMatch of
           EdhReturn !rtnVal | rtnVal /= EdhNil ->
             matchExit [(AttrByName attrName, rtnVal)]
@@ -407,21 +407,22 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
       -- { val } -- wild capture pattern, used to capture a non-nil result as
       -- an attribute.
       -- Note: a raw nil value should be value-matched explicitly
-      [StmtSrc (_, ExprStmt (AttrExpr (DirectRef (NamedAttr attrName))) _docCmt)]
-        -> case ctxMatch of -- don't match raw nil here, 
+      [StmtSrc (_, ExprStmt (AttrExpr (DirectRef !valAttr)) _docCmt)] ->
+        case ctxMatch of -- don't match raw nil here, 
           EdhNil -> exitEdh ets exit EdhCaseOther
           -- but a named nil (i.e. None/Nothing etc.) should be matched
-          _      -> matchExit [(AttrByName attrName, ctxMatch)]
+          _      -> resolveEdhAttrAddr ets valAttr
+            $ \ !valKey -> matchExit [(valKey, ctxMatch)]
 
       -- { term := value } -- definition pattern
-      [StmtSrc (_, ExprStmt (InfixExpr ":=" (AttrExpr (DirectRef (NamedAttr termName))) (AttrExpr (DirectRef (NamedAttr valueName)))) _docCmt)]
+      [StmtSrc (_, ExprStmt (InfixExpr ":=" (AttrExpr (DirectRef (NamedAttr !termName))) (AttrExpr (DirectRef (NamedAttr !valueName)))) _docCmt)]
         -> case ctxMatch of
           EdhNamedValue !n !v -> matchExit
             [(AttrByName termName, EdhString n), (AttrByName valueName, v)]
           _ -> exitEdh ets exit EdhCaseOther
 
       -- { head => tail } -- uncons pattern
-      [StmtSrc (_, ExprStmt (InfixExpr ":>" (AttrExpr (DirectRef (NamedAttr headName))) (AttrExpr (DirectRef (NamedAttr tailName)))) _docCmt)]
+      [StmtSrc (_, ExprStmt (InfixExpr ":>" (AttrExpr (DirectRef (NamedAttr !headName))) (AttrExpr (DirectRef (NamedAttr !tailName)))) _docCmt)]
         -> let doMatched headVal tailVal =
                    matchExit
                      [ (AttrByName headName, headVal)
@@ -439,7 +440,7 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
                  _ -> exitEdh ets exit EdhCaseOther
 
       -- { prefix @< match >@ suffix } -- sub-string cut pattern
-      [StmtSrc (_, ExprStmt (InfixExpr ">@" (InfixExpr "@<" (AttrExpr (DirectRef (NamedAttr prefixName))) matchExpr) (AttrExpr (DirectRef (NamedAttr suffixName)))) _docCmt)]
+      [StmtSrc (_, ExprStmt (InfixExpr ">@" (InfixExpr "@<" (AttrExpr (DirectRef (NamedAttr !prefixName))) matchExpr) (AttrExpr (DirectRef (NamedAttr !suffixName)))) _docCmt)]
         -> case ctxMatch of
           EdhString !fullStr ->
             runEdhTx ets $ evalExpr matchExpr $ \ !mVal _ets ->
@@ -458,7 +459,7 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
           _ -> exitEdh ets exit EdhCaseOther
 
       -- { match >@ suffix } -- prefix cut pattern
-      [StmtSrc (_, ExprStmt (InfixExpr ">@" prefixExpr (AttrExpr (DirectRef (NamedAttr suffixName)))) _docCmt)]
+      [StmtSrc (_, ExprStmt (InfixExpr ">@" prefixExpr (AttrExpr (DirectRef (NamedAttr !suffixName)))) _docCmt)]
         -> case ctxMatch of
           EdhString !fullStr ->
             runEdhTx ets $ evalExpr prefixExpr $ \ !lhVal _ets ->
@@ -470,7 +471,7 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
           _ -> exitEdh ets exit EdhCaseOther
 
       -- { prefix @< match } -- suffix cut pattern
-      [StmtSrc (_, ExprStmt (InfixExpr "@<" (AttrExpr (DirectRef (NamedAttr prefixName))) suffixExpr) _docCmt)]
+      [StmtSrc (_, ExprStmt (InfixExpr "@<" (AttrExpr (DirectRef (NamedAttr !prefixName))) suffixExpr) _docCmt)]
         -> case ctxMatch of
           EdhString !fullStr ->
             runEdhTx ets $ evalExpr suffixExpr $ \ !rhVal _ets ->
@@ -495,7 +496,7 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
             _ -> exitEdh ets exit EdhCaseOther
           else do
             !attrNames <- fmap catMaybes $ sequence $ (<$> argSenders) $ \case
-              SendPosArg (AttrExpr (DirectRef (NamedAttr vAttr))) ->
+              SendPosArg (AttrExpr (DirectRef (NamedAttr !vAttr))) ->
                 return $ Just vAttr
               _ -> return Nothing
             if length attrNames /= length argSenders
@@ -510,17 +511,16 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
                 _ -> exitEdh ets exit EdhCaseOther
 
       -- {{ class:inst }} -- instance resolving pattern
-      [StmtSrc (_, ExprStmt (DictExpr [(AddrDictKey !clsAddr, AttrExpr (DirectRef (NamedAttr instAttr)))]) _docCmt)]
+      [StmtSrc (_, ExprStmt (DictExpr [(AddrDictKey !clsAddr, AttrExpr (DirectRef !instAttr))]) _docCmt)]
         -> -- brittany insists on putting together the long line above, any workaround?
            case ctxMatch of
-          EdhObject ctxObj ->
+          EdhObject ctxObj -> resolveEdhAttrAddr ets instAttr $ \ !instKey ->
             runEdhTx ets $ evalAttrAddr clsAddr $ \ !clsVal _ets ->
               case clsVal of
                 EdhNil            -> exitEdh ets exit EdhCaseOther
                 EdhObject !clsObj -> resolveEdhInstance clsObj ctxObj >>= \case
-                  Just instObj ->
-                    matchExit [(AttrByName instAttr, EdhObject instObj)]
-                  Nothing -> exitEdh ets exit EdhCaseOther
+                  Just !instObj -> matchExit [(instKey, EdhObject instObj)]
+                  Nothing       -> exitEdh ets exit EdhCaseOther
                 _ ->
                   throwEdh ets EvalError
                     $  T.pack
