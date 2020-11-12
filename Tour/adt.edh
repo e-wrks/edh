@@ -67,9 +67,6 @@ v = Many( 99 )
 case v of {
   { SomeNumber( n ) } -> {
     console.info<| "We know it's numeric value is " ++ n ++ ' now'
-    fallthrough
-  }
-  { { SomeNumber:_ } } -> {
     { { One:_ } } -> {
       'got 1'
     }
@@ -87,12 +84,12 @@ case v of {
     }
   }
   _ -> {
-    'got sth else than some number'
+    "it's not some number"
   }
 }
 
 # %%
-Many(- 1 )
+Many( -1 )
 
 # %}
 
