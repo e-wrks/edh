@@ -1240,27 +1240,27 @@ data Stmt =
   deriving (Show)
 
 -- Attribute addressor
-data AttrAddr = ThisRef | ThatRef | SuperRef
-    | DirectRef !AttrAddressor
-    | IndirectRef !Expr !AttrAddressor
+data AttrRef = ThisRef | ThatRef | SuperRef
+  | DirectRef !AttrAddr
+  | IndirectRef !Expr !AttrAddr
   deriving (Eq, Show)
 
 -- | the key to address attributes against a left hand object or current scope
-data AttrAddressor =
+data AttrAddr =
     -- | vanilla form, by alphanumeric name
     NamedAttr !AttrName
-    -- | get the symbol value from current scope,
+    -- | at notation, i.e. - get the symbol or string value from current scope,
     -- then use it to address attributes
-    | SymbolicAttr !AttrName
+  | SymbolicAttr !AttrName
   deriving (Eq)
-instance Show AttrAddressor where
+instance Show AttrAddr where
   show = T.unpack . attrAddrStr
-instance Hashable AttrAddressor where
+instance Hashable AttrAddr where
   hashWithSalt s (NamedAttr name) = s `hashWithSalt` name
   hashWithSalt s (SymbolicAttr sym) =
     s `hashWithSalt` ("@" :: Text) `hashWithSalt` sym
 
-attrAddrStr :: AttrAddressor -> Text
+attrAddrStr :: AttrAddr -> Text
 attrAddrStr (NamedAttr    n) = n
 attrAddrStr (SymbolicAttr s) = "@" <> s
 
@@ -1288,7 +1288,7 @@ instance Show ArgsReceiver where
 data ArgReceiver = RecvRestPosArgs !AttrName
     | RecvRestKwArgs !AttrName
     | RecvRestPkArgs !AttrName
-    | RecvArg !AttrAddressor !(Maybe AttrAddr) !(Maybe Expr)
+    | RecvArg !AttrAddr !(Maybe AttrRef) !(Maybe Expr)
   deriving (Eq)
 instance Show ArgReceiver where
   show (RecvRestPosArgs nm) = "*" ++ T.unpack nm
@@ -1302,12 +1302,12 @@ data ArgSender = UnpackPosArgs !Expr
     | UnpackKwArgs !Expr
     | UnpackPkArgs !Expr
     | SendPosArg !Expr
-    | SendKwArg !AttrAddressor !Expr
+    | SendKwArg !AttrAddr !Expr
   deriving (Eq, Show)
 
 -- | Procedure declaration, result of parsing
 data ProcDecl = HostDecl (ArgsPack -> EdhHostProc) | ProcDecl {
-    edh'procedure'addr :: !AttrAddressor
+    edh'procedure'addr :: !AttrAddr
   , edh'procedure'args :: !ArgsReceiver
   , edh'procedure'body :: !StmtSrc
   , edh'procedure'name'span :: !SourceSpan
@@ -1352,7 +1352,7 @@ data Prefix = PrefixPlus | PrefixMinus | Not
 
 data DictKeyExpr =
       LitDictKey !Literal
-    | AddrDictKey !AttrAddr
+    | AddrDictKey !AttrRef
     | ExprDictKey !Expr -- this must be quoted in parenthesis
   deriving (Eq, Show)
 
@@ -1417,11 +1417,11 @@ data Expr =
 
   -- | call out an effectful artifact, search only outer stack frames,
   -- if from an effectful procedure run
-  | PerformExpr !AttrAddressor
+  | PerformExpr !AttrAddr
   -- | call out an effectful artifact, always search full stack frames
-  | BehaveExpr !AttrAddressor
+  | BehaveExpr !AttrAddr
 
-  | AttrExpr !AttrAddr
+  | AttrExpr !AttrRef
   | IndexExpr { index'value :: !Expr
               , index'target :: !Expr
               }

@@ -511,31 +511,23 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
                 _ -> exitEdh ets exit EdhCaseOther
 
       -- {{ class:inst }} -- instance resolving pattern
-      [StmtSrc (_, ExprStmt (DictExpr [(AddrDictKey !clsAddr, AttrExpr (DirectRef !instAttr))]) _docCmt)]
+      [StmtSrc (_, ExprStmt (DictExpr [(AddrDictKey !clsRef, AttrExpr (DirectRef !instAttr))]) _docCmt)]
         -> -- brittany insists on putting together the long line above, any workaround?
            case ctxMatch of
           EdhObject ctxObj -> resolveEdhAttrAddr ets instAttr $ \ !instKey ->
-            runEdhTx ets $ evalAttrAddr clsAddr $ \ !clsVal _ets ->
-              case clsVal of
-                EdhNil            -> exitEdh ets exit EdhCaseOther
-                EdhObject !clsObj -> resolveEdhInstance clsObj ctxObj >>= \case
-                  Just !instObj -> matchExit [(instKey, EdhObject instObj)]
-                  Nothing       -> exitEdh ets exit EdhCaseOther
-                _ ->
-                  throwEdh ets EvalError
-                    $  T.pack
-                    $  "invalid class "
-                    <> show clsAddr
-                    <> ", it is a "
-                    <> edhTypeNameOf clsVal
-                    <> ": "
-                    <> show clsVal
+            runEdhTx ets $ evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
+              EdhNil            -> exitEdh ets exit EdhCaseOther
+              EdhObject !clsObj -> resolveEdhInstance clsObj ctxObj >>= \case
+                Just !instObj -> matchExit [(instKey, EdhObject instObj)]
+                Nothing       -> exitEdh ets exit EdhCaseOther
+              !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
+                throwEdh ets UsageError $ "invalid class: " <> badDesc
           _ -> exitEdh ets exit EdhCaseOther
 
       -- { DataClass( field1, field2, ... ) } -- data class pattern
-      [StmtSrc (_, ExprStmt (CallExpr (AttrExpr !clsAddr) !apkr) _docCmt)] ->
+      [StmtSrc (_, ExprStmt (CallExpr (AttrExpr !clsRef) !apkr) _docCmt)] ->
         dcFieldsExtractor apkr $ \ !fieldExtractors ->
-          runEdhTx ets $ evalAttrAddr clsAddr $ \ !clsVal _ets -> case clsVal of
+          runEdhTx ets $ evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
             EdhObject !clsObj -> matchDataClass clsObj fieldExtractors
             !badClsVal        -> edhValueRepr ets badClsVal $ \ !badDesc ->
               throwEdh ets UsageError $ "invalid class: " <> badDesc

@@ -1657,7 +1657,7 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doStmt !iterCollector !forLo
 --      `.hs-boot` files
 -- | resolve an attribute addressor, either alphanumeric named or symbolic
 resolveEdhAttrAddr
-  :: EdhThreadState -> AttrAddressor -> (AttrKey -> STM ()) -> STM ()
+  :: EdhThreadState -> AttrAddr -> (AttrKey -> STM ()) -> STM ()
 resolveEdhAttrAddr _ (NamedAttr !attrName) !exit = exit (AttrByName attrName)
 resolveEdhAttrAddr !ets (SymbolicAttr !symName) !exit =
   let scope = contextScope $ edh'context ets
@@ -2647,7 +2647,7 @@ intplExpr !ets !x !exit = case x of
   YieldExpr !x'             -> intplExpr ets x' $ \ !x'' -> exit $ YieldExpr x''
   ForExpr !rcvs !fromX !doX -> intplExpr ets fromX $ \ !fromX' ->
     intplStmtSrc ets doX $ \ !doX' -> exit $ ForExpr rcvs fromX' doX'
-  AttrExpr !addr  -> intplAttrAddr ets addr $ \ !addr' -> exit $ AttrExpr addr'
+  AttrExpr !addr  -> intplAttrRef ets addr $ \ !addr' -> exit $ AttrExpr addr'
   IndexExpr !v !t -> intplExpr ets v
     $ \ !v' -> intplExpr ets t $ \ !t' -> exit $ IndexExpr v' t'
   CallExpr !v !args -> intplExpr ets v $ \ !v' ->
@@ -2670,7 +2670,7 @@ intplDictEntry
   -> STM ()
 intplDictEntry !ets (k@LitDictKey{}, !x) !exit =
   intplExpr ets x $ \ !x' -> exit (k, x')
-intplDictEntry !ets (AddrDictKey !k, !x) !exit = intplAttrAddr ets k
+intplDictEntry !ets (AddrDictKey !k, !x) !exit = intplAttrRef ets k
   $ \ !k' -> intplExpr ets x $ \ !x' -> exit (AddrDictKey k', x')
 intplDictEntry !ets (ExprDictKey !k, !x) !exit = intplExpr ets k
   $ \ !k' -> intplExpr ets x $ \ !x' -> exit (ExprDictKey k', x')
@@ -2687,8 +2687,8 @@ intplArgSender !ets (SendPosArg !x) !exit =
 intplArgSender !ets (SendKwArg !addr !x) !exit =
   intplExpr ets x $ \ !x' -> exit $ SendKwArg addr x'
 
-intplAttrAddr :: EdhThreadState -> AttrAddr -> (AttrAddr -> STM ()) -> STM ()
-intplAttrAddr !ets !addr !exit = case addr of
+intplAttrRef :: EdhThreadState -> AttrRef -> (AttrRef -> STM ()) -> STM ()
+intplAttrRef !ets !addr !exit = case addr of
   IndirectRef !x' !a -> intplExpr ets x' $ \ !x'' -> exit $ IndirectRef x'' a
   _                  -> exit addr
 
@@ -2708,7 +2708,7 @@ intplArgsRcvr !ets !a !exit = case a of
         Nothing -> exit' $ RecvArg attrAddr Nothing Nothing
         Just !x ->
           intplExpr ets x $ \ !x' -> exit' $ RecvArg attrAddr Nothing $ Just x'
-      Just !addr -> intplAttrAddr ets addr $ \ !addr' -> case maybeDefault of
+      Just !addr -> intplAttrRef ets addr $ \ !addr' -> case maybeDefault of
         Nothing -> exit' $ RecvArg attrAddr (Just addr') Nothing
         Just !x -> intplExpr ets x
           $ \ !x' -> exit' $ RecvArg attrAddr (Just addr') $ Just x'
@@ -2756,8 +2756,8 @@ evalLiteral = \case
   ValueLiteral !v  -> return v
 
 
-evalAttrAddr :: AttrAddr -> EdhTxExit -> EdhTx
-evalAttrAddr !addr !exit !ets = case addr of
+evalAttrRef :: AttrRef -> EdhTxExit -> EdhTx
+evalAttrRef !addr !exit !ets = case addr of
   ThisRef          -> exitEdh ets exit (EdhObject $ edh'scope'this scope)
   ThatRef          -> exitEdh ets exit (EdhObject $ edh'scope'that scope)
   SuperRef -> throwEdh ets UsageError "can not address a single super alone"
@@ -2795,7 +2795,7 @@ evalDictLit ((k, v) : entries) !dsl !exit !ets = case k of
   LitDictKey !lit -> runEdhTx ets $ evalExpr' v Nothing $ \ !vVal _ets ->
     evalLiteral lit >>= \ !kVal ->
       runEdhTx ets $ evalDictLit entries ((kVal, vVal) : dsl) exit
-  AddrDictKey !addr -> runEdhTx ets $ evalAttrAddr addr $ \ !kVal ->
+  AddrDictKey !addr -> runEdhTx ets $ evalAttrRef addr $ \ !kVal ->
     evalExpr' v Nothing
       $ \ !vVal -> evalDictLit entries ((kVal, vVal) : dsl) exit
   ExprDictKey !kExpr -> runEdhTx ets $ evalExpr' kExpr Nothing $ \ !kVal ->
@@ -3329,7 +3329,7 @@ evalExpr' (BehaveExpr !effAddr) _docCmt !exit = \ !ets ->
   resolveEdhAttrAddr ets effAddr
     $ \ !effKey -> resolveEdhBehave ets effKey $ exitEdh ets exit
 
-evalExpr' (AttrExpr !addr) _docCmt !exit = evalAttrAddr addr exit
+evalExpr' (AttrExpr !addr) _docCmt !exit = evalAttrRef addr exit
 
 evalExpr' (CallExpr !calleeExpr !argsSndr) _docCmt !exit =
   evalExpr' calleeExpr Nothing $ \ !calleeVal !ets ->

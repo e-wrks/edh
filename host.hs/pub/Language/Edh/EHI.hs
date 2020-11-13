@@ -130,8 +130,8 @@ module Language.Edh.EHI
   , OpFixity(..)
   , Precedence
   , OpDeclLoc
+  , AttrRef(..)
   , AttrAddr(..)
-  , AttrAddressor(..)
   , ArgsReceiver(..)
   , ArgReceiver(..)
   , ArgsPacker

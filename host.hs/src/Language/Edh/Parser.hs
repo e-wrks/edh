@@ -271,10 +271,10 @@ parseArgRecvs !rs !kwConsumed !posConsumed = (symbol ")" $> rs) <|> do
     void $ symbol "*"
     RecvRestPosArgs <$> parseAttrName
 
-parseRetarget :: Parser AttrAddr
+parseRetarget :: Parser AttrRef
 parseRetarget = do
   void $ keyword "as"
-  parseAttrAddr
+  parseAttrRef
 
 parseKwRecv :: Bool -> Parser ArgReceiver
 parseKwRecv !inPack = do
@@ -283,7 +283,7 @@ parseKwRecv !inPack = do
   defExpr <- if inPack then optional parseDefaultExpr else return Nothing
   return $ RecvArg addr (validateTgt retgt) defExpr
  where
-  validateTgt :: Maybe AttrAddr -> Maybe AttrAddr
+  validateTgt :: Maybe AttrRef -> Maybe AttrRef
   validateTgt tgt = case tgt of
     Nothing      -> Nothing
     Just ThisRef -> fail "can not overwrite this"
@@ -300,8 +300,8 @@ parseKwRecv !inPack = do
     return x
 
 
-parseAttrAddr :: Parser AttrAddr
-parseAttrAddr = do
+parseAttrRef :: Parser AttrRef
+parseAttrRef = do
   p1 <- leadingPart
   moreAddr p1
  where
@@ -319,7 +319,7 @@ parseAttrAddr = do
     , keyword "super" *> fail "unexpected super reference"
     , AttrExpr . DirectRef <$> parseAttrAddressor
     ]
-  moreAddr :: Expr -> Parser AttrAddr
+  moreAddr :: Expr -> Parser AttrRef
   moreAddr p1 =
     (symbol "." *> followingPart >>= \case
         AttrExpr (DirectRef addr) ->
@@ -792,10 +792,10 @@ parseLitExpr = choice
         -- annoying if all listed in err rpt
         litKw = hidden . keyword
 
-parseAttrAddressor :: Parser AttrAddressor
+parseAttrAddressor :: Parser AttrAddr
 parseAttrAddressor = parseAtNotation <|> NamedAttr <$> parseAttrName
  where
-  parseAtNotation :: Parser AttrAddressor
+  parseAtNotation :: Parser AttrAddr
   parseAtNotation = char '@' *> sc *> choice
     [NamedAttr <$> parseStringLit, SymbolicAttr <$> parseAlphNumName]
 
@@ -862,7 +862,7 @@ parseDictOrBlock !si0 = symbol "{"
       (v, si') <- parseExpr si
       return ((LitDictKey k, v), si')
     addrEntry = try $ do
-      k <- parseAttrAddr
+      k <- parseAttrRef
       void $ symbol ":"
       (v, si') <- parseExpr si
       return ((AddrDictKey k, v), si')
@@ -1031,7 +1031,7 @@ parseExprPrec precedingOp prec !si = lookAhead illegalExprStart >>= \case
       , parseProducerExpr si
       , parseOpDeclOvrdExpr si
       , (, si) . LitExpr <$> parseLitExpr
-      , (, si) . AttrExpr <$> parseAttrAddr
+      , (, si) . AttrExpr <$> parseAttrRef
       ]
     parseMoreOps precedingOp si' x
  where
