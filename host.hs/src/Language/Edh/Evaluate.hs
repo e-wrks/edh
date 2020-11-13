@@ -1858,8 +1858,8 @@ parseEdh'
   -> Text
   -> STM (Either ParserError ([StmtSrc], Maybe DocComment))
 parseEdh' !world !srcName !lineNo !srcCode = do
-  pd <- takeTMVar wops -- update 'worldOperators' atomically wrt parsing
-  let ((_, pr), pd') = runState
+  !pd <- takeTMVar wops -- update 'worldOperators' atomically wrt parsing
+  let ((_, !pr), (EdhParserState !pd' _)) = runState
         (runParserT'
           parseProgram
           State
@@ -1880,7 +1880,7 @@ parseEdh' !world !srcName !lineNo !srcCode = do
             , stateParseErrors = []
             }
         )
-        pd
+        (EdhParserState pd (RelSourcePos pos1 pos1))
   case pr of
     -- update operator precedence dict on success of parsing
     Right _ -> putTMVar wops pd'

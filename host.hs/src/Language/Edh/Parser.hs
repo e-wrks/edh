@@ -101,13 +101,27 @@ immediateDocComment = docComment >>= moreAfter
 
 
 symbol :: Text -> Parser Text
-symbol = L.symbol sc
+symbol !t = do
+  !r  <- string t
+  !sp <- getSourcePos
+  !s  <- get
+  put s { edh'parser'lexeme'end = RelSourcePos (sourceLine sp) (sourceColumn sp)
+        }
+  void sc
+  return r
 
 lexeme :: Parser a -> Parser a
-lexeme = L.lexeme sc
+lexeme !p = do
+  !r  <- p
+  !sp <- getSourcePos
+  !s  <- get
+  put s { edh'parser'lexeme'end = RelSourcePos (sourceLine sp) (sourceColumn sp)
+        }
+  void sc
+  return r
 
 keyword :: Text -> Parser Text
-keyword kw = try $ lexeme (string kw <* notFollowedBy (satisfy isIdentChar))
+keyword !kw = try $ lexeme (string kw <* notFollowedBy (satisfy isIdentChar))
 
 optionalComma :: Parser Bool
 optionalComma = fromMaybe False <$> optional (True <$ symbol ",")
@@ -527,7 +541,7 @@ parseOpDeclOvrdExpr !si = do
               nameStartPos
               (RelSourcePos (sourceLine nameEndPos) (sourceColumn nameEndPos))
             )
-      opPD <- get
+      ps@(EdhParserState !opPD _) <- get
       case precDecl of
         Nothing -> case Map.lookup opSym opPD of
           Nothing -> do
@@ -540,10 +554,15 @@ parseOpDeclOvrdExpr !si = do
             return (OpOvrdExpr origFixity origPrec opSym procDecl, si')
         Just opPrec -> case Map.lookup opSym opPD of
           Nothing -> do
-            put $ Map.insert
-              opSym
-              (fixity, opPrec, T.pack $ sourcePosPretty nameStartPos)
-              opPD
+            put ps
+              { edh'parser'op'dict = Map.insert
+                                       opSym
+                                       ( fixity
+                                       , opPrec
+                                       , T.pack $ sourcePosPretty nameStartPos
+                                       )
+                                       opPD
+              }
             return (OpDefiExpr fixity opPrec opSym procDecl, si')
           Just (origFixity, origPrec, odl) -> if origPrec /= opPrec
             then do
@@ -621,9 +640,8 @@ parseStmt' !prec !si = do
       (x, si') <- parseExprPrec Nothing prec si
       return (ExprStmt x docCmt, si')
     ]
-  (SourcePos _ end'line end'col) <- getSourcePos
-  return
-    (StmtSrc (SourceSpan startPos (RelSourcePos end'line end'col), stmt), si')
+  EdhParserState _ !lexeme'end <- get
+  return (StmtSrc (SourceSpan startPos lexeme'end, stmt), si')
 
 parseStmt :: IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
 parseStmt !si = parseStmt' (-10) si
@@ -1049,7 +1067,7 @@ parseExprPrec precedingOp prec !si = lookAhead illegalExprStart >>= \case
         >>= \case
               Nothing    -> return Nothing
               Just opSym -> do
-                opPD <- get
+                EdhParserState !opPD _ <- get
                 case Map.lookup opSym opPD of
                   Nothing -> do
                     setOffset errRptPos

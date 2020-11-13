@@ -26,8 +26,6 @@ import           Data.Dynamic
 import qualified Data.UUID                     as UUID
 import qualified Data.UUID.V4                  as UUID
 
-import           Text.Megaparsec
-
 import           Data.Lossless.Decimal         as D
 
 import           Language.Edh.Control
@@ -1176,26 +1174,6 @@ true = EdhBool True
 
 false :: EdhValue
 false = EdhBool False
-
-
-data SourceSpan = SourceSpan {
-    source'span'start :: {-# UNPACK #-} !SourcePos
-  , source'span'end   :: {-# UNPACK #-} !RelSourcePos
-  }
-instance Eq SourceSpan where
-  (SourceSpan x'start x'end) == (SourceSpan y'start y'end) =
-    x'start == y'start && x'end == y'end
-data RelSourcePos = RelSourcePos {
-    source'end'line   :: {-# UNPACK #-} !Pos
-  , source'end'column :: {-# UNPACK #-} !Pos
-  }
-instance Eq RelSourcePos where
-  (RelSourcePos x'line x'col) == (RelSourcePos y'line y'col) =
-    x'line == y'line && x'col == y'col
-startPosOfFile :: FilePath -> SourceSpan
-startPosOfFile !n = SourceSpan (initialPos n) (RelSourcePos pos1 pos1)
-prettySourceLoc :: SourceSpan -> String
-prettySourceLoc (SourceSpan !start _) = sourcePosPretty start
 
 
 newtype StmtSrc = StmtSrc (SourceSpan, Stmt)

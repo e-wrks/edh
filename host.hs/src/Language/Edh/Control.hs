@@ -25,12 +25,38 @@ instance Show OpFixity where
 type Precedence = Int
 type OpDeclLoc = Text
 
--- global dict for operator info, as the parsing state
+
+data SourceSpan = SourceSpan {
+    source'span'start :: {-# UNPACK #-} !SourcePos
+  , source'span'end   :: {-# UNPACK #-} !RelSourcePos
+  }
+instance Eq SourceSpan where
+  (SourceSpan x'start x'end) == (SourceSpan y'start y'end) =
+    x'start == y'start && x'end == y'end
+data RelSourcePos = RelSourcePos {
+    source'end'line   :: {-# UNPACK #-} !Pos
+  , source'end'column :: {-# UNPACK #-} !Pos
+  }
+instance Eq RelSourcePos where
+  (RelSourcePos x'line x'col) == (RelSourcePos y'line y'col) =
+    x'line == y'line && x'col == y'col
+startPosOfFile :: FilePath -> SourceSpan
+startPosOfFile !n = SourceSpan (initialPos n) (RelSourcePos pos1 pos1)
+prettySourceLoc :: SourceSpan -> String
+prettySourceLoc (SourceSpan !start _) = sourcePosPretty start
+
+
+data EdhParserState = EdhParserState {
+    -- global dict for operator info, as the parsing state
+    edh'parser'op'dict :: !GlobalOpDict
+    -- end of last lexeme
+  , edh'parser'lexeme'end :: !RelSourcePos
+  }
 type GlobalOpDict = Map.HashMap OpSymbol (OpFixity, Precedence, OpDeclLoc)
 
 -- no backtracking needed for precedence dict, so it
 -- can live in the inner monad of 'ParsecT'.
-type Parser = ParsecT Void Text (State GlobalOpDict)
+type Parser = ParsecT Void Text (State EdhParserState)
 
 -- so goes this simplified parsing err type name
 type ParserError = ParseErrorBundle Text Void
