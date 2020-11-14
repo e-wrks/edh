@@ -1880,7 +1880,7 @@ parseEdh' !world !srcName !lineNo !srcCode = do
             , stateParseErrors = []
             }
         )
-        (EdhParserState pd (RelSourcePos pos1 pos1))
+        (EdhParserState pd (SourceLoc pos1 pos1))
   case pr of
     -- update operator precedence dict on success of parsing
     Right _ -> putTMVar wops pd'

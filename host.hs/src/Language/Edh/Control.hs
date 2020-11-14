@@ -28,20 +28,20 @@ type OpDeclLoc = Text
 
 data SourceSpan = SourceSpan {
     source'span'start :: {-# UNPACK #-} !SourcePos
-  , source'span'end   :: {-# UNPACK #-} !RelSourcePos
+  , source'span'end   :: {-# UNPACK #-} !SourceLoc
   }
 instance Eq SourceSpan where
   (SourceSpan x'start x'end) == (SourceSpan y'start y'end) =
     x'start == y'start && x'end == y'end
-data RelSourcePos = RelSourcePos {
+data SourceLoc = SourceLoc {
     source'end'line   :: {-# UNPACK #-} !Pos
   , source'end'column :: {-# UNPACK #-} !Pos
   }
-instance Eq RelSourcePos where
-  (RelSourcePos x'line x'col) == (RelSourcePos y'line y'col) =
+instance Eq SourceLoc where
+  (SourceLoc x'line x'col) == (SourceLoc y'line y'col) =
     x'line == y'line && x'col == y'col
 startPosOfFile :: FilePath -> SourceSpan
-startPosOfFile !n = SourceSpan (initialPos n) (RelSourcePos pos1 pos1)
+startPosOfFile !n = SourceSpan (initialPos n) (SourceLoc pos1 pos1)
 prettySourceLoc :: SourceSpan -> String
 prettySourceLoc (SourceSpan !start _) = sourcePosPretty start
 
@@ -50,7 +50,7 @@ data EdhParserState = EdhParserState {
     -- global dict for operator info, as the parsing state
     edh'parser'op'dict :: !GlobalOpDict
     -- end of last lexeme
-  , edh'parser'lexeme'end :: !RelSourcePos
+  , edh'parser'lexeme'end :: !SourceLoc
   }
 type GlobalOpDict = Map.HashMap OpSymbol (OpFixity, Precedence, OpDeclLoc)
 

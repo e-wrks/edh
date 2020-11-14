@@ -105,7 +105,7 @@ symbol !t = do
   !r  <- string t
   !sp <- getSourcePos
   !s  <- get
-  put s { edh'parser'lexeme'end = RelSourcePos (sourceLine sp) (sourceColumn sp)
+  put s { edh'parser'lexeme'end = SourceLoc (sourceLine sp) (sourceColumn sp)
         }
   void sc
   return r
@@ -115,7 +115,7 @@ lexeme !p = do
   !r  <- p
   !sp <- getSourcePos
   !s  <- get
-  put s { edh'parser'lexeme'end = RelSourcePos (sourceLine sp) (sourceColumn sp)
+  put s { edh'parser'lexeme'end = SourceLoc (sourceLine sp) (sourceColumn sp)
         }
   void sc
   return r
@@ -278,7 +278,7 @@ parseRetarget = do
 
 parseKwRecv :: Bool -> Parser ArgReceiver
 parseKwRecv !inPack = do
-  addr    <- parseAttrAddressor
+  addr    <- parseAttrAddr
   retgt   <- optional parseRetarget
   defExpr <- if inPack then optional parseDefaultExpr else return Nothing
   return $ RecvArg addr (validateTgt retgt) defExpr
@@ -310,27 +310,27 @@ parseAttrRef = do
     [ AttrExpr ThisRef <$ keyword "this"
     , AttrExpr ThatRef <$ keyword "that"
     , AttrExpr SuperRef <$ keyword "super"
-    , AttrExpr . DirectRef <$> parseAttrAddressor
+    , AttrExpr . DirectRef <$> parseAttrAddr
     ]
   followingPart :: Parser Expr
   followingPart = choice
     [ keyword "this" *> fail "unexpected this reference"
     , keyword "that" *> fail "unexpected that reference"
     , keyword "super" *> fail "unexpected super reference"
-    , AttrExpr . DirectRef <$> parseAttrAddressor
+    , AttrExpr . DirectRef <$> parseAttrAddr
     ]
   moreAddr :: Expr -> Parser AttrRef
-  moreAddr p1 =
-    (symbol "." *> followingPart >>= \case
-        AttrExpr (DirectRef addr) ->
-          let r1 = IndirectRef p1 addr in moreAddr (AttrExpr r1) <|> return r1
-        _ -> error "bug"
-      )
-      <|> case p1 of
-            AttrExpr ThisRef -> return ThisRef
-            AttrExpr ThatRef -> return ThatRef
-            AttrExpr r1      -> return r1
-            _                -> error "bug"
+  moreAddr p1 = choice
+    [ symbol "." *> followingPart >>= \case
+      AttrExpr (DirectRef addr) ->
+        let r1 = IndirectRef p1 addr in moreAddr (AttrExpr r1) <|> return r1
+      _ -> error "bug"
+    , case p1 of
+      AttrExpr ThisRef -> return ThisRef
+      AttrExpr ThatRef -> return ThatRef
+      AttrExpr r1      -> return r1
+      _                -> error "bug"
+    ]
 
 
 parseArgsSender :: IntplSrcInfo -> Parser (ArgsPacker, IntplSrcInfo)
@@ -373,7 +373,7 @@ parseArgSends !si !closeSym !commaAppeared !ss =
     return (UnpackPosArgs x, si')
   parseKwArgSend :: Parser (ArgSender, IntplSrcInfo)
   parseKwArgSend = do
-    addr <- parseAttrAddressor
+    addr <- parseAttrAddr
     void $ symbol "="
     (x, si') <- parseExpr si
     return (SendKwArg addr x, si')
@@ -387,7 +387,7 @@ parseNamespaceExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseNamespaceExpr !si = do
   void $ keyword "namespace"
   nameStartPos      <- getSourcePos
-  pn                <- parseAttrAddressor
+  pn                <- parseAttrAddr
   nameEndPos        <- getSourcePos
   (argSender, si' ) <- parseArgsSender si
   (body     , si'') <- parseProcBody si'
@@ -399,7 +399,7 @@ parseNamespaceExpr !si = do
         body
         (SourceSpan
           nameStartPos
-          (RelSourcePos (sourceLine nameEndPos) (sourceColumn nameEndPos))
+          (SourceLoc (sourceLine nameEndPos) (sourceColumn nameEndPos))
         )
       )
       argSender
@@ -410,7 +410,7 @@ parseClassExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseClassExpr !si = do
   void $ keyword "class"
   nameStartPos <- getSourcePos
-  pn           <- parseAttrAddressor
+  pn           <- parseAttrAddr
   nameEndPos   <- getSourcePos
   (body, si')  <- parseProcBody si
   return
@@ -420,7 +420,7 @@ parseClassExpr !si = do
       body
       (SourceSpan
         nameStartPos
-        (RelSourcePos (sourceLine nameEndPos) (sourceColumn nameEndPos))
+        (SourceLoc (sourceLine nameEndPos) (sourceColumn nameEndPos))
       )
     , si'
     )
@@ -429,7 +429,7 @@ parseDataExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseDataExpr !si = do
   void $ keyword "data"
   nameStartPos <- getSourcePos
-  pn           <- parseAttrAddressor
+  pn           <- parseAttrAddr
   nameEndPos   <- getSourcePos
   ar           <- parseArgsReceiver
   (body, si')  <- parseProcBody si
@@ -440,7 +440,7 @@ parseDataExpr !si = do
       body
       (SourceSpan
         nameStartPos
-        (RelSourcePos (sourceLine nameEndPos) (sourceColumn nameEndPos))
+        (SourceLoc (sourceLine nameEndPos) (sourceColumn nameEndPos))
       )
     , si'
     )
@@ -493,7 +493,7 @@ parseWhileStmt !si = do
 parseProcDecl :: IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)
 parseProcDecl !si = do
   nameStartPos <- getSourcePos
-  pn           <- parseAttrAddressor
+  pn           <- parseAttrAddr
   nameEndPos   <- getSourcePos
   ar           <- parseArgsReceiver
   (body, si')  <- parseProcBody si
@@ -504,7 +504,7 @@ parseProcDecl !si = do
       body
       (SourceSpan
         nameStartPos
-        (RelSourcePos (sourceLine nameEndPos) (sourceColumn nameEndPos))
+        (SourceLoc (sourceLine nameEndPos) (sourceColumn nameEndPos))
       )
     , si'
     )
@@ -539,7 +539,7 @@ parseOpDeclOvrdExpr !si = do
             body
             (SourceSpan
               nameStartPos
-              (RelSourcePos (sourceLine nameEndPos) (sourceColumn nameEndPos))
+              (SourceLoc (sourceLine nameEndPos) (sourceColumn nameEndPos))
             )
       ps@(EdhParserState !opPD _) <- get
       case precDecl of
@@ -693,13 +693,13 @@ parseForExpr !si = do
 parsePerformExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parsePerformExpr !si = do
   void $ keyword "perform"
-  addr <- parseAttrAddressor
+  addr <- parseAttrAddr
   return (PerformExpr addr, si)
 
 parseBehaveExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseBehaveExpr !si = do
   void $ keyword "behave"
-  addr <- parseAttrAddressor
+  addr <- parseAttrAddr
   return (BehaveExpr addr, si)
 
 parseListExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -792,8 +792,8 @@ parseLitExpr = choice
         -- annoying if all listed in err rpt
         litKw = hidden . keyword
 
-parseAttrAddressor :: Parser AttrAddr
-parseAttrAddressor = parseAtNotation <|> NamedAttr <$> parseAttrName
+parseAttrAddr :: Parser AttrAddr
+parseAttrAddr = parseAtNotation <|> NamedAttr <$> parseAttrName
  where
   parseAtNotation :: Parser AttrAddr
   parseAtNotation = char '@' *> sc *> choice
