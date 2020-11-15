@@ -1880,7 +1880,7 @@ parseEdh' !world !srcName !lineNo !srcCode = do
             , stateParseErrors = []
             }
         )
-        (EdhParserState pd (SourceLoc pos1 pos1))
+        (EdhParserState pd (SrcPos 0 0))
   case pr of
     -- update operator precedence dict on success of parsing
     Right _ -> putTMVar wops pd'
@@ -3221,7 +3221,7 @@ evalExpr' (PrefixExpr Guard !expr') !docCmt !exit = \ !ets -> do
       (StmtSrc (!srcPos, _)) = edh'ctx'stmt ctx
   (consoleLogger $ edh'world'console world)
     30
-    (Just $ prettySourceLoc srcPos)
+    (Just $ prettySrcSpan srcPos)
     (ArgsPack [EdhString "standalone guard treated as plain value."] odEmpty)
   runEdhTx ets $ evalExpr' expr' docCmt exit
 
@@ -4886,7 +4886,7 @@ mkHostClass !scope !className !allocator !superClasses !storeMod = do
     edh'obj'class $ edh'obj'class $ edh'scope'this $ rootScopeOf scope
 
   clsCreStmt :: StmtSrc
-  clsCreStmt = StmtSrc (startPosOfFile "<host-class-creation>", VoidStmt)
+  clsCreStmt = StmtSrc (startLocOfFile "<host-class-creation>", VoidStmt)
 
 
 -- | make a sandbox scope from a vanilla object
@@ -4919,7 +4919,7 @@ mkObjSandbox !ets !obj !exit = case edh'obj'store obj of
           , edh'scope'that    = sbObj
           , edh'excpt'hndlr   = defaultEdhExcptHndlr
           , edh'scope'proc    = sbProc
-          , edh'scope'caller  = StmtSrc (startPosOfFile "<sandbox>", VoidStmt)
+          , edh'scope'caller  = StmtSrc (startLocOfFile "<sandbox>", VoidStmt)
           , edh'effects'stack = []
           }
       exit sbScope
@@ -4935,7 +4935,7 @@ mkObjSandbox !ets !obj !exit = case edh'obj'store obj of
 mkScopeSandbox :: EdhThreadState -> Scope -> (Scope -> STM ()) -> STM ()
 mkScopeSandbox !ets !origScope !exit = exit origScope
   { edh'scope'proc   = sbProc
-  , edh'scope'caller = StmtSrc (startPosOfFile "<sandbox>", VoidStmt)
+  , edh'scope'caller = StmtSrc (startLocOfFile "<sandbox>", VoidStmt)
   }
  where
   !world    = edh'prog'world $ edh'thread'prog ets

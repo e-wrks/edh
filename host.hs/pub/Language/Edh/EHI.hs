@@ -141,8 +141,8 @@ module Language.Edh.EHI
   , SourcePos(..)
   , mkPos
   , sourcePosPretty
-  , startPosOfFile
-  , prettySourceLoc
+  , startLocOfFile
+  , prettySrcSpan
 
     -- ** Object system
   , Object(..)

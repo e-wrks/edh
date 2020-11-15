@@ -26,31 +26,76 @@ type Precedence = Int
 type OpDeclLoc = Text
 
 
-data SourceSpan = SourceSpan {
-    source'span'start :: {-# UNPACK #-} !SourcePos
-  , source'span'end   :: {-# UNPACK #-} !SourceLoc
-  }
-instance Eq SourceSpan where
-  (SourceSpan x'start x'end) == (SourceSpan y'start y'end) =
-    x'start == y'start && x'end == y'end
-data SourceLoc = SourceLoc {
-    source'end'line   :: {-# UNPACK #-} !Pos
-  , source'end'column :: {-# UNPACK #-} !Pos
-  }
-instance Eq SourceLoc where
-  (SourceLoc x'line x'col) == (SourceLoc y'line y'col) =
-    x'line == y'line && x'col == y'col
-startPosOfFile :: FilePath -> SourceSpan
-startPosOfFile !n = SourceSpan (initialPos n) (SourceLoc pos1 pos1)
-prettySourceLoc :: SourceSpan -> String
-prettySourceLoc (SourceSpan !start _) = sourcePosPretty start
+-- | Source document
+--
+-- absolute local (though possibly network mounted) file path if started with
+-- '/', otherwise should be valid URI
+newtype SrcDoc = SrcDoc Text
+  deriving (Eq, Show)
+
+-- | Source position
+-- in LSP convention, i.e. no document locator
+data SrcPos = SrcPos {
+    -- in LSP convention, i.e. zero based
+    src'line :: !Int
+    -- in LSP convention, i.e. zero based
+  , src'char :: !Int
+  } deriving (Eq, Show)
+
+-- | Source range
+-- in LSP convention, i.e. no document locator
+data SrcRange = SrcRange {
+    -- in LSP convention, i.e. zero based
+    src'start :: {-# UNPACK #-} !SrcPos
+    -- in LSP convention, i.e. zero based
+  , src'end :: {-# UNPACK #-} !SrcPos
+  } deriving (Eq, Show)
+
+-- | Source location
+data SrcLoc = SrcLoc {
+    src'doc :: {-# UNPACK #-} !SrcDoc
+  , src'range :: {-# UNPACK #-} !SrcRange
+  } deriving (Eq, Show)
+
+
+lspSrcPosFromParsec :: SourcePos -> SrcPos
+lspSrcPosFromParsec !sp =
+  SrcPos (unPos (sourceLine sp) - 1) (unPos (sourceColumn sp) - 1)
+
+lspSrcLocFromParsec :: SourcePos -> SrcPos -> SrcLoc
+lspSrcLocFromParsec !sp !end =
+  SrcLoc (SrcDoc $ T.pack $ sourceName sp) $ SrcRange
+    (SrcPos (unPos (sourceLine sp) - 1) (unPos (sourceColumn sp) - 1))
+    end
+
+
+startLocOfFile :: FilePath -> SrcLoc
+startLocOfFile !n =
+  SrcLoc (SrcDoc $ T.pack n) (SrcRange (SrcPos 0 0) (SrcPos 0 0))
+prettySrcSpan :: SrcLoc -> Text
+prettySrcSpan (SrcLoc (SrcDoc !doc) (SrcRange (SrcPos !start'line !start'char) (SrcPos !end'line !end'char)))
+  | end'line == start'line && end'char == start'char
+  = if start'line == 0 && start'char == 0
+    then doc
+    else doc <> ":" <> T.pack (show $ 1 + start'line) <> ":" <> T.pack
+      (show $ 1 + start'char)
+  | otherwise
+  = doc
+    <> ":"
+    <> T.pack (show $ 1 + start'line)
+    <> ":"
+    <> T.pack (show $ 1 + start'char)
+    <> "-"
+    <> T.pack (show $ 1 + end'line)
+    <> ":"
+    <> T.pack (show $ 1 + end'char)
 
 
 data EdhParserState = EdhParserState {
     -- global dict for operator info, as the parsing state
     edh'parser'op'dict :: !GlobalOpDict
     -- end of last lexeme
-  , edh'parser'lexeme'end :: !SourceLoc
+  , edh'parser'lexeme'end :: !SrcPos
   }
 type GlobalOpDict = Map.HashMap OpSymbol (OpFixity, Precedence, OpDeclLoc)
 

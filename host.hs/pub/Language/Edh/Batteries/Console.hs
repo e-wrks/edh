@@ -42,7 +42,11 @@ loggingProc !lhExpr !rhExpr !exit !ets =
         then do
           !th <- unsafeIOToSTM myThreadId
           let !tracePrefix =
-                " 🐞 " <> show th <> " 👉 " <> prettySourceLoc srcPos <> " ❗ "
+                " 🐞 "
+                  <> show th
+                  <> " 👉 "
+                  <> T.unpack (prettySrcSpan srcPos)
+                  <> " ❗ "
           runEdhTx ets $ evalExpr rhExpr $ \ !rhVal _ets ->
             edhValueStr ets (edhDeCaseWrap rhVal) $ \ !logStr ->
               trace (tracePrefix ++ T.unpack logStr) $ exitEdh ets exit nil
@@ -52,7 +56,7 @@ loggingProc !lhExpr !rhExpr !exit !ets =
           else runEdhTx ets $ evalExpr rhExpr $ \ !rhVal _ets -> do
             let !srcLoc = if conLogLevel <= 20
                   then -- with source location info
-                       Just $ prettySourceLoc srcPos
+                       Just $ prettySrcSpan srcPos
                   else -- no source location info
                        Nothing
             -- convert all args to EdhString before passing to logger
@@ -171,7 +175,7 @@ conReadCommandProc (defaultArg defaultEdhPS1 -> !ps1) (defaultArg defaultEdhPS2 
                       edh'excpt'hndlr  = edh'excpt'hndlr callerScope
                       -- use a meaningful caller stmt
                     , edh'scope'caller = StmtSrc
-                      (startPosOfFile "<console-cmd>", VoidStmt)
+                      (startLocOfFile "<console-cmd>", VoidStmt)
                     }
                   NE.:| NE.tail (edh'ctx'stack ctx)
               }

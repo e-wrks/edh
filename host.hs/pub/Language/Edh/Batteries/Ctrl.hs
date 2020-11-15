@@ -148,7 +148,7 @@ arrowProc !lhExpr !rhExpr !exit !ets =
     let !pd = ProcDecl (NamedAttr arrowName)
                        argsRcvr
                        (StmtSrc (ctxSrcPos, ExprStmt rhExpr Nothing))
-                       (startPosOfFile "<lambda>")
+                       (startLocOfFile "<lambda>")
         !mth = procType ProcDefi { edh'procedure'ident = idProc
                                  , edh'procedure'name  = AttrByName arrowName
                                  , edh'procedure'lexi  = scope
@@ -229,7 +229,7 @@ prodArrowProc !lhExpr !rhExpr !exit !ets =
     let !pd = ProcDecl (NamedAttr arrowName)
                        argsRcvr
                        (StmtSrc (ctxSrcPos, ExprStmt rhExpr Nothing))
-                       (startPosOfFile "<lambda>")
+                       (startLocOfFile "<lambda>")
         !mth = EdhPrducr ProcDefi { edh'procedure'ident = idProc
                                   , edh'procedure'name  = AttrByName arrowName
                                   , edh'procedure'lexi  = scope

@@ -260,9 +260,7 @@ defaultEdhExcptHndlr _etsThrower !exv !rethrow = rethrow exv
 
 -- | Construct an call context from thread state
 getEdhCallContext :: Int -> EdhThreadState -> EdhCallContext
-getEdhCallContext !unwind !ets = EdhCallContext
-  (T.pack $ prettySourceLoc tip)
-  frames
+getEdhCallContext !unwind !ets = EdhCallContext (prettySrcSpan tip) frames
  where
   unwindStack :: Int -> [Scope] -> [Scope]
   unwindStack c s | c <= 0 = s
@@ -278,9 +276,9 @@ getEdhCallContext !unwind !ets = EdhCallContext
               (procedureName pd)
               (case edh'procedure'decl pd of
                 HostDecl _           -> "<host-code>"
-                ProcDecl _ _ _ !spos -> T.pack (prettySourceLoc spos)
+                ProcDecl _ _ _ !spos -> prettySrcSpan spos
               )
-              (T.pack $ prettySourceLoc callerPos)
+              (prettySrcSpan callerPos)
             : sfs
         )
         []
@@ -338,11 +336,12 @@ instance Show Scope where
       ++ " 🔎 "
       ++ defLoc
       ++ " 👈 "
-      ++ prettySourceLoc cPos
+      ++ T.unpack (prettySrcSpan cPos)
    where
     defLoc = case edh'procedure'decl pd of
-      HostDecl _      -> "<host-code>"
-      decl@ProcDecl{} -> prettySourceLoc $ edh'procedure'name'span decl
+      HostDecl _ -> "<host-code>"
+      decl@ProcDecl{} ->
+        T.unpack $ prettySrcSpan $ edh'procedure'name'span decl
 
 outerScopeOf :: Scope -> Maybe Scope
 outerScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
@@ -358,7 +357,7 @@ rootScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
 
 scopeLexiLoc :: Scope -> (Text -> STM ()) -> STM ()
 scopeLexiLoc !scope !exit = case edh'procedure'decl pd of
-  ProcDecl _ _ _ !nameSpan -> exit $ T.pack $ prettySourceLoc nameSpan
+  ProcDecl _ _ _ !nameSpan -> exit $ prettySrcSpan nameSpan
   HostDecl _ ->
     iopdLookup (AttrByName "__file__") (edh'scope'entity scope) >>= \case
       Nothing           -> exit $ "<host-procedure: " <> procedureName pd <> ">"
@@ -527,7 +526,7 @@ worldContext !world = Context
   { edh'ctx'stack        = edh'world'root world :| []
   , edh'ctx'genr'caller  = Nothing
   , edh'ctx'match        = true
-  , edh'ctx'stmt         = StmtSrc (startPosOfFile "<world>", VoidStmt)
+  , edh'ctx'stmt         = StmtSrc (startLocOfFile "<world>", VoidStmt)
   , edh'ctx'pure         = False
   , edh'ctx'exporting    = False
   , edh'ctx'eff'defining = False
@@ -555,7 +554,7 @@ data EdhInput = EdhInput {
   , edh'input'1st'line :: !Int
   , edh'input'src'lines :: ![Text]
   } deriving (Eq, Show)
-type EdhLogger = LogLevel -> Maybe String -> ArgsPack -> STM ()
+type EdhLogger = LogLevel -> Maybe Text -> ArgsPack -> STM ()
 type LogLevel = Int
 
 
@@ -1176,7 +1175,7 @@ false :: EdhValue
 false = EdhBool False
 
 
-newtype StmtSrc = StmtSrc (SourceSpan, Stmt)
+newtype StmtSrc = StmtSrc (SrcLoc, Stmt)
 instance Eq StmtSrc where
   StmtSrc (x'sp, _) == StmtSrc (y'sp, _) = x'sp == y'sp
 instance Show StmtSrc where
@@ -1239,7 +1238,7 @@ data Stmt =
     | ExprStmt !Expr !(Maybe DocComment)
   deriving (Show)
 
--- Attribute addressor
+-- Attribute reference
 data AttrRef = ThisRef | ThatRef | SuperRef
   | DirectRef !AttrAddr
   | IndirectRef !Expr !AttrAddr
@@ -1310,7 +1309,7 @@ data ProcDecl = HostDecl (ArgsPack -> EdhHostProc) | ProcDecl {
     edh'procedure'addr :: !AttrAddr
   , edh'procedure'args :: !ArgsReceiver
   , edh'procedure'body :: !StmtSrc
-  , edh'procedure'name'span :: !SourceSpan
+  , edh'procedure'name'span :: !SrcLoc
   }
 instance Eq ProcDecl where
   _ == _ = False
@@ -1586,7 +1585,7 @@ objectScope !obj = case edh'obj'store obj of
       , edh'excpt'hndlr   = defaultEdhExcptHndlr
       , edh'scope'proc    = ocProc
       , edh'scope'caller  = StmtSrc
-                              (startPosOfFile "<host-object-scope>", VoidStmt)
+                              (startLocOfFile "<host-object-scope>", VoidStmt)
       , edh'effects'stack = []
       }
 
@@ -1596,7 +1595,7 @@ objectScope !obj = case edh'obj'store obj of
     , edh'scope'that    = obj
     , edh'excpt'hndlr   = defaultEdhExcptHndlr
     , edh'scope'proc    = cp
-    , edh'scope'caller  = StmtSrc (startPosOfFile "<class-scope>", VoidStmt)
+    , edh'scope'caller  = StmtSrc (startLocOfFile "<class-scope>", VoidStmt)
     , edh'effects'stack = []
     }
 
@@ -1617,7 +1616,7 @@ objectScope !obj = case edh'obj'store obj of
               <$> iopdLookupDefault (EdhString "<on-the-fly>")
                                     (AttrByName "__file__")
                                     hs
-          let !srcSpan = startPosOfFile $ T.unpack moduFile
+          let !srcSpan = startLocOfFile $ T.unpack moduFile
           return Scope
             { edh'scope'entity  = hs
             , edh'scope'this    = obj
@@ -1635,7 +1634,7 @@ objectScope !obj = case edh'obj'store obj of
                 , edh'procedure'name'span = srcSpan
                 }
               }
-            , edh'scope'caller  = StmtSrc (startPosOfFile "<run-edh>", VoidStmt)
+            , edh'scope'caller  = StmtSrc (startLocOfFile "<run-edh>", VoidStmt)
             , edh'effects'stack = []
             }
         _ -> return Scope
@@ -1645,7 +1644,7 @@ objectScope !obj = case edh'obj'store obj of
           , edh'excpt'hndlr   = defaultEdhExcptHndlr
           , edh'scope'proc    = ocProc
           , edh'scope'caller  = StmtSrc
-                                  (startPosOfFile "<object-scope>", VoidStmt)
+                                  (startLocOfFile "<object-scope>", VoidStmt)
           , edh'effects'stack = []
           }
  where

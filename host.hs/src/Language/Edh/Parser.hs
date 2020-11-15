@@ -105,8 +105,7 @@ symbol !t = do
   !r  <- string t
   !sp <- getSourcePos
   !s  <- get
-  put s { edh'parser'lexeme'end = SourceLoc (sourceLine sp) (sourceColumn sp)
-        }
+  put s { edh'parser'lexeme'end = lspSrcPosFromParsec sp }
   void sc
   return r
 
@@ -115,8 +114,7 @@ lexeme !p = do
   !r  <- p
   !sp <- getSourcePos
   !s  <- get
-  put s { edh'parser'lexeme'end = SourceLoc (sourceLine sp) (sourceColumn sp)
-        }
+  put s { edh'parser'lexeme'end = lspSrcPosFromParsec sp }
   void sc
   return r
 
@@ -397,10 +395,7 @@ parseNamespaceExpr !si = do
         pn
         WildReceiver
         body
-        (SourceSpan
-          nameStartPos
-          (SourceLoc (sourceLine nameEndPos) (sourceColumn nameEndPos))
-        )
+        (lspSrcLocFromParsec nameStartPos (lspSrcPosFromParsec nameEndPos))
       )
       argSender
     , si''
@@ -418,10 +413,7 @@ parseClassExpr !si = do
       pn
       WildReceiver
       body
-      (SourceSpan
-        nameStartPos
-        (SourceLoc (sourceLine nameEndPos) (sourceColumn nameEndPos))
-      )
+      (lspSrcLocFromParsec nameStartPos (lspSrcPosFromParsec nameEndPos))
     , si'
     )
 
@@ -438,10 +430,7 @@ parseDataExpr !si = do
       pn
       ar
       body
-      (SourceSpan
-        nameStartPos
-        (SourceLoc (sourceLine nameEndPos) (sourceColumn nameEndPos))
-      )
+      (lspSrcLocFromParsec nameStartPos (lspSrcPosFromParsec nameEndPos))
     , si'
     )
 
@@ -502,10 +491,7 @@ parseProcDecl !si = do
       pn
       ar
       body
-      (SourceSpan
-        nameStartPos
-        (SourceLoc (sourceLine nameEndPos) (sourceColumn nameEndPos))
-      )
+      (lspSrcLocFromParsec nameStartPos (lspSrcPosFromParsec nameEndPos))
     , si'
     )
 
@@ -537,10 +523,7 @@ parseOpDeclOvrdExpr !si = do
             (NamedAttr opSym)
             argsRcvr
             body
-            (SourceSpan
-              nameStartPos
-              (SourceLoc (sourceLine nameEndPos) (sourceColumn nameEndPos))
-            )
+            (lspSrcLocFromParsec nameStartPos (lspSrcPosFromParsec nameEndPos))
       ps@(EdhParserState !opPD _) <- get
       case precDecl of
         Nothing -> case Map.lookup opSym opPD of
@@ -641,7 +624,7 @@ parseStmt' !prec !si = do
       return (ExprStmt x docCmt, si')
     ]
   EdhParserState _ !lexeme'end <- get
-  return (StmtSrc (SourceSpan startPos lexeme'end, stmt), si')
+  return (StmtSrc (lspSrcLocFromParsec startPos lexeme'end, stmt), si')
 
 parseStmt :: IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
 parseStmt !si = parseStmt' (-10) si

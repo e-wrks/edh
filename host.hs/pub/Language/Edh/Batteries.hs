@@ -120,19 +120,19 @@ defaultEdhConsole !inputSettings = do
       void $ tryTakeTMVar logIdle
       case logArgs of
         ArgsPack [!argVal] !kwargs | odNull kwargs ->
-          writeTBQueue logQueue $! T.pack logPrefix <> logString argVal <> "\n"
+          writeTBQueue logQueue $! logPrefix <> logString argVal <> "\n"
         _ -> -- todo: format structured log record,
              -- with some log parsers in mind
-          writeTBQueue logQueue $! T.pack (logPrefix ++ show logArgs) <> "\n"
+          writeTBQueue logQueue $! logPrefix <> T.pack (show logArgs) <> "\n"
      where
       logString :: EdhValue -> Text
       logString (EdhString s) = s
       logString v             = T.pack $ show v
-      logPrefix :: String
+      logPrefix :: Text
       logPrefix =
         (case srcLoc of
-            Nothing -> id
-            Just sl -> (++ sl ++ "\n")
+            Nothing  -> id
+            Just !sl -> (<> sl <> "\n")
           )
           $ case level of
               _ | level >= 50 -> "🔥 "

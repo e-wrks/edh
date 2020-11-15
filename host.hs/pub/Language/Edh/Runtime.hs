@@ -280,10 +280,10 @@ createEdhWorld !console = liftIO $ do
 
 
   -- * operator precedence dict
-  opPD  <- newTMVarIO Map.empty
+  !opPD  <- newTMVarIO Map.empty
 
   -- * the container of loaded modules
-  modus <- newTMVarIO Map.empty
+  !modus <- newTMVarIO Map.empty
 
   -- assembly the world with pieces prepared above
   let world = EdhWorld { edh'world'root        = rootScope
@@ -307,7 +307,7 @@ createEdhWorld !console = liftIO $ do
     throwEdhTx EvalError "bug: calling phantom procedure"
 
   genesisStmt :: StmtSrc
-  genesisStmt = StmtSrc (startPosOfFile "<genesis>", VoidStmt)
+  genesisStmt = StmtSrc (startLocOfFile "<genesis>", VoidStmt)
 
 
   mthClassRepr :: EdhHostProc
@@ -408,14 +408,14 @@ createEdhWorld !console = liftIO $ do
             $  "#scope@ "
             <> lexiLoc
             <> "\n#called by: "
-            <> T.pack (prettySourceLoc callerSrcLoc)
+            <> prettySrcSpan callerSrcLoc
 
   mthScopeCallerLoc :: EdhHostProc
   mthScopeCallerLoc !exit !ets =
     withThisHostObj' ets (exitEdh ets exit $ EdhString "<bogus scope object>")
       $ \(scope :: Scope) -> do
           let StmtSrc (!callerSrcLoc, _) = edh'scope'caller scope
-          exitEdh ets exit $ EdhString $ T.pack (prettySourceLoc callerSrcLoc)
+          exitEdh ets exit $ EdhString $ prettySrcSpan callerSrcLoc
 
   mthScopeLexiLoc :: EdhHostProc
   mthScopeLexiLoc !exit !ets =
