@@ -67,8 +67,11 @@ export data URI(
       { schema @< '://' >@ rest } -> {
         case rest of { rest @< '#' >@ fragment } -> { pass }
         case rest of { rest @< '?' >@ query } -> { pass }
-        case rest of { authority @< '/' >@ path } -> {
-          path = '/' ++ path
+        case rest of {
+          { authority @< '/' >@ path } -> {
+            path = '/' ++ path
+          }
+          _ -> authority = rest
         }
         return URI( schema, authority, path, query, fragment )
       }
