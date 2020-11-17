@@ -389,16 +389,15 @@ createEdhWorld !console = liftIO $ do
   mthScopeShow :: EdhHostProc
   mthScopeShow !exit !ets =
     withThisHostObj' ets (exitEdh ets exit $ EdhString "bogus scope object")
-      $ \(scope :: Scope) -> do
-          !lexiLoc <- edhScopeSrcLoc scope
-          exitEdh ets exit $ EdhString $ "#scope@ " <> prettySrcLoc lexiLoc
+      $ \(scope :: Scope) ->
+          exitEdh ets exit $ EdhString $ "#scope@ " <> prettySrcLoc
+            (edhScopeSrcLoc scope)
 
   mthScopeLexiLoc :: EdhHostProc
   mthScopeLexiLoc !exit !ets =
     withThisHostObj' ets (exitEdh ets exit $ EdhString "<bogus scope object>")
-      $ \(scope :: Scope) -> do
-          !lexiLoc <- edhScopeSrcLoc scope
-          exitEdh ets exit $ EdhString $ prettySrcLoc lexiLoc
+      $ \(scope :: Scope) ->
+          exitEdh ets exit $ EdhString $ prettySrcLoc $ edhScopeSrcLoc scope
 
   mthScopeAttrs :: EdhHostProc
   mthScopeAttrs !exit !ets =

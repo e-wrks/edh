@@ -87,9 +87,8 @@ export {
 
     console.print(
       ' * entering a repl at ' ++ callerScope.lexiLoc,
-      ' * which is called from ' ++ callerScope.callerLoc )
-    console.print(
-      ' * key in `quit` or `continue` to leave the repl and continue.' )
+      ' * key in `quit` or `continue` to leave the repl and continue.',
+    )
 
     rcArgs = ( ps1= '' ++prompt++ ' Đ: ', ps2= "Đ| ", inScopeOf=callerScope )
     while true {

@@ -86,20 +86,6 @@ edhCreateError !unwindDef !ets !tag apk@(ArgsPack !args !kwargs) = case args of
     _ -> unwindDef
 
 
-edhScopeSrcLoc :: Scope -> STM SrcLoc
-edhScopeSrcLoc !scope = scopeSrcDoc >>= \ !doc ->
-  let StmtSrc _ !body'span =
-          edh'procedure'body $ edh'procedure'decl $ edh'scope'proc scope
-  in  return $ SrcLoc doc body'span
- where
-  scopeSrcDoc :: STM SrcDoc
-  scopeSrcDoc = lookupEdhCtxAttr scope (AttrByName "__file__") >>= \case
-    EdhString !moduFile -> return $ SrcDoc moduFile
-    EdhNil -> return $ SrcDoc $ procedureName $ edh'scope'proc scope
-    !badFileVal ->
-      return $ SrcDoc $ "<bogus __file__: " <> T.pack (show badFileVal) <> ">"
-
-
 edhValueAsAttrKey :: EdhThreadState -> EdhValue -> (AttrKey -> STM ()) -> STM ()
 edhValueAsAttrKey !ets !keyVal !exit =
   let naExit = edhValueDesc ets keyVal $ \ !valDesc ->

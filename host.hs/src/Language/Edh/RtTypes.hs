@@ -326,6 +326,11 @@ rootScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
   else rootScopeOf outerScope
   where !outerScope = edh'procedure'lexi $ edh'scope'proc scope
 
+edhScopeSrcLoc :: Scope -> SrcLoc
+edhScopeSrcLoc !scope  = case   edh'procedure'decl   $  edh'scope'proc scope of 
+  HostDecl{} -> SrcLoc (SrcDoc "<host-code>") noSrcRange 
+  ProcDecl _ _ (StmtSrc _ !body'span) !loc -> loc { src'range  = body'span }
+
 
 -- | A class is wrapped as an object per se, the object's storage structure is
 -- here:
