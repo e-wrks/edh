@@ -3606,7 +3606,7 @@ evalExpr' (DefaultExpr (ExprSrc !exprDef _)) _docCmt !exit = \ !ets -> do
   exitEdh ets exit $ EdhDefault u exprDef (Just ets)
 
 evalExpr' (InfixExpr !opSym !lhExpr !rhExpr) _docCmt !exit =
-  evalInfix opSym lhExpr rhExpr exit
+  evalInfixSrc opSym lhExpr rhExpr exit
 
 -- defining an Edh class
 evalExpr' (ClassExpr HostDecl{}) _ _ =
@@ -3852,8 +3852,15 @@ evalExpr' (OpOvrdExpr !opFixity !opPrec !opSym !opProc) !docCmt !exit =
             <> badDesc
 
 
-evalInfix :: OpSymbol -> ExprSrc -> ExprSrc -> EdhHostProc
-evalInfix !opSym !lhExpr !rhExpr !exit !ets =
+evalInfix :: OpSymbol -> Expr -> Expr -> EdhHostProc
+evalInfix !opSym !lhExpr !rhExpr !exit !ets = evalInfixSrc
+  opSym
+  (ExprSrc lhExpr noSrcRange)
+  (ExprSrc rhExpr noSrcRange)
+  exit
+  ets
+evalInfixSrc :: OpSymbol -> ExprSrc -> ExprSrc -> EdhHostProc
+evalInfixSrc !opSym !lhExpr !rhExpr !exit !ets =
   resolveEdhCtxAttr scope (AttrByName opSym) >>= \case
     Nothing -> runEdhTx ets $ evalExprSrc lhExpr $ \ !lhVal ->
       evalExprSrc rhExpr $ \ !rhVal _ets ->

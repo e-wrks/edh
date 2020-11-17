@@ -84,8 +84,8 @@ assignWithOpProc !withOpSym lhExpr@(ExprSrc !lhe _) !rhExpr !exit !ets =
             iopdLookupDefault EdhNil ixVal ds >>= \ !dVal ->
               runEdhTx ets
                 $ evalInfix withOpSym
-                            (ExprSrc (LitExpr $ ValueLiteral dVal) noSrcRange)
-                            (ExprSrc (LitExpr $ ValueLiteral rhv) noSrcRange)
+                            (LitExpr $ ValueLiteral dVal)
+                            (LitExpr $ ValueLiteral rhv)
                 $ \ !opRtnV _ets -> do
                     case opRtnV of
                       EdhDefault{} -> pure ()
@@ -201,12 +201,9 @@ assignWithOpProc !withOpSym lhExpr@(ExprSrc !lhe _) !rhExpr !exit !ets =
           EdhObject !rhObj -> \_ets -> tryRightHandMagic rhObj
 
           _ ->
-            evalInfix
-                withOpSym
-                (ExprSrc (LitExpr $ ValueLiteral lhVal) noSrcRange)
-                (ExprSrc (LitExpr $ ValueLiteral $ edhDeCaseWrap rhVal)
-                         noSrcRange
-                )
+            evalInfix withOpSym
+                      (LitExpr $ ValueLiteral lhVal)
+                      (LitExpr $ ValueLiteral $ edhDeCaseWrap rhVal)
               $ \ !opRtnV -> case edhUltimate opRtnV of
                   EdhDefault{} -> edhSwitchState ets $ exitEdhTx exit opRtnV
                   _ -> assignEdhTarget lhe opRtnV $ edhSwitchState ets . exit
