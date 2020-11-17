@@ -33,7 +33,7 @@ export {
       error(
         msg and callerScope.eval( msg ) or 'assertion failed',
         # following goes as the thrown exception's @.details@
-        result=result, ***detailsResult
+        result= result, ***detailsResult
       )
     }
 

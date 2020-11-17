@@ -6,6 +6,7 @@ import           Prelude
 
 import           Data.Lossless.Decimal
 
+import           Language.Edh.Control
 import           Language.Edh.RtTypes
 import           Language.Edh.Evaluate
 
@@ -14,22 +15,24 @@ import           Language.Edh.Batteries.Data
 
 -- | operator (+)
 addProc :: EdhIntrinsicOp
-addProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+addProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
-    EdhDecimal !lhNum -> evalExpr rhExpr $ \ !rhVal ->
+    EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum + rhNum)
-        _                 -> concatProc (LitExpr (ValueLiteral lhVal))
-                                        (LitExpr (ValueLiteral rhVal))
-                                        exit
-    _ -> concatProc (LitExpr (ValueLiteral lhVal)) rhExpr exit
+        _ -> concatProc (ExprSrc (LitExpr (ValueLiteral lhVal)) noSrcRange)
+                        (ExprSrc (LitExpr (ValueLiteral rhVal)) noSrcRange)
+                        exit
+    _ -> concatProc (ExprSrc (LitExpr (ValueLiteral lhVal)) noSrcRange)
+                    rhExpr
+                    exit
 
 
 -- | operator (-)
 subtProc :: EdhIntrinsicOp
-subtProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+subtProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
-    EdhDecimal !lhNum -> evalExpr rhExpr $ \ !rhVal ->
+    EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum - rhNum)
         _                 -> exitEdhTx exit edhNA
@@ -38,9 +41,9 @@ subtProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 
 -- | operator (*)
 mulProc :: EdhIntrinsicOp
-mulProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+mulProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
-    EdhDecimal !lhNum -> evalExpr rhExpr $ \ !rhVal ->
+    EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum * rhNum)
         _                 -> exitEdhTx exit edhNA
@@ -49,9 +52,9 @@ mulProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 
 -- | operator (/)
 divProc :: EdhIntrinsicOp
-divProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+divProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
-    EdhDecimal !lhNum -> evalExpr rhExpr $ \ !rhVal ->
+    EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum / rhNum)
         _                 -> exitEdhTx exit edhNA
@@ -60,11 +63,11 @@ divProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 -- | operator (//) integer division, following Python 
 -- http://python-history.blogspot.com/2010/08/why-pythons-integer-division-floors.html
 divIntProc :: EdhIntrinsicOp
-divIntProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+divIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
     EdhDecimal !lhNum -> case decimalToInteger lhNum of
       Nothing   -> exitEdhTx exit edhNA
-      Just !lhi -> evalExpr rhExpr $ \ !rhVal -> case edhUltimate rhVal of
+      Just !lhi -> evalExprSrc rhExpr $ \ !rhVal -> case edhUltimate rhVal of
         EdhDecimal !rhNum -> case decimalToInteger rhNum of
           Nothing -> exitEdhTx exit edhNA
           Just !rhi ->
@@ -75,11 +78,11 @@ divIntProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 -- | operator (%) modulus of integer division, following Python 
 -- http://python-history.blogspot.com/2010/08/why-pythons-integer-division-floors.html
 modIntProc :: EdhIntrinsicOp
-modIntProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+modIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
     EdhDecimal !lhNum -> case decimalToInteger lhNum of
       Nothing  -> exitEdhTx exit edhNA
-      Just lhi -> evalExpr rhExpr $ \ !rhVal -> case edhUltimate rhVal of
+      Just lhi -> evalExprSrc rhExpr $ \ !rhVal -> case edhUltimate rhVal of
         EdhDecimal !rhNum -> case decimalToInteger rhNum of
           Nothing  -> exitEdhTx exit edhNA
           Just rhi -> exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `mod` rhi
@@ -89,9 +92,9 @@ modIntProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 
 -- | operator (**)
 powProc :: EdhIntrinsicOp
-powProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+powProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
-    EdhDecimal !lhNum -> evalExpr rhExpr $ \ !rhVal ->
+    EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum ->
           exitEdhTx exit (EdhDecimal $ powerDecimal lhNum rhNum)
@@ -101,46 +104,48 @@ powProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 
 -- | operator (and)
 nullishAndProc :: EdhIntrinsicOp
-nullishAndProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal !ets ->
+nullishAndProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal !ets ->
   edhValueNull ets lhVal $ \case
     -- short-circuiting, avoid eval of rhe
     True  -> exitEdh ets exit lhVal
     -- give right-hand value out
-    False -> runEdhTx ets $ evalExpr rhExpr exit
+    False -> runEdhTx ets $ evalExprSrc rhExpr exit
 
 -- | operator (or)
 nullishOrProc :: EdhIntrinsicOp
-nullishOrProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal !ets ->
+nullishOrProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal !ets ->
   edhValueNull ets lhVal $ \case
     -- short-circuiting, avoid eval of rhe
     False -> exitEdh ets exit lhVal
     -- give right-hand value out
-    True  -> runEdhTx ets $ evalExpr rhExpr exit
+    True  -> runEdhTx ets $ evalExprSrc rhExpr exit
 
 
 -- | operator (&&)
 logicalAndProc :: EdhIntrinsicOp
-logicalAndProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+logicalAndProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
-    EdhBool lhBool -> evalExpr rhExpr $ \ !rhVal -> case edhUltimate rhVal of
-      EdhBool rhBool -> exitEdhTx exit (EdhBool $ lhBool && rhBool)
-      _              -> exitEdhTx exit edhNA
+    EdhBool lhBool -> evalExprSrc rhExpr $ \ !rhVal ->
+      case edhUltimate rhVal of
+        EdhBool rhBool -> exitEdhTx exit (EdhBool $ lhBool && rhBool)
+        _              -> exitEdhTx exit edhNA
     _ -> exitEdhTx exit edhNA
 
 -- | operator (||)
 logicalOrProc :: EdhIntrinsicOp
-logicalOrProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+logicalOrProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
-    EdhBool lhBool -> evalExpr rhExpr $ \ !rhVal -> case edhUltimate rhVal of
-      EdhBool rhBool -> exitEdhTx exit (EdhBool $ lhBool || rhBool)
-      _              -> exitEdhTx exit edhNA
+    EdhBool lhBool -> evalExprSrc rhExpr $ \ !rhVal ->
+      case edhUltimate rhVal of
+        EdhBool rhBool -> exitEdhTx exit (EdhBool $ lhBool || rhBool)
+        _              -> exitEdhTx exit edhNA
     _ -> exitEdhTx exit edhNA
 
 
 -- | operator (==) and (!=)
 valEqProc :: (Bool -> Bool) -> EdhIntrinsicOp
-valEqProc !inversion !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal !ets -> if lhVal == rhVal
+valEqProc !inversion !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  evalExprSrc rhExpr $ \ !rhVal !ets -> if lhVal == rhVal
     then case lhVal of
       EdhObject{} -> -- same object, give default result, so magic enabled,
          -- vectorized equality test to itself is possible
@@ -158,42 +163,43 @@ valEqProc !inversion !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 
 -- | operator (is)
 idEqProc :: EdhIntrinsicOp
-idEqProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal -> evalExpr rhExpr
-  $ \ !rhVal -> exitEdhTx exit (EdhBool $ edhIdentEqual lhVal rhVal)
+idEqProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  evalExprSrc rhExpr
+    $ \ !rhVal -> exitEdhTx exit (EdhBool $ edhIdentEqual lhVal rhVal)
 
 -- | operator (is not)
 idNotEqProc :: EdhIntrinsicOp
-idNotEqProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr
+idNotEqProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  evalExprSrc rhExpr
     $ \ !rhVal -> exitEdhTx exit (EdhBool $ not $ edhIdentEqual lhVal rhVal)
 
 
 -- | operator (>)
 isGtProc :: EdhIntrinsicOp
-isGtProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
+isGtProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  evalExprSrc rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
     GT -> True
     _  -> False
 
 -- | operator (>=)
 isGeProc :: EdhIntrinsicOp
-isGeProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
+isGeProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  evalExprSrc rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
     GT -> True
     EQ -> True
     _  -> False
 
 -- | operator (<)
 isLtProc :: EdhIntrinsicOp
-isLtProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
+isLtProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  evalExprSrc rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
     LT -> True
     _  -> False
 
 -- | operator (<=)
 isLeProc :: EdhIntrinsicOp
-isLeProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
+isLeProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  evalExprSrc rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
     LT -> True
     EQ -> True
     _  -> False

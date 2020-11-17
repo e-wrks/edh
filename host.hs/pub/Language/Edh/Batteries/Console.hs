@@ -6,8 +6,7 @@ import           Debug.Trace
 
 import           GHC.Conc                       ( unsafeIOToSTM )
 
-import           Control.Applicative
-import           Control.Monad.Reader
+import           Control.Monad
 import           Control.Concurrent
 import           Control.Concurrent.STM
 
@@ -15,7 +14,6 @@ import           System.Clock
 
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
-import qualified Data.List.NonEmpty            as NE
 
 import           Data.Lossless.Decimal          ( Decimal
                                                 , decimalToInteger
@@ -31,10 +29,10 @@ import           Language.Edh.Evaluate
 
 -- | operator (<|)
 loggingProc :: EdhIntrinsicOp
-loggingProc !lhExpr !rhExpr !exit !ets =
-  runEdhTx ets $ evalExpr lhExpr $ \ !lhVal _ets ->
+loggingProc !lhExpr rhExpr@(ExprSrc _rhe (SrcRange !msg'start _msg'end)) !exit !ets
+  = runEdhTx ets $ evalExprSrc lhExpr $ \ !lhVal _ets ->
     case parseSpec $ edhDeCaseWrap lhVal of
-      Just (logLevel, StmtSrc (srcPos, _)) -> if logLevel < 0
+      Just !logLevel -> if logLevel < 0
         -- as the log queue is a TBQueue per se, log msgs from a failing STM
         -- transaction has no way to go into the queue then get logged, but the
         -- failing cases are especially in need of diagnostics, so negative log
@@ -45,18 +43,18 @@ loggingProc !lhExpr !rhExpr !exit !ets =
                 " 🐞 "
                   <> show th
                   <> " 👉 "
-                  <> T.unpack (prettySrcSpan srcPos)
+                  <> T.unpack (prettySrcPos doc msg'start)
                   <> " ❗ "
-          runEdhTx ets $ evalExpr rhExpr $ \ !rhVal _ets ->
+          runEdhTx ets $ evalExprSrc rhExpr $ \ !rhVal _ets ->
             edhValueStr ets (edhDeCaseWrap rhVal) $ \ !logStr ->
               trace (tracePrefix ++ T.unpack logStr) $ exitEdh ets exit nil
         else if logLevel < conLogLevel
           then -- drop log msg without even eval it
                exitEdh ets exit nil
-          else runEdhTx ets $ evalExpr rhExpr $ \ !rhVal _ets -> do
+          else runEdhTx ets $ evalExprSrc rhExpr $ \ !rhVal _ets -> do
             let !srcLoc = if conLogLevel <= 20
                   then -- with source location info
-                       Just $ prettySrcSpan srcPos
+                       Just (prettySrcPos doc msg'start)
                   else -- no source location info
                        Nothing
             -- convert all args to EdhString before passing to logger
@@ -81,22 +79,16 @@ loggingProc !lhExpr !rhExpr !exit !ets =
       _ ->
         throwEdh ets EvalError $ "invalid log target: " <> T.pack (show lhVal)
  where
-  !ctx         = edh'context ets
-  !console     = edh'world'console $ edh'prog'world $ edh'thread'prog ets
-  !conLogLevel = consoleLogLevel console
-  !logger      = consoleLogger console
+  !ctx            = edh'context ets
+  (SrcLoc !doc _) = contextSrcLoc ctx
+  !console        = edh'world'console $ edh'prog'world $ edh'thread'prog ets
+  !conLogLevel    = consoleLogLevel console
+  !logger         = consoleLogger console
 
-  parseSpec :: EdhValue -> Maybe (Int, StmtSrc)
+  parseSpec :: EdhValue -> Maybe Int
   parseSpec = \case
-    EdhDecimal !level ->
-      (, edh'ctx'stmt ctx) . fromInteger <$> decimalToInteger level
-    EdhPair (EdhDecimal !level) (EdhDecimal !unwind) ->
-      liftA2 (,) (fromInteger <$> decimalToInteger level)
-        $   edh'scope'caller
-        .   contextFrame ctx
-        .   fromInteger
-        <$> decimalToInteger unwind
-    _ -> Nothing
+    EdhDecimal !level -> fromInteger <$> decimalToInteger level
+    _                 -> Nothing
 
 
 -- | host method console.exit(***apk)
@@ -158,28 +150,20 @@ conReadCommandProc (defaultArg defaultEdhPS1 -> !ps1) (defaultArg defaultEdhPS2 
             $   edhContSTM
             $   readTMVar cmdIn
             >>= \(EdhInput !name !lineNo !lines_) ->
-                  runEdhTx etsCmd
-                    $ evalEdh'
-                        (if T.null name then "<console>" else T.unpack name)
-                        lineNo
-                        (T.unlines lines_)
+                  let
+                    !srcName = if T.null name then "<console>" else name
+                    !etsCmd  = ets
+                      { edh'context = ctx
+                        { edh'ctx'tip = (edh'ctx'tip ctx)
+                          { edh'frame'scope = cmdScope
+                          }
+                        }
+                      }
+                  in
+                    runEdhTx etsCmd
+                    $ evalEdh' srcName lineNo (T.unlines lines_)
                     $ edhSwitchState ets
                     . exitEdhTx exit
-         where
-          !etsCmd = ets
-            { edh'context = ctx
-              { edh'ctx'stack =
-                cmdScope
-                    {
-                      -- mind to inherit caller's exception handler anyway
-                      edh'excpt'hndlr  = edh'excpt'hndlr callerScope
-                      -- use a meaningful caller stmt
-                    , edh'scope'caller = StmtSrc
-                      (startLocOfFile "<console-cmd>", VoidStmt)
-                    }
-                  NE.:| NE.tail (edh'ctx'stack ctx)
-              }
-            }
       in
         case inScopeOf of
           Just !so -> castObjSelfStore so >>= \case
@@ -189,11 +173,10 @@ conReadCommandProc (defaultArg defaultEdhPS1 -> !ps1) (defaultArg defaultEdhPS2 
             -- eval cmd source in scope of the specified object
             Nothing -> objectScope so >>= \ !inScope -> doReadCmd inScope
           -- eval cmd source with caller's scope
-          _ -> doReadCmd callerScope
+          _ -> doReadCmd (callingScope ctx)
 
  where
   !ctx = edh'context ets
-  !callerScope = contextFrame ctx 1
   !ioQ = consoleIO $ edh'world'console $ edh'prog'world $ edh'thread'prog ets
 
 

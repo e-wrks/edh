@@ -60,7 +60,7 @@ blobProc !val !kwargs !exit !ets = case edhUltimate val of
   chkMagicRtn !rtn _ets = case edhUltimate rtn of
     EdhDefault _ !exprDef !etsDef ->
       runEdhTx (fromMaybe ets etsDef)
-        $ evalExpr (deExpr exprDef)
+        $ evalExpr (deExpr' exprDef)
         $ \ !defVal _ets -> case defVal of
             EdhNil -> naExit
             _      -> exitEdh ets exit defVal
@@ -79,7 +79,7 @@ propertyProc !getterVal !setterVal !exit !ets =
     _ -> throwEdh ets UsageError "can not define property for a host object"
  where
   !ctx         = edh'context ets
-  !caller'this = edh'scope'this $ contextFrame ctx 1
+  !caller'this = edh'scope'this $ callingScope ctx
 
   defProp :: EntityStore -> STM ()
   defProp !es = withGetter $ \ !getter -> withSetter $ \ !setter -> do
@@ -118,7 +118,7 @@ setterProc !setterVal !exit !ets = case edh'obj'store caller'this of
   _ -> throwEdh ets UsageError "can not define property for a host object"
  where
   !ctx         = edh'context ets
-  !caller'this = edh'scope'this $ contextFrame ctx 1
+  !caller'this = edh'scope'this $ callingScope ctx
 
   defProp :: EntityStore -> STM ()
   defProp !es = case setterVal of
@@ -147,13 +147,14 @@ setterProc !setterVal !exit !ets = case edh'obj'store caller'this of
 
 -- | operator (@) - attribute key dereferencing
 attrDerefAddrProc :: EdhIntrinsicOp
-attrDerefAddrProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal !ets ->
-  let naExit = edhValueDesc ets rhVal $ \ !badRefDesc ->
-        throwEdh ets EvalError
-          $  "invalid attribute reference value: "
-          <> badRefDesc
-  in  edhValueAsAttrKey' ets rhVal naExit $ \ !key ->
-        runEdhTx ets $ getEdhAttr lhExpr key (noAttr $ attrKeyStr key) exit
+attrDerefAddrProc !lhExpr !rhExpr !exit =
+  evalExprSrc rhExpr $ \ !rhVal !ets ->
+    let naExit = edhValueDesc ets rhVal $ \ !badRefDesc ->
+          throwEdh ets EvalError
+            $  "invalid attribute reference value: "
+            <> badRefDesc
+    in  edhValueAsAttrKey' ets rhVal naExit $ \ !key ->
+          runEdhTx ets $ getEdhAttr lhExpr key (noAttr $ attrKeyStr key) exit
  where
   noAttr !keyRepr !lhVal !ets = edhValueDesc ets lhVal $ \ !badDesc ->
     throwEdh ets EvalError
@@ -165,21 +166,23 @@ attrDerefAddrProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal !ets ->
 -- | operator (?@) - attribute dereferencing tempter, 
 -- address an attribute off an object if possible, nil otherwise
 attrDerefTemptProc :: EdhIntrinsicOp
-attrDerefTemptProc !lhExpr !rhExpr !exit = evalExpr rhExpr $ \ !rhVal !ets ->
-  let naExit = edhValueDesc ets rhVal $ \ !badRefDesc ->
-        throwEdh ets EvalError
-          $  "invalid attribute reference value: "
-          <> badRefDesc
-  in  edhValueAsAttrKey' ets rhVal naExit
-        $ \ !key -> runEdhTx ets $ getEdhAttr lhExpr key noAttr exit
+attrDerefTemptProc !lhExpr !rhExpr !exit =
+  evalExprSrc rhExpr $ \ !rhVal !ets ->
+    let naExit = edhValueDesc ets rhVal $ \ !badRefDesc ->
+          throwEdh ets EvalError
+            $  "invalid attribute reference value: "
+            <> badRefDesc
+    in  edhValueAsAttrKey' ets rhVal naExit
+          $ \ !key -> runEdhTx ets $ getEdhAttr lhExpr key noAttr exit
   where noAttr _ = exitEdhTx exit nil
 
 -- | operator (?) - attribute tempter, 
 -- address an attribute off an object if possible, nil otherwise
 attrTemptProc :: EdhIntrinsicOp
-attrTemptProc !lhExpr !rhExpr !exit !ets = case rhExpr of
-  AttrExpr (DirectRef !addr) -> resolveEdhAttrAddr ets addr $ \ !key ->
-    runEdhTx ets $ getEdhAttr lhExpr key (const $ exitEdhTx exit nil) exit
+attrTemptProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit !ets = case rhe of
+  AttrExpr (DirectRef (AttrAddrSrc !addr _)) ->
+    resolveEdhAttrAddr ets addr $ \ !key ->
+      runEdhTx ets $ getEdhAttr lhExpr key (const $ exitEdhTx exit nil) exit
   _ -> throwEdh ets EvalError $ "invalid attribute expression: " <> T.pack
     (show rhExpr)
 
@@ -189,11 +192,11 @@ attrTemptProc !lhExpr !rhExpr !exit !ets = case rhExpr of
 -- similar to the function application ($) operator in Haskell
 -- can be used to apply decorators with nicer syntax
 fapProc :: EdhIntrinsicOp
-fapProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  case edhUltimate lhVal of
+fapProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit =
+  evalExprSrc lhExpr $ \ !lhVal -> case edhUltimate lhVal of
     -- special case, support merging of apks with func app syntax, so args can
     -- be chained then applied to some function
-    EdhArgsPack (ArgsPack !args !kwargs) -> evalExpr rhExpr $ \ !rhVal ->
+    EdhArgsPack (ArgsPack !args !kwargs) -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhArgsPack (ArgsPack !args' !kwargs') -> \ !ets -> do
           !kwIOPD <- iopdFromList $ odToList kwargs
@@ -206,7 +209,7 @@ fapProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
       $ \ !mkCall -> runEdhTx ets (mkCall exit)
  where
   argsPkr :: ArgsPacker
-  argsPkr = case rhExpr of
+  argsPkr = case rhe of
     ArgsPackExpr !pkr -> pkr
     _                 -> [SendPosArg rhExpr]
 
@@ -219,8 +222,8 @@ ffapProc !lhExpr !rhExpr = fapProc rhExpr lhExpr
 
 -- | operator (:=) - named value definition
 defProc :: EdhIntrinsicOp
-defProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit =
-  evalExpr rhExpr $ \ !rhVal !ets -> do
+defProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valName) _))) _) !rhExpr !exit
+  = evalExprSrc rhExpr $ \ !rhVal !ets -> do
     let !ctx     = edh'context ets
         !scope   = contextScope ctx
         !es      = edh'scope'entity scope
@@ -257,11 +260,11 @@ defProc !lhExpr _ _ =
 
 -- | operator (?:=) - named value definition if missing
 defMissingProc :: EdhIntrinsicOp
-defMissingProc (AttrExpr (DirectRef (NamedAttr "_"))) _ _ !ets =
-  throwEdh ets UsageError "not so reasonable: _ ?:= xxx"
-defMissingProc (AttrExpr (DirectRef (NamedAttr !valName))) !rhExpr !exit !ets =
-  iopdLookup key es >>= \case
-    Nothing -> runEdhTx ets $ evalExpr rhExpr $ \ !rhVal _ets -> do
+defMissingProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "_") _))) _) _ _ !ets
+  = throwEdh ets UsageError "not so reasonable: _ ?:= xxx"
+defMissingProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valName) _))) _) !rhExpr !exit !ets
+  = iopdLookup key es >>= \case
+    Nothing -> runEdhTx ets $ evalExprSrc rhExpr $ \ !rhVal _ets -> do
       let !rhv = edhDeCaseWrap rhVal
           !nv  = EdhNamedValue valName rhv
       iopdInsert key nv es
@@ -277,8 +280,8 @@ defMissingProc !lhExpr _ _ !ets =
 
 -- | operator (:) - pair constructor
 pairCtorProc :: EdhIntrinsicOp
-pairCtorProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal ->
+pairCtorProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  evalExprSrc rhExpr $ \ !rhVal ->
     exitEdhTx exit (EdhPair (edhDeCaseWrap lhVal) (edhDeCaseWrap rhVal))
 
 
@@ -430,8 +433,8 @@ jsonProc !apk !exit !ets =
 -- | operator (++) - string coercing concatenator
 concatProc :: EdhIntrinsicOp
 concatProc !lhExpr !rhExpr !exit !ets =
-  runEdhTx ets $ evalExpr lhExpr $ \ !lhVal -> evalExpr rhExpr $ \ !rhVal ->
-    case edhUltimate lhVal of
+  runEdhTx ets $ evalExprSrc lhExpr $ \ !lhVal ->
+    evalExprSrc rhExpr $ \ !rhVal -> case edhUltimate lhVal of
       EdhString !lhStr -> case edhUltimate rhVal of
         EdhString !rhStr -> exitEdhTx exit $ EdhString $ lhStr <> rhStr
         _                -> \_ets -> defaultConvert lhVal rhVal
@@ -449,11 +452,25 @@ concatProc !lhExpr !rhExpr !exit !ets =
       u
       (InfixExpr
         "++"
-        (CallExpr (AttrExpr (DirectRef (NamedAttr "str")))
-                  [SendPosArg (LitExpr (ValueLiteral lhVal))]
+        (ExprSrc
+          (CallExpr
+            (ExprSrc
+              (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "str") noSrcRange)))
+              noSrcRange
+            )
+            [SendPosArg (ExprSrc (LitExpr (ValueLiteral lhVal)) noSrcRange)]
+          )
+          noSrcRange
         )
-        (CallExpr (AttrExpr (DirectRef (NamedAttr "str")))
-                  [SendPosArg (LitExpr (ValueLiteral rhVal))]
+        (ExprSrc
+          (CallExpr
+            (ExprSrc
+              (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "str") noSrcRange)))
+              noSrcRange
+            )
+            [SendPosArg (ExprSrc (LitExpr (ValueLiteral rhVal)) noSrcRange)]
+          )
+          noSrcRange
         )
       )
       (Just ets)
@@ -809,8 +826,8 @@ listPopProc (List _ !lv) !exit !ets =
 
 -- | operator (?<=) - element-of tester
 elemProc :: EdhIntrinsicOp
-elemProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal -> case edhUltimate rhVal of
+elemProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  evalExprSrc rhExpr $ \ !rhVal -> case edhUltimate rhVal of
     EdhArgsPack (ArgsPack !vs _ ) -> exitEdhTx exit (EdhBool $ lhVal `elem` vs)
     EdhList     (List     _   !l) -> \ !ets -> do
       ll <- readTVar l
@@ -823,16 +840,16 @@ elemProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 
 -- | operator (|*) - prefix tester
 isPrefixOfProc :: EdhIntrinsicOp
-isPrefixOfProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal !ets ->
+isPrefixOfProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  evalExprSrc rhExpr $ \ !rhVal !ets ->
     edhValueStr ets (edhUltimate lhVal) $ \ !lhStr ->
       edhValueStr ets (edhUltimate rhVal)
         $ \ !rhStr -> exitEdh ets exit $ EdhBool $ lhStr `T.isPrefixOf` rhStr
 
 -- | operator (*|) - suffix tester
 hasSuffixProc :: EdhIntrinsicOp
-hasSuffixProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal !ets ->
+hasSuffixProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  evalExprSrc rhExpr $ \ !rhVal !ets ->
     edhValueStr ets (edhUltimate lhVal) $ \ !lhStr ->
       edhValueStr ets (edhUltimate rhVal)
         $ \ !rhStr -> exitEdh ets exit $ EdhBool $ rhStr `T.isSuffixOf` lhStr
@@ -840,8 +857,8 @@ hasSuffixProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 
 -- | operator (:>) - prepender
 prpdProc :: EdhIntrinsicOp
-prpdProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
-  evalExpr rhExpr $ \ !rhVal ->
+prpdProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  evalExprSrc rhExpr $ \ !rhVal ->
     let !lhv = edhDeCaseWrap lhVal
     in
       case edhUltimate rhVal of
@@ -858,18 +875,18 @@ prpdProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 
 -- | operator (<-) - event publisher
 evtPubProc :: EdhIntrinsicOp
-evtPubProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+evtPubProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
-    EdhSink !es ->
-      evalExpr rhExpr $ \ !rhVal -> publishEvent es (edhDeCaseWrap rhVal) exit
+    EdhSink !es -> evalExprSrc rhExpr
+      $ \ !rhVal -> publishEvent es (edhDeCaseWrap rhVal) exit
     _ -> exitEdhTx exit edhNA
 
 
 -- | operator (>>) - list reverse prepender
 lstrvrsPrpdProc :: EdhIntrinsicOp
-lstrvrsPrpdProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
+lstrvrsPrpdProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
-    EdhList (List _ !ll) -> evalExpr rhExpr $ \ !rhVal ->
+    EdhList (List _ !ll) -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhArgsPack (ArgsPack !vs !kwargs) -> \ !ets -> do
           lll <- readTVar ll
@@ -896,8 +913,8 @@ lstrvrsPrpdProc !lhExpr !rhExpr !exit = evalExpr lhExpr $ \ !lhVal ->
 --  * args append
 --      () =< (...) / [...] / {...}
 cprhProc :: EdhIntrinsicOp
-cprhProc !lhExpr !rhExpr !exit = case deParen rhExpr of
-  ForExpr argsRcvr iterExpr doExpr -> evalExpr lhExpr $ \ !lhVal !ets ->
+cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
+  ForExpr !argsRcvr !iterExpr !doExpr -> evalExprSrc lhExpr $ \ !lhVal !ets ->
     case edhUltimate lhVal of
       EdhList (List _ !l) -> edhPrepareForLoop
         ets
@@ -937,7 +954,7 @@ cprhProc !lhExpr !rhExpr !exit = case deParen rhExpr of
           <> T.pack (edhTypeNameOf lhVal)
           <> ": "
           <> T.pack (show lhVal)
-  _ -> evalExpr lhExpr $ \ !lhVal -> evalExpr rhExpr $ \ !rhVal !ets ->
+  _ -> evalExprSrc lhExpr $ \ !lhVal -> evalExprSrc rhExpr $ \ !rhVal !ets ->
     case edhUltimate lhVal of
       EdhArgsPack (ArgsPack !vs !kwvs) -> case edhUltimate rhVal of
         EdhArgsPack (ArgsPack !args !kwargs) -> do

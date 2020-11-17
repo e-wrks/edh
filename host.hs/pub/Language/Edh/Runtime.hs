@@ -12,7 +12,6 @@ import           Control.Monad.Except
 import           Control.Concurrent.STM
 
 import           Data.Maybe
-import qualified Data.List.NonEmpty            as NE
 import qualified Data.ByteString               as B
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
@@ -61,27 +60,20 @@ createEdhWorld !console = liftIO $ do
   !mroNamespace <- newTVarIO [] -- no super class, and self is not stored
 
   let
-    rootScope =
-      Scope hsRoot rootObj rootObj defaultEdhExcptHndlr rootProc genesisStmt []
-    rootProc = ProcDefi idRoot
-                        (AttrByName "<root>")
-                        rootScope
-                        (Just ["the root namespace"])
-                        (HostDecl phantomHostProc)
+    rootScope = Scope hsRoot rootObj rootObj rootProc []
+    rootProc  = ProcDefi idRoot
+                         (AttrByName "<root>")
+                         rootScope
+                         (Just ["the root namespace"])
+                         (HostDecl phantomHostProc)
     rootObj      = Object idRoot (HashStore hsRoot) nsClassObj ssRoot
 
-    sandboxScope = Scope hsSandbox
-                         sandboxObj
-                         sandboxObj
-                         defaultEdhExcptHndlr
-                         sandboxProc
-                         genesisStmt
-                         []
-    sandboxProc = ProcDefi idSandbox
-                           (AttrByName "<sandbox>")
-                           sandboxScope
-                           (Just ["the sandbox namespace"])
-                           (HostDecl phantomHostProc)
+    sandboxScope = Scope hsSandbox sandboxObj sandboxObj sandboxProc []
+    sandboxProc  = ProcDefi idSandbox
+                            (AttrByName "<sandbox>")
+                            sandboxScope
+                            (Just ["the sandbox namespace"])
+                            (HostDecl phantomHostProc)
     sandboxObj =
       Object idSandbox (HashStore hsSandbox) sandboxClassObj ssSandbox
     sandboxClass = Class sandboxProc hsSandbox phantomAllocator mroSandbox
@@ -152,9 +144,8 @@ createEdhWorld !console = liftIO $ do
        ]
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
        | (nm, getter, setter) <-
-         [ ("outer"    , mthScopeOuterGetter, Nothing)
-         , ("lexiLoc"  , mthScopeLexiLoc    , Nothing)
-         , ("callerLoc", mthScopeCallerLoc  , Nothing)
+         [ ("outer"  , mthScopeOuterGetter, Nothing)
+         , ("lexiLoc", mthScopeLexiLoc    , Nothing)
          ]
        ]
   let scopeAllocator :: "ofObj" ?: Object -> EdhObjectAllocator
@@ -190,7 +181,7 @@ createEdhWorld !console = liftIO $ do
        ]
     ++ [ (AttrByName nm, ) <$> mkHostProperty rootScope nm getter setter
        | (nm, getter, setter) <-
-         [ ("stack"  , mthErrStackGetter  , Nothing)
+         [ ("context", mthErrCtxGetter    , Nothing)
          , ("message", mthErrMsgGetter    , Nothing)
          , ("details", mthErrDetailsGetter, Nothing)
          ]
@@ -306,9 +297,6 @@ createEdhWorld !console = liftIO $ do
   phantomHostProc _apk _exit =
     throwEdhTx EvalError "bug: calling phantom procedure"
 
-  genesisStmt :: StmtSrc
-  genesisStmt = StmtSrc (startLocOfFile "<genesis>", VoidStmt)
-
 
   mthClassRepr :: EdhHostProc
   mthClassRepr !exit !ets = case edh'obj'store clsObj of
@@ -401,27 +389,16 @@ createEdhWorld !console = liftIO $ do
   mthScopeShow :: EdhHostProc
   mthScopeShow !exit !ets =
     withThisHostObj' ets (exitEdh ets exit $ EdhString "bogus scope object")
-      $ \(scope :: Scope) -> scopeLexiLoc scope $ \ !lexiLoc -> do
-          let StmtSrc (!callerSrcLoc, _) = edh'scope'caller scope
-          exitEdh ets exit
-            $  EdhString
-            $  "#scope@ "
-            <> lexiLoc
-            <> "\n#called by: "
-            <> prettySrcSpan callerSrcLoc
-
-  mthScopeCallerLoc :: EdhHostProc
-  mthScopeCallerLoc !exit !ets =
-    withThisHostObj' ets (exitEdh ets exit $ EdhString "<bogus scope object>")
       $ \(scope :: Scope) -> do
-          let StmtSrc (!callerSrcLoc, _) = edh'scope'caller scope
-          exitEdh ets exit $ EdhString $ prettySrcSpan callerSrcLoc
+          !lexiLoc <- edhScopeSrcLoc scope
+          exitEdh ets exit $ EdhString $ "#scope@ " <> prettySrcLoc lexiLoc
 
   mthScopeLexiLoc :: EdhHostProc
   mthScopeLexiLoc !exit !ets =
     withThisHostObj' ets (exitEdh ets exit $ EdhString "<bogus scope object>")
-      $ \(scope :: Scope) -> scopeLexiLoc scope
-          $ \ !lexiLoc -> exitEdh ets exit $ EdhString lexiLoc
+      $ \(scope :: Scope) -> do
+          !lexiLoc <- edhScopeSrcLoc scope
+          exitEdh ets exit $ EdhString $ prettySrcLoc lexiLoc
 
   mthScopeAttrs :: EdhHostProc
   mthScopeAttrs !exit !ets =
@@ -499,50 +476,35 @@ createEdhWorld !console = liftIO $ do
             iopdUpdate (attrs ++ odToList kwargs) es
             exitEdh ets exit nil
 
-  mthScopeEval :: ArgsPack -> EdhHostProc
-  mthScopeEval (ArgsPack !args !kwargs) !exit !ets =
-    withThisHostObj' ets (throwEdh ets EvalError "bogus scope object")
+  mthScopeEval :: "expression" !: EdhValue -> "srcName" ?: Text -> EdhHostProc
+  mthScopeEval (mandatoryArg  -> !exprVal) (defaultArg "<ad-hoc>" -> !srcName) !exit !ets
+    = withThisHostObj' ets (throwEdh ets EvalError "bogus scope object")
       $ \(scope :: Scope) -> do
         -- eval all exprs with the original scope on top of current call stack
-          let !ctx            = edh'context ets
-              !scopeCallStack = scope NE.<| edh'ctx'stack ctx
-              !etsEval        = ets
-                { edh'context = ctx { edh'ctx'stack        = scopeCallStack
-                                    , edh'ctx'genr'caller  = Nothing
-                                    , edh'ctx'match        = true
-                                    , edh'ctx'pure         = False
-                                    , edh'ctx'exporting    = False
-                                    , edh'ctx'eff'defining = False
-                                    }
+          let !ctx     = edh'context ets
+              !etsEval = ets
+                { edh'context = ctx
+                                  { edh'ctx'tip          = EdhCallFrame
+                                                             scope
+                                                             (SrcLoc (SrcDoc srcName)
+                                                                     zeroSrcRange
+                                                             )
+                                                             defaultEdhExcptHndlr
+                                  , edh'ctx'stack        = edh'ctx'tip ctx
+                                                             : edh'ctx'stack ctx
+                                  , edh'ctx'genr'caller  = Nothing
+                                  , edh'ctx'match        = true
+                                  , edh'ctx'pure         = False
+                                  , edh'ctx'exporting    = False
+                                  , edh'ctx'eff'defining = False
+                                  }
                 }
-          !kwIOPD <- iopdEmpty
-          let
-            evalThePack
-              :: [EdhValue] -> [EdhValue] -> [(AttrKey, EdhValue)] -> STM ()
-            evalThePack !argsValues [] [] =
-              iopdToList kwIOPD >>= \ !kwargsValues ->
-                -- restore original tx state and return the eval-ed values
-                exitEdh ets exit $ case argsValues of
-                  [val] | null kwargsValues -> val
-                  _ ->
-                    EdhArgsPack $ ArgsPack (reverse argsValues) $ odFromList
-                      kwargsValues
-            evalThePack !argsValues [] (kwExpr : kwargsExprs') = case kwExpr of
-              (!kw, EdhExpr _ !expr _) ->
-                runEdhTx etsEval $ evalExpr expr $ \ !val _ets -> do
-                  edhSetValue kw (edhDeCaseWrap val) kwIOPD
-                  evalThePack argsValues [] kwargsExprs'
-              !v -> throwEdh ets EvalError $ "not an expr: " <> T.pack (show v)
-            evalThePack !argsValues (argExpr : argsExprs') !kwargsExprs =
-              case argExpr of
-                EdhExpr _ !expr _ ->
-                  runEdhTx etsEval $ evalExpr expr $ \ !val _ets -> evalThePack
-                    (edhDeCaseWrap val : argsValues)
-                    argsExprs'
-                    kwargsExprs
-                !v ->
-                  throwEdh ets EvalError $ "not an expr: " <> T.pack (show v)
-          evalThePack [] args $ odToList kwargs
+          case exprVal of
+            EdhExpr _ !expr _ ->
+              runEdhTx etsEval $ evalExpr expr $ \ !val _ets ->
+                exitEdh ets exit $ edhDeCaseWrap val
+            !badExpr -> edhValueDesc ets badExpr $ \ !badDesc ->
+              throwEdh ets EvalError $ "not an expr: " <> badDesc
 
   mthScopeOuterGetter :: EdhHostProc
   mthScopeOuterGetter !exit !ets = case edh'obj'store this of
@@ -664,7 +626,7 @@ createEdhWorld !console = liftIO $ do
   mthErrDesc !exit !ets = case edh'obj'store errObj of
     HostStore !hsd -> case fromDynamic hsd of
       Just (exc :: SomeException) -> case edhKnownError exc of
-        Just err@(EdhError _errTag _errMsg !details _cc) ->
+        Just err@(EdhError _errTag _errMsg !details _errCtx) ->
           case fromDynamic details of
             Just EdhNil      -> exitEdh ets exit $ EdhString $ T.pack (show err)
             Just !detailsVal -> edhValueStr ets detailsVal $ \ !detailsStr ->
@@ -683,14 +645,12 @@ createEdhWorld !console = liftIO $ do
     !errObj     = edh'scope'this $ contextScope $ edh'context ets
     !errClsName = objClassName errObj
 
-  mthErrStackGetter :: EdhHostProc
-  mthErrStackGetter !exit !ets = case edh'obj'store errObj of
+  mthErrCtxGetter :: EdhHostProc
+  mthErrCtxGetter !exit !ets = case edh'obj'store errObj of
     HostStore !hsd -> case fromDynamic hsd of
       Just (exc :: SomeException) -> case edhKnownError exc of
-        Just (EdhError _errTag _errMsg _details (EdhCallContext !tip !frames))
-          -> exitEdh ets exit $ EdhArgsPack $ ArgsPack
-            (EdhString . dispEdhCallFrame <$> frames)
-            (odFromList [(AttrByName "tip", EdhString tip)])
+        Just (EdhError _errTag _errMsg _details !errCtx) ->
+          exitEdh ets exit $ EdhString errCtx
         _ -> exitEdh ets exit nil
       _ -> exitEdh ets exit nil
     _ -> exitEdh ets exit nil
@@ -780,43 +740,39 @@ declareEdhOperators world declLoc opps = do
     (prevFixity, prevPrec, prevDeclLoc) <- prev
     (newFixity , newPrec , newDeclLoc ) <- newly
     if prevPrec /= newPrec
-      then
-        throwSTM
-        $ EdhError
+      then throwSTM $ EdhError
+        UsageError
+        (  "precedence change from "
+        <> T.pack (show prevPrec)
+        <> " (declared at "
+        <> prevDeclLoc
+        <> ") to "
+        <> T.pack (show newPrec)
+        <> " (declared at "
+        <> T.pack (show newDeclLoc)
+        <> ") for operator: "
+        <> sym
+        )
+        (toDyn nil)
+        "<edh>"
+      else case newFixity of
+        Infix -> return (prevFixity, prevPrec, prevDeclLoc)
+        _     -> if newFixity /= prevFixity
+          then throwSTM $ EdhError
             UsageError
-            (  "precedence change from "
-            <> T.pack (show prevPrec)
+            (  "fixity change from "
+            <> T.pack (show prevFixity)
             <> " (declared at "
             <> prevDeclLoc
             <> ") to "
-            <> T.pack (show newPrec)
+            <> T.pack (show newFixity)
             <> " (declared at "
             <> T.pack (show newDeclLoc)
             <> ") for operator: "
             <> sym
             )
             (toDyn nil)
-        $ EdhCallContext "<edh>" []
-      else case newFixity of
-        Infix -> return (prevFixity, prevPrec, prevDeclLoc)
-        _     -> if newFixity /= prevFixity
-          then
-            throwSTM
-            $ EdhError
-                UsageError
-                (  "fixity change from "
-                <> T.pack (show prevFixity)
-                <> " (declared at "
-                <> prevDeclLoc
-                <> ") to "
-                <> T.pack (show newFixity)
-                <> " (declared at "
-                <> T.pack (show newDeclLoc)
-                <> ") for operator: "
-                <> sym
-                )
-                (toDyn nil)
-            $ EdhCallContext "<edh>" []
+            "<edh>"
           else return (newFixity, prevPrec, prevDeclLoc)
 
 
@@ -904,9 +860,10 @@ runEdhModule' !world !impPath !preRun =
         in  edhCreateModule world moduName moduId moduFile >>= \ !modu ->
               moduleContext world modu >>= \ !moduCtx ->
                 let !etsModu = ets { edh'context = moduCtx }
-                in  preRun etsModu $ runEdhTx etsModu $ evalEdh moduFile
-                                                                moduSource
-                                                                endOfEdh
+                in  preRun etsModu $ runEdhTx etsModu $ evalEdh
+                      (T.pack moduFile)
+                      moduSource
+                      endOfEdh
 
 
 runEdhFile :: MonadIO m => EdhWorld -> FilePath -> m (Either EdhError EdhValue)
@@ -920,7 +877,7 @@ runEdhFile' !world !edhFile =
       edhCreateModule world "__main__" "__main__" edhFile >>= \ !modu ->
         moduleContext world modu >>= \ !moduCtx ->
           let !etsModu = ets { edh'context = moduCtx }
-          in  runEdhTx etsModu $ evalEdh edhFile moduSource endOfEdh
+          in  runEdhTx etsModu $ evalEdh (T.pack edhFile) moduSource endOfEdh
 
 
 -- | perform an effectful call from current Edh context

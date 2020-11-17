@@ -15,53 +15,54 @@ import           Language.Edh.Evaluate
 
 -- | operator (=)
 assignProc :: EdhIntrinsicOp
-assignProc !lhExpr !rhExpr !exit !ets = runEdhTx etsAssign $ case lhExpr of
+assignProc (ExprSrc !lhe _) !rhExpr !exit !ets =
+  runEdhTx etsAssign $ case lhe of
   -- indexing assignment
-  IndexExpr !ixExpr !tgtExpr -> evalExpr ixExpr $ \ !ixV -> do
-    let !ixVal = edhDeCaseWrap ixV
-    evalExpr rhExpr $ \ !rhVal -> do
-      let !rhv = edhDeCaseWrap rhVal
-      evalExpr tgtExpr $ \ !tgtVal _ets -> case edhUltimate tgtVal of
+    IndexExpr !ixExpr !tgtExpr -> evalExprSrc ixExpr $ \ !ixV -> do
+      let !ixVal = edhDeCaseWrap ixV
+      evalExprSrc rhExpr $ \ !rhVal -> do
+        let !rhv = edhDeCaseWrap rhVal
+        evalExprSrc tgtExpr $ \ !tgtVal _ets -> case edhUltimate tgtVal of
 
-        -- indexing assign to a dict
-        EdhDict (Dict _ !ds) -> do
-          setDictItem ixVal rhv ds
-          exitEdh ets exit rhv
+          -- indexing assign to a dict
+          EdhDict (Dict _ !ds) -> do
+            setDictItem ixVal rhv ds
+            exitEdh ets exit rhv
 
-        -- indexing assign to an object, by calling its ([=])
-        -- method with ixVal and rhv as the args
-        EdhObject obj -> lookupEdhObjAttr obj (AttrByName "[=]") >>= \case
-          (_, EdhNil) -> exitEdh ets exit edhNA
-          (this', EdhProcedure (EdhMethod !mth'proc) _) ->
-            runEdhTx ets $ callEdhMethod this'
-                                         obj
-                                         mth'proc
-                                         (ArgsPack [ixVal, rhv] odEmpty)
-                                         id
-                                         exit
-          (_, EdhBoundProc (EdhMethod !mth'proc) !this !that _) ->
-            runEdhTx ets $ callEdhMethod this
-                                         that
-                                         mth'proc
-                                         (ArgsPack [ixVal, rhv] odEmpty)
-                                         id
-                                         exit
-          (_, !badIndexer) ->
-            throwEdh ets EvalError
-              $  "malformed magic method ([=]) on "
-              <> T.pack (show obj)
-              <> " - "
-              <> T.pack (edhTypeNameOf badIndexer)
-              <> ": "
-              <> T.pack (show badIndexer)
+          -- indexing assign to an object, by calling its ([=])
+          -- method with ixVal and rhv as the args
+          EdhObject obj -> lookupEdhObjAttr obj (AttrByName "[=]") >>= \case
+            (_, EdhNil) -> exitEdh ets exit edhNA
+            (this', EdhProcedure (EdhMethod !mth'proc) _) ->
+              runEdhTx ets $ callEdhMethod this'
+                                           obj
+                                           mth'proc
+                                           (ArgsPack [ixVal, rhv] odEmpty)
+                                           id
+                                           exit
+            (_, EdhBoundProc (EdhMethod !mth'proc) !this !that _) ->
+              runEdhTx ets $ callEdhMethod this
+                                           that
+                                           mth'proc
+                                           (ArgsPack [ixVal, rhv] odEmpty)
+                                           id
+                                           exit
+            (_, !badIndexer) ->
+              throwEdh ets EvalError
+                $  "malformed magic method ([=]) on "
+                <> T.pack (show obj)
+                <> " - "
+                <> T.pack (edhTypeNameOf badIndexer)
+                <> ": "
+                <> T.pack (show badIndexer)
 
-        _ -> exitEdh ets exit edhNA
+          _ -> exitEdh ets exit edhNA
 
-  _ -> evalExpr rhExpr $ \ !rhVal ->
-    assignEdhTarget lhExpr (edhDeCaseWrap rhVal)
-      -- restore original tx state
-      $ edhSwitchState ets
-      . exitEdhTx exit
+    _ -> evalExprSrc rhExpr $ \ !rhVal ->
+      assignEdhTarget lhe (edhDeCaseWrap rhVal)
+        -- restore original tx state
+        $ edhSwitchState ets
+        . exitEdhTx exit
 
  where
   -- discourage artifact definition during assignment
@@ -70,21 +71,21 @@ assignProc !lhExpr !rhExpr !exit !ets = runEdhTx etsAssign $ case lhExpr of
 
 -- | operator (+=), (-=), (*=), (/=), (//=), (&&=), (||=) etc.
 assignWithOpProc :: OpSymbol -> EdhIntrinsicOp
-assignWithOpProc !withOpSym !lhExpr !rhExpr !exit !ets =
-  runEdhTx etsAssign $ case lhExpr of
-    IndexExpr ixExpr tgtExpr -> evalExpr ixExpr $ \ !ixV -> do
+assignWithOpProc !withOpSym lhExpr@(ExprSrc !lhe _) !rhExpr !exit !ets =
+  runEdhTx etsAssign $ case lhe of
+    IndexExpr !ixExpr !tgtExpr -> evalExprSrc ixExpr $ \ !ixV -> do
       let !ixVal = edhDeCaseWrap ixV
-      evalExpr rhExpr $ \ !rhVal -> do
+      evalExprSrc rhExpr $ \ !rhVal -> do
         let !rhv = edhDeCaseWrap rhVal
-        evalExpr tgtExpr $ \ !tgtVal _ets -> case edhUltimate tgtVal of
+        evalExprSrc tgtExpr $ \ !tgtVal _ets -> case edhUltimate tgtVal of
 
           -- indexing assign to a dict
           EdhDict (Dict _ !ds) ->
             iopdLookupDefault EdhNil ixVal ds >>= \ !dVal ->
               runEdhTx ets
                 $ evalInfix withOpSym
-                            (LitExpr $ ValueLiteral dVal)
-                            (LitExpr $ ValueLiteral rhv)
+                            (ExprSrc (LitExpr $ ValueLiteral dVal) noSrcRange)
+                            (ExprSrc (LitExpr $ ValueLiteral rhv) noSrcRange)
                 $ \ !opRtnV _ets -> do
                     case opRtnV of
                       EdhDefault{} -> pure ()
@@ -127,7 +128,7 @@ assignWithOpProc !withOpSym !lhExpr !rhExpr !exit !ets =
 
           _ -> exitEdh ets exit edhNA
 
-    _ -> evalExpr rhExpr $ \ !rhVal -> evalExpr lhExpr $ \ !lhVal -> do
+    _ -> evalExprSrc rhExpr $ \ !rhVal -> evalExprSrc lhExpr $ \ !lhVal -> do
       let lhMagicMthName = withOpSym <> "="
           rhMagicMthName = withOpSym <> "=@"
           tryRightHandMagic !rhObj =
@@ -200,13 +201,15 @@ assignWithOpProc !withOpSym !lhExpr !rhExpr !exit !ets =
           EdhObject !rhObj -> \_ets -> tryRightHandMagic rhObj
 
           _ ->
-            evalInfix withOpSym
-                      (LitExpr $ ValueLiteral lhVal)
-                      (LitExpr $ ValueLiteral $ edhDeCaseWrap rhVal)
+            evalInfix
+                withOpSym
+                (ExprSrc (LitExpr $ ValueLiteral lhVal) noSrcRange)
+                (ExprSrc (LitExpr $ ValueLiteral $ edhDeCaseWrap rhVal)
+                         noSrcRange
+                )
               $ \ !opRtnV -> case edhUltimate opRtnV of
                   EdhDefault{} -> edhSwitchState ets $ exitEdhTx exit opRtnV
-                  _ ->
-                    assignEdhTarget lhExpr opRtnV $ edhSwitchState ets . exit
+                  _ -> assignEdhTarget lhe opRtnV $ edhSwitchState ets . exit
 
  where
   -- discourage artifact definition during assignment
@@ -215,17 +218,17 @@ assignWithOpProc !withOpSym !lhExpr !rhExpr !exit !ets =
 
 -- | operator (?=)
 assignMissingProc :: EdhIntrinsicOp
-assignMissingProc (AttrExpr (DirectRef (NamedAttr "_"))) _ _ !ets =
-  throwEdh ets UsageError "not so reasonable: _ ?= xxx"
-assignMissingProc (AttrExpr (DirectRef !addr)) !rhExpr !exit !ets =
-  resolveEdhAttrAddr ets addr $ \ !key -> do
+assignMissingProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "_") _))) _) _ _ !ets
+  = throwEdh ets UsageError "not so reasonable: _ ?= xxx"
+assignMissingProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _) !rhExpr !exit !ets
+  = resolveEdhAttrAddr ets addr $ \ !key -> do
     let !es = edh'scope'entity $ contextScope $ edh'context ets
     iopdLookup key es >>= \case
       Nothing -> do
         -- discourage artifact definition during assignment
         let !etsAssign =
               ets { edh'context = (edh'context ets) { edh'ctx'pure = True } }
-        runEdhTx etsAssign $ evalExpr rhExpr $ \ !rhVal _ets ->
+        runEdhTx etsAssign $ evalExprSrc rhExpr $ \ !rhVal _ets ->
           let !rhv = edhDeCaseWrap rhVal
           in  do
                 edhSetValue key rhv es

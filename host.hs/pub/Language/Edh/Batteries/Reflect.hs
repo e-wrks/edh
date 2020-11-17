@@ -122,25 +122,27 @@ makeOpProc :: [EdhValue] -> EdhHostProc
 makeOpProc !args !exit = case args of
   [(EdhExpr _ !lhe _), EdhString !op, (EdhExpr _ !rhe _)] -> \ !ets -> do
     !xu <- unsafeIOToSTM newUnique
-    exitEdh ets exit $ EdhExpr xu (InfixExpr op lhe rhe) ""
-  _ -> throwEdhTx EvalError $ "invalid arguments to makeOp: " <> T.pack
-    (show args)
+    exitEdh ets exit
+      $ EdhExpr
+          xu
+          (InfixExpr op (ExprSrc lhe noSrcRange) (ExprSrc rhe noSrcRange))
+          ""
+  _ ->
+    throwEdhTx EvalError $ "invalid arguments to makeOp: " <> T.pack (show args)
 
 
 -- | utility parseEdh(srcCode, srcName='<edh>', lineNo=1)
 parseEdhProc
   :: "srcCode" !: Text -> "srcName" ?: Text -> "lineNo" ?: Int -> EdhHostProc
 parseEdhProc (mandatoryArg  -> !srcCode) (defaultArg  "<edh>"  -> !srcName) (defaultArg  1 -> !lineNo) !exit !ets
-  = parseEdh' world (T.unpack srcName) lineNo srcCode >>= \case
+  = parseEdh' world srcName lineNo srcCode >>= \case
     Left !err -> do
-      let !msg              = T.pack $ errorBundlePretty err
+      let !msg = T.pack $ errorBundlePretty err
           !edhWrapException = edh'exception'wrapper world
-          !cc               = getEdhCallContext 0 ets
-          !edhErr           = EdhError ParseError msg (toDyn nil) cc
+          !edhErr = EdhError ParseError msg (toDyn nil) $ getEdhErrCtx 0 ets
       edhWrapException (toException edhErr)
         >>= \ !exo -> edhThrow ets (EdhObject exo)
     Right (!stmts, _docCmt) -> do
       !u <- unsafeIOToSTM newUnique
       exitEdh ets exit $ EdhExpr u (BlockExpr stmts) srcCode
- where
-  world = edh'prog'world $ edh'thread'prog ets
+  where world = edh'prog'world $ edh'thread'prog ets

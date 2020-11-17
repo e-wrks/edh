@@ -46,7 +46,7 @@ silentAnnoProc _ _ !exit = exitEdhTx exit nil
 -- can be used to tell the analyzer that the expression is gonna be executed
 -- by a JavaScript interpreter.
 leftAnnoProc :: EdhIntrinsicOp
-leftAnnoProc _ !rhExpr !exit = evalExpr rhExpr exit
+leftAnnoProc _ !rhExpr !exit = evalExprSrc rhExpr exit
 
 
 -- | error(***) - throw an @Exception@
@@ -54,10 +54,11 @@ leftAnnoProc _ !rhExpr !exit = evalExpr rhExpr exit
 -- this being a host procedure so the tip context statement carries the
 -- right Edh source location reporting the error
 errorProc :: ArgsPack -> EdhHostProc
-errorProc !apk _ !ets = edhThrow ets . EdhObject =<< edh'exception'wrapper
-  (edh'prog'world $ edh'thread'prog ets)
-  (toException $ edhCreateError 1 ets EdhException apk)
-
+errorProc !apk _ !ets =
+  edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
+                        (toException edhErr)
+    >>= \ !exo -> edhThrow ets $ EdhObject exo
+  where !edhErr = edhCreateError 1 ets EdhException apk
 
 -- | operator ($=>) - the `catch`
 --
@@ -75,7 +76,7 @@ errorProc !apk _ !ets = edhThrow ets . EdhObject =<< edh'exception'wrapper
 catchProc :: EdhIntrinsicOp
 catchProc !tryExpr !catchExpr !exit !etsOuter = do
   !handlerThId <- unsafeIOToSTM myThreadId
-  edhCatch etsOuter (evalExpr tryExpr) (exitEdh etsOuter exit)
+  edhCatch etsOuter (evalExprSrc tryExpr) (exitEdh etsOuter exit)
     $ \ !etsThrower !exv recover rethrow -> do
         !throwerThId <- unsafeIOToSTM myThreadId
         let !isThreadTerminate = case exv of
@@ -96,7 +97,7 @@ catchProc !tryExpr !catchExpr !exit !etsOuter = do
                   !ctxHndl  = ctxOuter { edh'ctx'match = exv }
                   !etsHndl  = etsThrower { edh'context = ctxHndl }
               in  runEdhTx etsHndl
-                    $ evalExpr catchExpr
+                    $ evalExprSrc catchExpr
                     $ \ !catchResult _ets -> case edhDeCaseClose catchResult of
 
                         -- these results all mean no recovery, i.e. to rethrow
@@ -122,7 +123,7 @@ catchProc !tryExpr !catchExpr !exit !etsOuter = do
 finallyProc :: EdhIntrinsicOp
 finallyProc !tryExpr !finallyExpr !exit !etsOuter = do
   !handlerThId <- unsafeIOToSTM myThreadId
-  edhCatch etsOuter (evalExpr tryExpr) (exitEdh etsOuter exit)
+  edhCatch etsOuter (evalExprSrc tryExpr) (exitEdh etsOuter exit)
     $ \ !etsThrower !exv _recover !rethrow -> do
         !throwerThId <- unsafeIOToSTM myThreadId
         -- note we deliberately avoid executing a finally block on a
@@ -134,7 +135,7 @@ finallyProc !tryExpr !finallyExpr !exit !etsOuter = do
             let !ctxOuter = edh'context etsOuter
                 !ctxHndl  = ctxOuter { edh'ctx'match = exv }
                 !etsHndl  = etsThrower { edh'context = ctxHndl }
-            in  runEdhTx etsHndl $ evalExpr finallyExpr $ \_result _ets ->
+            in  runEdhTx etsHndl $ evalExprSrc finallyExpr $ \_result _ets ->
                   rethrow exv
 
 
@@ -142,29 +143,33 @@ finallyProc !tryExpr !finallyExpr !exit !etsOuter = do
 --
 -- similar to fat arrow in JavaScript
 arrowProc :: EdhIntrinsicOp
-arrowProc !lhExpr !rhExpr !exit !ets =
-  pkr2rcvr (deParen1 lhExpr) $ \ !argsRcvr -> do
+arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
+  pkr2rcvr (deParen'1 lhExpr) $ \ !argsRcvr -> do
     !idProc <- unsafeIOToSTM newUnique
-    let !pd = ProcDecl (NamedAttr arrowName)
-                       argsRcvr
-                       (StmtSrc (ctxSrcPos, ExprStmt rhExpr Nothing))
-                       (startLocOfFile "<lambda>")
-        !mth = procType ProcDefi { edh'procedure'ident = idProc
-                                 , edh'procedure'name  = AttrByName arrowName
-                                 , edh'procedure'lexi  = scope
-                                 , edh'procedure'doc   = Nothing
-                                 , edh'procedure'decl  = pd
-                                 }
-        !boundMth = EdhBoundProc mth
-                                 (edh'scope'this scope)
-                                 (edh'scope'that scope)
-                                 Nothing
+    let
+      !pd = ProcDecl
+        (AttrAddrSrc (NamedAttr arrowName)
+                     (SrcRange (src'end lhSpan) (src'start rhSpan))
+        )
+        argsRcvr
+        (StmtSrc (ExprStmt rhExpr Nothing) rhSpan)
+        (edh'exe'src'loc tip)
+          { src'range = SrcRange (src'start lhSpan) (src'end rhSpan)
+          }
+      !mth = procType ProcDefi { edh'procedure'ident = idProc
+                               , edh'procedure'name  = AttrByName arrowName
+                               , edh'procedure'lexi  = scope
+                               , edh'procedure'doc   = Nothing
+                               , edh'procedure'decl  = pd
+                               }
+      !boundMth =
+        EdhBoundProc mth (edh'scope'this scope) (edh'scope'that scope) Nothing
     exitEdh ets exit boundMth
  where
-  !ctx                           = edh'context ets
-  !scope                         = contextScope ctx
-  StmtSrc (!ctxSrcPos, _ctxStmt) = edh'ctx'stmt ctx
-  !arrowName                     = "<arrow>"
+  !ctx       = edh'context ets
+  !tip       = edh'ctx'tip ctx
+  !scope     = edh'frame'scope tip
+  !arrowName = "<arrow>"
   pkr2rcvr :: Expr -> (ArgsReceiver -> STM ()) -> STM ()
   pkr2rcvr (AttrExpr (DirectRef !argAttr)) !rcvrExit =
     rcvrExit $ SingleReceiver $ RecvArg argAttr Nothing Nothing
@@ -173,16 +178,16 @@ arrowProc !lhExpr !rhExpr !exit !ets =
     cnvrt :: [ArgSender] -> [ArgReceiver] -> STM ()
     cnvrt []            !rcvrs = rcvrExit $ PackReceiver $ reverse rcvrs
     cnvrt (sndr : rest) !rcvrs = case sndr of
-      UnpackPosArgs (AttrExpr (DirectRef (NamedAttr !argName))) ->
-        cnvrt rest (RecvRestPosArgs argName : rcvrs)
-      UnpackKwArgs (AttrExpr (DirectRef (NamedAttr !argName))) ->
-        cnvrt rest (RecvRestKwArgs argName : rcvrs)
-      UnpackPkArgs (AttrExpr (DirectRef (NamedAttr !argName))) ->
-        cnvrt rest (RecvRestPkArgs argName : rcvrs)
-      SendPosArg (AttrExpr (DirectRef !argAttr)) ->
-        cnvrt rest (RecvArg argAttr Nothing Nothing : rcvrs)
-      SendKwArg !argAttr !defExpr ->
-        cnvrt rest (RecvArg argAttr Nothing (Just defExpr) : rcvrs)
+      UnpackPosArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt rest (RecvRestPosArgs argRef : rcvrs)
+      UnpackKwArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt rest (RecvRestKwArgs argRef : rcvrs)
+      UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt rest (RecvRestPkArgs argRef : rcvrs)
+      SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt rest (RecvArg argRef Nothing Nothing : rcvrs)
+      SendKwArg !argRef !defExpr ->
+        cnvrt rest (RecvArg argRef Nothing (Just defExpr) : rcvrs)
       !badSndr ->
         throwEdh ets UsageError $ "invalid argument expr for arrow: " <> T.pack
           (show badSndr)
@@ -195,27 +200,31 @@ arrowProc !lhExpr !rhExpr !exit !ets =
   procType = if containsYield rhExpr then EdhGnrtor else EdhMethod
 
   containsYield :: Expr -> Bool
-  containsYield YieldExpr{}           = True
-  containsYield (ParenExpr       !x ) = containsYield x
-  containsYield (BlockExpr       !bs) = blockContainsYield bs
-  containsYield (ScopedBlockExpr !bs) = blockContainsYield bs
-  containsYield (AtoIsoExpr      !x ) = containsYield x
-  containsYield (PrefixExpr _ !x    ) = containsYield x
-  containsYield (IfExpr !cnd !csq !alt) =
+  containsYield YieldExpr{}                      = True
+  containsYield (ParenExpr       (ExprSrc !x _)) = containsYield x
+  containsYield (BlockExpr       !bs           ) = blockContainsYield bs
+  containsYield (ScopedBlockExpr !bs           ) = blockContainsYield bs
+  containsYield (AtoIsoExpr      (ExprSrc !x _)) = containsYield x
+  containsYield (PrefixExpr _ (ExprSrc !x _)   ) = containsYield x
+  containsYield (IfExpr (ExprSrc !cnd _) !csq !alt) =
     containsYield cnd || blockContainsYield [csq] || case alt of
       Nothing    -> False
       Just !body -> blockContainsYield [body]
-  containsYield (CaseExpr !t !x   ) = containsYield t || containsYield x
-  containsYield (ForExpr _ !x !b  ) = containsYield x || blockContainsYield [b]
-  containsYield (IndexExpr !t !x  ) = containsYield t || containsYield x
-  containsYield (CallExpr  !x _   ) = containsYield x
-  containsYield (InfixExpr _ !l !r) = containsYield l || containsYield r
-  containsYield _                   = False
+  containsYield (CaseExpr (ExprSrc !t _) (ExprSrc !x _)) =
+    containsYield t || containsYield x
+  containsYield (ForExpr _ (ExprSrc !x _) !b) =
+    containsYield x || blockContainsYield [b]
+  containsYield (IndexExpr (ExprSrc !t _) (ExprSrc !x _)) =
+    containsYield t || containsYield x
+  containsYield (CallExpr (ExprSrc !x _) _) = containsYield x
+  containsYield (InfixExpr _ (ExprSrc !l _) (ExprSrc !r _)) =
+    containsYield l || containsYield r
+  containsYield _ = False
 
   blockContainsYield :: [StmtSrc] -> Bool
-  blockContainsYield []                          = False
-  blockContainsYield (StmtSrc (_, !stmt) : rest) = case stmt of
-    WhileStmt !cnd !body ->
+  blockContainsYield []                       = False
+  blockContainsYield (StmtSrc !stmt _ : rest) = case stmt of
+    WhileStmt (ExprSrc !cnd _) !body ->
       containsYield cnd || blockContainsYield [body] || blockContainsYield rest
     ExprStmt !x _docCmt -> containsYield x || blockContainsYield rest
     _                   -> blockContainsYield rest
@@ -223,13 +232,18 @@ arrowProc !lhExpr !rhExpr !exit !ets =
 
 -- | operator (=>*) - producing arrow, define an anonymous, bound producer
 prodArrowProc :: EdhIntrinsicOp
-prodArrowProc !lhExpr !rhExpr !exit !ets =
-  pkr2rcvr (deParen1 lhExpr) $ \ !argsRcvr -> do
+prodArrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
+  pkr2rcvr (deParen'1 lhExpr) $ \ !argsRcvr -> do
     !idProc <- unsafeIOToSTM newUnique
-    let !pd = ProcDecl (NamedAttr arrowName)
-                       argsRcvr
-                       (StmtSrc (ctxSrcPos, ExprStmt rhExpr Nothing))
-                       (startLocOfFile "<lambda>")
+    let !pd = ProcDecl
+          (AttrAddrSrc (NamedAttr arrowName)
+                       (SrcRange (src'end lhSpan) (src'start rhSpan))
+          )
+          argsRcvr
+          (StmtSrc (ExprStmt rhExpr Nothing) rhSpan)
+          (edh'exe'src'loc tip)
+            { src'range = SrcRange (src'start lhSpan) (src'end rhSpan)
+            }
         !mth = EdhPrducr ProcDefi { edh'procedure'ident = idProc
                                   , edh'procedure'name  = AttrByName arrowName
                                   , edh'procedure'lexi  = scope
@@ -242,10 +256,10 @@ prodArrowProc !lhExpr !rhExpr !exit !ets =
                                  Nothing
     exitEdh ets exit boundMth
  where
-  !ctx                           = edh'context ets
-  !scope                         = contextScope ctx
-  StmtSrc (!ctxSrcPos, _ctxStmt) = edh'ctx'stmt ctx
-  !arrowName                     = "<producer>"
+  !ctx       = edh'context ets
+  !tip       = edh'ctx'tip ctx
+  !scope     = edh'frame'scope tip
+  !arrowName = "<producer>"
   pkr2rcvr :: Expr -> (ArgsReceiver -> STM ()) -> STM ()
   pkr2rcvr (AttrExpr (DirectRef !argAttr)) !rcvrExit =
     rcvrExit $ SingleReceiver $ RecvArg argAttr Nothing Nothing
@@ -257,24 +271,24 @@ prodArrowProc !lhExpr !rhExpr !exit !ets =
       else
         rcvrExit
         $ PackReceiver
-        $ (RecvArg (NamedAttr "outlet")
-                   (Just (DirectRef (NamedAttr "_")))
-                   (Just (LitExpr SinkCtor))
+        $ (RecvArg (AttrAddrSrc (NamedAttr "outlet") noSrcRange)
+                   (Just (DirectRef (AttrAddrSrc (NamedAttr "_") noSrcRange)))
+                   (Just (ExprSrc (LitExpr SinkCtor) noSrcRange))
           )
         : reverse rcvrs
     cnvrt !outletPrsnt (sndr : rest) !rcvrs = case sndr of
-      UnpackPosArgs (AttrExpr (DirectRef (NamedAttr !argName))) ->
-        cnvrt outletPrsnt rest (RecvRestPosArgs argName : rcvrs)
-      UnpackKwArgs (AttrExpr (DirectRef (NamedAttr !argName))) ->
-        cnvrt outletPrsnt rest (RecvRestKwArgs argName : rcvrs)
-      UnpackPkArgs (AttrExpr (DirectRef (NamedAttr !argName))) ->
-        cnvrt outletPrsnt rest (RecvRestPkArgs argName : rcvrs)
-      SendPosArg (AttrExpr (DirectRef !argAttr)) ->
-        cnvrt outletPrsnt rest (RecvArg argAttr Nothing Nothing : rcvrs)
-      SendKwArg !argAttr !defExpr -> cnvrt
+      UnpackPosArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt outletPrsnt rest (RecvRestPosArgs argRef : rcvrs)
+      UnpackKwArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt outletPrsnt rest (RecvRestKwArgs argRef : rcvrs)
+      UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt outletPrsnt rest (RecvRestPkArgs argRef : rcvrs)
+      SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt outletPrsnt rest (RecvArg argRef Nothing Nothing : rcvrs)
+      SendKwArg argRef@(AttrAddrSrc !argAttr _) !defExpr -> cnvrt
         (outletPrsnt || argAttr == NamedAttr "outlet")
         rest
-        (RecvArg argAttr Nothing (Just defExpr) : rcvrs)
+        (RecvArg argRef Nothing (Just defExpr) : rcvrs)
       !badSndr ->
         throwEdh ets UsageError $ "invalid argument expr for arrow: " <> T.pack
           (show badSndr)
@@ -288,13 +302,13 @@ prodArrowProc !lhExpr !rhExpr !exit !ets =
 -- with eval-ed result of its right-hand, unless the right-hand result is
 -- `fallthrough`
 branchProc :: EdhIntrinsicOp
-branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
+branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
 
   -- recognize `_` as similar to the wildcard pattern match in Haskell,
   -- it always matches
-  AttrExpr (DirectRef (NamedAttr "_")) -> afterMatch
+  AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "_") _)) -> afterMatch
 
-  InfixExpr "|" !matchExpr !guardExpr ->
+  InfixExpr "|" (ExprSrc !matchExpr _) (ExprSrc !guardExpr _) ->
     handlePattern matchExpr (valueMatch matchExpr $ chkGuard guardExpr)
       $ \ !ps -> do
           updAttrs ps
@@ -354,8 +368,8 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
     -- TODO support nested patterns
 
     -- { x:y:z:... } -- pair pattern matching
-    DictExpr [(AddrDictKey (DirectRef (NamedAttr !name1)), pairPattern)] ->
-      handlePairPattern (Just $ AttrByName name1) pairPattern
+    DictExpr [(AddrDictKey (DirectRef (AttrAddrSrc (NamedAttr !name1) _)), ExprSrc !pairPattern _)]
+      -> handlePairPattern (Just $ AttrByName name1) pairPattern
     -- this is to establish the intuition that `{ ... }` always invokes
     -- pattern matching. if a literal dict value really meant to be matched,
     -- the parenthesized form `( {k1: v1, k2: v2, ...} )` should be used.
@@ -367,62 +381,50 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
     BlockExpr patternExpr -> case patternExpr of
 
       -- {( x )} -- single arg 
-      [StmtSrc (_, ExprStmt (ParenExpr (AttrExpr (DirectRef (NamedAttr !attrName)))) _docCmt)]
+      [StmtSrc (ExprStmt (ParenExpr (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !attrName) _))) _)) _docCmt) _]
         -> case ctxMatch of
           EdhArgsPack (ArgsPack [argVal] !kwargs) | odNull kwargs ->
             matchExit [(AttrByName attrName, argVal)]
           _ -> exitEdh ets exit EdhCaseOther
 
       -- {( x:y:z:... )} -- parenthesised pair pattern
-      [StmtSrc (_, ExprStmt (ParenExpr pairPattern@(InfixExpr ":" _ _)) _docCmt)]
+      [StmtSrc (ExprStmt (ParenExpr (ExprSrc pairPattern@(InfixExpr ":" _ _) _)) _docCmt) _]
         -> handlePairPattern Nothing pairPattern
 
       -- { continue } -- match with continue
-      [StmtSrc (_, ContinueStmt)] -> case ctxMatch of
+      [StmtSrc ContinueStmt _] -> case ctxMatch of
         EdhContinue -> matchExit []
         _           -> exitEdh ets exit EdhCaseOther
 
       -- { break } -- match with break
-      [StmtSrc (_, BreakStmt)] -> case ctxMatch of
+      [StmtSrc BreakStmt _] -> case ctxMatch of
         EdhBreak -> matchExit []
         _        -> exitEdh ets exit EdhCaseOther
 
       -- { fallthrough } -- match with fallthrough
-      [StmtSrc (_, FallthroughStmt)] -> case ctxMatch of
+      [StmtSrc FallthroughStmt _] -> case ctxMatch of
         EdhFallthrough -> matchExit []
         _              -> exitEdh ets exit EdhCaseOther
-
-      -- { return nil } -- match with nil return
-      [StmtSrc (_, ReturnStmt (LitExpr NilLiteral))] -> case ctxMatch of
-        EdhReturn EdhNil -> matchExit []
-        _                -> exitEdh ets exit EdhCaseOther
-
-      -- { return xx } -- match with value return
-      [StmtSrc (_, ReturnStmt (AttrExpr (DirectRef (NamedAttr !attrName))))] ->
-        case ctxMatch of
-          EdhReturn !rtnVal | rtnVal /= EdhNil ->
-            matchExit [(AttrByName attrName, rtnVal)]
-          _ -> exitEdh ets exit EdhCaseOther
 
       -- { val } -- wild capture pattern, used to capture a non-nil result as
       -- an attribute.
       -- Note: a raw nil value should be value-matched explicitly
-      [StmtSrc (_, ExprStmt (AttrExpr (DirectRef !valAttr)) _docCmt)] ->
-        case ctxMatch of -- don't match raw nil here, 
+      [StmtSrc (ExprStmt (AttrExpr (DirectRef (AttrAddrSrc !valAttr _))) _docCmt) _]
+        -> case ctxMatch of -- don't match raw nil here, 
           EdhNil -> exitEdh ets exit EdhCaseOther
           -- but a named nil (i.e. None/Nothing etc.) should be matched
           _      -> resolveEdhAttrAddr ets valAttr
             $ \ !valKey -> matchExit [(valKey, ctxMatch)]
 
       -- { term := value } -- definition pattern
-      [StmtSrc (_, ExprStmt (InfixExpr ":=" (AttrExpr (DirectRef (NamedAttr !termName))) (AttrExpr (DirectRef (NamedAttr !valueName)))) _docCmt)]
+      [StmtSrc (ExprStmt (InfixExpr ":=" (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !termName) _))) _) (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valueName) _))) _)) _docCmt) _]
         -> case ctxMatch of
           EdhNamedValue !n !v -> matchExit
             [(AttrByName termName, EdhString n), (AttrByName valueName, v)]
           _ -> exitEdh ets exit EdhCaseOther
 
       -- { head => tail } -- uncons pattern
-      [StmtSrc (_, ExprStmt (InfixExpr ":>" (AttrExpr (DirectRef (NamedAttr !headName))) (AttrExpr (DirectRef (NamedAttr !tailName)))) _docCmt)]
+      [StmtSrc (ExprStmt (InfixExpr ":>" (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !headName) _))) _) (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !tailName) _))) _)) _docCmt) _]
         -> let doMatched headVal tailVal =
                    matchExit
                      [ (AttrByName headName, headVal)
@@ -440,10 +442,10 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
                  _ -> exitEdh ets exit EdhCaseOther
 
       -- { prefix @< match >@ suffix } -- sub-string cut pattern
-      [StmtSrc (_, ExprStmt (InfixExpr ">@" (InfixExpr "@<" (AttrExpr (DirectRef (NamedAttr !prefixName))) matchExpr) (AttrExpr (DirectRef (NamedAttr !suffixName)))) _docCmt)]
+      [StmtSrc (ExprStmt (InfixExpr ">@" (ExprSrc (InfixExpr "@<" (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !prefixName) _))) _) matchExpr) _) (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !suffixName) _))) _)) _docCmt) _]
         -> case ctxMatch of
           EdhString !fullStr ->
-            runEdhTx ets $ evalExpr matchExpr $ \ !mVal _ets ->
+            runEdhTx ets $ evalExprSrc matchExpr $ \ !mVal _ets ->
               edhValueStr ets (edhUltimate mVal) $ \ !mStr -> if T.null mStr
                 then throwEdh ets
                               UsageError
@@ -459,10 +461,10 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
           _ -> exitEdh ets exit EdhCaseOther
 
       -- { match >@ suffix } -- prefix cut pattern
-      [StmtSrc (_, ExprStmt (InfixExpr ">@" prefixExpr (AttrExpr (DirectRef (NamedAttr !suffixName)))) _docCmt)]
+      [StmtSrc (ExprStmt (InfixExpr ">@" prefixExpr (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !suffixName) _))) _)) _docCmt) _]
         -> case ctxMatch of
           EdhString !fullStr ->
-            runEdhTx ets $ evalExpr prefixExpr $ \ !lhVal _ets ->
+            runEdhTx ets $ evalExprSrc prefixExpr $ \ !lhVal _ets ->
               edhValueStr ets (edhUltimate lhVal) $ \ !lhStr ->
                 case T.stripPrefix lhStr fullStr of
                   Just !suffix ->
@@ -471,10 +473,10 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
           _ -> exitEdh ets exit EdhCaseOther
 
       -- { prefix @< match } -- suffix cut pattern
-      [StmtSrc (_, ExprStmt (InfixExpr "@<" (AttrExpr (DirectRef (NamedAttr !prefixName))) suffixExpr) _docCmt)]
+      [StmtSrc (ExprStmt (InfixExpr "@<" (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !prefixName) _))) _) suffixExpr) _docCmt) _]
         -> case ctxMatch of
           EdhString !fullStr ->
-            runEdhTx ets $ evalExpr suffixExpr $ \ !rhVal _ets ->
+            runEdhTx ets $ evalExprSrc suffixExpr $ \ !rhVal _ets ->
               edhValueStr ets (edhUltimate rhVal) $ \ !rhStr ->
                 case T.stripSuffix rhStr fullStr of
                   Just !prefix ->
@@ -483,7 +485,7 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
           _ -> exitEdh ets exit EdhCaseOther
 
       -- {( x,y,z,... )} -- pattern matching number of positional args
-      [StmtSrc (_, ExprStmt (ArgsPackExpr !argSenders) _docCmt)] ->
+      [StmtSrc (ExprStmt (ArgsPackExpr !argSenders) _docCmt) _] ->
         if null argSenders
           then case ctxMatch of
             -- an empty apk pattern matches any empty sequence
@@ -496,8 +498,8 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
             _ -> exitEdh ets exit EdhCaseOther
           else do
             !attrNames <- fmap catMaybes $ sequence $ (<$> argSenders) $ \case
-              SendPosArg (AttrExpr (DirectRef (NamedAttr !vAttr))) ->
-                return $ Just vAttr
+              SendPosArg (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !vAttr) _))) _)
+                -> return $ Just vAttr
               _ -> return Nothing
             if length attrNames /= length argSenders
               then throwEdh
@@ -511,7 +513,7 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
                 _ -> exitEdh ets exit EdhCaseOther
 
       -- {{ class:inst }} -- instance resolving pattern
-      [StmtSrc (_, ExprStmt (DictExpr [(AddrDictKey !clsRef, AttrExpr (DirectRef !instAttr))]) _docCmt)]
+      [StmtSrc (ExprStmt (DictExpr [(AddrDictKey !clsRef, ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !instAttr _))) _)]) _docCmt) _]
         -> -- brittany insists on putting together the long line above, any workaround?
            case ctxMatch of
           EdhObject ctxObj -> resolveEdhAttrAddr ets instAttr $ \ !instKey ->
@@ -525,15 +527,15 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
           _ -> exitEdh ets exit EdhCaseOther
 
       -- { DataClass( field1, field2, ... ) } -- data class pattern
-      [StmtSrc (_, ExprStmt (CallExpr (AttrExpr !clsRef) !apkr) _docCmt)] ->
-        dcFieldsExtractor apkr $ \ !fieldExtractors ->
+      [StmtSrc (ExprStmt (CallExpr (ExprSrc (AttrExpr !clsRef) _) !apkr) _docCmt) _]
+        -> dcFieldsExtractor apkr $ \ !fieldExtractors ->
           runEdhTx ets $ evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
             EdhObject !clsObj -> matchDataClass clsObj fieldExtractors
             !badClsVal        -> edhValueRepr ets badClsVal $ \ !badDesc ->
               throwEdh ets UsageError $ "invalid class: " <> badDesc
 
       -- {[ x,y,z,... ]} -- any-of pattern
-      [StmtSrc (_, ExprStmt (ListExpr vExprs) _docCmt)] -> if null vExprs
+      [StmtSrc (ExprStmt (ListExpr vExprs) _docCmt) _] -> if null vExprs
         then exitEdh ets exit EdhCaseOther
         else runEdhTx ets $ evalExprs vExprs $ \ !matchVals _ets ->
           case matchVals of
@@ -551,7 +553,7 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
     -- guarded condition, ignore match target in context, just check if the
     -- condition itself is true
     PrefixExpr Guard guardedExpr ->
-      runEdhTx ets $ evalExpr guardedExpr $ \ !predValue _ets ->
+      runEdhTx ets $ evalExprSrc guardedExpr $ \ !predValue _ets ->
         if edhDeCaseWrap predValue /= true
           then exitEdh ets exit EdhCaseOther
           else matchExit []
@@ -581,18 +583,18 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
       -> [(AttrKey, EdhValue)]
       -> Maybe (Maybe EdhValue, [(AttrKey, EdhValue)])
     matchPairPattern !p !v !matches = case p of
-      AttrExpr (DirectRef (NamedAttr !lastAttr)) -> case v of
+      AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !lastAttr) _)) -> case v of
         EdhPair !resi !lastVal ->
           Just (Just resi, (AttrByName lastAttr, lastVal) : matches)
         _ -> Just (Nothing, (AttrByName lastAttr, v) : matches)
-      InfixExpr ":" !leftExpr (AttrExpr (DirectRef (NamedAttr !vAttr))) ->
-        case v of
+      InfixExpr ":" (ExprSrc !leftExpr _) (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !vAttr) _))) _)
+        -> case v of
           EdhPair !leftVal !val ->
             let matches' = (AttrByName vAttr, val) : matches
             in
               case leftExpr of
-                (AttrExpr (DirectRef (NamedAttr !leftAttr))) ->
-                  case leftVal of
+                (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !leftAttr) _)))
+                  -> case leftVal of
                     EdhPair !resi !lastVal -> Just
                       (Just resi, (AttrByName leftAttr, lastVal) : matches')
                     _ ->
@@ -609,10 +611,11 @@ branchProc !lhExpr !rhExpr !exit !ets = case lhExpr of
      where
       go []                 !keys = exit' keys
       go (argSender : rest) !keys = case argSender of
-        SendPosArg (AttrExpr (DirectRef !rcvAttr)) ->
-          resolveEdhAttrAddr ets rcvAttr $ \ !key -> go rest $ (key, key) : keys
-        SendKwArg !srcAttr (AttrExpr (DirectRef !tgtAttr)) ->
-          resolveEdhAttrAddr ets srcAttr $ \ !srcKey ->
+        SendPosArg (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !rcvAttr _))) _)
+          -> resolveEdhAttrAddr ets rcvAttr
+          $  \ !key -> go rest $ (key, key) : keys
+        SendKwArg (AttrAddrSrc !srcAttr _) (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !tgtAttr _))) _)
+          -> resolveEdhAttrAddr ets srcAttr $ \ !srcKey ->
             resolveEdhAttrAddr ets tgtAttr
               $ \ !tgtKey -> go rest $ (srcKey, tgtKey) : keys
         _ ->

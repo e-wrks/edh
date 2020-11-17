@@ -16,8 +16,26 @@ module Language.Edh.EHI
   , EdhErrorTag(..)
   , ParserError
   , EdhCallFrame(..)
-  , EdhCallContext(..)
+  , PeerSite
+  , ErrDetails
+  , ErrMessage
+  , ErrContext
   , edhKnownError
+
+    -- * Context information
+  , SrcDoc(..)
+  , SrcPos(..)
+  , SrcRange(..)
+  , SrcLoc(..)
+  , prettySrcLoc
+  , zeroSrcRange
+  , noSrcRange
+  , prettySrcPos
+  , prettySrcRange
+  , lspSrcPosFromParsec
+  , lspSrcLocFromParsec
+  , contextSrcLoc
+  , edhScopeSrcLoc
 
     -- * Event processing
   , EventSink(..)
@@ -63,7 +81,7 @@ module Language.Edh.EHI
   , importEdhModule
   , moduleContext
   , contextScope
-  , contextFrame
+  , callingScope
   , parseEdh
   , parseEdh'
   , evalEdh
@@ -75,8 +93,9 @@ module Language.Edh.EHI
   , edhPrepareCall'
   , callEdhMethod
   , evalStmt
-  , evalStmt'
+  , evalStmtSrc
   , evalExpr
+  , evalExprSrc
   , evalExprs
   , evalInfix
   , recvEdhArgs
@@ -98,7 +117,7 @@ module Language.Edh.EHI
   , EdhIntrinsicOp
   , edhFlipOp
     -- ** Edh Runtime error
-  , getEdhCallContext
+  , getEdhErrCtx
   , edhCreateError
   , edhThrow
   , edhCatch
@@ -138,11 +157,6 @@ module Language.Edh.EHI
   , ArgSender(..)
   , ProcDecl(..)
   , procedureName
-  , SourcePos(..)
-  , mkPos
-  , sourcePosPretty
-  , startLocOfFile
-  , prettySrcSpan
 
     -- ** Object system
   , Object(..)
@@ -209,9 +223,7 @@ module Language.Edh.EHI
   , edhUltimate
   , nil
   , edhNone
-  , edhNoneExpr
   , edhNothing
-  , edhNothingExpr
   , edhNA
   , noneNil
   , true
@@ -256,8 +268,6 @@ module Language.Edh.EHI
   , module Language.Edh.IOPD
   )
 where
-
-import           Text.Megaparsec
 
 import qualified Data.Lossless.Decimal         as D
 

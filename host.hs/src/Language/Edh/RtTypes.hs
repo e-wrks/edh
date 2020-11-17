@@ -11,7 +11,6 @@ import           System.IO.Unsafe               ( unsafePerformIO )
 import           Control.Exception
 import           Control.Concurrent.STM
 
-import           Data.Foldable
 import           Data.Unique
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
@@ -19,8 +18,6 @@ import           Data.ByteString                ( ByteString )
 import qualified Data.ByteString               as B
 import           Data.Hashable
 import qualified Data.HashMap.Strict           as Map
-import           Data.List.NonEmpty             ( NonEmpty(..) )
-import qualified Data.List.NonEmpty            as NE
 import           Data.Dynamic
 
 import qualified Data.UUID                     as UUID
@@ -206,34 +203,36 @@ instance Show List where
 
 -- | The execution context of an Edh thread
 data Context = Context {
-    -- | the call stack frames of Edh procedures
-    edh'ctx'stack :: !(NonEmpty Scope)
+    -- | the top frame of the calling context
+    edh'ctx'tip :: !EdhCallFrame
+    -- | the underneath call frames
+  , edh'ctx'stack :: ![EdhCallFrame]
     -- | the direct generator caller
   , edh'ctx'genr'caller :: !(Maybe EdhGenrCaller)
     -- | the match target value in context, normally be `true`, or the
     -- value from `x` in a `case x of` block
   , edh'ctx'match :: EdhValue
-    -- | currently executing statement
-  , edh'ctx'stmt :: !StmtSrc
     -- | whether it's discouraged for procedure definitions or similar
     -- expressions from installing their results as attributes into the
-    -- context scope, i.e. the top of current call stack
+    -- context scope
   , edh'ctx'pure :: !Bool
     -- | whether running within an exporting stmt
   , edh'ctx'exporting :: !Bool
     -- | whether running within an effect stmt
   , edh'ctx'eff'defining :: !Bool
   }
+
 contextScope :: Context -> Scope
-contextScope = NE.head . edh'ctx'stack
-contextFrame :: Context -> Int -> Scope
-contextFrame !ctx !unwind = unwindStack (NE.head stack) (NE.tail stack) unwind
- where
-  !stack = edh'ctx'stack ctx
-  unwindStack :: Scope -> [Scope] -> Int -> Scope
-  unwindStack !s _ !c | c <= 0 = s
-  unwindStack !s []         _  = s
-  unwindStack _  (s : rest) !c = unwindStack s rest (c - 1)
+contextScope = edh'frame'scope . edh'ctx'tip
+contextSrcLoc :: Context -> SrcLoc
+contextSrcLoc = edh'exe'src'loc . edh'ctx'tip
+callingScope :: Context -> Scope
+callingScope = edh'frame'scope . callingFrame
+callingFrame :: Context -> EdhCallFrame
+callingFrame (Context !tip !stack _ _ _ _ _) = case stack of
+  callerFrame : _ -> callerFrame
+  _               -> tip
+
 
 -- the yield receiver, a.k.a. the caller's continuation
 type EdhGenrCaller
@@ -248,6 +247,31 @@ type EdhGenrCaller
   -> STM ()
 
 
+data EdhCallFrame = EdhCallFrame {
+    -- | the scope of this call frame
+    edh'frame'scope :: !Scope
+    -- | the source location currently under execution
+  , edh'exe'src'loc :: !SrcLoc
+    -- | the exception handler, `catch`/`finally` should capture the
+    -- outer scope, and run its *tried* block with a new stack whose
+    -- top frame is a scope all same but the `edh'exc'handler` field,
+    -- which executes its handling logics appropriately.
+  , edh'exc'handler :: !EdhExcptHndlr
+  }
+frameMovePC :: EdhCallFrame -> SrcRange -> EdhCallFrame
+frameMovePC !frame !src'span = frame
+  { edh'exe'src'loc = loc { src'range = src'span }
+  }
+  where !loc = edh'exe'src'loc frame
+etsMovePC :: EdhThreadState -> SrcRange -> EdhThreadState
+etsMovePC !ets !src'span = ets
+  { edh'context = ctx { edh'ctx'tip = frameMovePC tip src'span }
+  }
+ where
+  !ctx = edh'context ets
+  !tip = edh'ctx'tip ctx
+
+
 type EdhExcptHndlr
   =  EdhThreadState       -- ^ thread state of the thrower
   -> EdhValue             -- ^ the error value to handle
@@ -258,53 +282,6 @@ defaultEdhExcptHndlr :: EdhExcptHndlr
 defaultEdhExcptHndlr _etsThrower !exv !rethrow = rethrow exv
 
 
--- | Construct an call context from thread state
-getEdhCallContext :: Int -> EdhThreadState -> EdhCallContext
-getEdhCallContext !unwind !ets = EdhCallContext (prettySrcSpan tip) frames
- where
-  unwindStack :: Int -> [Scope] -> [Scope]
-  unwindStack c s | c <= 0 = s
-  unwindStack _ []         = []
-  unwindStack _ [f    ]    = [f]
-  unwindStack c (_ : s)    = unwindStack (c - 1) s
-  !ctx                = edh'context ets
-  (StmtSrc (!tip, _)) = edh'ctx'stmt ctx
-  !frames =
-    foldl'
-        (\sfs (Scope _ _ _ _ !pd (StmtSrc (!callerPos, _)) _) ->
-          EdhCallFrame
-              (procedureName pd)
-              (case edh'procedure'decl pd of
-                HostDecl _           -> "<host-code>"
-                ProcDecl _ _ _ !spos -> prettySrcSpan spos
-              )
-              (prettySrcSpan callerPos)
-            : sfs
-        )
-        []
-      $ unwindStack unwind
-      $ NE.init (edh'ctx'stack ctx)
-
-edhCreateError :: Int -> EdhThreadState -> EdhErrorTag -> ArgsPack -> EdhError
-edhCreateError !unwindDef !ets !tag apk@(ArgsPack !args !kwargs) = case args of
-  [EdhString !m] | odNull kwargs' -> createErr m nil
-  (EdhString !m : args')          -> createErr m $ case args' of
-    [] | odNull kwargs' -> nil
-    _                   -> EdhArgsPack $ ArgsPack args' kwargs
-  _ -> createErr "❌" $ case args of
-    [] | odNull kwargs' -> nil
-    _                   -> EdhArgsPack apk
- where
-  createErr !msg !details = EdhError tag msg (toDyn details) cc
-  (!maybeUnwind, !kwargs') = odTakeOut (AttrByName "unwind") kwargs
-  !unwind                  = case maybeUnwind of
-    Just (EdhDecimal d) -> case decimalToInteger d of
-      Just !n -> fromIntegral n
-      _       -> unwindDef
-    _ -> unwindDef
-  !cc = getEdhCallContext unwind ets
-
-
 -- | A lexical scope
 data Scope = Scope {
     -- | the backing storage of this scope
@@ -313,35 +290,29 @@ data Scope = Scope {
   , edh'scope'this :: !Object
     -- | `that` object in this scope
   , edh'scope'that :: !Object
-    -- | the exception handler, `catch`/`finally` should capture the
-    -- outer scope, and run its *tried* block with a new stack whose
-    -- top frame is a scope all same but the `edh'excpt'hndlr` field,
-    -- which executes its handling logics appropriately.
-  , edh'excpt'hndlr :: !EdhExcptHndlr
     -- | the Edh procedure, as to run which, this scope is created
     -- note this is left lazy so the root scope can be created without infinite
     -- loop
   , edh'scope'proc :: ProcDefi
-    -- | the Edh stmt caused creation of this scope
-  , edh'scope'caller :: !StmtSrc
     -- | when this scope is of an effectful procedure as called, this is the
-    -- outer call stack from which (but not including the) scope the
+    -- outer call stack from which (but not including the) scope the effectful
     -- procedure is addressed of
-  , edh'effects'stack :: [Scope]
+  , edh'effects'stack :: [EdhCallFrame]
   }
 instance Show Scope where
-  show (Scope _ _ _ _ !pd (StmtSrc (!cPos, _)) _) =
-    "📜 "
-      ++ (T.unpack $ procedureName pd)
-      ++ " 🔎 "
-      ++ defLoc
-      ++ " 👈 "
-      ++ T.unpack (prettySrcSpan cPos)
-   where
-    defLoc = case edh'procedure'decl pd of
-      HostDecl _ -> "<host-code>"
-      decl@ProcDecl{} ->
-        T.unpack $ prettySrcSpan $ edh'procedure'name'span decl
+  show !s = T.unpack $ "<scope: " <> procedureName (edh'scope'proc s) <> ">"
+  -- show (Scope _ _ _ _ !pd (StmtSrc (!cPos, _)) _) =
+  --   "📜 "
+  --     ++ (T.unpack $ procedureName pd)
+  --     ++ " 🔎 "
+  --     ++ defLoc
+  --     ++ " 👈 "
+  --     ++ T.unpack (prettySrcSpan cPos)
+  --  where
+  --   defLoc = case edh'procedure'decl pd of
+  --     HostDecl _ -> "<host-code>"
+  --     decl@ProcDecl{} ->
+  --       T.unpack $ prettySrcSpan $ edh'procedure'name'span decl
 
 outerScopeOf :: Scope -> Maybe Scope
 outerScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
@@ -354,17 +325,6 @@ rootScopeOf !scope = if edh'scope'proc outerScope == edh'scope'proc scope
   then scope -- found a root scope
   else rootScopeOf outerScope
   where !outerScope = edh'procedure'lexi $ edh'scope'proc scope
-
-scopeLexiLoc :: Scope -> (Text -> STM ()) -> STM ()
-scopeLexiLoc !scope !exit = case edh'procedure'decl pd of
-  ProcDecl _ _ _ !nameSpan -> exit $ prettySrcSpan nameSpan
-  HostDecl _ ->
-    iopdLookup (AttrByName "__file__") (edh'scope'entity scope) >>= \case
-      Nothing           -> exit $ "<host-procedure: " <> procedureName pd <> ">"
-      Just !moduFileVal -> case moduFileVal of
-        EdhString !moduFile -> exit moduFile
-        _                   -> exit $ "<procedure: " <> procedureName pd <> ">"
-  where !pd = edh'scope'proc scope
 
 
 -- | A class is wrapped as an object per se, the object's storage structure is
@@ -523,10 +483,12 @@ edhCreateModule !world !moduName !moduId !srcName = do
 
 worldContext :: EdhWorld -> Context
 worldContext !world = Context
-  { edh'ctx'stack        = edh'world'root world :| []
+  { edh'ctx'tip          = EdhCallFrame (edh'world'root world)
+                                        (SrcLoc (SrcDoc "<world>") noSrcRange)
+                                        defaultEdhExcptHndlr
+  , edh'ctx'stack        = []
   , edh'ctx'genr'caller  = Nothing
   , edh'ctx'match        = true
-  , edh'ctx'stmt         = StmtSrc (startLocOfFile "<world>", VoidStmt)
   , edh'ctx'pure         = False
   , edh'ctx'exporting    = False
   , edh'ctx'eff'defining = False
@@ -711,7 +673,7 @@ exitEdh !ets !exit !val = edhDoSTM ets $ exit val ets
 -- | Type of an intrinsic infix operator in the host language (Haskell).
 --
 -- Note no stack frame is created/pushed when an intrinsic operator is called.
-type EdhIntrinsicOp = Expr -> Expr -> EdhTxExit -> EdhTx
+type EdhIntrinsicOp = ExprSrc -> ExprSrc -> EdhTxExit -> EdhTx
 
 edhFlipOp :: EdhIntrinsicOp -> EdhIntrinsicOp
 edhFlipOp !op = flipped
@@ -905,10 +867,10 @@ data EdhValue =
 
   -- | a callable procedure
   -- with the effect outer stack if resolved as an effectful artifact
-  | EdhProcedure !EdhProc !(Maybe [Scope])
+  | EdhProcedure !EdhProc !(Maybe [EdhCallFrame])
   -- | a callable procedure bound to a specific this object and that object
   -- with the effect outer stack if resolved as an effectful artifact
-  | EdhBoundProc !EdhProc !Object !Object !(Maybe [Scope])
+  | EdhBoundProc !EdhProc !Object !Object !(Maybe [EdhCallFrame])
 
   -- * flow control
   | EdhBreak
@@ -944,6 +906,10 @@ data EdhValue =
 
   -- | reflective expr, with source (or not, if empty)
   | EdhExpr !Unique !Expr !Text
+
+edhExpr :: Unique -> ExprSrc -> Text -> EdhValue
+edhExpr !u (ExprSrc !x _) !s = EdhExpr u x s
+
 
 instance Show EdhValue where
   show (EdhType t)              = show t
@@ -1127,11 +1093,6 @@ nil = EdhNil
 edhNone :: EdhValue
 edhNone = EdhNamedValue "None" EdhNil
 
--- | None as an expression
-edhNoneExpr :: Expr
-edhNoneExpr =
-  InfixExpr ":=" (AttrExpr (DirectRef (NamedAttr "None"))) (LitExpr NilLiteral)
-
 -- | Similar to `None`
 --
 -- though we don't have `Maybe` monad in Edh, having a `Nothing`
@@ -1139,18 +1100,10 @@ edhNoneExpr =
 edhNothing :: EdhValue
 edhNothing = EdhNamedValue "Nothing" EdhNil
 
--- | Nothing as an expression
-edhNothingExpr :: Expr
-edhNothingExpr = InfixExpr ":="
-                           (AttrExpr (DirectRef (NamedAttr "Nothing")))
-                           (LitExpr NilLiteral)
-
 -- | NA for not-applicable, similar to @NotImplemented@ as in Python
 edhNA :: EdhValue
-edhNA = EdhNamedValue "NA" $ EdhDefault
-  (unsafePerformIO newUnique)
-  (ExprWithSrc (LitExpr NilLiteral) [SrcSeg "nil"])
-  Nothing
+edhNA = EdhNamedValue "NA"
+  $ EdhDefault (unsafePerformIO newUnique) (LitExpr NilLiteral) Nothing
 {-# NOINLINE edhNA #-}
 
 
@@ -1175,12 +1128,8 @@ false :: EdhValue
 false = EdhBool False
 
 
-newtype StmtSrc = StmtSrc (SrcLoc, Stmt)
-instance Eq StmtSrc where
-  StmtSrc (x'sp, _) == StmtSrc (y'sp, _) = x'sp == y'sp
-instance Show StmtSrc where
-  show (StmtSrc (_sp, stmt)) = show stmt
-
+data StmtSrc = StmtSrc !Stmt !SrcRange
+  deriving (Eq, Show)
 type DocComment = [Text]
 
 
@@ -1189,19 +1138,19 @@ data Stmt =
       -- same as in Python
       VoidStmt
       -- | similar to `go` in Go, starts goroutine
-    | GoStmt !Expr
+    | GoStmt !ExprSrc
       -- | not similar to `defer` in Go (in Go `defer` snapshots arg values
       -- and schedules execution on func return), but in Edh `defer`
       -- schedules execution on thread termination
-    | DeferStmt !Expr
+    | DeferStmt !ExprSrc
       -- | artifacts introduced within an `effect` statement will be put
       -- into effect namespace, which as currently implemented, a dict
       -- resides in current scope entity addressed by name `__exports__`
-    | EffectStmt !Expr !(Maybe DocComment)
+    | EffectStmt !ExprSrc !(Maybe DocComment)
       -- | assignment with args (un/re)pack sending/receiving syntax
     | LetStmt !ArgsReceiver !ArgsPacker
       -- | super object declaration for a descendant object
-    | ExtendsStmt !Expr
+    | ExtendsStmt !ExprSrc
       -- | perceiption declaration, a perceiver is bound to an event `sink`
       -- with the calling thread as context, when an event fires from that
       -- event `sink`, the bound perceiver body will be executed from the
@@ -1217,9 +1166,9 @@ data Stmt =
       --
       -- the perceiption construct is somewhat similar to traditional signal
       -- handling mechanism in OS process management
-    | PerceiveStmt !Expr !StmtSrc
+    | PerceiveStmt !ExprSrc !StmtSrc
       -- | while loop
-    | WhileStmt !Expr !StmtSrc
+    | WhileStmt !ExprSrc !StmtSrc
       -- | break from a while/for loop, or terminate the Edh thread if given
       -- from a perceiver
     | BreakStmt
@@ -1231,17 +1180,21 @@ data Stmt =
     | RethrowStmt
       -- | any value can be thrown as exception, handling will rely on the
       --   ($=>) as `catch` and (@=>) as `finally` operators
-    | ThrowStmt !Expr
+    | ThrowStmt !ExprSrc
       -- | early stop from a procedure
-    | ReturnStmt !Expr
+    | ReturnStmt !ExprSrc
       -- | expression with precedence
     | ExprStmt !Expr !(Maybe DocComment)
-  deriving (Show)
+  deriving (Eq, Show)
+
 
 -- Attribute reference
 data AttrRef = ThisRef | ThatRef | SuperRef
-  | DirectRef !AttrAddr
-  | IndirectRef !Expr !AttrAddr
+  | DirectRef !AttrAddrSrc
+  | IndirectRef !ExprSrc !AttrAddrSrc
+  deriving (Eq, Show)
+
+data AttrAddrSrc = AttrAddrSrc !AttrAddr !SrcRange
   deriving (Eq, Show)
 
 -- | the key to address attributes against a left hand object or current scope
@@ -1266,14 +1219,16 @@ attrAddrStr (SymbolicAttr s) = "@" <> s
 
 receivesNamedArg :: Text -> ArgsReceiver -> Bool
 receivesNamedArg _     WildReceiver              = True
-receivesNamedArg !name (SingleReceiver argRcvr ) = _hasNamedArg name [argRcvr]
-receivesNamedArg !name (PackReceiver   argRcvrs) = _hasNamedArg name argRcvrs
-
-_hasNamedArg :: Text -> [ArgReceiver] -> Bool
-_hasNamedArg _     []           = False
-_hasNamedArg !name (arg : rest) = case arg of
-  RecvArg (NamedAttr !argName) _ _ -> argName == name || _hasNamedArg name rest
-  _ -> _hasNamedArg name rest
+receivesNamedArg !name (SingleReceiver !argRcvr) = case argRcvr of
+  RecvArg (AttrAddrSrc !addr _) _ _ | addr == NamedAttr name -> True
+  _ -> False
+receivesNamedArg !name (PackReceiver !argRcvrs) = hasNamedArg argRcvrs
+ where
+  hasNamedArg :: [ArgReceiver] -> Bool
+  hasNamedArg []           = False
+  hasNamedArg (arg : rest) = case arg of
+    RecvArg (AttrAddrSrc !addr _) _ _ | addr == NamedAttr name -> True
+    _ -> hasNamedArg rest
 
 data ArgsReceiver = PackReceiver ![ArgReceiver]
     | SingleReceiver !ArgReceiver
@@ -1284,38 +1239,39 @@ instance Show ArgsReceiver where
   show (SingleReceiver r ) = "(" ++ show r ++ ")"
   show WildReceiver        = "*"
 
-data ArgReceiver = RecvRestPosArgs !AttrName
-    | RecvRestKwArgs !AttrName
-    | RecvRestPkArgs !AttrName
-    | RecvArg !AttrAddr !(Maybe AttrRef) !(Maybe Expr)
-  deriving (Eq)
-instance Show ArgReceiver where
-  show (RecvRestPosArgs nm) = "*" ++ T.unpack nm
-  show (RecvRestKwArgs  nm) = "**" ++ T.unpack nm
-  show (RecvRestPkArgs  nm) = "***" ++ T.unpack nm
-  show (RecvArg nm _ _    ) = show nm
+data ArgReceiver =
+    -- * <args | @args'ptr>
+    RecvRestPosArgs !AttrAddrSrc
+    -- ** <kwargs | @kwargs'ptr>
+  | RecvRestKwArgs !AttrAddrSrc
+    -- *** <apk | @apk'ptr>
+  | RecvRestPkArgs !AttrAddrSrc
+    -- <attr | @attr'ptr> [as some.other.attr] [= default'expr]
+  | RecvArg !AttrAddrSrc !(Maybe AttrRef) !(Maybe ExprSrc)
+  deriving (Eq, Show)
 
 
 type ArgsPacker = [ArgSender]
-data ArgSender = UnpackPosArgs !Expr
-    | UnpackKwArgs !Expr
-    | UnpackPkArgs !Expr
-    | SendPosArg !Expr
-    | SendKwArg !AttrAddr !Expr
+data ArgSender = UnpackPosArgs !ExprSrc
+    | UnpackKwArgs !ExprSrc
+    | UnpackPkArgs !ExprSrc
+    | SendPosArg !ExprSrc
+    | SendKwArg !AttrAddrSrc !ExprSrc
   deriving (Eq, Show)
 
 -- | Procedure declaration, result of parsing
 data ProcDecl = HostDecl (ArgsPack -> EdhHostProc) | ProcDecl {
-    edh'procedure'addr :: !AttrAddr
+    edh'procedure'addr :: !AttrAddrSrc
   , edh'procedure'args :: !ArgsReceiver
   , edh'procedure'body :: !StmtSrc
-  , edh'procedure'name'span :: !SrcLoc
+  , edh'procedure'loc  :: !SrcLoc
   }
 instance Eq ProcDecl where
   _ == _ = False
 instance Show ProcDecl where
-  show (HostDecl _          ) = "<host-proc>"
-  show (ProcDecl !addr _ _ _) = "<edh-proc " <> show addr <> ">"
+  show (HostDecl _) = "<host-proc>"
+  show (ProcDecl (AttrAddrSrc !addr _) _ _ _) =
+    "<edh-proc " <> T.unpack (attrAddrStr addr) <> ">"
 
 
 -- | Procedure definition, result of execution of the declaration
@@ -1331,11 +1287,17 @@ instance Eq ProcDefi where
 instance Ord ProcDefi where
   compare (ProcDefi x'u _ _ _ _) (ProcDefi y'u _ _ _ _) = compare x'u y'u
 instance Hashable ProcDefi where
-  hashWithSalt s (ProcDefi u _ _ _ _) = s `hashWithSalt` u
+  hashWithSalt s (ProcDefi !u _ _ _ _) = s `hashWithSalt` u
 instance Show ProcDefi where
-  show (ProcDefi _ !name _ _ (HostDecl _)) = "<host-proc " <> show name <> ">"
-  show (ProcDefi _ !name _ _ (ProcDecl !addr _ _ _)) =
-    "<edh-proc " <> show name <> " : " <> show addr <> ">"
+  show (ProcDefi _ !name _ _ (HostDecl _)) =
+    T.unpack $ "<host-proc " <> attrKeyStr name <> ">"
+  show (ProcDefi _ !name _ _ (ProcDecl (AttrAddrSrc !addr _) _ _ _)) =
+    T.unpack
+      $  "<edh-proc "
+      <> attrKeyStr name
+      <> " : "
+      <> attrAddrStr addr
+      <> ">"
 
 procedureName :: ProcDefi -> Text
 procedureName !pd = case edh'procedure'name pd of
@@ -1352,40 +1314,48 @@ data Prefix = PrefixPlus | PrefixMinus | Not
 data DictKeyExpr =
       LitDictKey !Literal
     | AddrDictKey !AttrRef
-    | ExprDictKey !Expr -- this must be quoted in parenthesis
+    | ExprDictKey !ExprSrc -- this must be quoted in parenthesis
   deriving (Eq, Show)
+
+data ExprSrc = ExprSrc !Expr !SrcRange
+  deriving (Eq, Show)
+exprSrcStart :: ExprSrc -> SrcPos
+exprSrcStart (ExprSrc _ (SrcRange !start _end)) = start
+exprSrcEnd :: ExprSrc -> SrcPos
+exprSrcEnd (ExprSrc _ (SrcRange _start !end)) = end
+
 
 data Expr =
     -- | the expr will be evaluated with result discarded,
     -- should always result in nil
-    VoidExpr !Expr
+    VoidExpr !ExprSrc
 
     -- | atomically isolated, mark an expression to be evaluated in a single
     -- STM transaction as a whole
-  | AtoIsoExpr !Expr
+  | AtoIsoExpr !ExprSrc
 
   | LitExpr !Literal
-  | PrefixExpr !Prefix !Expr
+  | PrefixExpr !Prefix !ExprSrc
 
-  | IfExpr { if'condition :: !Expr
+  | IfExpr { if'condition :: !ExprSrc
           , if'consequence :: !StmtSrc
           , if'alternative :: !(Maybe StmtSrc)
           }
 
-  | CaseExpr { case'target :: !Expr , case'branches :: !Expr }
+  | CaseExpr { case'target :: !ExprSrc , case'branches :: !ExprSrc }
 
     -- note: the order of entries is reversed as parsed from source
-  | DictExpr ![(DictKeyExpr, Expr)]
-  | ListExpr ![Expr]
+  | DictExpr ![(DictKeyExpr, ExprSrc)]
+  | ListExpr ![ExprSrc]
   | ArgsPackExpr !ArgsPacker
-  | ParenExpr !Expr
+  | ParenExpr !ExprSrc
 
     -- | import with args (re)pack receiving syntax
     -- `into` a target object from specified expr, or current scope
-  | ImportExpr !ArgsReceiver !Expr !(Maybe Expr)
+  | ImportExpr !ArgsReceiver !ExprSrc !(Maybe ExprSrc)
     -- | only artifacts introduced within an `export` statement, into
     -- `this` object in context, are eligible for importing by others
-  | ExportExpr !Expr
+  | ExportExpr !ExprSrc
     -- | namespace definition
   | NamespaceExpr !ProcDecl !ArgsPacker
     -- | class definition
@@ -1408,35 +1378,35 @@ data Expr =
   | BlockExpr ![StmtSrc]
   | ScopedBlockExpr ![StmtSrc]
 
-  | YieldExpr !Expr
+  | YieldExpr !ExprSrc
 
   -- | a for-from-do loop is made an expression in Edh, so it can
   -- appear as the right-hand expr of the comprehension (=<) operator.
-  | ForExpr !ArgsReceiver !Expr !StmtSrc
+  | ForExpr !ArgsReceiver !ExprSrc !StmtSrc
 
   -- | call out an effectful artifact, search only outer stack frames,
   -- if from an effectful procedure run
-  | PerformExpr !AttrAddr
+  | PerformExpr !AttrAddrSrc
   -- | call out an effectful artifact, always search full stack frames
-  | BehaveExpr !AttrAddr
+  | BehaveExpr !AttrAddrSrc
 
   | AttrExpr !AttrRef
-  | IndexExpr { index'value :: !Expr
-              , index'target :: !Expr
+  | IndexExpr { index'value :: !ExprSrc
+              , index'target :: !ExprSrc
               }
-  | CallExpr !Expr !ArgsPacker
+  | CallExpr !ExprSrc !ArgsPacker
 
-  | InfixExpr !OpSymbol !Expr !Expr
+  | InfixExpr !OpSymbol !ExprSrc !ExprSrc
 
   -- specify a default by Edh code
-  | DefaultExpr !Expr
+  | DefaultExpr !ExprSrc
 
   -- to support interpolation within expressions, with source form
-  | ExprWithSrc !Expr ![SourceSeg]
-  | IntplExpr !Expr
+  | ExprWithSrc !ExprSrc ![SourceSeg]
+  | IntplExpr !ExprSrc
   deriving (Eq, Show)
 
-data SourceSeg = SrcSeg !Text | IntplSeg !Expr
+data SourceSeg = SrcSeg !Text | IntplSeg !ExprSrc
   deriving (Eq, Show)
 
 data Literal =
@@ -1578,26 +1548,19 @@ objectScope !obj = case edh'obj'store obj of
   HostStore _ -> do
     -- provide the scope for a host object with an ad-hoc empty hash entity
     !hs <- iopdEmpty
-    return Scope
-      { edh'scope'entity  = hs
-      , edh'scope'this    = obj
-      , edh'scope'that    = obj
-      , edh'excpt'hndlr   = defaultEdhExcptHndlr
-      , edh'scope'proc    = ocProc
-      , edh'scope'caller  = StmtSrc
-                              (startLocOfFile "<host-object-scope>", VoidStmt)
-      , edh'effects'stack = []
-      }
+    return Scope { edh'scope'entity  = hs
+                 , edh'scope'this    = obj
+                 , edh'scope'that    = obj
+                 , edh'scope'proc    = ocProc
+                 , edh'effects'stack = []
+                 }
 
-  ClassStore (Class !cp !cs _ _) -> return Scope
-    { edh'scope'entity  = cs
-    , edh'scope'this    = obj
-    , edh'scope'that    = obj
-    , edh'excpt'hndlr   = defaultEdhExcptHndlr
-    , edh'scope'proc    = cp
-    , edh'scope'caller  = StmtSrc (startLocOfFile "<class-scope>", VoidStmt)
-    , edh'effects'stack = []
-    }
+  ClassStore (Class !cp !cs _ _) -> return Scope { edh'scope'entity  = cs
+                                                 , edh'scope'this    = obj
+                                                 , edh'scope'that    = obj
+                                                 , edh'scope'proc    = cp
+                                                 , edh'effects'stack = []
+                                                 }
 
   HashStore !hs ->
     let mustStr !v = case edhUltimate v of
@@ -1606,47 +1569,42 @@ objectScope !obj = case edh'obj'store obj of
     in
       case procedureName ocProc of
         "module" -> do
-          !moduPath <-
+          !moduName <-
             mustStr
               <$> iopdLookupDefault (EdhString "<anonymous>")
-                                    (AttrByName "__path__")
+                                    (AttrByName "__name__")
                                     hs
           !moduFile <-
             mustStr
               <$> iopdLookupDefault (EdhString "<on-the-fly>")
                                     (AttrByName "__file__")
                                     hs
-          let !srcSpan = startLocOfFile $ T.unpack moduFile
           return Scope
             { edh'scope'entity  = hs
             , edh'scope'this    = obj
             , edh'scope'that    = obj
-            , edh'excpt'hndlr   = defaultEdhExcptHndlr
             , edh'scope'proc    = ProcDefi
               { edh'procedure'ident = edh'obj'ident obj
-              , edh'procedure'name  = AttrByName moduPath
+              , edh'procedure'name  = AttrByName $ "module:" <> moduName
               , edh'procedure'lexi  = edh'procedure'lexi ocProc
               , edh'procedure'doc   = Nothing
               , edh'procedure'decl  = ProcDecl
-                { edh'procedure'addr      = NamedAttr moduPath
-                , edh'procedure'args      = PackReceiver []
-                , edh'procedure'body      = StmtSrc (srcSpan, VoidStmt)
-                , edh'procedure'name'span = srcSpan
+                { edh'procedure'addr = AttrAddrSrc
+                                         (NamedAttr $ "module:" <> moduName)
+                                         zeroSrcRange
+                , edh'procedure'args = PackReceiver []
+                , edh'procedure'body = StmtSrc VoidStmt zeroSrcRange
+                , edh'procedure'loc  = SrcLoc (SrcDoc moduFile) zeroSrcRange
                 }
               }
-            , edh'scope'caller  = StmtSrc (startLocOfFile "<run-edh>", VoidStmt)
             , edh'effects'stack = []
             }
-        _ -> return Scope
-          { edh'scope'entity  = hs
-          , edh'scope'this    = obj
-          , edh'scope'that    = obj
-          , edh'excpt'hndlr   = defaultEdhExcptHndlr
-          , edh'scope'proc    = ocProc
-          , edh'scope'caller  = StmtSrc
-                                  (startLocOfFile "<object-scope>", VoidStmt)
-          , edh'effects'stack = []
-          }
+        _ -> return Scope { edh'scope'entity  = hs
+                          , edh'scope'this    = obj
+                          , edh'scope'that    = obj
+                          , edh'scope'proc    = ocProc
+                          , edh'effects'stack = []
+                          }
  where
   !oc = case edh'obj'store $ edh'obj'class obj of
     ClassStore !cls -> cls

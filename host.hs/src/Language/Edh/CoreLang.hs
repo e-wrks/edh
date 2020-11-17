@@ -41,9 +41,10 @@ resolveEdhCtxAttr !fromScope !key = resolveLexicalAttr (Just fromScope)
 edhEffectsMagicName :: Text
 edhEffectsMagicName = "__effects__"
 
-resolveEffectfulAttr :: [Scope] -> EdhValue -> STM (Maybe (EdhValue, [Scope]))
+resolveEffectfulAttr
+  :: [EdhCallFrame] -> EdhValue -> STM (Maybe (EdhValue, [EdhCallFrame]))
 resolveEffectfulAttr [] _ = return Nothing
-resolveEffectfulAttr (scope : rest) !key =
+resolveEffectfulAttr (EdhCallFrame scope _ _ : rest) !key =
   iopdLookup (AttrByName edhEffectsMagicName) (edh'scope'entity scope) >>= \case
     Nothing                    -> resolveEffectfulAttr rest key
     Just (EdhDict (Dict _ !d)) -> iopdLookup key d >>= \case

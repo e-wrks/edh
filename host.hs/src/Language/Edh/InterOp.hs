@@ -1398,12 +1398,11 @@ mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
 mkIntrinsicOp !world !opSym !iop = do
   u <- unsafeIOToSTM newUnique
   Map.lookup opSym <$> readTMVar (edh'world'operators world) >>= \case
-    Nothing ->
-      throwSTM
-        $ EdhError UsageError
-                   ("operator (" <> opSym <> ") not declared in this world")
-                   (toDyn nil)
-        $ EdhCallContext "<edh>" []
+    Nothing -> throwSTM $ EdhError
+      UsageError
+      ("operator (" <> opSym <> ") not declared in this world")
+      (toDyn nil)
+      "<edh>"
     Just (fixity, preced, _) -> return $ EdhProcedure
       (EdhIntrOp fixity preced $ IntrinOpDefi u opSym iop)
       Nothing

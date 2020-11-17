@@ -1,115 +1,107 @@
+{##
+ # ($=>) reads `catch`
+ # (@=>) reads `finally`
+ #
+ # there is no `try` keyword in Edh, just use a block (or single
+ # expression) as the left-hand-expr of ($=>) or (@=>)
+ #
+ # pattern/value matching can be used in the right-hand-expr of
+ # catch/finally. you may never want to match the exception in
+ # a finally block, but you probably always do in a catch block
+ #}
 
+# %%
 {
 
-  # ($=>) reads `catch`
+  throw 3*7 # any value can be thrown
 
-  # (@=>) reads `finally`
+} $=> { { UsageError: exc } } -> {
+  # (->) binds tighter than ($=>) and (@=>) so can be single branch catch
 
-  # there is no `try` keyword in Edh, just use a block (or single
-  # expression) as the left-hand-expr of ($=>) or (@=>)
-  #
-  # pattern/value matching can be used in the right-hand-expr of
-  # catch/finally. you may never want to match the exception in
-  # a finally block, but you probably always do in a catch block
+  console.warn <| "Obviously it's your fault by not doing the right thing! "
+  ++ exc # it's bad smell to swallow error information in your code
 
-  {
+} $=> { { IOError: exc } } -> {
+  # multiple `catch`es can be chained, same intuition as in other languages
 
-    throw 3*7 # any value can be thrown
+  console.fatal <| 'The realworld is insane sometimes ... '
 
-  } $=> { { UsageError: exc } } -> {
-    # (->) binds tighter than ($=>) and (@=>) so can be single branch catch
+  fallthrough # this way to re-throw the original exception
 
-    console.warn <| "Obviously it's your fault by not doing the right thing! "
-    ++ exc # it's bad smell to swallow error information in your code
+} $=> { # and catches can be grouped in a block too,
+  # with the exception value as pattern/value match target throughout
 
-  } $=> { { IOError: exc } } -> {
-    # multiple `catch`es can be chained, same intuition as in other languages
-
-    console.fatal <| 'The realworld is insane sometimes ... '
-
-    fallthrough # this way to re-throw the original exception
-
-  } $=> { # and catches can be grouped in a block too,
-    # with the exception value as pattern/value match target throughout
-
-    { n } -> {
-      console.print( 'a ' ++ type( n ) ++ ' exception is thrown!' )
-      fallthrough # or it'll be recovered right from here
-    }
-
-    21 -> {
-      console.print( "That's what I'm afraid of, but it's okay then." )
-      # in case any branch with pattern/value matched successfuly, the
-      # exception is considered to have been recovered
-    }
-
-  } @=> { # (@=>) is the `finally` operator
-    console.print( 'I always do cleanup anyway.' )
-  } @=> { { ProgramHalt:_ } } -> {
-    # `finally`s can be chained and matched too in Edh, surprise!
-    # but if you are fond of this fact, maybe you've unfortunately
-    # been trapped often.
-    console.print( "There're never short of cleanup jobs to do." )
+  { n } -> {
+    console.print( 'a ' ++ type( n ) ++ ' exception is thrown!' )
+    fallthrough # or it'll be recovered right from here
   }
 
-  console.print( "there're other stuffs beyond the dangerous zone." )
+  21 -> {
+    console.print( "That's what I'm afraid of, but it's okay then." )
+    # in case any branch with pattern/value matched successfuly, the
+    # exception is considered to have been recovered
+  }
 
+} @=> { # (@=>) is the `finally` operator
+  console.print( 'I always do cleanup anyway.' )
+} @=> { { ProgramHalt:_ } } -> {
+  # `finally`s can be chained and matched too in Edh, surprise!
+  # but if you are fond of this fact, maybe you've unfortunately
+  # been trapped often.
+  console.print( "There're never short of cleanup jobs to do." )
+}
+
+console.print( "there're other stuffs beyond the dangerous zone." )
+
+
+# %%
+{
+  console.exit( 'You can never recover from a ProgramHalt really.' )
+} $=> { { ProgramHalt:_ } } -> {
+  console.info<| 'Though you can catch a ProgramHalt and do sth.'
+  "What ever this evals to, it's not used for a recovery."
+}
+console.info<| 'This never gonna to happen.'
+
+
+# %%
+# custom exception classes can be defined and caught accordingly
+# wrt class hierarchy
+
+class MyException extends Exception
+
+class AppException extends Exception
+
+class RuleViolated extends AppException
+
+method doBusiness () {
+  throw RuleViolated( "warning ignored", reason= 'unknown', degree= 'perphaps!' )
+}
+
+{
+  doBusiness()
+} $=> { { RuleViolated:exc } } -> {
+  console.debug<| 'or maybe the rule is wrong ...'
+  rethrow
+} $=> { { AppException:exc } } -> {
+  console.warn <| 'app error encountered: ' ++ desc( exc )
+  console.info <| 'app error recorded - ' ++ exc.message ++ ' -- ' ++ exc.details
+} @=> {
+  console.info <| 'looking forward for more business to do'
 }
 
 
-{
-  {
-    console.exit( 'You can never recover from a ProgramHalt really.' )
-  } $=> { { ProgramHalt:_ } } -> {
-    console.print( 'Though you can catch a ProgramHalt and do sth.' )
-    "What ever this evals to, it's not used for a recovery."
-  }
-  console.print( 'This never gonna to happen.' )
+# %%
+# Exceptions can be used to obtain backtracing information,
+# when not meant to be thrown
+
+method f() {
+  console.print( "I suspect why I'm called anyway ...",
+    backtrace= show( Exception( "See I'm so called." ) ) )
 }
 
-
-{
-
-  # custom exception classes can be defined and caught accordingly
-  # wrt class hierarchy
-
-  class MyException extends Exception
-
-  class AppException extends Exception
-
-  class RuleViolated extends AppException
-
-  method doBusiness () {
-    throw RuleViolated( "warning ignored", reason= 'unknown', degree= 'perphaps!' )
-  }
-
-  {
-    doBusiness()
-  } $=> { { RuleViolated:exc } } -> {
-    console.debug<| 'or maybe the rule is wrong ...'
-    rethrow
-  } $=> { { AppException:exc } } -> {
-    console.warn <| 'app error encountered: ' ++ desc( exc )
-    console.info <| 'app error recorded - ' ++ exc.message ++ ' -- ' ++ exc.details
-  } @=> {
-    console.info <| 'looking forward for more business to do'
-  }
-
+method g() {
+  f ()
 }
 
-
-{
-  # Exceptions can be used to obtain backtracing information,
-  # when not meant to be thrown
-
-  method f() {
-    console.print( "I suspect why I'm called anyway ...",
-      backtrace = show( Exception( "See I'm so called." ) ) )
-  }
-
-  method g() {
-    f ()
-  }
-
-  g()
-}
+g()

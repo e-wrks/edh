@@ -258,12 +258,14 @@ createVectorClass !clsOuterScope =
               else unsafeIOToSTM (MV.read mvec n) >>= \ !srcVal ->
                 runEdhTx ets
                   $ (if flipOperands
-                      then evalInfix opSym
-                                     (LitExpr $ ValueLiteral other)
-                                     (LitExpr $ ValueLiteral srcVal)
-                      else evalInfix opSym
-                                     (LitExpr $ ValueLiteral srcVal)
-                                     (LitExpr $ ValueLiteral other)
+                      then evalInfix
+                        opSym
+                        (ExprSrc (LitExpr $ ValueLiteral other) noSrcRange)
+                        (ExprSrc (LitExpr $ ValueLiteral srcVal) noSrcRange)
+                      else evalInfix
+                        opSym
+                        (ExprSrc (LitExpr $ ValueLiteral srcVal) noSrcRange)
+                        (ExprSrc (LitExpr $ ValueLiteral other) noSrcRange)
                     )
                   $ \ !rv _ets -> do
                       unsafeIOToSTM $ MV.unsafeWrite newVec n rv
@@ -294,8 +296,8 @@ createVectorClass !clsOuterScope =
       else unsafeIOToSTM (MV.read mvec n) >>= \ !oldVal ->
         runEdhTx ets
           $ evalInfix opSym
-                      (LitExpr $ ValueLiteral oldVal)
-                      (LitExpr $ ValueLiteral rhVal)
+                      (ExprSrc (LitExpr $ ValueLiteral oldVal) noSrcRange)
+                      (ExprSrc (LitExpr $ ValueLiteral rhVal) noSrcRange)
           $ \ !opRtnV _ets -> do
               unsafeIOToSTM $ MV.unsafeWrite mvec n opRtnV
               assignAt (n + step)
@@ -341,8 +343,8 @@ createVectorClass !clsOuterScope =
       unsafeIOToSTM (MV.read mvec n) >>= \ !oldVal ->
         runEdhTx ets
           $ evalInfix opSym
-                      (LitExpr $ ValueLiteral oldVal)
-                      (LitExpr $ ValueLiteral x)
+                      (ExprSrc (LitExpr $ ValueLiteral oldVal) noSrcRange)
+                      (ExprSrc (LitExpr $ ValueLiteral x) noSrcRange)
           $ \ !opRtnV _ets -> do
               unsafeIOToSTM $ MV.unsafeWrite mvec n opRtnV
               assignWithList (n + step) xs
@@ -354,8 +356,8 @@ createVectorClass !clsOuterScope =
         !otherVal <- unsafeIOToSTM $ MV.unsafeRead mvec' i
         runEdhTx ets
           $ evalInfix opSym
-                      (LitExpr $ ValueLiteral oldVal)
-                      (LitExpr $ ValueLiteral otherVal)
+                      (ExprSrc (LitExpr $ ValueLiteral oldVal) noSrcRange)
+                      (ExprSrc (LitExpr $ ValueLiteral otherVal) noSrcRange)
           $ \ !opRtnV _ets -> do
               unsafeIOToSTM $ MV.unsafeWrite mvec n opRtnV
               assignWithVec (n + step) (i + 1) mvec'
@@ -368,8 +370,8 @@ createVectorClass !clsOuterScope =
         Right (EdhIndex !i) -> unsafeIOToSTM (MV.read mvec i) >>= \ !oldVal ->
           runEdhTx ets
             $ evalInfix opSym
-                        (LitExpr $ ValueLiteral oldVal)
-                        (LitExpr $ ValueLiteral other)
+                        (ExprSrc (LitExpr $ ValueLiteral oldVal) noSrcRange)
+                        (ExprSrc (LitExpr $ ValueLiteral other) noSrcRange)
             $ \ !opRtnV _ets -> do
                 unsafeIOToSTM $ MV.unsafeWrite mvec i opRtnV
                 exitEdh ets exit opRtnV

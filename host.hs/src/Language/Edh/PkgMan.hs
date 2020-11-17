@@ -28,12 +28,11 @@ data ImportName = RelativeName !Text | AbsoluteName !Text
 -- program context trips into it, the `PackageError` thrown may be augmented
 -- later when appropriate.
 throwPkgError :: Text -> [(AttrKey, EdhValue)] -> IO a
-throwPkgError !msg !details =
-  throwIO
-    $ EdhError PackageError
-               msg
-               (toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details)
-    $ EdhCallContext "<os>" []
+throwPkgError !msg !details = throwIO $ EdhError
+  PackageError
+  msg
+  (toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details)
+  "<os>"
 
 
 edhPkgPathFrom :: FilePath -> FilePath

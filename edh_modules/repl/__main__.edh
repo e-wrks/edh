@@ -48,7 +48,7 @@ while true { # this is the *Loop* in so-called REPL
     # still reading stdin, and what ever read will subsequently be
     # discarded anyway. this behavior may be rather surprising to the
     # user, need to optimize UX for such cases.
-    console.print( 'Your last input may have no effect due to the error.' )
+    console.info<| 'Your last input may have no effect due to the error.'
   }
 
 }
