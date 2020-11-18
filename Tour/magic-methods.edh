@@ -10,50 +10,91 @@
 
     method (+) ( other ) case type( other ) of {
       # add to a constant
-      DecimalType -> Tensor( name= '(' ++ this.name ++ '+' ++ other ++ ')' )
-
-      case other of { { Tensor:_ } } -> {
-        # add to another Tensor
-        return Tensor( name= '(' ++ this.name ++ '+' ++ other.name ++ ')' )
+      DecimalType -> {
+        return Tensor( name= '(' ++ this.name ++ '+' ++ other ++ ')')
       }
 
-      return NA # not-applicable - similar to NotImplemented in Python
+      case other of { { Tensor:_} } -> {
+        # add to another Tensor
+        return Tensor( name= '(' ++ this.name ++ '+' ++ other.name ++ ')')
+      }
+
+      # note (+) operator from default batteries will do stringified
+      # concatenation if we `return NA` here, it's preferable to fail loudly
+      # instead
+      error(" Please don't plus a tensor with a " ++ show(other))
     }
-    ; (+@) = (+)
+    # a magic method reference is visually similar to an operator reference,
+    # but they are intrinsically different, e.g.
+    #   this.(+) vs (+)
+    # where the parenthesis are part of the magic method name, but not of an
+    # operator reference.
+    #
+    # while a following part in a dot-notation is interpreted as magic method,
+    # the leading part of a dot-notation or a standalone operator symbol, when
+    # quoted by parenthesis, is interpreted as an operator reference.
+    #
+    # here to reuse the left-hand magic method (+) for the right-hand
+    # implementation to be named (+.), we use at-notation with literal string
+    #
+    # and the semicolon is necessary here to disambiguate the @ symbol for
+    # at-notation instead of infix (@) operation, as it is in the leading part
+    ; @'(+.)' = @'(+)'
 
 
     method (*) ( other ) case type( other ) of {
       # mul to a constant
-      DecimalType -> Tensor( name= '(' ++ this.name ++ '*' ++ other ++ ')' )
+      DecimalType -> {
+        return Tensor( name= '(' ++ this.name ++ '*' ++ other ++ ')')
+      }
 
-      case other of { { Tensor:_ } } -> {
+      case other of { { Tensor:_} } -> {
         # mul to another Tensor
-        return Tensor( name= '(' ++ this.name ++ '*' ++ other.name ++ ')' )
+        return Tensor( name= '(' ++ this.name ++ '*' ++ other.name ++ ')')
       }
 
       return NA # not-applicable - similar to NotImplemented in Python
     }
-    ; (*@) = (*)
+    # a magic method reference is visually similar to an operator reference,
+    # but they are intrinsically different, e.g.
+    #   this.(+) vs (+)
+    # where the parenthesis are part of the magic method name, but not of an
+    # operator reference.
+    #
+    # while a following part in a dot-notation is interpreted as magic method,
+    # the leading part of a dot-notation or a standalone operator symbol, when
+    # quoted by parenthesis, is interpreted as an operator reference.
+    #
+    # here to reuse the left-hand magic method (*) for the right-hand
+    # implementation to be named (*.), we use at-notation with literal string
+    #
+    # and the semicolon is necessary here to disambiguate the @ symbol for
+    # at-notation instead of infix (@) operation, as it is in the leading part
+    ; @'(*.)' = @'(*)'
 
 
     method (-) ( other ) case type( other ) of {
       # sub a constant
-      DecimalType -> Tensor( name= '(' ++ this.name ++ '-' ++ other ++ ')' )
+      DecimalType -> {
+        return Tensor( name= '(' ++ this.name ++ '-' ++ other ++ ')')
+      }
 
-      case other of { { Tensor:_ } } -> {
+      case other of { { Tensor:_} } -> {
         # sub another Tensor
-        return Tensor( name= '(' ++ this.name ++ '-' ++ other.name ++ ')' )
+        return Tensor( name= '(' ++ this.name ++ '-' ++ other.name ++ ')')
       }
 
       return NA # not-applicable - similar to NotImplemented in Python
     }
 
-    method (-@) ( other ) case type( other ) of {
+    method (-.) ( other ) case type( other ) of {
       # sub from a constant
-      DecimalType -> Tensor( name= '(' ++ other ++ '-' ++ this.name ++ ')' )
+      DecimalType -> {
+        return Tensor( name= '(' ++ other ++ '-' ++ this.name ++ ')')
+      }
 
-      case other of { { Tensor:_ } } -> {
-        error( 'not resolved to magic (-) of ' ++ lhv ++ ' ?!' )
+      case other of { { Tensor:_} } -> {
+        error( 'not resolved to magic (-) of ' ++ lhv ++ ' ?!')
       }
 
       return NA # not-applicable - similar to NotImplemented in Python
@@ -62,22 +103,26 @@
 
     method (/) ( other ) case type( other ) of {
       # div by a constant
-      DecimalType -> Tensor( name= '(' ++ this.name ++ '/' ++ other ++ ')' )
+      DecimalType -> {
+        return Tensor( name= '(' ++ this.name ++ '/' ++ other ++ ')')
+      }
 
-      case other of { { Tensor:_ } } -> {
+      case other of { { Tensor:_} } -> {
         # div by another Tensor
-        return Tensor( name= '(' ++ this.name ++ '/' ++ other.name ++ ')' )
+        return Tensor( name= '(' ++ this.name ++ '/' ++ other.name ++ ')')
       }
 
       return NA # not-applicable - similar to NotImplemented in Python
     }
 
-    method (/@) ( other ) case type( other ) of {
+    method (/.) ( other ) case type( other ) of {
       # div to a constant
-      DecimalType -> Tensor( name= '(' ++ other ++ '/' ++ this.name ++ ')' )
+      DecimalType -> {
+        return Tensor( name= '(' ++ other ++ '/' ++ this.name ++ ')')
+      }
 
-      case other of { { Tensor:_ } } -> {
-        error( 'not resolved to magic (/) of ' ++ lhv ++ ' ?!' )
+      case other of { { Tensor:_} } -> {
+        error( 'not resolved to magic (/) of ' ++ lhv ++ ' ?!')
       }
 
       return NA # not-applicable - similar to NotImplemented in Python
@@ -87,20 +132,24 @@
 
 }
 
-let ( x, y ) = ( Tensor( 'x' ), Tensor( 'y' ) )
+# %%
+let ( x, y ) = ( Tensor( 'x'), Tensor( 'y') )
 
-x + y
-x + 5
-5 + x
-x - 5
-5 - x
-x * y
-x / y
-x * 3
-3 * x
-x / 3
-3 / x
+# %%
+console.print( x + y )
+console.print( x + 5 )
+console.print( 5 + x )
+console.print( x - 5 )
+console.print( 5 - x )
+console.print( x * y )
+console.print( x / y )
+console.print( x * 3 )
+console.print( 3 * x )
+console.print( x / 3 )
+console.print( 3 / x )
 
+# %%
 3 + x / 7 * ( y - 5 )
 
+# %%
 x + 'z'

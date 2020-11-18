@@ -71,14 +71,14 @@ same as in **Python**, e.g. the magic methods `__init__()`, `__str__()`,
 While in **Python** you can rely on the language to translate `obj + val`
 to `obj.__add__(val)`, `val + obj` to `obj.__radd__(val)`, in **Đ (Edh)**
 the same surface syntax is translated to `obj.(+)(val)` and
-`obj.(+@)(val)` respectively.
+`obj.(+.)(val)` respectively.
 
 More examples:
 
 | Surface Syntax   | Python Translation          | Đ (Edh) Translation   |
 | ---------------- | --------------------------- | --------------------- |
 | `obj - val`      | `obj.__sub__(val)`          | `obj.(-)(val)`        |
-| `val - obj`      | `obj.__rsub__(val)`         | `obj.(-@)(val)`       |
+| `val - obj`      | `obj.__rsub__(val)`         | `obj.(-.)(val)`       |
 | `obj(x, y)`      | `obj.__call__(x, y)`        | `obj.__call__(x, y)`  |
 | `obj[idx]`       | `obj.__getitem__(idx)`      | `obj.([])(idx)`       |
 | `obj[idx] = val` | `obj.__setitem__(idx, val)` | `obj.([=])(idx, val)` |

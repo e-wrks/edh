@@ -1925,10 +1925,7 @@ Suspicious index TupleType: ( 3, 5, 7, )
 
 ## Defining More Magic Methods
 
-Checkout [./magic.edh](./magic.edh)
-[batteries/magic/](../edh_modules/batteries/magic/)
-and
-[arith.edh](../edh_modules/batteries/magic/arith.edh)
+Checkout [./magic-methods.edh](./magic-methods.edh)
 
 This is meant to attract people to port **Theano** and **TensorFlow** as well as
 **Pandas** and **Numpy** to **Haskell** with the aid of **Edh**, while
@@ -1938,127 +1935,156 @@ have demonstrated how great **Haskell** can be at heavy lifting wrt number
 crunchings.
 
 ```bash
-Đ: import * 'batteries/magic'
-<object: /home/cyue/Wander/e-wrks/edh/edh_modules/batteries/magic>
-Đ:
-Đ: {
+cymp:edh-universe cyue$ stack run edh
+>> Bare Đ (Edh) Interpreter <<
+* Blank Screen Syndrome ? Take the Tour as your companion, checkout:
+  https://github.com/e-wrks/edh/tree/master/Tour
+(repl)Đ: {
 Đ|  1:
 Đ|  2:   class Tensor {
 Đ|  3:
-Đ|  4:     method __init__ (name as this.name) pass
+Đ|  4:     method __init__ ( name as this.name ) pass
 Đ|  5:
-Đ|  6:     method (+) (other) case type(other) of {
-Đ|  7:       # add to a constant
-Đ|  8:       DecimalType -> Tensor(name= '('++ this.name ++ '+' ++ other ++')')
-Đ|  9:
-Đ| 10:       case other of {{ Tensor:_ }} -> {
-Đ| 11:         # add to another Tensor
-Đ| 12:         return Tensor(name= '('++ this.name ++ '+' ++ other.name ++')')
+Đ|  6:     method __repr__ () this.name
+Đ|  7:
+Đ|  8:
+Đ|  9:     method (+) ( other ) case type( other ) of {
+Đ| 10:       # add to a constant
+Đ| 11:       DecimalType -> {
+Đ| 12:         return Tensor( name= '(' ++ this.name ++ '+' ++ other ++ ')')
 Đ| 13:       }
 Đ| 14:
-Đ| 15:       continue # as NotImplemented in Python
-Đ| 16:     }
-Đ| 17:
-Đ| 18:     method (*) (other) case type(other) of {
-Đ| 19:       # mul to a constant
-Đ| 20:       DecimalType -> Tensor(name= '('++ this.name ++ '*' ++ other ++')')
-Đ| 21:
-Đ| 22:       case other of {{ Tensor:_ }} -> {
-Đ| 23:         # mul to another Tensor
-Đ| 24:         return Tensor(name= '('++ this.name ++ '*' ++ other.name ++')')
-Đ| 25:       }
-Đ| 26:
-Đ| 27:       continue # as NotImplemented in Python
-Đ| 28:     }
-Đ| 29:
-Đ| 30:     method (-) (other) case type(other) of {
-Đ| 31:       # sub a constant
-Đ| 32:       DecimalType -> Tensor(name= '('++ this.name ++ '-' ++ other ++')')
-Đ| 33:
-Đ| 34:       case other of {{ Tensor:_ }} -> {
-Đ| 35:         # sub another Tensor
-Đ| 36:         return Tensor(name= '('++ this.name ++ '-' ++ other.name ++')')
-Đ| 37:       }
-Đ| 38:
-Đ| 39:       continue # as NotImplemented in Python
-Đ| 40:     }
+Đ| 15:       case other of { { Tensor:_} } -> {
+Đ| 16:         # add to another Tensor
+Đ| 17:         return Tensor( name= '(' ++ this.name ++ '+' ++ other.name ++ ')')
+Đ| 18:       }
+Đ| 19:
+Đ| 20:       # note (+) operator from default batteries will do stringified
+Đ| 21:       # concatenation if we `return NA` here, it's preferable to fail loudly
+Đ| 22:       # instead
+Đ| 23:       error(" Please don't plus a tensor with a " ++ show(other))
+Đ| 24:     }
+Đ| 25:     # a magic method reference is visually similar to an operator reference,
+Đ| 26:     # but they are intrinsically different, e.g.
+Đ| 27:     #   this.(+) vs (+)
+Đ| 28:     # where the parenthesis are part of the magic method name, but not of an
+Đ| 29:     # operator reference.
+Đ| 30:     #
+Đ| 31:     # while a following part in a dot-notation is interpreted as magic method,
+Đ| 32:     # the leading part of a dot-notation or a standalone operator symbol, when
+Đ| 33:     # quoted by parenthesis, is interpreted as an operator reference.
+Đ| 34:     #
+Đ| 35:     # here to reuse the left-hand magic method (+) for the right-hand
+Đ| 36:     # implementation to be named (+.), we use at-notation with literal string
+Đ| 37:     #
+Đ| 38:     # and the semicolon is necessary here to disambiguate the @ symbol for
+Đ| 39:     # at-notation instead of infix (@) operation, as it is in the leading part
+Đ| 40:     ; @'(+.)' = @'(+)'
 Đ| 41:
-Đ| 42:     method (-@) (other) case type(other) of {
-Đ| 43:       # sub from a constant
-Đ| 44:       DecimalType -> Tensor(name= '('++ other ++ '-' ++ this.name ++')')
-Đ| 45:
-Đ| 46:       case other of {{ Tensor:_ }} -> {
-Đ| 47:         error('not resolved to magic (-) of ' ++ lhv ++ ' ?!')
-Đ| 48:       }
-Đ| 49:
-Đ| 50:       continue # as NotImplemented in Python
-Đ| 51:     }
-Đ| 52:
-Đ| 53:     method (/) (other) case type(other) of {
-Đ| 54:       # div by a constant
-Đ| 55:       DecimalType -> Tensor(name= '('++ this.name ++ '/' ++ other ++')')
-Đ| 56:
-Đ| 57:       case other of {{ Tensor:_ }} -> {
-Đ| 58:         # div by another Tensor
-Đ| 59:         return Tensor(name= '('++ this.name ++ '/' ++ other.name ++')')
-Đ| 60:       }
-Đ| 61:
-Đ| 62:       continue # as NotImplemented in Python
-Đ| 63:     }
-Đ| 64:
-Đ| 65:     method (/@) (other) case type(other) of {
-Đ| 66:       # div to a constant
-Đ| 67:       DecimalType -> Tensor(name= '('++ other ++ '/' ++ this.name ++')')
-Đ| 68:
-Đ| 69:       case other of {{ Tensor:_ }} -> {
-Đ| 70:         error('not resolved to magic (/) of ' ++ lhv ++ ' ?!')
-Đ| 71:       }
+Đ| 42:
+Đ| 43:     method (*) ( other ) case type( other ) of {
+Đ| 44:       # mul to a constant
+Đ| 45:       DecimalType -> {
+Đ| 46:         return Tensor( name= '(' ++ this.name ++ '*' ++ other ++ ')')
+Đ| 47:       }
+Đ| 48:
+Đ| 49:       case other of { { Tensor:_} } -> {
+Đ| 50:         # mul to another Tensor
+Đ| 51:         return Tensor( name= '(' ++ this.name ++ '*' ++ other.name ++ ')')
+Đ| 52:       }
+Đ| 53:
+Đ| 54:       return NA # not-applicable - similar to NotImplemented in Python
+Đ| 55:     }
+Đ| 56:     # a magic method reference is visually similar to an operator reference,
+Đ| 57:     # but they are intrinsically different, e.g.
+Đ| 58:     #   this.(+) vs (+)
+Đ| 59:     # where the parenthesis are part of the magic method name, but not of an
+Đ| 60:     # operator reference.
+Đ| 61:     #
+Đ| 62:     # while a following part in a dot-notation is interpreted as magic method,
+Đ| 63:     # the leading part of a dot-notation or a standalone operator symbol, when
+Đ| 64:     # quoted by parenthesis, is interpreted as an operator reference.
+Đ| 65:     #
+Đ| 66:     # here to reuse the left-hand magic method (*) for the right-hand
+Đ| 67:     # implementation to be named (*.), we use at-notation with literal string
+Đ| 68:     #
+Đ| 69:     # and the semicolon is necessary here to disambiguate the @ symbol for
+Đ| 70:     # at-notation instead of infix (@) operation, as it is in the leading part
+Đ| 71:     ; @'(*.)' = @'(*)'
 Đ| 72:
-Đ| 73:       continue # as NotImplemented in Python
-Đ| 74:     }
-Đ| 75:
-Đ| 76:   }
-Đ| 77:
-Đ| 78: }
+Đ| 73:
+Đ| 74:     method (-) ( other ) case type( other ) of {
+Đ| 75:       # sub a constant
+Đ| 76:       DecimalType -> {
+Đ| 77:         return Tensor( name= '(' ++ this.name ++ '-' ++ other ++ ')')
+Đ| 78:       }
+Đ| 79:
+Đ| 80:       case other of { { Tensor:_} } -> {
+Đ| 81:         # sub another Tensor
+Đ| 82:         return Tensor( name= '(' ++ this.name ++ '-' ++ other.name ++ ')')
+Đ| 83:       }
+Đ| 84:
+Đ| 85:       return NA # not-applicable - similar to NotImplemented in Python
+Đ| 86:     }
+Đ| 87:
+Đ| 88:     method (-.) ( other ) case type( other ) of {
+Đ| 89:       # sub from a constant
+Đ| 90:       DecimalType -> {
+Đ| 91:         return Tensor( name= '(' ++ other ++ '-' ++ this.name ++ ')')
+Đ| 92:       }
+Đ| 93:
+Đ| 94:       case other of { { Tensor:_} } -> {
+Đ| 95:         error( 'not resolved to magic (-) of ' ++ lhv ++ ' ?!')
+Đ| 96:       }
+Đ| 97:
+Đ| 98:       return NA # not-applicable - similar to NotImplemented in Python
+Đ| 99:     }
+Đ| 100:
+Đ| 101:
+Đ| 102:     method (/) ( other ) case type( other ) of {
+Đ| 103:       # div by a constant
+Đ| 104:       DecimalType -> {
+Đ| 105:         return Tensor( name= '(' ++ this.name ++ '/' ++ other ++ ')')
+Đ| 106:       }
+Đ| 107:
+Đ| 108:       case other of { { Tensor:_} } -> {
+Đ| 109:         # div by another Tensor
+Đ| 110:         return Tensor( name= '(' ++ this.name ++ '/' ++ other.name ++ ')')
+Đ| 111:       }
+Đ| 112:
+Đ| 113:       return NA # not-applicable - similar to NotImplemented in Python
+Đ| 114:     }
+Đ| 115:
+Đ| 116:     method (/.) ( other ) case type( other ) of {
+Đ| 117:       # div to a constant
+Đ| 118:       DecimalType -> {
+Đ| 119:         return Tensor( name= '(' ++ other ++ '/' ++ this.name ++ ')')
+Đ| 120:       }
+Đ| 121:
+Đ| 122:       case other of { { Tensor:_} } -> {
+Đ| 123:         error( 'not resolved to magic (/) of ' ++ lhv ++ ' ?!')
+Đ| 124:       }
+Đ| 125:
+Đ| 126:       return NA # not-applicable - similar to NotImplemented in Python
+Đ| 127:     }
+Đ| 128:
+Đ| 129:   }
+Đ| 130:
+Đ| 131: }
 Tensor
-Đ:
-Đ: let (x, y) = (Tensor('x'), Tensor('y'))
-Đ:
-Đ: result = x + y; result?name
-(x+y)
-Đ: result = x + 5; result?name
-(x+5)
-Đ: result = 5 + x; result?name
-(x+5)
-Đ: result = x - 5; result?name
-(x-5)
-Đ: result = 5 - x; result?name
-(5-x)
-Đ: result = x * y; result?name
-(x*y)
-Đ: result = x / y; result?name
-(x/y)
-Đ: result = x * 3; result?name
-(x*3)
-Đ: result = 3 * x; result?name
-(x*3)
-Đ: result = x / 3; result?name
-(x/3)
-Đ: result = 3 / x; result?name
-(3/x)
-Đ:
-Đ: result = 3 + x / 7 * (y - 5); result?name
+(repl)Đ: let ( x, y ) = ( Tensor( 'x'), Tensor( 'y') )
+(repl)Đ: 3 + x / 7 * ( y - 5 )
 (((x/7)*(y-5))+3)
-Đ:
-Đ: x + 'z'
-* 😱 *
-💔
-📜 <interactive> 🔎 <adhoc>:1:1
-📜 + 🔎 /home/cyue/Wander/e-wrks/edh/edh_modules/batteries/magic/arith.edh:2:23
-📜 error 🔎 <host-code>
-💣 Not possible to do (+) with ObjectType: <object: Tensor> and StringType: z
-👉 /home/cyue/Wander/e-wrks/edh/edh_modules/batteries/magic/arith.edh:19:3
-Đ:
+(repl)Đ: x + 'z'
+❗ /epm_home/edh_modules/repl/__main__.edh:44:21
+Recovered from error: Đ traceback
+📜 module:repl 👉 /epm_home/edh_modules/repl/__main__.edh:5:8-8:5
+📜 module:repl 👉 <console>:1:1-1:8
+📜 (+) 👉 <console>:23:7-23:66
+ Please don't plus a tensor with a StringType: z
+ℹ️ /epm_home/edh_modules/repl/__main__.edh:51:20
+Your last input may have no effect due to the error.
+(repl)Đ:
 ```
 
 ## Reflections

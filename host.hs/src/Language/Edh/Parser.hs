@@ -139,7 +139,7 @@ isDigit = flip elem ['0' .. '9']
 
 isOperatorChar :: Char -> Bool
 isOperatorChar c = if c < toEnum 128
-  then elem c ("=~!@#$%^&|:<>?+-*/" :: [Char])
+  then elem c ("=~!@#$%^&|:<>?*+-/" :: [Char])
   else case Char.generalCategory c of
     Char.MathSymbol           -> True
     Char.CurrencySymbol       -> True
@@ -785,9 +785,10 @@ parseAttrName = ("(" <>) . (<> ")") <$> parseMagicName <|> parseAlphNumName
  where
   parseMagicName :: Parser Text
   parseMagicName = between (symbol "(") (symbol ")") (parseOpLit' isMagicChar)
-  -- to allow magic method names like ([]) ([=]) etc.
+  -- to allow magic method names for indexing (assignment) i.e. ([]) ([=]),
+  -- and right-hand operator overriding e.g. (*.) (/.)
   isMagicChar :: Char -> Bool
-  isMagicChar c = isOperatorChar c || elem c ("[]" :: [Char])
+  isMagicChar c = elem c (".[]" :: [Char]) || isOperatorChar c
 
 parseAlphNumName :: Parser AttrName
 parseAlphNumName = lexeme $ do

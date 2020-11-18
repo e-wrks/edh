@@ -322,12 +322,8 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
                                                         exit
 
       -- no virtual attribute supported yet
-      _ ->
-        throwEdh ets EvalError
-          $  "invalid assignment target, it's a "
-          <> T.pack (edhTypeNameOf tgtVal)
-          <> ": "
-          <> T.pack (show tgtVal)
+      _ -> edhValueDesc ets tgtVal $ \ !badDesc ->
+        throwEdh ets EvalError $ "invalid assignment target, " <> badDesc
 
  where
   ctx   = edh'context ets
@@ -3862,6 +3858,9 @@ evalInfixSrc !opSym !lhExpr !rhExpr !exit !ets =
           <> "): "
           <> badDesc
  where
+  magicName   = "(" <> opSym <> ")"
+  rhMagicName = "(" <> opSym <> ".)"
+
   notApplicable !lhVal !rhVal = edhValueDesc ets lhVal $ \ !lhDesc ->
     edhValueDesc ets rhVal $ \ !rhDesc ->
       throwEdh ets EvalError
@@ -3874,64 +3873,59 @@ evalInfixSrc !opSym !lhExpr !rhExpr !exit !ets =
 
   tryMagicMethod :: EdhValue -> EdhValue -> STM () -> STM ()
   tryMagicMethod !lhVal !rhVal !naExit = case edhUltimate lhVal of
-    EdhObject !lhObj ->
-      lookupEdhObjAttr lhObj (AttrByName $ "(" <> opSym <> ")") >>= \case
-        (_, EdhNil) -> case edhUltimate rhVal of
-          EdhObject !rhObj ->
-            lookupEdhObjAttr rhObj (AttrByName $ "(" <> opSym <> "@)") >>= \case
-              (_, EdhNil) -> naExit
-              (!this', EdhProcedure (EdhMethod !mth) _) ->
-                runEdhTx ets $ callEdhMethod this'
-                                             rhObj
-                                             mth
-                                             (ArgsPack [lhVal] odEmpty)
-                                             id
-                                             chkExitMagic
-              (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-                runEdhTx ets $ callEdhMethod this
-                                             that
-                                             mth
-                                             (ArgsPack [lhVal] odEmpty)
-                                             id
-                                             chkExitMagic
-              (_, !badEqMth) ->
-                throwEdh ets UsageError
-                  $  "malformed magic method ("
-                  <> opSym
-                  <> "@) on "
-                  <> T.pack (show rhObj)
-                  <> " - "
-                  <> T.pack (edhTypeNameOf badEqMth)
-                  <> ": "
-                  <> T.pack (show badEqMth)
-          _ -> naExit
-        (!this', EdhProcedure (EdhMethod !mth) _) ->
-          runEdhTx ets $ callEdhMethod this'
-                                       lhObj
-                                       mth
-                                       (ArgsPack [rhVal] odEmpty)
-                                       id
-                                       chkExitMagic
-        (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-          runEdhTx ets $ callEdhMethod this
-                                       that
-                                       mth
-                                       (ArgsPack [rhVal] odEmpty)
-                                       id
-                                       chkExitMagic
-        (_, !badEqMth) ->
-          throwEdh ets UsageError
-            $  "malformed magic method ("
-            <> opSym
-            <> ") on "
-            <> T.pack (show lhObj)
-            <> " - "
-            <> T.pack (edhTypeNameOf badEqMth)
-            <> ": "
-            <> T.pack (show badEqMth)
+    EdhObject !lhObj -> lookupEdhObjAttr lhObj (AttrByName magicName) >>= \case
+      (_, EdhNil) -> case edhUltimate rhVal of
+        EdhObject !rhObj ->
+          lookupEdhObjAttr rhObj (AttrByName rhMagicName) >>= \case
+            (_, EdhNil) -> naExit
+            (!this', EdhProcedure (EdhMethod !mth) _) ->
+              runEdhTx ets $ callEdhMethod this'
+                                           rhObj
+                                           mth
+                                           (ArgsPack [lhVal] odEmpty)
+                                           id
+                                           chkExitMagic
+            (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+              runEdhTx ets $ callEdhMethod this
+                                           that
+                                           mth
+                                           (ArgsPack [lhVal] odEmpty)
+                                           id
+                                           chkExitMagic
+            (_, !badMth) -> edhValueDesc ets badMth $ \ !badDesc ->
+              throwEdh ets UsageError
+                $  "malformed magic method "
+                <> rhMagicName
+                <> " on "
+                <> objClassName rhObj
+                <> ", "
+                <> badDesc
+        _ -> naExit
+      (!this', EdhProcedure (EdhMethod !mth) _) -> runEdhTx ets $ callEdhMethod
+        this'
+        lhObj
+        mth
+        (ArgsPack [rhVal] odEmpty)
+        id
+        chkExitMagic
+      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+        runEdhTx ets $ callEdhMethod this
+                                     that
+                                     mth
+                                     (ArgsPack [rhVal] odEmpty)
+                                     id
+                                     chkExitMagic
+      (_, !badMth) -> edhValueDesc ets badMth $ \ !badDesc ->
+        throwEdh ets UsageError
+          $  "malformed magic method "
+          <> magicName
+          <> " on "
+          <> objClassName lhObj
+          <> ", "
+          <> badDesc
     _ -> case edhUltimate rhVal of
       EdhObject !rhObj ->
-        lookupEdhObjAttr rhObj (AttrByName $ "(" <> opSym <> "@)") >>= \case
+        lookupEdhObjAttr rhObj (AttrByName rhMagicName) >>= \case
           (_, EdhNil) -> naExit
           (!this', EdhProcedure (EdhMethod !mth) _) ->
             runEdhTx ets $ callEdhMethod this'
@@ -3947,16 +3941,14 @@ evalInfixSrc !opSym !lhExpr !rhExpr !exit !ets =
                                          (ArgsPack [lhVal] odEmpty)
                                          id
                                          chkExitMagic
-          (_, !badEqMth) ->
+          (_, !badMth) -> edhValueDesc ets badMth $ \ !badDesc ->
             throwEdh ets UsageError
-              $  "malformed magic method ("
-              <> opSym
-              <> "@) on "
-              <> T.pack (show rhObj)
-              <> " - "
-              <> T.pack (edhTypeNameOf badEqMth)
-              <> ": "
-              <> T.pack (show badEqMth)
+              $  "malformed magic method "
+              <> rhMagicName
+              <> " on "
+              <> edhClassName rhObj
+              <> ", "
+              <> badDesc
       _ -> naExit
    where
     chkExitMagic :: EdhTxExit
