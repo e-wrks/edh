@@ -1,0 +1,22 @@
+cradle:
+  stack:
+    - path: "./pub"
+      component: "edh:lib"
+
+    - path: "./src"
+      component: "edh:lib:edh-internal"
+
+    - path: "./repl/Main.hs"
+      component: "edh:exe:edh"
+
+    - path: "./repl/Repl.hs"
+      component: "edh:exe:edh"
+
+    - path: "./runfile/Main.hs"
+      component: "edh:exe:runedh"
+
+    - path: "./runmodu/Main.hs"
+      component: "edh:exe:edhm"
+
+    - path: "../lossless-decimal/src"
+      component: "lossless-decimal:lib"

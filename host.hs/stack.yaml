@@ -1,0 +1,9 @@
+
+resolver: lts-16.11
+
+ghc-options:
+  edh: -O0
+
+packages:
+  - ../lossless-decimal
+  - .
