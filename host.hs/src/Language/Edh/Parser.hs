@@ -146,7 +146,6 @@ isOperatorChar c = if c < toEnum 128
     Char.ModifierSymbol       -> True
     Char.OtherSymbol          -> True
 
-    Char.ConnectorPunctuation -> True
     Char.DashPunctuation      -> True
     Char.OtherPunctuation     -> True
 
