@@ -13,15 +13,22 @@ module Language.Edh.Batteries
   )
 where
 
-import Control.Concurrent
+import Control.Concurrent (forkIOWithUnmask)
 import Control.Concurrent.STM
-import Control.Exception
+import Control.Exception (finally, mask_)
 import Control.Monad.Reader
+  ( MonadIO (..),
+    void,
+  )
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Data.Void
+import Data.Void (Void)
 import Language.Edh.Batteries.Assign
+  ( assignMissingProc,
+    assignProc,
+    assignWithOpProc,
+  )
 import Language.Edh.Batteries.Console
 import Language.Edh.Batteries.Ctrl
 import Language.Edh.Batteries.Data
@@ -46,13 +53,13 @@ import System.Console.Haskeline
     runInputT,
     withInterrupt,
   )
-import System.Environment
+import System.Environment (lookupEnv)
 import System.IO (stderr)
-import Text.Megaparsec
-import Text.Megaparsec.Char
+import Text.Megaparsec (Parsec, runParser, takeRest)
+import Text.Megaparsec.Char (space)
 import qualified Text.Megaparsec.Char.Lexer as L
-import Text.Printf
-import Text.Read
+import Text.Printf (printf)
+import Text.Read (readEither)
 import Prelude
 
 defaultEdhConsoleSettings :: Settings IO

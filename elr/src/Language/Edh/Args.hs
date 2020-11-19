@@ -12,7 +12,7 @@ module Language.Edh.Args
 where
 
 import Data.Kind (Type)
-import Data.Maybe
+import Data.Maybe (Maybe, fromMaybe)
 import GHC.TypeLits (Symbol)
 
 newtype NamedEdhArg (t :: Type) (name :: Symbol) = NamedEdhArg t

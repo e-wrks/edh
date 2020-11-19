@@ -1,13 +1,22 @@
 module Language.Edh.Control where
 
 import Control.Exception
-import Control.Monad.State.Strict
-import Data.Dynamic
+  ( Exception (fromException),
+    SomeException,
+  )
+import Control.Monad.State.Strict (State)
+import Data.Dynamic (Dynamic, toDyn)
 import qualified Data.HashMap.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Void
-import Text.Megaparsec hiding (State)
+import Data.Void (Void)
+import Text.Megaparsec
+  ( ParseErrorBundle,
+    ParsecT,
+    SourcePos (sourceColumn, sourceLine, sourceName),
+    errorBundlePretty,
+    unPos,
+  )
 import Prelude
 
 type OpSymbol = Text

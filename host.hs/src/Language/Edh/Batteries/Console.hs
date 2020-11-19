@@ -1,23 +1,45 @@
 module Language.Edh.Batteries.Console where
 
-import Control.Concurrent
+import Control.Concurrent (forkIO, myThreadId, threadDelay)
 import Control.Concurrent.STM
-import Control.Monad
+  ( STM,
+    atomically,
+    newEmptyTMVar,
+    putTMVar,
+    readTMVar,
+    takeTMVar,
+    tryPutTMVar,
+    writeTBQueue,
+  )
+import Control.Monad (void)
 import Data.Lossless.Decimal
   ( Decimal,
     decimalToInteger,
   )
 import Data.Text (Text)
 import qualified Data.Text as T
-import Debug.Trace
+import Debug.Trace (trace)
 import GHC.Conc (unsafeIOToSTM)
-import Language.Edh.Args
+import Language.Edh.Args (defaultArg, optionalArg, type (?:))
 import Language.Edh.Control
+  ( EdhErrorTag (EvalError, UsageError),
+    SrcLoc (SrcLoc),
+    SrcRange (SrcRange),
+    prettySrcPos,
+  )
 import Language.Edh.Evaluate
-import Language.Edh.IOPD
+  ( edhProcessReprs,
+    edhThrow,
+    edhValueRepr,
+    edhValueStr,
+    evalEdh',
+    evalExprSrc,
+    throwEdh,
+  )
+import Language.Edh.IOPD (odEmpty, odFromList, odNull, odToList)
 import Language.Edh.RtTypes
-import Language.Edh.Runtime
-import System.Clock
+import Language.Edh.Runtime (haltEdhProgram)
+import System.Clock (Clock (Realtime), getTime, toNanoSecs)
 import Prelude
 
 -- | operator (<|)

@@ -4,15 +4,27 @@ module Language.Edh.Batteries.Ctrl where
 -- import           System.IO.Unsafe
 
 import Control.Exception
-import Data.Dynamic
-import Data.Maybe
+  ( Exception (fromException, toException),
+    SomeException,
+  )
+import Data.Dynamic (fromDynamic)
+import Data.Maybe (catMaybes)
 import qualified Data.Text as T
-import Data.Unique
+import Data.Unique (newUnique)
 import GHC.Conc
+  ( STM,
+    myThreadId,
+    newTVar,
+    readTVar,
+    unsafeIOToSTM,
+  )
 import Language.Edh.Control
 import Language.Edh.CoreLang
+  ( lookupEdhObjAttr,
+    resolveEdhInstance,
+  )
 import Language.Edh.Evaluate
-import Language.Edh.IOPD
+import Language.Edh.IOPD (iopdUpdate, odEmpty, odNull)
 import Language.Edh.RtTypes
 import Prelude
 

@@ -2,16 +2,21 @@ module Main where
 
 -- import           Debug.Trace
 
-import Control.Concurrent
-import Control.Concurrent.STM
-import Control.Exception
-import Control.Monad
+import Control.Concurrent (forkFinally)
+import Control.Concurrent.STM (atomically, writeTBQueue)
+import Control.Exception (SomeException)
+import Control.Monad (void)
 import qualified Data.Text as T
 import Language.Edh.EHI
-import Repl
-import System.Environment
-import System.Exit
-import System.IO
+  ( EdhConsole (consoleIO, consoleIOLoop),
+    EdhConsoleIO (ConsoleOut, ConsoleShutdown),
+    defaultEdhConsole,
+    defaultEdhConsoleSettings,
+  )
+import Repl (edhProgLoop)
+import System.Environment (getArgs)
+import System.Exit (exitFailure)
+import System.IO (hPutStrLn, stderr)
 import Prelude
 
 main :: IO ()

@@ -3,12 +3,23 @@ module Language.Edh.CoreLang where
 
 -- import           Debug.Trace
 
-import Control.Concurrent.STM
-import Data.Either
+import Control.Concurrent.STM (STM, readTVar, writeTVar)
+import Data.Either (partitionEithers)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Language.Edh.IOPD
+import Language.Edh.IOPD (iopdLookup)
 import Language.Edh.RtTypes
+  ( AttrKey (AttrByName),
+    Class (Class, edh'class'mro, edh'class'store),
+    Dict (Dict),
+    EdhCallFrame (EdhCallFrame),
+    EdhValue (EdhBoundProc, EdhDict, EdhNil, EdhProcedure),
+    Object (edh'obj'class, edh'obj'store, edh'obj'supers),
+    ObjectStore (ClassStore, HashStore, HostStore),
+    Scope (edh'scope'entity),
+    objClassName,
+    outerScopeOf,
+  )
 import Prelude
 
 -- * Edh lexical attribute resolution

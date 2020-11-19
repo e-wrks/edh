@@ -3,9 +3,16 @@ module Language.Edh.IOPD where
 -- import           Debug.Trace
 
 import Control.Concurrent.STM
-import Control.Monad.ST
+  ( STM,
+    TVar,
+    modifyTVar',
+    newTVar,
+    readTVar,
+    writeTVar,
+  )
+import Control.Monad.ST (runST)
 import qualified Data.HashMap.Strict as Map
-import Data.Hashable
+import Data.Hashable (Hashable (hashWithSalt))
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV

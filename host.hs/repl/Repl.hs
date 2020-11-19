@@ -2,9 +2,18 @@ module Repl where
 
 -- import           Debug.Trace
 
-import Control.Concurrent.STM
+import Control.Concurrent.STM (atomically, writeTBQueue)
 import qualified Data.Text as T
 import Language.Edh.EHI
+  ( EdhConsole (consoleIO),
+    EdhConsoleIO (ConsoleOut, ConsoleShutdown),
+    EdhValue (EdhNil, EdhString),
+    createEdhWorld,
+    edhModuleAsIs,
+    edhUltimate,
+    installEdhBatteries,
+    runEdhModule,
+  )
 import Prelude
 
 -- | Manage lifecycle of Edh programs during the interactive session

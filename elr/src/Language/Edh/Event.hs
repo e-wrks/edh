@@ -3,15 +3,26 @@ module Language.Edh.Event where
 -- import           Debug.Trace
 -- import           System.IO.Unsafe
 
-import Control.Concurrent
+import Control.Concurrent (forkIOWithUnmask, myThreadId, throwTo)
 import Control.Concurrent.STM
 import Control.Exception
-import Control.Monad.Reader
-import Data.Dynamic
-import Data.Unique
+  ( SomeException,
+    finally,
+    handle,
+  )
+import Control.Monad
+import Data.Dynamic (toDyn)
+import Data.Unique (newUnique)
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Control
+  ( EdhError (EdhError),
+    EdhErrorTag (UsageError),
+  )
 import Language.Edh.RtTypes
+  ( EdhValue (EdhNil),
+    EventSink (..),
+    nil,
+  )
 import Prelude
 
 -- | Create a new event sink

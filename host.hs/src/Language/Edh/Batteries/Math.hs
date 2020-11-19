@@ -3,10 +3,34 @@ module Language.Edh.Batteries.Math where
 -- import           Debug.Trace
 
 import Data.Lossless.Decimal
-import Language.Edh.Batteries.Data
-import Language.Edh.Control
+  ( Decimal (Decimal),
+    decimalToInteger,
+    powerDecimal,
+  )
+import Language.Edh.Batteries.Data (concatProc)
+import Language.Edh.Control (noSrcRange)
 import Language.Edh.Evaluate
+  ( edhCompareValue,
+    edhIdentEqual,
+    edhValueEqual,
+    edhValueNull,
+    evalExprSrc,
+  )
 import Language.Edh.RtTypes
+  ( EdhIntrinsicOp,
+    EdhTx,
+    EdhTxExit,
+    EdhValue (EdhBool, EdhDecimal, EdhObject),
+    Expr (LitExpr),
+    ExprSrc (ExprSrc),
+    Literal (BoolLiteral, ValueLiteral),
+    edhNA,
+    edhUltimate,
+    exitEdh,
+    exitEdhTx,
+    mkDefault,
+    runEdhTx,
+  )
 import Prelude
 
 -- | operator (+)

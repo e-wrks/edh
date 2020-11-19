@@ -5,24 +5,33 @@ module Language.Edh.InterOp where
 -- import           System.IO.Unsafe               ( unsafePerformIO )
 
 import Control.Concurrent.STM
+  ( STM,
+    readTMVar,
+    readTVar,
+    throwSTM,
+  )
 import Data.ByteString (ByteString)
-import Data.Dynamic
+import Data.Dynamic (Typeable, fromDynamic, toDyn)
 import qualified Data.HashMap.Strict as Map
-import Data.Lossless.Decimal as D
-import Data.Proxy
+import Data.Lossless.Decimal as D (Decimal, decimalToInteger)
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.UUID as UUID
-import Data.Unique
+import Data.Unique (newUnique)
 import GHC.Conc (unsafeIOToSTM)
 import GHC.TypeLits
   ( KnownSymbol,
     symbolVal,
   )
-import Language.Edh.Args
+import Language.Edh.Args (NamedEdhArg (..))
 import Language.Edh.Control
-import Language.Edh.Evaluate
-import Language.Edh.IOPD
+  ( EdhError (EdhError),
+    EdhErrorTag (UsageError),
+    OpSymbol,
+  )
+import Language.Edh.Evaluate (edhValueRepr, throwEdh, throwEdhTx)
+import Language.Edh.IOPD (odEmpty, odNull, odTakeOut)
 import Language.Edh.RtTypes
 import Prelude
 

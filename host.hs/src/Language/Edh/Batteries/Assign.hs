@@ -4,9 +4,19 @@ module Language.Edh.Batteries.Assign where
 
 import qualified Data.Text as T
 import Language.Edh.Control
-import Language.Edh.CoreLang
+  ( EdhErrorTag (EvalError, UsageError),
+    OpSymbol,
+  )
+import Language.Edh.CoreLang (lookupEdhObjAttr)
 import Language.Edh.Evaluate
-import Language.Edh.IOPD
+  ( assignEdhTarget,
+    callEdhMethod,
+    evalExprSrc,
+    evalInfix,
+    resolveEdhAttrAddr,
+    throwEdh,
+  )
+import Language.Edh.IOPD (iopdLookup, iopdLookupDefault, odEmpty)
 import Language.Edh.RtTypes
 import Prelude
 

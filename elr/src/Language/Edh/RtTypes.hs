@@ -5,18 +5,33 @@ module Language.Edh.RtTypes where
 -- import           Debug.Trace
 
 import Control.Concurrent.STM
-import Control.Exception
+  ( STM,
+    TBQueue,
+    TChan,
+    TMVar,
+    TVar,
+    newTVar,
+    readTVar,
+    readTVarIO,
+    writeTBQueue,
+  )
+import Control.Exception (SomeException)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
-import Data.Dynamic
+import Data.Dynamic (Dynamic, Typeable, fromDynamic)
 import qualified Data.HashMap.Strict as Map
-import Data.Hashable
+import Data.Hashable (Hashable (hashWithSalt))
 import Data.Lossless.Decimal as D
+  ( Decimal,
+    inf,
+    nan,
+    showDecimal,
+  )
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
-import Data.Unique
+import Data.Unique (Unique, newUnique)
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Control
 import Language.Edh.IOPD

@@ -2,20 +2,43 @@ module Language.Edh.Batteries.Reflect where
 
 -- import           Debug.Trace
 
-import Control.Concurrent.STM
-import Control.Exception
-import Control.Monad
-import Data.Dynamic
+import Control.Concurrent.STM (STM, readTVar)
+import Control.Exception (Exception (toException))
+import Control.Monad (unless)
+import Data.Dynamic (fromDynamic, toDyn)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Unique
+import Data.Unique (newUnique)
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
+  ( defaultArg,
+    mandatoryArg,
+    type (!:),
+    type (?:),
+  )
 import Language.Edh.Control
+  ( EdhError (EdhError),
+    EdhErrorTag (EvalError, ParseError, UsageError),
+    noSrcRange,
+  )
 import Language.Edh.Evaluate
+  ( edhThrow,
+    getEdhErrCtx,
+    mkObjSandbox,
+    mkScopeSandbox,
+    parseEdh',
+    throwEdh,
+    throwEdhTx,
+  )
 import Language.Edh.IOPD
+  ( iopdInsert,
+    odEmpty,
+    odMap,
+    odMapSTM,
+    odNull,
+  )
 import Language.Edh.RtTypes
-import Text.Megaparsec
+import Text.Megaparsec (errorBundlePretty)
 import Prelude
 
 -- | utility constructor(*args,**kwargs)

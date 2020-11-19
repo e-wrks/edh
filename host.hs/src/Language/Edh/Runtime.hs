@@ -4,24 +4,42 @@ module Language.Edh.Runtime where
 
 import Control.Concurrent.STM
 import Control.Exception
+  ( Exception (toException),
+    SomeException,
+    throwIO,
+    tryJust,
+  )
 import Control.Monad.Except
+  ( MonadIO (..),
+    void,
+  )
 import qualified Data.ByteString as B
-import Data.Dynamic
+import Data.Dynamic (fromDynamic, toDyn)
 import qualified Data.HashMap.Strict as Map
-import Data.Maybe
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Encoding
-import Data.Text.Encoding.Error
-import Data.Unique
+import Data.Text.Encoding (Decoding (Some), streamDecodeUtf8With)
+import Data.Text.Encoding.Error (lenientDecode)
+import Data.Unique (newUnique)
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
+  ( defaultArg,
+    mandatoryArg,
+    optionalArg,
+    type (!:),
+    type (?:),
+  )
 import Language.Edh.Control
-import Language.Edh.CoreLang
+import Language.Edh.CoreLang (lookupEdhSelfAttr)
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
 import Language.Edh.InterOp
-import Language.Edh.PkgMan
+  ( EdhAllocator (allocEdhObj),
+    mkHostProperty,
+    wrapHostProc,
+  )
+import Language.Edh.PkgMan (locateEdhMainModule)
 import Language.Edh.RtTypes
 import Prelude
 

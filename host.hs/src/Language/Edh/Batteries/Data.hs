@@ -3,25 +3,37 @@ module Language.Edh.Batteries.Data where
 -- import           Debug.Trace
 
 import Control.Concurrent.STM
+  ( STM,
+    modifyTVar',
+    newTVar,
+    readTVar,
+    writeTVar,
+  )
 import Control.Monad.Reader
+  ( unless,
+    when,
+  )
 import qualified Data.Bits as Bits
 import Data.ByteString (ByteString)
-import Data.Lossless.Decimal as D
-import Data.Maybe
+import Data.Lossless.Decimal as D (Decimal, nan)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.UUID as UUID
-import Data.Unique
+import Data.Unique (hashUnique, newUnique)
 import GHC.Conc (unsafeIOToSTM)
-import Language.Edh.Args
+import Language.Edh.Args (defaultArg, type (?:))
 import Language.Edh.Control
-import Language.Edh.CoreLang
+  ( EdhErrorTag (EvalError, UsageError),
+    noSrcRange,
+  )
+import Language.Edh.CoreLang (lookupEdhObjMagic)
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
-import Language.Edh.InterOp
+import Language.Edh.InterOp (mkHostProc')
 import Language.Edh.RtTypes
-import Language.Edh.Utils
+import Language.Edh.Utils (seqcontSTM)
 import Prelude
 
 strEncodeProc :: Text -> EdhHostProc

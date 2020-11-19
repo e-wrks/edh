@@ -7,19 +7,19 @@ import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad.State.Strict
 import qualified Data.ByteString as B
-import Data.Dynamic
+import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import qualified Data.HashMap.Strict as Map
-import Data.IORef
+import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.Lossless.Decimal as D
-import Data.Maybe
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Encoding
-import Data.Text.Encoding.Error
-import Data.Typeable
+import Data.Text.Encoding (Decoding (Some), streamDecodeUtf8With)
+import Data.Text.Encoding.Error (lenientDecode)
+import Data.Typeable (Proxy (..), Typeable, typeRep)
 import qualified Data.UUID as UUID
-import Data.Unique
-import GHC.Conc
+import Data.Unique (newUnique)
+import GHC.Conc (forkIOWithUnmask, myThreadId, unsafeIOToSTM)
 import Language.Edh.Control
 import Language.Edh.CoreLang
 import Language.Edh.Event
@@ -35,6 +35,9 @@ import Text.Megaparsec
     runParserT',
   )
 import Text.Megaparsec.Pos
+  ( SourcePos (SourcePos, sourceColumn, sourceLine, sourceName),
+    mkPos,
+  )
 import Prelude
 
 -- | Construct an error context from thread state

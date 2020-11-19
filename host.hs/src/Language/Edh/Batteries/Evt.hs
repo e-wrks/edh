@@ -2,11 +2,18 @@ module Language.Edh.Batteries.Evt where
 
 -- import           Debug.Trace
 
-import Control.Concurrent.STM
-import Language.Edh.Args
-import Language.Edh.Control
-import Language.Edh.Evaluate
+import Control.Concurrent.STM (readTVar)
+import Language.Edh.Args (mandatoryArg, type (!:))
+import Language.Edh.Control (EdhErrorTag (UsageError))
+import Language.Edh.Evaluate (edhValueDesc, throwEdh)
 import Language.Edh.RtTypes
+  ( EdhHostProc,
+    EdhValue (EdhBool, EdhSink),
+    EventSink (evs'mrv, evs'subc),
+    edhUltimate,
+    exitEdh,
+    nil,
+  )
 import Prelude
 
 -- | virtual property <sink>.subseq

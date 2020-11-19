@@ -7,13 +7,13 @@ import Control.Applicative hiding
     some,
   )
 import Control.Monad
-import Control.Monad.State.Strict
+import Control.Monad.State.Strict (MonadState (get, put))
 import qualified Data.Char as Char
-import Data.Functor
+import Data.Functor (($>))
 import qualified Data.HashMap.Strict as Map
-import Data.Lossless.Decimal as D
-import Data.Maybe
-import Data.Scientific
+import Data.Lossless.Decimal as D (Decimal (Decimal), inf, nan)
+import Data.Maybe (fromMaybe)
+import Data.Scientific (Scientific (base10Exponent, coefficient))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Language.Edh.Control

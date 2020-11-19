@@ -3,7 +3,13 @@ module Language.Edh.Batteries.Vector where
 -- import           Debug.Trace
 
 import Control.Concurrent.STM
-import Data.Dynamic
+  ( STM,
+    TVar,
+    newTVar,
+    readTVar,
+    writeTVar,
+  )
+import Data.Dynamic (toDyn)
 import qualified Data.Lossless.Decimal as D
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -11,10 +17,10 @@ import qualified Data.Vector as V
 import Data.Vector.Mutable (IOVector)
 import qualified Data.Vector.Mutable as MV
 import GHC.Conc (unsafeIOToSTM)
-import Language.Edh.Control
+import Language.Edh.Control (EdhErrorTag (UsageError), OpSymbol)
 import Language.Edh.Evaluate
-import Language.Edh.IOPD
-import Language.Edh.InterOp
+import Language.Edh.IOPD (iopdUpdate, odLookup)
+import Language.Edh.InterOp (wrapHostProc)
 import Language.Edh.RtTypes
 import Prelude
 

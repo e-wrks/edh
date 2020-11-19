@@ -3,16 +3,32 @@ module Language.Edh.PkgMan where
 
 -- import           Debug.Trace
 
-import Control.Exception
-import Data.Dynamic
-import Data.List
+import Control.Exception (throwIO)
+import Data.Dynamic (toDyn)
+import Data.List (isPrefixOf, stripPrefix)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Language.Edh.Control
-import Language.Edh.IOPD
+  ( EdhError (EdhError),
+    EdhErrorTag (PackageError),
+  )
+import Language.Edh.IOPD (odFromList)
 import Language.Edh.RtTypes
+  ( ArgsPack (ArgsPack),
+    AttrKey (AttrByName),
+    EdhValue (EdhArgsPack, EdhString),
+  )
 import System.Directory
+  ( canonicalizePath,
+    doesFileExist,
+    doesPathExist,
+  )
 import System.FilePath
+  ( equalFilePath,
+    splitExtension,
+    takeDirectory,
+    (</>),
+  )
 import Prelude
 
 data ImportName = RelativeName !Text | AbsoluteName !Text
