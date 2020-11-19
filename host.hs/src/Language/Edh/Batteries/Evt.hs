@@ -1,16 +1,13 @@
-
 module Language.Edh.Batteries.Evt where
 
-import           Prelude
 -- import           Debug.Trace
 
-import           Control.Concurrent.STM
-
-import           Language.Edh.Args
-import           Language.Edh.Control
-import           Language.Edh.RtTypes
-import           Language.Edh.Evaluate
-
+import Control.Concurrent.STM
+import Language.Edh.Args
+import Language.Edh.Control
+import Language.Edh.Evaluate
+import Language.Edh.RtTypes
+import Prelude
 
 -- | virtual property <sink>.subseq
 --
@@ -18,10 +15,9 @@ import           Language.Edh.Evaluate
 sink'subseqProc :: "sinkValue" !: EdhValue -> EdhHostProc
 sink'subseqProc (mandatoryArg -> !sinkVal) !exit !ets =
   case edhUltimate sinkVal of
-    EdhSink !sink -> exitEdh ets exit $ EdhSink sink { evs'mrv = Nothing }
-    _             -> edhValueDesc ets sinkVal $ \ !badDesc ->
+    EdhSink !sink -> exitEdh ets exit $ EdhSink sink {evs'mrv = Nothing}
+    _ -> edhValueDesc ets sinkVal $ \ !badDesc ->
       throwEdh ets UsageError $ "not an event sink but a " <> badDesc
-
 
 -- | virtual property <sink>.mrv
 --
@@ -35,16 +31,14 @@ sink'subseqProc (mandatoryArg -> !sinkVal) !exit !ets =
 --
 -- NOTE
 --   a non-lingering copy of a sink will always return `nil` as its `.mrv`
---
 sink'mrvProc :: "sinkValue" !: EdhValue -> EdhHostProc
 sink'mrvProc (mandatoryArg -> !sinkVal) !exit !ets =
   case edhUltimate sinkVal of
     EdhSink !sink -> case evs'mrv sink of
-      Nothing    -> exitEdh ets exit nil
+      Nothing -> exitEdh ets exit nil
       Just !mrvv -> readTVar mrvv >>= \ !mrv -> exitEdh ets exit mrv
     _ -> edhValueDesc ets sinkVal $ \ !badDesc ->
       throwEdh ets UsageError $ "not an event sink but a " <> badDesc
-
 
 -- | virtual property <sink>.eos
 --
@@ -52,8 +46,8 @@ sink'mrvProc (mandatoryArg -> !sinkVal) !exit !ets =
 sink'eosProc :: "sinkValue" !: EdhValue -> EdhHostProc
 sink'eosProc (mandatoryArg -> !sinkVal) !exit !ets =
   case edhUltimate sinkVal of
-    EdhSink !sink -> readTVar (evs'subc sink)
-      >>= \ !subc -> exitEdh ets exit $ EdhBool $ subc < 0
+    EdhSink !sink ->
+      readTVar (evs'subc sink)
+        >>= \ !subc -> exitEdh ets exit $ EdhBool $ subc < 0
     _ -> edhValueDesc ets sinkVal $ \ !badDesc ->
       throwEdh ets UsageError $ "not an event sink but a " <> badDesc
-
