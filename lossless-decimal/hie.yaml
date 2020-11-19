@@ -1,0 +1,5 @@
+cradle:
+  stack:
+
+    - path: "./src"
+      component: "lossless-decimal:lib"

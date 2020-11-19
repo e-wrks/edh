@@ -8,7 +8,7 @@ author:             Compl Yue
 stability:          experimental
 homepage:           https://github.com/e-wrks/edh
 bug-reports:        https://github.com/e-wrks/edh/issues
-synopsis:           a modern Object layer spliced with Haskell
+synopsis:           Event Distributing & Hosting
 description:
   Please see the README on Github at <https://github.com/e-wrks/edh>
 
@@ -39,63 +39,6 @@ library
     Language.Edh.Batteries.Reflect
     Language.Edh.Batteries.Vector
 
-  hs-source-dirs:     pub
-  default-language:   Haskell2010
-  default-extensions:
-    NoImplicitPrelude
-    BangPatterns
-    ConstraintKinds
-    DataKinds
-    FlexibleContexts
-    FlexibleInstances
-    GADTs
-    KindSignatures
-    LambdaCase
-    OverloadedStrings
-    ScopedTypeVariables
-    TupleSections
-    TypeApplications
-    TypeOperators
-    ViewPatterns
-
-  ghc-options:        -Wall
-  build-depends:
-    , base                  >=4.12  && <5
-    , bytestring
-    , clock
-    , containers
-    , directory
-    , edh-internal
-    , filepath
-    , ghc                   >=8.6.5
-    , hashable
-    , haskeline
-    , lossless-decimal
-    , megaparsec            >7.0
-    , mtl
-    , scientific
-    , stm                   >=2.5
-    , text
-    , time
-    , transformers
-    , unordered-containers
-    , uuid
-    , vector
-
-library edh-internal
-  exposed-modules:
-    Language.Edh.Args
-    Language.Edh.Control
-    Language.Edh.CoreLang
-    Language.Edh.Evaluate
-    Language.Edh.IOPD
-    Language.Edh.PkgMan
-    Language.Edh.RtTypes
-    Language.Edh.Utils
-    Language.Edh.Event
-    Language.Edh.InterOp
-    Language.Edh.Parser
-
   hs-source-dirs:     src
   default-language:   Haskell2010
   default-extensions:
@@ -122,6 +65,7 @@ library edh-internal
     , clock
     , containers
     , directory
+    , elr
     , filepath
     , ghc                   >=8.6.5
     , hashable
@@ -162,8 +106,8 @@ executable edh
 
   ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-maxN31
 
-  -- same dependencies as edh-internal, so you can:
-  -- cabal v2-repl "--repl-options=-isrc -ipub" edhi
+  -- same dependencies as edh, so you can:
+  -- cabal v2-repl "--repl-options=-isrc" edh
   build-depends:
     , base                  >=4.12  && <5
     , bytestring
@@ -171,6 +115,7 @@ executable edh
     , containers
     , directory
     , edh
+    , elr
     , filepath
     , ghc                   >=8.6.5
     , hashable
@@ -209,8 +154,8 @@ executable runedh
 
   ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-maxN31
 
-  -- same dependencies as edh-internal, so you can:
-  -- cabal v2-repl "--repl-options=-isrc -ipub" edh xxx
+  -- same dependencies as edh, so you can:
+  -- cabal v2-repl "--repl-options=-isrc" runedh
   build-depends:
     , base                  >=4.12  && <5
     , bytestring
@@ -218,6 +163,7 @@ executable runedh
     , containers
     , directory
     , edh
+    , elr
     , filepath
     , ghc                   >=8.6.5
     , hashable
@@ -256,8 +202,8 @@ executable edhm
 
   ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-maxN31
 
-  -- same dependencies as edh-internal, so you can:
-  -- cabal v2-repl "--repl-options=-isrc -ipub" edh xxx
+  -- same dependencies as edh, so you can:
+  -- cabal v2-repl "--repl-options=-isrc" edhm
   build-depends:
     , base                  >=4.12  && <5
     , bytestring
@@ -265,6 +211,7 @@ executable edhm
     , containers
     , directory
     , edh
+    , elr
     , filepath
     , ghc                   >=8.6.5
     , hashable
