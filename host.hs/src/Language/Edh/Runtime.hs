@@ -4,15 +4,8 @@ module Language.Edh.Runtime where
 
 import Control.Concurrent.STM
 import Control.Exception
-  ( Exception (toException),
-    SomeException,
-    throwIO,
-    tryJust,
-  )
-import Control.Monad.Except
-  ( MonadIO (..),
-    void,
-  )
+import Control.Monad (void)
+import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.ByteString as B
 import Data.Dynamic (fromDynamic, toDyn)
 import qualified Data.HashMap.Strict as Map
@@ -43,8 +36,8 @@ import Language.Edh.PkgMan (locateEdhMainModule)
 import Language.Edh.RtTypes
 import Prelude
 
-createEdhWorld :: MonadIO m => EdhConsole -> m EdhWorld
-createEdhWorld !console = liftIO $ do
+createEdhWorld :: EdhConsole -> IO EdhWorld
+createEdhWorld !console = do
   -- the meta class
   !idMeta <- newUnique
   !hsMeta <- atomically iopdEmpty
@@ -318,7 +311,7 @@ createEdhWorld !console = liftIO $ do
   !modus <- newTMVarIO Map.empty
 
   -- assembly the world with pieces prepared above
-  let world =
+  let !world =
         EdhWorld
           { edh'world'root = rootScope,
             edh'world'sandbox = sandboxScope,
@@ -761,15 +754,21 @@ createEdhWorld !console = liftIO $ do
       "__file__" ?: Text ->
       RestKwArgs ->
       EdhObjectAllocator
-    moduleAllocator (mandatoryArg -> !moduName) (defaultArg "<ad-hoc>" -> !moduPath) (defaultArg "<on-the-fly>" -> !moduFile) !extraArts !exit _ets =
-      exit =<< HashStore <$> iopdFromList moduArts
-      where
-        moduArts =
-          odToList extraArts
-            ++ [ (AttrByName "__name__", EdhString moduName),
-                 (AttrByName "__path__", EdhString moduPath),
-                 (AttrByName "__file__", EdhString moduFile)
-               ]
+    moduleAllocator
+      (mandatoryArg -> !moduName)
+      (defaultArg "<ad-hoc>" -> !moduPath)
+      (defaultArg "<on-the-fly>" -> !moduFile)
+      !extraArts
+      !exit
+      _ets =
+        exit . HashStore =<< iopdFromList moduArts
+        where
+          moduArts =
+            odToList extraArts
+              ++ [ (AttrByName "__name__", EdhString moduName),
+                   (AttrByName "__path__", EdhString moduPath),
+                   (AttrByName "__file__", EdhString moduFile)
+                 ]
 
     mthModuClsRepr :: EdhHostProc
     mthModuClsRepr !exit !ets = do
@@ -871,13 +870,13 @@ terminateEdhThread !ets =
     !edhWrapException =
       edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
 
-runEdhProgram :: MonadIO m => EdhWorld -> EdhTx -> m (Either EdhError EdhValue)
+runEdhProgram :: EdhWorld -> EdhTx -> IO (Either EdhError EdhValue)
 runEdhProgram !world !prog =
-  liftIO $ tryJust edhKnownError $ runEdhProgram' world prog
+  tryJust edhKnownError $ runEdhProgram' world prog
 
-runEdhProgram' :: MonadIO m => EdhWorld -> EdhTx -> m EdhValue
-runEdhProgram' !world !prog = liftIO $ do
-  !haltResult <- atomically newEmptyTMVar
+runEdhProgram' :: EdhWorld -> EdhTx -> IO EdhValue
+runEdhProgram' !world !prog = do
+  !haltResult <- newEmptyTMVarIO
   driveEdhProgram haltResult world prog
   liftIO (atomically $ tryReadTMVar haltResult) >>= \case
     Nothing -> return nil
@@ -885,9 +884,9 @@ runEdhProgram' !world !prog = liftIO $ do
     Just (Left e) -> throwIO e
 
 createEdhModule ::
-  MonadIO m => EdhWorld -> Text -> ModuleId -> String -> m Object
+  EdhWorld -> Text -> ModuleId -> String -> IO Object
 createEdhModule !world !moduName !moduId !srcName =
-  liftIO $ atomically $ edhCreateModule world moduName moduId srcName
+  atomically $ edhCreateModule world moduName moduId srcName
 
 type EdhModulePreparation = EdhThreadState -> STM () -> STM ()
 
@@ -895,8 +894,8 @@ edhModuleAsIs :: EdhModulePreparation
 edhModuleAsIs _ets !exit = exit
 
 installEdhModule ::
-  MonadIO m => EdhWorld -> ModuleId -> EdhModulePreparation -> m Object
-installEdhModule !world !moduId !preInstall = liftIO $ do
+  EdhWorld -> ModuleId -> EdhModulePreparation -> IO Object
+installEdhModule !world !moduId !preInstall = do
   !modu <- createEdhModule world moduId moduId "<host-module>"
   void $
     runEdhProgram' world $ \ !ets ->
@@ -907,60 +906,58 @@ installEdhModule !world !moduId !preInstall = liftIO $ do
           putTMVar (edh'world'modules world) $ Map.insert moduId moduSlot moduMap
   return modu
 
-installedEdhModule :: MonadIO m => EdhWorld -> ModuleId -> m (Maybe Object)
+installedEdhModule :: EdhWorld -> ModuleId -> IO (Maybe Object)
 installedEdhModule !world !moduId =
-  liftIO $
-    atomically $
-      tryReadTMVar (edh'world'modules world) >>= \case
+  atomically $
+    tryReadTMVar (edh'world'modules world) >>= \case
+      Nothing -> return Nothing
+      Just !mm -> case Map.lookup moduId mm of
         Nothing -> return Nothing
-        Just !mm -> case Map.lookup moduId mm of
-          Nothing -> return Nothing
-          Just !moduSlotVar ->
-            readTVar moduSlotVar >>= \case
-              ModuLoaded !modu -> return $ Just modu
-              ModuLoading !loadScope _ -> return $ Just $ edh'scope'this loadScope
-              _ -> return Nothing
+        Just !moduSlotVar ->
+          readTVar moduSlotVar >>= \case
+            ModuLoaded !modu -> return $ Just modu
+            ModuLoading !loadScope _ -> return $ Just $ edh'scope'this loadScope
+            _ -> return Nothing
 
 runEdhModule ::
-  MonadIO m =>
   EdhWorld ->
   FilePath ->
   EdhModulePreparation ->
-  m (Either EdhError EdhValue)
+  IO (Either EdhError EdhValue)
 runEdhModule !world !impPath !preRun =
-  liftIO $ tryJust edhKnownError $ runEdhModule' world impPath preRun
+  tryJust edhKnownError $ runEdhModule' world impPath preRun
 
 runEdhModule' ::
-  MonadIO m => EdhWorld -> FilePath -> EdhModulePreparation -> m EdhValue
+  EdhWorld -> FilePath -> EdhModulePreparation -> IO EdhValue
 runEdhModule' !world !impPath !preRun =
-  liftIO $
-    locateEdhMainModule impPath >>= \(!moduName, !nomPath, !moduFile) ->
-      streamDecodeUtf8With lenientDecode <$> B.readFile moduFile >>= \case
-        Some !moduSource _ _ -> runEdhProgram' world $ \ !ets ->
-          let !moduId = T.pack nomPath
-           in edhCreateModule world moduName moduId moduFile >>= \ !modu ->
-                moduleContext world modu >>= \ !moduCtx ->
-                  let !etsModu = ets {edh'context = moduCtx}
-                   in preRun etsModu $
-                        runEdhTx etsModu $
-                          evalEdh
-                            (T.pack moduFile)
-                            moduSource
-                            endOfEdh
-
-runEdhFile :: MonadIO m => EdhWorld -> FilePath -> m (Either EdhError EdhValue)
-runEdhFile !world !edhFile =
-  liftIO $ tryJust edhKnownError $ runEdhFile' world edhFile
-
-runEdhFile' :: MonadIO m => EdhWorld -> FilePath -> m EdhValue
-runEdhFile' !world !edhFile =
-  liftIO $
-    streamDecodeUtf8With lenientDecode <$> B.readFile edhFile >>= \case
+  locateEdhMainModule impPath >>= \(!moduName, !nomPath, !moduFile) -> do
+    !fileContent <- B.readFile moduFile
+    case streamDecodeUtf8With lenientDecode fileContent of
       Some !moduSource _ _ -> runEdhProgram' world $ \ !ets ->
-        edhCreateModule world "__main__" "__main__" edhFile >>= \ !modu ->
-          moduleContext world modu >>= \ !moduCtx ->
-            let !etsModu = ets {edh'context = moduCtx}
-             in runEdhTx etsModu $ evalEdh (T.pack edhFile) moduSource endOfEdh
+        let !moduId = T.pack nomPath
+         in edhCreateModule world moduName moduId moduFile >>= \ !modu ->
+              moduleContext world modu >>= \ !moduCtx ->
+                let !etsModu = ets {edh'context = moduCtx}
+                 in preRun etsModu $
+                      runEdhTx etsModu $
+                        evalEdh
+                          (T.pack moduFile)
+                          moduSource
+                          endOfEdh
+
+runEdhFile :: EdhWorld -> FilePath -> IO (Either EdhError EdhValue)
+runEdhFile !world !edhFile =
+  tryJust edhKnownError $ runEdhFile' world edhFile
+
+runEdhFile' :: EdhWorld -> FilePath -> IO EdhValue
+runEdhFile' !world !edhFile = do
+  !fileContent <- B.readFile edhFile
+  case streamDecodeUtf8With lenientDecode fileContent of
+    Some !moduSource _ _ -> runEdhProgram' world $ \ !ets ->
+      edhCreateModule world "__main__" "__main__" edhFile >>= \ !modu ->
+        moduleContext world modu >>= \ !moduCtx ->
+          let !etsModu = ets {edh'context = moduCtx}
+           in runEdhTx etsModu $ evalEdh (T.pack edhFile) moduSource endOfEdh
 
 -- | perform an effectful call from current Edh context
 --

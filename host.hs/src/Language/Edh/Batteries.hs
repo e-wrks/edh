@@ -16,10 +16,8 @@ where
 import Control.Concurrent (forkIOWithUnmask)
 import Control.Concurrent.STM
 import Control.Exception (finally, mask_)
-import Control.Monad.Reader
-  ( MonadIO (..),
-    void,
-  )
+import Control.Monad (void)
+import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -283,8 +281,8 @@ defaultEdhConsole !inputSettings = do
         consoleFlush = atomically $ void (readTMVar outIdle >> readTMVar logIdle)
       }
 
-installEdhBatteries :: MonadIO m => EdhWorld -> m ()
-installEdhBatteries world = liftIO $
+installEdhBatteries :: EdhWorld -> IO ()
+installEdhBatteries world =
   void $
     runEdhProgram' world $ \ !ets -> do
       declareEdhOperators
