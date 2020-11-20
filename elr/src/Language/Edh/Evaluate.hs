@@ -55,9 +55,9 @@ getEdhErrCtx !unwind !ets =
     prettyFrame :: EdhCallFrame -> ErrContext
     prettyFrame (EdhCallFrame !scope !exe'loc _) =
       "📜 "
-        <> (procedureName $ edh'scope'proc scope)
+        <> procedureName (edh'scope'proc scope)
         <> " 👉 "
-        <> (prettySrcLoc exe'loc)
+        <> prettySrcLoc exe'loc
 
     unwindStack :: Int -> [EdhCallFrame] -> [EdhCallFrame]
     unwindStack c s | c <= 0 = s
@@ -162,7 +162,7 @@ getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
     trySelfMagic :: Object -> EdhTx
     trySelfMagic !obj _ets =
       lookupEdhObjAttr obj key >>= \case
-        (_, EdhNil) -> (obj :) <$> readTVar (edh'obj'supers obj) >>= trySelves
+        (_, EdhNil) -> readTVar (edh'obj'supers obj) >>= trySelves . (obj :)
         (this, !val) -> chkVanillaExit this obj val
       where
         trySelves :: [Object] -> STM ()
@@ -334,7 +334,7 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
       \ !valSet -> exitEdh ets exit valSet
       where
         tryMagic :: STM ()
-        tryMagic = (obj :) <$> readTVar (edh'obj'supers obj) >>= trySelves
+        tryMagic = readTVar (edh'obj'supers obj) >>= trySelves . (obj :)
         trySelves :: [Object] -> STM ()
         trySelves [] =
           writeObjAttr ets obj key val $ \ !valSet -> exitEdh ets exit valSet
@@ -582,8 +582,7 @@ edhConstructObj !clsObj !apk !exit !ets =
                 case restSupers of
                   [] -> allocIt
                   (nextSuper : restSupers') ->
-                    createOne nextSuper restSupers' apkCtor' $
-                      \_superObj -> allocIt
+                    createOne nextSuper restSupers' apkCtor' $ const allocIt
               _ -> throwEdh ets EvalError "bug: non-class object in mro"
         !superClasses <- readTVar (edh'class'mro endClass)
         createOne clsObj superClasses apk $ \ !obj -> do
@@ -1966,7 +1965,7 @@ parseEdh' ::
   STM (Either ParserError ([StmtSrc], Maybe DocComment))
 parseEdh' !world !srcName !lineNo !srcCode = do
   !pd <- takeTMVar wops -- update 'worldOperators' atomically wrt parsing
-  let ((_, !pr), (EdhParserState !pd' _)) =
+  let ((_, !pr), EdhParserState !pd' _) =
         runState
           ( runParserT'
               parseProgram
@@ -2025,7 +2024,7 @@ evalEdh' !srcName !lineNo !srcCode !exit !ets =
             ctx
               { edh'ctx'tip =
                   (edh'ctx'tip ctx)
-                    { edh'exe'src'loc = (SrcLoc (SrcDoc srcName) zeroSrcRange)
+                    { edh'exe'src'loc = SrcLoc (SrcDoc srcName) zeroSrcRange
                     }
               }
         }
@@ -3073,7 +3072,7 @@ edhValueRepr !ets !val !exitRepr = case val of
       else edhProcessReprs ets ((\ !v -> (v, id)) <$> args) $ \ !posReprs ->
         edhProcessReprs
           ets
-          ( (\(!k, !v) -> (v, (\ !r -> attrKeyStr k <> "= " <> r)))
+          ( (\(!k, !v) -> (v, \ !r -> attrKeyStr k <> "= " <> r))
               <$> odToList kwargs
           )
           $ \ !kwReprs ->
@@ -3164,10 +3163,10 @@ edhValueStr ets (EdhObject !o) !exit = case edh'obj'store o of
     tryRepr = case edh'obj'store o of
       ClassStore {} ->
         lookupEdhObjAttr (edh'obj'class o) (AttrByName "__repr__")
-          >>= (withMagic $ exit $ T.pack $ show o)
+          >>= withMagic (exit $ T.pack $ show o)
       _ ->
         lookupEdhObjAttr o (AttrByName "__repr__")
-          >>= (withMagic $ exit $ T.pack $ show o)
+          >>= withMagic (exit $ T.pack $ show o)
     withMagic !altOpt = \case
       (_, EdhNil) -> altOpt
       (_, EdhString !str) -> exit str
@@ -3642,7 +3641,7 @@ evalExpr' (ClassExpr pd@(ProcDecl (AttrAddrSrc !addr _) !argsRcvr (StmtSrc !body
     let allocatorProc :: ArgsPack -> EdhObjectAllocator
         allocatorProc !apkCtor !exitCtor !etsCtor = case argsRcvr of
           -- a normal class
-          WildReceiver -> exitCtor =<< HashStore <$> iopdEmpty
+          WildReceiver -> exitCtor . HashStore =<< iopdEmpty
           -- a data class (ADT)
           _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
             iopdFromList (odToList dataAttrs) >>= exitCtor . HashStore
@@ -4308,7 +4307,7 @@ edhValueNull _ (EdhBool b) !exit = exit $ not b
 edhValueNull _ (EdhString s) !exit = exit $ T.null s
 edhValueNull _ (EdhSymbol _) !exit = exit False
 edhValueNull _ (EdhDict (Dict _ ds)) !exit = iopdNull ds >>= exit
-edhValueNull _ (EdhList (List _ l)) !exit = null <$> readTVar l >>= exit
+edhValueNull _ (EdhList (List _ l)) !exit = readTVar l >>= exit . null
 edhValueNull _ (EdhArgsPack (ArgsPack args kwargs)) !exit =
   exit $ null args && odNull kwargs
 edhValueNull _ (EdhExpr _ (LitExpr NilLiteral) _) !exit = exit True
@@ -4380,7 +4379,7 @@ edhValueEqual !ets !lhVal !rhVal !exit =
         EdhList (List _ rhll) -> do
           !lhl <- readTVar lhll
           !rhl <- readTVar rhll
-          edhListEq ets lhl rhl $ exit
+          edhListEq ets lhl rhl exit
         _ -> exit $ Just False
       EdhDict (Dict _ !lhd) -> case rhv of
         EdhDict (Dict _ !rhd) -> do

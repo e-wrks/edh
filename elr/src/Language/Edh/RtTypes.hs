@@ -43,7 +43,7 @@ data ArgsPack = ArgsPack
   }
   deriving (Eq)
 
-type KwArgs = (OrderedDict AttrKey EdhValue)
+type KwArgs = OrderedDict AttrKey EdhValue
 
 instance Hashable ArgsPack where
   hashWithSalt s (ArgsPack !args !kwargs) =
@@ -447,7 +447,7 @@ castObjSelfStore' !val = case edhUltimate val of
 
 -- | Try cast and unveil an Object's storage of a known type
 castObjectStore :: forall a. (Typeable a) => Object -> STM (Maybe (Object, a))
-castObjectStore !obj = (obj :) <$> readTVar (edh'obj'supers obj) >>= goSearch
+castObjectStore !obj = readTVar (edh'obj'supers obj) >>= goSearch . (obj :)
   where
     goSearch [] = return Nothing
     goSearch (o : rest) =
