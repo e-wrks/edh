@@ -322,20 +322,14 @@ data Scope = Scope
   }
 
 instance Show Scope where
-  show !s = T.unpack $ "<scope: " <> procedureName (edh'scope'proc s) <> ">"
-
--- show (Scope _ _ _ _ !pd (StmtSrc (!cPos, _)) _) =
---   "📜 "
---     ++ (T.unpack $ procedureName pd)
---     ++ " 🔎 "
---     ++ defLoc
---     ++ " 👈 "
---     ++ T.unpack (prettySrcSpan cPos)
---  where
---   defLoc = case edh'procedure'decl pd of
---     HostDecl _ -> "<host-code>"
---     decl@ProcDecl{} ->
---       T.unpack $ prettySrcSpan $ edh'procedure'name'span decl
+  show !scope =
+    T.unpack $
+      "#scope: 📜 " <> procedureName sp
+        <> " 🔎 "
+        <> prettySrcLoc (edh'procedure'loc pd)
+    where
+      !sp = edh'scope'proc scope
+      !pd = edh'procedure'decl sp
 
 outerScopeOf :: Scope -> Maybe Scope
 outerScopeOf !scope =

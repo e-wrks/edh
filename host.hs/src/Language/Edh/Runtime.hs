@@ -431,11 +431,13 @@ createEdhWorld !console = do
     mthScopeShow !exit !ets =
       withThisHostObj' ets (exitEdh ets exit $ EdhString "bogus scope object") $
         \(scope :: Scope) ->
-          exitEdh ets exit $
-            EdhString $
-              "#scope@ "
-                <> prettySrcLoc
-                  (edhScopeSrcLoc scope)
+          let !sp = edh'scope'proc scope
+              !pd = edh'procedure'decl sp
+           in exitEdh ets exit $
+                EdhString $
+                  "#scope: 📜 " <> procedureName sp
+                    <> " 🔎 "
+                    <> prettySrcLoc (edh'procedure'loc pd)
 
     mthScopeLexiLoc :: EdhHostProc
     mthScopeLexiLoc !exit !ets =
