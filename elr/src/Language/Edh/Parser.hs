@@ -786,7 +786,7 @@ parseAttrAddr = parseAtNotation <|> NamedAttr <$> parseAttrName
     parseAtNotation =
       char '@' *> sc
         *> choice
-          [NamedAttr <$> parseStringLit, SymbolicAttr <$> parseAlphNumName]
+          [SyntheticAttr <$> parseStringLit, SymbolicAttr <$> parseAlphNumName]
 
 parseAttrName :: Parser Text
 parseAttrName = ("(" <>) . (<> ")") <$> parseMagicName <|> parseAlphNumName

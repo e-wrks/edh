@@ -1002,6 +1002,10 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
                     -- simple rename
                     edhSetValue (AttrByName attrName) argVal em
                     exit' (ArgsPack posArgs'' kwArgs'')
+                  SyntheticAttr !attrName -> do
+                    -- odd rename
+                    edhSetValue (AttrByName attrName) argVal em
+                    exit' (ArgsPack posArgs'' kwArgs'')
                   SymbolicAttr !symName ->
                     -- todo support this ?
                     throwEdh etsCaller UsageError $
@@ -1769,6 +1773,7 @@ edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doStmt !iterCollector !forLo
 resolveEdhAttrAddr ::
   EdhThreadState -> AttrAddr -> (AttrKey -> STM ()) -> STM ()
 resolveEdhAttrAddr _ (NamedAttr !attrName) !exit = exit (AttrByName attrName)
+resolveEdhAttrAddr _ (SyntheticAttr !attrName) !exit = exit (AttrByName attrName)
 resolveEdhAttrAddr !ets (SymbolicAttr !symName) !exit =
   let scope = contextScope $ edh'context ets
    in resolveEdhCtxAttr scope (AttrByName symName) >>= \case

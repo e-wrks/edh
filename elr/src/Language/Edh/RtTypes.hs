@@ -1205,8 +1205,11 @@ data AttrAddrSrc = AttrAddrSrc !AttrAddr !SrcRange
 data AttrAddr
   = -- | vanilla form, by alphanumeric name
     NamedAttr !AttrName
-  | -- | at notation, i.e. - get the symbol or string value from current scope,
-    -- then use it to address attributes
+  | -- | static at-notation i.e. attribute name with arbitrary chars from a
+    -- literal string
+    SyntheticAttr !Text
+  | -- | dynamic at-notation i.e. get the symbol or string value from current
+    -- scope, then use it to address attributes
     SymbolicAttr !AttrName
   deriving (Eq)
 
@@ -1215,11 +1218,13 @@ instance Show AttrAddr where
 
 instance Hashable AttrAddr where
   hashWithSalt s (NamedAttr name) = s `hashWithSalt` name
+  hashWithSalt s (SyntheticAttr name) = s `hashWithSalt` name
   hashWithSalt s (SymbolicAttr sym) =
     s `hashWithSalt` ("@" :: Text) `hashWithSalt` sym
 
 attrAddrStr :: AttrAddr -> Text
 attrAddrStr (NamedAttr n) = n
+attrAddrStr (SyntheticAttr n) = T.pack ("@" <> show n)
 attrAddrStr (SymbolicAttr s) = "@" <> s
 
 receivesNamedArg :: Text -> ArgsReceiver -> Bool
