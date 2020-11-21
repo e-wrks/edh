@@ -4,6 +4,11 @@ module Language.Edh.Runtime where
 
 import Control.Concurrent.STM
 import Control.Exception
+  ( Exception (toException),
+    SomeException,
+    throwIO,
+    tryJust,
+  )
 import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.ByteString as B
@@ -935,11 +940,11 @@ runEdhModule' !world !impPath !preRun =
   locateEdhMainModule impPath >>= \(!moduName, !nomPath, !moduFile) -> do
     !fileContent <- B.readFile moduFile
     case streamDecodeUtf8With lenientDecode fileContent of
-      Some !moduSource _ _ -> runEdhProgram' world $ \ !ets ->
+      Some !moduSource _ _ -> runEdhProgram' world $ \ !etsMain ->
         let !moduId = T.pack nomPath
          in edhCreateModule world moduName moduId moduFile >>= \ !modu ->
               moduleContext world modu >>= \ !moduCtx ->
-                let !etsModu = ets {edh'context = moduCtx}
+                let !etsModu = etsMain {edh'context = moduCtx}
                  in preRun etsModu $
                       runEdhTx etsModu $
                         evalEdh
@@ -955,10 +960,10 @@ runEdhFile' :: EdhWorld -> FilePath -> IO EdhValue
 runEdhFile' !world !edhFile = do
   !fileContent <- B.readFile edhFile
   case streamDecodeUtf8With lenientDecode fileContent of
-    Some !moduSource _ _ -> runEdhProgram' world $ \ !ets ->
+    Some !moduSource _ _ -> runEdhProgram' world $ \ !etsMain ->
       edhCreateModule world "__main__" "__main__" edhFile >>= \ !modu ->
         moduleContext world modu >>= \ !moduCtx ->
-          let !etsModu = ets {edh'context = moduCtx}
+          let !etsModu = etsMain {edh'context = moduCtx}
            in runEdhTx etsModu $ evalEdh (T.pack edhFile) moduSource endOfEdh
 
 -- | perform an effectful call from current Edh context
