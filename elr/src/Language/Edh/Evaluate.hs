@@ -2729,12 +2729,12 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
                         exit loadedSlot
                     )
                     $ \_etsThrower !exv _recover !rethrow -> case exv of
-                      EdhNil -> rethrow exv -- no error occurred
+                      EdhNil -> rethrow nil -- no error occurred
                       _ -> do
                         let !failedSlot = ModuFailed exv
                         writeTVar moduSlotVar failedSlot
                         -- cleanup on loading error
-                        moduMap'' <- takeTMVar worldModules
+                        !moduMap'' <- takeTMVar worldModules
                         case Map.lookup moduId moduMap'' of
                           Nothing -> putTMVar worldModules moduMap''
                           Just !moduSlotVar' ->
