@@ -91,8 +91,8 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
                 [(AttrByName "moduSpec", EdhString $ T.pack nomSpec)]
 
     resolveAbsImport :: FilePath -> IO (ImportName, FilePath, FilePath)
-    resolveAbsImport !caniPkgPath = do
-      let !nomPath = caniPkgPath </> "edh_modules" </> nomSpec
+    resolveAbsImport !absPkgPath = do
+      let !nomPath = absPkgPath </> "edh_modules" </> nomSpec
           !edhFilePath = nomPath ++ ".edh"
       -- trace (" ** no hit: " <> edhFilePath <> " ** " <> nomPath) $ return ()
       doesFileExist edhFilePath >>= \case
@@ -104,8 +104,8 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
             True -> return (AbsoluteName (T.pack nomSpec), nomPath, edhIdxPath)
             False -> do
               -- trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $ return ()
-              let !parentPkgPath = takeDirectory caniPkgPath
-              if equalFilePath parentPkgPath caniPkgPath
+              let !parentPkgPath = takeDirectory absPkgPath
+              if equalFilePath parentPkgPath absPkgPath
                 then
                   throwPkgError
                     ("no such module: " <> T.pack nomSpec)
@@ -116,14 +116,14 @@ locateEdhMainModule :: FilePath -> IO (Text, FilePath, FilePath)
 locateEdhMainModule !importPath = canonicalizePath "." >>= resolveMainImport
   where
     resolveMainImport :: FilePath -> IO (Text, FilePath, FilePath)
-    resolveMainImport !caniPkgPath = do
-      let !nomPath = caniPkgPath </> "edh_modules" </> importPath
+    resolveMainImport !absPkgPath = do
+      let !nomPath = absPkgPath </> "edh_modules" </> importPath
           !edhFilePath = nomPath </> "__main__.edh"
       doesFileExist edhFilePath >>= \case
         True -> return (T.pack importPath, nomPath, edhFilePath)
         False -> do
-          let !parentPkgPath = takeDirectory caniPkgPath
-          if equalFilePath parentPkgPath caniPkgPath
+          let !parentPkgPath = takeDirectory absPkgPath
+          if equalFilePath parentPkgPath absPkgPath
             then
               throwPkgError
                 ("no such main module: " <> T.pack importPath)
