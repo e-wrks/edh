@@ -8,29 +8,9 @@ import Data.Lossless.Decimal
     powerDecimal,
   )
 import Language.Edh.Batteries.Data (concatProc)
-import Language.Edh.Control (noSrcRange)
+import Language.Edh.Control
 import Language.Edh.Evaluate
-  ( edhCompareValue,
-    edhIdentEqual,
-    edhValueEqual,
-    edhValueNull,
-    evalExprSrc,
-  )
 import Language.Edh.RtTypes
-  ( EdhIntrinsicOp,
-    EdhTx,
-    EdhTxExit,
-    EdhValue (EdhBool, EdhDecimal, EdhObject),
-    Expr (LitExpr),
-    ExprSrc (ExprSrc),
-    Literal (BoolLiteral, ValueLiteral),
-    edhNA,
-    edhUltimate,
-    exitEdh,
-    exitEdhTx,
-    mkDefault,
-    runEdhTx,
-  )
 import Prelude
 
 -- | operator (+)
@@ -223,7 +203,7 @@ isLeProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
     _ -> False
 
 edhCompareValue' ::
-  EdhTxExit -> EdhValue -> EdhValue -> (Ordering -> Bool) -> EdhTx
+  EdhTxExit EdhValue -> EdhValue -> EdhValue -> (Ordering -> Bool) -> EdhTx
 edhCompareValue' !exit !lhVal !rhVal !cm !ets =
   edhCompareValue ets lhVal rhVal $ \case
     Nothing -> exitEdh ets exit edhNA

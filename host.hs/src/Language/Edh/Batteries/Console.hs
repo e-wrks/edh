@@ -238,7 +238,7 @@ timelyNotify ::
   Decimal ->
   Bool ->
   EdhGenrCaller ->
-  EdhTxExit ->
+  EdhTxExit EdhValue ->
   STM ()
 timelyNotify !ets !scale !interval !wait1st !iter'cb !exit =
   if edh'in'tx ets

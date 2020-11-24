@@ -105,7 +105,12 @@ edhValueAsAttrKey' !ets !keyVal !naExit !exit = case edhUltimate keyVal of
 --
 -- The target would be an object in most common cases, but can be some type of
 -- value with virtual attributes, then one can be get as well.
-getEdhAttr :: ExprSrc -> AttrKey -> EdhTxExit -> EdhTxExit -> EdhTx
+getEdhAttr ::
+  ExprSrc ->
+  AttrKey ->
+  EdhTxExit EdhValue ->
+  EdhTxExit EdhValue ->
+  EdhTx
 getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
   -- no magic layer laid over access via `this` ref
   AttrExpr ThisRef ->
@@ -221,7 +226,13 @@ getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
 -- intercepting the attr resolution
 
 -- | Try get an attribute from an object, with super magic
-getObjAttrWSM :: AttrKey -> Object -> AttrKey -> EdhTx -> EdhTxExit -> EdhTx
+getObjAttrWSM ::
+  AttrKey ->
+  Object ->
+  AttrKey ->
+  EdhTx ->
+  EdhTxExit EdhValue ->
+  EdhTx
 getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
   lookupEdhSuperAttr obj magicSpell >>= \case
     (_, EdhNil) -> runEdhTx ets exitNoMagic
@@ -256,7 +267,13 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
 
 -- | Try set an attribute into an object, with super magic
 setObjAttrWSM ::
-  AttrKey -> Object -> AttrKey -> EdhValue -> EdhTx -> EdhTxExit -> EdhTx
+  AttrKey ->
+  Object ->
+  AttrKey ->
+  EdhValue ->
+  EdhTx ->
+  EdhTxExit EdhValue ->
+  EdhTx
 setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
   lookupEdhSuperAttr obj magicSpell >>= \case
     (_, EdhNil) -> runEdhTx ets exitNoMagic
@@ -296,7 +313,7 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
 -- The target would be an object in most common cases, but can be some type of
 -- value with virtual attributes, but currently all virtual attributes are
 -- readonly, not mutable virtual attribute supported yet.
-setEdhAttr :: Expr -> AttrKey -> EdhValue -> EdhTxExit -> EdhTx
+setEdhAttr :: Expr -> AttrKey -> EdhValue -> EdhTxExit EdhValue -> EdhTx
 setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
   -- no magic layer laid over assignment via `this` ref
   AttrExpr ThisRef ->
@@ -423,7 +440,7 @@ setObjAttr' !ets !obj !key !val !naExit !exit =
           <> " is readonly"
 
 -- | Assign an evaluated value to a target expression
-assignEdhTarget :: Expr -> EdhValue -> EdhTxExit -> EdhTx
+assignEdhTarget :: Expr -> EdhValue -> EdhTxExit EdhValue -> EdhTx
 assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
   -- attribute assignment
   AttrExpr !addr -> case addr of
@@ -653,6 +670,7 @@ edhMutCloneObj !ets !fromThis !fromThat !newStore !exitEnd =
     let cloneSupers :: [Object] -> ([Object] -> STM ()) -> [Object] -> STM ()
         cloneSupers !cloned !exitSupers [] = exitSupers $ reverse cloned
         cloneSupers !cloned !exitSupers (super : rest) =
+          {- HLINT ignore "Redundant <$>" -}
           Map.lookup super <$> readTVar instMap >>= \case
             Just !superClone -> cloneSupers (superClone : cloned) exitSupers rest
             Nothing -> clone1 super $ \ !superClone ->
@@ -775,7 +793,7 @@ callEdhOperator ::
   ProcDefi ->
   Maybe EdhValue ->
   [EdhValue] ->
-  EdhTxExit ->
+  EdhTxExit EdhValue ->
   EdhTx
 callEdhOperator !this !that !mth !prede !args !exit =
   case edh'procedure'decl mth of
@@ -827,7 +845,7 @@ callEdhOperator' ::
   SrcLoc ->
   StmtSrc ->
   [EdhValue] ->
-  EdhTxExit ->
+  EdhTxExit EdhValue ->
   EdhTx
 callEdhOperator' !this !that !mth !prede !proc'loc (StmtSrc !body'stmt _) !args !exit !ets =
   recvEdhArgs
@@ -1215,7 +1233,8 @@ edhPrepareCall ::
   EdhThreadState -> -- ets to prepare the call
   EdhValue -> -- callee value
   ArgsPacker -> -- specification for the arguments pack
-  ((EdhTxExit -> EdhTx) -> STM ()) -> -- callback to receive the prepared call
+  -- callback to receive the prepared call
+  ((EdhTxExit EdhValue -> EdhTx) -> STM ()) ->
   STM ()
 edhPrepareCall !etsCallPrep !calleeVal !argsSndr !callMaker = case calleeVal of
   EdhProcedure EdhIntrpr {} _ -> packEdhExprs etsCallPrep argsSndr $
@@ -1230,70 +1249,91 @@ edhPrepareCall' ::
   EdhThreadState -> -- ets to prepare the call
   EdhValue -> -- callee value
   ArgsPack -> -- packed arguments
-  ((EdhTxExit -> EdhTx) -> STM ()) -> -- callback to receive the prepared call
+  -- callback to receive the prepared call
+  ((EdhTxExit EdhValue -> EdhTx) -> STM ()) ->
   STM ()
-edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker =
-  case calleeVal of
-    EdhBoundProc !callee !this !that !effOuter ->
-      callProc callee this that $
-        flip (maybe id) effOuter $
-          \ !outerStack !s -> s {edh'effects'stack = outerStack}
-    EdhProcedure !callee !effOuter ->
-      callProc callee (edh'scope'this scope) (edh'scope'that scope) $
-        flip (maybe id) effOuter $
-          \ !outerStack !s -> s {edh'effects'stack = outerStack}
-    (EdhObject !obj) -> case edh'obj'store obj of
-      -- calling a class
-      ClassStore {} -> callMaker $ \ !exit -> edhConstructObj obj apk $
-        \ !instObj !ets -> exitEdh ets exit $ EdhObject instObj
-      -- calling an object
-      _ ->
-        lookupEdhObjAttr obj (AttrByName "__call__") >>= \case
-          (!this', EdhProcedure !callee !effOuter) ->
-            callProc callee this' obj $
-              flip (maybe id) effOuter $
-                \ !outerStack !s -> s {edh'effects'stack = outerStack}
-          (_, EdhBoundProc !callee !this !that !effOuter) ->
-            callProc callee this that $
-              flip (maybe id) effOuter $
-                \ !outerStack !s -> s {edh'effects'stack = outerStack}
-          _ -> throwEdh etsCallPrep EvalError "no __call__ method on object"
-    _ -> edhValueRepr etsCallPrep calleeVal $ \ !calleeRepr ->
-      throwEdh etsCallPrep EvalError $
-        "can not call a "
-          <> T.pack (edhTypeNameOf calleeVal)
-          <> ": "
-          <> calleeRepr
-  where
-    scope = contextScope $ edh'context etsCallPrep
+edhPrepareCall'
+  !etsCallPrep
+  !calleeVal
+  apk@(ArgsPack !args !kwargs)
+  !callMaker =
+    case calleeVal of
+      EdhBoundProc !callee !this !that !effOuter ->
+        callProc callee this that $
+          flip (maybe id) effOuter $
+            \ !outerStack !s -> s {edh'effects'stack = outerStack}
+      EdhProcedure !callee !effOuter ->
+        callProc callee (edh'scope'this scope) (edh'scope'that scope) $
+          flip (maybe id) effOuter $
+            \ !outerStack !s -> s {edh'effects'stack = outerStack}
+      (EdhObject !obj) -> case edh'obj'store obj of
+        -- calling a class
+        ClassStore {} -> callMaker $ \ !exit -> edhConstructObj obj apk $
+          \ !instObj !ets -> exitEdh ets exit $ EdhObject instObj
+        -- calling an object
+        _ ->
+          lookupEdhObjAttr obj (AttrByName "__call__") >>= \case
+            (!this', EdhProcedure !callee !effOuter) ->
+              callProc callee this' obj $
+                flip (maybe id) effOuter $
+                  \ !outerStack !s -> s {edh'effects'stack = outerStack}
+            (_, EdhBoundProc !callee !this !that !effOuter) ->
+              callProc callee this that $
+                flip (maybe id) effOuter $
+                  \ !outerStack !s -> s {edh'effects'stack = outerStack}
+            _ -> throwEdh etsCallPrep EvalError "no __call__ method on object"
+      _ -> edhValueRepr etsCallPrep calleeVal $ \ !calleeRepr ->
+        throwEdh etsCallPrep EvalError $
+          "can not call a "
+            <> T.pack (edhTypeNameOf calleeVal)
+            <> ": "
+            <> calleeRepr
+    where
+      scope = contextScope $ edh'context etsCallPrep
 
-    callProc :: EdhProc -> Object -> Object -> (Scope -> Scope) -> STM ()
-    callProc !callee !this !that !scopeMod = case callee of
-      -- calling a method procedure
-      EdhMethod !mth ->
-        callMaker $ \ !exit -> callEdhMethod this that mth apk scopeMod exit
-      -- calling an interpreter procedure
-      EdhIntrpr !mth -> do
-        -- an Edh interpreter proc needs a `callerScope` as its 1st arg,
-        -- while a host interpreter proc doesn't.
-        apk' <- case edh'procedure'decl mth of
-          HostDecl {} -> return apk
-          ProcDecl {} -> do
-            let callerCtx = edh'context etsCallPrep
-            !argCallerScope <- mkScopeWrapper etsCallPrep $ contextScope callerCtx
-            return $ ArgsPack (EdhObject argCallerScope : args) kwargs
-        callMaker $ \ !exit -> callEdhMethod this that mth apk' scopeMod exit
+      callProc :: EdhProc -> Object -> Object -> (Scope -> Scope) -> STM ()
+      callProc !callee !this !that !scopeMod = case callee of
+        -- calling a method procedure
+        EdhMethod !mth ->
+          callMaker $ \ !exit -> callEdhMethod this that mth apk scopeMod exit
+        -- calling an interpreter procedure
+        EdhIntrpr !mth -> do
+          -- an Edh interpreter proc needs a `callerScope` as its 1st arg,
+          -- while a host interpreter proc doesn't.
+          apk' <- case edh'procedure'decl mth of
+            HostDecl {} -> return apk
+            ProcDecl {} -> do
+              let callerCtx = edh'context etsCallPrep
+              !argCallerScope <- mkScopeWrapper etsCallPrep $ contextScope callerCtx
+              return $ ArgsPack (EdhObject argCallerScope : args) kwargs
+          callMaker $ \ !exit -> callEdhMethod this that mth apk' scopeMod exit
 
-      -- calling a producer procedure
-      EdhPrducr !mth -> case edh'procedure'decl mth of
-        HostDecl {} ->
-          throwEdh etsCallPrep EvalError "bug: host producer procedure"
-        ProcDecl _ _ !pb !pl ->
-          case edhUltimate <$> odLookup (AttrByName "outlet") kwargs of
-            Nothing -> do
-              outlet <- newEventSink
-              callMaker $ \exit ->
-                launchEventProducer exit outlet $
+        -- calling a producer procedure
+        EdhPrducr !mth -> case edh'procedure'decl mth of
+          HostDecl {} ->
+            throwEdh etsCallPrep EvalError "bug: host producer procedure"
+          ProcDecl _ _ !pb !pl ->
+            case edhUltimate <$> odLookup (AttrByName "outlet") kwargs of
+              Nothing -> do
+                outlet <- newEventSink
+                callMaker $ \ !exit ->
+                  launchEventProducer (exit . EdhSink) outlet $
+                    callEdhMethod'
+                      Nothing
+                      this
+                      that
+                      mth
+                      pl
+                      pb
+                      ( ArgsPack args $
+                          odFromList $
+                            odToList kwargs
+                              ++ [(AttrByName "outlet", EdhSink outlet)]
+                      )
+                      scopeMod
+                      endOfEdh
+              Just (EdhSink !outlet) -> callMaker $ \exit ->
+                launchEventProducer (exit . EdhSink) outlet $
                   callEdhMethod'
                     Nothing
                     this
@@ -1301,39 +1341,23 @@ edhPrepareCall' !etsCallPrep !calleeVal apk@(ArgsPack !args !kwargs) !callMaker 
                     mth
                     pl
                     pb
-                    ( ArgsPack args $
-                        odFromList $
-                          odToList kwargs
-                            ++ [(AttrByName "outlet", EdhSink outlet)]
-                    )
+                    (ArgsPack args kwargs)
                     scopeMod
                     endOfEdh
-            Just (EdhSink !outlet) -> callMaker $ \exit ->
-              launchEventProducer exit outlet $
-                callEdhMethod'
-                  Nothing
-                  this
-                  that
-                  mth
-                  pl
-                  pb
-                  (ArgsPack args kwargs)
-                  scopeMod
-                  endOfEdh
-            Just !badVal ->
-              throwEdh etsCallPrep UsageError $
-                "the value passed to a producer as `outlet` found to be a "
-                  <> T.pack (edhTypeNameOf badVal)
-      -- calling a generator
-      (EdhGnrtor _) ->
-        throwEdh
-          etsCallPrep
-          EvalError
-          "can only call a generator method by for-from-do loop"
-      _ ->
-        throwEdh etsCallPrep EvalError $
-          "`edhPrepareCall` can not be used to call a "
-            <> T.pack (show callee)
+              Just !badVal ->
+                throwEdh etsCallPrep UsageError $
+                  "the value passed to a producer as `outlet` found to be a "
+                    <> T.pack (edhTypeNameOf badVal)
+        -- calling a generator
+        (EdhGnrtor _) ->
+          throwEdh
+            etsCallPrep
+            EvalError
+            "can only call a generator method by for-from-do loop"
+        _ ->
+          throwEdh etsCallPrep EvalError $
+            "`edhPrepareCall` can not be used to call a "
+              <> T.pack (show callee)
 
 callEdhMethod ::
   Object ->
@@ -1341,7 +1365,7 @@ callEdhMethod ::
   ProcDefi ->
   ArgsPack ->
   (Scope -> Scope) ->
-  EdhTxExit ->
+  EdhTxExit EdhValue ->
   EdhTx
 callEdhMethod !this !that !mth !apk !scopeMod !exit =
   case edh'procedure'decl mth of
@@ -1394,68 +1418,78 @@ callEdhMethod' ::
   StmtSrc ->
   ArgsPack ->
   (Scope -> Scope) ->
-  EdhTxExit ->
+  EdhTxExit EdhValue ->
   EdhTx
-callEdhMethod' !gnr'caller !this !that !mth !proc'loc (StmtSrc !body'stmt _) !apk !scopeMod !exit !etsCaller =
-  recvEdhArgs
-    etsCaller
-    recvCtx
-    (edh'procedure'args $ edh'procedure'decl mth)
-    apk
-    $ \ !ed -> do
-      !esScope <- iopdFromList (odToList ed)
-      let !mthScope =
-            scopeMod
-              Scope
-                { edh'scope'entity = esScope,
-                  edh'scope'this = this,
-                  edh'scope'that = that,
-                  edh'scope'proc = mth,
-                  edh'effects'stack = []
+callEdhMethod'
+  !gnr'caller
+  !this
+  !that
+  !mth
+  !proc'loc
+  (StmtSrc !body'stmt _)
+  !apk
+  !scopeMod
+  !exit
+  !etsCaller =
+    recvEdhArgs
+      etsCaller
+      recvCtx
+      (edh'procedure'args $ edh'procedure'decl mth)
+      apk
+      $ \ !ed -> do
+        !esScope <- iopdFromList (odToList ed)
+        let !mthScope =
+              scopeMod
+                Scope
+                  { edh'scope'entity = esScope,
+                    edh'scope'this = this,
+                    edh'scope'that = that,
+                    edh'scope'proc = mth,
+                    edh'effects'stack = []
+                  }
+            !mthCtx =
+              callerCtx
+                { edh'ctx'tip =
+                    EdhCallFrame
+                      mthScope
+                      proc'loc
+                      defaultEdhExcptHndlr,
+                  edh'ctx'stack = new'stack,
+                  edh'ctx'genr'caller = gnr'caller,
+                  edh'ctx'match = true,
+                  edh'ctx'pure = False,
+                  edh'ctx'exporting = False,
+                  edh'ctx'eff'defining = False
                 }
-          !mthCtx =
-            callerCtx
-              { edh'ctx'tip =
-                  EdhCallFrame
-                    mthScope
-                    proc'loc
-                    defaultEdhExcptHndlr,
-                edh'ctx'stack = new'stack,
-                edh'ctx'genr'caller = gnr'caller,
-                edh'ctx'match = true,
-                edh'ctx'pure = False,
-                edh'ctx'exporting = False,
-                edh'ctx'eff'defining = False
-              }
-          !etsMth = etsCaller {edh'context = mthCtx}
-      runEdhTx etsMth $
-        evalStmt body'stmt $ \ !mthRtn ->
-          edhSwitchState etsCaller $
-            exitEdhTx exit $ case mthRtn of
-              -- explicit return
-              EdhReturn !rtnVal -> rtnVal
-              -- no explicit return
-              _ -> mthRtn
-  where
-    !callerCtx = edh'context etsCaller
-    !new'stack = edh'ctx'tip callerCtx : edh'ctx'stack callerCtx
-    !recvCtx =
-      callerCtx
-        { edh'ctx'tip =
-            EdhCallFrame
-              (edh'procedure'lexi mth)
-                { edh'scope'this = this,
-                  edh'scope'that = that
-                }
-              proc'loc
-              defaultEdhExcptHndlr,
-          edh'ctx'stack = new'stack,
-          edh'ctx'genr'caller = Nothing,
-          edh'ctx'match = true,
-          edh'ctx'pure = False,
-          edh'ctx'exporting = False,
-          edh'ctx'eff'defining = False
-        }
+            !etsMth = etsCaller {edh'context = mthCtx}
+        runEdhTx etsMth $
+          evalStmt body'stmt $ \ !mthRtn ->
+            edhSwitchState etsCaller $
+              exitEdhTx exit $ case mthRtn of
+                -- explicit return
+                EdhReturn !rtnVal -> rtnVal
+                -- no explicit return
+                _ -> mthRtn
+    where
+      !callerCtx = edh'context etsCaller
+      !new'stack = edh'ctx'tip callerCtx : edh'ctx'stack callerCtx
+      !recvCtx =
+        callerCtx
+          { edh'ctx'tip =
+              EdhCallFrame
+                (edh'procedure'lexi mth)
+                  { edh'scope'this = this,
+                    edh'scope'that = that
+                  }
+                proc'loc
+                defaultEdhExcptHndlr,
+            edh'ctx'stack = new'stack,
+            edh'ctx'genr'caller = Nothing,
+            edh'ctx'match = true,
+            edh'ctx'pure = False,
+            edh'ctx'exporting = False,
+            edh'ctx'eff'defining = False
+          }
 
 edhPrepareForLoop ::
   EdhThreadState -> -- ets to prepare the looping
@@ -1463,307 +1497,313 @@ edhPrepareForLoop ::
   ExprSrc ->
   StmtSrc ->
   (EdhValue -> STM ()) ->
-  ((EdhTxExit -> EdhTx) -> STM ()) ->
+  ((EdhTxExit EdhValue -> EdhTx) -> STM ()) ->
   STM ()
-edhPrepareForLoop !etsLoopPrep !argsRcvr !iterExpr !doStmt !iterCollector !forLooper =
-  case deParen1 iterExpr of -- a complex expression is better quoted within
-  -- a pair of parenthesis; and we strip off only 1 layer of parenthesis
-  -- here, so in case a pure context intended, double-parenthesis quoting
-  -- will work e.g. an adhoc procedure defined then called, but that
-  -- procedure would better not get defined into the enclosing scope, and it
-  -- is preferably be named instead of being anonymous (with a single
-  -- underscore in place of the procedure name in the definition).
-    ExprSrc (CallExpr !calleeExpr !argsSndr) !iter'span ->
-      -- loop over a procedure call
-      runEdhTx etsLoopPrep $
-        evalExprSrc calleeExpr $ \ !calleeVal _ets ->
-          case calleeVal of
-            EdhBoundProc callee@EdhGnrtor {} !this !that !effOuter ->
-              loopCallGenr iter'span argsSndr callee this that $
-                flip (maybe id) effOuter $
-                  \ !outerStack !s -> s {edh'effects'stack = outerStack}
-            EdhProcedure callee@EdhGnrtor {} !effOuter ->
-              loopCallGenr
-                iter'span
-                argsSndr
-                callee
-                (edh'scope'this scopeLooper)
-                (edh'scope'that scopeLooper)
-                $ flip (maybe id) effOuter $
-                  \ !outerStack !s -> s {edh'effects'stack = outerStack}
-            (EdhObject !obj) ->
-              -- calling an object
-              lookupEdhObjAttr obj (AttrByName "__call__") >>= \(!this', !mth) ->
-                case mth of
-                  EdhBoundProc callee@EdhGnrtor {} !this !that !effOuter ->
-                    loopCallGenr iter'span argsSndr callee this that $
-                      flip (maybe id) effOuter $
-                        \ !outerStack !s -> s {edh'effects'stack = outerStack}
-                  EdhProcedure callee@EdhGnrtor {} !effOuter ->
-                    loopCallGenr iter'span argsSndr callee this' obj $
-                      flip (maybe id) effOuter $
-                        \ !outerStack !s -> s {edh'effects'stack = outerStack}
-                  -- not a callable generator object, assume to loop over
-                  -- its return value
-                  _ ->
-                    edhPrepareCall etsLoopPrep calleeVal argsSndr $ \ !mkCall ->
-                      runEdhTx etsLoopPrep $
-                        mkCall $ \ !iterVal _ets ->
-                          loopOverValue iterVal
-            -- calling other procedures, assume to loop over its return value
-            _ ->
-              runEdhTx etsLoopPrep $
-                evalExprSrc iterExpr $ \ !iterVal _ets ->
-                  loopOverValue $ edhDeCaseWrap iterVal
-    _ ->
-      -- loop over an iterable value
-      runEdhTx etsLoopPrep $
-        evalExprSrc iterExpr $ \ !iterVal _ets ->
-          loopOverValue $ edhDeCaseWrap iterVal
-  where
-    scopeLooper = contextScope $ edh'context etsLoopPrep
-
-    loopCallGenr ::
-      SrcRange ->
-      ArgsPacker ->
-      EdhProc ->
-      Object ->
-      Object ->
-      (Scope -> Scope) ->
-      STM ()
-    loopCallGenr !caller'span !argsSndr (EdhGnrtor !gnr'proc) !this !that !scopeMod =
-      packEdhArgs etsLoopPrep argsSndr $ \ !apk ->
-        case edh'procedure'decl gnr'proc of
-          -- calling a host generator
-          HostDecl !hp -> forLooper $ \ !exit !ets -> do
-            -- a host procedure views the same scope entity as of the caller's
-            -- call frame
-            let !looperCtx = edh'context ets
-                !looperFrame = edh'ctx'tip looperCtx
-                !callerFrame = frameMovePC looperFrame caller'span
-                !calleeScope =
-                  Scope
-                    { edh'scope'entity =
-                        edh'scope'entity $
-                          edh'frame'scope looperFrame,
-                      edh'scope'this = this,
-                      edh'scope'that = that,
-                      edh'scope'proc = gnr'proc,
-                      edh'effects'stack = []
-                    }
-                !calleeCtx =
-                  looperCtx
-                    { edh'ctx'tip =
-                        EdhCallFrame
-                          calleeScope
-                          (SrcLoc (SrcDoc "<host-code>") noSrcRange)
-                          defaultEdhExcptHndlr,
-                      edh'ctx'stack = callerFrame : edh'ctx'stack looperCtx,
-                      edh'ctx'genr'caller = Just $ recvYield ets exit,
-                      edh'ctx'match = true,
-                      edh'ctx'pure = False,
-                      edh'ctx'exporting = False,
-                      edh'ctx'eff'defining = False
-                    }
-                !etsCallee = ets {edh'context = calleeCtx}
-            runEdhTx etsCallee $
-              hp apk $ \ !val ->
-                -- a host generator is responsible to return a sense-making result
-                -- anyway
-                edhSwitchState ets $ exitEdhTx exit val
-
-          -- calling an Edh generator
-          ProcDecl _ _ !pb !pl -> forLooper $ \ !exit !ets -> do
-            let !looperCtx = edh'context ets
-                !looperFrame = edh'ctx'tip looperCtx
-                !callerFrame = frameMovePC looperFrame caller'span
-                !etsCaller =
-                  ets {edh'context = looperCtx {edh'ctx'tip = callerFrame}}
-            runEdhTx etsCaller $
-              callEdhMethod'
-                (Just $ recvYield ets exit)
-                this
-                that
-                gnr'proc
-                pl
-                pb
-                apk
-                scopeMod
-                $ \ !gnrRtn -> case gnrRtn of
-                  -- todo what's the case a generator would return a continue?
-                  EdhContinue -> exitEdhTx exit nil
-                  -- todo what's the case a generator would return a break?
-                  EdhBreak -> exitEdhTx exit nil
-                  -- it'll be double return, in case do block issued return and
-                  -- propagated here or the generator can make it that way, which
-                  -- is black magic
-
-                  -- unwrap the return, as result of this for-loop
-                  EdhReturn !rtnVal -> exitEdhTx exit rtnVal
-                  -- otherwise passthrough
-                  _ -> exitEdhTx exit gnrRtn
-    loopCallGenr _ _ !callee _ _ _ =
-      throwEdh etsLoopPrep EvalError $
-        "bug: unexpected generator: "
-          <> T.pack
-            (show callee)
-
-    -- receive one yielded value from the generator, the 'genrCont' here is
-    -- to continue the generator execution, result passed to the 'genrCont'
-    -- here is to be the eval'ed value of the `yield` expression from the
-    -- generator's perspective, or exception to be thrown from there
-    recvYield ::
-      EdhThreadState ->
-      EdhTxExit ->
-      EdhValue ->
-      (Either (EdhThreadState, EdhValue) EdhValue -> STM ()) ->
-      STM ()
-    recvYield !ets !exit !yielded'val !genrCont = do
-      let doOne !exitOne !etsTry =
-            recvEdhArgs
-              etsTry
-              (edh'context etsTry)
-              argsRcvr
-              ( case yielded'val of
-                  EdhArgsPack apk -> apk
-                  _ -> ArgsPack [yielded'val] odEmpty
-              )
-              $ \ !em -> do
-                iopdUpdate (odToList em) (edh'scope'entity scopeLooper)
-                runEdhTx etsTry $ evalStmtSrc doStmt exitOne
-          doneOne !doResult = case edhDeCaseClose doResult of
-            EdhContinue ->
-              -- send nil to generator on continue
-              genrCont $ Right nil
-            EdhBreak ->
-              -- break out of the for-from-do loop,
-              -- the generator on <break> yielded will return
-              -- nil, effectively have the for loop eval to nil
-              genrCont $ Right EdhBreak
-            EdhCaseOther ->
-              -- send nil to generator on no-match of a branch
-              genrCont $ Right nil
-            EdhFallthrough ->
-              -- send nil to generator on fallthrough
-              genrCont $ Right nil
-            EdhReturn EdhReturn {} ->
-              -- this has special meaning
-              -- Edh code should not use this pattern
-              throwEdh ets UsageError "double return from do-of-for?"
-            EdhReturn !rtnVal ->
-              -- early return from for-from-do, the geneerator on
-              -- double wrapped return yielded, will unwrap one
-              -- level and return the result, effectively have the
-              -- for loop eval to return that
-              genrCont $ Right $ EdhReturn $ EdhReturn rtnVal
-            !val -> do
-              -- vanilla val from do, send to generator
-              iterCollector val
-              genrCont $ Right val
-      case yielded'val of
-        EdhNil ->
-          -- nil yielded from a generator effectively early stops
-          exitEdh ets exit nil
-        EdhContinue -> throwEdh ets EvalError "generator yielded continue"
-        EdhBreak -> throwEdh ets EvalError "generator yielded break"
-        EdhReturn {} -> throwEdh ets EvalError "generator yielded return"
-        _ ->
-          edhCatch ets doOne doneOne $ \ !etsThrower !exv _recover rethrow ->
-            case exv of
-              EdhNil -> rethrow nil -- no exception occurred in do block
+edhPrepareForLoop
+  !etsLoopPrep
+  !argsRcvr
+  !iterExpr
+  !doStmt
+  !iterCollector
+  !forLooper =
+    case deParen1 iterExpr of -- a complex expression is better quoted within
+    -- a pair of parenthesis; and we strip off only 1 layer of parenthesis
+    -- here, so in case a pure context intended, double-parenthesis quoting
+    -- will work e.g. an adhoc procedure defined then called, but that
+    -- procedure would better not get defined into the enclosing scope, and it
+    -- is preferably be named instead of being anonymous (with a single
+    -- underscore in place of the procedure name in the definition).
+      ExprSrc (CallExpr !calleeExpr !argsSndr) !iter'span ->
+        -- loop over a procedure call
+        runEdhTx etsLoopPrep $
+          evalExprSrc calleeExpr $ \ !calleeVal _ets ->
+            case calleeVal of
+              EdhBoundProc callee@EdhGnrtor {} !this !that !effOuter ->
+                loopCallGenr iter'span argsSndr callee this that $
+                  flip (maybe id) effOuter $
+                    \ !outerStack !s -> s {edh'effects'stack = outerStack}
+              EdhProcedure callee@EdhGnrtor {} !effOuter ->
+                loopCallGenr
+                  iter'span
+                  argsSndr
+                  callee
+                  (edh'scope'this scopeLooper)
+                  (edh'scope'that scopeLooper)
+                  $ flip (maybe id) effOuter $
+                    \ !outerStack !s -> s {edh'effects'stack = outerStack}
+              (EdhObject !obj) ->
+                -- calling an object
+                lookupEdhObjAttr obj (AttrByName "__call__") >>= \(!this', !mth) ->
+                  case mth of
+                    EdhBoundProc callee@EdhGnrtor {} !this !that !effOuter ->
+                      loopCallGenr iter'span argsSndr callee this that $
+                        flip (maybe id) effOuter $
+                          \ !outerStack !s -> s {edh'effects'stack = outerStack}
+                    EdhProcedure callee@EdhGnrtor {} !effOuter ->
+                      loopCallGenr iter'span argsSndr callee this' obj $
+                        flip (maybe id) effOuter $
+                          \ !outerStack !s -> s {edh'effects'stack = outerStack}
+                    -- not a callable generator object, assume to loop over
+                    -- its return value
+                    _ ->
+                      edhPrepareCall etsLoopPrep calleeVal argsSndr $ \ !mkCall ->
+                        runEdhTx etsLoopPrep $
+                          mkCall $ \ !iterVal _ets ->
+                            loopOverValue iterVal
+              -- calling other procedures, assume to loop over its return value
               _ ->
-                -- exception uncaught in do block
-                -- propagate to the generator, the genr may catch it or
-                -- the exception will propagate to outer of for-from-do
-                genrCont $ Left (etsThrower, exv)
+                runEdhTx etsLoopPrep $
+                  evalExprSrc iterExpr $ \ !iterVal _ets ->
+                    loopOverValue $ edhDeCaseWrap iterVal
+      _ ->
+        -- loop over an iterable value
+        runEdhTx etsLoopPrep $
+          evalExprSrc iterExpr $ \ !iterVal _ets ->
+            loopOverValue $ edhDeCaseWrap iterVal
+    where
+      scopeLooper = contextScope $ edh'context etsLoopPrep
 
-    loopOverValue :: EdhValue -> STM ()
-    loopOverValue !iterVal = forLooper $ \ !exit !ets -> do
-      let !ctx = edh'context ets
-          !scope = contextScope ctx
-          -- do one iteration
-          do1 :: ArgsPack -> STM () -> STM ()
-          do1 !apk !next = recvEdhArgs ets ctx argsRcvr apk $ \ !em -> do
-            iopdUpdate (odToList em) (edh'scope'entity scope)
-            runEdhTx ets $
-              evalStmtSrc doStmt $ \ !doResult -> case doResult of
-                EdhBreak ->
-                  -- break for loop
-                  exitEdhTx exit nil
-                rtn@EdhReturn {} ->
-                  -- early return during for loop
-                  exitEdhTx exit rtn
-                _ -> \_ets -> do
-                  -- continue for loop
-                  iterCollector doResult
-                  next
+      loopCallGenr ::
+        SrcRange ->
+        ArgsPacker ->
+        EdhProc ->
+        Object ->
+        Object ->
+        (Scope -> Scope) ->
+        STM ()
+      loopCallGenr !caller'span !argsSndr (EdhGnrtor !gnr'proc) !this !that !scopeMod =
+        packEdhArgs etsLoopPrep argsSndr $ \ !apk ->
+          case edh'procedure'decl gnr'proc of
+            -- calling a host generator
+            HostDecl !hp -> forLooper $ \ !exit !ets -> do
+              -- a host procedure views the same scope entity as of the caller's
+              -- call frame
+              let !looperCtx = edh'context ets
+                  !looperFrame = edh'ctx'tip looperCtx
+                  !callerFrame = frameMovePC looperFrame caller'span
+                  !calleeScope =
+                    Scope
+                      { edh'scope'entity =
+                          edh'scope'entity $
+                            edh'frame'scope looperFrame,
+                        edh'scope'this = this,
+                        edh'scope'that = that,
+                        edh'scope'proc = gnr'proc,
+                        edh'effects'stack = []
+                      }
+                  !calleeCtx =
+                    looperCtx
+                      { edh'ctx'tip =
+                          EdhCallFrame
+                            calleeScope
+                            (SrcLoc (SrcDoc "<host-code>") noSrcRange)
+                            defaultEdhExcptHndlr,
+                        edh'ctx'stack = callerFrame : edh'ctx'stack looperCtx,
+                        edh'ctx'genr'caller = Just $ recvYield ets exit,
+                        edh'ctx'match = true,
+                        edh'ctx'pure = False,
+                        edh'ctx'exporting = False,
+                        edh'ctx'eff'defining = False
+                      }
+                  !etsCallee = ets {edh'context = calleeCtx}
+              runEdhTx etsCallee $
+                hp apk $ \ !val ->
+                  -- a host generator is responsible to return a sense-making result
+                  -- anyway
+                  edhSwitchState ets $ exitEdhTx exit val
 
-          -- loop over a series of args packs
-          iterThem :: [ArgsPack] -> STM ()
-          iterThem [] = exitEdh ets exit nil
-          iterThem (apk : apks) = do1 apk $ iterThem apks
+            -- calling an Edh generator
+            ProcDecl _ _ !pb !pl -> forLooper $ \ !exit !ets -> do
+              let !looperCtx = edh'context ets
+                  !looperFrame = edh'ctx'tip looperCtx
+                  !callerFrame = frameMovePC looperFrame caller'span
+                  !etsCaller =
+                    ets {edh'context = looperCtx {edh'ctx'tip = callerFrame}}
+              runEdhTx etsCaller $
+                callEdhMethod'
+                  (Just $ recvYield ets exit)
+                  this
+                  that
+                  gnr'proc
+                  pl
+                  pb
+                  apk
+                  scopeMod
+                  $ \ !gnrRtn -> case gnrRtn of
+                    -- todo what's the case a generator would return a continue?
+                    EdhContinue -> exitEdhTx exit nil
+                    -- todo what's the case a generator would return a break?
+                    EdhBreak -> exitEdhTx exit nil
+                    -- it'll be double return, in case do block issued return and
+                    -- propagated here or the generator can make it that way, which
+                    -- is black magic
 
-          -- loop over a subscriber's channel of an event sink
-          iterEvt :: TChan EdhValue -> STM ()
-          iterEvt !subChan =
-            edhDoSTM ets $
-              readTChan subChan >>= \case
-                EdhNil ->
-                  -- nil marks end-of-stream from an event sink
-                  exitEdh ets exit nil -- stop the for-from-do loop
-                EdhArgsPack !apk -> do1 apk $ iterEvt subChan
-                !v -> do1 (ArgsPack [v] odEmpty) $ iterEvt subChan
+                    -- unwrap the return, as result of this for-loop
+                    EdhReturn !rtnVal -> exitEdhTx exit rtnVal
+                    -- otherwise passthrough
+                    _ -> exitEdhTx exit gnrRtn
+      loopCallGenr _ _ !callee _ _ _ =
+        throwEdh etsLoopPrep EvalError $
+          "bug: unexpected generator: "
+            <> T.pack
+              (show callee)
 
-      case edhUltimate iterVal of
-        -- loop from an event sink
-        (EdhSink !sink) ->
-          subscribeEvents sink >>= \case
-            Nothing -> exitEdh ets exit nil -- already at eos
-            Just (!subChan, !mrv) -> case mrv of
-              Nothing -> iterEvt subChan
-              Just !ev -> case ev of
-                EdhArgsPack !apk -> do1 apk $ iterEvt subChan
-                !v -> do1 (ArgsPack [v] odEmpty) $ iterEvt subChan
-        -- loop from a positonal-only args pack
-        (EdhArgsPack (ArgsPack !args !kwargs))
-          | odNull kwargs ->
+      -- receive one yielded value from the generator, the 'genrCont' here is
+      -- to continue the generator execution, result passed to the 'genrCont'
+      -- here is to be the eval'ed value of the `yield` expression from the
+      -- generator's perspective, or exception to be thrown from there
+      recvYield ::
+        EdhThreadState ->
+        EdhTxExit EdhValue ->
+        EdhValue ->
+        (Either (EdhThreadState, EdhValue) EdhValue -> STM ()) ->
+        STM ()
+      recvYield !ets !exit !yielded'val !genrCont = do
+        let doOne !exitOne !etsTry =
+              recvEdhArgs
+                etsTry
+                (edh'context etsTry)
+                argsRcvr
+                ( case yielded'val of
+                    EdhArgsPack apk -> apk
+                    _ -> ArgsPack [yielded'val] odEmpty
+                )
+                $ \ !em -> do
+                  iopdUpdate (odToList em) (edh'scope'entity scopeLooper)
+                  runEdhTx etsTry $ evalStmtSrc doStmt exitOne
+            doneOne !doResult = case edhDeCaseClose doResult of
+              EdhContinue ->
+                -- send nil to generator on continue
+                genrCont $ Right nil
+              EdhBreak ->
+                -- break out of the for-from-do loop,
+                -- the generator on <break> yielded will return
+                -- nil, effectively have the for loop eval to nil
+                genrCont $ Right EdhBreak
+              EdhCaseOther ->
+                -- send nil to generator on no-match of a branch
+                genrCont $ Right nil
+              EdhFallthrough ->
+                -- send nil to generator on fallthrough
+                genrCont $ Right nil
+              EdhReturn EdhReturn {} ->
+                -- this has special meaning
+                -- Edh code should not use this pattern
+                throwEdh ets UsageError "double return from do-of-for?"
+              EdhReturn !rtnVal ->
+                -- early return from for-from-do, the geneerator on
+                -- double wrapped return yielded, will unwrap one
+                -- level and return the result, effectively have the
+                -- for loop eval to return that
+                genrCont $ Right $ EdhReturn $ EdhReturn rtnVal
+              !val -> do
+                -- vanilla val from do, send to generator
+                iterCollector val
+                genrCont $ Right val
+        case yielded'val of
+          EdhNil ->
+            -- nil yielded from a generator effectively early stops
+            exitEdh ets exit nil
+          EdhContinue -> throwEdh ets EvalError "generator yielded continue"
+          EdhBreak -> throwEdh ets EvalError "generator yielded break"
+          EdhReturn {} -> throwEdh ets EvalError "generator yielded return"
+          _ ->
+            edhCatch ets doOne doneOne $ \ !etsThrower !exv _recover rethrow ->
+              case exv of
+                EdhNil -> rethrow nil -- no exception occurred in do block
+                _ ->
+                  -- exception uncaught in do block
+                  -- propagate to the generator, the genr may catch it or
+                  -- the exception will propagate to outer of for-from-do
+                  genrCont $ Left (etsThrower, exv)
+
+      loopOverValue :: EdhValue -> STM ()
+      loopOverValue !iterVal = forLooper $ \ !exit !ets -> do
+        let !ctx = edh'context ets
+            !scope = contextScope ctx
+            -- do one iteration
+            do1 :: ArgsPack -> STM () -> STM ()
+            do1 !apk !next = recvEdhArgs ets ctx argsRcvr apk $ \ !em -> do
+              iopdUpdate (odToList em) (edh'scope'entity scope)
+              runEdhTx ets $
+                evalStmtSrc doStmt $ \ !doResult -> case doResult of
+                  EdhBreak ->
+                    -- break for loop
+                    exitEdhTx exit nil
+                  rtn@EdhReturn {} ->
+                    -- early return during for loop
+                    exitEdhTx exit rtn
+                  _ -> \_ets -> do
+                    -- continue for loop
+                    iterCollector doResult
+                    next
+
+            -- loop over a series of args packs
+            iterThem :: [ArgsPack] -> STM ()
+            iterThem [] = exitEdh ets exit nil
+            iterThem (apk : apks) = do1 apk $ iterThem apks
+
+            -- loop over a subscriber's channel of an event sink
+            iterEvt :: TChan EdhValue -> STM ()
+            iterEvt !subChan =
+              edhDoSTM ets $
+                readTChan subChan >>= \case
+                  EdhNil ->
+                    -- nil marks end-of-stream from an event sink
+                    exitEdh ets exit nil -- stop the for-from-do loop
+                  EdhArgsPack !apk -> do1 apk $ iterEvt subChan
+                  !v -> do1 (ArgsPack [v] odEmpty) $ iterEvt subChan
+
+        case edhUltimate iterVal of
+          -- loop from an event sink
+          (EdhSink !sink) ->
+            subscribeEvents sink >>= \case
+              Nothing -> exitEdh ets exit nil -- already at eos
+              Just (!subChan, !mrv) -> case mrv of
+                Nothing -> iterEvt subChan
+                Just !ev -> case ev of
+                  EdhArgsPack !apk -> do1 apk $ iterEvt subChan
+                  !v -> do1 (ArgsPack [v] odEmpty) $ iterEvt subChan
+          -- loop from a positonal-only args pack
+          (EdhArgsPack (ArgsPack !args !kwargs))
+            | odNull kwargs ->
+              iterThem
+                [ case val of
+                    EdhArgsPack !apk' -> apk'
+                    _ -> ArgsPack [val] odEmpty
+                  | val <- args
+                ]
+          -- loop from a keyword-only args pack
+          (EdhArgsPack (ArgsPack !args !kwargs))
+            | null args ->
+              iterThem
+                [ArgsPack [attrKeyValue k, v] odEmpty | (k, v) <- odToList kwargs]
+          -- loop from a list
+          (EdhList (List _ !l)) -> do
+            !ll <- readTVar l
             iterThem
               [ case val of
                   EdhArgsPack !apk' -> apk'
                   _ -> ArgsPack [val] odEmpty
-                | val <- args
+                | val <- ll
               ]
-        -- loop from a keyword-only args pack
-        (EdhArgsPack (ArgsPack !args !kwargs))
-          | null args ->
-            iterThem
-              [ArgsPack [attrKeyValue k, v] odEmpty | (k, v) <- odToList kwargs]
-        -- loop from a list
-        (EdhList (List _ !l)) -> do
-          !ll <- readTVar l
-          iterThem
-            [ case val of
-                EdhArgsPack !apk' -> apk'
-                _ -> ArgsPack [val] odEmpty
-              | val <- ll
-            ]
 
-        -- loop from a dict
-        (EdhDict (Dict _ !d)) -> do
-          !del <- iopdToList d
-          -- don't be tempted to yield pairs from a dict here,
-          -- it'll be messy if some entry values are themselves pairs
-          iterThem [ArgsPack [k, v] odEmpty | (k, v) <- del]
+          -- loop from a dict
+          (EdhDict (Dict _ !d)) -> do
+            !del <- iopdToList d
+            -- don't be tempted to yield pairs from a dict here,
+            -- it'll be messy if some entry values are themselves pairs
+            iterThem [ArgsPack [k, v] odEmpty | (k, v) <- del]
 
-        -- TODO define the magic method for an object to be able to respond
-        --      to for-from-do looping
+          -- TODO define the magic method for an object to be able to respond
+          --      to for-from-do looping
 
-        _ ->
-          throwEdh ets EvalError $
-            "can not do a for loop from "
-              <> T.pack (edhTypeNameOf iterVal)
-              <> ": "
-              <> T.pack (show iterVal)
+          _ ->
+            throwEdh ets EvalError $
+              "can not do a for loop from "
+                <> T.pack (edhTypeNameOf iterVal)
+                <> ": "
+                <> T.pack (show iterVal)
 
 -- todo this should really be in `CoreLang.hs`, but there has no access to
 --      'throwEdh' without cyclic imports, maybe some day we shall try
@@ -1877,10 +1917,10 @@ edhErrorUncaught !ets !exv = case exv of
 
 -- | Try an Edh action, pass its result to the @passOn@ via `edh'ctx'match`
 edhCatchTx ::
-  (EdhTxExit -> EdhTx) -> -- tryAct
-  EdhTxExit -> -- normal/recovered exit
-  ( EdhTxExit -> -- recover exit
-    EdhTxExit -> -- rethrow exit
+  (EdhTxExit EdhValue -> EdhTx) -> -- tryAct
+  EdhTxExit EdhValue -> -- normal/recovered exit
+  ( EdhTxExit EdhValue -> -- recover exit
+    EdhTxExit EdhValue -> -- rethrow exit
     EdhTx
   ) -> -- edh'ctx'match of this Edh tx being the thrown value or nil
   EdhTx
@@ -1896,7 +1936,7 @@ edhCatchTx !tryAct !exit !passOn !etsOuter =
 -- | Try an Edh action, pass its result to the @passOn@
 edhCatch ::
   EdhThreadState ->
-  (EdhTxExit -> EdhTx) -> -- tryAct
+  (EdhTxExit EdhValue -> EdhTx) -> -- tryAct
   (EdhValue -> STM ()) -> -- normal/recovered exit
   ( EdhThreadState -> -- thread state of the thrower
     EdhValue -> -- thrown value or nil
@@ -2007,10 +2047,10 @@ parseEdh' !world !srcName !lineNo !srcCode = do
   where
     !wops = edh'world'operators world
 
-evalEdh :: Text -> Text -> EdhTxExit -> EdhTx
+evalEdh :: Text -> Text -> EdhTxExit EdhValue -> EdhTx
 evalEdh !srcName = evalEdh' srcName 1
 
-evalEdh' :: Text -> Int -> Text -> EdhTxExit -> EdhTx
+evalEdh' :: Text -> Int -> Text -> EdhTxExit EdhValue -> EdhTx
 evalEdh' !srcName !lineNo !srcCode !exit !ets =
   parseEdh' world srcName lineNo srcCode >>= \case
     Left !err -> do
@@ -2154,7 +2194,7 @@ deApk1 :: ArgsPack -> ArgsPack
 deApk1 (ArgsPack [EdhArgsPack !apk] !kwargs) | odNull kwargs = apk
 deApk1 x = x
 
-evalStmtSrc :: StmtSrc -> EdhTxExit -> EdhTx
+evalStmtSrc :: StmtSrc -> EdhTxExit EdhValue -> EdhTx
 evalStmtSrc (StmtSrc !stmt !ss) !exit !ets =
   runEdhTx ets {edh'context = ctx {edh'ctx'tip = frameMovePC tip ss}} $
     evalStmt stmt $
@@ -2163,7 +2203,7 @@ evalStmtSrc (StmtSrc !stmt !ss) !exit !ets =
     !ctx = edh'context ets
     !tip = edh'ctx'tip ctx
 
-evalCaseBranches :: ExprSrc -> EdhTxExit -> EdhTx
+evalCaseBranches :: ExprSrc -> EdhTxExit EdhValue -> EdhTx
 evalCaseBranches expr@(ExprSrc !x !src'span) !exit = case x of
   -- case-of with a block is normal
   BlockExpr !stmts ->
@@ -2189,7 +2229,7 @@ evalCaseBranches expr@(ExprSrc !x !src'span) !exit = case x of
     -- other vanilla result, propagate as is
     _ -> exitEdhTx exit val
 
-evalScopedBlock :: [StmtSrc] -> EdhTxExit -> EdhTx
+evalScopedBlock :: [StmtSrc] -> EdhTxExit EdhValue -> EdhTx
 evalScopedBlock !stmts !exit !ets = do
   !esBlock <- iopdEmpty
   !spid <- unsafeIOToSTM newUnique
@@ -2217,7 +2257,7 @@ evalScopedBlock !stmts !exit !ets = do
 
 -- note a branch match should not escape out of a block, so adjacent blocks
 -- always execute sequentially
-evalBlock :: [StmtSrc] -> EdhTxExit -> EdhTx
+evalBlock :: [StmtSrc] -> EdhTxExit EdhValue -> EdhTx
 evalBlock [] !exit = exitEdhTx exit nil
 evalBlock [!ss] !exit = evalStmtSrc ss $ \ !val -> case val of
   -- last branch did match
@@ -2252,7 +2292,7 @@ evalBlock (ss : rest) !exit = evalStmtSrc ss $ \ !val -> case val of
   _ -> evalBlock rest exit
 
 -- | a left-to-right expr list eval'er, returning a tuple
-evalExprs :: [ExprSrc] -> EdhTxExit -> EdhTx
+evalExprs :: [ExprSrc] -> EdhTxExit EdhValue -> EdhTx
 -- here 'EdhArgsPack' is used as an intermediate container,
 -- no apk intended to be returned anyway
 evalExprs [] !exit = exitEdhTx exit (EdhArgsPack $ ArgsPack [] odEmpty)
@@ -2262,7 +2302,7 @@ evalExprs (x : xs) !exit = evalExprSrc x $ \ !val -> evalExprs xs $ \ !tv ->
       exitEdhTx exit (EdhArgsPack $ ArgsPack (edhDeCaseWrap val : l) odEmpty)
     _ -> error "bug"
 
-evalStmt :: Stmt -> EdhTxExit -> EdhTx
+evalStmt :: Stmt -> EdhTxExit EdhValue -> EdhTx
 evalStmt !stmt !exit = case stmt of
   ExprStmt !expr !docCmt ->
     evalExpr' expr docCmt $ \ !result -> exitEdhTx exit result
@@ -2329,18 +2369,18 @@ evalStmt !stmt !exit = case stmt of
                   }
             )
             (evalCaseBranches branchesExpr endOfEdh)
-            exit
+            (\() -> exitEdhTx exit nil)
     (CallExpr !calleeExpr !argsSndr) ->
       evalExprSrc calleeExpr $ \ !calleeVal !etsForker ->
         edhPrepareCall etsForker calleeVal argsSndr $ \ !mkCall ->
           runEdhTx (etsMovePC etsForker src'span) $
-            forkEdh id (mkCall endOfEdh) exit
+            forkEdh id (mkCall endOfEdh) (\() -> exitEdhTx exit nil)
     (ForExpr !argsRcvr !iterExpr !doStmt) -> \ !etsForker ->
       edhPrepareForLoop etsForker argsRcvr iterExpr doStmt (const $ return ()) $
         \ !runLoop ->
           runEdhTx (etsMovePC etsForker src'span) $
-            forkEdh id (runLoop endOfEdh) exit
-    _ -> forkEdh id (evalExprSrc expr endOfEdh) exit
+            forkEdh id (runLoop endOfEdh) (\() -> exitEdhTx exit nil)
+    _ -> forkEdh id (evalExprSrc expr endOfEdh) (\() -> exitEdhTx exit nil)
   DeferStmt (ExprSrc !expr !src'span) -> do
     let schedDefered ::
           EdhThreadState ->
@@ -2474,7 +2514,7 @@ importInto ::
   EntityStore ->
   ArgsReceiver ->
   ExprSrc ->
-  EdhTxExit ->
+  EdhTxExit EdhValue ->
   EdhTx
 importInto !fsChk !tgtEnt !argsRcvr srcExpr@(ExprSrc x _) !exit = case x of
   LitExpr (StringLiteral !importSpec) ->
@@ -2498,7 +2538,12 @@ importInto !fsChk !tgtEnt !argsRcvr srcExpr@(ExprSrc x _) !exit = case x of
           <> ": "
           <> T.pack (show srcVal)
 
-importFromApk :: EntityStore -> ArgsReceiver -> ArgsPack -> EdhTxExit -> EdhTx
+importFromApk ::
+  EntityStore ->
+  ArgsReceiver ->
+  ArgsPack ->
+  EdhTxExit EdhValue ->
+  EdhTx
 importFromApk !tgtEnt !argsRcvr !fromApk !exit !ets =
   recvEdhArgs ets ctx argsRcvr fromApk $ \ !em -> do
     if not (edh'ctx'eff'defining ctx)
@@ -2519,7 +2564,12 @@ importFromApk !tgtEnt !argsRcvr !fromApk !exit !ets =
   where
     !ctx = edh'context ets
 
-importFromObject :: EntityStore -> ArgsReceiver -> Object -> EdhTxExit -> EdhTx
+importFromObject ::
+  EntityStore ->
+  ArgsReceiver ->
+  Object ->
+  EdhTxExit EdhValue ->
+  EdhTx
 importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
   iopdEmpty >>= \ !arts -> do
     !supers <- readTVar $ edh'obj'supers fromObj
@@ -2596,12 +2646,17 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
 -- | Import some Edh module
 --
 -- Note the returned module object may still be under going initialization run
-importEdhModule :: Text -> EdhTxExit -> EdhTx
+importEdhModule :: Text -> EdhTxExit EdhValue -> EdhTx
 importEdhModule !importSpec !exit =
   importEdhModule'' importSpec (\_ !loadExit -> loadExit) exit
 
 -- | Import some Edh module into specified entity
-importEdhModule' :: EntityStore -> ArgsReceiver -> Text -> EdhTxExit -> EdhTx
+importEdhModule' ::
+  EntityStore ->
+  ArgsReceiver ->
+  Text ->
+  EdhTxExit EdhValue ->
+  EdhTx
 importEdhModule' !tgtEnt !argsRcvr !importSpec !exit !ets =
   runEdhTx ets $
     importEdhModule''
@@ -2618,7 +2673,11 @@ importEdhModule' !tgtEnt !argsRcvr !importSpec !exit !ets =
 --
 -- Note the returned module object may still be under going initialization run,
 -- and the load action may be performed either synchronously or asynchronously
-importEdhModule'' :: Text -> (Object -> STM () -> STM ()) -> EdhTxExit -> EdhTx
+importEdhModule'' ::
+  Text ->
+  (Object -> STM () -> STM ()) ->
+  EdhTxExit EdhValue ->
+  EdhTx
 importEdhModule'' !importSpec !loadAct !impExit !etsImp =
   if edh'in'tx etsImp
     then
@@ -2639,7 +2698,7 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
         modifyTVar' postQueue ((\ !modu -> loadAct modu $ pure ()) :)
         exitEdh etsImp impExit $ EdhObject $ edh'scope'this loadScope
   where
-    runModuleSource :: Scope -> FilePath -> EdhTxExit -> EdhTx
+    runModuleSource :: Scope -> FilePath -> EdhTxExit EdhValue -> EdhTx
     runModuleSource !scopeLoad !moduFile !exit !ets =
       unsafeIOToSTM (streamDecodeUtf8With lenientDecode <$> B.readFile moduFile)
         >>= \case
@@ -2932,7 +2991,7 @@ evalLiteral = \case
   SinkCtor -> EdhSink <$> newEventSink
   ValueLiteral !v -> return v
 
-evalAttrRef :: AttrRef -> EdhTxExit -> EdhTx
+evalAttrRef :: AttrRef -> EdhTxExit EdhValue -> EdhTx
 evalAttrRef !addr !exit !ets = case addr of
   ThisRef -> exitEdh ets exit (EdhObject $ edh'scope'this scope)
   ThatRef -> exitEdh ets exit (EdhObject $ edh'scope'that scope)
@@ -2961,7 +3020,7 @@ evalAttrRef !addr !exit !ets = case addr of
     !scope = contextScope ctx
 
 evalDictLit ::
-  [(DictKeyExpr, ExprSrc)] -> [(EdhValue, EdhValue)] -> EdhTxExit -> EdhTx
+  [(DictKeyExpr, ExprSrc)] -> [(EdhValue, EdhValue)] -> EdhTxExit EdhValue -> EdhTx
 evalDictLit [] !dsl !exit !ets = do
   !u <- unsafeIOToSTM newUnique
   -- entry order in DictExpr is reversed as from source, we reversed it again
@@ -3152,9 +3211,9 @@ edhValueRepr !ets !val !exitRepr = case val of
         edhValueRepr ets v $ \ !vRepr ->
           reprDictCSR ((kRepr, vrDecor vRepr) : entries) rest exit'
 
-edhValueReprTx :: EdhValue -> EdhTxExit -> EdhTx
+edhValueReprTx :: EdhValue -> EdhTxExit Text -> EdhTx
 edhValueReprTx !val !exit !ets =
-  edhValueRepr ets val $ \ !repr -> exitEdh ets exit $ EdhString repr
+  edhValueRepr ets val $ \ !repr -> exitEdh ets exit repr
 
 edhValueStr :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
 edhValueStr _ (EdhString !s) !exit = exit s
@@ -3190,9 +3249,9 @@ edhValueStr ets (EdhObject !o) !exit = case edh'obj'store o of
       (_, !strVal) -> edhValueStr ets strVal exit
 edhValueStr !ets !v !exit = edhValueRepr ets v exit
 
-edhValueStrTx :: EdhValue -> EdhTxExit -> EdhTx
+edhValueStrTx :: EdhValue -> EdhTxExit Text -> EdhTx
 edhValueStrTx !v !exit !ets =
-  edhValueStr ets v $ \ !s -> exitEdh ets exit $ EdhString s
+  edhValueStr ets v $ \ !s -> exitEdh ets exit s
 
 -- | Coercing an Edh value to valid JSON in string form
 --
@@ -3338,23 +3397,23 @@ implantEffects !tgtEnt !effs =
   where
     !effd = [(attrKeyValue k, v) | (k, v) <- effs]
 
-evalExprSrc :: ExprSrc -> EdhTxExit -> EdhTx
+evalExprSrc :: ExprSrc -> EdhTxExit EdhValue -> EdhTx
 evalExprSrc (ExprSrc !expr !ss) !exit !ets =
   runEdhTx (etsMovePC ets ss) $
     evalExpr expr $ \ !rtn ->
       edhSwitchState ets $ exit rtn
 
 -- | Evaluate an Edh expression
-evalExpr :: Expr -> EdhTxExit -> EdhTx
+evalExpr :: Expr -> EdhTxExit EdhValue -> EdhTx
 evalExpr !x !exit = evalExpr' x Nothing exit
 
-evalExprSrc' :: ExprSrc -> Maybe DocComment -> EdhTxExit -> EdhTx
+evalExprSrc' :: ExprSrc -> Maybe DocComment -> EdhTxExit EdhValue -> EdhTx
 evalExprSrc' (ExprSrc !expr !ss) !docCmt !exit !ets =
   runEdhTx (etsMovePC ets ss) $
     evalExpr' expr docCmt $ \ !rtn ->
       edhSwitchState ets $ exit rtn
 
-evalExpr' :: Expr -> Maybe DocComment -> EdhTxExit -> EdhTx
+evalExpr' :: Expr -> Maybe DocComment -> EdhTxExit EdhValue -> EdhTx
 evalExpr' IntplExpr {} _docCmt _exit =
   throwEdhTx EvalError "bug: interpolating out side of expr range."
 evalExpr' (ExprWithSrc (ExprSrc !x _) !sss) !docCmt !exit = \ !ets ->
@@ -4018,7 +4077,7 @@ evalInfixSrc !opSym !lhExpr !rhExpr !exit !ets =
                   <> badDesc
         _ -> naExit
       where
-        chkExitMagic :: EdhTxExit
+        chkExitMagic :: EdhTxExit EdhValue
         chkExitMagic !result _ets = case edhUltimate result of
           EdhDefault _ !exprDef !etsDef ->
             -- eval default expression with possibly the designated thread state
@@ -4116,7 +4175,7 @@ defineOperator ::
   OpSymbol ->
   ProcDecl ->
   Maybe DocComment ->
-  EdhTxExit ->
+  EdhTxExit EdhValue ->
   Maybe EdhValue ->
   EdhTx
 defineOperator !opFixity !opPrec !opSym !opProc !docCmt !exit !predecessor !ets =
@@ -4625,7 +4684,7 @@ edhCompareValue !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
       (_, !badCmpMagic) -> edhValueDesc ets badCmpMagic $ \ !badDesc ->
         throwEdh ets UsageError $ "bad __compare__ magic: " <> badDesc
       where
-        chkMagicRtn :: EdhTxExit
+        chkMagicRtn :: EdhTxExit EdhValue
         chkMagicRtn !magicRtn _ets = case edhUltimate magicRtn of
           EdhDefault _ !exprDef !etsDef ->
             runEdhTx (fromMaybe ets etsDef) $
@@ -4979,7 +5038,7 @@ edhRegulateIndex !ets !len !idx !exit =
               <> T.pack (show len)
         else exit posIdx
 
-publishEvent :: EventSink -> EdhValue -> EdhTxExit -> EdhTx
+publishEvent :: EventSink -> EdhValue -> EdhTxExit EdhValue -> EdhTx
 publishEvent !sink !val !exit !ets =
   postEvent sink val >>= \case
     True -> exitEdh ets exit val
@@ -4991,7 +5050,7 @@ publishEvent !sink !val !exit !ets =
 -- | Fork a new Edh thread to run the specified event producer, but hold the
 -- production until current thread has later started consuming events from the
 -- sink returned here.
-launchEventProducer :: EdhTxExit -> EventSink -> EdhTx -> EdhTx
+launchEventProducer :: EdhTxExit EventSink -> EventSink -> EdhTx -> EdhTx
 launchEventProducer !exit sink@(EventSink _ _ _ !subc) !producerTx !etsConsumer =
   readTVar subc >>= \ !subcBefore ->
     if subcBefore < 0
@@ -5004,8 +5063,7 @@ launchEventProducer !exit sink@(EventSink _ _ _ !subc) !producerTx !etsConsumer 
          in runEdhTx etsConsumer $
               forkEdh id prodThAct $
                 const $
-                  exitEdhTx exit $
-                    EdhSink sink
+                  exitEdhTx exit sink
 
 mkHostClass' ::
   Scope ->
@@ -5144,11 +5202,16 @@ mkScopeSandbox !ets !origScope !exit =
     !origProc = edh'scope'proc origScope
     !sbProc = origProc {edh'procedure'lexi = edh'world'sandbox world}
 
-runEdhTxInSandbox :: Scope -> EdhHostProc -> EdhTxExit -> EdhTx
+runEdhTxInSandbox :: Scope -> EdhHostProc -> EdhTxExit EdhValue -> EdhTx
 runEdhTxInSandbox !sandbox !act !exit !ets =
   runEdhInSandbox ets sandbox act exit
 
-runEdhInSandbox :: EdhThreadState -> Scope -> EdhHostProc -> EdhTxExit -> STM ()
+runEdhInSandbox ::
+  EdhThreadState ->
+  Scope ->
+  EdhHostProc ->
+  EdhTxExit EdhValue ->
+  STM ()
 runEdhInSandbox !ets !sandbox !act !exit =
   runEdhTx etsSandbox $
     act $ \ !result ->

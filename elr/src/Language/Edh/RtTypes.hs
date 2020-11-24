@@ -634,9 +634,9 @@ edhDoSTM !ets !act =
 type EdhTx = EdhThreadState -> STM ()
 
 -- | The commonplace type of CPS exit for transactional Edh computations
-type EdhTxExit = EdhValue -> EdhTx
+type EdhTxExit a = a -> EdhTx
 
-endOfEdh :: EdhTxExit
+endOfEdh :: EdhTxExit a
 endOfEdh _ _ = return ()
 {-# INLINE endOfEdh #-}
 
@@ -646,12 +646,12 @@ endOfEdh _ _ = return ()
 --
 -- NOTE this happens as part of current STM tx, the actual fork won't happen if
 --      any subsequent Edh code within the tx throws without recovered
-forkEdh :: (EdhThreadState -> EdhThreadState) -> EdhTx -> EdhTxExit -> EdhTx
+forkEdh :: (EdhThreadState -> EdhThreadState) -> EdhTx -> EdhTxExit () -> EdhTx
 forkEdh !bootMod !p !exit !etsForker = do
   writeTBQueue
     (edh'fork'queue $ edh'thread'prog etsForker)
     (etsForker, p . bootMod)
-  exitEdh etsForker exit nil
+  exitEdh etsForker exit ()
 {-# INLINE forkEdh #-}
 
 -- | Schedule an STM action to be performed in current Edh thread, but after
@@ -705,7 +705,7 @@ edhSwitchState !ets !etx = const $ edhDoSTM ets $ etx ets
 --
 -- @edh'in'tx ets@ is normally controlled by the `ai` keyword at scripting
 -- level, this implements the semantics of it
-exitEdhTx :: EdhTxExit -> EdhValue -> EdhTx
+exitEdhTx :: EdhTxExit a -> a -> EdhTx
 exitEdhTx !exit !val !ets = edhDoSTM ets $ exit val ets
 {-# INLINE exitEdhTx #-}
 
@@ -713,14 +713,14 @@ exitEdhTx !exit !val !ets = edhDoSTM ets $ exit val ets
 --
 -- @edh'in'tx ets@ is normally controlled by the `ai` keyword at scripting
 -- level, this implements the semantics of it
-exitEdh :: EdhThreadState -> EdhTxExit -> EdhValue -> STM ()
+exitEdh :: EdhThreadState -> EdhTxExit a -> a -> STM ()
 exitEdh !ets !exit !val = edhDoSTM ets $ exit val ets
 {-# INLINE exitEdh #-}
 
 -- | Type of an intrinsic infix operator in the host language (Haskell).
 --
 -- Note no stack frame is created/pushed when an intrinsic operator is called.
-type EdhIntrinsicOp = ExprSrc -> ExprSrc -> EdhTxExit -> EdhTx
+type EdhIntrinsicOp = ExprSrc -> ExprSrc -> EdhTxExit EdhValue -> EdhTx
 
 edhFlipOp :: EdhIntrinsicOp -> EdhIntrinsicOp
 edhFlipOp !op = flipped
@@ -737,7 +737,7 @@ data IntrinOpDefi = IntrinOpDefi
 -- | Monotype for the last part of an 'EdhCallable' procedure
 -- such a procedure servs as the callee, it is in CPS, i.e. taking an exit to
 -- return a value from this procedure
-type EdhHostProc = EdhTxExit -> EdhTx
+type EdhHostProc = EdhTxExit EdhValue -> EdhTx
 
 -- | An event sink is similar to a Go channel, but is broadcast
 -- in nature, in contrast to the unicast nature of channels in Go.

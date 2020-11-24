@@ -1,5 +1,3 @@
-{-# LANGUAGE PatternSynonyms #-}
-
 module Language.Edh.InterOp where
 
 -- import           System.IO.Unsafe               ( unsafePerformIO )
@@ -1571,7 +1569,8 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Mayb
 
 mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
 mkIntrinsicOp !world !opSym !iop = do
-  u <- unsafeIOToSTM newUnique
+  !u <- unsafeIOToSTM newUnique
+  {- HLINT ignore "Redundant <$>" -}
   Map.lookup opSym <$> readTMVar (edh'world'operators world) >>= \case
     Nothing ->
       throwSTM $
@@ -1593,10 +1592,10 @@ mkIntrinsicOp !world !opSym !iop = do
 -- callee, that scope should have mounted the caller's scope entity, not a new
 -- entity in contrast to when an Edh procedure as the callee.
 class EdhCallable fn where
-  callFromEdh :: fn -> ArgsPack -> EdhTxExit -> EdhTx
+  callFromEdh :: fn -> ArgsPack -> EdhTxExit EdhValue -> EdhTx
 
 -- nullary base case
-instance EdhCallable (EdhTxExit -> EdhTx) where
+instance EdhCallable (EdhTxExit EdhValue -> EdhTx) where
   callFromEdh !fn apk@(ArgsPack !args !kwargs) !exit =
     if null args && odNull kwargs
       then fn exit

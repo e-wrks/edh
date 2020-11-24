@@ -138,15 +138,16 @@ createVectorClass !clsOuterScope =
     vecEqProc !other !exit !ets =
       castObjectStore' other >>= \case
         Nothing -> exitEdh ets exit $ EdhBool False
-        Just (_, !mvecOther) -> withThisHostObj ets $ \(mvv :: TVar EdhVector) ->
-          readTVar mvv >>= \ !mvec -> do
-            !conclusion <- unsafeIOToSTM $ do
-              -- TODO we're sacrificing thread safety for zero-copy performance
-              --      here, justify this decision
-              !vec <- V.unsafeFreeze mvec
-              !vecOther <- V.unsafeFreeze mvecOther
-              return $ vec == vecOther
-            exitEdh ets exit $ EdhBool conclusion
+        Just (_, !mvecOther) -> withThisHostObj ets $
+          \(mvv :: TVar EdhVector) ->
+            readTVar mvv >>= \ !mvec -> do
+              !conclusion <- unsafeIOToSTM $ do
+                -- TODO we're sacrificing thread safety for zero-copy performance
+                --      here, justify this decision
+                !vec <- V.unsafeFreeze mvec
+                !vecOther <- V.unsafeFreeze mvecOther
+                return $ vec == vecOther
+              exitEdh ets exit $ EdhBool conclusion
 
     vecIdxReadProc :: EdhValue -> EdhHostProc
     vecIdxReadProc !idxVal !exit !ets =
@@ -255,8 +256,14 @@ createVectorClass !clsOuterScope =
                     then do
                       !newVV <- newTVar newVec
                       let !newStore = HostStore (toDyn newVV)
-                      edhMutCloneObj ets thisVecObj (edh'scope'that scope) newStore $
-                        \ !thatObjClone -> exitEdh ets exit $ EdhObject thatObjClone
+                      edhMutCloneObj
+                        ets
+                        thisVecObj
+                        (edh'scope'that scope)
+                        newStore
+                        $ \ !thatObjClone ->
+                          exitEdh ets exit $
+                            EdhObject thatObjClone
                     else
                       unsafeIOToSTM (MV.read mvec n) >>= \ !srcVal ->
                         runEdhTx ets $
@@ -328,7 +335,7 @@ createVectorClass !clsOuterScope =
       Int ->
       Int ->
       Int ->
-      EdhTxExit ->
+      EdhTxExit EdhValue ->
       STM ()
     opAssignRange !ets !opSym !rhVal !mvec !start !stop !step !exit =
       castObjectStore' (edhUltimate rhVal) >>= \case
@@ -338,7 +345,9 @@ createVectorClass !clsOuterScope =
         (q, r) = quotRem (stop - start) step
         !len = if r == 0 then abs q else 1 + abs q
         exitWithNonVecAssign = case edhUltimate rhVal of
-          EdhArgsPack (ArgsPack !args' _) -> assignWithList start $ take len args'
+          EdhArgsPack (ArgsPack !args' _) ->
+            assignWithList start $
+              take len args'
           EdhList (List _ !lsv) -> do
             !ls <- readTVar lsv
             assignWithList start $ take len ls
@@ -400,7 +409,10 @@ createVectorClass !clsOuterScope =
 
     vecNullProc :: EdhHostProc
     vecNullProc !exit !ets = withThisHostObj ets $ \(mvv :: TVar EdhVector) ->
-      readTVar mvv >>= \ !mvec -> exitEdh ets exit $ EdhBool $ MV.length mvec <= 0
+      readTVar mvv >>= \ !mvec ->
+        exitEdh ets exit $
+          EdhBool $
+            MV.length mvec <= 0
 
     vecLenProc :: EdhHostProc
     vecLenProc !exit !ets = withThisHostObj ets $ \(mvv :: TVar EdhVector) ->
