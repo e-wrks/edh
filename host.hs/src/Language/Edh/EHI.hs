@@ -18,6 +18,7 @@ module Language.Edh.EHI
     ErrMessage,
     ErrContext,
     edhKnownError,
+    errorBundlePretty,
 
     -- * Context information
     SrcDoc (..),
@@ -284,3 +285,4 @@ import Language.Edh.InterOp
 import Language.Edh.RtTypes
 import Language.Edh.Runtime
 import Language.Edh.Utils
+import Text.Megaparsec
