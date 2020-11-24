@@ -2798,33 +2798,46 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
                           Nothing -> putTMVar worldModules moduMap''
                           Just !moduSlotVar' ->
                             if moduSlotVar' == moduSlotVar
-                              then putTMVar worldModules $ Map.delete moduId moduMap''
+                              then
+                                putTMVar worldModules $
+                                  Map.delete
+                                    moduId
+                                    moduMap''
                               else putTMVar worldModules moduMap''
                         rethrow exv
           where
             !scope = contextScope ctx
 
-            locateModuInFS :: ((ImportName, FilePath, FilePath) -> STM ()) -> STM ()
+            locateModuInFS ::
+              ((ImportName, FilePath, FilePath) -> STM ()) -> STM ()
             locateModuInFS !exit' =
-              lookupEdhCtxAttr scope (AttrByName "__path__") >>= \case
-                EdhString !fromPath ->
-                  lookupEdhCtxAttr scope (AttrByName "__file__") >>= \case
-                    EdhString !fromFile ->
-                      (exit' =<<) $
-                        unsafeIOToSTM $
-                          locateEdhModule (edhPkgPathFrom $ T.unpack fromFile) $
-                            case normalizedSpec of
-                              -- special case for `import * '.'`, 2 possible use cases:
-                              --
-                              --  *) from an entry module (i.e. __main__.edh), to import artifacts
-                              --     from its respective persistent module
-                              --
-                              --  *) from a persistent module, to re-populate the module scope with
-                              --     its own exports (i.e. the dict __exports__ in its scope), in
-                              --     case the module scope possibly altered after initialization
-                              "." -> T.unpack fromPath
-                              _ -> T.unpack normalizedSpec
-                    _ -> error "bug: no valid `__file__` in module context"
+              lookupEdhCtxAttr scope (AttrByName "__name__") >>= \case
+                EdhString !fromName
+                  | not ("<" `T.isPrefixOf` fromName) ->
+                    lookupEdhCtxAttr scope (AttrByName "__file__") >>= \case
+                      EdhString !fromFile ->
+                        (exit' =<<) $
+                          unsafeIOToSTM $
+                            locateEdhModule
+                              ( edhPkgPathFrom $
+                                  T.unpack
+                                    fromFile
+                              )
+                              $ case normalizedSpec of
+                                -- special case for `import * '.'`, 2 possible use cases:
+                                --
+                                --  *) from an entry module (i.e. __main__.edh), to import artifacts
+                                --     from its respective persistent module
+                                --
+                                --  *) from a persistent module, to re-populate the module scope with
+                                --     its own exports (i.e. the dict __exports__ in its scope), in
+                                --     case the module scope possibly altered after initialization
+                                "." -> T.unpack fromName
+                                _ -> T.unpack normalizedSpec
+                      _ ->
+                        error $
+                          "bug: no valid `__file__` in module "
+                            <> T.unpack fromName
                 _ ->
                   (exit' =<<) $
                     unsafeIOToSTM $
