@@ -20,6 +20,7 @@ import Language.Edh.RtTypes
   )
 import System.Directory
   ( canonicalizePath,
+    doesDirectoryExist,
     doesFileExist,
     doesPathExist,
   )
@@ -53,9 +54,11 @@ edhPkgPathFrom !fromPath =
       (filePath, ".edh") -> takeDirectory filePath
       _ -> fromPath
 
--- | returns import name, nominal path and actual file path, the last two will
--- be different e.g. in case an `__init__.edh` for a package, where nominal
--- path will  point to the root directory
+-- | returns import name, nominal path and actual file path
+--
+-- there is a special case of `__init__.edh` for a dir module, where nominal
+-- path will point to the directory, otherwise nominal path will be actual file
+-- path without `.edh` extension
 locateEdhModule :: FilePath -> FilePath -> IO (ImportName, FilePath, FilePath)
 locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
   (_, ".edh") ->
@@ -79,33 +82,43 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
       doesFileExist edhFilePath >>= \case
         True -> return (RelativeName (T.pack relImp), nomPath, edhFilePath)
         False -> do
-          -- trace (" ** no hit: " <> edhFilePath <> " ** " <> nomPath) $ return ()
           let !edhIdxPath = nomPath </> "__init__.edh"
           doesFileExist edhIdxPath >>= \case
             True -> return (RelativeName (T.pack relImp), nomPath, edhIdxPath)
             False ->
-              -- do
-              --   trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $  return ()
               throwPkgError
                 ("no such module: " <> T.pack nomSpec)
                 [(AttrByName "moduSpec", EdhString $ T.pack nomSpec)]
 
     resolveAbsImport :: FilePath -> IO (ImportName, FilePath, FilePath)
-    resolveAbsImport !absPkgPath = do
-      let !nomPath = absPkgPath </> "edh_modules" </> nomSpec
-          !edhFilePath = nomPath ++ ".edh"
-      -- trace (" ** no hit: " <> edhFilePath <> " ** " <> nomPath) $ return ()
-      doesFileExist edhFilePath >>= \case
-        True -> return (AbsoluteName (T.pack nomSpec), nomPath, edhFilePath)
-        False -> do
-          -- trace (" ** no hit: " <> edhFilePath <> " ** " <> nomPath) $ return ()
-          let !edhIdxPath = nomPath </> "__init__.edh"
-          doesFileExist edhIdxPath >>= \case
-            True -> return (AbsoluteName (T.pack nomSpec), nomPath, edhIdxPath)
-            False -> do
-              -- trace (" ** no hit: " <> edhIdxPath <> " ** " <> nomPath) $ return ()
-              let !parentPkgPath = takeDirectory absPkgPath
-              if equalFilePath parentPkgPath absPkgPath
+    resolveAbsImport !absPkgPath =
+      let !emsDir = absPkgPath </> "edh_modules"
+       in doesDirectoryExist emsDir >>= \case
+            False -> tryParentDir
+            True -> do
+              let !nomPath = emsDir </> nomSpec
+                  !edhFilePath = nomPath <> ".edh"
+              doesFileExist edhFilePath >>= \case
+                True ->
+                  return
+                    ( AbsoluteName (T.pack nomSpec),
+                      nomPath,
+                      edhFilePath
+                    )
+                False -> do
+                  let !edhIdxPath = nomPath </> "__init__.edh"
+                  doesFileExist edhIdxPath >>= \case
+                    True ->
+                      return
+                        ( AbsoluteName (T.pack nomSpec),
+                          nomPath,
+                          edhIdxPath
+                        )
+                    False -> tryParentDir
+      where
+        tryParentDir =
+          let !parentPkgPath = takeDirectory absPkgPath
+           in if equalFilePath parentPkgPath absPkgPath
                 then
                   throwPkgError
                     ("no such module: " <> T.pack nomSpec)
