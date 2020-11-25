@@ -3701,159 +3701,180 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
         EvalError
         "import from filesystem is prohibited from a sandboxed environment"
 evalExpr' (DefaultExpr (ExprSrc !exprDef _)) _docCmt !exit = \ !ets -> do
-  u <- unsafeIOToSTM newUnique
+  !u <- unsafeIOToSTM newUnique
   exitEdh ets exit $ EdhDefault u exprDef (Just ets)
 evalExpr' (InfixExpr !opSym !lhExpr !rhExpr) _docCmt !exit =
   evalInfixSrc opSym lhExpr rhExpr exit
 -- defining an Edh class
 evalExpr' (ClassExpr HostDecl {}) _ _ =
   throwEdhTx EvalError "bug: eval host class decl"
-evalExpr' (ClassExpr pd@(ProcDecl (AttrAddrSrc !addr _) !argsRcvr (StmtSrc !body'stmt _) !proc'loc)) !docCmt !exit =
-  \ !ets -> resolveEdhAttrAddr ets addr $ \ !name -> do
-    let !ctx = edh'context ets
-        !scope = contextScope ctx
-        !rootScope = edh'world'root $ edh'prog'world $ edh'thread'prog ets
-        !nsClass = edh'obj'class $ edh'scope'this rootScope
-        !metaClass = edh'obj'class nsClass
+evalExpr'
+  ( ClassExpr
+      pd@( ProcDecl
+             (AttrAddrSrc !addr _)
+             !argsRcvr
+             (StmtSrc !body'stmt _)
+             !proc'loc
+           )
+    )
+  !docCmt
+  !exit =
+    \ !ets -> resolveEdhAttrAddr ets addr $ \ !name -> do
+      let !ctx = edh'context ets
+          !scope = contextScope ctx
+          !rootScope = edh'world'root $ edh'prog'world $ edh'thread'prog ets
+          !nsClass = edh'obj'class $ edh'scope'this rootScope
+          !metaClass = edh'obj'class nsClass
 
-    !idCls <- unsafeIOToSTM newUnique
-    !cs <- iopdEmpty
-    !ss <- newTVar []
-    !mro <- newTVar []
-    let allocatorProc :: ArgsPack -> EdhObjectAllocator
-        allocatorProc !apkCtor !exitCtor !etsCtor = case argsRcvr of
-          -- a normal class
-          WildReceiver -> exitCtor . HashStore =<< iopdEmpty
-          -- a data class (ADT)
-          _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
-            iopdFromList (odToList dataAttrs) >>= exitCtor . HashStore
+      !idCls <- unsafeIOToSTM newUnique
+      !cs <- iopdEmpty
+      !ss <- newTVar []
+      !mro <- newTVar []
+      let allocatorProc :: ArgsPack -> EdhObjectAllocator
+          allocatorProc !apkCtor !exitCtor !etsCtor = case argsRcvr of
+            -- a normal class
+            WildReceiver -> exitCtor . HashStore =<< iopdEmpty
+            -- a data class (ADT)
+            _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
+              iopdFromList (odToList dataAttrs) >>= exitCtor . HashStore
 
-        !clsProc =
-          ProcDefi
-            { edh'procedure'ident = idCls,
-              edh'procedure'name = name,
-              edh'procedure'lexi = scope,
-              edh'procedure'doc = docCmt,
-              edh'procedure'decl = pd
-            }
-        !cls = Class clsProc cs allocatorProc mro
-        !clsObj = Object idCls (ClassStore cls) metaClass ss
+          !clsProc =
+            ProcDefi
+              { edh'procedure'ident = idCls,
+                edh'procedure'name = name,
+                edh'procedure'lexi = scope,
+                edh'procedure'doc = docCmt,
+                edh'procedure'decl = pd
+              }
+          !cls = Class clsProc cs allocatorProc mro
+          !clsObj = Object idCls (ClassStore cls) metaClass ss
 
-        doExit _rtn _ets =
-          readTVar ss >>= fillClassMRO cls >>= \case
-            "" -> do
-              defineScopeAttr ets name $ EdhObject clsObj
-              exitEdh ets exit $ EdhObject clsObj
-            !mroInvalid -> throwEdh ets UsageError mroInvalid
+          doExit _rtn _ets =
+            readTVar ss >>= fillClassMRO cls >>= \case
+              "" -> do
+                defineScopeAttr ets name $ EdhObject clsObj
+                exitEdh ets exit $ EdhObject clsObj
+              !mroInvalid -> throwEdh ets UsageError mroInvalid
 
-    let !clsScope =
-          Scope
-            { edh'scope'entity = cs,
-              edh'scope'this = clsObj,
-              edh'scope'that = clsObj,
-              edh'scope'proc = clsProc,
-              edh'effects'stack = []
-            }
-        !clsCtx =
-          ctx
-            { edh'ctx'tip = EdhCallFrame clsScope proc'loc defaultEdhExcptHndlr,
-              edh'ctx'stack = edh'ctx'tip ctx : edh'ctx'stack ctx,
-              edh'ctx'genr'caller = Nothing,
-              edh'ctx'match = true,
-              edh'ctx'pure = False,
-              edh'ctx'exporting = False,
-              edh'ctx'eff'defining = False
-            }
-        !etsCls = ets {edh'context = clsCtx}
+      let !clsScope =
+            Scope
+              { edh'scope'entity = cs,
+                edh'scope'this = clsObj,
+                edh'scope'that = clsObj,
+                edh'scope'proc = clsProc,
+                edh'effects'stack = []
+              }
+          !clsCtx =
+            ctx
+              { edh'ctx'tip = EdhCallFrame clsScope proc'loc defaultEdhExcptHndlr,
+                edh'ctx'stack = edh'ctx'tip ctx : edh'ctx'stack ctx,
+                edh'ctx'genr'caller = Nothing,
+                edh'ctx'match = true,
+                edh'ctx'pure = False,
+                edh'ctx'exporting = False,
+                edh'ctx'eff'defining = False
+              }
+          !etsCls = ets {edh'context = clsCtx}
 
-    case argsRcvr of
-      -- a normal class
-      WildReceiver -> pure ()
-      -- a data class (ADT)
-      _ -> do
-        !clsArts <-
-          sequence $
-            [ (AttrByName nm,) <$> mkHostProc clsScope mc nm hp
-              | (mc, nm, hp) <-
-                  [ (EdhMethod, "__repr__", (adtReprProc, WildReceiver)),
-                    (EdhMethod, "__str__", (adtReprProc, WildReceiver)),
-                    (EdhMethod, "__eq__", (adtEqProc, WildReceiver)),
-                    (EdhMethod, "__compare__", (adtCmpProc, WildReceiver))
-                  ]
-            ]
-        iopdUpdate clsArts cs
-    -- calling the Edh class definition
-    runEdhTx etsCls $ evalStmt body'stmt doExit
+      case argsRcvr of
+        -- a normal class
+        WildReceiver -> pure ()
+        -- a data class (ADT)
+        _ -> do
+          !clsArts <-
+            sequence $
+              [ (AttrByName nm,) <$> mkHostProc clsScope mc nm hp
+                | (mc, nm, hp) <-
+                    [ (EdhMethod, "__repr__", (adtReprProc, WildReceiver)),
+                      (EdhMethod, "__str__", (adtReprProc, WildReceiver)),
+                      (EdhMethod, "__eq__", (adtEqProc, WildReceiver)),
+                      (EdhMethod, "__compare__", (adtCmpProc, WildReceiver))
+                    ]
+              ]
+          iopdUpdate clsArts cs
+      -- calling the Edh class definition
+      runEdhTx etsCls $ evalStmt body'stmt doExit
 
 -- defining an Edh namespace
 evalExpr' (NamespaceExpr HostDecl {} _) _ _ =
   throwEdhTx EvalError "bug: eval host ns decl"
-evalExpr' (NamespaceExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ (StmtSrc !body'stmt _) !proc'loc) !argsSndr) !docCmt !exit =
-  \ !ets -> packEdhArgs ets argsSndr $ \(ArgsPack !args !kwargs) ->
-    if not (null args)
-      then
-        throwEdh
-          ets
-          UsageError
-          "you don't pass positional args to a namespace"
-      else resolveEdhAttrAddr ets addr $ \ !name -> do
-        let !ctx = edh'context ets
-            !scope = contextScope ctx
-            !rootScope = edh'world'root $ edh'prog'world $ edh'thread'prog ets
-            !nsClsObj = edh'obj'class $ edh'scope'this rootScope
-            !nsClass = case edh'obj'store nsClsObj of
-              ClassStore !cls -> cls
-              _ -> error "bug: namespace class not bearing ClassStore"
+evalExpr'
+  ( NamespaceExpr
+      pd@( ProcDecl
+             (AttrAddrSrc !addr _)
+             _
+             (StmtSrc !body'stmt _)
+             !proc'loc
+           )
+      !argsSndr
+    )
+  !docCmt
+  !exit =
+    \ !ets -> packEdhArgs ets argsSndr $ \(ArgsPack !args !kwargs) ->
+      if not (null args)
+        then
+          throwEdh
+            ets
+            UsageError
+            "you don't pass positional args to a namespace"
+        else resolveEdhAttrAddr ets addr $ \ !name -> do
+          let !ctx = edh'context ets
+              !scope = contextScope ctx
+              !rootScope = edh'world'root $ edh'prog'world $ edh'thread'prog ets
+              !nsClsObj = edh'obj'class $ edh'scope'this rootScope
+              !nsClass = case edh'obj'store nsClsObj of
+                ClassStore !cls -> cls
+                _ -> error "bug: namespace class not bearing ClassStore"
 
-        !idNs <- unsafeIOToSTM newUnique
-        !hs <-
-          iopdFromList $
-            odToList kwargs
-              ++ [(AttrByName "__name__", attrKeyValue name)]
-        !ss <- newTVar []
-        let !nsProc =
-              ProcDefi
-                { edh'procedure'ident = idNs,
-                  edh'procedure'name = name,
-                  edh'procedure'lexi = scope,
-                  edh'procedure'doc = docCmt,
-                  edh'procedure'decl = pd
-                }
-            !nsObj =
-              Object
-                idNs
-                (HashStore hs)
-                nsClsObj
-                  { edh'obj'store = ClassStore nsClass {edh'class'proc = nsProc}
+          !idNs <- unsafeIOToSTM newUnique
+          !hs <-
+            iopdFromList $
+              odToList kwargs
+                ++ [(AttrByName "__name__", attrKeyValue name)]
+          !ss <- newTVar []
+          let !nsProc =
+                ProcDefi
+                  { edh'procedure'ident = idNs,
+                    edh'procedure'name = name,
+                    edh'procedure'lexi = scope,
+                    edh'procedure'doc = docCmt,
+                    edh'procedure'decl = pd
                   }
-                ss
+              !nsObj =
+                Object
+                  idNs
+                  (HashStore hs)
+                  nsClsObj
+                    { edh'obj'store = ClassStore nsClass {edh'class'proc = nsProc}
+                    }
+                  ss
 
-            doExit _rtn _ets = do
-              defineScopeAttr ets name $ EdhObject nsObj
-              exitEdh ets exit $ EdhObject nsObj
+              doExit _rtn _ets = do
+                defineScopeAttr ets name $ EdhObject nsObj
+                exitEdh ets exit $ EdhObject nsObj
 
-        let !nsScope =
-              Scope
-                { edh'scope'entity = hs,
-                  edh'scope'this = nsObj,
-                  edh'scope'that = nsObj,
-                  edh'scope'proc = nsProc,
-                  edh'effects'stack = []
-                }
-            !nsCtx =
-              ctx
-                { edh'ctx'tip = EdhCallFrame nsScope proc'loc defaultEdhExcptHndlr,
-                  edh'ctx'stack = edh'ctx'tip ctx : edh'ctx'stack ctx,
-                  edh'ctx'genr'caller = Nothing,
-                  edh'ctx'match = true,
-                  edh'ctx'pure = False,
-                  edh'ctx'exporting = False,
-                  edh'ctx'eff'defining = False
-                }
-            !etsNs = ets {edh'context = nsCtx}
+          let !nsScope =
+                Scope
+                  { edh'scope'entity = hs,
+                    edh'scope'this = nsObj,
+                    edh'scope'that = nsObj,
+                    edh'scope'proc = nsProc,
+                    edh'effects'stack = []
+                  }
+              !nsCtx =
+                ctx
+                  { edh'ctx'tip = EdhCallFrame nsScope proc'loc defaultEdhExcptHndlr,
+                    edh'ctx'stack = edh'ctx'tip ctx : edh'ctx'stack ctx,
+                    edh'ctx'genr'caller = Nothing,
+                    edh'ctx'match = true,
+                    edh'ctx'pure = False,
+                    edh'ctx'exporting = False,
+                    edh'ctx'eff'defining = False
+                  }
+              !etsNs = ets {edh'context = nsCtx}
 
-        -- calling the Edh ns definition
-        runEdhTx etsNs $ evalStmt body'stmt doExit
+          -- calling the Edh ns definition
+          runEdhTx etsNs $ evalStmt body'stmt doExit
 evalExpr' (MethodExpr HostDecl {}) _ _ =
   throwEdhTx EvalError "bug: eval host method decl"
 evalExpr' (MethodExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _)) !docCmt !exit =

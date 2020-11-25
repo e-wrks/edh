@@ -154,6 +154,7 @@ module Language.Edh.EHI
     Precedence,
     OpDeclLoc,
     AttrRef (..),
+    AttrAddrSrc (..),
     AttrAddr (..),
     ArgsReceiver (..),
     ArgReceiver (..),
