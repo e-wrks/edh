@@ -2755,12 +2755,17 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
               -- resolve correct module name
               !moduName <- case impName of
                 AbsoluteName !moduName -> return moduName
-                RelativeName !relModuName ->
+                RelativeName !relModuSpec ->
                   lookupEdhCtxAttr scope (AttrByName "__name__") >>= \case
-                    EdhString !currModuName ->
-                      return $ currModuName <> "/" <> relModuName
-                    _ -> return $ "/" <> relModuName -- todo this confusing?
-                    -- allocate a loading slot
+                    EdhString !importerName ->
+                      case T.stripPrefix "./" relModuSpec of
+                        Just !relModuName ->
+                          return $ importerName <> "/" <> relModuName
+                        -- TODO handling '../' etc.
+                        Nothing -> return $ importerName <> "/" <> relModuSpec
+                    -- todo this confusing?
+                    _ -> return $ "<some>/" <> relModuSpec
+              -- allocate a loading slot
               !modu <- edhCreateModule world moduName moduId moduFile
               !loadingScope <- objectScope modu
               !postLoads <- newTVar []
