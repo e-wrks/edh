@@ -1,11 +1,11 @@
 -- | Edh package management functionalities
 module Language.Edh.PkgMan where
 
--- import           Debug.Trace
+-- import Debug.Trace
 
 import Control.Exception (throwIO)
 import Data.Dynamic (toDyn)
-import Data.List (isPrefixOf, stripPrefix)
+import Data.List (isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Language.Edh.Control
@@ -46,8 +46,8 @@ throwPkgError !msg !details =
       (toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details)
       "<os>"
 
-edhPkgPathFrom :: FilePath -> FilePath
-edhPkgPathFrom !fromPath =
+edhRelPathFrom :: FilePath -> FilePath
+edhRelPathFrom !fromPath =
   if "<" `isPrefixOf` fromPath
     then "." -- intrinsic module path
     else case splitExtension fromPath of
@@ -60,25 +60,26 @@ edhPkgPathFrom !fromPath =
 -- path will point to the directory, otherwise nominal path will be actual file
 -- path without `.edh` extension
 locateEdhModule :: FilePath -> FilePath -> IO (ImportName, FilePath, FilePath)
-locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
+locateEdhModule !relPath !nomSpec = case splitExtension nomSpec of
   (_, ".edh") ->
     throwPkgError
       "you don't include the `.edh` file extension in the import"
       [(AttrByName "spec", EdhString $ T.pack nomSpec)]
   _ ->
-    doesPathExist pkgPath >>= \case
+    doesPathExist relPath >>= \case
       False ->
         throwPkgError
-          ("path does not exist: " <> T.pack pkgPath)
-          [(AttrByName "path", EdhString $ T.pack pkgPath)]
-      True -> case stripPrefix "./" nomSpec of
-        Just !relImp -> resolveRelImport relImp
-        Nothing -> canonicalizePath "." >>= resolveAbsImport
+          ("path does not exist: " <> T.pack relPath)
+          [(AttrByName "path", EdhString $ T.pack relPath)]
+      True ->
+        if "." `isPrefixOf` nomSpec
+          then resolveRelImport nomSpec
+          else canonicalizePath "." >>= resolveAbsImport
   where
     resolveRelImport :: FilePath -> IO (ImportName, FilePath, FilePath)
     resolveRelImport !relImp = do
-      let !nomPath = (if null pkgPath then "." else pkgPath) </> relImp
-          !edhFilePath = nomPath ++ ".edh"
+      !nomPath <- canonicalizePath $ relPath </> relImp
+      let !edhFilePath = nomPath <> ".edh"
       doesFileExist edhFilePath >>= \case
         True -> return (RelativeName (T.pack relImp), nomPath, edhFilePath)
         False -> do
@@ -87,8 +88,13 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
             True -> return (RelativeName (T.pack relImp), nomPath, edhIdxPath)
             False ->
               throwPkgError
-                ("no such module: " <> T.pack nomSpec)
-                [(AttrByName "moduSpec", EdhString $ T.pack nomSpec)]
+                ( "no such module: " <> T.pack (show nomSpec)
+                    <> " relative to: "
+                    <> T.pack relPath
+                )
+                [ (AttrByName "moduSpec", EdhString $ T.pack nomSpec),
+                  (AttrByName "relPath", EdhString $ T.pack relPath)
+                ]
 
     resolveAbsImport :: FilePath -> IO (ImportName, FilePath, FilePath)
     resolveAbsImport !absPkgPath =
@@ -121,7 +127,7 @@ locateEdhModule !pkgPath !nomSpec = case splitExtension nomSpec of
            in if equalFilePath parentPkgPath absPkgPath
                 then
                   throwPkgError
-                    ("no such module: " <> T.pack nomSpec)
+                    ("no such module: " <> T.pack (show nomSpec))
                     [(AttrByName "moduSpec", EdhString $ T.pack nomSpec)]
                 else resolveAbsImport parentPkgPath
 

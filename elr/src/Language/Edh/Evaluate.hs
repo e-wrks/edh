@@ -2819,7 +2819,7 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
                         (exit' =<<) $
                           unsafeIOToSTM $
                             locateEdhModule
-                              ( edhPkgPathFrom $
+                              ( edhRelPathFrom $
                                   T.unpack
                                     fromFile
                               )
