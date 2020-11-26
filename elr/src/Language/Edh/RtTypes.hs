@@ -734,6 +734,9 @@ data IntrinOpDefi = IntrinOpDefi
     intrinsic'op :: EdhIntrinsicOp
   }
 
+-- | Polytype to denote Haskell procedures runnable by an Edh language runtime
+type EdhProc a = EdhTxExit a -> EdhTx
+
 -- | Monotype for the last part of an 'EdhCallable' procedure
 -- such a procedure servs as the callee, it is in CPS, i.e. taking an exit to
 -- return a value from this procedure
@@ -773,7 +776,7 @@ instance Show EventSink where
   show EventSink {} = "<sink>"
 
 -- | executable precedures
-data EdhProc
+data EdhProcDefi
   = EdhIntrOp !OpFixity !Precedence !IntrinOpDefi
   | EdhOprtor !OpFixity !Precedence !(Maybe EdhValue) !ProcDefi
   | EdhMethod !ProcDefi
@@ -786,7 +789,7 @@ data EdhProc
     -- deleter semantic is expressed as calling setter without arg
     EdhDescriptor !ProcDefi !(Maybe ProcDefi)
 
-instance Show EdhProc where
+instance Show EdhProcDefi where
   show (EdhIntrOp !fixity !prec (IntrinOpDefi _ !opSym _)) =
     "intrinsic: "
       ++ show fixity
@@ -812,7 +815,7 @@ instance Show EdhProc where
       Nothing -> "readonly property "
       Just _ -> "property "
 
-instance Eq EdhProc where
+instance Eq EdhProcDefi where
   EdhIntrOp _ _ (IntrinOpDefi x'u _ _) == EdhIntrOp _ _ (IntrinOpDefi y'u _ _) =
     x'u == y'u
   EdhOprtor _ _ _ x == EdhOprtor _ _ _ y = x == y
@@ -824,7 +827,7 @@ instance Eq EdhProc where
     x'getter == y'getter && x'setter == y'setter
   _ == _ = False
 
-instance Hashable EdhProc where
+instance Hashable EdhProcDefi where
   hashWithSalt s (EdhIntrOp _ _ (IntrinOpDefi x'u _ _)) = hashWithSalt s x'u
   hashWithSalt s (EdhMethod x) = hashWithSalt s x
   hashWithSalt s (EdhOprtor _ _ _ x) = hashWithSalt s x
@@ -834,7 +837,7 @@ instance Hashable EdhProc where
   hashWithSalt s (EdhDescriptor getter setter) =
     s `hashWithSalt` getter `hashWithSalt` setter
 
-callableName :: EdhProc -> Text
+callableName :: EdhProcDefi -> Text
 callableName = \case
   EdhIntrOp _fixity _preced (IntrinOpDefi _ !opSym _) -> "(" <> opSym <> ")"
   EdhOprtor _fixity _preced _ !pd -> "(" <> procedureName pd <> ")"
@@ -847,7 +850,7 @@ callableName = \case
       Nothing -> "<readonly property "
       Just _ -> "<property "
 
-callableDoc :: EdhProc -> Maybe DocComment
+callableDoc :: EdhProcDefi -> Maybe DocComment
 callableDoc = \case
   EdhIntrOp _fixity _preced _ -> Nothing
   EdhOprtor _fixity _preced _ !pd -> edh'procedure'doc pd
@@ -904,10 +907,10 @@ data EdhValue
     EdhObject !Object
   | -- | a callable procedure
     -- with the effect outer stack if resolved as an effectful artifact
-    EdhProcedure !EdhProc !(Maybe [EdhCallFrame])
+    EdhProcedure !EdhProcDefi !(Maybe [EdhCallFrame])
   | -- | a callable procedure bound to a specific this object and that object
     -- with the effect outer stack if resolved as an effectful artifact
-    EdhBoundProc !EdhProc !Object !Object !(Maybe [EdhCallFrame])
+    EdhBoundProc !EdhProcDefi !Object !Object !(Maybe [EdhCallFrame])
   | -- flow control
     EdhBreak
   | EdhContinue
@@ -1523,7 +1526,7 @@ edhTypeOf EdhSink {} = SinkType
 edhTypeOf (EdhNamedValue _ v) = edhTypeOf v
 edhTypeOf EdhExpr {} = ExprType
 
-edhProcTypeOf :: EdhProc -> EdhTypeValue
+edhProcTypeOf :: EdhProcDefi -> EdhTypeValue
 edhProcTypeOf = \case
   EdhIntrOp {} -> IntrinsicType
   EdhOprtor _ _ _ !pd -> case edh'procedure'decl pd of
@@ -1642,7 +1645,7 @@ data EdhIndex
 
 mkHostProc ::
   Scope ->
-  (ProcDefi -> EdhProc) ->
+  (ProcDefi -> EdhProcDefi) ->
   AttrName ->
   (ArgsPack -> EdhHostProc, ArgsReceiver) ->
   STM EdhValue
@@ -1663,7 +1666,7 @@ mkHostProc !scope !vc !nm (!p, _args) = do
 
 mkSymbolicHostProc ::
   Scope ->
-  (ProcDefi -> EdhProc) ->
+  (ProcDefi -> EdhProcDefi) ->
   Symbol ->
   (ArgsPack -> EdhHostProc, ArgsReceiver) ->
   STM EdhValue

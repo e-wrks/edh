@@ -3134,7 +3134,7 @@ wrapHostProc !fn =
 mkHostProc' ::
   EdhCallable fn =>
   Scope ->
-  (ProcDefi -> EdhProc) ->
+  (ProcDefi -> EdhProcDefi) ->
   AttrName ->
   fn ->
   STM EdhValue
@@ -3143,7 +3143,7 @@ mkHostProc' !scope !vc !nm !fn = mkHostProc scope vc nm $ wrapHostProc fn
 mkSymbolicHostProc' ::
   EdhCallable fn =>
   Scope ->
-  (ProcDefi -> EdhProc) ->
+  (ProcDefi -> EdhProcDefi) ->
   Symbol ->
   fn ->
   STM EdhValue

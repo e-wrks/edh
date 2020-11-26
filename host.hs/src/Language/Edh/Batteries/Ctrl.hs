@@ -212,7 +212,7 @@ arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
             (show badArgs)
 
     -- to be a generator if there's a yield somewhere, or to be a vanilla method
-    procType :: ProcDefi -> EdhProc
+    procType :: ProcDefi -> EdhProcDefi
     procType = if containsYield rhExpr then EdhGnrtor else EdhMethod
 
     containsYield :: Expr -> Bool

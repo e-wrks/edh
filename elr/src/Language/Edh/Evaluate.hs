@@ -1291,7 +1291,7 @@ edhPrepareCall'
     where
       scope = contextScope $ edh'context etsCallPrep
 
-      callProc :: EdhProc -> Object -> Object -> (Scope -> Scope) -> STM ()
+      callProc :: EdhProcDefi -> Object -> Object -> (Scope -> Scope) -> STM ()
       callProc !callee !this !that !scopeMod = case callee of
         -- calling a method procedure
         EdhMethod !mth ->
@@ -1566,7 +1566,7 @@ edhPrepareForLoop
       loopCallGenr ::
         SrcRange ->
         ArgsPacker ->
-        EdhProc ->
+        EdhProcDefi ->
         Object ->
         Object ->
         (Scope -> Scope) ->
@@ -4147,7 +4147,7 @@ evalInfixSrc !opSym !lhExpr !rhExpr !exit !ets =
               -- exit with original thread state
               _ -> exitEdh ets exit resultDef
 
-    callProc :: Object -> Object -> EdhProc -> STM ()
+    callProc :: Object -> Object -> EdhProcDefi -> STM ()
     callProc !this !that !callable = case callable of
       -- calling an intrinsic operator
       EdhIntrOp _ _ (IntrinOpDefi _ _ iop'proc) ->

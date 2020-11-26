@@ -404,7 +404,7 @@ idProc !val !exit = exitEdhTx exit $ identityOf val
     idOfProcDefi :: ProcDefi -> EdhValue
     idOfProcDefi !def = idFromInt $ hashUnique $ edh'procedure'ident def
 
-    idOfProc :: EdhProc -> EdhValue
+    idOfProc :: EdhProcDefi -> EdhValue
     idOfProc (EdhIntrOp _ _ !def) =
       idFromInt $ hashUnique $ intrinsic'op'uniq def
     idOfProc (EdhOprtor _ _ _ !def) = idOfProcDefi def
@@ -806,7 +806,7 @@ procNameProc !p !exit !ets = case p of
   EdhBoundProc !callable _this _that _ -> cpName callable
   _ -> exitEdh ets exit nil
   where
-    cpName :: EdhProc -> STM ()
+    cpName :: EdhProcDefi -> STM ()
     cpName = \case
       EdhIntrOp _ _ (IntrinOpDefi _ !opSym _) ->
         exitEdh ets exit $ EdhString $ "(" <> opSym <> ")"
