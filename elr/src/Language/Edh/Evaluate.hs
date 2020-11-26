@@ -1578,6 +1578,7 @@ edhPrepareForLoop
             HostDecl !hp -> forLooper $ \ !exit !ets -> do
               -- a host procedure views the same scope entity as of the caller's
               -- call frame
+              {- HLINT ignore "Reduce duplication" -}
               let !looperCtx = edh'context ets
                   !looperFrame = edh'ctx'tip looperCtx
                   !callerFrame = frameMovePC looperFrame caller'span
@@ -2492,12 +2493,9 @@ evalStmt !stmt !exit = case stmt of
                           <> ": "
                           <> superStr
                in extendSupers supers
-          _ -> edhValueStr ets superVal $ \ !superStr ->
+          _ -> edhValueDesc ets superVal $ \ !badDesc ->
             throwEdh ets UsageError $
-              "can not extends a "
-                <> T.pack (edhTypeNameOf superVal)
-                <> ": "
-                <> superStr
+              "can not extend a " <> badDesc
   EffectStmt !effs !docCmt -> \ !ets ->
     runEdhTx
       ets
