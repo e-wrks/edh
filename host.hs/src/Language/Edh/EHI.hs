@@ -26,6 +26,7 @@ module Language.Edh.EHI
     SrcRange (..),
     SrcLoc (..),
     prettySrcLoc,
+    beginningSrcPos,
     zeroSrcRange,
     noSrcRange,
     prettySrcPos,

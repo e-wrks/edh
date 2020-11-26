@@ -50,8 +50,8 @@ data SrcPos = SrcPos
   }
   deriving (Eq, Show)
 
-defaultSrcPos :: SrcPos
-defaultSrcPos = SrcPos 0 0
+beginningSrcPos :: SrcPos
+beginningSrcPos = SrcPos 0 0
 
 -- | Source range
 -- in LSP convention, i.e. no document locator
@@ -64,7 +64,7 @@ data SrcRange = SrcRange
   deriving (Eq, Show)
 
 zeroSrcRange :: SrcRange
-zeroSrcRange = SrcRange defaultSrcPos defaultSrcPos
+zeroSrcRange = SrcRange beginningSrcPos beginningSrcPos
 
 noSrcRange :: SrcRange
 noSrcRange = SrcRange (SrcPos (-1) (-1)) (SrcPos (-1) (-1))
