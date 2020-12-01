@@ -144,6 +144,7 @@ module Language.Edh.EHI
     edhContIO,
 
     -- ** Reflective manipulation
+    DocComment,
     StmtSrc (..),
     Stmt (..),
     ExprSrc (..),
