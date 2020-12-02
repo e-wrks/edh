@@ -2523,12 +2523,15 @@ importInto !fsChk !tgtEnt !argsRcvr srcExpr@(ExprSrc x _) !exit = case x of
     EdhString !importSpec ->
       -- import from dynamic path
       fsChk importSpec $ importEdhModule' tgtEnt argsRcvr importSpec exit
-    EdhObject !fromObj ->
-      -- import from an object
-      importFromObject tgtEnt argsRcvr fromObj exit
-    EdhArgsPack !fromApk ->
-      -- import from an argument pack
-      importFromApk tgtEnt argsRcvr fromApk exit
+    EdhObject !fromObj -> \ !ets -> -- import from an object
+      runEdhTx ets $
+        importFromObject tgtEnt argsRcvr fromObj $
+          exitEdh ets exit $ EdhObject fromObj
+    EdhArgsPack !fromApk -> \ !ets -> -- import from an argument pack
+      runEdhTx ets $
+        importFromApk tgtEnt argsRcvr fromApk $
+          exitEdh ets exit $
+            EdhArgsPack fromApk
     _ ->
       -- todo support more sources of import ?
       throwEdhTx EvalError $
@@ -2541,9 +2544,9 @@ importFromApk ::
   EntityStore ->
   ArgsReceiver ->
   ArgsPack ->
-  EdhTxExit EdhValue ->
+  STM () ->
   EdhTx
-importFromApk !tgtEnt !argsRcvr !fromApk !exit !ets =
+importFromApk !tgtEnt !argsRcvr !fromApk !done !ets =
   recvEdhArgs ets ctx argsRcvr fromApk $ \ !em -> do
     if not (edh'ctx'eff'defining ctx)
       then -- normal import
@@ -2559,7 +2562,7 @@ importFromApk !tgtEnt !argsRcvr !fromApk !exit !ets =
           -- todo warn if of wrong type
           d <- EdhDict <$> createEdhDict impd
           iopdInsert (AttrByName edhExportsMagicName) d tgtEnt
-    exitEdh ets exit $ EdhArgsPack fromApk
+    done
   where
     !ctx = edh'context ets
 
@@ -2567,9 +2570,9 @@ importFromObject ::
   EntityStore ->
   ArgsReceiver ->
   Object ->
-  EdhTxExit EdhValue ->
+  STM () ->
   EdhTx
-importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
+importFromObject !tgtEnt !argsRcvr !fromObj !done !ets =
   iopdEmpty >>= \ !arts -> do
     !supers <- readTVar $ edh'obj'supers fromObj
     -- the reversed order ensures that artifacts from a nearer object overwrite
@@ -2577,8 +2580,7 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
     sequence_ $ reverse $ collect1 arts <$> fromObj : supers
     !arts' <- iopdSnapshot arts
     runEdhTx ets $
-      importFromApk tgtEnt argsRcvr (ArgsPack [] arts') $ \_ ->
-        exitEdhTx exit $ EdhObject fromObj
+      importFromApk tgtEnt argsRcvr (ArgsPack [] arts') done
   where
     moduClass = edh'module'class $ edh'prog'world $ edh'thread'prog ets
 
@@ -2647,7 +2649,7 @@ importFromObject !tgtEnt !argsRcvr !fromObj !exit !ets =
 -- Note the returned module object may still be under going initialization run
 importEdhModule :: Text -> EdhTxExit EdhValue -> EdhTx
 importEdhModule !importSpec !exit =
-  importEdhModule'' importSpec (\_ !loadExit -> loadExit) exit
+  importEdhModule'' importSpec (\_modu !done _ets -> done) exit
 
 -- | Import some Edh module into specified entity
 importEdhModule' ::
@@ -2660,12 +2662,10 @@ importEdhModule' !tgtEnt !argsRcvr !importSpec !exit !ets =
   runEdhTx ets $
     importEdhModule''
       importSpec
-      ( \ !modu !loadExit ->
-          -- an exception handler triggered during the import in post load action
-          -- may appear executed later than subsequent code of the import
-          -- statement, this may be surprising
-          runEdhTx ets $ importFromObject tgtEnt argsRcvr modu $ \_ _ -> loadExit
-      )
+      -- an exception handler triggered during the import in post load
+      -- action may appear executed later than subsequent code of the
+      -- import statement, this may be surprising
+      (\ !modu !done -> importFromObject tgtEnt argsRcvr modu done)
       exit
 
 -- | Import some Edh module and perform the `loadAct` after its fully loaded
@@ -2674,7 +2674,7 @@ importEdhModule' !tgtEnt !argsRcvr !importSpec !exit !ets =
 -- and the load action may be performed either synchronously or asynchronously
 importEdhModule'' ::
   Text ->
-  (Object -> STM () -> STM ()) ->
+  (Object -> STM () -> EdhTx) ->
   EdhTxExit EdhValue ->
   EdhTx
 importEdhModule'' !importSpec !loadAct !impExit !etsImp =
@@ -2685,16 +2685,21 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
         UsageError
         "you don't import file modules from within a transaction"
     else loadEdhModule $ \case
-      -- module already loaded, perform the load action synchronously, before
+      -- module already loaded, perform the load action immediately, before
       -- returning the module object
-      ModuLoaded !modu -> loadAct modu $ exitEdh etsImp impExit $ EdhObject modu
-      -- import error has been encountered, propagate the error synchronously
+      ModuLoaded !modu ->
+        runEdhTx etsImp $
+          loadAct modu $ exitEdh etsImp impExit $ EdhObject modu
+      -- import error has been encountered, propagate the error immediately
       ModuFailed !exvImport -> edhThrow etsImp exvImport
-      -- enqueue the load action to be performed asynchronously, then return the
-      -- module object that still under in-progress loading, this is crucial to
-      -- not get killed as deadlock in case of cyclic import
+      -- enqueue the load action to be performed later, then return the module
+      -- object that still under in-progress loading, this is crucial to not get
+      -- killed due to deadlock detected by GHC RTS, in case of cyclic import
       ModuLoading !loadScope !postQueue -> do
-        modifyTVar' postQueue ((\ !modu -> loadAct modu $ pure ()) :)
+        -- always perform the post load action on the importing thread,
+        -- we've checked above that there is no `ai` tx to break
+        modifyTVar' postQueue $
+          (:) $ \ !modu -> runEdhTx etsImp $ loadAct modu $ return ()
         exitEdh etsImp impExit $ EdhObject $ edh'scope'this loadScope
   where
     runModuleSource :: Scope -> FilePath -> EdhTxExit EdhValue -> EdhTx
