@@ -25,18 +25,18 @@ to create / update / delete attributes on the namespace object.
 Combined with the transactional nature of **Đ (Edh)**, though you can think of
 an **Đ (Edh)** attribute similar to a conventional variable, you should keep its transactional semantics in mind too, i.e. adding/deleting other attributes
 to/from its owing entity will render reading and writting of the attribute
-inconsistent per the **STM** transaction pending commit, thus retries. Whereas
+inconsistent per the **STM** transaction pending commit, thus retrie(s). Whereas
 it's technically implemented, when no attribute is added/deleted to/from its
-owning entity, concurrently to the reading/writing of an attribute, **STM** will
-only isolate concurrent readings/writings of the attribute, regardless of
+owning entity concurrently to the reading/writing of an attribute, **STM** will
+only isolate concurrent readings/writings of the very attribute, regardless of
 readings/writings of other attributes on the same entity.
 
 This design of **Đ (Edh)** is to favor dynamic evaluation of expressions
 anytime anywhere, by preserving the full context. But it leads to a CAVEAT,
-that it's much easier to leak resources bound to any lexical scope of a
-procedure you return as a 1st class value, which then get retained for a long
-time elsewhere.
+that it's much easier to leak resources bound to any scope in the hierarchy of
+the lexical context where a procedure is defined, in case you return the
+procedure as a 1st class value, for it to be retained elsewhere for a long time.
 
 You are adviced to more aggressively clear references to resource values once
-not need anymore, as the closure machinery is not doing this automatically for
+not needed anymore, as the closure machinery is not doing this automatically for
 you.
