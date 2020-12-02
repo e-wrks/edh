@@ -1936,12 +1936,13 @@ edhCatchTx !tryAct !exit !passOn !etsOuter =
 
 -- | Try an Edh action, pass its result to the @passOn@
 edhCatch ::
+  forall a.
   EdhThreadState ->
-  (EdhTxExit EdhValue -> EdhTx) -> -- tryAct
-  (EdhValue -> STM ()) -> -- normal/recovered exit
+  (EdhTxExit a -> EdhTx) -> -- tryAct
+  (a -> STM ()) -> -- normal/recovered exit
   ( EdhThreadState -> -- thread state of the thrower
     EdhValue -> -- thrown value or nil
-    (EdhValue -> STM ()) -> -- recover exit
+    (a -> STM ()) -> -- recover exit
     (EdhValue -> STM ()) -> -- rethrow exit
     STM ()
   ) ->
@@ -1957,7 +1958,7 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
       hndlr !etsThrower !exv !rethrow = do
         !throwerThId <- unsafeIOToSTM myThreadId
         let -- the catch block is providing a result value to recover
-            goRecover :: EdhValue -> STM ()
+            goRecover :: a -> STM ()
             goRecover !result =
               isRecoverable exv >>= \case
                 False -> goRethrow exv
