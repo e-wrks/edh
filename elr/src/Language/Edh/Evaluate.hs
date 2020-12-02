@@ -2726,7 +2726,7 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
         !srcName = T.pack moduFile
 
     loadEdhModule :: (ModuSlot -> STM ()) -> STM ()
-    loadEdhModule !exit = do
+    loadEdhModule !exit = do -- TODO takeTMVar to avoid duplicate efforts
       !moduMap <- readTMVar worldModules
       case Map.lookup normalizedSpec moduMap of
         -- attempt the import specification as direct module id first
