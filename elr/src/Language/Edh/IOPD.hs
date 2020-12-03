@@ -15,7 +15,9 @@ import qualified Data.HashMap.Strict as Map
 import Data.Hashable (Hashable (hashWithSalt))
 import Data.Vector (Vector)
 import qualified Data.Vector as V
+import Data.Vector.Mutable (IOVector)
 import qualified Data.Vector.Mutable as MV
+import GHC.Conc (unsafeIOToSTM)
 import Prelude
 
 -- | Mutable dict with insertion order preserved
@@ -29,9 +31,9 @@ data IOPD k v where
     { iopd'map :: {-# UNPACK #-} !(TVar (Map.HashMap k Int)),
       iopd'write'pos :: {-# UNPACK #-} !(TVar Int),
       iopd'num'holes :: {-# UNPACK #-} !(TVar Int),
-      -- TODO will the Vector possibly crash the program?
+      -- use IOVector concerning immutable Vector to crash the program
       -- https://mail.haskell.org/pipermail/glasgow-haskell-users/2020-August/026947.html
-      iopd'array :: {-# UNPACK #-} !(TVar (Vector (TVar (Maybe (k, v)))))
+      iopd'array :: {-# UNPACK #-} !(TVar (IOVector (TVar (Maybe (k, v)))))
     } ->
     IOPD k v
 
@@ -43,8 +45,7 @@ iopdClone (IOPD !mv !wpv !nhv !av) = do
   !av' <-
     newTVar =<< do
       !a <- readTVar av
-      let a' = runST $ V.thaw a >>= V.freeze
-      return a'
+      unsafeIOToSTM $ MV.clone a
   return $ IOPD mv' wpv' nhv' av'
 
 iopdTransform ::
@@ -55,17 +56,24 @@ iopdTransform ::
   STM (IOPD k v')
 iopdTransform !trans (IOPD !mv !wpv !nhv !av) = do
   !mv' <- newTVar =<< readTVar mv
-  !wpv' <- newTVar =<< readTVar wpv
+  !wp <- readTVar wpv
+  !wpv' <- newTVar wp
   !nhv' <- newTVar =<< readTVar nhv
   !av' <-
     newTVar =<< do
       !a <- readTVar av
-      !a' <- flip V.mapM a $ \ !ev ->
-        readTVar ev >>= \case
-          Nothing -> newTVar Nothing
-          Just (!k, !v) -> newTVar $ Just (k, trans v)
-      let a'' = runST $ V.thaw a' >>= V.freeze
-      return a''
+      !a' <- unsafeIOToSTM $ MV.unsafeNew (MV.length a)
+      let go !i | i < 0 = return a'
+          go !i = do
+            unsafeIOToSTM (MV.unsafeRead a i) >>= readTVar >>= \case
+              Nothing ->
+                newTVar Nothing
+                  >>= unsafeIOToSTM . MV.unsafeWrite a' i
+              Just (!k, !v) ->
+                newTVar (Just (k, trans v))
+                  >>= unsafeIOToSTM . MV.unsafeWrite a' i
+            go (i - 1)
+      go (wp - 1)
   return $ IOPD mv' wpv' nhv' av'
 
 iopdEmpty :: forall k v. (Eq k, Hashable k) => STM (IOPD k v)
@@ -73,7 +81,7 @@ iopdEmpty = do
   !mv <- newTVar Map.empty
   !wpv <- newTVar 0
   !nhv <- newTVar 0
-  !av <- newTVar V.empty
+  !av <- newTVar =<< unsafeIOToSTM (MV.unsafeNew 0)
   return $ IOPD mv wpv nhv av
 
 iopdNull :: forall k v. (Eq k, Hashable k) => IOPD k v -> STM Bool
@@ -88,33 +96,25 @@ iopdSize (IOPD _mv !wpv !nhv _av) = do
   !nh <- readTVar nhv
   return $ wp - nh
 
-iopdSingleton :: forall k v. (Eq k, Hashable k) => k -> v -> STM (IOPD k v)
-iopdSingleton !key !val = do
-  !mv <- newTVar $ Map.singleton key 0
-  !wpv <- newTVar 1
-  !nhv <- newTVar 0
-  !av <- newTVar . V.singleton =<< newTVar (Just (key, val))
-  return $ IOPD mv wpv nhv av
-
 iopdInsert :: forall k v. (Eq k, Hashable k) => k -> v -> IOPD k v -> STM ()
 iopdInsert !key !val d@(IOPD !mv !wpv _nhv !av) =
+  {- HLINT ignore "Redundant <$>" -}
   Map.lookup key <$> readTVar mv >>= \case
     Just !i ->
-      flip V.unsafeIndex i <$> readTVar av >>= flip writeTVar (Just (key, val))
+      readTVar av >>= unsafeIOToSTM . flip MV.unsafeRead i
+        >>= flip writeTVar (Just (key, val))
     Nothing -> do
       !entry <- newTVar $ Just (key, val)
       !wp0 <- readTVar wpv
       !a0 <- readTVar av
-      if wp0 >= V.length a0 then iopdReserve 7 d else pure ()
+      if wp0 >= MV.length a0 then iopdReserve 7 d else pure ()
       !wp <- readTVar wpv
       !a <- readTVar av
-      if wp >= V.length a
+      if wp >= MV.length a
         then error "bug: iopd reservation malfunctioned"
         else pure ()
-      flip seq (modifyTVar' mv $ Map.insert key wp) $
-        runST $ do
-          !a' <- V.unsafeThaw a
-          MV.unsafeWrite a' wp entry
+      unsafeIOToSTM $ MV.unsafeWrite a wp entry
+      modifyTVar' mv $ Map.insert key wp
       writeTVar wpv (wp + 1)
 
 iopdReserve :: forall k v. (Eq k, Hashable k) => Int -> IOPD k v -> STM ()
@@ -122,15 +122,14 @@ iopdReserve !moreCap (IOPD _mv !wpv _nhv !av) = do
   !wp <- readTVar wpv
   !a <- readTVar av
   let !needCap = wp + moreCap
-      !cap = V.length a
+      !cap = MV.length a
   if cap >= needCap
     then return ()
     else do
-      let !aNew = runST $ do
-            !a' <- MV.unsafeNew needCap
-            MV.unsafeCopy (MV.unsafeSlice 0 wp a')
-              =<< V.unsafeThaw (V.slice 0 wp a)
-            V.unsafeFreeze a'
+      !aNew <- unsafeIOToSTM $ do
+        !a' <- MV.unsafeNew needCap
+        MV.unsafeCopy (MV.unsafeSlice 0 wp a') (MV.unsafeSlice 0 wp a)
+        return a'
       writeTVar av aNew
 
 iopdUpdate :: forall k v. (Eq k, Hashable k) => [(k, v)] -> IOPD k v -> STM ()
@@ -151,7 +150,9 @@ iopdLookup !key (IOPD !mv _wpv _nhv !av) =
   Map.lookup key <$> readTVar mv >>= \case
     Nothing -> return Nothing
     Just !i ->
-      (fmap snd <$>) $ flip V.unsafeIndex i <$> readTVar av >>= readTVar
+      (fmap snd <$>) $
+        readTVar av >>= unsafeIOToSTM . flip MV.unsafeRead i
+          >>= readTVar
 
 iopdLookupDefault ::
   forall k v. (Eq k, Hashable k) => v -> k -> IOPD k v -> STM v
@@ -165,7 +166,8 @@ iopdDelete !key (IOPD !mv _wpv !nhv !av) =
   Map.lookup key <$> readTVar mv >>= \case
     Nothing -> return ()
     Just !i -> do
-      flip V.unsafeIndex i <$> readTVar av >>= flip writeTVar Nothing
+      readTVar av >>= unsafeIOToSTM . flip MV.unsafeRead i
+        >>= flip writeTVar Nothing
       modifyTVar' nhv (+ 1)
 
 iopdKeys :: forall k v. (Eq k, Hashable k) => IOPD k v -> STM [k]
@@ -174,7 +176,7 @@ iopdKeys (IOPD _mv !wpv _nhv !av) = do
   !a <- readTVar av
   let go !keys !i | i < 0 = return keys
       go !keys !i =
-        readTVar (V.unsafeIndex a i) >>= \case
+        unsafeIOToSTM (MV.unsafeRead a i) >>= readTVar >>= \case
           Nothing -> go keys (i - 1)
           Just (!key, _val) -> go (key : keys) (i - 1)
   go [] (wp - 1)
@@ -185,7 +187,7 @@ iopdValues (IOPD _mv !wpv _nhv !av) = do
   !a <- readTVar av
   let go !vals !i | i < 0 = return vals
       go !vals !i =
-        readTVar (V.unsafeIndex a i) >>= \case
+        unsafeIOToSTM (MV.unsafeRead a i) >>= readTVar >>= \case
           Nothing -> go vals (i - 1)
           Just (_key, !val) -> go (val : vals) (i - 1)
   go [] (wp - 1)
@@ -196,7 +198,7 @@ iopdToList (IOPD _mv !wpv _nhv !av) = do
   !a <- readTVar av
   let go !entries !i | i < 0 = return entries
       go !entries !i =
-        readTVar (V.unsafeIndex a i) >>= \case
+        unsafeIOToSTM (MV.unsafeRead a i) >>= readTVar >>= \case
           Nothing -> go entries (i - 1)
           Just !entry -> go (entry : entries) (i - 1)
   go [] (wp - 1)
@@ -208,7 +210,7 @@ iopdToReverseList (IOPD _mv !wpv _nhv !av) = do
   !a <- readTVar av
   let go !entries !i | i >= wp = return entries
       go !entries !i =
-        readTVar (V.unsafeIndex a i) >>= \case
+        unsafeIOToSTM (MV.unsafeRead a i) >>= readTVar >>= \case
           Nothing -> go entries (i + 1)
           Just !entry -> go (entry : entries) (i + 1)
   go [] 0
@@ -216,24 +218,22 @@ iopdToReverseList (IOPD _mv !wpv _nhv !av) = do
 iopdFromList :: forall k v. (Eq k, Hashable k) => [(k, v)] -> STM (IOPD k v)
 iopdFromList !entries = do
   !tves <- sequence $ [(key,) <$> newTVar (Just e) | e@(!key, _) <- entries]
-  let (mNew, wpNew, nhNew, aNew) = runST $ do
-        !a <- MV.unsafeNew cap
-        let go [] !m !wp !nh = (m,wp,nh,) <$> V.unsafeFreeze a
-            go ((!key, !ev) : rest) !m !wp !nh = case Map.lookup key m of
-              Nothing -> do
-                MV.unsafeWrite a wp ev
-                go rest (Map.insert key wp m) (wp + 1) nh
-              Just !i -> do
-                MV.unsafeWrite a i ev
-                go rest m wp nh
-        go tves Map.empty 0 0
+  (!mNew, !wpNew, !nhNew, !aNew) <- unsafeIOToSTM $ do
+    !a <- MV.unsafeNew $ length entries
+    let go [] !m !wp !nh = return (m, wp, nh, a)
+        go ((!key, !ev) : rest) !m !wp !nh = case Map.lookup key m of
+          Nothing -> do
+            MV.unsafeWrite a wp ev
+            go rest (Map.insert key wp m) (wp + 1) nh
+          Just !i -> do
+            MV.unsafeWrite a i ev
+            go rest m wp nh
+    go tves Map.empty 0 0
   !mv <- newTVar mNew
   !wpv <- newTVar wpNew
   !nhv <- newTVar nhNew
   !av <- newTVar aNew
   return $ IOPD mv wpv nhv av
-  where
-    cap = length entries
 
 iopdSnapshot ::
   forall k v. (Eq k, Hashable k) => IOPD k v -> STM (OrderedDict k v)
@@ -241,7 +241,10 @@ iopdSnapshot (IOPD !mv !wpv _nhv !av) = do
   !m <- readTVar mv
   !wp <- readTVar wpv
   !a <- readTVar av
-  !a' <- V.sequence (readTVar <$> V.slice 0 wp a)
+  !a' <-
+    V.mapM readTVar
+      =<< unsafeIOToSTM
+        (V.unsafeFreeze $ MV.unsafeSlice 0 wp a)
   return $ OrderedDict m a'
 
 -- | Immutable dict with insertion order preserved
