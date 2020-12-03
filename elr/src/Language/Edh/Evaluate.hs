@@ -2698,6 +2698,11 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
       ModuLoading !loadScope !postQueue -> do
         -- always perform the post load action on the importing thread,
         -- we've checked above that there is no `ai` tx to break
+        --
+        -- TODO if the initiating thread has terminated when the importee module
+        -- finished loading, the load action will get no chance to be executed,
+        -- rendering the importing intent fruitless, which is unexpected.
+        -- though this should rarely happen, the race condition seems real.
         modifyTVar' postQueue $
           (:) $ \ !modu -> runEdhTx etsImp $ loadAct modu $ return ()
         exitEdh etsImp impExit $ EdhObject $ edh'scope'this loadScope
@@ -2726,7 +2731,7 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
         !srcName = T.pack moduFile
 
     loadEdhModule :: (ModuSlot -> STM ()) -> STM ()
-    loadEdhModule !exit = do -- TODO takeTMVar to avoid duplicate efforts
+    loadEdhModule !exit = do
       !moduMap <- readTMVar worldModules
       case Map.lookup normalizedSpec moduMap of
         -- attempt the import specification as direct module id first
@@ -2786,12 +2791,10 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
                         let !loadedSlot = ModuLoaded modu
                         -- update the world wide map for this just loaded module
                         writeTVar moduSlotVar loadedSlot
-                        -- run its post load actions
-                        -- todo
-                        --  *) should catch and ensure every post action executed?
-                        --     those actions tend not to throw as just write to TBQs
-                        --  *) should eval post actions in same order as they are
-                        --     queued? i.e. reverse the intermediate list here
+                        -- trigger all post load actions
+                        -- note they should just enque a proper Edh task to
+                        -- their respective initiating thread's task queue, so
+                        -- here we care neither about exceptions nor orders
                         readTVar postLoads >>= sequence_ . (<*> pure modu)
                         -- return the loaded slot
                         exit loadedSlot
