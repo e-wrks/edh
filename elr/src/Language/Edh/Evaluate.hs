@@ -2540,38 +2540,43 @@ importInto !fsChk !tgtEnt !argsRcvr srcExpr@(ExprSrc x _) !exit = case x of
           <> ": "
           <> T.pack (show srcVal)
 
-importFromApk ::
-  EntityStore ->
-  ArgsReceiver ->
-  ArgsPack ->
-  STM () ->
-  EdhTx
+importFromApk :: EntityStore -> ArgsReceiver -> ArgsPack -> STM () -> EdhTx
 importFromApk !tgtEnt !argsRcvr !fromApk !done !ets =
   recvEdhArgs ets ctx argsRcvr fromApk $ \ !em -> do
-    if not (edh'ctx'eff'defining ctx)
-      then -- normal import
-        iopdUpdate (odToList em) tgtEnt
-      else -- importing effects
+    if edh'ctx'eff'defining ctx
+      then -- importing effects
         implantEffects tgtEnt (odToList em)
+      else -- normal import
+        iopdUpdate (odToList em) tgtEnt
     when (edh'ctx'exporting ctx) $ do
       -- do export what's imported
       let !impd = [(attrKeyValue k, v) | (k, v) <- odToList em]
       iopdLookup (AttrByName edhExportsMagicName) tgtEnt >>= \case
         Just (EdhDict (Dict _ !dsExp)) -> iopdUpdate impd dsExp
-        _ -> do
-          -- todo warn if of wrong type
-          d <- EdhDict <$> createEdhDict impd
+        Nothing -> do
+          !d <- EdhDict <$> createEdhDict impd
           iopdInsert (AttrByName edhExportsMagicName) d tgtEnt
+        Just !badVal -> edhValueDesc ets badVal $ \ !badDesc ->
+          let !world = edh'prog'world $ edh'thread'prog ets
+              !console = edh'world'console world
+              !logger = consoleLogger console
+           in logger
+                30 -- warning
+                (Just $ prettySrcLoc $ contextSrcLoc ctx)
+                ( ArgsPack
+                    [ EdhString $
+                        "bad artifact as "
+                          <> edhExportsMagicName
+                          <> ", it is a "
+                          <> badDesc
+                    ]
+                    odEmpty
+                )
     done
   where
     !ctx = edh'context ets
 
-importFromObject ::
-  EntityStore ->
-  ArgsReceiver ->
-  Object ->
-  STM () ->
-  EdhTx
+importFromObject :: EntityStore -> ArgsReceiver -> Object -> STM () -> EdhTx
 importFromObject !tgtEnt !argsRcvr !fromObj !done !ets =
   iopdEmpty >>= \ !arts -> do
     !supers <- readTVar $ edh'obj'supers fromObj
