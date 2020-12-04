@@ -54,6 +54,9 @@ export data URI(
 
   {##
    # parse a string as URI object
+   #
+   # TODO write some Haskell code to help decodeURI
+   # https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/decodeURI
    #}
   method parse( s ) {
     # init default values of fields
