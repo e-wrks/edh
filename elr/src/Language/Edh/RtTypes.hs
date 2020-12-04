@@ -1130,6 +1130,9 @@ false = EdhBool False
 data StmtSrc = StmtSrc !Stmt !SrcRange
   deriving (Eq, Show)
 
+stmtSrcSpan :: StmtSrc -> SrcRange
+stmtSrcSpan (StmtSrc _ !s'span) = s'span
+
 type DocComment = [Text]
 
 data Stmt
@@ -1338,6 +1341,9 @@ data DictKeyExpr
 
 data ExprSrc = ExprSrc !Expr !SrcRange
   deriving (Eq, Show)
+
+exprSrcSpan :: ExprSrc -> SrcRange
+exprSrcSpan (ExprSrc _ !x'span) = x'span
 
 exprSrcStart :: ExprSrc -> SrcPos
 exprSrcStart (ExprSrc _ (SrcRange !start _end)) = start

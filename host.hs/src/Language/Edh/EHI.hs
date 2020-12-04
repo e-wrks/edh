@@ -146,8 +146,10 @@ module Language.Edh.EHI
     -- ** Reflective manipulation
     DocComment,
     StmtSrc (..),
+    stmtSrcSpan,
     Stmt (..),
     ExprSrc (..),
+    exprSrcSpan,
     Expr (..),
     Prefix (..),
     Literal (..),
