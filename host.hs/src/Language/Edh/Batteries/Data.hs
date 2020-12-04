@@ -23,7 +23,7 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.UUID as UUID
 import Data.Unique (hashUnique, newUnique)
 import GHC.Conc (unsafeIOToSTM)
-import Language.Edh.Args (defaultArg, type (?:))
+import Language.Edh.Args
 import Language.Edh.Control
   ( EdhErrorTag (EvalError, UsageError),
     noSrcRange,
@@ -296,23 +296,14 @@ pairCtorProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   evalExprSrc rhExpr $ \ !rhVal ->
     exitEdhTx exit (EdhPair (edhDeCaseWrap lhVal) (edhDeCaseWrap rhVal))
 
--- | the Symbol(repr, *reprs) constructor
-symbolCtorProc :: ArgsPack -> EdhHostProc
-symbolCtorProc (ArgsPack !reprs !kwargs) !exit !ets =
-  if not $ odNull kwargs
-    then throwEdh ets UsageError "no kwargs should be passed to Symbol()"
-    else seqcontSTM (ctorSym <$> reprs) $ \case
-      [sym] -> exitEdh ets exit $ EdhSymbol sym
-      syms ->
-        exitEdh ets exit $ EdhArgsPack $ ArgsPack (EdhSymbol <$> syms) odEmpty
-  where
-    ctorSym :: EdhValue -> (Symbol -> STM ()) -> STM ()
-    ctorSym (EdhString !repr) !exit' = mkSymbol repr >>= exit'
-    ctorSym _ _ = throwEdh ets EvalError "invalid arg to Symbol()"
+-- | the Symbol(repr) constructor
+symbolCtorProc :: "repr" !: Text -> EdhHostProc
+symbolCtorProc (mandatoryArg -> !repr) !exit !ets =
+  mkSymbol repr >>= exitEdh ets exit . EdhSymbol
 
 -- todo support more forms of UUID ctor args
 uuidCtorProc :: Maybe Text -> EdhHostProc
-uuidCtorProc Nothing !exit !ets = EdhUUID <$> mkUUID >>= exitEdh ets exit
+uuidCtorProc Nothing !exit !ets = mkUUID >>= exitEdh ets exit . EdhUUID
 uuidCtorProc (Just !uuidTxt) !exit !ets = case UUID.fromText uuidTxt of
   Just !uuid -> exitEdh ets exit $ EdhUUID uuid
   _ -> throwEdh ets UsageError $ "invalid uuid string: " <> uuidTxt
