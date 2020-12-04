@@ -15,7 +15,7 @@ where
 
 import Control.Concurrent (forkIOWithUnmask)
 import Control.Concurrent.STM
-import Control.Exception (finally, mask_)
+import Control.Exception (bracket, finally, mask_)
 import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Text (Text)
@@ -52,7 +52,7 @@ import System.Console.Haskeline
     withInterrupt,
   )
 import System.Environment (lookupEnv)
-import System.IO (stderr)
+import System.IO (stderr, stdout)
 import Text.Megaparsec (Parsec, runParser, takeRest)
 import Text.Megaparsec.Char (space)
 import qualified Text.Megaparsec.Char.Lexer as L
@@ -81,6 +81,7 @@ defaultEdhConsoleSettings =
 defaultEdhConsole :: Settings IO -> IO EdhConsole
 defaultEdhConsole !inputSettings = do
   !envLogLevel <- lookupEnv "EDH_LOG_LEVEL"
+  !outputTk <- newTMVarIO ()
   !logIdle <- newEmptyTMVarIO
   !outIdle <- newEmptyTMVarIO
   !ioQ <- newTBQueueIO 100
@@ -99,17 +100,24 @@ defaultEdhConsole !inputSettings = do
       flushLogs = atomically $ readTMVar logIdle
       logPrinter :: IO ()
       logPrinter = do
-        lr <-
+        !lr <-
           atomically (tryReadTBQueue logQueue) >>= \case
             Just !lr -> do
+              -- make sure log is marked busy
               void $ atomically $ tryTakeTMVar logIdle
               return lr
             Nothing -> do
+              -- mark log idle
               void $ atomically $ tryPutTMVar logIdle ()
+              -- block wait next log request
               !lr <- atomically $ readTBQueue logQueue
+              -- make sure log is marked busy
               void $ atomically $ tryTakeTMVar logIdle
               return lr
-        TIO.hPutStr stderr lr
+        bracket
+          (atomically $ takeTMVar outputTk)
+          (atomically . putTMVar outputTk)
+          $ \() -> TIO.hPutStr stderr lr
         logPrinter
       logger :: EdhLogger
       logger !level !srcLoc !logArgs = do
@@ -141,23 +149,34 @@ defaultEdhConsole !inputSettings = do
                 _ -> "😥 "
       ioLoop :: InputT IO ()
       ioLoop = do
-        ior <-
+        !ior <-
           liftIO $
             atomically (tryReadTBQueue ioQ) >>= \case
               Just !ior -> do
+                -- make sure out is marked busy
                 void $ atomically $ tryTakeTMVar outIdle
                 return ior
               Nothing -> do
+                -- mark out idle
                 void $ atomically $ tryPutTMVar outIdle ()
+                -- block wait next i/o request
                 !ior <- atomically $ readTBQueue ioQ
+                -- make sure out is marked busy
                 void $ atomically $ tryTakeTMVar outIdle
                 return ior
         case ior of
           ConsoleShutdown -> return () -- gracefully stop the io loop
           ConsoleOut !txt -> do
-            outputStr $ T.unpack txt
+            liftIO $
+              bracket
+                (atomically $ takeTMVar outputTk)
+                (atomically . putTMVar outputTk)
+                $ \() -> TIO.hPutStr stdout txt
             ioLoop
-          ConsoleIn !cmdIn !ps1 !ps2 ->
+          ConsoleIn !cmdIn !ps1 !ps2 -> do
+            -- mark out idle before starting input, or flush request will hang
+            -- up for user input
+            liftIO $ atomically $ void $ tryPutTMVar outIdle ()
             readInput ps1 ps2 [] >>= \case
               Nothing ->
                 -- reached EOF (end-of-feed) before clean shutdown
@@ -270,6 +289,7 @@ defaultEdhConsole !inputSettings = do
       forkIOWithUnmask $ \unmask ->
         finally (unmask logPrinter) $
           atomically $ do
+            void $ tryPutTMVar outputTk ()
             void $ tryPutTMVar logIdle ()
             void $ tryPutTMVar outIdle ()
   return
