@@ -10,10 +10,9 @@ First of all, _variable_ as most computer programming languages have defined it,
 
 As a purposeful imperative language, **Đ (Edh)** tries to avoid such misconceptions, so we talk about **procedure**s instead of **function**s (as in **C** semantics), and **attribute**s of **entitie**s (complying to assignable semantics) instead of **variable**s.
 
-There are 2 general types of scopes in **Đ (Edh)**:
+There are 3 general types of scopes in **Đ (Edh)**:
 
 - Object Scope, be of an object, which possibly being:
-  - a module object
   - a namespace object
   - a vanilla object
 - Procedure Scope, per each call against a procedure, which possibly being:
@@ -23,6 +22,9 @@ There are 2 general types of scopes in **Đ (Edh)**:
   - a generator procedure
   - a producer procedure
   - an arrow procedure (vanilla/generator/producer)
+- Module Scope, be of a module object, it is:
+  - similar to a procedure scope when the module is being loaded, i.e. during execution of module source file
+  - similar to an object scope after the module is loaded
 
 All **Đ (Edh)** scopes are backed by **entitie**s, each **entity** has its own dynamic set of **attribute**s, updated at runtime. An **Đ (Edh)** procedure encloses all of its lexical scopes.
 
