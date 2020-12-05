@@ -161,6 +161,7 @@ module Language.Edh.EHI
     AttrRef (..),
     AttrAddrSrc (..),
     AttrAddr (..),
+    attrAddrStr,
     ArgsReceiver (..),
     ArgReceiver (..),
     ArgsPacker,
