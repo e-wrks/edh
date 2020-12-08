@@ -269,6 +269,8 @@ module Language.Edh.EHI
     PackedArgs (..),
     module Language.Edh.Args,
     module Language.Edh.InterOp,
+    methodArrowArgsReceiver,
+    producerArrowArgsReceiver,
 
     -- * indexing and slicing support
     EdhIndex (..),

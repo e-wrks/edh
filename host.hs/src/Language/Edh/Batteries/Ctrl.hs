@@ -3,26 +3,20 @@ module Language.Edh.Batteries.Ctrl where
 -- import           Debug.Trace
 -- import           System.IO.Unsafe
 
+import Control.Concurrent
+import Control.Concurrent.STM
 import Control.Exception
   ( Exception (fromException, toException),
     SomeException,
   )
 import Data.Dynamic (fromDynamic)
 import Data.Maybe (catMaybes)
+import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Unique (newUnique)
-import GHC.Conc
-  ( STM,
-    myThreadId,
-    newTVar,
-    readTVar,
-    unsafeIOToSTM,
-  )
+import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Control
 import Language.Edh.CoreLang
-  ( lookupEdhObjAttr,
-    resolveEdhInstance,
-  )
 import Language.Edh.Evaluate
 import Language.Edh.IOPD (iopdUpdate, odEmpty, odNull)
 import Language.Edh.RtTypes
@@ -152,64 +146,39 @@ finallyProc !tryExpr !finallyExpr !exit !etsOuter = do
 -- similar to fat arrow in JavaScript
 arrowProc :: EdhIntrinsicOp
 arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
-  pkr2rcvr (deParen'1 lhExpr) $ \ !argsRcvr -> do
-    !idProc <- unsafeIOToSTM newUnique
-    let !pd =
-          ProcDecl
-            ( AttrAddrSrc
-                (NamedAttr arrowName)
-                (SrcRange (src'end lhSpan) (src'start rhSpan))
-            )
-            argsRcvr
-            (StmtSrc (ExprStmt rhExpr Nothing) rhSpan)
-            (edh'exe'src'loc tip)
-              { src'range = SrcRange (src'start lhSpan) (src'end rhSpan)
-              }
-        !mth =
-          procType
-            ProcDefi
-              { edh'procedure'ident = idProc,
-                edh'procedure'name = AttrByName arrowName,
-                edh'procedure'lexi = scope,
-                edh'procedure'doc = Nothing,
-                edh'procedure'decl = pd
-              }
-        !boundMth =
-          EdhBoundProc mth (edh'scope'this scope) (edh'scope'that scope) Nothing
-    exitEdh ets exit boundMth
+  methodArrowArgsReceiver (deParen'1 lhExpr) $ \case
+    Left !err -> throwEdh ets UsageError err
+    Right !argsRcvr -> do
+      !idProc <- unsafeIOToSTM newUnique
+      let !pd =
+            ProcDecl
+              ( AttrAddrSrc
+                  (NamedAttr arrowName)
+                  (SrcRange (src'end lhSpan) (src'start rhSpan))
+              )
+              argsRcvr
+              (StmtSrc (ExprStmt rhExpr Nothing) rhSpan)
+              (edh'exe'src'loc tip)
+                { src'range = SrcRange (src'start lhSpan) (src'end rhSpan)
+                }
+          !mth =
+            procType
+              ProcDefi
+                { edh'procedure'ident = idProc,
+                  edh'procedure'name = AttrByName arrowName,
+                  edh'procedure'lexi = scope,
+                  edh'procedure'doc = Nothing,
+                  edh'procedure'decl = pd
+                }
+          !boundMth =
+            EdhBoundProc mth (edh'scope'this scope) (edh'scope'that scope) Nothing
+      exitEdh ets exit boundMth
   where
+    {- HLINT ignore "Reduce duplication" -}
     !ctx = edh'context ets
     !tip = edh'ctx'tip ctx
     !scope = edh'frame'scope tip
     !arrowName = "<arrow>"
-    pkr2rcvr :: Expr -> (ArgsReceiver -> STM ()) -> STM ()
-    pkr2rcvr (AttrExpr (DirectRef !argAttr)) !rcvrExit =
-      rcvrExit $ SingleReceiver $ RecvArg argAttr Nothing Nothing
-    pkr2rcvr (ArgsPackExpr !argSndrs) !rcvrExit = cnvrt argSndrs []
-      where
-        cnvrt :: [ArgSender] -> [ArgReceiver] -> STM ()
-        cnvrt [] !rcvrs = rcvrExit $ PackReceiver $ reverse rcvrs
-        cnvrt (sndr : rest) !rcvrs = case sndr of
-          UnpackPosArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-            cnvrt rest (RecvRestPosArgs argRef : rcvrs)
-          UnpackKwArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-            cnvrt rest (RecvRestKwArgs argRef : rcvrs)
-          UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-            cnvrt rest (RecvRestPkArgs argRef : rcvrs)
-          SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-            cnvrt rest (RecvArg argRef Nothing Nothing : rcvrs)
-          SendKwArg !argRef !defExpr ->
-            cnvrt rest (RecvArg argRef Nothing (Just defExpr) : rcvrs)
-          !badSndr ->
-            throwEdh ets UsageError $
-              "invalid argument expr for arrow: "
-                <> T.pack
-                  (show badSndr)
-    pkr2rcvr !badArgs _ =
-      throwEdh ets UsageError $
-        "invalid argument expr for arrow: "
-          <> T.pack
-            (show badArgs)
 
     -- to be a generator if there's a yield somewhere, or to be a vanilla method
     procType :: ProcDefi -> EdhProcDefi
@@ -245,85 +214,110 @@ arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
       ExprStmt !x _docCmt -> containsYield x || blockContainsYield rest
       _ -> blockContainsYield rest
 
+methodArrowArgsReceiver :: Expr -> (Either Text ArgsReceiver -> STM ()) -> STM ()
+methodArrowArgsReceiver (AttrExpr (DirectRef !argAttr)) !exit =
+  exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing
+methodArrowArgsReceiver (ArgsPackExpr !argSndrs) !exit = cnvrt argSndrs []
+  where
+    cnvrt :: [ArgSender] -> [ArgReceiver] -> STM ()
+    cnvrt [] !rcvrs = exit $ Right $ PackReceiver $ reverse rcvrs
+    cnvrt (sndr : rest) !rcvrs = case sndr of
+      UnpackPosArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt rest (RecvRestPosArgs argRef : rcvrs)
+      UnpackKwArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt rest (RecvRestKwArgs argRef : rcvrs)
+      UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt rest (RecvRestPkArgs argRef : rcvrs)
+      SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt rest (RecvArg argRef Nothing Nothing : rcvrs)
+      SendKwArg !argRef !defExpr ->
+        cnvrt rest (RecvArg argRef Nothing (Just defExpr) : rcvrs)
+      !badSndr ->
+        exit $
+          Left $
+            "invalid argument expr for arrow: " <> T.pack (show badSndr)
+methodArrowArgsReceiver !badArgs !exit =
+  exit $ Left $ "invalid argument expr for arrow: " <> T.pack (show badArgs)
+
 -- | operator (=>*) - producing arrow, define an anonymous, bound producer
 prodArrowProc :: EdhIntrinsicOp
 prodArrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
-  pkr2rcvr (deParen'1 lhExpr) $ \ !argsRcvr -> do
-    !idProc <- unsafeIOToSTM newUnique
-    let !pd =
-          ProcDecl
-            ( AttrAddrSrc
-                (NamedAttr arrowName)
-                (SrcRange (src'end lhSpan) (src'start rhSpan))
-            )
-            argsRcvr
-            (StmtSrc (ExprStmt rhExpr Nothing) rhSpan)
-            (edh'exe'src'loc tip)
-              { src'range = SrcRange (src'start lhSpan) (src'end rhSpan)
-              }
-        !mth =
-          EdhPrducr
-            ProcDefi
-              { edh'procedure'ident = idProc,
-                edh'procedure'name = AttrByName arrowName,
-                edh'procedure'lexi = scope,
-                edh'procedure'doc = Nothing,
-                edh'procedure'decl = pd
-              }
-        !boundMth =
-          EdhBoundProc
-            mth
-            (edh'scope'this scope)
-            (edh'scope'that scope)
-            Nothing
-    exitEdh ets exit boundMth
+  producerArrowArgsReceiver (deParen'1 lhExpr) $ \case
+    Left !err -> throwEdh ets UsageError err
+    Right !argsRcvr -> do
+      !idProc <- unsafeIOToSTM newUnique
+      let !pd =
+            ProcDecl
+              ( AttrAddrSrc
+                  (NamedAttr arrowName)
+                  (SrcRange (src'end lhSpan) (src'start rhSpan))
+              )
+              argsRcvr
+              (StmtSrc (ExprStmt rhExpr Nothing) rhSpan)
+              (edh'exe'src'loc tip)
+                { src'range = SrcRange (src'start lhSpan) (src'end rhSpan)
+                }
+          !mth =
+            EdhPrducr
+              ProcDefi
+                { edh'procedure'ident = idProc,
+                  edh'procedure'name = AttrByName arrowName,
+                  edh'procedure'lexi = scope,
+                  edh'procedure'doc = Nothing,
+                  edh'procedure'decl = pd
+                }
+          !boundMth =
+            EdhBoundProc
+              mth
+              (edh'scope'this scope)
+              (edh'scope'that scope)
+              Nothing
+      exitEdh ets exit boundMth
   where
     !ctx = edh'context ets
     !tip = edh'ctx'tip ctx
     !scope = edh'frame'scope tip
     !arrowName = "<producer>"
-    pkr2rcvr :: Expr -> (ArgsReceiver -> STM ()) -> STM ()
-    pkr2rcvr (AttrExpr (DirectRef !argAttr)) !rcvrExit =
-      rcvrExit $ SingleReceiver $ RecvArg argAttr Nothing Nothing
-    pkr2rcvr (ArgsPackExpr !argSndrs) !rcvrExit = cnvrt False argSndrs []
-      where
-        cnvrt :: Bool -> [ArgSender] -> [ArgReceiver] -> STM ()
-        cnvrt !outletPrsnt [] !rcvrs =
-          if outletPrsnt
-            then rcvrExit $ PackReceiver $ reverse rcvrs
-            else
-              rcvrExit $
-                PackReceiver $
-                  ( RecvArg
-                      (AttrAddrSrc (NamedAttr "outlet") noSrcRange)
-                      (Just (DirectRef (AttrAddrSrc (NamedAttr "_") noSrcRange)))
-                      (Just (ExprSrc (LitExpr SinkCtor) noSrcRange))
-                  ) :
-                  reverse rcvrs
-        cnvrt !outletPrsnt (sndr : rest) !rcvrs = case sndr of
-          UnpackPosArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-            cnvrt outletPrsnt rest (RecvRestPosArgs argRef : rcvrs)
-          UnpackKwArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-            cnvrt outletPrsnt rest (RecvRestKwArgs argRef : rcvrs)
-          UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-            cnvrt outletPrsnt rest (RecvRestPkArgs argRef : rcvrs)
-          SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-            cnvrt outletPrsnt rest (RecvArg argRef Nothing Nothing : rcvrs)
-          SendKwArg argRef@(AttrAddrSrc !argAttr _) !defExpr ->
-            cnvrt
-              (outletPrsnt || argAttr == NamedAttr "outlet")
-              rest
-              (RecvArg argRef Nothing (Just defExpr) : rcvrs)
-          !badSndr ->
-            throwEdh ets UsageError $
-              "invalid argument expr for arrow: "
-                <> T.pack
-                  (show badSndr)
-    pkr2rcvr !badArgs _ =
-      throwEdh ets UsageError $
-        "invalid argument expr for arrow: "
-          <> T.pack
-            (show badArgs)
+
+producerArrowArgsReceiver :: Expr -> (Either Text ArgsReceiver -> STM ()) -> STM ()
+producerArrowArgsReceiver (AttrExpr (DirectRef !argAttr)) !exit =
+  exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing
+producerArrowArgsReceiver (ArgsPackExpr !argSndrs) !exit = cnvrt False argSndrs []
+  where
+    cnvrt :: Bool -> [ArgSender] -> [ArgReceiver] -> STM ()
+    cnvrt !outletPrsnt [] !rcvrs =
+      if outletPrsnt
+        then exit $ Right $ PackReceiver $ reverse rcvrs
+        else
+          exit $
+            Right $
+              PackReceiver $
+                reverse
+                  $! RecvArg
+                    (AttrAddrSrc (NamedAttr "outlet") noSrcRange)
+                    (Just (DirectRef (AttrAddrSrc (NamedAttr "_") noSrcRange)))
+                    (Just (ExprSrc (LitExpr SinkCtor) noSrcRange)) :
+                rcvrs
+    cnvrt !outletPrsnt (sndr : rest) !rcvrs = case sndr of
+      UnpackPosArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt outletPrsnt rest (RecvRestPosArgs argRef : rcvrs)
+      UnpackKwArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt outletPrsnt rest (RecvRestKwArgs argRef : rcvrs)
+      UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt outletPrsnt rest (RecvRestPkArgs argRef : rcvrs)
+      SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        cnvrt outletPrsnt rest (RecvArg argRef Nothing Nothing : rcvrs)
+      SendKwArg argRef@(AttrAddrSrc !argAttr _) !defExpr ->
+        cnvrt
+          (outletPrsnt || argAttr == NamedAttr "outlet")
+          rest
+          (RecvArg argRef Nothing (Just defExpr) : rcvrs)
+      !badSndr ->
+        exit $
+          Left $
+            "invalid argument expr for arrow: " <> T.pack (show badSndr)
+producerArrowArgsReceiver !badArgs !exit =
+  exit $ Left $ "invalid argument expr for arrow: " <> T.pack (show badArgs)
 
 -- | operator (->) - the brancher, if its left-hand matches, early stop its
 -- enclosing code block (commonly a case-of block, but other blocks as well),
