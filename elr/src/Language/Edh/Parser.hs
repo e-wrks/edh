@@ -136,7 +136,7 @@ isDigit = flip elem ['0' .. '9']
 isOperatorChar :: Char -> Bool
 isOperatorChar c =
   if c < toEnum 128
-    then elem c ("=~!@#$%^&|:<>?*+-/" :: [Char])
+    then c `elem` ("=~!@#$%^&|:<>?*+-/" :: [Char])
     else case Char.generalCategory c of
       Char.MathSymbol -> True
       Char.CurrencySymbol -> True
@@ -411,6 +411,7 @@ parseDataExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseDataExpr !si = do
   !startPos <- getSourcePos
   void $ keyword "data"
+  {- HLINT ignore "Reduce duplication" -}
   !pn <- parseAttrAddrSrc
   !ar <- parseArgsReceiver
   (!body, !si') <- parseProcBody si
@@ -638,6 +639,7 @@ parseIfExpr !si = do
   void $ keyword "then"
   (!cseq, !si2) <- parseStmt si'
   (!alt, !si3) <-
+    {- HLINT ignore "Use first" -}
     fmap (maybe (Nothing, si2) (\(alt, si3) -> (Just alt, si3))) $
       optional $ do
         void $ keyword "else"
@@ -707,8 +709,7 @@ parseStringLit = lexeme $ do
   T.pack <$> manyTill L.charLiteral (string delim)
 
 parseBoolLit :: Parser Bool
-parseBoolLit =
-  (keyword "true" *> return True) <|> (keyword "false" *> return False)
+parseBoolLit = (keyword "true" $> True) <|> (keyword "false" $> False)
 
 parseDecLit :: Parser Decimal
 parseDecLit = lexeme $ do
