@@ -158,6 +158,7 @@ module Language.Edh.EHI
     OpFixity (..),
     Precedence,
     OpDeclLoc,
+    DictKeyExpr (..),
     AttrRef (..),
     AttrAddrSrc (..),
     AttrAddr (..),
