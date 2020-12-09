@@ -151,6 +151,7 @@ module Language.Edh.EHI
     ExprSrc (..),
     exprSrcSpan,
     Expr (..),
+    SourceSeg (..),
     deExpr,
     deExpr',
     deExpr1,
