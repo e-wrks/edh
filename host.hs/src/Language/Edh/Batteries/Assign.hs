@@ -63,7 +63,7 @@ assignProc (ExprSrc !lhe _) !rhExpr !exit !ets =
                   "malformed magic method ([=]) on "
                     <> T.pack (show obj)
                     <> " - "
-                    <> T.pack (edhTypeNameOf badIndexer)
+                    <> edhTypeNameOf badIndexer
                     <> ": "
                     <> T.pack (show badIndexer)
           _ -> exitEdh ets exit edhNA
@@ -132,7 +132,7 @@ assignWithOpProc !withOpSym lhExpr@(ExprSrc !lhe _) !rhExpr !exit !ets =
                         <> ") on "
                         <> T.pack (show obj)
                         <> " - "
-                        <> T.pack (edhTypeNameOf badIndexer)
+                        <> edhTypeNameOf badIndexer
                         <> ": "
                         <> T.pack (show badIndexer)
           _ -> exitEdh ets exit edhNA
@@ -167,7 +167,7 @@ assignWithOpProc !withOpSym lhExpr@(ExprSrc !lhe _) !rhExpr !exit !ets =
                     <> ") on "
                     <> T.pack (show rhObj)
                     <> " - "
-                    <> T.pack (edhTypeNameOf badIndexer)
+                    <> edhTypeNameOf badIndexer
                     <> ": "
                     <> T.pack (show badIndexer)
 
@@ -202,7 +202,7 @@ assignWithOpProc !withOpSym lhExpr@(ExprSrc !lhe _) !rhExpr !exit !ets =
                   <> ") on "
                   <> T.pack (show lhObj)
                   <> " - "
-                  <> T.pack (edhTypeNameOf badIndexer)
+                  <> edhTypeNameOf badIndexer
                   <> ": "
                   <> T.pack (show badIndexer)
         _ -> case edhUltimate rhVal of

@@ -58,7 +58,7 @@ blobProc !val !kwargs !exit !ets = case edhUltimate val of
       (_, !badMagic) ->
         throwEdh ets UsageError $
           "bad magic __blob__ of "
-            <> T.pack (edhTypeNameOf badMagic)
+            <> edhTypeNameOf badMagic
             <> " on class "
             <> objClassName o
   _ -> naExit
@@ -106,7 +106,7 @@ propertyProc !getterVal !setterVal !exit !ets =
       !badVal ->
         throwEdh ets UsageError $
           "need a method procedure to define a property, not a: "
-            <> T.pack (edhTypeNameOf badVal)
+            <> edhTypeNameOf badVal
     withSetter :: (Maybe ProcDefi -> STM ()) -> STM ()
     withSetter setterExit = case setterVal of
       Nothing -> setterExit Nothing
@@ -116,7 +116,7 @@ propertyProc !getterVal !setterVal !exit !ets =
       Just !badVal ->
         throwEdh ets UsageError $
           "need a method procedure to define a property, not a: "
-            <> T.pack (edhTypeNameOf badVal)
+            <> edhTypeNameOf badVal
 
 setterProc :: EdhValue -> EdhHostProc
 setterProc !setterVal !exit !ets = case edh'obj'store caller'this of
@@ -509,7 +509,7 @@ capProc !v !kwargs !exit !ets = case edhUltimate v of
       (_, !badMagic) ->
         throwEdh ets UsageError $
           "bad magic __cap__ of "
-            <> T.pack (edhTypeNameOf badMagic)
+            <> edhTypeNameOf badMagic
             <> " on class "
             <> objClassName o
   _ -> exitEdh ets exit $ EdhDecimal D.nan
@@ -543,7 +543,7 @@ growProc !v !newCap !kwargs !exit !ets = case edhUltimate v of
       (_, !badMagic) ->
         throwEdh ets UsageError $
           "bad magic __grow__ of "
-            <> T.pack (edhTypeNameOf badMagic)
+            <> edhTypeNameOf badMagic
             <> " on class "
             <> objClassName o
   !badVal -> edhValueDesc ets badVal $ \ !badDesc ->
@@ -561,7 +561,7 @@ lenProc !v !kwargs !exit !ets = case edhUltimate v of
       (_, !badMagic) ->
         throwEdh ets UsageError $
           "bad magic __len__ of "
-            <> T.pack (edhTypeNameOf badMagic)
+            <> edhTypeNameOf badMagic
             <> " on class "
             <> objClassName o
   EdhList (List _ !lv) ->
@@ -614,14 +614,12 @@ markProc !v !newLen !kwargs !exit !ets = case edhUltimate v of
       (_, !badMagic) ->
         throwEdh ets UsageError $
           "bad magic __mark__ of "
-            <> T.pack (edhTypeNameOf badMagic)
+            <> edhTypeNameOf badMagic
             <> " on class "
             <> objClassName o
   !badVal ->
     throwEdh ets UsageError $
-      "mark() not supported by a value of "
-        <> T.pack
-          (edhTypeNameOf badVal)
+      "mark() not supported by a value of " <> edhTypeNameOf badVal
 
 showProc :: EdhValue -> RestKwArgs -> EdhHostProc
 showProc (EdhArgsPack (ArgsPack [!v] !kwargs')) !kwargs !exit !ets
@@ -661,11 +659,11 @@ showProc !v !kwargs !exit !ets = case v of
       (_, !badMagic) ->
         throwEdh ets UsageError $
           "bad magic __show__ of "
-            <> T.pack (edhTypeNameOf badMagic)
+            <> edhTypeNameOf badMagic
             <> " on class "
             <> objClassName o
     showWithNoMagic = edhValueStr ets v $ \ !s ->
-      exitEdh ets exit $ EdhString $ T.pack (edhTypeNameOf v) <> ": " <> s
+      exitEdh ets exit $ EdhString $ edhTypeNameOf v <> ": " <> s
 
 descProc :: EdhValue -> RestKwArgs -> EdhHostProc
 descProc (EdhArgsPack (ArgsPack [!v] !kwargs')) !kwargs !exit !ets
@@ -735,7 +733,7 @@ descProc !v !kwargs !exit !ets = case edhUltimate v of
       (_, !badMagic) ->
         throwEdh ets UsageError $
           "bad magic __desc__ of "
-            <> T.pack (edhTypeNameOf badMagic)
+            <> edhTypeNameOf badMagic
             <> " on class "
             <> objClassName o
 
@@ -968,7 +966,7 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
       _ ->
         throwEdh ets EvalError $
           "don't know how to comprehend into a "
-            <> T.pack (edhTypeNameOf lhVal)
+            <> edhTypeNameOf lhVal
             <> ": "
             <> T.pack (show lhVal)
   _ -> evalExprSrc lhExpr $ \ !lhVal -> evalExprSrc rhExpr $ \ !rhVal !ets ->

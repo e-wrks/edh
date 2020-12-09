@@ -217,7 +217,7 @@ createVectorClass !clsOuterScope =
                     !badList ->
                       throwEdh ets UsageError $
                         "not assignable to indexed vector: "
-                          <> T.pack (edhTypeNameOf badList)
+                          <> edhTypeNameOf badList
                   assignWithList :: Int -> [EdhValue] -> IO ()
                   assignWithList _ [] = return ()
                   assignWithList !n (x : xs) = do

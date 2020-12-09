@@ -862,6 +862,18 @@ callableDoc = \case
     Nothing -> edh'procedure'doc getter
     Just setter -> edh'procedure'doc setter
 
+callableLoc :: EdhProcDefi -> SrcLoc
+callableLoc = \case
+  EdhIntrOp _fixity _preced _ -> SrcLoc (SrcDoc "<host-code>") noSrcRange
+  EdhOprtor _fixity _preced _ !pd -> procedureLoc' pd
+  EdhMethod !pd -> procedureLoc' pd
+  EdhGnrtor !pd -> procedureLoc' pd
+  EdhIntrpr !pd -> procedureLoc' pd
+  EdhPrducr !pd -> procedureLoc' pd
+  EdhDescriptor !getter !maybeSetter -> case maybeSetter of
+    Nothing -> procedureLoc' getter
+    Just setter -> procedureLoc' setter
+
 -- Atop Haskell, most types in Edh the surface language, are for
 -- immutable values, besides dict and list, the only other mutable
 -- data structure in Edh, is 'EntityStore', an **entity** is a set
@@ -1290,6 +1302,13 @@ instance Show ProcDecl where
   show (ProcDecl (AttrAddrSrc !addr _) _ _ _) =
     "<edh-proc " <> T.unpack (attrAddrStr addr) <> ">"
 
+procedureLoc :: ProcDecl -> SrcLoc
+procedureLoc HostDecl {} = SrcLoc (SrcDoc "<host-code>") noSrcRange
+procedureLoc pd@ProcDecl {} = edh'procedure'loc pd
+
+procedureLoc' :: ProcDefi -> SrcLoc
+procedureLoc' = procedureLoc . edh'procedure'decl
+
 -- | Procedure definition, result of execution of the declaration
 data ProcDefi = ProcDefi
   { edh'procedure'ident :: !Unique,
@@ -1489,10 +1508,10 @@ data EdhTypeValue
 instance Hashable EdhTypeValue where
   hashWithSalt s t = hashWithSalt s $ fromEnum t
 
-edhTypeNameOf :: EdhValue -> String
+edhTypeNameOf :: EdhValue -> Text
 edhTypeNameOf EdhNil = "nil"
-edhTypeNameOf (EdhNamedValue _n v) = edhTypeNameOf v
-edhTypeNameOf v = show $ edhTypeOf v
+edhTypeNameOf (EdhNamedValue n v) = n <> " := " <> edhTypeNameOf v
+edhTypeNameOf v = T.pack $ show $ edhTypeOf v
 
 -- | Get the type tag of an value
 --

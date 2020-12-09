@@ -145,7 +145,7 @@ getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
         _ -> case key of
           AttrByName !attrName -> do
             let !magicName =
-                  "__" <> T.pack (edhTypeNameOf fromVal) <> "_" <> attrName <> "__"
+                  "__" <> edhTypeNameOf fromVal <> "_" <> attrName <> "__"
             lookupEdhCtxAttr scope (AttrByName magicName) >>= \case
               -- todo allow bound contextual magic method for virtual attr?
               EdhProcedure (EdhMethod !mth) _ ->
@@ -181,9 +181,7 @@ getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
             -- todo honor default expr here?
             !magicVal ->
               throwEdh ets UsageError $
-                "invalid magic method type: "
-                  <> T.pack
-                    (edhTypeNameOf magicVal)
+                "invalid magic method type: " <> edhTypeNameOf magicVal
         callSelfMagic :: ProcDefi -> Object -> Object -> STM ()
         callSelfMagic !magicMth !this !that =
           runEdhTx ets $
@@ -242,9 +240,7 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
       withMagicMethod magicMth this that
     (_, !magicVal) ->
       throwEdh ets UsageError $
-        "invalid magic method type: "
-          <> T.pack
-            (edhTypeNameOf magicVal)
+        "invalid magic method type: " <> edhTypeNameOf magicVal
   where
     withMagicMethod :: ProcDefi -> Object -> Object -> STM ()
     withMagicMethod !magicMth !this !that =
@@ -283,9 +279,7 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
       withMagicMethod magicMth this that
     (_, !magicVal) ->
       throwEdh ets UsageError $
-        "invalid magic method type: "
-          <> T.pack
-            (edhTypeNameOf magicVal)
+        "invalid magic method type: " <> edhTypeNameOf magicVal
   where
     withMagicMethod :: ProcDefi -> Object -> Object -> STM ()
     withMagicMethod !magicMth !this !that =
@@ -364,9 +358,7 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
             -- todo honor default expr here?
             !magicVal ->
               throwEdh ets UsageError $
-                "invalid magic method type: "
-                  <> T.pack
-                    (edhTypeNameOf magicVal)
+                "invalid magic method type: " <> edhTypeNameOf magicVal
         callSelfMagic :: ProcDefi -> Object -> Object -> STM ()
         callSelfMagic !magicMth !this !that =
           let !args =
@@ -500,8 +492,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
             runEdhTx ets $ setEdhAttr tgtExpr (AttrBySym sym) rhVal exit
           _ ->
             throwEdh ets EvalError $
-              "invalid attribute reference type - "
-                <> T.pack (edhTypeNameOf addrVal)
+              "invalid attribute reference type - " <> edhTypeNameOf addrVal
   !x ->
     throwEdh ets EvalError $
       "invalid left hand expression for assignment: "
@@ -742,7 +733,7 @@ edhMutCloneObj !ets !fromThis !fromThat !newStore !exitEnd =
                   !badMth ->
                     throwEdh ets UsageError $
                       "invalid __clone__ method of type: "
-                        <> T.pack (edhTypeNameOf badMth)
+                        <> edhTypeNameOf badMth
      in clone1 fromThat $ \ !thatNew -> exitEnd thatNew
 
 edhObjExtends :: EdhThreadState -> Object -> Object -> STM () -> STM ()
@@ -783,9 +774,7 @@ edhObjExtends !ets !this !superObj !exit = case edh'obj'store this of
         callMagicMethod mthThis this mth
       _ ->
         throwEdh ets EvalError $
-          "invalid magic (<-^) method type: "
-            <> T.pack
-              (edhTypeNameOf magicMth)
+          "invalid magic (<-^) method type: " <> edhTypeNameOf magicMth
 
 callEdhOperator ::
   Object ->
@@ -1163,8 +1152,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                     edhVal2Kw
                       k
                       ( throwEdh ets UsageError $
-                          "invalid keyword type: "
-                            <> T.pack (edhTypeNameOf k)
+                          "invalid keyword type: " <> edhTypeNameOf k
                       )
                       $ \ !kw -> do
                         iopdInsert kw (noneNil $ edhDeCaseWrap v) kwIOPD
@@ -1284,10 +1272,7 @@ edhPrepareCall'
             _ -> throwEdh etsCallPrep EvalError "no __call__ method on object"
       _ -> edhValueRepr etsCallPrep calleeVal $ \ !calleeRepr ->
         throwEdh etsCallPrep EvalError $
-          "can not call a "
-            <> T.pack (edhTypeNameOf calleeVal)
-            <> ": "
-            <> calleeRepr
+          "can not call a " <> edhTypeNameOf calleeVal <> ": " <> calleeRepr
     where
       scope = contextScope $ edh'context etsCallPrep
 
@@ -1347,7 +1332,7 @@ edhPrepareCall'
               Just !badVal ->
                 throwEdh etsCallPrep UsageError $
                   "the value passed to a producer as `outlet` found to be a "
-                    <> T.pack (edhTypeNameOf badVal)
+                    <> edhTypeNameOf badVal
         -- calling a generator
         (EdhGnrtor _) ->
           throwEdh
@@ -1802,7 +1787,7 @@ edhPrepareForLoop
           _ ->
             throwEdh ets EvalError $
               "can not do a for loop from "
-                <> T.pack (edhTypeNameOf iterVal)
+                <> edhTypeNameOf iterVal
                 <> ": "
                 <> T.pack (show iterVal)
 
@@ -1826,7 +1811,7 @@ resolveEdhAttrAddr !ets (SymbolicAttr !symName) !exit =
               "not a symbol/string as "
                 <> symName
                 <> ", it is a "
-                <> T.pack (edhTypeNameOf val)
+                <> edhTypeNameOf val
                 <> ": "
                 <> T.pack (show val)
         Nothing ->
@@ -2449,7 +2434,7 @@ evalStmt !stmt !exit = case stmt of
       _ ->
         throwEdh ets EvalError $
           "can only perceive from an event sink, not a "
-            <> T.pack (edhTypeNameOf sinkVal)
+            <> edhTypeNameOf sinkVal
             <> ": "
             <> T.pack (show sinkVal)
   ThrowStmt !excExpr ->
@@ -2471,7 +2456,7 @@ evalStmt !stmt !exit = case stmt of
             _ ->
               throwEdhTx EvalError $
                 "invalid condition value for while: "
-                  <> T.pack (edhTypeNameOf cndVal)
+                  <> edhTypeNameOf cndVal
                   <> ": "
                   <> T.pack (show cndVal)
     doWhile
@@ -2490,7 +2475,7 @@ evalStmt !stmt !exit = case stmt of
                     _ -> edhValueStr ets val $ \ !superStr ->
                       throwEdh ets UsageError $
                         "can not extends a "
-                          <> T.pack (edhTypeNameOf val)
+                          <> edhTypeNameOf val
                           <> ": "
                           <> superStr
                in extendSupers supers
@@ -2536,7 +2521,7 @@ importInto !fsChk !tgtEnt !argsRcvr srcExpr@(ExprSrc x _) !exit = case x of
       -- todo support more sources of import ?
       throwEdhTx EvalError $
         "don't know how to import from a "
-          <> T.pack (edhTypeNameOf srcVal)
+          <> edhTypeNameOf srcVal
           <> ": "
           <> T.pack (show srcVal)
 
@@ -3074,12 +3059,7 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
   EdhObject !obj -> edhValueRepr ets val $ \ !valRepr ->
     exitDesc $ "`" <> objClassName obj <> "` object `" <> valRepr <> "`"
   _ -> edhValueRepr ets val $ \ !valRepr ->
-    exitDesc $
-      "`"
-        <> T.pack (edhTypeNameOf val)
-        <> "` value `"
-        <> valRepr
-        <> "`"
+    exitDesc $ "`" <> edhTypeNameOf val <> "` value `" <> valRepr <> "`"
 
 adtFields ::
   EdhThreadState -> Object -> ([(Text, EdhValue)] -> STM ()) -> STM ()
@@ -3468,7 +3448,7 @@ evalExpr' (PrefixExpr PrefixMinus !expr') !docCmt !exit =
     !v ->
       throwEdhTx EvalError $
         "can not negate a "
-          <> T.pack (edhTypeNameOf v)
+          <> edhTypeNameOf v
           <> ": "
           <> T.pack (show v)
           <> " ❌"
@@ -3478,7 +3458,7 @@ evalExpr' (PrefixExpr Not !expr') !docCmt !exit =
     !v ->
       throwEdhTx EvalError $
         "expect bool but got a "
-          <> T.pack (edhTypeNameOf v)
+          <> edhTypeNameOf v
           <> ": "
           <> T.pack (show v)
           <> " ❌"
@@ -3622,9 +3602,7 @@ evalExpr' (IndexExpr !ixExpr !tgtExpr) _docCmt !exit =
               exitEdhTx exit $ odLookupDefault EdhNil (AttrBySym attrSym) kwargs
             !badIdxVal ->
               throwEdhTx UsageError $
-                "invalid index to an apk: "
-                  <> T.pack
-                    (edhTypeNameOf badIdxVal)
+                "invalid index to an apk: " <> edhTypeNameOf badIdxVal
           -- indexing an object, by calling its ([]) method with ixVal as the single arg
           EdhObject !obj -> \ !ets ->
             lookupEdhObjAttr obj (AttrByName "[]") >>= \case
@@ -3656,17 +3634,17 @@ evalExpr' (IndexExpr !ixExpr !tgtExpr) _docCmt !exit =
                   "malformed index method ([]) on "
                     <> T.pack (show obj)
                     <> " - "
-                    <> T.pack (edhTypeNameOf badIndexer)
+                    <> edhTypeNameOf badIndexer
                     <> ": "
                     <> T.pack (show badIndexer)
           tgtVal ->
             throwEdhTx EvalError $
               "don't know how to index "
-                <> T.pack (edhTypeNameOf tgtVal)
+                <> edhTypeNameOf tgtVal
                 <> ": "
                 <> T.pack (show tgtVal)
                 <> " with "
-                <> T.pack (edhTypeNameOf ixVal)
+                <> edhTypeNameOf ixVal
                 <> ": "
                 <> T.pack (show ixVal)
 evalExpr' (ExportExpr !exps) !docCmt !exit = \ !ets ->
@@ -3703,7 +3681,7 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
               _ ->
                 throwEdhTx UsageError $
                   "can only import into an object, not a "
-                    <> T.pack (edhTypeNameOf intoVal)
+                    <> edhTypeNameOf intoVal
   where
     allowFsImp :: FileSystemImportCheck
     allowFsImp _impSpec doImp = doImp
@@ -4393,13 +4371,8 @@ val2DictEntry _ (EdhPair !k !v) !exit = exit (k, v)
 val2DictEntry _ (EdhArgsPack (ArgsPack [!k, !v] !kwargs)) !exit
   | odNull kwargs = exit (k, v)
 val2DictEntry !ets !val _ =
-  throwEdh
-    ets
-    UsageError
-    ( "invalid entry for dict " <> T.pack (edhTypeNameOf val) <> ": "
-        <> T.pack
-          (show val)
-    )
+  throwEdh ets UsageError $
+    "invalid entry for dict " <> edhTypeNameOf val <> ": " <> T.pack (show val)
 
 pvlToDict :: EdhThreadState -> [EdhValue] -> (DictStore -> STM ()) -> STM ()
 pvlToDict !ets !pvl !exit = do
@@ -4453,9 +4426,7 @@ edhValueNull !ets (EdhObject !o) !exit =
     (_, EdhBool !b) -> exit b
     (_, !badVal) ->
       throwEdh ets UsageError $
-        "invalid value type from __null__: "
-          <> T.pack
-            (edhTypeNameOf badVal)
+        "invalid value type from __null__: " <> edhTypeNameOf badVal
 edhValueNull _ _ !exit = exit False
 
 edhIdentEqual :: EdhValue -> EdhValue -> Bool
@@ -4521,11 +4492,13 @@ edhValueEqual !ets !lhVal !rhVal !exit =
             (!this', EdhProcedure (EdhMethod !mth) _) ->
               runEdhTx ets $
                 callEdhMethod this' lhObj mth (ArgsPack [rhv] odEmpty) id $
-                  \ !magicRtn _ets -> chkMagicRtn tryRightHandMagic magicRtn
+                  \ !magicRtn _ets ->
+                    chkMagicRtn (procedureLoc' mth) tryRightHandMagic magicRtn
             (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
               runEdhTx ets $
                 callEdhMethod this that mth (ArgsPack [rhv] odEmpty) id $
-                  \ !magicRtn _ets -> chkMagicRtn tryRightHandMagic magicRtn
+                  \ !magicRtn _ets ->
+                    chkMagicRtn (procedureLoc' mth) tryRightHandMagic magicRtn
             (_, !badMagic) -> edhValueDesc ets badMagic $ \ !badDesc ->
               throwEdh ets UsageError $ "malformed __eq__ magic: " <> badDesc
       _ -> tryRightHandMagic
@@ -4533,7 +4506,7 @@ edhValueEqual !ets !lhVal !rhVal !exit =
     !lhv = edhUltimate lhVal
     !rhv = edhUltimate rhVal
 
-    chkMagicRtn !naExit = \case
+    chkMagicRtn mthLoc !naExit !magicRtn = case edhUltimate magicRtn of
       EdhBool !conclusion -> exit $ Just conclusion
       EdhNil -> naExit
       EdhDefault _ !exprDef !etsDef ->
@@ -4544,10 +4517,14 @@ edhValueEqual !ets !lhVal !rhVal !exit =
               EdhNil -> naExit
               !badVal -> edhValueDesc ets badVal $ \ !badDesc ->
                 throwEdh ets UsageError $
-                  "invalid return from __eq__ magic: "
+                  "the __eq__ magic method defined at " <> prettySrcLoc mthLoc
+                    <> " returned invalid default result: "
                     <> badDesc
       !badVal -> edhValueDesc ets badVal $ \ !badDesc ->
-        throwEdh ets UsageError $ "invalid return from __eq__ magic: " <> badDesc
+        throwEdh ets UsageError $
+          "the __eq__ magic method defined at " <> prettySrcLoc mthLoc
+            <> " returned invalid result: "
+            <> badDesc
 
     -- in case no __eq__ magic draws a conclusion, don't conclude here,
     -- as they may implement (==) and (!=) for vectorized comparison
@@ -4559,11 +4536,13 @@ edhValueEqual !ets !lhVal !rhVal !exit =
           (!this', EdhProcedure (EdhMethod !mth) _) ->
             runEdhTx ets $
               callEdhMethod this' rhObj mth (ArgsPack [lhv] odEmpty) id $
-                \ !magicRtn _ets -> chkMagicRtn (exit Nothing) magicRtn
+                \ !magicRtn _ets ->
+                  chkMagicRtn (procedureLoc' mth) (exit Nothing) magicRtn
           (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
             runEdhTx ets $
               callEdhMethod this that mth (ArgsPack [lhv] odEmpty) id $
-                \ !magicRtn _ets -> chkMagicRtn (exit Nothing) magicRtn
+                \ !magicRtn _ets ->
+                  chkMagicRtn (procedureLoc' mth) (exit Nothing) magicRtn
           (_, !badMagic) -> edhValueDesc ets badMagic $ \ !badDesc ->
             throwEdh ets UsageError $ "malformed __eq__ magic: " <> badDesc
       _ -> exit Nothing
@@ -4851,7 +4830,7 @@ parseEdhIndex !ets !val !exit = case val of
         exit' $
           Left $
             "bad index number of "
-              <> T.pack (edhTypeNameOf badIdxNum)
+              <> edhTypeNameOf badIdxNum
               <> ": "
               <> badIdxNumRepr
 

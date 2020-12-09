@@ -505,9 +505,7 @@ createEdhWorld !console = do
         attrKeyFrom (EdhSymbol sym) !exit' = exit' $ AttrBySym sym
         attrKeyFrom badVal _ =
           throwEdh ets UsageError $
-            "invalid attribute reference type - "
-              <> T.pack
-                (edhTypeNameOf badVal)
+            "invalid attribute reference type - " <> edhTypeNameOf badVal
 
     mthScopePut :: ArgsPack -> EdhHostProc
     mthScopePut (ArgsPack !args !kwargs) !exit !ets =
