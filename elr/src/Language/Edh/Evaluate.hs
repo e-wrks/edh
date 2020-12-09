@@ -3994,6 +3994,10 @@ evalExpr' (OpOvrdExpr !opFixity !opPrec !opSym !opProc) !docCmt !exit =
             throwEdh ets UsageError $
               "overriding an invalid operator: "
                 <> badDesc
+evalExpr' (SymbolExpr !attr) _docCmt !exit = \ !ets -> do
+  !sym <- EdhSymbol <$> mkSymbol ("@" <> attr)
+  defineScopeAttr ets (AttrByName attr) sym
+  exitEdh ets exit sym
 
 evalInfix :: OpSymbol -> Expr -> Expr -> EdhHostProc
 evalInfix !opSym !lhExpr !rhExpr !exit !ets =

@@ -3,9 +3,9 @@
 
 {
   # convention: retrieve the state which is an int
-  Get = Symbol( 'Get' )
+  symbol @Get
   # convention: set the state, should be an int
-  Set = Symbol( 'Set' )
+  symbol @Set
 
   method better_state ( initial ) {
     # this anonymous class procedure constructs an object instance,
@@ -33,9 +33,9 @@
 
 {
   # convention: retrieve the state which is an int
-  Get = Symbol( 'Get' )
+  symbol @Get
   # convention: set the state, should be an int
-  Set = Symbol( 'Set' )
+  symbol @Set
 
   generator better_state ( initial ) {
     yield {
@@ -68,7 +68,7 @@
 }
 
 
-export mattersLot = Symbol( 'mattersLot' )
+symbol @mattersLot
 
 {
 
@@ -108,14 +108,14 @@ export mattersLot = Symbol( 'mattersLot' )
     # something like `effectsConsumer` should really be imported from
     # some library modules in real cases
     effectsConsumer( 3 )
-    effectsConsumer( Symbol( 'awesome' ) )
+    effectsConsumer( symbol @awesome'
 
-  }
+      }
 
-}
-
-
-effectsStaker()
+      }
 
 
-quit
+      effectsStaker()
+
+
+      quit

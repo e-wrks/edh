@@ -1355,6 +1355,8 @@ data Expr
   = -- | the expr will be evaluated with result discarded,
     -- should always result in nil
     VoidExpr !ExprSrc
+  | -- | symbol definition
+    SymbolExpr !AttrName
   | -- | atomically isolated, mark an expression to be evaluated in a single
     -- STM transaction as a whole
     AtoIsoExpr !ExprSrc

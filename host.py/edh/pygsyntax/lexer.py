@@ -86,7 +86,7 @@ class EdhLexer(RegexLexer):
             (r"[{(\[;,})\].]", Punctuation),
             (
                 r"(while|for|from|do|break|continue|return|default|case|of|if|then|else|"
-                r"throw|rethrow|ai|go|expr|sink|void|yield|this|that)\b",
+                r"throw|rethrow|ai|go|expr|sink|symbol|void|yield|this|that)\b",
                 Keyword,
             ),
             (
@@ -103,7 +103,7 @@ class EdhLexer(RegexLexer):
             ),
             (
                 r"(namespace|module|scope|null|compare|type|constructor|supers|"
-                r"property|setter|error|assert|print|abs|max|min|Symbol|id|"
+                r"property|setter|error|assert|print|abs|max|min|id|"
                 r"blob|str|json|repr|show|desc|cap|grow|len|mark|"
                 r"range|enumerate|replicate|zip|zip3|parseEdh|makeOp|makeExpr|"
                 r"scope|sandbox|dict|partial|console|batteries|debug)\b",

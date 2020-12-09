@@ -296,11 +296,6 @@ pairCtorProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   evalExprSrc rhExpr $ \ !rhVal ->
     exitEdhTx exit (EdhPair (edhDeCaseWrap lhVal) (edhDeCaseWrap rhVal))
 
--- | the Symbol(repr) constructor
-symbolCtorProc :: "repr" !: Text -> EdhHostProc
-symbolCtorProc (mandatoryArg -> !repr) !exit !ets =
-  mkSymbol repr >>= exitEdh ets exit . EdhSymbol
-
 -- todo support more forms of UUID ctor args
 uuidCtorProc :: Maybe Text -> EdhHostProc
 uuidCtorProc Nothing !exit !ets = mkUUID >>= exitEdh ets exit . EdhUUID

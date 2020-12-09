@@ -576,6 +576,13 @@ parseOpDeclOvrdExpr !si = do
       setOffset argsErrRptPos
       fail "invalid operator arguments receiver"
 
+parseSymbolExpr :: Parser Expr
+parseSymbolExpr = do
+  void $ keyword "symbol"
+  void $ char '@'
+  sc
+  SymbolExpr <$> parseAlphNumName
+
 parseReturnStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseReturnStmt !si = do
   void $ keyword "return"
@@ -1076,6 +1083,7 @@ parseExprPrec !precedingOp !prec !si =
               parseInterpreterExpr si,
               parseProducerExpr si,
               parseOpDeclOvrdExpr si,
+              (,si) <$> parseSymbolExpr,
               (,si) . LitExpr <$> parseLitExpr,
               (,si) . AttrExpr <$> parseAttrRef
             ]

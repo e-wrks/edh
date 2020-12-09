@@ -592,7 +592,6 @@ installEdhBatteries world =
             | (mc, nm, hp) <-
                 [ (EdhMethod, "__StringType_bytes__", wrapHostProc strEncodeProc),
                   (EdhMethod, "__BlobType_utf8string__", wrapHostProc blobDecodeProc),
-                  (EdhMethod, "Symbol", wrapHostProc symbolCtorProc),
                   (EdhMethod, "UUID", wrapHostProc uuidCtorProc),
                   (EdhMethod, "__ArgsPackType_args__", wrapHostProc apkArgsProc),
                   (EdhMethod, "__ArgsPackType_kwargs__", wrapHostProc apkKwrgsProc),
