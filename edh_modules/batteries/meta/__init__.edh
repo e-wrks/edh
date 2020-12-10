@@ -13,6 +13,7 @@ error( 'Executing meta module: ' ++ __name__ )
 
 export {
 
+  # mockings for host artifacts
   import * './ops'
   import * './mths'
   import * './console'
