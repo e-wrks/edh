@@ -1,0 +1,124 @@
+{##
+ # this module is meant to be imported by an Edh language server, into every
+ # meta world's root scope at analysis time, reflecting definition information
+ # of the corresponding host artifacts at runtime.
+ #
+ # the purpose is for sakes of tooling functionalities, typically an IDE like
+ # VSCode.
+ #
+ #}
+
+# this module should never get imported by any Edh interpreter for the run
+error( 'Executing meta module: ' ++ __name__ )
+
+
+export namespace console () export {
+  debug = 10
+  info = 20
+  warn = 30
+  error = 40
+  fatal = 50
+
+  logLevel :: int!DecimalType
+  {##
+   # controlled by environment variable EDH_LOG_LEVEL
+   #}
+  logLevel = this.info # the default
+
+
+  exit :: ( Any ) -> throw ProgramHalt
+  {##
+   # halt current Edh program with an optional value
+   #
+   # if the program is run by the main thread of an Edh interpreter process,
+   # this will quit the process with an exit code from `haltValue` if it is an
+   # integer number.
+   #}
+  method exit( haltValue=None ) {
+    throw ProgramHalt( haltValue )
+  }
+
+
+  readSource :: ( StringType || None, String || None ) -> StringType
+  {##
+   # read a piece of source code from stdin
+   #}
+  method readSource( ps1= "Đ: ", ps2= "Đ| " ) {
+    '<text-read-from-stdin>'
+  }
+
+
+  readCommand :: (
+    StringType || None, String || None, ObjectType || None,
+  ) -> Any
+  {##
+   # read a piece of source code from stdin, evaluate as Edh source and return
+   # the result
+   #
+   # `inScopeOf` can be specified for the contextual scope, or the source will
+   # be evaluated as in the caller's scope. it can be a reflective scope object
+   # or a vanilla Edh object (including namespace objects and module objects)
+   #}
+  method readCommand( ps1= "Đ: ", ps2= "Đ| ", inScopeOf= None ) {
+    pass
+  }
+
+
+  print :: (* Any, **Any ) -> nil
+  {##
+   # print things to stdout
+   #
+   # `repr` will be used to convert each argument to string form for the print
+   #}
+  method print(* args, **kwargs ) void {
+  }
+
+
+  now :: () -> int!DecimalType
+  {##
+   # obtain nanoseconds ellapsed since epoch in UTC, from the underlying
+   # operating system
+   #}
+  method now() 0
+
+
+  everySeconds
+  :: ( s!int!DecimalType, BoolType || None )
+  -> [ ns!int!DecimalType ] =>* nil
+  {##
+   # yield `this.now()` at the specified interval
+   #
+   # the first yield may wait an interval or not, according to how `wait1st` is
+   # specified
+   #}
+  generator everySeconds( interval, wait1st=true ) void {
+    yield this.now()
+  }
+
+  everyMicros
+  :: ( us!int!DecimalType, BoolType || None )
+  -> [ ns!int!DecimalType ] =>* nil
+  {##
+   # yield `this.now()` at the specified interval
+   #
+   # the first yield may wait an interval or not, according to how `wait1st` is
+   # specified
+   #}
+  generator everyMicros( interval, wait1st=true ) void {
+    yield this.now()
+  }
+
+  everyMillis
+  :: ( ms!int!DecimalType, BoolType || None )
+  -> [ ns!int!DecimalType ] =>* nil
+  {##
+   # yield `this.now()` at the specified interval
+   #
+   # the first yield may wait an interval or not, according to how `wait1st` is
+   # specified
+   #}
+  generator everyMillis( interval, wait1st=true ) void {
+    yield this.now()
+  }
+
+}

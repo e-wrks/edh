@@ -1,0 +1,23 @@
+{##
+ # this module is imported by an Edh language server, into every meta world's
+ # root scope at analysis time, reflecting definition information for host
+ # artifacts as well as Edh artifacts at runtime.
+ #
+ # the purpose is for sakes of tooling functionalities, typically an IDE like
+ # VSCode.
+ #
+ #}
+
+# this module should never get imported by any Edh interpreter for the run
+error( 'Executing meta module: ' ++ __name__ )
+
+export {
+
+  import * './ops'
+  import * './mths'
+  import * './console'
+
+  # Edh artifacts as is
+  import * '../root'
+
+}
