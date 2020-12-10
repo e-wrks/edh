@@ -289,6 +289,10 @@ module Language.Edh.EHI
     edhRegulateSlice,
     edhRegulateIndex,
 
+    -- * language harness
+    normalizeImportSpec,
+    edhExportsMagicName,
+
     -- * standalone modules
     module Language.Edh.IOPD,
   )

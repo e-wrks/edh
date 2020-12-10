@@ -2739,11 +2739,7 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
         !world = edh'prog'world $ edh'thread'prog etsImp
         !worldModules = edh'world'modules world
 
-        normalizedSpec = normalizeImpSpec importSpec
-        normalizeImpSpec :: Text -> Text
-        normalizeImpSpec = withoutLeadingSlash . withoutTrailingSlash
-        withoutLeadingSlash spec = fromMaybe spec $ T.stripPrefix "/" spec
-        withoutTrailingSlash spec = fromMaybe spec $ T.stripSuffix "/" spec
+        normalizedSpec = normalizeImportSpec importSpec
 
         importFromFS :: STM ()
         importFromFS = locateModuInFS $ \(!impName, !nomPath, !moduFile) -> do

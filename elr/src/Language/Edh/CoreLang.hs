@@ -5,21 +5,11 @@ module Language.Edh.CoreLang where
 
 import Control.Concurrent.STM (STM, readTVar, writeTVar)
 import Data.Either (partitionEithers)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Language.Edh.IOPD (iopdLookup)
+import Language.Edh.IOPD
 import Language.Edh.RtTypes
-  ( AttrKey (AttrByName),
-    Class (Class, edh'class'mro, edh'class'store),
-    Dict (Dict),
-    EdhCallFrame (EdhCallFrame),
-    EdhValue (EdhBoundProc, EdhDict, EdhNil, EdhProcedure),
-    Object (edh'obj'class, edh'obj'store, edh'obj'supers),
-    ObjectStore (ClassStore, HashStore, HostStore),
-    Scope (edh'scope'entity),
-    objClassName,
-    outerScopeOf,
-  )
 import Prelude
 
 -- * Edh lexical attribute resolution
@@ -77,6 +67,7 @@ resolveEffectfulAttr (EdhCallFrame scope _ _ : rest) !key =
 fillClassMRO :: Class -> [Object] -> STM Text
 fillClassMRO _ [] = return ""
 fillClassMRO !cls !superClasses =
+  {- HLINT ignore "Redundant <$>" -}
   partitionEithers <$> sequence (l <$> superClasses) >>= \case
     ([], !superLs) -> case merge (superLs ++ [superClasses]) [] of
       Left !mroInvalid -> return mroInvalid
@@ -233,6 +224,13 @@ lookupEdhObjMagic !this !key =
 {-# INLINE lookupEdhObjMagic #-}
 
 -- * import/export
+
+normalizeImportSpec :: Text -> Text
+normalizeImportSpec = withoutLeadingSlash . withoutTrailingSlash
+  where
+    withoutLeadingSlash spec = fromMaybe spec $ T.stripPrefix "/" spec
+    withoutTrailingSlash spec = fromMaybe spec $ T.stripSuffix "/" spec
+{-# INLINE normalizeImportSpec #-}
 
 edhExportsMagicName :: Text
 edhExportsMagicName = "__exports__"
