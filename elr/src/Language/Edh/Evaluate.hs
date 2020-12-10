@@ -1044,8 +1044,8 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
                 -- always eval the default value atomically in callee's contex
                 Just (ExprSrc !defaultExpr _) ->
                   runEdhTx etsRecv $
-                    evalExpr' defaultExpr Nothing $
-                      \ !val _ets -> exit'' (edhDeCaseWrap val, posArgs', kwArgs'')
+                    evalExpr' defaultExpr Nothing $ \ !val _ets ->
+                      exit'' (edhDeCaseWrap val, posArgs', kwArgs'')
                 _ ->
                   throwEdh etsCaller UsageError $
                     "missing argument: "
@@ -1450,7 +1450,7 @@ callEdhMethod'
         runEdhTx etsMth $
           evalStmt body'stmt $ \ !mthRtn ->
             edhSwitchState etsCaller $
-              exitEdhTx exit $ case mthRtn of
+              exitEdhTx exit $ case edhDeCaseWrap mthRtn of
                 -- explicit return
                 EdhReturn !rtnVal -> rtnVal
                 -- no explicit return
@@ -1518,8 +1518,8 @@ edhPrepareForLoop
                     \ !outerStack !s -> s {edh'effects'stack = outerStack}
               (EdhObject !obj) ->
                 -- calling an object
-                lookupEdhObjAttr obj (AttrByName "__call__") >>= \(!this', !mth) ->
-                  case mth of
+                lookupEdhObjAttr obj (AttrByName "__call__")
+                  >>= \(!this', !mth) -> case mth of
                     EdhBoundProc callee@EdhGnrtor {} !this !that !effOuter ->
                       loopCallGenr iter'span argsSndr callee this that $
                         flip (maybe id) effOuter $
@@ -1530,11 +1530,9 @@ edhPrepareForLoop
                           \ !outerStack !s -> s {edh'effects'stack = outerStack}
                     -- not a callable generator object, assume to loop over
                     -- its return value
-                    _ ->
-                      edhPrepareCall etsLoopPrep calleeVal argsSndr $ \ !mkCall ->
-                        runEdhTx etsLoopPrep $
-                          mkCall $ \ !iterVal _ets ->
-                            loopOverValue iterVal
+                    _ -> edhPrepareCall etsLoopPrep calleeVal argsSndr $
+                      \ !mkCall -> runEdhTx etsLoopPrep $
+                        mkCall $ \ !iterVal _ets -> loopOverValue iterVal
               -- calling other procedures, assume to loop over its return value
               _ ->
                 runEdhTx etsLoopPrep $
@@ -1556,83 +1554,89 @@ edhPrepareForLoop
         Object ->
         (Scope -> Scope) ->
         STM ()
-      loopCallGenr !caller'span !argsSndr (EdhGnrtor !gnr'proc) !this !that !scopeMod =
-        packEdhArgs etsLoopPrep argsSndr $ \ !apk ->
-          case edh'procedure'decl gnr'proc of
-            -- calling a host generator
-            HostDecl !hp -> forLooper $ \ !exit !ets -> do
-              -- a host procedure views the same scope entity as of the caller's
-              -- call frame
-              {- HLINT ignore "Reduce duplication" -}
-              let !looperCtx = edh'context ets
-                  !looperFrame = edh'ctx'tip looperCtx
-                  !callerFrame = frameMovePC looperFrame caller'span
-                  !calleeScope =
-                    Scope
-                      { edh'scope'entity =
-                          edh'scope'entity $
-                            edh'frame'scope looperFrame,
-                        edh'scope'this = this,
-                        edh'scope'that = that,
-                        edh'scope'proc = gnr'proc,
-                        edh'effects'stack = []
-                      }
-                  !calleeCtx =
-                    looperCtx
-                      { edh'ctx'tip =
-                          EdhCallFrame
-                            calleeScope
-                            (SrcLoc (SrcDoc "<host-code>") noSrcRange)
-                            defaultEdhExcptHndlr,
-                        edh'ctx'stack = callerFrame : edh'ctx'stack looperCtx,
-                        edh'ctx'genr'caller = Just $ recvYield ets exit,
-                        edh'ctx'match = true,
-                        edh'ctx'pure = False,
-                        edh'ctx'exporting = False,
-                        edh'ctx'eff'defining = False
-                      }
-                  !etsCallee = ets {edh'context = calleeCtx}
-              runEdhTx etsCallee $
-                hp apk $ \ !val ->
-                  -- a host generator is responsible to return a sense-making result
-                  -- anyway
-                  edhSwitchState ets $ exitEdhTx exit val
+      loopCallGenr
+        !caller'span
+        !argsSndr
+        (EdhGnrtor !gnr'proc)
+        !this
+        !that
+        !scopeMod =
+          packEdhArgs etsLoopPrep argsSndr $ \ !apk ->
+            case edh'procedure'decl gnr'proc of
+              -- calling a host generator
+              HostDecl !hp -> forLooper $ \ !exit !ets -> do
+                -- a host procedure views the same scope entity as of the
+                -- caller's call frame
+                {- HLINT ignore "Reduce duplication" -}
+                let !looperCtx = edh'context ets
+                    !looperFrame = edh'ctx'tip looperCtx
+                    !callerFrame = frameMovePC looperFrame caller'span
+                    !calleeScope =
+                      Scope
+                        { edh'scope'entity =
+                            edh'scope'entity $
+                              edh'frame'scope looperFrame,
+                          edh'scope'this = this,
+                          edh'scope'that = that,
+                          edh'scope'proc = gnr'proc,
+                          edh'effects'stack = []
+                        }
+                    !calleeCtx =
+                      looperCtx
+                        { edh'ctx'tip =
+                            EdhCallFrame
+                              calleeScope
+                              (SrcLoc (SrcDoc "<host-code>") noSrcRange)
+                              defaultEdhExcptHndlr,
+                          edh'ctx'stack = callerFrame : edh'ctx'stack looperCtx,
+                          edh'ctx'genr'caller = Just $ recvYield ets exit,
+                          edh'ctx'match = true,
+                          edh'ctx'pure = False,
+                          edh'ctx'exporting = False,
+                          edh'ctx'eff'defining = False
+                        }
+                    !etsCallee = ets {edh'context = calleeCtx}
+                runEdhTx etsCallee $
+                  hp apk $ \ !val ->
+                    -- a host generator is responsible to return a sense-making
+                    -- result anyway
+                    edhSwitchState ets $ exitEdhTx exit val
 
-            -- calling an Edh generator
-            ProcDecl _ _ !pb !pl -> forLooper $ \ !exit !ets -> do
-              let !looperCtx = edh'context ets
-                  !looperFrame = edh'ctx'tip looperCtx
-                  !callerFrame = frameMovePC looperFrame caller'span
-                  !etsCaller =
-                    ets {edh'context = looperCtx {edh'ctx'tip = callerFrame}}
-              runEdhTx etsCaller $
-                callEdhMethod'
-                  (Just $ recvYield ets exit)
-                  this
-                  that
-                  gnr'proc
-                  pl
-                  pb
-                  apk
-                  scopeMod
-                  $ \ !gnrRtn -> case gnrRtn of
-                    -- todo what's the case a generator would return a continue?
-                    EdhContinue -> exitEdhTx exit nil
-                    -- todo what's the case a generator would return a break?
-                    EdhBreak -> exitEdhTx exit nil
-                    -- it'll be double return, in case do block issued return and
-                    -- propagated here or the generator can make it that way, which
-                    -- is black magic
+              -- calling an Edh generator
+              ProcDecl _ _ !pb !pl -> forLooper $ \ !exit !ets -> do
+                let !looperCtx = edh'context ets
+                    !looperFrame = edh'ctx'tip looperCtx
+                    !callerFrame = frameMovePC looperFrame caller'span
+                    !etsCaller =
+                      ets {edh'context = looperCtx {edh'ctx'tip = callerFrame}}
+                runEdhTx etsCaller $
+                  callEdhMethod'
+                    (Just $ recvYield ets exit)
+                    this
+                    that
+                    gnr'proc
+                    pl
+                    pb
+                    apk
+                    scopeMod
+                    $ \ !gnrRtn -> edhSwitchState ets $ case gnrRtn of
+                      -- todo what's the case a generator would return a
+                      -- continue?
+                      EdhContinue -> exitEdhTx exit nil
+                      -- todo what's the case a generator would return a
+                      -- break?
+                      EdhBreak -> exitEdhTx exit nil
+                      -- it'll be double return, in case do block issued return
+                      -- and propagated here or the generator can make it that
+                      -- way, which is black magic
 
-                    -- unwrap the return, as result of this for-loop
-                    EdhReturn !rtnVal -> exitEdhTx exit rtnVal
-                    -- otherwise passthrough
-                    _ -> exitEdhTx exit gnrRtn
+                      -- unwrap the return, as result of this for-loop
+                      EdhReturn !rtnVal -> exitEdhTx exit rtnVal
+                      -- otherwise passthrough
+                      _ -> exitEdhTx exit gnrRtn
       loopCallGenr _ _ !callee _ _ _ =
         throwEdh etsLoopPrep EvalError $
-          "bug: unexpected generator: "
-            <> T.pack
-              (show callee)
+          "bug: unexpected generator: " <> T.pack (show callee)
 
       -- receive one yielded value from the generator, the 'genrCont' here is
       -- to continue the generator execution, result passed to the 'genrCont'
@@ -2304,7 +2308,7 @@ evalStmt !stmt !exit = case stmt of
           else -- define effectful artifacts by multi-assignment
             implantEffects (edh'scope'entity scope) (odToList um)
         let !maybeExp2ent =
-              if edh'ctx'exporting ctx
+              if not $ edh'ctx'exporting ctx
                 then Nothing -- not exporting
                 -- always export to current this object's scope, and possibly a
                 -- class object. a method procedure's scope has no way to be
@@ -2388,11 +2392,7 @@ evalStmt !stmt !exit = case stmt of
             ( \ !etsDefer ->
                 etsDefer
                   { edh'context =
-                      (edh'context etsDefer)
-                        { edh'ctx'match =
-                            edhDeCaseWrap
-                              val
-                        }
+                      (edh'context etsDefer) {edh'ctx'match = edhDeCaseWrap val}
                   }
             )
             $ evalCaseBranches branchesExpr endOfEdh
@@ -2401,8 +2401,14 @@ evalStmt !stmt !exit = case stmt of
           edhPrepareCall etsSched calleeVal argsSndr $
             \ !mkCall -> schedDefered etsSched id (mkCall endOfEdh)
       (ForExpr !argsRcvr !iterExpr !doStmt) -> \ !etsSched ->
-        edhPrepareForLoop etsSched argsRcvr iterExpr doStmt (const $ return ()) $
-          \ !runLoop -> schedDefered etsSched id (runLoop endOfEdh)
+        edhPrepareForLoop
+          etsSched
+          argsRcvr
+          iterExpr
+          doStmt
+          (const $ return ())
+          $ \ !runLoop ->
+            schedDefered etsSched id (runLoop endOfEdh)
       _ -> \ !etsSched ->
         schedDefered etsSched id $ evalExpr' expr Nothing endOfEdh
   PerceiveStmt !sinkExpr !bodyStmt ->
@@ -3512,9 +3518,8 @@ evalExpr' (CaseExpr !tgtExpr !branchesExpr) !docCmt !exit =
               { edh'ctx'match = edhDeCaseWrap tgtVal
               }
         }
-      $ evalCaseBranches branchesExpr
-      -- restore original tx state after block done
-      $
+      $ evalCaseBranches branchesExpr $
+        -- restore original tx state after block done
         \ !blkResult _ets -> exitEdh ets exit blkResult
 -- yield stmt evals to the value of caller's `do` expression
 evalExpr' (YieldExpr !yieldExpr) !docCmt !exit =
