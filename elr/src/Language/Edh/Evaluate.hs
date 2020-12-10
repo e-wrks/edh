@@ -2820,34 +2820,32 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
                   | not ("<" `T.isPrefixOf` fromName) ->
                     lookupEdhCtxAttr scope (AttrByName "__file__") >>= \case
                       EdhString !fromFile ->
-                        (exit' =<<) $
-                          unsafeIOToSTM $
-                            locateEdhModule
-                              ( edhRelPathFrom $
-                                  T.unpack
-                                    fromFile
-                              )
-                              $ case normalizedSpec of
-                                -- special case for `import * '.'`, 2 possible use cases:
-                                --
-                                --  *) from an entry module (i.e. __main__.edh), to import artifacts
-                                --     from its respective persistent module
-                                --
-                                --  *) from a persistent module, to re-populate the module scope with
-                                --     its own exports (i.e. the dict __exports__ in its scope), in
-                                --     case the module scope possibly altered after initialization
-                                "." -> T.unpack fromName
-                                _ -> T.unpack normalizedSpec
+                        -- special case for `import * '.'`, 2 use cases:
+                        --
+                        --  *) from an entry module (i.e. __main__.edh), to
+                        --     import artifacts from its respective persistent
+                        --     module
+                        --
+                        --  *) from a persistent module, to re-populate the
+                        --     module scope with its own exports (i.e. the dict
+                        --     __exports__ in its scope), in case the module
+                        -- scope possibly altered after initialization
+                        let !nomSpec = case normalizedSpec of
+                              "." -> fromName
+                              _ -> normalizedSpec
+                         in doLocate nomSpec $
+                              edhRelPathFrom $ T.unpack fromFile
                       _ ->
-                        error $
-                          "bug: no valid `__file__` in module "
-                            <> T.unpack fromName
+                        throwEdh etsImp PackageError $
+                          "bug: no valid `__file__` in module " <> fromName
                 _ ->
-                  (exit' =<<) $
-                    unsafeIOToSTM $
-                      locateEdhModule "." $
-                        T.unpack
-                          normalizedSpec
+                  doLocate normalizedSpec "."
+              where
+                doLocate :: Text -> FilePath -> STM ()
+                doLocate !nomSpec !relPath =
+                  unsafeIOToSTM (locateEdhModule nomSpec relPath) >>= \case
+                    Left !err -> throwEdh etsImp PackageError err
+                    Right !result -> exit' result
 
 moduleContext :: EdhWorld -> Object -> STM Context
 moduleContext !world !modu =

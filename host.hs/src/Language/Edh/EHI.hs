@@ -290,7 +290,12 @@ module Language.Edh.EHI
     edhRegulateIndex,
 
     -- * language harness
+    ImportName (..),
     normalizeImportSpec,
+    locateEdhModule,
+    resolveRelativeImport,
+    resolveAbsoluteImport,
+    locateEdhMainModule,
     edhExportsMagicName,
 
     -- * standalone modules
@@ -307,6 +312,7 @@ import Language.Edh.Evaluate
 import Language.Edh.Event
 import Language.Edh.IOPD
 import Language.Edh.InterOp
+import Language.Edh.PkgMan
 import Language.Edh.RtTypes
 import Language.Edh.Runtime
 import Language.Edh.Utils

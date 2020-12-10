@@ -935,20 +935,19 @@ runEdhModule !world !impPath !preRun =
 runEdhModule' ::
   EdhWorld -> FilePath -> EdhModulePreparation -> IO EdhValue
 runEdhModule' !world !impPath !preRun =
-  locateEdhMainModule impPath >>= \(!moduName, !nomPath, !moduFile) -> do
-    !fileContent <- B.readFile moduFile
-    case streamDecodeUtf8With lenientDecode fileContent of
-      Some !moduSource _ _ -> runEdhProgram' world $ \ !etsMain ->
-        let !moduId = T.pack nomPath
-         in edhCreateModule world moduName moduId moduFile >>= \ !modu ->
-              moduleContext world modu >>= \ !moduCtx ->
-                let !etsModu = etsMain {edh'context = moduCtx}
-                 in preRun etsModu $
-                      runEdhTx etsModu $
-                        evalEdh
-                          (T.pack moduFile)
-                          moduSource
-                          endOfEdh
+  locateEdhMainModule impPath >>= \case
+    Left !err -> throwIO $ EdhError PackageError err (toDyn nil) "<run-modu>"
+    Right (!moduName, !nomPath, !moduFile) -> do
+      !fileContent <- B.readFile moduFile
+      case streamDecodeUtf8With lenientDecode fileContent of
+        Some !moduSource _ _ -> runEdhProgram' world $ \ !etsMain ->
+          let !moduId = T.pack nomPath
+           in edhCreateModule world moduName moduId moduFile >>= \ !modu ->
+                moduleContext world modu >>= \ !moduCtx ->
+                  let !etsModu = etsMain {edh'context = moduCtx}
+                   in preRun etsModu $
+                        runEdhTx etsModu $
+                          evalEdh (T.pack moduFile) moduSource endOfEdh
 
 runEdhFile :: EdhWorld -> FilePath -> IO (Either EdhError EdhValue)
 runEdhFile !world !edhFile =
