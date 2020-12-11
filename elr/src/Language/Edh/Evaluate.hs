@@ -3058,10 +3058,34 @@ evalDictLit ((k, v) : entries) !dsl !exit !ets = case k of
 
 edhValueDesc :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
 edhValueDesc !ets !val !exitDesc = case edhUltimate val of
-  EdhObject !obj -> edhValueRepr ets val $ \ !valRepr ->
-    exitDesc $ "`" <> objClassName obj <> "` object `" <> valRepr <> "`"
+  EdhObject !o -> case edh'obj'store o of
+    ClassStore cls ->
+      lookupEdhObjMagic (edh'obj'class o) (AttrByName "__desc__") >>= \case
+        (_, EdhNil) ->
+          exitDesc $ "class `" <> procedureName (edh'class'proc cls) <> "`"
+        !magicMth -> descWithMagic o magicMth
+    _ -> lookupEdhObjMagic o (AttrByName "__desc__") >>= descWithMagic o
   _ -> edhValueRepr ets val $ \ !valRepr ->
     exitDesc $ "`" <> edhTypeNameOf val <> "` value `" <> valRepr <> "`"
+  where
+    magicExit :: EdhTxExit EdhValue
+    magicExit !magicRtn _ets = edhValueStr ets magicRtn $
+      \ !magicStr -> exitDesc magicStr
+    descWithMagic !o = \case
+      (_, EdhNil) -> edhValueRepr ets val $ \ !valRepr ->
+        exitDesc $ "`" <> objClassName o <> "` object `" <> valRepr <> "`"
+      (!this', EdhProcedure (EdhMethod !mth) _) ->
+        runEdhTx ets $
+          callEdhMethod this' o mth (ArgsPack [] odEmpty) id magicExit
+      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+        runEdhTx ets $
+          callEdhMethod this that mth (ArgsPack [] odEmpty) id magicExit
+      (_, !badMagic) ->
+        throwEdh ets UsageError $
+          "bad magic __desc__ of "
+            <> edhTypeNameOf badMagic
+            <> " on class "
+            <> objClassName o
 
 adtFields ::
   EdhThreadState -> Object -> ([(Text, EdhValue)] -> STM ()) -> STM ()
