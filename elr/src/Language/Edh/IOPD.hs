@@ -241,10 +241,7 @@ iopdSnapshot (IOPD !mv !wpv _nhv !av) = do
   !m <- readTVar mv
   !wp <- readTVar wpv
   !a <- readTVar av
-  !a' <-
-    V.mapM readTVar
-      =<< unsafeIOToSTM
-        (V.unsafeFreeze $ MV.unsafeSlice 0 wp a)
+  !a' <- V.mapM readTVar =<< unsafeIOToSTM (V.freeze $ MV.unsafeSlice 0 wp a)
   return $ OrderedDict m a'
 
 -- | Immutable dict with insertion order preserved
