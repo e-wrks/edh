@@ -55,7 +55,7 @@ locateEdhModule !nomSpec !relPath = case splitExtension (T.unpack nomSpec) of
               <$> resolveRelativeImport nomSpec relPath
           else
             fmap (\(!name, !path, !file) -> (AbsoluteName name, path, file))
-              <$> (canonicalizePath "." >>= resolveAbsoluteImport nomSpec)
+              <$> resolveAbsoluteImport nomSpec "."
 
 resolveRelativeImport ::
   Text ->
@@ -91,8 +91,8 @@ resolveAbsoluteImport !nomSpec !pkgPath = canonicalizePath pkgPath >>= go
        in doesDirectoryExist emsDir >>= \case
             False -> tryParentDir
             True -> do
-              let !moduPath = emsDir </> moduSpec
-                  !edhFilePath = moduPath <> ".edh"
+              !moduPath <- canonicalizePath $ emsDir </> moduSpec
+              let !edhFilePath = moduPath <> ".edh"
               doesFileExist edhFilePath >>= \case
                 True ->
                   return $ Right (nomSpec, edhFilePath, edhFilePath)
