@@ -65,11 +65,11 @@ resolveRelativeImport !nomSpec !relPath = do
   !nomPath <- canonicalizePath $ relPath </> relImp
   let !edhFilePath = nomPath <> ".edh"
   doesFileExist edhFilePath >>= \case
-    True -> return $ Right (T.pack relPath, edhFilePath, edhFilePath)
+    True -> return $ Right (nomSpec, edhFilePath, edhFilePath)
     False ->
       let !edhIdxPath = nomPath </> "__init__.edh"
        in doesFileExist edhIdxPath >>= \case
-            True -> return $ Right (T.pack relPath, nomPath, edhIdxPath)
+            True -> return $ Right (nomSpec, nomPath, edhIdxPath)
             False ->
               return $
                 Left $
