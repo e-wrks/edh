@@ -1958,8 +1958,8 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
                     else -- on the same thread, continue the recovery
                       exit result
 
-            -- the catch block doesn't want to catch this exception, propagate it
-            -- outward
+            -- the catch block doesn't want to catch this exception, propagate
+            -- it outward
             goRethrow :: EdhValue -> STM ()
             goRethrow !exv' = edh'exc'handler frameOuter etsThrower exv' rethrow
 
@@ -1969,9 +1969,11 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
     tryAct $ \ !tryResult _ets ->
       -- no exception has occurred, the @passOn@ may be a finally block and we
       -- trigger it here, but expect it to rethow (not to recover)
-      passOn etsOuter nil (error "bug: a finally block trying recovery") $
-        const $
-          exit tryResult
+      passOn
+        etsOuter
+        EdhNil -- exv
+        (const $ error "bug: a finally block trying recovery") -- recover
+        (const $ exit tryResult) -- rethrow
   where
     isRecoverable !exv = case exv of
       EdhObject !exo -> case edh'obj'store exo of
