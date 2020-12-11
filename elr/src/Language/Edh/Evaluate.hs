@@ -5641,10 +5641,11 @@ driveEdhThread !eps !defers !tq = taskLoop
               drivePerceivers gotevl >>= \case
                 True -> do
                   -- a perceiver is terminating this thread, the task action
-                  -- has not been executed, re-queue it so it can get notified by a
-                  -- ThreadTerminate exception. note the actTask won't be used anyway
-                  -- as True is being returned here, but etsTask provides the target
-                  -- context to where a ThreadTerminate exception will be thrown at
+                  -- has not been executed, re-queue it so it can get notified
+                  -- by a ThreadTerminate exception. note the actTask won't be
+                  -- really executed anyhow, as True is being returned here,
+                  -- just its etsTask to provide the target context to where a
+                  -- ThreadTerminate exception will be thrown at
                   atomically $ writeTBQueue tq $ EdhDoSTM etsTask actTask
                   return True
                 False ->
@@ -5653,20 +5654,21 @@ driveEdhThread !eps !defers !tq = taskLoop
                   -- continue with this tx job
                   loopSTM
 
-        -- this is the STM work package, where perceivers can preempt the inline
-        -- job on an Edh thread
+        -- this is the STM work package, where perceivers can preempt the
+        -- inline job on an Edh thread
         stmJob :: STM (Maybe (Either [(EdhValue, PerceiveRecord)] Bool))
         stmJob =
           tryReadTMVar (edh'prog'result eps) >>= \case
             Just _ -> return Nothing -- program halted
             Nothing ->
               -- program still running
-              (readTVar (edh'perceivers etsTask) >>= perceiverChk []) >>= \gotevl ->
-                if null gotevl
-                  then -- no perceiver fires, execute the tx job
-                    Just . Right <$> actTask
-                  else -- skip the tx job if at least one perceiver fires
-                    return $ Just $ Left gotevl
+              (readTVar (edh'perceivers etsTask) >>= perceiverChk [])
+                >>= \ !gotevl ->
+                  if null gotevl
+                    then -- no perceiver fires, execute the tx job
+                      Just . Right <$> actTask
+                    else -- skip the tx job if at least one perceiver fires
+                      return $ Just $ Left gotevl
 
         perceiverChk ::
           [(EdhValue, PerceiveRecord)] ->
