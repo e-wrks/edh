@@ -22,8 +22,8 @@ import Prelude
 
 data ImportName = RelativeName !Text | AbsoluteName !Text
 
-edhRelPathFrom :: FilePath -> FilePath
-edhRelPathFrom !fromPath =
+edhRelativePathFrom :: FilePath -> FilePath
+edhRelativePathFrom !fromPath =
   if "<" `isPrefixOf` fromPath
     then "." -- intrinsic module path
     else case splitExtension fromPath of

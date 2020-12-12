@@ -292,6 +292,7 @@ module Language.Edh.EHI
     -- * language harness
     ImportName (..),
     normalizeImportSpec,
+    edhRelativePathFrom,
     locateEdhModule,
     resolveRelativeImport,
     resolveAbsoluteImport,

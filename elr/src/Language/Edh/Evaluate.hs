@@ -2842,7 +2842,7 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
                               "." -> fromName
                               _ -> normalizedSpec
                          in doLocate nomSpec $
-                              edhRelPathFrom $ T.unpack fromFile
+                              edhRelativePathFrom $ T.unpack fromFile
                       _ ->
                         throwEdh etsImp PackageError $
                           "bug: no valid `__file__` in module " <> fromName
