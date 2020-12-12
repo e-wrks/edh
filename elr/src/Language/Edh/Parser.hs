@@ -783,8 +783,8 @@ parseLitExpr =
 parseAttrAddrSrc :: Parser AttrAddrSrc
 parseAttrAddrSrc = do
   !startPos <- getSourcePos
-  EdhParserState _ !lexeme'end <- get
   !addr <- parseAttrAddr
+  EdhParserState _ !lexeme'end <- get
   return $ AttrAddrSrc addr $ SrcRange (lspSrcPosFromParsec startPos) lexeme'end
 
 parseAttrAddr :: Parser AttrAddr
