@@ -3497,8 +3497,11 @@ evalExpr' (PrefixExpr Guard !expr') !docCmt !exit = \ !ets -> do
   runEdhTx ets $ evalExprSrc' expr' docCmt exit
 evalExpr' (VoidExpr !expr) !docCmt !exit =
   evalExprSrc' expr docCmt $ \case
+    EdhReturn EdhNil -> exitEdhTx exit $ EdhReturn EdhNil
     EdhReturn {} ->
       throwEdhTx UsageError "you don't return sth from within a void block"
+    EdhBreak -> exitEdhTx exit EdhBreak
+    EdhContinue -> exitEdhTx exit EdhContinue
     _ -> exitEdhTx exit EdhNil
 evalExpr' (AtoIsoExpr !expr) !docCmt !exit = \ !ets ->
   runEdhTx ets {edh'in'tx = True} $ -- ensure in'tx state
