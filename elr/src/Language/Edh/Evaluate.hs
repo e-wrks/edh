@@ -3496,7 +3496,10 @@ evalExpr' (PrefixExpr Guard !expr') !docCmt !exit = \ !ets -> do
     (ArgsPack [EdhString "standalone guard treated as plain value."] odEmpty)
   runEdhTx ets $ evalExprSrc' expr' docCmt exit
 evalExpr' (VoidExpr !expr) !docCmt !exit =
-  evalExprSrc' expr docCmt $ \_val -> exitEdhTx exit EdhNil
+  evalExprSrc' expr docCmt $ \case
+    EdhReturn {} ->
+      throwEdhTx UsageError "you don't return sth from within a void block"
+    _ -> exitEdhTx exit EdhNil
 evalExpr' (AtoIsoExpr !expr) !docCmt !exit = \ !ets ->
   runEdhTx ets {edh'in'tx = True} $ -- ensure in'tx state
     evalExprSrc' (deParen1 expr) docCmt
