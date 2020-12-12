@@ -565,33 +565,38 @@ edhConstructObj !clsObj !apk !exit !ets =
       ClassStore !endClass -> do
         let createOne ::
               Object -> [Object] -> ArgsPack -> (Object -> STM ()) -> STM ()
-            createOne !co !restSupers !apkCtor !exitOne = case edh'obj'store co of
-              ClassStore !cls -> reformCtorArgs co cls apkCtor $ \ !apkCtor' -> do
-                let allocIt :: STM ()
-                    allocIt = do
-                      !mro <- readTVar (edh'class'mro cls)
-                      !im <- readTVar instMap
-                      case sequence $ (\ !sco -> fst <$> Map.lookup sco im) <$> mro of
-                        Nothing ->
-                          throwEdh
-                            ets
-                            EvalError
-                            "bug: missing some instance by mro"
-                        Just !supers ->
-                          runEdhTx ets $
-                            edh'class'allocator cls apkCtor' $
-                              \ !es -> do
-                                !oid <- unsafeIOToSTM newUnique
-                                !ss <- newTVar supers
-                                let !o = Object oid es co ss
-                                -- put into instance may by class
-                                modifyTVar' instMap $ Map.insert co (o, apkCtor')
-                                exitOne o
-                case restSupers of
-                  [] -> allocIt
-                  (nextSuper : restSupers') ->
-                    createOne nextSuper restSupers' apkCtor' $ const allocIt
-              _ -> throwEdh ets EvalError "bug: non-class object in mro"
+            createOne !co !restSupers !apkCtor !exitOne =
+              case edh'obj'store co of
+                ClassStore !cls ->
+                  reformCtorArgs co cls apkCtor $ \ !apkCtor' -> do
+                    let allocIt :: STM ()
+                        allocIt = do
+                          !mro <- readTVar (edh'class'mro cls)
+                          !im <- readTVar instMap
+                          case sequence $
+                            (\ !sco -> fst <$> Map.lookup sco im)
+                              <$> mro of
+                            Nothing ->
+                              throwEdh
+                                ets
+                                EvalError
+                                "bug: missing some instance by mro"
+                            Just !supers ->
+                              runEdhTx ets $
+                                edh'class'allocator cls apkCtor' $
+                                  \ !es -> do
+                                    !oid <- unsafeIOToSTM newUnique
+                                    !ss <- newTVar supers
+                                    let !o = Object oid es co ss
+                                    -- put into instance map by class
+                                    modifyTVar' instMap $
+                                      Map.insert co (o, apkCtor')
+                                    exitOne o
+                    case restSupers of
+                      [] -> allocIt
+                      (nextSuper : restSupers') ->
+                        createOne nextSuper restSupers' apkCtor' $ const allocIt
+                _ -> throwEdh ets EvalError "bug: non-class object in mro"
         !superClasses <- readTVar (edh'class'mro endClass)
         createOne clsObj superClasses apk $ \ !obj -> do
           !im <- readTVar instMap
@@ -663,7 +668,8 @@ edhMutCloneObj !ets !fromThis !fromThat !newStore !exitEnd =
         cloneSupers !cloned !exitSupers (super : rest) =
           {- HLINT ignore "Redundant <$>" -}
           Map.lookup super <$> readTVar instMap >>= \case
-            Just !superClone -> cloneSupers (superClone : cloned) exitSupers rest
+            Just !superClone ->
+              cloneSupers (superClone : cloned) exitSupers rest
             Nothing -> clone1 super $ \ !superClone ->
               cloneSupers (superClone : cloned) exitSupers rest
         clone1 :: Object -> (Object -> STM ()) -> STM ()
