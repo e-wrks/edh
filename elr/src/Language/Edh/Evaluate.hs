@@ -3043,13 +3043,16 @@ evalAttrRef !addr !exit !ets = case addr of
     !scope = contextScope ctx
 
 evalDictLit ::
-  [(DictKeyExpr, ExprSrc)] -> [(EdhValue, EdhValue)] -> EdhTxExit EdhValue -> EdhTx
+  [(DictKeyExpr, ExprSrc)] ->
+  [(EdhValue, EdhValue)] ->
+  EdhTxExit EdhValue ->
+  EdhTx
 evalDictLit [] !dsl !exit !ets = do
   !u <- unsafeIOToSTM newUnique
-  -- entry order in DictExpr is reversed as from source, we reversed it again
-  -- here, so dsl now is the same order as in source code
-  !dsv <- iopdFromList dsl
+  !dsv <- edhDictFromList dsl
   exitEdh ets exit $ EdhDict $ Dict u dsv
+-- entry order in DictExpr is reversed as from source, it is reversed again
+-- here, so the final dsl here is the same order as in source code
 evalDictLit ((k, v) : entries) !dsl !exit !ets = case k of
   LitDictKey !lit -> runEdhTx ets $
     evalExprSrc v $ \ !vVal _ets ->
@@ -3102,9 +3105,15 @@ adtFields !ets !obj !exit = case edh'obj'store obj of
           go [] !fs = exit $ reverse fs
           go (dr : rest) !fs = case dr of
             RecvArg _ Just {} _ ->
-              throwEdh ets UsageError "rename of data class field not supported yet"
+              throwEdh
+                ets
+                UsageError
+                "rename of data class field not supported yet"
             RecvArg (AttrAddrSrc SymbolicAttr {} _) _ _ ->
-              throwEdh ets UsageError "symbolic data class field not supported yet"
+              throwEdh
+                ets
+                UsageError
+                "symbolic data class field not supported yet"
             RecvArg (AttrAddrSrc (NamedAttr !fn) _) Nothing _ ->
               case odLookup (AttrByName fn) ds of
                 Just !fv -> go rest ((fn <> "= ", fv) : fs)

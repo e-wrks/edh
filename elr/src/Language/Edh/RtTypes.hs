@@ -33,6 +33,10 @@ edhSetValue !key !val !d = case val of
   EdhNil -> iopdDelete key d
   _ -> iopdInsert key val d
 
+edhDictFromList :: [(EdhValue, EdhValue)] -> STM (IOPD EdhValue EdhValue)
+edhDictFromList = iopdFromList' $ \e@(_k, !v) ->
+  if v == EdhNil then Nothing else Just e
+
 -- | A pack of evaluated argument values with positional/keyword origin,
 -- this works in places of tuples in other languages, apk in Edh can be
 -- considered a tuple if only positional arguments inside.

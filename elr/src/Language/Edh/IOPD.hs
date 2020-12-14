@@ -216,18 +216,37 @@ iopdToReverseList (IOPD _mv !wpv _nhv !av) = do
   go [] 0
 
 iopdFromList :: forall k v. (Eq k, Hashable k) => [(k, v)] -> STM (IOPD k v)
-iopdFromList !entries = do
-  !tves <- sequence $ [(key,) <$> newTVar (Just e) | e@(!key, _) <- entries]
+iopdFromList = iopdFromList' Just
+
+iopdFromList' ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  ((k, v) -> Maybe (k, v)) ->
+  [(k, v)] ->
+  STM (IOPD k v)
+iopdFromList' !entryMod !entries = do
+  !tves <-
+    sequence $
+      [ case entryMod e of
+          Nothing -> (key,True,) <$> newTVar Nothing
+          ev@Just {} -> (key,False,) <$> newTVar ev
+        | e@(!key, _) <- entries
+      ]
   (!mNew, !wpNew, !nhNew, !aNew) <- unsafeIOToSTM $ do
     !a <- MV.unsafeNew $ length entries
     let go [] !m !wp !nh = return (m, wp, nh, a)
-        go ((!key, !ev) : rest) !m !wp !nh = case Map.lookup key m of
-          Nothing -> do
-            MV.unsafeWrite a wp ev
-            go rest (Map.insert key wp m) (wp + 1) nh
+        go ((!key, !del, !ev) : rest) !m !wp !nh = case Map.lookup key m of
+          Nothing ->
+            if del
+              then go rest m wp nh
+              else do
+                MV.unsafeWrite a wp ev
+                go rest (Map.insert key wp m) (wp + 1) nh
           Just !i -> do
             MV.unsafeWrite a i ev
-            go rest m wp nh
+            if del
+              then go rest (Map.delete key m) wp (nh + 1)
+              else go rest m wp nh
     go tves Map.empty 0 0
   !mv <- newTVar mNew
   !wpv <- newTVar wpNew
