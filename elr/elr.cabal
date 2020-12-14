@@ -57,6 +57,7 @@ library
 
   ghc-options:        -Wall
   build-depends:
+    , aeson
     , base                  >=4.12  && <5
     , bytestring
     , clock

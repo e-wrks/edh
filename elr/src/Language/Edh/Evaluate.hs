@@ -6,7 +6,9 @@ module Language.Edh.Evaluate where
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad.State.Strict
+import qualified Data.Aeson as A
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as BL
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import qualified Data.HashMap.Strict as Map
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -14,7 +16,7 @@ import qualified Data.Lossless.Decimal as D
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Encoding (Decoding (Some), streamDecodeUtf8With)
+import Data.Text.Encoding (Decoding (Some), decodeUtf8With, streamDecodeUtf8With)
 import Data.Text.Encoding.Error (lenientDecode)
 import Data.Typeable (Proxy (..), Typeable, typeRep)
 import qualified Data.UUID as UUID
@@ -3377,7 +3379,8 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
           !s -> exit $ strJson s
 
     strJson :: Text -> Text
-    strJson = T.pack . show -- todo need to sophisticate this?
+    strJson = decodeUtf8With lenientDecode . BL.toStrict . A.encode
+
     listJson :: [EdhValue] -> (Text -> STM ()) -> STM ()
     listJson [] !exit = exit "[]"
     listJson !vs !exit = go [] vs $
