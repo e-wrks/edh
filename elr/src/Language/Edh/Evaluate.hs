@@ -3339,7 +3339,10 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
       EdhDict (Dict _ !ds) -> iopdToList ds >>= flip dictJson exit
       EdhArgsPack (ArgsPack !args !kwargs) ->
         if null args
-          then kwsJson (odToList kwargs) exit
+          then
+            if odNull kwargs
+              then exit "[]"
+              else kwsJson (odToList kwargs) exit
           else
             if odNull kwargs
               then listJson args exit
