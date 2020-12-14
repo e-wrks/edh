@@ -631,6 +631,8 @@ installEdhBatteries world =
                   (EdhMethod, "__SinkType_mrv__", wrapHostProc sink'mrvProc),
                   (EdhMethod, "__SinkType_eos__", wrapHostProc sink'eosProc),
                   (EdhMethod, "__DictType_size__", wrapHostProc dictSizeProc),
+                  (EdhMethod, "__DictType_keys__", wrapHostProc dictKeysProc),
+                  (EdhMethod, "__DictType_values__", wrapHostProc dictValuesProc),
                   (EdhMethod, "__ListType_push__", wrapHostProc listPushProc),
                   (EdhMethod, "__ListType_pop__", wrapHostProc listPopProc)
                 ]

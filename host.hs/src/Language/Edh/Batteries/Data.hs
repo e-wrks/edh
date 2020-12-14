@@ -820,6 +820,14 @@ dictSizeProc :: Dict -> EdhHostProc
 dictSizeProc (Dict _ !ds) !exit !ets =
   exitEdh ets exit . EdhDecimal . fromIntegral =<< iopdSize ds
 
+dictKeysProc :: Dict -> EdhHostProc
+dictKeysProc (Dict _ !ds) !exit !ets =
+  exitEdh ets exit . EdhArgsPack . flip ArgsPack odEmpty =<< iopdKeys ds
+
+dictValuesProc :: Dict -> EdhHostProc
+dictValuesProc (Dict _ !ds) !exit !ets =
+  exitEdh ets exit . EdhArgsPack . flip ArgsPack odEmpty =<< iopdValues ds
+
 listPushProc :: List -> EdhHostProc
 listPushProc l@(List _ !lv) !exit !ets =
   mkHostProc' (contextScope $ edh'context ets) EdhMethod "push" listPush
