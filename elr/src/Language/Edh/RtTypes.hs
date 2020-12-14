@@ -33,6 +33,7 @@ edhSetValue !key !val !d = case val of
   EdhNil -> iopdDelete key d
   _ -> iopdInsert key val d
 
+-- | `nil` carries deletion semantics in Edh
 edhDictFromList :: [(EdhValue, EdhValue)] -> STM (IOPD EdhValue EdhValue)
 edhDictFromList = iopdFromList' $ \e@(_k, !v) ->
   if v == EdhNil then Nothing else Just e
