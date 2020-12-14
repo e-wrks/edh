@@ -2249,7 +2249,14 @@ evalScopedBlock !stmts !exit !ets = do
                   edh'procedure'lexi = currScope
                 }
           }
-      !etsBlock = ets {edh'context = ctx {edh'ctx'tip = blockFrame}}
+      !etsBlock =
+        ets
+          { edh'context =
+              ctx
+                { edh'ctx'tip = blockFrame,
+                  edh'ctx'stack = currFrame : edh'ctx'stack ctx
+                }
+          }
   runEdhTx etsBlock $
     evalBlock stmts $ \ !blkResult ->
       edhSwitchState ets $ exitEdhTx exit blkResult
