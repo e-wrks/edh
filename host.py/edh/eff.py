@@ -41,43 +41,18 @@ def effect(key2get_or_dict2put: Optional[Union[dict, object]] = None, **kws2put)
 
     # meant to extract an effectful artifact by key `key2get`
 
-    # do extract from the synchronous call stack if not in an asynchronous
-    # context; or from the asynchronous call stack, regardless of the direct
-    # caller is sync or async. this means a synchronous library function can
-    # not provide or override effectful artifacts for asynchronous application
-    # or framework functions, those demanding some effect.
-
-    coro_task = None
-    try:
-        coro_task = asyncio.current_task()
-    except:
-        pass
-    if coro_task is None:  # no asynchronous context
-
-        while True:
-            effs = scope.get(EFFSKEY, None)
-            if effs is not None:
-                art = effs.get(key2get, effs)
-                if art is not effs:
-                    return art
-            frame = frame.f_back
-            if frame is None:
-                raise ValueError(f"No such effect: {key2get!r}")
-            scope = frame.f_locals
-
-    else:  # asynchronous context involved
-
-        # this function is not a coroutine, so the top is already the nearest
-        # async caller's frame
-        for frame in reversed(coro_task.get_stack()):
-            scope = frame.f_locals
-            effs = scope.get(EFFSKEY, None)
-            if effs is not None:
-                art = effs.get(key2get, effs)
-                if art is not effs:
-                    return art
-
-        raise ValueError(f"No such async effect: {key2get!r}")
+    # need CPython 3.8 or later to have frames of async coroutines in the stack
+    # searched this way
+    while True:
+        effs = scope.get(EFFSKEY, None)
+        if effs is not None:
+            art = effs.get(key2get, effs)
+            if art is not effs:
+                return art
+        frame = frame.f_back
+        if frame is None:
+            raise ValueError(f"No such effect: {key2get!r}")
+        scope = frame.f_locals
 
 
 def effect_import(modu: Union["module", Dict[str, object]]):
