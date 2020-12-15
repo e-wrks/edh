@@ -115,6 +115,10 @@ class EventSink:
         # the publish channel
         self.chan = PubChan()
 
+    @property
+    def eos(self):
+        return self.mrv is EndOfStream
+
     def publish(self, ev):
         if self.seqn >= 9223372036854775807:
             # int64 wrap back to 1 on overflow
