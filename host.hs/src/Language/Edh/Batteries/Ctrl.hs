@@ -718,7 +718,8 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                     !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
                       throwEdh ets UsageError $ "invalid class: " <> badDesc
               _ -> exitEdh ets exit EdhCaseOther
-        -- { class( field1, field2, ... ) } -- fields of class pattern
+        -- { class( field1, field2, ... ) } -- fields by class pattern
+        -- __match__ magic from the class works as well
         [ StmtSrc
             (ExprStmt (CallExpr (ExprSrc (AttrExpr !clsRef) _) !apkr) _docCmt)
             _
@@ -726,7 +727,32 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
             dcFieldsExtractor apkr $ \ !fieldExtractors ->
               runEdhTx ets $
                 evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
-                  EdhObject !clsObj -> matchDataClass clsObj fieldExtractors
+                  EdhObject !clsObj ->
+                    matchDataClass clsObj fieldExtractors Nothing
+                  !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
+                    throwEdh ets UsageError $ "invalid class: " <> badDesc
+        -- { class( field1, field2, ... ) = instAddr } -- fields by class again
+        -- but receive the matched object as well
+        -- __match__ magic from the class works as well
+        [ StmtSrc
+            ( ExprStmt
+                ( InfixExpr
+                    "="
+                    (ExprSrc (CallExpr (ExprSrc (AttrExpr !clsRef) _) !apkr) _)
+                    (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !instAddr _))) _)
+                  )
+                _docCmt
+              )
+            _
+          ] ->
+            dcFieldsExtractor apkr $ \ !fieldExtractors ->
+              runEdhTx ets $
+                evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
+                  EdhObject !clsObj -> case instAddr of
+                    NamedAttr "_" ->
+                      matchDataClass clsObj fieldExtractors Nothing
+                    _ -> resolveEdhAttrAddr ets instAddr $ \ !instKey ->
+                      matchDataClass clsObj fieldExtractors $ Just instKey
                   !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
                     throwEdh ets UsageError $ "invalid class: " <> badDesc
         --
@@ -864,10 +890,15 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                     <> T.pack
                       (show argSender)
 
-        matchDataClass :: Object -> [(AttrKey, AttrKey)] -> STM ()
-        matchDataClass !clsObj !dcfxs = case edhUltimate ctxMatch of
-          EdhObject !ctxObj -> withObj ctxObj tryCoerceMatch
-          _ -> tryCoerceMatch
+        matchDataClass ::
+          Object ->
+          [(AttrKey, AttrKey)] ->
+          Maybe AttrKey ->
+          STM ()
+        matchDataClass !clsObj !dcfxs !maybeInstKey =
+          case edhUltimate ctxMatch of
+            EdhObject !ctxObj -> withObj ctxObj tryCoerceMatch
+            _ -> tryCoerceMatch
           where
             withObj !obj !alt =
               resolveEdhInstance clsObj obj >>= \case
@@ -876,7 +907,9 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
             withMatched !matchedObj = go dcfxs []
               where
                 go :: [(AttrKey, AttrKey)] -> [(AttrKey, EdhValue)] -> STM ()
-                go [] !arts = matchExit arts
+                go [] !arts = matchExit $ case maybeInstKey of
+                  Just !instKey -> arts ++ [(instKey, EdhObject matchedObj)]
+                  Nothing -> arts
                 go ((!srcKey, !tgtKey) : rest) !arts =
                   lookupEdhObjAttr matchedObj srcKey >>= \case
                     (_, !artVal) -> go rest $ (tgtKey, noneNil artVal) : arts
