@@ -171,7 +171,11 @@ arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
                   edh'procedure'decl = pd
                 }
           !boundMth =
-            EdhBoundProc mth (edh'scope'this scope) (edh'scope'that scope) Nothing
+            EdhBoundProc
+              mth
+              (edh'scope'this scope)
+              (edh'scope'that scope)
+              Nothing
       exitEdh ets exit boundMth
   where
     {- HLINT ignore "Reduce duplication" -}
@@ -210,11 +214,15 @@ arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
     blockContainsYield [] = False
     blockContainsYield (StmtSrc !stmt _ : rest) = case stmt of
       WhileStmt (ExprSrc !cnd _) !body ->
-        containsYield cnd || blockContainsYield [body] || blockContainsYield rest
+        containsYield cnd || blockContainsYield [body]
+          || blockContainsYield rest
       ExprStmt !x _docCmt -> containsYield x || blockContainsYield rest
       _ -> blockContainsYield rest
 
-methodArrowArgsReceiver :: Expr -> (Either Text ArgsReceiver -> STM ()) -> STM ()
+methodArrowArgsReceiver ::
+  Expr ->
+  (Either Text ArgsReceiver -> STM ()) ->
+  STM ()
 methodArrowArgsReceiver (AttrExpr (DirectRef !argAttr)) !exit =
   exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing
 methodArrowArgsReceiver (ArgsPackExpr !argSndrs) !exit = cnvrt argSndrs []
@@ -279,10 +287,14 @@ prodArrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
     !scope = edh'frame'scope tip
     !arrowName = "<producer>"
 
-producerArrowArgsReceiver :: Expr -> (Either Text ArgsReceiver -> STM ()) -> STM ()
+producerArrowArgsReceiver ::
+  Expr ->
+  (Either Text ArgsReceiver -> STM ()) ->
+  STM ()
 producerArrowArgsReceiver (AttrExpr (DirectRef !argAttr)) !exit =
   exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing
-producerArrowArgsReceiver (ArgsPackExpr !argSndrs) !exit = cnvrt False argSndrs []
+producerArrowArgsReceiver (ArgsPackExpr !argSndrs) !exit =
+  cnvrt False argSndrs []
   where
     cnvrt :: Bool -> [ArgSender] -> [ArgReceiver] -> STM ()
     cnvrt !outletPrsnt [] !rcvrs =
@@ -385,13 +397,21 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [(k, noneNil v) | (k, v) <- ps', k /= AttrByName "_"]
         scopeEntity
 
-    handlePattern :: Expr -> STM () -> ([(AttrKey, EdhValue)] -> STM ()) -> STM ()
+    handlePattern ::
+      Expr ->
+      STM () ->
+      ([(AttrKey, EdhValue)] -> STM ()) ->
+      STM ()
     handlePattern !fullExpr !naExit !matchExit = case fullExpr of
       -- TODO support nested patterns
 
       -- { x:y:z:... } -- pair pattern matching
-      DictExpr [(AddrDictKey (DirectRef (AttrAddrSrc (NamedAttr !name1) _)), ExprSrc !pairPattern _)] ->
-        handlePairPattern (Just $ AttrByName name1) pairPattern
+      DictExpr
+        [ ( AddrDictKey (DirectRef (AttrAddrSrc (NamedAttr !name1) _)),
+            ExprSrc !pairPattern _
+            )
+          ] ->
+          handlePairPattern (Just $ AttrByName name1) pairPattern
       -- this is to establish the intuition that `{ ... }` always invokes
       -- pattern matching. if a literal dict value really meant to be matched,
       -- the parenthesized form `( {k1: v1, k2: v2, ...} )` should be used.
@@ -403,15 +423,34 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
       -- other patterns matching
       BlockExpr patternExpr -> case patternExpr of
         -- {( x )} -- single arg
-        [StmtSrc (ExprStmt (ParenExpr (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !attrName) _))) _)) _docCmt) _] ->
-          case ctxMatch of
-            EdhArgsPack (ArgsPack [argVal] !kwargs)
-              | odNull kwargs ->
-                matchExit [(AttrByName attrName, argVal)]
-            _ -> exitEdh ets exit EdhCaseOther
+        [ StmtSrc
+            ( ExprStmt
+                ( ParenExpr
+                    ( ExprSrc
+                        ( AttrExpr
+                            (DirectRef (AttrAddrSrc (NamedAttr !attrName) _))
+                          )
+                        _
+                      )
+                  )
+                _docCmt
+              )
+            _
+          ] ->
+            case ctxMatch of
+              EdhArgsPack (ArgsPack [argVal] !kwargs)
+                | odNull kwargs ->
+                  matchExit [(AttrByName attrName, argVal)]
+              _ -> exitEdh ets exit EdhCaseOther
         -- {( x:y:z:... )} -- parenthesised pair pattern
-        [StmtSrc (ExprStmt (ParenExpr (ExprSrc pairPattern@(InfixExpr ":" _ _) _)) _docCmt) _] ->
-          handlePairPattern Nothing pairPattern
+        [ StmtSrc
+            ( ExprStmt
+                (ParenExpr (ExprSrc pairPattern@(InfixExpr ":" _ _) _))
+                _docCmt
+              )
+            _
+          ] ->
+            handlePairPattern Nothing pairPattern
         -- { continue } -- match with continue
         [StmtSrc ContinueStmt _] -> case ctxMatch of
           EdhContinue -> matchExit []
@@ -427,85 +466,187 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         -- { val } -- wild capture pattern, used to capture a non-nil result as
         -- an attribute.
         -- Note: a raw nil value should be value-matched explicitly
-        [StmtSrc (ExprStmt (AttrExpr (DirectRef (AttrAddrSrc !valAttr _))) _docCmt) _] ->
-          case ctxMatch of -- don't match raw nil here,
-            EdhNil -> exitEdh ets exit EdhCaseOther
-            -- but a named nil (i.e. None/Nothing etc.) should be matched
-            _ -> resolveEdhAttrAddr ets valAttr $
-              \ !valKey -> matchExit [(valKey, ctxMatch)]
+        [ StmtSrc
+            (ExprStmt (AttrExpr (DirectRef (AttrAddrSrc !valAttr _))) _docCmt)
+            _
+          ] ->
+            case ctxMatch of -- don't match raw nil here,
+              EdhNil -> exitEdh ets exit EdhCaseOther
+              -- but a named nil (i.e. None/Nothing etc.) should be matched
+              _ -> resolveEdhAttrAddr ets valAttr $
+                \ !valKey -> matchExit [(valKey, ctxMatch)]
         -- { term := value } -- definition pattern
-        [StmtSrc (ExprStmt (InfixExpr ":=" (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !termName) _))) _) (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valueName) _))) _)) _docCmt) _] ->
-          case ctxMatch of
-            EdhNamedValue !n !v ->
-              matchExit
-                [(AttrByName termName, EdhString n), (AttrByName valueName, v)]
-            _ -> exitEdh ets exit EdhCaseOther
-        -- { head => tail } -- uncons pattern
-        [StmtSrc (ExprStmt (InfixExpr ":>" (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !headName) _))) _) (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !tailName) _))) _)) _docCmt) _] ->
-          let doMatched headVal tailVal =
+        [ StmtSrc
+            ( ExprStmt
+                ( InfixExpr
+                    ":="
+                    ( ExprSrc
+                        ( AttrExpr
+                            (DirectRef (AttrAddrSrc (NamedAttr !termName) _))
+                          )
+                        _
+                      )
+                    ( ExprSrc
+                        ( AttrExpr
+                            (DirectRef (AttrAddrSrc (NamedAttr !valueName) _))
+                          )
+                        _
+                      )
+                  )
+                _docCmt
+              )
+            _
+          ] ->
+            case ctxMatch of
+              EdhNamedValue !n !v ->
                 matchExit
-                  [ (AttrByName headName, headVal),
-                    (AttrByName tailName, tailVal)
-                  ]
-           in case ctxMatch of
-                EdhArgsPack (ArgsPack (h : rest) !kwargs)
-                  | odNull kwargs ->
-                    doMatched h (EdhArgsPack (ArgsPack rest kwargs))
-                EdhList (List _ !l) ->
-                  readTVar l >>= \case
-                    (h : rest) -> do
-                      rl <- newTVar rest
-                      u <- unsafeIOToSTM newUnique
-                      doMatched h $ EdhList $ List u rl
-                    _ -> exitEdh ets exit EdhCaseOther
-                _ -> exitEdh ets exit EdhCaseOther
+                  [(AttrByName termName, EdhString n), (AttrByName valueName, v)]
+              _ -> exitEdh ets exit EdhCaseOther
+        -- { head => tail } -- uncons pattern
+        [ StmtSrc
+            ( ExprStmt
+                ( InfixExpr
+                    ":>"
+                    ( ExprSrc
+                        ( AttrExpr
+                            (DirectRef (AttrAddrSrc (NamedAttr !headName) _))
+                          )
+                        _
+                      )
+                    ( ExprSrc
+                        ( AttrExpr
+                            (DirectRef (AttrAddrSrc (NamedAttr !tailName) _))
+                          )
+                        _
+                      )
+                  )
+                _docCmt
+              )
+            _
+          ] ->
+            let doMatched headVal tailVal =
+                  matchExit
+                    [ (AttrByName headName, headVal),
+                      (AttrByName tailName, tailVal)
+                    ]
+             in case ctxMatch of
+                  EdhArgsPack (ArgsPack (h : rest) !kwargs)
+                    | odNull kwargs ->
+                      doMatched h (EdhArgsPack (ArgsPack rest kwargs))
+                  EdhList (List _ !l) ->
+                    readTVar l >>= \case
+                      (h : rest) -> do
+                        rl <- newTVar rest
+                        u <- unsafeIOToSTM newUnique
+                        doMatched h $ EdhList $ List u rl
+                      _ -> exitEdh ets exit EdhCaseOther
+                  _ -> exitEdh ets exit EdhCaseOther
         -- { prefix @< match >@ suffix } -- sub-string cut pattern
-        [StmtSrc (ExprStmt (InfixExpr ">@" (ExprSrc (InfixExpr "@<" (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !prefixName) _))) _) matchExpr) _) (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !suffixName) _))) _)) _docCmt) _] ->
-          case ctxMatch of
-            EdhString !fullStr ->
-              runEdhTx ets $
-                evalExprSrc matchExpr $ \ !mVal _ets ->
-                  edhValueStr ets (edhUltimate mVal) $ \ !mStr ->
-                    if T.null mStr
-                      then
-                        throwEdh
-                          ets
-                          UsageError
-                          "you don't use empty string for match"
-                      else
-                        let (prefix, rest) = T.breakOn mStr fullStr
-                         in case T.stripPrefix mStr rest of
-                              Just !suffix ->
-                                matchExit
-                                  [ (AttrByName prefixName, EdhString prefix),
-                                    (AttrByName suffixName, EdhString suffix)
-                                  ]
-                              _ -> exitEdh ets exit EdhCaseOther
-            _ -> exitEdh ets exit EdhCaseOther
+        [ StmtSrc
+            ( ExprStmt
+                ( InfixExpr
+                    ">@"
+                    ( ExprSrc
+                        ( InfixExpr
+                            "@<"
+                            ( ExprSrc
+                                ( AttrExpr
+                                    ( DirectRef
+                                        (AttrAddrSrc (NamedAttr !prefixName) _)
+                                      )
+                                  )
+                                _
+                              )
+                            matchExpr
+                          )
+                        _
+                      )
+                    ( ExprSrc
+                        ( AttrExpr
+                            (DirectRef (AttrAddrSrc (NamedAttr !suffixName) _))
+                          )
+                        _
+                      )
+                  )
+                _docCmt
+              )
+            _
+          ] ->
+            case ctxMatch of
+              EdhString !fullStr ->
+                runEdhTx ets $
+                  evalExprSrc matchExpr $ \ !mVal _ets ->
+                    edhValueStr ets (edhUltimate mVal) $ \ !mStr ->
+                      if T.null mStr
+                        then
+                          throwEdh
+                            ets
+                            UsageError
+                            "you don't use empty string for match"
+                        else
+                          let (prefix, rest) = T.breakOn mStr fullStr
+                           in case T.stripPrefix mStr rest of
+                                Just !suffix ->
+                                  matchExit
+                                    [ (AttrByName prefixName, EdhString prefix),
+                                      (AttrByName suffixName, EdhString suffix)
+                                    ]
+                                _ -> exitEdh ets exit EdhCaseOther
+              _ -> exitEdh ets exit EdhCaseOther
         -- { match >@ suffix } -- prefix cut pattern
-        [StmtSrc (ExprStmt (InfixExpr ">@" prefixExpr (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !suffixName) _))) _)) _docCmt) _] ->
-          case ctxMatch of
-            EdhString !fullStr ->
-              runEdhTx ets $
-                evalExprSrc prefixExpr $ \ !lhVal _ets ->
-                  edhValueStr ets (edhUltimate lhVal) $ \ !lhStr ->
-                    case T.stripPrefix lhStr fullStr of
-                      Just !suffix ->
-                        matchExit [(AttrByName suffixName, EdhString suffix)]
-                      _ -> exitEdh ets exit EdhCaseOther
-            _ -> exitEdh ets exit EdhCaseOther
+        [ StmtSrc
+            ( ExprStmt
+                ( InfixExpr
+                    ">@"
+                    prefixExpr
+                    ( ExprSrc
+                        ( AttrExpr
+                            (DirectRef (AttrAddrSrc (NamedAttr !suffixName) _))
+                          )
+                        _
+                      )
+                  )
+                _docCmt
+              )
+            _
+          ] ->
+            case ctxMatch of
+              EdhString !fullStr ->
+                runEdhTx ets $
+                  evalExprSrc prefixExpr $ \ !lhVal _ets ->
+                    edhValueStr ets (edhUltimate lhVal) $ \ !lhStr ->
+                      case T.stripPrefix lhStr fullStr of
+                        Just !suffix ->
+                          matchExit [(AttrByName suffixName, EdhString suffix)]
+                        _ -> exitEdh ets exit EdhCaseOther
+              _ -> exitEdh ets exit EdhCaseOther
         -- { prefix @< match } -- suffix cut pattern
-        [StmtSrc (ExprStmt (InfixExpr "@<" (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !prefixName) _))) _) suffixExpr) _docCmt) _] ->
-          case ctxMatch of
-            EdhString !fullStr ->
-              runEdhTx ets $
-                evalExprSrc suffixExpr $ \ !rhVal _ets ->
-                  edhValueStr ets (edhUltimate rhVal) $ \ !rhStr ->
-                    case T.stripSuffix rhStr fullStr of
-                      Just !prefix ->
-                        matchExit [(AttrByName prefixName, EdhString prefix)]
-                      _ -> exitEdh ets exit EdhCaseOther
-            _ -> exitEdh ets exit EdhCaseOther
+        [ StmtSrc
+            ( ExprStmt
+                ( InfixExpr
+                    "@<"
+                    ( ExprSrc
+                        ( AttrExpr
+                            (DirectRef (AttrAddrSrc (NamedAttr !prefixName) _))
+                          )
+                        _
+                      )
+                    suffixExpr
+                  )
+                _docCmt
+              )
+            _
+          ] ->
+            case ctxMatch of
+              EdhString !fullStr ->
+                runEdhTx ets $
+                  evalExprSrc suffixExpr $ \ !rhVal _ets ->
+                    edhValueStr ets (edhUltimate rhVal) $ \ !rhStr ->
+                      case T.stripSuffix rhStr fullStr of
+                        Just !prefix ->
+                          matchExit [(AttrByName prefixName, EdhString prefix)]
+                        _ -> exitEdh ets exit EdhCaseOther
+              _ -> exitEdh ets exit EdhCaseOther
         -- {( x,y,z,... )} -- pattern matching number of positional args
         [StmtSrc (ExprStmt (ArgsPackExpr !argSenders) _docCmt) _] ->
           if null argSenders
@@ -523,15 +664,25 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
               !attrNames <- fmap catMaybes $
                 sequence $
                   (<$> argSenders) $ \case
-                    SendPosArg (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !vAttr) _))) _) ->
-                      return $ Just vAttr
+                    SendPosArg
+                      ( ExprSrc
+                          ( AttrExpr
+                              ( DirectRef
+                                  (AttrAddrSrc (NamedAttr !vAttr) _)
+                                )
+                            )
+                          _
+                        ) ->
+                        return $ Just vAttr
                     _ -> return Nothing
               if length attrNames /= length argSenders
                 then
                   throwEdh
                     ets
                     UsageError
-                    ("invalid element in apk pattern: " <> T.pack (show argSenders))
+                    ( "invalid element in apk pattern: "
+                        <> T.pack (show argSenders)
+                    )
                 else case ctxMatch of
                   EdhArgsPack (ArgsPack !args !kwargs)
                     | length args == length argSenders && odNull kwargs ->
@@ -540,28 +691,46 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                   _ -> exitEdh ets exit EdhCaseOther
 
         -- {{ class:inst }} -- instance resolving pattern
-        [StmtSrc (ExprStmt (DictExpr [(AddrDictKey !clsRef, ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !instAttr _))) _)]) _docCmt) _] ->
-          -- brittany insists on putting together the long line above, any workaround?
-          case ctxMatch of
-            EdhObject ctxObj -> resolveEdhAttrAddr ets instAttr $ \ !instKey ->
+        [ StmtSrc
+            ( ExprStmt
+                ( DictExpr
+                    [ ( AddrDictKey !clsRef,
+                        ExprSrc
+                          (AttrExpr (DirectRef (AttrAddrSrc !instAttr _)))
+                          _
+                        )
+                      ]
+                  )
+                _docCmt
+              )
+            _
+          ] ->
+            case ctxMatch of
+              EdhObject ctxObj -> resolveEdhAttrAddr ets instAttr $
+                \ !instKey -> runEdhTx ets $
+                  evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
+                    EdhNil -> exitEdh ets exit EdhCaseOther
+                    EdhObject !clsObj ->
+                      resolveEdhInstance clsObj ctxObj >>= \case
+                        Just !instObj ->
+                          matchExit [(instKey, EdhObject instObj)]
+                        Nothing -> exitEdh ets exit EdhCaseOther
+                    !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
+                      throwEdh ets UsageError $ "invalid class: " <> badDesc
+              _ -> exitEdh ets exit EdhCaseOther
+        -- { class( field1, field2, ... ) } -- fields of class pattern
+        [ StmtSrc
+            (ExprStmt (CallExpr (ExprSrc (AttrExpr !clsRef) _) !apkr) _docCmt)
+            _
+          ] ->
+            dcFieldsExtractor apkr $ \ !fieldExtractors ->
               runEdhTx ets $
                 evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
-                  EdhNil -> exitEdh ets exit EdhCaseOther
-                  EdhObject !clsObj ->
-                    resolveEdhInstance clsObj ctxObj >>= \case
-                      Just !instObj -> matchExit [(instKey, EdhObject instObj)]
-                      Nothing -> exitEdh ets exit EdhCaseOther
+                  EdhObject !clsObj -> matchDataClass clsObj fieldExtractors
                   !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
                     throwEdh ets UsageError $ "invalid class: " <> badDesc
-            _ -> exitEdh ets exit EdhCaseOther
-        -- { DataClass( field1, field2, ... ) } -- data class pattern
-        [StmtSrc (ExprStmt (CallExpr (ExprSrc (AttrExpr !clsRef) _) !apkr) _docCmt) _] ->
-          dcFieldsExtractor apkr $ \ !fieldExtractors ->
-            runEdhTx ets $
-              evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
-                EdhObject !clsObj -> matchDataClass clsObj fieldExtractors
-                !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
-                  throwEdh ets UsageError $ "invalid class: " <> badDesc
+        --
+
         -- {[ x,y,z,... ]} -- any-of pattern
         [StmtSrc (ExprStmt (ListExpr vExprs) _docCmt) _] ->
           if null vExprs
@@ -614,26 +783,49 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
           [(AttrKey, EdhValue)] ->
           Maybe (Maybe EdhValue, [(AttrKey, EdhValue)])
         matchPairPattern !p !v !matches = case p of
-          AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !lastAttr) _)) -> case v of
-            EdhPair !resi !lastVal ->
-              Just (Just resi, (AttrByName lastAttr, lastVal) : matches)
-            _ -> Just (Nothing, (AttrByName lastAttr, v) : matches)
-          InfixExpr ":" (ExprSrc !leftExpr _) (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !vAttr) _))) _) ->
+          AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !lastAttr) _)) ->
             case v of
-              EdhPair !leftVal !val ->
-                let matches' = (AttrByName vAttr, val) : matches
-                 in case leftExpr of
-                      (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !leftAttr) _))) ->
-                        case leftVal of
-                          EdhPair !resi !lastVal ->
-                            Just
-                              (Just resi, (AttrByName leftAttr, lastVal) : matches')
-                          _ ->
-                            Just (Nothing, (AttrByName leftAttr, leftVal) : matches')
-                      InfixExpr ":" _ _ ->
-                        matchPairPattern leftExpr leftVal matches'
-                      _ -> Nothing
-              _ -> Just (Nothing, [])
+              EdhPair !resi !lastVal ->
+                Just (Just resi, (AttrByName lastAttr, lastVal) : matches)
+              _ -> Just (Nothing, (AttrByName lastAttr, v) : matches)
+          InfixExpr
+            ":"
+            (ExprSrc !leftExpr _)
+            ( ExprSrc
+                ( AttrExpr
+                    ( DirectRef
+                        (AttrAddrSrc (NamedAttr !vAttr) _)
+                      )
+                  )
+                _
+              ) ->
+              case v of
+                EdhPair !leftVal !val ->
+                  let matches' = (AttrByName vAttr, val) : matches
+                   in case leftExpr of
+                        ( AttrExpr
+                            ( DirectRef
+                                ( AttrAddrSrc
+                                    (NamedAttr !leftAttr)
+                                    _
+                                  )
+                              )
+                          ) ->
+                            case leftVal of
+                              EdhPair !resi !lastVal ->
+                                Just
+                                  ( Just resi,
+                                    (AttrByName leftAttr, lastVal) : matches'
+                                  )
+                              _ ->
+                                Just
+                                  ( Nothing,
+                                    (AttrByName leftAttr, leftVal) : matches'
+                                  )
+                        InfixExpr ":" _ _ ->
+                          matchPairPattern leftExpr leftVal matches'
+                        _ -> Nothing
+                _ -> Just (Nothing, [])
           _ -> Nothing
 
         dcFieldsExtractor ::
@@ -642,13 +834,30 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
           where
             go [] !keys = exit' keys
             go (argSender : rest) !keys = case argSender of
-              SendPosArg (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !rcvAttr _))) _) ->
-                resolveEdhAttrAddr ets rcvAttr $
-                  \ !key -> go rest $ (key, key) : keys
-              SendKwArg (AttrAddrSrc !srcAttr _) (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !tgtAttr _))) _) ->
-                resolveEdhAttrAddr ets srcAttr $ \ !srcKey ->
-                  resolveEdhAttrAddr ets tgtAttr $
-                    \ !tgtKey -> go rest $ (srcKey, tgtKey) : keys
+              SendPosArg
+                ( ExprSrc
+                    ( AttrExpr
+                        ( DirectRef
+                            (AttrAddrSrc !rcvAttr _)
+                          )
+                      )
+                    _
+                  ) ->
+                  resolveEdhAttrAddr ets rcvAttr $
+                    \ !key -> go rest $ (key, key) : keys
+              SendKwArg
+                (AttrAddrSrc !srcAttr _)
+                ( ExprSrc
+                    ( AttrExpr
+                        ( DirectRef
+                            (AttrAddrSrc !tgtAttr _)
+                          )
+                      )
+                    _
+                  ) ->
+                  resolveEdhAttrAddr ets srcAttr $ \ !srcKey ->
+                    resolveEdhAttrAddr ets tgtAttr $
+                      \ !tgtKey -> go rest $ (srcKey, tgtKey) : keys
               _ ->
                 throwEdh ets UsageError $
                   "bad data class field extractor: "
@@ -677,15 +886,27 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                 (_, EdhNil) -> exitEdh ets exit EdhCaseOther
                 (!this', EdhProcedure (EdhMethod !mth) _) ->
                   runEdhTx ets $
-                    callEdhMethod this' clsObj mth (ArgsPack [ctxMatch] odEmpty) id $
-                      \ !mthRtn _ets -> case mthRtn of
-                        EdhObject !obj -> withObj obj $ exitEdh ets exit EdhCaseOther
+                    callEdhMethod
+                      this'
+                      clsObj
+                      mth
+                      (ArgsPack [ctxMatch] odEmpty)
+                      id
+                      $ \ !mthRtn _ets -> case mthRtn of
+                        EdhObject !obj ->
+                          withObj obj $ exitEdh ets exit EdhCaseOther
                         _ -> exitEdh ets exit EdhCaseOther
                 (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
                   runEdhTx ets $
-                    callEdhMethod this that mth (ArgsPack [ctxMatch] odEmpty) id $
-                      \ !mthRtn _ets -> case mthRtn of
-                        EdhObject !obj -> withObj obj $ exitEdh ets exit EdhCaseOther
+                    callEdhMethod
+                      this
+                      that
+                      mth
+                      (ArgsPack [ctxMatch] odEmpty)
+                      id
+                      $ \ !mthRtn _ets -> case mthRtn of
+                        EdhObject !obj ->
+                          withObj obj $ exitEdh ets exit EdhCaseOther
                         _ -> exitEdh ets exit EdhCaseOther
                 (_, !badMagic) -> edhValueDesc ets badMagic $ \ !badDesc ->
                   throwEdh ets UsageError $ "bad __match__ magic: " <> badDesc
