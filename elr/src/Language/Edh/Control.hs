@@ -50,6 +50,11 @@ data SrcPos = SrcPos
   }
   deriving (Eq, Show)
 
+instance Ord SrcPos where
+  compare (SrcPos !x'l !x'c) (SrcPos !y'l !y'c) = case compare x'l y'l of
+    EQ -> compare x'c y'c
+    !conclusion -> conclusion
+
 beginningSrcPos :: SrcPos
 beginningSrcPos = SrcPos 0 0
 
@@ -62,6 +67,17 @@ data SrcRange = SrcRange
     src'end :: {-# UNPACK #-} !SrcPos
   }
   deriving (Eq, Show)
+
+-- | compare a position to a range, return 'EQ' when the position is within the
+-- range, or 'LT' when before it, 'GT' when after it.
+srcPosCmp2Range :: SrcPos -> SrcRange -> Ordering
+srcPosCmp2Range !p (SrcRange !start !end) = case compare p start of
+  LT -> LT
+  EQ -> EQ
+  GT -> case compare p end of
+    LT -> EQ
+    EQ -> EQ
+    GT -> GT
 
 zeroSrcRange :: SrcRange
 zeroSrcRange = SrcRange beginningSrcPos beginningSrcPos
