@@ -53,12 +53,12 @@ export data URI(
   }
 
   {##
-   # parse a string as URI object
+   # match a string as URI object
    #
    # TODO write some Haskell code to help decodeURI
    # https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/decodeURI
    #}
-  method parse( s ) {
+  method __match__( s ) {
     # init default values of fields
     scheme= 'file'
     authority= ''
@@ -83,8 +83,12 @@ export data URI(
   }
 
   {##
-   # enable pattern matching of string to parsed URI
+   # meant to be called *statically* as @URI.parse(xxx)@
+   # this method throws for failure of conversion
    #}
-  __match__ = parse
+  method parse ( s ) case s of {
+    { URI() = uri } -> uri
+    error( 'bad URI: ' ++ desc( s ) )
+  }
 
 }
