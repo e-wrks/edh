@@ -84,8 +84,9 @@ defaultEdhConsole !inputSettings = do
   !outputTk <- newTMVarIO ()
   !logIdle <- newEmptyTMVarIO
   !outIdle <- newEmptyTMVarIO
-  !ioQ <- newTBQueueIO 100
-  !logQueue <- newTBQueueIO 100
+  -- TODO detect backpressure from stdout/stderr, handle accordingly
+  !ioQ <- newTQueueIO
+  !logQueue <- newTQueueIO
   let logLevel = case envLogLevel of
         Nothing -> 20
         Just "DEBUG" -> 10
@@ -101,7 +102,7 @@ defaultEdhConsole !inputSettings = do
       logPrinter :: IO ()
       logPrinter = do
         !lr <-
-          atomically (tryReadTBQueue logQueue) >>= \case
+          atomically (tryReadTQueue logQueue) >>= \case
             Just !lr -> do
               -- make sure log is marked busy
               void $ atomically $ tryTakeTMVar logIdle
@@ -110,7 +111,7 @@ defaultEdhConsole !inputSettings = do
               -- mark log idle
               void $ atomically $ tryPutTMVar logIdle ()
               -- block wait next log request
-              !lr <- atomically $ readTBQueue logQueue
+              !lr <- atomically $ readTQueue logQueue
               -- make sure log is marked busy
               void $ atomically $ tryTakeTMVar logIdle
               return lr
@@ -125,11 +126,11 @@ defaultEdhConsole !inputSettings = do
         case logArgs of
           ArgsPack [!argVal] !kwargs
             | odNull kwargs ->
-              writeTBQueue logQueue $! logPrefix <> logString argVal <> "\n"
+              writeTQueue logQueue $! logPrefix <> logString argVal <> "\n"
           _ ->
             -- todo: format structured log record,
             -- with some log parsers in mind
-            writeTBQueue logQueue $! logPrefix <> T.pack (show logArgs) <> "\n"
+            writeTQueue logQueue $! logPrefix <> T.pack (show logArgs) <> "\n"
         where
           logString :: EdhValue -> Text
           logString (EdhString s) = s
@@ -151,7 +152,7 @@ defaultEdhConsole !inputSettings = do
       ioLoop = do
         !ior <-
           liftIO $
-            atomically (tryReadTBQueue ioQ) >>= \case
+            atomically (tryReadTQueue ioQ) >>= \case
               Just !ior -> do
                 -- make sure out is marked busy
                 void $ atomically $ tryTakeTMVar outIdle
@@ -160,7 +161,7 @@ defaultEdhConsole !inputSettings = do
                 -- mark out idle
                 void $ atomically $ tryPutTMVar outIdle ()
                 -- block wait next i/o request
-                !ior <- atomically $ readTBQueue ioQ
+                !ior <- atomically $ readTQueue ioQ
                 -- make sure out is marked busy
                 void $ atomically $ tryTakeTMVar outIdle
                 return ior
@@ -294,7 +295,7 @@ defaultEdhConsole !inputSettings = do
             void $ tryPutTMVar outIdle ()
   return
     EdhConsole
-      { consoleIO = ioQ,
+      { consoleIO = atomically . writeTQueue ioQ,
         consoleIOLoop = flip finally flushLogs $ runInputT inputSettings ioLoop,
         consoleLogLevel = logLevel,
         consoleLogger = logger,

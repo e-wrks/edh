@@ -542,7 +542,7 @@ worldContext !world =
 -- | Checkout 'defaultEdhConsole' and 'defaultEdhIOLoop' from the
 -- default batteries for implementation details, or just use that.
 data EdhConsole = EdhConsole
-  { consoleIO :: !(TBQueue EdhConsoleIO),
+  { consoleIO :: !(EdhConsoleIO -> IO ()),
     consoleIOLoop :: IO (),
     consoleLogLevel :: !LogLevel,
     consoleLogger :: !EdhLogger,

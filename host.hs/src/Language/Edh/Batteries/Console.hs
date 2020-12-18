@@ -138,11 +138,11 @@ conReadSourceProc
           "you don't read console from within a transaction"
       else do
         !cmdIn <- newEmptyTMVar
-        writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
         runEdhTx ets $
-          edhContSTM $
-            readTMVar cmdIn
-              >>= \(EdhInput !name !lineNo !lines_) ->
+          edhContIO $ do
+            cio $ ConsoleIn cmdIn ps1 ps2
+            atomically $
+              readTMVar cmdIn >>= \(EdhInput !name !lineNo !lines_) ->
                 if locInfo
                   then
                     exitEdh ets exit $
@@ -155,11 +155,8 @@ conReadSourceProc
                           T.unlines lines_
                   else exitEdh ets exit $ EdhString $ T.unlines lines_
     where
-      !ioQ =
-        consoleIO $
-          edh'world'console $
-            edh'prog'world $
-              edh'thread'prog ets
+      !world = edh'prog'world $ edh'thread'prog ets
+      !cio = consoleIO $ edh'world'console world
 
 -- | host method console.readCommand(ps1="Đ: ", ps2="Đ| ", inScopeOf=None)
 conReadCommandProc ::
@@ -180,26 +177,27 @@ conReadCommandProc
         let doReadCmd :: Scope -> STM ()
             doReadCmd !cmdScope = do
               !cmdIn <- newEmptyTMVar
-              writeTBQueue ioQ $ ConsoleIn cmdIn ps1 ps2
               runEdhTx ets $
-                edhContSTM $
-                  readTMVar cmdIn
-                    >>= \(EdhInput !name !lineNo !lines_) ->
-                      let !srcName = if T.null name then "<console>" else name
-                          !etsCmd =
-                            ets
-                              { edh'context =
-                                  ctx
-                                    { edh'ctx'tip =
-                                        (edh'ctx'tip ctx)
-                                          { edh'frame'scope = cmdScope
-                                          }
-                                    }
-                              }
-                       in runEdhTx etsCmd $
-                            evalEdh' srcName lineNo (T.unlines lines_) $
-                              edhSwitchState ets
-                                . exitEdhTx exit
+                edhContIO $ do
+                  cio $ ConsoleIn cmdIn ps1 ps2
+                  atomically $
+                    readTMVar cmdIn
+                      >>= \(EdhInput !name !lineNo !lines_) ->
+                        let !srcName = if T.null name then "<console>" else name
+                            !etsCmd =
+                              ets
+                                { edh'context =
+                                    ctx
+                                      { edh'ctx'tip =
+                                          (edh'ctx'tip ctx)
+                                            { edh'frame'scope = cmdScope
+                                            }
+                                      }
+                                }
+                         in runEdhTx etsCmd $
+                              evalEdh' srcName lineNo (T.unlines lines_) $
+                                edhSwitchState ets
+                                  . exitEdhTx exit
          in case inScopeOf of
               Just !so ->
                 castObjSelfStore so >>= \case
@@ -212,38 +210,42 @@ conReadCommandProc
               _ -> doReadCmd (callingScope ctx)
     where
       !ctx = edh'context ets
-      !ioQ =
-        consoleIO $
-          edh'world'console $
-            edh'prog'world $
-              edh'thread'prog ets
+      !world = edh'prog'world $ edh'thread'prog ets
+      !cio = consoleIO $ edh'world'console world
 
 -- | host method console.print(*args, **kwargs)
 conPrintProc :: ArgsPack -> EdhHostProc
 conPrintProc (ArgsPack !args !kwargs) !exit !ets =
-  printVS args $
-    odToList kwargs
+  if edh'in'tx ets
+    then
+      throwEdh
+        ets
+        UsageError
+        "you don't print to console from within a transaction"
+    else runEdhTx ets $ edhContIO $ printVS args $ odToList kwargs
   where
-    !ioQ = consoleIO $ edh'world'console $ edh'prog'world $ edh'thread'prog ets
+    !cio = consoleIO $ edh'world'console $ edh'prog'world $ edh'thread'prog ets
 
-    printVS :: [EdhValue] -> [(AttrKey, EdhValue)] -> STM ()
-    printVS [] [] = exitEdh ets exit nil
+    printVS :: [EdhValue] -> [(AttrKey, EdhValue)] -> IO ()
+    printVS [] [] = atomically $ exitEdh ets exit nil
     printVS [] ((k, v) : rest) = case v of
       EdhString !s -> do
-        writeTBQueue ioQ $
-          ConsoleOut $ "  " <> attrKeyStr k <> "= " <> s <> "\n"
+        cio $ ConsoleOut $ "  " <> attrKeyStr k <> "= " <> s <> "\n"
         printVS [] rest
-      _ -> edhValueRepr ets v $ \ !s -> do
-        writeTBQueue ioQ $
-          ConsoleOut $ "  " <> attrKeyStr k <> "= " <> s <> "\n"
-        printVS [] rest
+      _ -> atomically $
+        edhValueRepr ets v $ \ !s -> runEdhTx ets $
+          edhContIO $ do
+            cio $ ConsoleOut $ "  " <> attrKeyStr k <> "= " <> s <> "\n"
+            printVS [] rest
     printVS (v : rest) !kvs = case v of
       EdhString !s -> do
-        writeTBQueue ioQ $ ConsoleOut $ s <> "\n"
+        cio $ ConsoleOut $ s <> "\n"
         printVS rest kvs
-      _ -> edhValueRepr ets v $ \ !s -> do
-        writeTBQueue ioQ $ ConsoleOut $ s <> "\n"
-        printVS rest kvs
+      _ -> atomically $
+        edhValueRepr ets v $ \ !s -> runEdhTx ets $
+          edhContIO $ do
+            cio $ ConsoleOut $ s <> "\n"
+            printVS rest kvs
 
 conNowProc :: EdhHostProc
 conNowProc !exit !ets = do
