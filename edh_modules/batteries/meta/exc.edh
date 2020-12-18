@@ -1,0 +1,32 @@
+{##
+ # this module is meant to be imported by an Edh language server, into every
+ # meta world's root scope at analysis time, reflecting definition information
+ # of the corresponding host artifacts at runtime.
+ #
+ # the purpose is for sakes of tooling functionalities, typically an IDE like
+ # VSCode.
+ #
+ #}
+
+if meta'only!false then export {
+
+  {##
+   # thrown when an Edh program is halted
+   #}
+  data ProgramHalt ( haltValue = None ) pass
+
+  {##
+   # generic runtime error occurred at runtime
+   #}
+  data EvalError( msg, ***details ) pass
+
+  {##
+   # report an unexpected error
+   #}
+  method error( msg, ***details ) throw EvalError( msg, ***details )
+
+}
+
+
+# this module should never get imported by any Edh interpreter for the run
+error( 'Executing meta module: ' ++ __name__ )

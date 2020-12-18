@@ -8,6 +8,8 @@
  #
  #}
 
+import * './exc'
+
 # this module should never get imported by any Edh interpreter for the run
 error( 'Executing meta module: ' ++ __name__ )
 
