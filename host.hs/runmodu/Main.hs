@@ -3,7 +3,7 @@ module Main where
 -- import           Debug.Trace
 
 import Control.Concurrent (forkFinally)
-import Control.Concurrent.STM (atomically, writeTBQueue)
+import Control.Concurrent.STM
 import Control.Exception (SomeException)
 import Control.Monad (void)
 import qualified Data.Text as T
@@ -31,28 +31,26 @@ main =
   getArgs >>= \case
     [moduSpec] -> do
       !console <- defaultEdhConsole defaultEdhConsoleSettings
-      let !consoleOut = writeTBQueue (consoleIO console) . ConsoleOut
-          !consoleShutdown = writeTBQueue (consoleIO console) ConsoleShutdown
+      let !consoleOut = consoleIO console . ConsoleOut
+          !consoleShutdown = consoleIO console ConsoleShutdown
           consoleErr msg =
             consoleLogger console 50 Nothing $ ArgsPack [EdhString msg] odEmpty
           runIt = do
             world <- createEdhWorld console
             installEdhBatteries world
             runEdhModule world moduSpec edhModuleAsIs >>= \case
-              Left !err -> atomically $ do
+              Left !err -> do
                 -- program crash on error
-                consoleErr $
-                  T.pack $
-                    "Edh crashed with an error:\n"
-                      <> show err
-                      <> "\n"
+                atomically $
+                  consoleErr $
+                    T.pack $ "Edh crashed with an error:\n" <> show err <> "\n"
                 consoleShutdown
               Right !phv -> case edhUltimate phv of
                 -- clean program halt, all done
                 EdhNil -> return ()
                 -- unclean program exit
-                _ -> atomically $ do
-                  consoleErr $
+                _ -> do
+                  atomically $ consoleErr $
                     (<> "\n") $
                       "Edh halted with a result:\n"
                         <> case phv of
@@ -64,10 +62,10 @@ main =
         forkFinally runIt $ \ !result -> do
           case result of
             Left (e :: SomeException) ->
-              atomically $ consoleOut $ "💥 " <> T.pack (show e)
+              consoleOut $ "💥 " <> T.pack (show e)
             Right _ -> pure ()
           -- shutdown console IO anyway
-          atomically $ writeTBQueue (consoleIO console) ConsoleShutdown
+          consoleIO console ConsoleShutdown
 
       consoleIOLoop console
     _ -> hPutStrLn stderr "Usage: edhm <edh-module>" >> exitFailure
