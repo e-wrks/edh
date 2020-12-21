@@ -404,7 +404,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
       STM ()
     -- TODO support nested patterns
     handlePattern !fullExpr !naExit !matchExit = case fullExpr of
-      BlockExpr patternExpr -> case patternExpr of
+      BlockExpr !patternExpr -> case patternExpr of
         -- {( x )} -- single arg
         [ StmtSrc
             ( ExprStmt
@@ -781,9 +781,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
       -- the parenthesized form `( {k1: v1, k2: v2, ...} )` should be used.
       DictExpr !malPairs ->
         throwEdh ets EvalError $
-          "invalid match pattern: "
-            <> T.pack
-              (show malPairs)
+          "invalid match pattern: " <> T.pack (show malPairs)
       _ -> naExit -- not a recognized pattern
       where
         handlePairPattern !maybeName1 !pairPattern =
