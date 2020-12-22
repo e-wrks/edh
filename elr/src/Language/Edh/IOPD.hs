@@ -387,7 +387,9 @@ odFromList :: forall k v. (Eq k, Hashable k) => [(k, v)] -> OrderedDict k v
 odFromList !entries =
   let (mNew, aNew) = runST $ do
         !a <- MV.unsafeNew $ length entries
-        let go [] !m _wp = (m,) <$> V.unsafeFreeze a
+        let go [] !m !wp =
+              ((m,) . V.force <$>) $
+                V.unsafeFreeze $ MV.unsafeSlice 0 wp a
             go (ev@(!key, _) : rest) !m !wp = case Map.lookup key m of
               Nothing -> do
                 MV.unsafeWrite a wp $ Just ev
