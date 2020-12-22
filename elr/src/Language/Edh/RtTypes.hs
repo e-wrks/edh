@@ -1290,6 +1290,13 @@ data ArgSender
   | SendKwArg !AttrAddrSrc !ExprSrc
   deriving (Eq, Show)
 
+argSenderSpan :: ArgSender -> SrcRange
+argSenderSpan (UnpackPosArgs (ExprSrc _ !src'span)) = src'span
+argSenderSpan (UnpackKwArgs (ExprSrc _ !src'span)) = src'span
+argSenderSpan (UnpackPkArgs (ExprSrc _ !src'span)) = src'span
+argSenderSpan (SendPosArg (ExprSrc _ !src'span)) = src'span
+argSenderSpan (SendKwArg (AttrAddrSrc _ !src'span) _) = src'span
+
 -- | Procedure declaration, result of parsing
 data ProcDecl
   = HostDecl (ArgsPack -> EdhHostProc)
