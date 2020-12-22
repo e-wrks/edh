@@ -405,47 +405,6 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
     -- TODO support nested patterns
     handlePattern !fullExpr !naExit !matchExit = case fullExpr of
       BlockExpr !patternExpr -> case patternExpr of
-        -- {( x )} -- single arg
-        [ StmtSrc
-            ( ExprStmt
-                ( ParenExpr
-                    ( ExprSrc
-                        ( AttrExpr
-                            (DirectRef (AttrAddrSrc (NamedAttr !attrName) _))
-                          )
-                        _
-                      )
-                  )
-                _docCmt
-              )
-            _
-          ] ->
-            case ctxMatch of
-              EdhArgsPack (ArgsPack [argVal] !kwargs)
-                | odNull kwargs ->
-                  matchExit [(AttrByName attrName, argVal)]
-              _ -> exitEdh ets exit EdhCaseOther
-        -- {( x:y:z:... )} -- parenthesised pair pattern
-        [ StmtSrc
-            ( ExprStmt
-                (ParenExpr (ExprSrc pairPattern@(InfixExpr ":" _ _) _))
-                _docCmt
-              )
-            _
-          ] ->
-            handlePairPattern Nothing pairPattern
-        -- { continue } -- match with continue
-        [StmtSrc ContinueStmt _] -> case ctxMatch of
-          EdhContinue -> matchExit []
-          _ -> exitEdh ets exit EdhCaseOther
-        -- { break } -- match with break
-        [StmtSrc BreakStmt _] -> case ctxMatch of
-          EdhBreak -> matchExit []
-          _ -> exitEdh ets exit EdhCaseOther
-        -- { fallthrough } -- match with fallthrough
-        [StmtSrc FallthroughStmt _] -> case ctxMatch of
-          EdhFallthrough -> matchExit []
-          _ -> exitEdh ets exit EdhCaseOther
         -- { val } -- wild capture pattern, used to capture a non-nil result as
         -- an attribute.
         -- Note: a raw nil value should be value-matched explicitly
@@ -458,34 +417,90 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
               -- but a named nil (i.e. None/Nothing etc.) should be matched
               _ -> resolveEdhAttrAddr ets valAttr $
                 \ !valKey -> matchExit [(valKey, ctxMatch)]
-        -- { term := value } -- definition pattern
+        --
+
+        -- { class( field1, field2, ... ) } -- fields by class pattern
+        -- __match__ magic from the class works here
+        [ StmtSrc
+            (ExprStmt (CallExpr (ExprSrc (AttrExpr !clsRef) _) !apkr) _docCmt)
+            _
+          ] ->
+            dcFieldsExtractor apkr $ \ !fieldExtractors ->
+              runEdhTx ets $
+                evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
+                  EdhObject !clsObj ->
+                    matchDataClass clsObj fieldExtractors Nothing
+                  !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
+                    throwEdh ets UsageError $ "invalid class: " <> badDesc
+        -- { class( field1, field2, ... ) = instAddr } -- fields by class again
+        -- but receive the matched object as well
+        -- __match__ magic from the class works here
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    ":="
-                    ( ExprSrc
-                        ( AttrExpr
-                            (DirectRef (AttrAddrSrc (NamedAttr !termName) _))
-                          )
-                        _
-                      )
-                    ( ExprSrc
-                        ( AttrExpr
-                            (DirectRef (AttrAddrSrc (NamedAttr !valueName) _))
-                          )
-                        _
-                      )
+                    "="
+                    (ExprSrc (CallExpr (ExprSrc (AttrExpr !clsRef) _) !apkr) _)
+                    (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !instAddr _))) _)
+                  )
+                _docCmt
+              )
+            _
+          ] ->
+            dcFieldsExtractor apkr $ \ !fieldExtractors ->
+              runEdhTx ets $
+                evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
+                  EdhObject !clsObj -> case instAddr of
+                    NamedAttr "_" ->
+                      matchDataClass clsObj fieldExtractors Nothing
+                    _ -> resolveEdhAttrAddr ets instAddr $ \ !instKey ->
+                      matchDataClass clsObj fieldExtractors $ Just instKey
+                  !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
+                    throwEdh ets UsageError $ "invalid class: " <> badDesc
+        -- {{ class:inst }} -- instance resolving pattern
+        [ StmtSrc
+            ( ExprStmt
+                ( DictExpr
+                    [ ( AddrDictKey !clsRef,
+                        ExprSrc
+                          (AttrExpr (DirectRef (AttrAddrSrc !instAttr _)))
+                          _
+                        )
+                      ]
                   )
                 _docCmt
               )
             _
           ] ->
             case ctxMatch of
-              EdhNamedValue !n !v ->
-                matchExit
-                  [(AttrByName termName, EdhString n), (AttrByName valueName, v)]
+              EdhObject ctxObj -> resolveEdhAttrAddr ets instAttr $
+                \ !instKey -> runEdhTx ets $
+                  evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
+                    EdhNil -> exitEdh ets exit EdhCaseOther
+                    EdhObject !clsObj ->
+                      resolveEdhInstance clsObj ctxObj >>= \case
+                        Just !instObj ->
+                          matchExit [(instKey, EdhObject instObj)]
+                        Nothing -> exitEdh ets exit EdhCaseOther
+                    !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
+                      throwEdh ets UsageError $ "invalid class: " <> badDesc
               _ -> exitEdh ets exit EdhCaseOther
-        -- { head => tail } -- uncons pattern
+        --
+
+        -- {[ x,y,z,... ]} -- any-of pattern
+        [StmtSrc (ExprStmt (ListExpr vExprs) _docCmt) _] ->
+          if null vExprs
+            then exitEdh ets exit EdhCaseOther
+            else runEdhTx ets $
+              evalExprs vExprs $ \ !matchVals _ets ->
+                case matchVals of
+                  EdhArgsPack (ArgsPack !l _) ->
+                    if ctxMatch `elem` l
+                      then matchExit []
+                      else exitEdh ets exit EdhCaseOther
+                  _ -> error "bug: evalExprs returned non-apk"
+        --
+
+        -- { head :> tail } -- uncons pattern
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
@@ -524,6 +539,8 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                         doMatched h $ EdhList $ List u rl
                       _ -> exitEdh ets exit EdhCaseOther
                   _ -> exitEdh ets exit EdhCaseOther
+        --
+
         -- { prefix @< match >@ suffix } -- sub-string cut pattern
         [ StmtSrc
             ( ExprStmt
@@ -630,6 +647,28 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                           matchExit [(AttrByName prefixName, EdhString prefix)]
                         _ -> exitEdh ets exit EdhCaseOther
               _ -> exitEdh ets exit EdhCaseOther
+        --
+
+        -- {( x )} -- single arg
+        [ StmtSrc
+            ( ExprStmt
+                ( ParenExpr
+                    ( ExprSrc
+                        ( AttrExpr
+                            (DirectRef (AttrAddrSrc (NamedAttr !attrName) _))
+                          )
+                        _
+                      )
+                  )
+                _docCmt
+              )
+            _
+          ] ->
+            case ctxMatch of
+              EdhArgsPack (ArgsPack [argVal] !kwargs)
+                | odNull kwargs ->
+                  matchExit [(AttrByName attrName, argVal)]
+              _ -> exitEdh ets exit EdhCaseOther
         -- {( x,y,z,... )} -- pattern matching number of positional args
         [StmtSrc (ExprStmt (ArgsPackExpr !argSenders) _docCmt) _] ->
           if null argSenders
@@ -672,86 +711,60 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                       matchExit $
                         zip (AttrByName <$> attrNames) args
                   _ -> exitEdh ets exit EdhCaseOther
+        --
 
-        -- {{ class:inst }} -- instance resolving pattern
+        -- {( x:y:z:... )} -- parenthesised pair pattern
         [ StmtSrc
             ( ExprStmt
-                ( DictExpr
-                    [ ( AddrDictKey !clsRef,
-                        ExprSrc
-                          (AttrExpr (DirectRef (AttrAddrSrc !instAttr _)))
-                          _
-                        )
-                      ]
+                (ParenExpr (ExprSrc pairPattern@(InfixExpr ":" _ _) _))
+                _docCmt
+              )
+            _
+          ] ->
+            handlePairPattern Nothing pairPattern
+        --
+
+        -- { continue } -- match with continue
+        [StmtSrc ContinueStmt _] -> case ctxMatch of
+          EdhContinue -> matchExit []
+          _ -> exitEdh ets exit EdhCaseOther
+        -- { break } -- match with break
+        [StmtSrc BreakStmt _] -> case ctxMatch of
+          EdhBreak -> matchExit []
+          _ -> exitEdh ets exit EdhCaseOther
+        -- { fallthrough } -- match with fallthrough
+        [StmtSrc FallthroughStmt _] -> case ctxMatch of
+          EdhFallthrough -> matchExit []
+          _ -> exitEdh ets exit EdhCaseOther
+        -- { term := value } -- definition pattern
+        [ StmtSrc
+            ( ExprStmt
+                ( InfixExpr
+                    ":="
+                    ( ExprSrc
+                        ( AttrExpr
+                            (DirectRef (AttrAddrSrc (NamedAttr !termName) _))
+                          )
+                        _
+                      )
+                    ( ExprSrc
+                        ( AttrExpr
+                            (DirectRef (AttrAddrSrc (NamedAttr !valueName) _))
+                          )
+                        _
+                      )
                   )
                 _docCmt
               )
             _
           ] ->
             case ctxMatch of
-              EdhObject ctxObj -> resolveEdhAttrAddr ets instAttr $
-                \ !instKey -> runEdhTx ets $
-                  evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
-                    EdhNil -> exitEdh ets exit EdhCaseOther
-                    EdhObject !clsObj ->
-                      resolveEdhInstance clsObj ctxObj >>= \case
-                        Just !instObj ->
-                          matchExit [(instKey, EdhObject instObj)]
-                        Nothing -> exitEdh ets exit EdhCaseOther
-                    !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
-                      throwEdh ets UsageError $ "invalid class: " <> badDesc
+              EdhNamedValue !n !v ->
+                matchExit
+                  [(AttrByName termName, EdhString n), (AttrByName valueName, v)]
               _ -> exitEdh ets exit EdhCaseOther
-        -- { class( field1, field2, ... ) } -- fields by class pattern
-        -- __match__ magic from the class works as well
-        [ StmtSrc
-            (ExprStmt (CallExpr (ExprSrc (AttrExpr !clsRef) _) !apkr) _docCmt)
-            _
-          ] ->
-            dcFieldsExtractor apkr $ \ !fieldExtractors ->
-              runEdhTx ets $
-                evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
-                  EdhObject !clsObj ->
-                    matchDataClass clsObj fieldExtractors Nothing
-                  !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
-                    throwEdh ets UsageError $ "invalid class: " <> badDesc
-        -- { class( field1, field2, ... ) = instAddr } -- fields by class again
-        -- but receive the matched object as well
-        -- __match__ magic from the class works as well
-        [ StmtSrc
-            ( ExprStmt
-                ( InfixExpr
-                    "="
-                    (ExprSrc (CallExpr (ExprSrc (AttrExpr !clsRef) _) !apkr) _)
-                    (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !instAddr _))) _)
-                  )
-                _docCmt
-              )
-            _
-          ] ->
-            dcFieldsExtractor apkr $ \ !fieldExtractors ->
-              runEdhTx ets $
-                evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
-                  EdhObject !clsObj -> case instAddr of
-                    NamedAttr "_" ->
-                      matchDataClass clsObj fieldExtractors Nothing
-                    _ -> resolveEdhAttrAddr ets instAddr $ \ !instKey ->
-                      matchDataClass clsObj fieldExtractors $ Just instKey
-                  !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
-                    throwEdh ets UsageError $ "invalid class: " <> badDesc
         --
 
-        -- {[ x,y,z,... ]} -- any-of pattern
-        [StmtSrc (ExprStmt (ListExpr vExprs) _docCmt) _] ->
-          if null vExprs
-            then exitEdh ets exit EdhCaseOther
-            else runEdhTx ets $
-              evalExprs vExprs $ \ !matchVals _ets ->
-                case matchVals of
-                  EdhArgsPack (ArgsPack !l _) ->
-                    if ctxMatch `elem` l
-                      then matchExit []
-                      else exitEdh ets exit EdhCaseOther
-                  _ -> error "bug: evalExprs returned non-apk"
         -- TODO more kinds of match patterns to support ?
         --      e.g. list pattern, with rest-items repacking etc.
         _ ->
