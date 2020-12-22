@@ -1279,7 +1279,8 @@ data ArgReceiver
     RecvArg !AttrAddrSrc !(Maybe AttrRef) !(Maybe ExprSrc)
   deriving (Eq, Show)
 
-type ArgsPacker = [ArgSender]
+data ArgsPacker = ArgsPacker [ArgSender] SrcRange
+  deriving (Eq, Show)
 
 data ArgSender
   = UnpackPosArgs !ExprSrc

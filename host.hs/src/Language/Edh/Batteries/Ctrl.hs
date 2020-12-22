@@ -225,7 +225,8 @@ methodArrowArgsReceiver ::
   STM ()
 methodArrowArgsReceiver (AttrExpr (DirectRef !argAttr)) !exit =
   exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing
-methodArrowArgsReceiver (ArgsPackExpr !argSndrs) !exit = cnvrt argSndrs []
+methodArrowArgsReceiver (ArgsPackExpr (ArgsPacker !argSndrs _)) !exit =
+  cnvrt argSndrs []
   where
     cnvrt :: [ArgSender] -> [ArgReceiver] -> STM ()
     cnvrt [] !rcvrs = exit $ Right $ PackReceiver $ reverse rcvrs
@@ -293,7 +294,7 @@ producerArrowArgsReceiver ::
   STM ()
 producerArrowArgsReceiver (AttrExpr (DirectRef !argAttr)) !exit =
   exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing
-producerArrowArgsReceiver (ArgsPackExpr !argSndrs) !exit =
+producerArrowArgsReceiver (ArgsPackExpr (ArgsPacker !argSndrs _)) !exit =
   cnvrt False argSndrs []
   where
     cnvrt :: Bool -> [ArgSender] -> [ArgReceiver] -> STM ()
@@ -670,47 +671,50 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                   matchExit [(AttrByName attrName, argVal)]
               _ -> exitEdh ets exit EdhCaseOther
         -- {( x,y,z,... )} -- pattern matching number of positional args
-        [StmtSrc (ExprStmt (ArgsPackExpr !argSenders) _docCmt) _] ->
-          if null argSenders
-            then case ctxMatch of
-              -- an empty apk pattern matches any empty sequence
-              EdhArgsPack (ArgsPack [] !kwargs) | odNull kwargs -> matchExit []
-              EdhList (List _ !l) ->
-                readTVar l
-                  >>= \ll ->
-                    if null ll
-                      then matchExit []
-                      else exitEdh ets exit EdhCaseOther
-              _ -> exitEdh ets exit EdhCaseOther
-            else do
-              !attrNames <- fmap catMaybes $
-                sequence $
-                  (<$> argSenders) $ \case
-                    SendPosArg
-                      ( ExprSrc
-                          ( AttrExpr
-                              ( DirectRef
-                                  (AttrAddrSrc (NamedAttr !vAttr) _)
-                                )
-                            )
-                          _
-                        ) ->
-                        return $ Just vAttr
-                    _ -> return Nothing
-              if length attrNames /= length argSenders
-                then
-                  throwEdh
-                    ets
-                    UsageError
-                    ( "invalid element in apk pattern: "
-                        <> T.pack (show argSenders)
-                    )
-                else case ctxMatch of
-                  EdhArgsPack (ArgsPack !args !kwargs)
-                    | length args == length argSenders && odNull kwargs ->
-                      matchExit $
-                        zip (AttrByName <$> attrNames) args
-                  _ -> exitEdh ets exit EdhCaseOther
+        [ StmtSrc
+            (ExprStmt (ArgsPackExpr (ArgsPacker !argSenders _)) _docCmt)
+            _
+          ] ->
+            if null argSenders
+              then case ctxMatch of
+                -- an empty apk pattern matches any empty sequence
+                EdhArgsPack (ArgsPack [] !kwargs) | odNull kwargs -> matchExit []
+                EdhList (List _ !l) ->
+                  readTVar l
+                    >>= \ll ->
+                      if null ll
+                        then matchExit []
+                        else exitEdh ets exit EdhCaseOther
+                _ -> exitEdh ets exit EdhCaseOther
+              else do
+                !attrNames <- fmap catMaybes $
+                  sequence $
+                    (<$> argSenders) $ \case
+                      SendPosArg
+                        ( ExprSrc
+                            ( AttrExpr
+                                ( DirectRef
+                                    (AttrAddrSrc (NamedAttr !vAttr) _)
+                                  )
+                              )
+                            _
+                          ) ->
+                          return $ Just vAttr
+                      _ -> return Nothing
+                if length attrNames /= length argSenders
+                  then
+                    throwEdh
+                      ets
+                      UsageError
+                      ( "invalid element in apk pattern: "
+                          <> T.pack (show argSenders)
+                      )
+                  else case ctxMatch of
+                    EdhArgsPack (ArgsPack !args !kwargs)
+                      | length args == length argSenders && odNull kwargs ->
+                        matchExit $
+                          zip (AttrByName <$> attrNames) args
+                    _ -> exitEdh ets exit EdhCaseOther
         --
 
         -- {( x:y:z:... )} -- parenthesised pair pattern
@@ -867,7 +871,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
 
         dcFieldsExtractor ::
           ArgsPacker -> ([(AttrKey, AttrKey)] -> STM ()) -> STM ()
-        dcFieldsExtractor !apkr !exit' = go apkr []
+        dcFieldsExtractor (ArgsPacker !sndrs _) !exit' = go sndrs []
           where
             go [] !keys = exit' keys
             go (argSender : rest) !keys = case argSender of

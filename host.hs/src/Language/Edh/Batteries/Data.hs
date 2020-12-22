@@ -220,9 +220,9 @@ fapProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit =
     !calleeVal -> \ !ets -> edhPrepareCall ets calleeVal argsPkr $
       \ !mkCall -> runEdhTx ets (mkCall exit)
   where
-    argsPkr :: ArgsPacker
+    argsPkr :: [ArgSender]
     argsPkr = case rhe of
-      ArgsPackExpr !pkr -> pkr
+      ArgsPackExpr (ArgsPacker !pkr _) -> pkr
       _ -> [SendPosArg rhExpr]
 
 -- | operator (|) - flipped ($), low-precedence operator for procedure call
@@ -458,7 +458,10 @@ concatProc !lhExpr !rhExpr !exit !ets =
                           (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "str") noSrcRange)))
                           noSrcRange
                       )
-                      [SendPosArg (ExprSrc (LitExpr (ValueLiteral lhVal)) noSrcRange)]
+                      ( ArgsPacker
+                          [SendPosArg (ExprSrc (LitExpr (ValueLiteral lhVal)) noSrcRange)]
+                          noSrcRange
+                      )
                   )
                   noSrcRange
               )
@@ -468,7 +471,10 @@ concatProc !lhExpr !rhExpr !exit !ets =
                           (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "str") noSrcRange)))
                           noSrcRange
                       )
-                      [SendPosArg (ExprSrc (LitExpr (ValueLiteral rhVal)) noSrcRange)]
+                      ( ArgsPacker
+                          [SendPosArg (ExprSrc (LitExpr (ValueLiteral rhVal)) noSrcRange)]
+                          noSrcRange
+                      )
                   )
                   noSrcRange
               )

@@ -1075,7 +1075,7 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
 
 -- | Pack args as expressions, normally in preparation of calling another
 -- interpreter procedure
-packEdhExprs :: EdhThreadState -> ArgsPacker -> (ArgsPack -> STM ()) -> STM ()
+packEdhExprs :: EdhThreadState -> [ArgSender] -> (ArgsPack -> STM ()) -> STM ()
 packEdhExprs !ets !pkrs !pkExit = do
   kwIOPD <- iopdEmpty
   let pkExprs :: [ArgSender] -> ([EdhValue] -> STM ()) -> STM ()
@@ -1099,7 +1099,7 @@ packEdhExprs !ets !pkrs !pkExit = do
     iopdSnapshot kwIOPD >>= \ !kwargs -> pkExit $ ArgsPack args kwargs
 
 -- | Pack args as caller, normally in preparation of calling another procedure
-packEdhArgs :: EdhThreadState -> ArgsPacker -> (ArgsPack -> STM ()) -> STM ()
+packEdhArgs :: EdhThreadState -> [ArgSender] -> (ArgsPack -> STM ()) -> STM ()
 packEdhArgs !ets !argSenders !pkExit = do
   !kwIOPD <- iopdEmpty
   let pkArgs :: [ArgSender] -> ([EdhValue] -> STM ()) -> STM ()
@@ -1228,7 +1228,7 @@ packEdhArgs !ets !argSenders !pkExit = do
 edhPrepareCall ::
   EdhThreadState -> -- ets to prepare the call
   EdhValue -> -- callee value
-  ArgsPacker -> -- specification for the arguments pack
+  [ArgSender] -> -- specification for the arguments pack
   -- callback to receive the prepared call
   ((EdhTxExit EdhValue -> EdhTx) -> STM ()) ->
   STM ()
@@ -1506,7 +1506,7 @@ edhPrepareForLoop
     -- procedure would better not get defined into the enclosing scope, and it
     -- is preferably be named instead of being anonymous (with a single
     -- underscore in place of the procedure name in the definition).
-      ExprSrc (CallExpr !calleeExpr !argsSndr) !iter'span ->
+      ExprSrc (CallExpr !calleeExpr (ArgsPacker !argsSndr _)) !iter'span ->
         -- loop over a procedure call
         runEdhTx etsLoopPrep $
           evalExprSrc calleeExpr $ \ !calleeVal _ets ->
@@ -1556,7 +1556,7 @@ edhPrepareForLoop
 
       loopCallGenr ::
         SrcRange ->
-        ArgsPacker ->
+        [ArgSender] ->
         EdhProcDefi ->
         Object ->
         Object ->
@@ -2314,7 +2314,7 @@ evalStmt :: Stmt -> EdhTxExit EdhValue -> EdhTx
 evalStmt !stmt !exit = case stmt of
   ExprStmt !expr !docCmt ->
     evalExpr' expr docCmt $ \ !result -> exitEdhTx exit result
-  LetStmt !argsRcvr !argsSndr -> \ !ets -> do
+  LetStmt !argsRcvr (ArgsPacker !argsSndr _) -> \ !ets -> do
     let !ctx = edh'context ets
         !scope = contextScope ctx
     packEdhArgs ets argsSndr $ \ !apk ->
@@ -2378,7 +2378,7 @@ evalStmt !stmt !exit = case stmt of
             )
             (evalCaseBranches branchesExpr endOfEdh)
             (\() -> exitEdhTx exit nil)
-    (CallExpr !calleeExpr !argsSndr) ->
+    (CallExpr !calleeExpr (ArgsPacker !argsSndr _)) ->
       evalExprSrc calleeExpr $ \ !calleeVal !etsForker ->
         edhPrepareCall etsForker calleeVal argsSndr $ \ !mkCall ->
           runEdhTx (etsMovePC etsForker src'span) $
@@ -2413,7 +2413,7 @@ evalStmt !stmt !exit = case stmt of
                   }
             )
             $ evalCaseBranches branchesExpr endOfEdh
-      (CallExpr !calleeExpr !argsSndr) ->
+      (CallExpr !calleeExpr (ArgsPacker !argsSndr _)) ->
         evalExprSrc calleeExpr $ \ !calleeVal !etsSched ->
           edhPrepareCall etsSched calleeVal argsSndr $
             \ !mkCall -> schedDefered etsSched id (mkCall endOfEdh)
@@ -2908,8 +2908,9 @@ intplExpr !ets !x !exit = case x of
     \ !entries' -> exit $ DictExpr entries'
   ListExpr !es ->
     seqcontSTM (intplExprSrc ets <$> es) $ \ !es' -> exit $ ListExpr es'
-  ArgsPackExpr !argSenders -> seqcontSTM (intplArgSender ets <$> argSenders) $
-    \ !argSenders' -> exit $ ArgsPackExpr argSenders'
+  ArgsPackExpr (ArgsPacker !argSenders !apkrSpan) ->
+    seqcontSTM (intplArgSender ets <$> argSenders) $
+      \ !argSenders' -> exit $ ArgsPackExpr $ ArgsPacker argSenders' apkrSpan
   ParenExpr !x' -> intplExprSrc ets x' $ \ !x'' -> exit $ ParenExpr x''
   BlockExpr !ss ->
     seqcontSTM (intplStmtSrc ets <$> ss) $ \ !ss' -> exit $ BlockExpr ss'
@@ -2919,9 +2920,9 @@ intplExpr !ets !x !exit = case x of
   AttrExpr !addr -> intplAttrRef ets addr $ \ !addr' -> exit $ AttrExpr addr'
   IndexExpr !v !t -> intplExprSrc ets v $
     \ !v' -> intplExprSrc ets t $ \ !t' -> exit $ IndexExpr v' t'
-  CallExpr !v !args -> intplExprSrc ets v $ \ !v' ->
+  CallExpr !v (ArgsPacker !args !argsSpan) -> intplExprSrc ets v $ \ !v' ->
     seqcontSTM (intplArgSndr ets <$> args) $
-      \ !args' -> exit $ CallExpr v' args'
+      \ !args' -> exit $ CallExpr v' $ ArgsPacker args' argsSpan
   InfixExpr !op !lhe !rhe -> intplExprSrc ets lhe $ \ !lhe' ->
     intplExprSrc ets rhe $ \ !rhe' -> exit $ InfixExpr op lhe' rhe'
   ImportExpr !rcvrs !xFrom !maybeInto ->
@@ -3000,9 +3001,10 @@ intplStmt :: EdhThreadState -> Stmt -> (Stmt -> STM ()) -> STM ()
 intplStmt !ets !stmt !exit = case stmt of
   GoStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ GoStmt x'
   DeferStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ DeferStmt x'
-  LetStmt !rcvrs !sndrs -> intplArgsRcvr ets rcvrs $ \ !rcvrs' ->
-    seqcontSTM (intplArgSndr ets <$> sndrs) $
-      \ !sndrs' -> exit $ LetStmt rcvrs' sndrs'
+  LetStmt !rcvrs (ArgsPacker !sndrs !sndrsSpan) ->
+    intplArgsRcvr ets rcvrs $ \ !rcvrs' ->
+      seqcontSTM (intplArgSndr ets <$> sndrs) $
+        \ !sndrs' -> exit $ LetStmt rcvrs' $ ArgsPacker sndrs' sndrsSpan
   ExtendsStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ ExtendsStmt x'
   PerceiveStmt !sink !body -> intplExprSrc ets sink $ \ !sink' ->
     intplStmtSrc ets body $ \ !body' -> exit $ PerceiveStmt sink' body'
@@ -3554,7 +3556,7 @@ evalExpr' (ListExpr !xs) _docCmt !exit = evalExprs xs $ \ !tv !ets ->
       !u <- unsafeIOToSTM newUnique
       exitEdh ets exit (EdhList $ List u ll)
     _ -> error "bug: evalExprs returned non-apk"
-evalExpr' (ArgsPackExpr !argSenders) _docCmt !exit = \ !ets ->
+evalExpr' (ArgsPackExpr (ArgsPacker !argSenders _)) _docCmt !exit = \ !ets ->
   packEdhArgs ets argSenders $ \ !apk -> exitEdh ets exit $ EdhArgsPack apk
 evalExpr' (ParenExpr !x) !docCmt !exit = \ !ets ->
   -- use a pure ctx to eval the expr in parenthesis
@@ -3626,7 +3628,7 @@ evalExpr' (BehaveExpr (AttrAddrSrc !effAddr _)) _docCmt !exit = \ !ets ->
   resolveEdhAttrAddr ets effAddr $
     \ !effKey -> resolveEdhBehave ets effKey $ exitEdh ets exit
 evalExpr' (AttrExpr !addr) _docCmt !exit = evalAttrRef addr exit
-evalExpr' (CallExpr !calleeExpr !argsSndr) _docCmt !exit =
+evalExpr' (CallExpr !calleeExpr (ArgsPacker !argsSndr _)) _docCmt !exit =
   evalExprSrc calleeExpr $ \ !calleeVal !ets ->
     edhPrepareCall ets calleeVal argsSndr $
       \ !mkCall -> runEdhTx ets $ mkCall exit
@@ -3855,7 +3857,7 @@ evalExpr'
              (StmtSrc !body'stmt _)
              !proc'loc
            )
-      !argsSndr
+      (ArgsPacker !argsSndr _)
     )
   !docCmt
   !exit =

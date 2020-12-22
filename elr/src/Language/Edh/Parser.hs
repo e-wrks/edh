@@ -329,13 +329,16 @@ parseArgsSender :: IntplSrcInfo -> Parser (ArgsPacker, IntplSrcInfo)
 parseArgsSender !si =
   parseArgsPacker si <|> do
     (!x, !si') <- parseExpr si
-    return ([SendPosArg x], si')
+    return (ArgsPacker [SendPosArg x] (exprSrcSpan x), si')
 
 parseArgsPacker :: IntplSrcInfo -> Parser (ArgsPacker, IntplSrcInfo)
 parseArgsPacker !si = do
+  !startPos <- getSourcePos
   void $ symbol "("
   (_, !ss, !si') <- parseArgSends si ")" False []
-  return (reverse ss, si')
+  EdhParserState _ !lexeme'end <- get
+  return
+    (ArgsPacker (reverse ss) (lspSrcRangeFromParsec startPos lexeme'end), si')
 
 parseArgSends ::
   IntplSrcInfo ->
@@ -900,28 +903,31 @@ parseOpAddrOrApkOrParen !si = do
                   (lspSrcRangeFromParsec startPos lexeme'end),
             si
           ),
-      parseApkRest si ")" False
+      parseApkRest startPos si ")" False
     ]
 
-parseApkRest :: IntplSrcInfo -> Text -> Bool -> Parser (Expr, IntplSrcInfo)
-parseApkRest !si !closeSym !mustApk = do
+parseApkRest :: SourcePos -> IntplSrcInfo -> Text -> Bool -> Parser (Expr, IntplSrcInfo)
+parseApkRest !startPos !si !closeSym !mustApk = do
   !mustApk' <-
     optionalComma >>= \case
       True -> return True
       False -> return mustApk
   (!mustApk'', !ss, !si') <- parseArgSends si closeSym mustApk' []
+  EdhParserState _ !lexeme'end <- get
   return $
     (,si') $ case ss of
       [SendPosArg singleExpr@(ExprSrc !x _)]
         | not mustApk'' ->
           if closeSym == ")" then ParenExpr singleExpr else x
-      _ -> ArgsPackExpr $ reverse ss
+      _ ->
+        ArgsPackExpr $
+          ArgsPacker (reverse ss) (lspSrcRangeFromParsec startPos lexeme'end)
 
 parseIndexer :: IntplSrcInfo -> Parser (ExprSrc, IntplSrcInfo)
 parseIndexer !si = do
   !startPos <- getSourcePos
   void $ symbol "["
-  (!x, !si') <- parseApkRest si "]" False
+  (!x, !si') <- parseApkRest startPos si "]" False
   EdhParserState _ !lexeme'end <- get
   return (ExprSrc x (lspSrcRangeFromParsec startPos lexeme'end), si')
 

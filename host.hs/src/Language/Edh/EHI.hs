@@ -177,7 +177,7 @@ module Language.Edh.EHI
     attrAddrStr,
     ArgsReceiver (..),
     ArgReceiver (..),
-    ArgsPacker,
+    ArgsPacker (..),
     ArgSender (..),
     ProcDecl (..),
     procedureName,
