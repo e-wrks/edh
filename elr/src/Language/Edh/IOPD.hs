@@ -398,6 +398,14 @@ odFromList !entries =
         go entries Map.empty 0
    in OrderedDict mNew aNew
 
+odUnion ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  OrderedDict k v ->
+  OrderedDict k v ->
+  OrderedDict k v
+odUnion !d' !d = odFromList $ odToList d ++ odToList d'
+
 odMap ::
   forall k v v'.
   (Eq k, Hashable k) =>
