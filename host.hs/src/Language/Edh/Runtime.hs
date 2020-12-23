@@ -312,8 +312,19 @@ createEdhWorld !console = do
   -- operator precedence dict
   !opPD <- newTMVarIO Map.empty
 
+  -- the meta host module
+  !metaModu <-
+    newTVarIO $
+      ModuLoaded $
+        Object
+          { edh'obj'ident = idRoot,
+            edh'obj'store = HashStore hsRoot,
+            edh'obj'class = clsModule,
+            edh'obj'supers = ssRoot
+          }
+
   -- the container of loaded modules
-  !modus <- newTMVarIO Map.empty
+  !modus <- newTMVarIO $ Map.fromList [("batteries/meta", metaModu)]
 
   -- assembly the world with pieces prepared above
   let !world =
