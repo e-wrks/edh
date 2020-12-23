@@ -558,7 +558,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                                   )
                                 _
                               )
-                            matchExpr
+                            !matchExpr
                           )
                         _
                       )
@@ -599,7 +599,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
             ( ExprStmt
                 ( InfixExpr
                     ">@"
-                    prefixExpr
+                    !prefixExpr
                     ( ExprSrc
                         ( AttrExpr
                             (DirectRef (AttrAddrSrc (NamedAttr !suffixName) _))
@@ -632,7 +632,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                           )
                         _
                       )
-                    suffixExpr
+                    !suffixExpr
                   )
                 _docCmt
               )
@@ -740,6 +740,8 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [StmtSrc FallthroughStmt _] -> case ctxMatch of
           EdhFallthrough -> matchExit []
           _ -> exitEdh ets exit EdhCaseOther
+        --
+
         -- { term := value } -- definition pattern
         [ StmtSrc
             ( ExprStmt
@@ -776,6 +778,8 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
             "invalid match pattern: "
               <> T.pack
                 (show patternExpr)
+      --
+
       -- guarded condition, ignore match target in context, just check if the
       -- condition expression evals to true or false
       PrefixExpr Guard !condExpr ->
@@ -786,13 +790,17 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
               EdhBool False -> exitEdh ets exit EdhCaseOther
               _ -> edhValueDesc ets guardResult $ \ !badDesc ->
                 throwEdh ets UsageError $ "bad guard result: " <> badDesc
-      -- { x:y:z:... } -- pair pattern matching
+      --
+
+      -- { x:y:z:... } -- pair pattern
       DictExpr
         [ ( AddrDictKey (DirectRef (AttrAddrSrc (NamedAttr !name1) _)),
             ExprSrc !pairPattern _
             )
           ] ->
           handlePairPattern (Just $ AttrByName name1) pairPattern
+      --
+
       -- this is to establish the intuition that `{ ... }` always invokes
       -- pattern matching. if a literal dict value really meant to be matched,
       -- the parenthesized form `( {k1: v1, k2: v2, ...} )` should be used.
