@@ -115,19 +115,19 @@ getEdhAttr ::
   EdhTx
 getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
   -- no magic layer laid over access via `this` ref
-  AttrExpr ThisRef ->
+  AttrExpr ThisRef {} ->
     let !this = edh'scope'this scope
      in lookupEdhObjAttr this key >>= \case
           (_, EdhNil) -> exitEdh ets exitNoAttr $ EdhObject this
           (this', !val) -> chkVanillaExit this' this val
   -- no magic layer laid over access via `that` ref
-  AttrExpr ThatRef ->
+  AttrExpr ThatRef {} ->
     let !that = edh'scope'that scope
      in lookupEdhObjAttr that key >>= \case
           (_, EdhNil) -> exitEdh ets exitNoAttr $ EdhObject that
           (this, !val) -> chkVanillaExit this that val
   -- no magic layer laid over access via `super` ref
-  AttrExpr SuperRef ->
+  AttrExpr SuperRef {} ->
     let !this = edh'scope'this scope
      in lookupEdhSuperAttr this key >>= \case
           (_, EdhNil) -> exitEdh ets exitNoAttr $ EdhObject this
@@ -312,15 +312,15 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
 setEdhAttr :: Expr -> AttrKey -> EdhValue -> EdhTxExit EdhValue -> EdhTx
 setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
   -- no magic layer laid over assignment via `this` ref
-  AttrExpr ThisRef ->
+  AttrExpr ThisRef {} ->
     let !this = edh'scope'this scope
      in setObjAttr ets this key val $ \ !valSet -> exitEdh ets exit valSet
   -- no magic layer laid over assignment via `that` ref
-  AttrExpr ThatRef ->
+  AttrExpr ThatRef {} ->
     let !that = edh'scope'that scope
      in setObjAttr ets that key val $ \ !valSet -> exitEdh ets exit valSet
   -- not allowing assignment via super
-  AttrExpr SuperRef -> throwEdh ets EvalError "can not assign via super"
+  AttrExpr SuperRef {} -> throwEdh ets EvalError "can not assign via super"
   _ -> runEdhTx ets $
     evalExpr' tgtExpr Nothing $ \ !tgtVal _ets ->
       case tgtVal of
@@ -454,7 +454,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
 
     -- special case, assigning with `this.v=x` `that.v=y`, handle exports and
     -- effect definition
-    IndirectRef (ExprSrc (AttrExpr ThisRef) _) (AttrAddrSrc !addr' _) ->
+    IndirectRef (ExprSrc (AttrExpr ThisRef {}) _) (AttrAddrSrc !addr' _) ->
       let this = edh'scope'this scope
        in resolveEdhAttrAddr ets addr' $ \ !key ->
             if edh'ctx'eff'defining ctx
@@ -463,7 +463,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
                 exitWithChkExportTo this key rhVal
               else setObjAttr ets this key rhVal $
                 \ !valSet -> exitWithChkExportTo this key valSet
-    IndirectRef (ExprSrc (AttrExpr ThatRef) _) (AttrAddrSrc !addr' _) ->
+    IndirectRef (ExprSrc (AttrExpr ThatRef {}) _) (AttrAddrSrc !addr' _) ->
       let that = edh'scope'that scope
        in resolveEdhAttrAddr ets addr' $ \ !key ->
             if edh'ctx'eff'defining ctx
@@ -477,9 +477,9 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
       resolveEdhAttrAddr ets addr' $
         \ !key -> runEdhTx ets $ setEdhAttr tgtExpr key rhVal exit
     -- god forbidden things
-    ThisRef -> throwEdh ets EvalError "can not assign to this"
-    ThatRef -> throwEdh ets EvalError "can not assign to that"
-    SuperRef -> throwEdh ets EvalError "can not assign to super"
+    ThisRef {} -> throwEdh ets EvalError "can not assign to this"
+    ThatRef {} -> throwEdh ets EvalError "can not assign to that"
+    SuperRef {} -> throwEdh ets EvalError "can not assign to super"
   -- dereferencing attribute assignment
   InfixExpr "@" (ExprSrc !tgtExpr _) (ExprSrc !addrRef _) ->
     runEdhTx ets $
@@ -3027,9 +3027,9 @@ evalLiteral = \case
 
 evalAttrRef :: AttrRef -> EdhTxExit EdhValue -> EdhTx
 evalAttrRef !addr !exit !ets = case addr of
-  ThisRef -> exitEdh ets exit (EdhObject $ edh'scope'this scope)
-  ThatRef -> exitEdh ets exit (EdhObject $ edh'scope'that scope)
-  SuperRef -> throwEdh ets UsageError "can not address a single super alone"
+  ThisRef {} -> exitEdh ets exit (EdhObject $ edh'scope'this scope)
+  ThatRef {} -> exitEdh ets exit (EdhObject $ edh'scope'that scope)
+  SuperRef {} -> throwEdh ets UsageError "can not address a single super alone"
   DirectRef (AttrAddrSrc !addr' _) -> resolveEdhAttrAddr ets addr' $ \ !key ->
     lookupEdhCtxAttr scope key >>= \case
       EdhNil ->

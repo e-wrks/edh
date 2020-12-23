@@ -115,8 +115,12 @@ lexeme !p = do
   void sc
   return r
 
-keyword :: Text -> Parser Text
-keyword !kw = try $ lexeme (string kw <* notFollowedBy (satisfy isIdentChar))
+keyword :: Text -> Parser SrcRange
+keyword !kw = try $ do
+  !startPos <- getSourcePos
+  void $ lexeme (string kw <* notFollowedBy (satisfy isIdentChar))
+  EdhParserState _ !lexeme'end <- get
+  return $ lspSrcRangeFromParsec startPos lexeme'end
 
 optionalComma :: Parser Bool
 optionalComma = fromMaybe False <$> optional (True <$ symbol ",")
@@ -278,8 +282,8 @@ parseKwRecv !inPack = do
     validateTgt :: Maybe AttrRef -> Maybe AttrRef
     validateTgt tgt = case tgt of
       Nothing -> Nothing
-      Just ThisRef -> fail "can not overwrite this"
-      Just ThatRef -> fail "can not overwrite that"
+      Just ThisRef {} -> fail "can not overwrite this"
+      Just ThatRef {} -> fail "can not overwrite that"
       _ -> tgt
     parseDefaultExpr :: Parser ExprSrc
     parseDefaultExpr = do
@@ -311,9 +315,9 @@ parseAttrRef = do
     leadingPart :: Parser AttrRef
     leadingPart =
       choice
-        [ ThisRef <$ keyword "this",
-          ThatRef <$ keyword "that",
-          SuperRef <$ keyword "super",
+        [ ThisRef <$> keyword "this",
+          ThatRef <$> keyword "that",
+          SuperRef <$> keyword "super",
           DirectRef <$> parseAttrAddrSrc
         ]
     followingPart :: Parser AttrAddrSrc
@@ -821,8 +825,9 @@ parseOpLit = parseOpLit' isOperatorChar
 parseOpLit' :: (Char -> Bool) -> Parser Text
 parseOpLit' p =
   choice
-    [keyword "is not", keyword "is", keyword "and", keyword "or", lexeme opLit]
+    [kwLit "is not", kwLit "is", kwLit "and", kwLit "or", lexeme opLit]
   where
+    kwLit !kw = keyword kw >> return kw
     opLit = takeWhile1P (Just "operator symbol") p
 
 parseScopedBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)

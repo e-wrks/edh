@@ -1208,12 +1208,20 @@ data Stmt
 
 -- Attribute reference
 data AttrRef
-  = ThisRef
-  | ThatRef
-  | SuperRef
+  = ThisRef !SrcRange
+  | ThatRef !SrcRange
+  | SuperRef !SrcRange
   | DirectRef !AttrAddrSrc
   | IndirectRef !ExprSrc !AttrAddrSrc
   deriving (Eq, Show)
+
+attrRefSpan :: AttrRef -> SrcRange
+attrRefSpan (ThisRef !src'span) = src'span
+attrRefSpan (ThatRef !src'span) = src'span
+attrRefSpan (SuperRef !src'span) = src'span
+attrRefSpan (DirectRef (AttrAddrSrc _ !src'span)) = src'span
+attrRefSpan (IndirectRef (ExprSrc _ !tgt'span) (AttrAddrSrc _ !addr'span)) =
+  SrcRange (src'start tgt'span) (src'end addr'span)
 
 data AttrAddrSrc = AttrAddrSrc !AttrAddr !SrcRange
   deriving (Eq, Show)

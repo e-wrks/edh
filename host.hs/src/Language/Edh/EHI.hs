@@ -172,6 +172,7 @@ module Language.Edh.EHI
     OpDeclLoc,
     DictKeyExpr (..),
     AttrRef (..),
+    attrRefSpan,
     AttrAddrSrc (..),
     AttrAddr (..),
     attrAddrStr,
