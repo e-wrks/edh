@@ -488,7 +488,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         --
 
         -- {[ x,y,z,... ]} -- any-of pattern
-        [StmtSrc (ExprStmt (ListExpr vExprs) _docCmt) _] ->
+        [StmtSrc (ExprStmt (ListExpr !vExprs) _docCmt) _] ->
           if null vExprs
             then exitEdh ets exit EdhCaseOther
             else runEdhTx ets $
