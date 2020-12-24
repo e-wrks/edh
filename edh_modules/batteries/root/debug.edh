@@ -51,41 +51,45 @@ export {
   }
 
   # the default basic implementation for the `dir` command
-  interpreter printDir( callerScope, ofThe= None, )
-  case if ofThe is not None
-  then callerScope.eval( ofThe )
-  else callerScope of {
+  interpreter printDir( callerScope, ofThe= None, ) case (
+    if ofThe is not None
+    then callerScope.eval( ofThe )
+    else callerScope
+  ) of {
     { { scope: ofScope } }
     -> console.print( ofScope.lexiLoc, **ofScope.attrs() )
-    { otherVal } | type( otherVal ) is ObjectType -> {
-      ofScope = scope( ofObj= otherVal )
-      console.print( desc( otherVal ), **ofScope.attrs() )
-      fallthrough
+    { otherVal } -> {
+      ; | type( otherVal ) is ObjectType -> {
+        ofScope = scope( ofObj= otherVal )
+        console.print( desc( otherVal ), **ofScope.attrs() )
+      }
+      console.print( 'Not an object but - ' ++ desc( otherVal ) )
     }
-    console.print( 'Not an object but - ' ++ desc( otherVal ) )
   }
 
   # basic implementation of a string form for `dir` command to
   # output to a remote console
-  interpreter sprintDir( callerScope, ofThe= None, )
-  case if ofThe is not None
-  then callerScope.eval( ofThe )
-  else callerScope of {
+  interpreter sprintDir( callerScope, ofThe= None, ) case (
+    if ofThe is not None
+    then callerScope.eval( ofThe )
+    else callerScope
+  ) of {
     { { scope: ofScope } } -> join( sep= '\n',
       ofScope.lexiLoc,
       *() =< for ( k, v ) from ofScope.attrs() do
       '  ' ++ k ++ '= ' ++ v
     )
-    { otherVal } | type( otherVal ) is ObjectType -> {
-      ofScope = scope( ofObj= otherVal )
-      join( sep= '\n',
-        desc( otherVal ),
-        *() =< for ( k, v ) from ofScope.attrs() do
-        '  ' ++ k ++ '= ' ++ v
-      )
-      fallthrough
+    { otherVal } -> {
+      ; | type( otherVal ) is ObjectType -> {
+        ofScope = scope( ofObj= otherVal )
+        join( sep= '\n',
+          desc( otherVal ),
+          *() =< for ( k, v ) from ofScope.attrs() do
+          '  ' ++ k ++ '= ' ++ v
+        )
+      }
+      'Not an object but - ' ++ desc( otherVal )
     }
-    'Not an object but - ' ++ desc( otherVal )
   }
 
   interpreter replHere( callerScope, prompt=None ) {
