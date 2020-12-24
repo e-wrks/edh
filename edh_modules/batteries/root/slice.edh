@@ -1,4 +1,9 @@
 
+# a language server will follow this import to find meta artifacts,
+# while an interpreter will import nothing from the meta host module
+import * 'batteries/meta'
+
+
 export { # placeholders to be placed in slicers
 
   # define these terms truthfully valued,

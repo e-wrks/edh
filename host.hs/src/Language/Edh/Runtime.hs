@@ -466,9 +466,7 @@ createEdhWorld !console = do
       withThisHostObj' ets (throwEdh ets EvalError "bogus scope object") $
         \(scope :: Scope) ->
           (iopdSnapshot (edh'scope'entity scope) >>=) $
-            exitEdh ets exit
-              . EdhArgsPack
-              . ArgsPack []
+            exitEdh ets exit . EdhArgsPack . ArgsPack []
 
     mthScopeGet :: ArgsPack -> EdhHostProc
     mthScopeGet (ArgsPack !args !kwargs) !exit !ets =
@@ -506,10 +504,7 @@ createEdhWorld !console = do
             ([v], []) -> exitEdh ets exit v
             (rtnArgs, rtnKwArgs) ->
               exitEdh ets exit $
-                EdhArgsPack $
-                  ArgsPack
-                    (reverse rtnArgs)
-                    (odFromList rtnKwArgs)
+                EdhArgsPack $ ArgsPack (reverse rtnArgs) (odFromList rtnKwArgs)
       where
         attrKeyFrom :: EdhValue -> (AttrKey -> STM ()) -> STM ()
         attrKeyFrom (EdhString attrName) !exit' = exit' $ AttrByName attrName

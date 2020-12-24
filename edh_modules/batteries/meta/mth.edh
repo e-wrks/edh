@@ -1,0 +1,262 @@
+{##
+ # this module is meant to be imported by an Edh language server, into every
+ # meta world's root scope at analysis time, reflecting definition information
+ # of the corresponding host artifacts at runtime.
+ #
+ # the purpose is for sakes of tooling functionalities, typically an IDE like
+ # VSCode.
+ #
+ #}
+
+import * './exc'
+
+# this module should never get imported by any Edh interpreter for the run
+error( 'Executing meta module: ' ++ __name__ )
+
+
+export {
+
+  UUID
+  :: ( uuid'str= None ) -> UUIDType
+  || ( uuid'ns, uuid'word1, uuid'word2, ) -> UUIDType
+  {##
+   # restore or generate a UUID value
+   #}
+  method UUID( uuid'str= None ) {
+    uuid'str :: StringType || None
+  }
+
+  id :: ( Any ) -> Any
+  {##
+   # obtain identity of a value
+   #
+   # immutable values tend to have themselves being their respective identity
+   #
+   # mutable values (including objects, lists, dicts, etc.) tend to have their
+   # respective identities as `UUID` associated with their respective unique
+   # identifier within the running process
+   #}
+  method id( v ) pass
+
+  blob :: ( Any, orElse!Any= default error ) -> BlobType
+  {##
+   # coerce a value to blob
+   #
+   # a string value will return its utf-8 bytes
+   #
+   # the `__blob__()` magic is attempted to convert an object
+   #
+   # the specified `orElse` will be returned otherwise, or an error will be
+   # thrown in case no `orElse` is specified
+   #}
+  method blob( v,
+    orElse= default error( 'not convertible to blob: ' ++ desc( v ) )
+  ) pass
+
+  str
+  :: ( Any ) -> StringType
+  || ( ArgsPackType ) -> ArgsPackType
+  {##
+   # convert arguments to string values
+   #
+   # a single string is returned if a single argument is passed
+   #
+   # otherwise an apk (morphed after the input apk) is returned with each
+   # argument in it converted to string
+   #
+   # the `__str__()` magic is attempted in converting objects
+   #}
+  method str(*** apk ) pass
+
+  repr
+  :: ( Any ) -> StringType
+  || ( ArgsPackType ) -> ArgsPackType
+  {##
+   # convert arguments to string representations
+   #
+   # almost the same semantics as in Python
+   #
+   # a single string is returned if a single argument is passed
+   #
+   # otherwise an apk (morphed after the input apk) is returned with each
+   # argument in it converted to string
+   #
+   # the `__repr__()` magic is attempted in converting objects
+   #}
+  method repr(*** apk ) pass
+
+  json
+  :: ( Any ) -> StringType
+  || ( *Any ) -> JsonArray!StringType
+  || ( **Any ) -> JsonObject!StringType
+  {##
+   # convert arguments to stringified JSON representation
+   #
+   # a single argument is stringified and returned right away
+   #
+   # if any keyword argument is specified, the result will be the string form
+   # of a JSON object taking all arguments
+   #
+   # if multiple positional arguments are specified, without any keyword
+   # argument, the result will the string form of a JSON array taking all
+   # arguments
+   #
+   # the `__json__()` magic is attempted in converting objects
+   #}
+  method json(*** apk ) pass
+
+  cap :: ( Any ) -> int!DecimalType
+  {##
+   # get capacity of a container
+   #
+   # `nan` is returned when not applicable to the specified value
+   #
+   # the `__cap__()` magic is attempted against objects
+   #}
+  method cap( container ) pass
+
+  grow :: ( Any, int!DecimalType ) -> nil
+  {##
+   # grow (or shrink to a smaller) capacity for a container
+   #
+   # the `__grow__(newCap)` magic is attempted against objects
+   #}
+  method cap( container, newCap ) pass
+
+  len :: ( Any ) -> int!DecimalType
+  {##
+   # get length of a container
+   #
+   # `nan` is returned when not applicable to the specified value
+   #
+   # the `__len__()` magic is attempted against objects
+   #}
+  method len( container ) pass
+
+  mark :: ( Any, int!DecimalType ) -> nil
+  {##
+   # mark valid data length for a container
+   #
+   # the `__mark__(newLength)` magic is attempted against objects
+   #}
+  method mark( container, newLength ) pass
+
+  show :: ( Any, **kwargs!ArgsPackType ) -> StringType
+  {##
+   # pretty showing a value as string
+   #
+   # the result should typically be terser than that from `desc()`
+   #
+   # the `__show__()` magic is attempted against objects
+   #}
+  method show( v, **kwargs ) pass
+
+  desc :: ( Any, **kwargs!ArgsPackType ) -> StringType
+  {##
+   # pretty describing a value as string
+   #
+   # the result should typically be more verbose than that from `show()`
+   #
+   # the `__desc__()` magic is attempted against objects
+   #}
+  method desc( v, **kwargs ) pass
+
+  dict :: (** kwargs!ArgsPackType ) -> DictType
+  {##
+   # dict constructor
+   #
+   # almost the same semantics as in Python
+   #}
+  method dict(** entries ) pass
+
+  null :: ( Any ) -> BoolType
+  {##
+   # check null semantics
+   #
+   # almost the same semantics as in Haskell
+   #
+   # the `__null__()` magic is attempted against objects
+   #}
+  method null( v ) pass
+
+  compare :: ( Any, Any ) -> OrdType || NA
+  {##
+   # compare two values
+   #
+   # `EQ/LT/GT` is returned if conclusion can be made, or `NA` is returned
+   #
+   # almost the same semantics as in Haskell
+   #
+   # the `__compare__()` magic is attempted against objects
+   #
+   # note the magic method can return `default <conclusion>` to allow further
+   # magics to be attempted, while defaulting to some value evaluated from the
+   # specified expression; and `NA` (or the equivalent expanded `default nil`)
+   # indicates that comparison is not-applicable to the two values
+   #}
+  method compare( v1, v2 ) pass
+
+  type
+  :: ( Any ) -> TypeType
+  || ( ArgsPackType ) -> ArgsPackType
+  {##
+   # obtain type of arguments
+   #
+   # a single type value is returned if a single argument is passed
+   #
+   # otherwise an apk (morphed after the input apk) is returned with type of
+   # each argument in it
+   #}
+  method type(*** apk ) pass
+
+  constructor
+  :: ( Any ) -> ClassType
+  || () -> ClassType
+  || ( ArgsPackType ) -> ArgsPackType
+  {##
+   # obtain class of arguments
+   #
+   # a single class object is returned if a single object is passed
+   #
+   # the lexical context class is returned when no arguement specified
+   #
+   # otherwise an apk (morphed after the input apk) is returned with class of
+   # each argument in it
+   #
+   # note `None` will be returned for non-object values
+   #}
+  method constructor(*** apk ) pass
+
+  supers
+  :: () -> ObjectType
+  || ( Any ) -> ObjectType
+  || ( ArgsPackType ) -> ArgsPackType
+  {##
+   # obtain super objects of arguments
+   #
+   # the super objects of `this` is returned when no arguement specified
+   #
+   # a single apk of super objects is returned if a single object is passed
+   #
+   # otherwise an apk (morphed after the input apk) is returned with super
+   # objects of each argument in it
+   #
+   # note `None` will be returned for non-object values
+   #}
+  method supers(*** apk ) pass
+
+  parseEdh :: ( StringType ) -> ExprType
+  {##
+   # parse Edh source code into expressions
+   #
+   # a block expression containing statements is usually returned
+   #}
+  method parseEdh( srcCode, srcName= '<edh>', lineNo= 1 ) pass
+
+  makeOp :: ( ExprType, op!StringType, ExprType ) -> ExprType
+  {##
+   # make an infix operator application expression
+   #}
+  method makeOp( lhExpr, op, rhExpr ) pass
+
+}

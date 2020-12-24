@@ -1,0 +1,31 @@
+{##
+ # this module is meant to be imported by an Edh language server, into every
+ # meta world's root scope at analysis time, reflecting definition information
+ # of the corresponding host artifacts at runtime.
+ #
+ # the purpose is for sakes of tooling functionalities, typically an IDE like
+ # VSCode.
+ #
+ #}
+
+import * './exc'
+
+# this module should never get imported by any Edh interpreter for the run
+error( 'Executing meta module: ' ++ __name__ )
+
+
+export {
+
+  property :: ( MethodType ) -> DescriptorType
+  {##
+   # decorate a method to be a property getter
+   #}
+  method property ( getterMth ) pass
+
+  setter :: ( MethodType ) -> DescriptorType
+  {##
+   # decorate a method to be a property setter
+   #}
+  method setter ( setterMth ) pass
+
+}

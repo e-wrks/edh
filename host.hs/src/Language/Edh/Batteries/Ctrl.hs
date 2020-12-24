@@ -717,7 +717,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                     _ -> exitEdh ets exit EdhCaseOther
         --
 
-        -- {( x:y:z:... )} -- parenthesised pair pattern
+        -- {( x:y:z:... )} -- pair pattern
         [ StmtSrc
             ( ExprStmt
                 (ParenExpr (ExprSrc pairPattern@(InfixExpr ":" _ _) _))
@@ -792,22 +792,17 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                 throwEdh ets UsageError $ "bad guard result: " <> badDesc
       --
 
-      -- { x:y:z:... } -- pair pattern
-      DictExpr
-        [ ( AddrDictKey (DirectRef (AttrAddrSrc (NamedAttr !name1) _)),
-            ExprSrc !pairPattern _
-            )
-          ] ->
-          handlePairPattern (Just $ AttrByName name1) pairPattern
-      --
-
       -- this is to establish the intuition that `{ ... }` always invokes
       -- pattern matching. if a literal dict value really meant to be matched,
       -- the parenthesized form `( {k1: v1, k2: v2, ...} )` should be used.
       DictExpr !malPairs ->
         throwEdh ets EvalError $
           "invalid match pattern: " <> T.pack (show malPairs)
+      --
+
       _ -> naExit -- not a recognized pattern
+
+      --
       where
         handlePairPattern !maybeName1 !pairPattern =
           case matchPairPattern pairPattern ctxMatch [] of

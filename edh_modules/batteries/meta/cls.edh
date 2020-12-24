@@ -1,0 +1,128 @@
+{##
+ # this module is meant to be imported by an Edh language server, into every
+ # meta world's root scope at analysis time, reflecting definition information
+ # of the corresponding host artifacts at runtime.
+ #
+ # the purpose is for sakes of tooling functionalities, typically an IDE like
+ # VSCode.
+ #
+ #}
+
+import * './exc'
+
+# this module should never get imported by any Edh interpreter for the run
+error( 'Executing meta module: ' ++ __name__ )
+
+import * './decor'
+
+
+export {
+
+  {##
+   # the namespace class is only addressable in instance resolution patterns,
+   # e.g.
+   #
+```edh
+case xx of {{ namespace:ns }} -> {
+  console.print('got a namespace object: ' ++ ns)
+}
+```
+   #
+   # otherwise `namespace` is a keyword, only valid to appear in the namespace
+   # definition syntax
+   #}
+  class @'namespace' {
+
+    __name__ :: StringType
+
+  }
+
+  {##
+   # the scope wrapper class
+   #}
+  class scope {
+
+    scope
+    :: () -> scope
+    || ( ofObj!ObjectType ) -> scope
+    {##
+     # wrap the caller's scope or the object specified by `ofObj` as a
+     # reflective object
+     #}
+    method __init__( ofObj= None ) pass
+
+    eval :: ( ExprType, StringType= None ) -> Any
+    {##
+     # evaluate the specified expression within the wrapped scope
+     #}
+    method eval( expression, srcName= None ) pass
+
+    get
+    :: ( StringType ) -> Any
+    || ( SymbolType ) -> Any
+    || ( ArgsPackType ) -> ArgsPackType
+    {##
+     # lookup attribute(s) from the wrapped scope
+     #
+     # a single value is returned if a single argument is passed
+     #
+     # otherwise an apk (morphed after the input apk) is returned with each
+     # argument in it looked up as attribute key against the wrapped scope
+     #
+     # note the attribute key has to be string or symbol, otherwise runtime
+     # error will be thrown
+     #}
+    method get(*** apk ) pass
+
+
+    put
+    :: ( StringType:Any ) -> nil
+    || ( SymbolType:Any ) -> nil
+    || ( ArgsPackType ) -> ArgsPackType
+    {##
+     # put attributes into the wrapped scope
+     #
+     # key/value pairs can be used as positional arguments, as well as keyword
+     # arguments
+     #
+     # note the key in a pair has to be string or symbol, otherwise runtime
+     # error will be thrown
+     #}
+    method put(*** apk ) pass
+
+
+    attrs :: () -> keywords!ArgsPackType
+    {##
+     # obtain all attributes from the wrapped scope
+     #}
+    method attrs() pass
+
+    outer :: scope
+    {##
+     # get lexical outer scope of the wrapped scope, readonly
+     #}
+    property$ method outer() pass
+
+    lexiLoc :: StringType
+    {##
+     # get source location of the wrapped scope
+     #}
+    property$ method lexiLoc() pass
+
+  }
+
+  {##
+   # the module class
+   #
+   # module objects are usually constructed implicitly by running Edh code from
+   # command line, then then imports performed meanwhile
+   #}
+  class module {
+
+    __name__ :: StringType
+    __path__ :: StringType
+    __file__ :: StringType
+
+  }
+
+}

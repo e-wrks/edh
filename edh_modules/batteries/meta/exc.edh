@@ -11,19 +11,65 @@
 if meta'only!false then export {
 
   {##
-   # thrown when an Edh program is halted
+   # thrown to the main Edh thread, when an Edh program is halted
+   #
+   # can also be thrown from any Edh thread by application code to halt the
+   # whold program
    #}
   data ProgramHalt ( haltValue = None ) pass
 
   {##
-   # generic runtime error occurred at runtime
+   # thrown to an Edh thread when the whole Edh program has been halted
    #}
-  data EvalError( msg, ***details ) pass
+  data ThreadTerminate() pass
+
+  {##
+   # generic IO error occurred at runtime
+   #}
+  data IOError( message, ***details ) pass
+
+  {##
+   # generic peer error occurred at runtime
+   #}
+  data PeerError( peerSite, details ) pass
+
+  {##
+   # root class for application/framework/library defined exceptions
+   #}
+  data Exception( message, context='<stack-trace>', ***details ) pass
+
+  {##
+   # generic package error occurred at runtime
+   #}
+  data PackageError( message, context='<stack-trace>', ***details ) pass
+
+  {##
+   # parsing error occurred at runtime
+   #}
+  data ParseError( message, context='<stack-trace>', ***details ) pass
+
+  {##
+   # generic evaluation error occurred at runtime
+   #}
+  data EvalError( message, context='<stack-trace>', ***details ) pass
+
+  {##
+   # generic usage error occurred at runtime
+   #}
+  data UsageError( message, context='<stack-trace>', ***details ) pass
 
   {##
    # report an unexpected error
    #}
-  method error( msg, ***details ) throw EvalError( msg, ***details )
+  method error( message, context='<stack-trace>', ***details ) pass
+
+  {##
+   # check the assertion holds when debugging
+   #
+   # assertions are not evaluated when not debugging, they still serve good
+   # documentation anyway
+   #}
+  method assert( assertion, msg=None, ***details ) pass
 
 }
 

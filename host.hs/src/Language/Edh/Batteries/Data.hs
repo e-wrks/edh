@@ -303,24 +303,6 @@ uuidCtorProc (Just !uuidTxt) !exit !ets = case UUID.fromText uuidTxt of
   Just !uuid -> exitEdh ets exit $ EdhUUID uuid
   _ -> throwEdh ets UsageError $ "invalid uuid string: " <> uuidTxt
 
-apkArgsProc :: ArgsPack -> EdhHostProc
-apkArgsProc (ArgsPack _ !kwargs) _
-  | not $ odNull kwargs =
-    throwEdhTx EvalError "bug: __ArgsPackType_args__ got kwargs"
-apkArgsProc (ArgsPack [EdhArgsPack (ArgsPack !args _)] _) !exit =
-  exitEdhTx exit $ EdhArgsPack $ ArgsPack args odEmpty
-apkArgsProc _ _ =
-  throwEdhTx EvalError "bug: __ArgsPackType_args__ got unexpected args"
-
-apkKwrgsProc :: ArgsPack -> EdhHostProc
-apkKwrgsProc (ArgsPack _ !kwargs) _
-  | not $ odNull kwargs =
-    throwEdhTx EvalError "bug: __ArgsPackType_kwargs__ got kwargs"
-apkKwrgsProc (ArgsPack [EdhArgsPack (ArgsPack _ !kwargs')] _) !exit =
-  exitEdhTx exit $ EdhArgsPack $ ArgsPack [] kwargs'
-apkKwrgsProc _ _ =
-  throwEdhTx EvalError "bug: __ArgsPackType_kwargs__ got unexpected args"
-
 -- | utility id(val) -- obtain unique evident value of a value
 --
 -- this follows the semantic of Python's `id` function for object values and
@@ -571,24 +553,15 @@ lenProc !v !kwargs !exit !ets = case edhUltimate v of
             <> " on class "
             <> objClassName o
   EdhList (List _ !lv) ->
+    {- HLINT ignore "Redundant <$>" -}
     length <$> readTVar lv >>= \ !llen ->
       exitEdh ets exit $ EdhDecimal $ fromIntegral llen
   EdhDict (Dict _ !ds) ->
     iopdSize ds
       >>= \ !dlen -> exitEdh ets exit $ EdhDecimal $ fromIntegral dlen
-  EdhArgsPack (ArgsPack !posArgs !kwArgs)
-    | odNull kwArgs ->
-      -- no keyword arg, assuming tuple semantics
-      exitEdh ets exit $ EdhDecimal $ fromIntegral $ length posArgs
-  EdhArgsPack (ArgsPack !posArgs !kwArgs)
-    | null posArgs ->
-      -- no positional arg, assuming named tuple semantics
-      exitEdh ets exit $ EdhDecimal $ fromIntegral $ odSize kwArgs
-  EdhArgsPack {} ->
-    throwEdh
-      ets
-      UsageError
-      "unresonable to get length of an apk with both positional and keyword args"
+  EdhArgsPack (ArgsPack !posArgs _kwArgs) ->
+    -- assuming tuple semantics, return number of positional arguments
+    exitEdh ets exit $ EdhDecimal $ fromIntegral $ length posArgs
   _ -> exitEdh ets exit $ EdhDecimal D.nan
 
 markProc :: EdhValue -> Decimal -> RestKwArgs -> EdhHostProc

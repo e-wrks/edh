@@ -1,0 +1,187 @@
+{##
+ # this module is meant to be imported by an Edh language server, into every
+ # meta world's root scope at analysis time, reflecting definition information
+ # of the corresponding host artifacts at runtime.
+ #
+ # the purpose is for sakes of tooling functionalities, typically an IDE like
+ # VSCode.
+ #
+ #}
+
+import * './exc'
+
+# this module should never get imported by any Edh interpreter for the run
+error( 'Executing meta module: ' ++ __name__ )
+
+
+export {
+
+  __StringType_bytes__ :: ( StringType ) -> BlobType
+  {##
+   # virtual property of a string value, encoding the string into utf-8 bytes
+   # as a blob value
+   #}
+  method __StringType_bytes__ ( s ) {
+    s :: StringType
+  }
+
+  __BlobType_utf8string__ :: ( BlobType ) -> StringType
+  {##
+   # virtual property of a blob value, decoding (assuming utf-8 bytes) into a
+   # string
+   #}
+  method __BlobType_utf8string__( b ) {
+    b :: BlobType
+  }
+
+  __IntrinsicType_name__ :: ( IntrinsicType ) -> StringType
+  {##
+   # the virtual name property of an intrinsic operator
+   #}
+  method __IntrinsicType_name__ ( op ) {
+    op :: IntrinsicType
+  }
+
+  __MethodType_name__ :: ( MethodType ) -> StringType
+  {##
+   # the virtual name property of a method procedure
+   #}
+  method __MethodType_name__ ( mth ) {
+    mth :: MethodType
+  }
+
+  __HostMethodType_name__ :: ( HostMethodType ) -> StringType
+  {##
+   # the virtual name property of a method procedure
+   #}
+  method __HostMethodType_name__ ( mth ) {
+    mth :: HostMethodType
+  }
+
+  __OperatorType_name__ :: ( OperatorType ) -> StringType
+  {##
+   # the virtual name property of an operator
+   #}
+  method __OperatorType_name__ ( mth ) {
+    mth :: OperatorType
+  }
+
+  __HostOper_name__ :: ( HostOper ) -> StringType
+  {##
+   # the virtual name property of an operator
+   #}
+  method __HostOper_name__ ( mth ) {
+    mth :: HostOper
+  }
+
+  __GeneratorType_name__ :: ( GeneratorType ) -> StringType
+  {##
+   # the virtual name property of a generator procedure
+   #}
+  method __GeneratorType_name__ ( mth ) {
+    mth :: GeneratorType
+  }
+
+  __HostGenrType_name__ :: ( HostGenrType ) -> StringType
+  {##
+   # the virtual name property of a generator procedure
+   #}
+  method __HostGenrType_name__ ( mth ) {
+    mth :: HostGenrType
+  }
+
+  __InterpreterType_name__ :: ( InterpreterType ) -> StringType
+  {##
+   # the virtual name property of a iterpreter procedure
+   #}
+  method __InterpreterType_name__ ( mth ) {
+    mth :: InterpreterType
+  }
+
+  __ProducerType_name__ :: ( ProducerType ) -> StringType
+  {##
+   # the virtual name property of a producer procedure
+   #}
+  method __ProducerType_name__ ( mth ) {
+    mth :: ProducerType
+  }
+
+  __DescriptorType_name__ :: ( DescriptorType ) -> StringType
+  {##
+   # the virtual name property of a property descriptor
+   #}
+  method __DescriptorType_name__ ( mth ) {
+    mth :: DescriptorType
+  }
+
+  __SinkType_subseq__ :: ( SinkType ) -> SinkType
+  {##
+   # the virtual property of an event sink, to obtain a non-lingering copy of
+   # the event sink
+   #}
+  method __SinkType_subseq__ ( sink_ ) {
+    sink_ :: SinkType
+  }
+
+  __SinkType_mrv__ :: ( SinkType ) -> Any
+  {##
+   # the virtual property of an event sink, to obtain the most recent value
+   # from the event sink
+   #
+   # note this only works for a lingering event sink, `nil` is always returned
+   # for non-lingering event sinks
+   #}
+  method __SinkType_mrv__ ( sink_ ) {
+    sink_ :: SinkType
+  }
+
+  __SinkType_eos__ :: ( SinkType ) -> BoolType
+  {##
+   # the virtual property of an event sink, to check whether it is already at
+   # end-of-stream
+   #}
+  method __SinkType_eos__ ( sink_ ) {
+    sink_ :: SinkType
+  }
+
+  __DictType_size__ :: ( DictType ) -> size!int!DecimalType
+  {##
+   # the virtual property of a dict, to obtain number of entries in it
+   #}
+  method __DictType_size__ ( d ) {
+    d :: DictType
+  }
+
+  __DictType_keys__ :: ( DictType ) -> positional!ArgsPackType
+  {##
+   # the virtual property of a dict, to obtain all keys in it
+   #}
+  method __DictType_keys__ ( d ) {
+    d :: DictType
+  }
+
+  __DictType_values__ :: ( DictType ) -> positional!ArgsPackType
+  {##
+   # the virtual property of a dict, to obtain all values in it
+   #}
+  method __DictType_values__ ( d ) {
+    d :: DictType
+  }
+
+  __ListType_push__ :: ( ListType ) -> nil
+  {##
+   # the virtual method of a list, to prepand an element into it
+   #}
+  method __ListType_push__ ( d ) {
+    d :: ListType
+  }
+
+  __ListType_pop__ :: ( ListType ) -> Any
+  {##
+   # the virtual method of a list, to pop out the first element from it
+   #}
+  method __ListType_pop__ ( d ) {
+    d :: ListType
+  }
+
+}

@@ -13,11 +13,18 @@ import * './exc'
 # this module should never get imported by any Edh interpreter for the run
 error( 'Executing meta module: ' ++ __name__ )
 
-# mockings for host artifacts
-import * './exc'
-import * './ops'
-import * './mths'
-import * './console'
+export {
 
-# Edh artifacts as is
-import * '../root'
+  # mockings for host artifacts
+  import * './exc'
+  import * './decor'
+  import * './ops'
+  import * './vattrs'
+  import * './console'
+  import * './mth'
+  import * './cls'
+
+  # those artifacts written in Edh, as is
+  import * '../root'
+
+}
