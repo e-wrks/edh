@@ -3309,6 +3309,7 @@ edhValueStr ets (EdhObject !o) !exit = case edh'obj'store o of
               EdhString !str -> exit str
               _ -> edhValueRepr ets mthRtn exit
       (_, !strVal) -> edhValueStr ets strVal exit
+edhValueStr !ets (EdhNamedValue _ !v) !exit = edhValueStr ets v exit
 edhValueStr !ets !v !exit = edhValueRepr ets v exit
 
 edhValueStrTx :: EdhValue -> EdhTxExit Text -> EdhTx
@@ -3335,6 +3336,7 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
       EdhDecimal !d -> exit $ T.pack $ show d
       EdhNil -> exit "null"
       EdhNamedValue _ EdhNil -> exit "null"
+      EdhNamedValue _ !termVal -> valJson termVal exit
       EdhBool True -> exit "true"
       EdhBool False -> exit "false"
       EdhList (List _ !lv) -> readTVar lv >>= flip listJson exit
