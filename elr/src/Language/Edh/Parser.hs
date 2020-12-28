@@ -267,24 +267,23 @@ parseArgRecvs !rs !kwConsumed !posConsumed =
       void $ symbol "*"
       RecvRestPosArgs <$> parseAttrAddrSrc
 
-parseRetarget :: Parser AttrRef
-parseRetarget = do
-  void $ keyword "as"
-  parseAttrRef
-
 parseKwRecv :: Bool -> Parser ArgReceiver
 parseKwRecv !inPack = do
   !addr <- parseAttrAddrSrc
-  !retgt <- optional parseRetarget
+  !retgt <- optional parseRetarget >>= validateTgt
   !defExpr <- if inPack then optional parseDefaultExpr else return Nothing
-  return $ RecvArg addr (validateTgt retgt) defExpr
+  return $ RecvArg addr retgt defExpr
   where
-    validateTgt :: Maybe AttrRef -> Maybe AttrRef
+    parseRetarget :: Parser AttrRef
+    parseRetarget = do
+      void $ keyword "as"
+      parseAttrRef
+    validateTgt :: Maybe AttrRef -> Parser (Maybe AttrRef)
     validateTgt tgt = case tgt of
-      Nothing -> Nothing
       Just ThisRef {} -> fail "can not overwrite this"
       Just ThatRef {} -> fail "can not overwrite that"
-      _ -> tgt
+      Just SuperRef {} -> fail "can not overwrite super"
+      _ -> return tgt
     parseDefaultExpr :: Parser ExprSrc
     parseDefaultExpr = do
       void $ symbol "="
@@ -321,13 +320,7 @@ parseAttrRef = do
           DirectRef <$> parseAttrAddrSrc
         ]
     followingPart :: Parser AttrAddrSrc
-    followingPart =
-      choice
-        [ keyword "this" *> fail "unexpected this reference",
-          keyword "that" *> fail "unexpected that reference",
-          keyword "super" *> fail "unexpected super reference",
-          parseAttrAddrSrc
-        ]
+    followingPart = parseAttrAddrSrc
 
 parseArgsSender :: IntplSrcInfo -> Parser (ArgsPacker, IntplSrcInfo)
 parseArgsSender !si =
@@ -627,7 +620,7 @@ parseStmt' !prec !si = do
         parseThrowStmt si,
         (,si) <$> parseVoidStmt,
         -- NOTE: statements above should probably all be detected by
-        -- `illegalExprStart` as invalid start for an expr
+        -- `illegalExprKws` as invalid start for an expr
         do
           !docCmt <- optional immediateDocComment
           (ExprSrc !x _, !si') <- parseExprPrec Nothing prec si
@@ -813,11 +806,24 @@ parseAttrName = ("(" <>) . (<> ")") <$> parseMagicName <|> parseAlphNumName
     isMagicChar :: Char -> Bool
     isMagicChar c = elem c (".[]" :: [Char]) || isOperatorChar c
 
+illegalIdentifier :: Parser Bool
+illegalIdentifier =
+  True
+    <$ choice
+      [ keyword "this",
+        keyword "that",
+        keyword "super"
+      ]
+      <|> illegalExprKws
+
 parseAlphNumName :: Parser AttrName
-parseAlphNumName = lexeme $ do
-  !anStart <- takeWhile1P (Just "attribute name") isIdentStart
-  !anRest <- takeWhileP Nothing isIdentChar
-  return $ anStart <> anRest
+parseAlphNumName =
+  lookAhead illegalIdentifier >>= \case
+    True -> fail "illegal identifier"
+    False -> lexeme $ do
+      !anStart <- takeWhile1P (Just "attribute name") isIdentStart
+      !anRest <- takeWhileP Nothing isIdentChar
+      return $ anStart <> anRest
 
 parseOpLit :: Parser Text
 parseOpLit = parseOpLit' isOperatorChar
@@ -975,10 +981,10 @@ parsePrefixExpr !si =
         return (x, si')
     ]
 
--- NOTE: a keyword for statement will parse as identifier in an expr,
+-- NOTE: keywords for statements will parse as identifier in an expr,
 --       if not forbidden here.
-illegalExprStart :: Parser Bool
-illegalExprStart =
+illegalExprKws :: Parser Bool
+illegalExprKws =
   True
     <$ choice
       [ keyword "go",
@@ -1066,8 +1072,8 @@ parseExprPrec ::
   IntplSrcInfo ->
   Parser (ExprSrc, IntplSrcInfo)
 parseExprPrec !precedingOp !prec !si =
-  lookAhead illegalExprStart >>= \case
-    True -> fail "illegal expression"
+  lookAhead illegalExprKws >>= \case
+    True -> fail "illegal keyword in expression"
     False ->
       ((,si) <$> parseExprLit) <|> parseIntplExpr si <|> do
         !startPos <- getSourcePos
