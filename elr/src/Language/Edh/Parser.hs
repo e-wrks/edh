@@ -301,15 +301,12 @@ parseAttrRef = do
       moreAddr !p1 = (<|> return p1) $ do
         EdhParserState _ !lexeme'end <- get
         void $ symbol "."
-        !addr <- followingPart
-        let !r1 =
-              IndirectRef
-                ( ExprSrc (AttrExpr p1) (lspSrcRangeFromParsec startPos lexeme'end)
-                )
-                addr
-        moreAddr r1 <|> return r1
-  !p1 <- leadingPart
-  moreAddr p1
+        !addr <- parseAttrAddrSrc
+        moreAddr $
+          IndirectRef
+            (ExprSrc (AttrExpr p1) (lspSrcRangeFromParsec startPos lexeme'end))
+            addr
+  leadingPart >>= moreAddr
   where
     leadingPart :: Parser AttrRef
     leadingPart =
@@ -319,8 +316,6 @@ parseAttrRef = do
           SuperRef <$> keyword "super",
           DirectRef <$> parseAttrAddrSrc
         ]
-    followingPart :: Parser AttrAddrSrc
-    followingPart = parseAttrAddrSrc
 
 parseArgsSender :: IntplSrcInfo -> Parser (ArgsPacker, IntplSrcInfo)
 parseArgsSender !si =
