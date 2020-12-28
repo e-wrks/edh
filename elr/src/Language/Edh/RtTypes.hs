@@ -35,8 +35,9 @@ edhSetValue !key !val !d = case val of
 
 -- | `nil` carries deletion semantics in Edh
 edhDictFromList :: [(EdhValue, EdhValue)] -> STM (IOPD EdhValue EdhValue)
-edhDictFromList = iopdFromList' $ \e@(_k, !v) ->
-  if v == EdhNil then Nothing else Just e
+edhDictFromList = iopdFromList' $ \e@(_k, !v) -> case v of
+  EdhNil -> Nothing
+  _ -> Just e
 
 -- | A pack of evaluated argument values with positional/keyword origin,
 -- this works in places of tuples in other languages, apk in Edh can be
@@ -1038,9 +1039,9 @@ instance Eq EdhValue where
   EdhOrd x == EdhOrd y = x == y
   EdhDefault x'u _ _ == EdhDefault y'u _ _ = x'u == y'u
   EdhSink x == EdhSink y = x == y
-  EdhNamedValue _ x'v == EdhNamedValue _ y'v = x'v == y'v
-  EdhNamedValue _ x'v == y = x'v == y
-  x == EdhNamedValue _ y'v = x == y'v
+  EdhNamedValue x'n x'v == EdhNamedValue y'n y'v = x'n == y'n && x'v == y'v
+  EdhNamedValue {} == _ = False
+  _ == EdhNamedValue {} = False
   EdhExpr _ (LitExpr x'l) _ == EdhExpr _ (LitExpr y'l) _ = x'l == y'l
   EdhExpr x'u _ _ == EdhExpr y'u _ _ = x'u == y'u
   -- todo: support coercing equality ?

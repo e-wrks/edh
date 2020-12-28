@@ -3309,6 +3309,7 @@ edhValueStr ets (EdhObject !o) !exit = case edh'obj'store o of
               EdhString !str -> exit str
               _ -> edhValueRepr ets mthRtn exit
       (_, !strVal) -> edhValueStr ets strVal exit
+edhValueStr _ (EdhNamedValue !name EdhNil) !exit = exit name
 edhValueStr !ets (EdhNamedValue _ !v) !exit = edhValueStr ets v exit
 edhValueStr !ets !v !exit = edhValueRepr ets v exit
 
