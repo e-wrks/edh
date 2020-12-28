@@ -1024,11 +1024,20 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
                   SymbolicAttr !symName ->
                     -- todo support this ?
                     throwEdh etsCaller UsageError $
-                      "do you mean `this.@"
-                        <> symName
-                        <> "` instead ?"
+                      "do you mean `this.@" <> symName <> "` instead ?"
+                  MissedAttrName ->
+                    throwEdh
+                      etsCaller
+                      EvalError
+                      "missing attribute name"
+                  MissedAttrSymbol ->
+                    throwEdh
+                      etsCaller
+                      EvalError
+                      "missing symbolic attribute name"
                 Just addr@IndirectRef {} ->
-                  -- do assignment in callee's context, and return to caller's afterwards
+                  -- do assignment in callee's context,
+                  -- and return to caller's afterwards
                   runEdhTx etsRecv $
                     assignEdhTarget (AttrExpr addr) argVal $
                       \_assignResult _ets -> exit' (ArgsPack posArgs'' kwArgs'')
@@ -1831,6 +1840,16 @@ resolveEdhAttrAddr !ets (SymbolicAttr !symName) !exit =
             "no symbol/string named "
               <> T.pack (show symName)
               <> " available"
+resolveEdhAttrAddr !ets MissedAttrName _exit =
+  throwEdh
+    ets
+    EvalError
+    "missing attribute name"
+resolveEdhAttrAddr !ets MissedAttrSymbol _exit =
+  throwEdh
+    ets
+    EvalError
+    "missing symbolic attribute name"
 {-# INLINE resolveEdhAttrAddr #-}
 
 -- | Throw a tagged error from Edh computation

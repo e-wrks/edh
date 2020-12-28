@@ -300,12 +300,22 @@ parseAttrRef = do
   let moreAddr :: AttrRef -> Parser AttrRef
       moreAddr !p1 = (<|> return p1) $ do
         EdhParserState _ !lexeme'end <- get
+        let !leading'span = lspSrcRangeFromParsec startPos lexeme'end
         void $ symbol "."
-        !addr <- parseAttrAddrSrc
-        moreAddr $
-          IndirectRef
-            (ExprSrc (AttrExpr p1) (lspSrcRangeFromParsec startPos lexeme'end))
-            addr
+        EdhParserState _ !after'dot <- get
+        !endPos <- getSourcePos
+        choice
+          [ do
+              !addr <- parseAttrAddrSrc
+              moreAddr $
+                IndirectRef (ExprSrc (AttrExpr p1) leading'span) addr,
+            moreAddr $
+              IndirectRef
+                (ExprSrc (AttrExpr p1) leading'span)
+                ( AttrAddrSrc MissedAttrName $
+                    SrcRange after'dot $ lspSrcPosFromParsec endPos
+                )
+          ]
   leadingPart >>= moreAddr
   where
     leadingPart :: Parser AttrRef
@@ -789,7 +799,10 @@ parseAttrAddr = parseAtNotation <|> NamedAttr <$> parseAttrName
     parseAtNotation =
       char '@' *> sc
         *> choice
-          [QuaintAttr <$> parseStringLit, SymbolicAttr <$> parseAlphNumName]
+          [ QuaintAttr <$> parseStringLit,
+            SymbolicAttr <$> parseAlphNumName,
+            pure MissedAttrSymbol
+          ]
 
 parseAttrName :: Parser Text
 parseAttrName = ("(" <>) . (<> ")") <$> parseMagicName <|> parseAlphNumName

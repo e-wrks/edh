@@ -1237,6 +1237,8 @@ data AttrAddr
   | -- | dynamic at-notation i.e. get the symbol or string value from current
     -- scope, then use it to address attributes
     SymbolicAttr !AttrName
+  | MissedAttrName
+  | MissedAttrSymbol
   deriving (Eq, Ord)
 
 instance Show AttrAddr where
@@ -1247,11 +1249,15 @@ instance Hashable AttrAddr where
   hashWithSalt s (QuaintAttr name) = s `hashWithSalt` name
   hashWithSalt s (SymbolicAttr sym) =
     s `hashWithSalt` ("@" :: Text) `hashWithSalt` sym
+  hashWithSalt s MissedAttrName = s `hashWithSalt` (101 :: Int)
+  hashWithSalt s MissedAttrSymbol = s `hashWithSalt` (102 :: Int)
 
 attrAddrStr :: AttrAddr -> Text
 attrAddrStr (NamedAttr n) = n
 attrAddrStr (QuaintAttr n) = T.pack ("@" <> show n)
 attrAddrStr (SymbolicAttr s) = "@" <> s
+attrAddrStr MissedAttrName = "<?>"
+attrAddrStr MissedAttrSymbol = "@<?>"
 
 receivesNamedArg :: Text -> ArgsReceiver -> Bool
 receivesNamedArg _ WildReceiver = True
