@@ -3,13 +3,6 @@ module Language.Edh.IOPD where
 -- import           Debug.Trace
 
 import Control.Concurrent.STM
-  ( STM,
-    TVar,
-    modifyTVar',
-    newTVar,
-    readTVar,
-    writeTVar,
-  )
 import Control.Monad.ST (runST)
 import qualified Data.HashMap.Strict as Map
 import Data.Hashable (Hashable (hashWithSalt))
@@ -75,6 +68,14 @@ iopdTransform !trans (IOPD !mv !wpv !nhv !av) = do
             go (i - 1)
       go (wp - 1)
   return $ IOPD mv' wpv' nhv' av'
+
+iopdEmptyIO :: forall k v. (Eq k, Hashable k) => IO (IOPD k v)
+iopdEmptyIO = do
+  !mv <- newTVarIO Map.empty
+  !wpv <- newTVarIO 0
+  !nhv <- newTVarIO 0
+  !av <- newTVarIO =<< MV.unsafeNew 0
+  return $ IOPD mv wpv nhv av
 
 iopdEmpty :: forall k v. (Eq k, Hashable k) => STM (IOPD k v)
 iopdEmpty = do
