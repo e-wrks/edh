@@ -74,10 +74,13 @@ srcPosCmp2Range :: SrcPos -> SrcRange -> Ordering
 srcPosCmp2Range !p (SrcRange !start !end) = case compare p start of
   LT -> LT
   EQ -> EQ
-  GT -> case compare p end of
-    LT -> EQ
-    EQ -> EQ
-    GT -> GT
+  GT ->
+    if src'line end < 0
+      then EQ -- special infinite end
+      else case compare p end of
+        LT -> EQ
+        EQ -> GT -- end position of a range is exclusive
+        GT -> GT
 
 zeroSrcRange :: SrcRange
 zeroSrcRange = SrcRange beginningSrcPos beginningSrcPos
