@@ -93,9 +93,15 @@ docComment = do
 -- | get the doc comment immediately before next non-whitespace lexeme, return
 -- the last one if multiple consecutive doc comment blocks present.
 immediateDocComment :: Parser DocComment
-immediateDocComment = docComment >>= moreAfter
+immediateDocComment = docComment >>= moreAfterSemicolons
   where
-    moreAfter !gotCmt = (try (sc >> docComment) >>= moreAfter) <|> return gotCmt
+    moreAfterSemicolons gotCmt =
+      optionalSemicolon >>= \case
+        True -> moreAfterSemicolons gotCmt
+        False -> moreAfter gotCmt
+    moreAfter !gotCmt =
+      (<|> return gotCmt) $
+        try (sc >> docComment) >>= moreAfter
 
 symbol :: Text -> Parser Text
 symbol !t = do
@@ -303,17 +309,19 @@ parseAttrRef = do
         let !leading'span = lspSrcRangeFromParsec startPos lexeme'end
         void $ symbol "."
         EdhParserState _ !after'dot <- get
-        !endPos <- getSourcePos
+        !missEndPos <- getSourcePos
         choice
           [ do
-              !addr <- parseAttrAddrSrc
+              AttrAddrSrc !addr (SrcRange _ !addr'end) <- parseAttrAddrSrc
               moreAddr $
-                IndirectRef (ExprSrc (AttrExpr p1) leading'span) addr,
+                IndirectRef
+                  (ExprSrc (AttrExpr p1) leading'span)
+                  (AttrAddrSrc addr (SrcRange after'dot addr'end)),
             moreAddr $
               IndirectRef
                 (ExprSrc (AttrExpr p1) leading'span)
                 ( AttrAddrSrc MissedAttrName $
-                    SrcRange after'dot $ lspSrcPosFromParsec endPos
+                    SrcRange after'dot $ lspSrcPosFromParsec missEndPos
                 )
           ]
   leadingPart >>= moreAddr
