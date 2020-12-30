@@ -1040,8 +1040,8 @@ instance Eq EdhValue where
   EdhDefault x'u _ _ == EdhDefault y'u _ _ = x'u == y'u
   EdhSink x == EdhSink y = x == y
   EdhNamedValue x'n x'v == EdhNamedValue y'n y'v = x'n == y'n && x'v == y'v
-  EdhNamedValue {} == _ = False
-  _ == EdhNamedValue {} = False
+  EdhNamedValue _ x'v == y = x'v == y
+  x == EdhNamedValue _ y'v = x == y'v
   EdhExpr _ (LitExpr x'l) _ == EdhExpr _ (LitExpr y'l) _ = x'l == y'l
   EdhExpr x'u _ _ == EdhExpr y'u _ _ = x'u == y'u
   -- todo: support coercing equality ?
