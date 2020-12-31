@@ -1,6 +1,6 @@
 module Language.Edh.Parser where
 
--- import           Debug.Trace
+-- import Debug.Trace
 
 import Control.Applicative hiding
   ( many,
@@ -156,6 +156,9 @@ isOperatorChar c =
       Char.OtherPunctuation -> True
       _ -> False
 
+equalSign :: Parser ()
+equalSign = char '=' >> notFollowedBy (satisfy isOperatorChar) >> sc
+
 parseProgram :: Parser ([StmtSrc], Maybe DocComment)
 parseProgram = do
   void sc
@@ -233,7 +236,7 @@ parseLetStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseLetStmt !si = do
   void $ keyword "let"
   !ar <- parseArgsReceiver
-  void $ symbol "="
+  equalSign
   (!argSender, !si') <- parseArgsSender si
   return (LetStmt ar argSender, si')
 
@@ -292,7 +295,7 @@ parseKwRecv !inPack = do
       _ -> return tgt
     parseDefaultExpr :: Parser ExprSrc
     parseDefaultExpr = do
-      void $ symbol "="
+      equalSign
       -- TODO carry on 'IntplSrcInfo' in the full call chain to here,
       --      so the default value expr can be interpolated.
       !s <- getInput
@@ -383,7 +386,7 @@ parseArgSends !si !closeSym !commaAppeared !ss =
     parseKwArgSend :: Parser (ArgSender, IntplSrcInfo)
     parseKwArgSend = do
       !addr <- parseAttrAddrSrc
-      void $ symbol "="
+      equalSign
       (!x, !si') <- parseExpr si
       return (SendKwArg addr x, si')
     parse1ArgSend :: Parser (ArgSender, IntplSrcInfo)
@@ -870,6 +873,9 @@ parseDictOrBlock !si0 =
   symbol "{"
     *> choice [try $ parseDictEntries si0 [], parseBlockRest [] si0]
   where
+    entryColon :: Parser ()
+    entryColon = char ':' >> notFollowedBy (satisfy isOperatorChar) >> sc
+
     parseBlockRest :: [StmtSrc] -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
     parseBlockRest !t !si =
       optionalSemicolon
@@ -898,18 +904,18 @@ parseDictOrBlock !si0 =
         nextEntry = (litEntry <|> addrEntry <|> exprEntry) <* optionalComma
         litEntry = try $ do
           !k <- parseLitExpr
-          void $ symbol ":"
+          entryColon
           (!v, !si') <- parseExpr si
           return ((LitDictKey k, v), si')
         addrEntry = try $ do
           !k <- parseAttrRef
-          void $ symbol ":"
+          entryColon
           (!v, !si') <- parseExpr si
           return ((AddrDictKey k, v), si')
         exprEntry = try $ do
           -- (:) should be infixl 2, cross check please
           (!k, !si') <- parseExprPrec (Just (":", InfixL)) 2 si
-          void $ symbol ":"
+          entryColon
           (!v, !si'') <- parseExpr si'
           return ((ExprDictKey k, v), si'')
 
@@ -1092,20 +1098,28 @@ parseExprPrec !precedingOp !prec !si =
     True -> fail "illegal keyword in expression"
     False ->
       ((,si) <$> parseExprLit) <|> parseIntplExpr si <|> parseMoreExpr
-        <|> case precedingOp of
-          Nothing -> empty
-          Just {} -> do
-            EdhParserState _ !missed'start <- get
-            !missed'end <- getSourcePos
-            let !missed'span = lspSrcRangeFromParsec' missed'start missed'end
-            return
-              ( ExprSrc
+        <|> do
+          EdhParserState _ !missed'start <- get
+          !missed'end <- getSourcePos
+          let !missed'span = lspSrcRangeFromParsec' missed'start missed'end
+              !missedExpr =
+                ExprSrc
                   ( AttrExpr
                       (DirectRef (AttrAddrSrc MissedAttrName missed'span))
                   )
-                  missed'span,
-                si
-              )
+                  missed'span
+          case precedingOp of
+            Nothing ->
+              parseMoreInfix Nothing si missedExpr >>= \case
+                ( ExprSrc
+                    ( AttrExpr
+                        (DirectRef (AttrAddrSrc MissedAttrName _))
+                      )
+                    _,
+                  _
+                  ) -> empty
+                !lhsMissedResult -> return lhsMissedResult
+            Just {} -> return (missedExpr, si)
   where
     parseMoreExpr :: Parser (ExprSrc, IntplSrcInfo)
     parseMoreExpr = do
