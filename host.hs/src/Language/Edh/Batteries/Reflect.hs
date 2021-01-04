@@ -70,7 +70,7 @@ supersProc (ArgsPack !args !kwargs) !exit !ets = do
   if null args && odNull kwargs
     then do
       !supers <-
-        map EdhObject <$> (readTVar $ edh'obj'supers $ edh'scope'this scope)
+        map EdhObject <$> readTVar (edh'obj'supers $ edh'scope'this scope)
       exitEdh ets exit $ EdhArgsPack $ ArgsPack supers odEmpty
     else
       if odNull kwargs
@@ -90,6 +90,7 @@ supersProc (ArgsPack !args !kwargs) !exit !ets = do
     supersOf :: EdhValue -> STM EdhValue
     supersOf !v = case v of
       EdhObject !o ->
+        {- HLINT ignore "Redundant <$>" -}
         map EdhObject <$> readTVar (edh'obj'supers o) >>= \ !supers ->
           return $ EdhArgsPack $ ArgsPack supers odEmpty
       _ -> return edhNone
@@ -138,7 +139,7 @@ sandboxProc (mandatoryArg -> !origObj) !exit !ets =
 -- | utility makeOp(lhExpr, opSym, rhExpr)
 makeOpProc :: [EdhValue] -> EdhHostProc
 makeOpProc !args !exit = case args of
-  [(EdhExpr _ !lhe _), EdhString !op, (EdhExpr _ !rhe _)] -> \ !ets -> do
+  [EdhExpr _ !lhe _, EdhString !op, EdhExpr _ !rhe _] -> \ !ets -> do
     !xu <- unsafeIOToSTM newUnique
     exitEdh ets exit $
       EdhExpr

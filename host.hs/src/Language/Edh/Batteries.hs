@@ -673,10 +673,12 @@ installEdhBatteries world =
         conArts
           ++ [(AttrByName "__exports__", conExps)]
 
-      -- artifacts considered safe for sandboxed envs, to afford basic Edh source
-      -- evaluation
+      -- artifacts considered safe for sandboxed envs, to afford basic Edh
+      -- source evaluation
       let !basicArts = basicOperators ++ basicProcs
 
+      -- artifacts considered privileged, thus not made available to sandboxed
+      -- envs
       !privilegedProcs <-
         sequence $
           [ (AttrByName nm,) <$> mkHostProc rootScope mc nm hp
