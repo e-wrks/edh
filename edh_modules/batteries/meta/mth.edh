@@ -35,9 +35,8 @@ export {
    #}
   method sandbox( origObj ) pass
 
-  UUID
-  :: ( uuid'str= None ) -> UUIDType
-  || ( uuid'ns, uuid'word1, uuid'word2, ) -> UUIDType
+  UUID :: ( uuid'str= None ) -> UUIDType
+  UUID :: ( uuid'ns, uuid'word1, uuid'word2, ) -> UUIDType
   {##
    # restore or generate a UUID value
    #}
@@ -72,9 +71,8 @@ export {
     orElse= default error( 'not convertible to blob: ' ++ desc( v ) )
   ) pass
 
-  str
-  :: ( Any ) -> StringType
-  || ( ArgsPackType ) -> ArgsPackType
+  str :: ( Any ) -> StringType
+  str :: ( ArgsPackType ) -> ArgsPackType
   {##
    # convert arguments to string values
    #
@@ -87,9 +85,8 @@ export {
    #}
   method str(*** apk ) pass
 
-  repr
-  :: ( Any ) -> StringType
-  || ( ArgsPackType ) -> ArgsPackType
+  repr :: ( Any ) -> StringType
+  repr :: ( ArgsPackType ) -> ArgsPackType
   {##
    # convert arguments to string representations
    #
@@ -104,10 +101,9 @@ export {
    #}
   method repr(*** apk ) pass
 
-  json
-  :: ( Any ) -> StringType
-  || ( *Any ) -> JsonArray!StringType
-  || ( **Any ) -> JsonObject!StringType
+  json :: ( Any ) -> StringType
+  json :: ( *Any ) -> JsonArray!StringType
+  json :: ( **Any ) -> JsonObject!StringType
   {##
    # convert arguments to stringified JSON representation
    #
@@ -215,9 +211,8 @@ export {
    #}
   method compare( v1, v2 ) pass
 
-  type
-  :: ( Any ) -> TypeType
-  || ( ArgsPackType ) -> ArgsPackType
+  type :: ( Any ) -> TypeType
+  type ::( ArgsPackType ) -> ArgsPackType
   {##
    # obtain type of arguments
    #
@@ -228,10 +223,9 @@ export {
    #}
   method type(*** apk ) pass
 
-  constructor
-  :: ( Any ) -> ClassType
-  || () -> ClassType
-  || ( ArgsPackType ) -> ArgsPackType
+  constructor :: ( Any ) -> ClassType
+  constructor :: () -> ClassType
+  constructor :: ( ArgsPackType ) -> ArgsPackType
   {##
    # obtain class of arguments
    #
@@ -246,10 +240,9 @@ export {
    #}
   method constructor(*** apk ) pass
 
-  supers
-  :: () -> ObjectType
-  || ( Any ) -> ObjectType
-  || ( ArgsPackType ) -> ArgsPackType
+  supers :: () -> ObjectType
+  supers :: ( Any ) -> ObjectType
+  supers :: ( ArgsPackType ) -> ArgsPackType
   {##
    # obtain super objects of arguments
    #

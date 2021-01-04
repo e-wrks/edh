@@ -42,9 +42,8 @@ case xx of {{ namespace:ns }} -> {
    #}
   class scope {
 
-    scope
-    :: () -> scope
-    || ( ofObj!ObjectType ) -> scope
+    scope :: () -> scope
+    scope :: ( ofObj!ObjectType ) -> scope
     {##
      # wrap the caller's scope or the object specified by `ofObj` as a
      # reflective object
@@ -57,10 +56,9 @@ case xx of {{ namespace:ns }} -> {
      #}
     method eval( expression, srcName= None ) pass
 
-    get
-    :: ( StringType ) -> Any
-    || ( SymbolType ) -> Any
-    || ( ArgsPackType ) -> ArgsPackType
+    get :: ( StringType ) -> Any
+    get :: ( SymbolType ) -> Any
+    get :: ( ArgsPackType ) -> ArgsPackType
     {##
      # lookup attribute(s) from the wrapped scope
      #
@@ -75,10 +73,9 @@ case xx of {{ namespace:ns }} -> {
     method get(*** apk ) pass
 
 
-    put
-    :: ( StringType:Any ) -> nil
-    || ( SymbolType:Any ) -> nil
-    || ( ArgsPackType ) -> ArgsPackType
+    put :: ( StringType:Any ) -> nil
+    put :: ( SymbolType:Any ) -> nil
+    put :: ( ArgsPackType ) -> ArgsPackType
     {##
      # put attributes into the wrapped scope
      #
