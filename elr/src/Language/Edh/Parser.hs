@@ -372,15 +372,21 @@ parseArgSends !si !closeSym !commaAppeared !ss =
         Parser (ArgSender, IntplSrcInfo)
     nextArg = unpackPkArgs <|> unpackKwArgs <|> unpackPosArgs <|> parse1ArgSend
     unpackPkArgs = do
-      void $ symbol "***"
+      void $ string "***"
+      notFollowedBy $ satisfy isOperatorChar
+      sc
       (!x, !si') <- parseExpr si
       return (UnpackPkArgs x, si')
     unpackKwArgs = do
-      void $ symbol "**"
+      void $ string "**"
+      notFollowedBy $ satisfy isOperatorChar
+      sc
       (!x, !si') <- parseExpr si
       return (UnpackKwArgs x, si')
     unpackPosArgs = do
-      void $ symbol "*"
+      void $ string "*"
+      notFollowedBy $ satisfy isOperatorChar
+      sc
       (!x, !si') <- parseExpr si
       return (UnpackPosArgs x, si')
     parseKwArgSend :: Parser (ArgSender, IntplSrcInfo)
@@ -825,24 +831,27 @@ parseAttrName = ("(" <>) . (<> ")") <$> parseMagicName <|> parseAlphNumName
     isMagicChar :: Char -> Bool
     isMagicChar c = elem c (".[]" :: [Char]) || isOperatorChar c
 
-illegalIdentifier :: Parser Bool
-illegalIdentifier =
-  True
-    <$ choice
-      [ keyword "this",
-        keyword "that",
-        keyword "super"
-      ]
-      <|> illegalExprKws
-
 parseAlphNumName :: Parser AttrName
-parseAlphNumName =
-  lookAhead illegalIdentifier >>= \case
-    True -> fail "illegal identifier"
-    False -> lexeme $ do
-      !anStart <- takeWhile1P (Just "attribute name") isIdentStart
-      !anRest <- takeWhileP Nothing isIdentChar
-      return $ anStart <> anRest
+parseAlphNumName = (detectIllegalIdent >>) $
+  lexeme $ do
+    !anStart <- takeWhile1P (Just "attribute name") isIdentStart
+    !anRest <- takeWhileP Nothing isIdentChar
+    return $ anStart <> anRest
+  where
+    detectIllegalIdent =
+      lookAhead illegalIdentifier >>= \case
+        True -> fail "illegal identifier"
+        False -> return ()
+    illegalIdentifier :: Parser Bool
+    illegalIdentifier =
+      choice
+        [ True <$ keyword "this",
+          True <$ keyword "that",
+          True <$ keyword "super",
+          True <$ parseLitExpr,
+          illegalExprKws,
+          return False
+        ]
 
 parseOpLit :: Parser Text
 parseOpLit = parseOpLit' isOperatorChar
