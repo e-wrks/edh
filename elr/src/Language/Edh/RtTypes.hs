@@ -1508,7 +1508,6 @@ data EdhTypeValue
   | ListType
   | PairType
   | ArgsPackType
-  | BlockType
   | HostMethodType
   | HostOperType
   | HostGenrType
