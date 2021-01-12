@@ -180,33 +180,13 @@ parseVoidStmt = VoidStmt <$ keyword "pass" -- same as Python
 parseGoStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseGoStmt !si = do
   void $ keyword "go"
-  !errRptPos <- getOffset
   (!expr, !si') <- parseExpr si
-  case expr of
-    ExprSrc BlockExpr {} _ -> return ()
-    ExprSrc ScopedBlockExpr {} _ -> return ()
-    ExprSrc CaseExpr {} _ -> return ()
-    ExprSrc CallExpr {} _ -> return ()
-    ExprSrc ForExpr {} _ -> return ()
-    _ -> do
-      setOffset errRptPos
-      fail "a block, case, call or for loop should be here"
   return (GoStmt expr, si')
 
 parseDeferStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseDeferStmt !si = do
   void $ keyword "defer"
-  !errRptPos <- getOffset
   (!expr, !si') <- parseExpr si
-  case expr of
-    ExprSrc BlockExpr {} _ -> return ()
-    ExprSrc ScopedBlockExpr {} _ -> return ()
-    ExprSrc CaseExpr {} _ -> return ()
-    ExprSrc CallExpr {} _ -> return ()
-    ExprSrc ForExpr {} _ -> return ()
-    _ -> do
-      setOffset errRptPos
-      fail "a block, case, call or for loop should be here"
   return (DeferStmt expr, si')
 
 parseEffectStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
