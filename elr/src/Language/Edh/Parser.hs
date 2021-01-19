@@ -1166,32 +1166,49 @@ parseExprPrec !precedingOp !prec !si =
               ExprSrc
                 (CallExpr expr aps)
                 (SrcRange (exprSrcStart expr) (lspSrcPosFromParsec endPos)),
+          parseIndirectRef pOp si' expr,
           parseMoreInfix pOp si' expr
         ]
+
+    parseIndirectRef ::
+      Maybe (OpSymbol, OpFixity) ->
+      IntplSrcInfo ->
+      ExprSrc ->
+      Parser (ExprSrc, IntplSrcInfo)
+    parseIndirectRef !pOp !si' !tgtExpr = do
+      symbol "." >> sc
+      addr@(AttrAddrSrc _ !addr'span) <- parseAttrAddrSrc
+      parseMoreOps pOp si' $
+        flip ExprSrc (SrcRange (exprSrcStart tgtExpr) (src'end addr'span)) $
+          AttrExpr $ IndirectRef tgtExpr addr
 
     parseMoreInfix ::
       Maybe (OpSymbol, OpFixity) ->
       IntplSrcInfo ->
       ExprSrc ->
       Parser (ExprSrc, IntplSrcInfo)
-    parseMoreInfix pOp si' leftExpr =
+    parseMoreInfix !pOp !si' !leftExpr =
       tighterOp prec >>= \case
         Nothing -> return (leftExpr, si')
-        Just (opFixity, opPrec, opSym) -> do
-          (!rightExpr, !si'') <- parseExprPrec (Just (opSym, opFixity)) opPrec si'
+        Just (!opFixity, !opPrec, !opSym) -> do
+          (!rightExpr, !si'') <-
+            parseExprPrec (Just (opSym, opFixity)) opPrec si'
           parseMoreInfix pOp si'' $
             ExprSrc
               (InfixExpr opSym leftExpr rightExpr)
               (SrcRange (exprSrcStart leftExpr) (exprSrcEnd rightExpr))
       where
-        tighterOp :: Precedence -> Parser (Maybe (OpFixity, Precedence, OpSymbol))
+        tighterOp ::
+          Precedence ->
+          Parser (Maybe (OpFixity, Precedence, OpSymbol))
         tighterOp prec' = do
           !beforeOp <- getParserState
           !errRptPos <- getOffset
           optional
             ( try
                 ( parseOpLit
-                    <* notFollowedBy (oneOf ("}])" :: [Char])) -- or it's an augmented closing bracket
+                    -- or it's an augmented closing bracket
+                    <* notFollowedBy (oneOf ("}])" :: [Char]))
                 )
             )
             >>= \case
