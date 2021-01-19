@@ -49,8 +49,9 @@ class PubChan:
         loop = asyncio.get_running_loop()
         self.nxt = loop.create_future()
 
-    def write(self, ev):
-        loop = asyncio.get_running_loop()
+    def write(self, ev, loop=None):
+        if loop is None:
+            loop = asyncio.get_running_loop()
         nxt = loop.create_future()
         self.nxt.set_result((ev, nxt))
         self.nxt = nxt
@@ -119,14 +120,14 @@ class EventSink:
     def eos(self):
         return self.mrv is EndOfStream
 
-    def publish(self, ev):
+    def publish(self, ev, loop=None):
         if self.seqn >= 9223372036854775807:
             # int64 wrap back to 1 on overflow
             self.seqn = 1
         else:
             self.seqn += 1
         self.mrv = ev
-        self.chan.write(ev)
+        self.chan.write(ev, loop=loop)
 
     async def one_more(self):
         if self.seqn > 0 and self.mrv is EndOfStream:
