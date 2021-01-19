@@ -79,7 +79,7 @@ srcPosCmp2Range !p (SrcRange !start !end) = case compare p start of
       then EQ -- special infinite end
       else case compare p end of
         LT -> EQ
-        EQ -> GT -- end position of a range is exclusive
+        EQ -> EQ -- end position of a range is inclusive per VSCode word pick
         GT -> GT
 
 zeroSrcRange :: SrcRange
