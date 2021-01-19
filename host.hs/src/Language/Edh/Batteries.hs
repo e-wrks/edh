@@ -313,74 +313,39 @@ installEdhBatteries world =
 
           -- annotations
           ("::", Infix, -9),
-          ( "!",
-            InfixR,
-            0
-          ),
+          ("!", InfixR, 0),
           -- arrows, make it higher than (=), so an arrow procedure can be
           -- assigned to some attribute without quoting
           ("=>", InfixR, 1),
-          ( "=>*",
-            InfixR,
-            1
-          ),
+          ("=>*", InfixR, 1),
           -- branch
-          ( "->",
-            InfixR,
-            -1
-          ),
+          ("->", InfixR, -1),
           -- catch
-          ( "$=>",
-            InfixL,
-            -2
-          ),
+          ("$=>", InfixL, -2),
           -- finally
-          ( "@=>",
-            InfixL,
-            -2
-          ),
+          ("@=>", InfixL, -2),
           -- the attribute key dereferencing operator
-          ( "@",
-            InfixL,
-            10
-          ),
+          ("@", InfixL, 10),
           -- attribute tempter,
           -- address an attribute off an object if possible, nil otherwise
           ("?", InfixL, 10),
-          ( "?@",
-            InfixL,
-            10
-          ),
+          ("?@", InfixL, 10),
           -- the function application operator
-          ( "$",
-            InfixR,
-            -5 -- make it lower than procedure body definition (i.e. -3 to be
-            -- cross checked with `parseProcBody`), or decorators can go wrong
-          ),
-          -- the flipped function application operator, in UNIX pipe semantics
-          ( "|",
-            InfixL,
-            0 -- make it slightly higher than (->),
-            -- so the guard syntax in pattern matching works nicely
-          ),
-          -- the flipped function application operator, in Haskell convention
-          ( "&",
-            InfixL,
-            -4 -- make it one higher than ($) as in Haskell
-          ),
+          ("$", InfixR, -5), -- make it lower than procedure body definition
+          -- (i.e. -3 to be cross checked with `parseProcBody`), or decorators
+          -- can go wrong the flipped function application operator, in UNIX
+          -- pipe semantics
+          ("|", InfixL, 0), -- make it slightly higher than (->),
+          -- so the guard syntax in pattern matching works nicely the flipped
+          -- function application operator, in Haskell convention
+          ("&", InfixL, -4), -- make it one higher than ($) as in Haskell
           -- assignments, make them lower than (++),
           -- so don't need to quote `a = b ++ c`
           ("=", InfixR, 0),
-          ( "?=",
-            InfixR,
-            0
-          ),
+          ("?=", InfixR, 0),
           -- the definition operator, creates named value in Edh
           (":=", InfixR, 1),
-          ( "?:=",
-            InfixR,
-            1
-          ),
+          ("?:=", InfixR, 1),
           -- syntactic sugars for (=)
           ("++=", InfixR, 2),
           ("+=", InfixR, 2),
@@ -391,10 +356,7 @@ installEdhBatteries world =
           ("%=", InfixR, 2),
           ("**=", InfixR, 2),
           ("&&=", InfixR, 3),
-          ( "||=",
-            InfixR,
-            3
-          ),
+          ("||=", InfixR, 3),
           -- arithmetic
           ("+", InfixL, 6),
           ("-", InfixL, 6),
@@ -402,54 +364,22 @@ installEdhBatteries world =
           ("/", InfixL, 7),
           ("//", InfixL, 7),
           ("%", InfixL, 7),
-          ( "**",
-            InfixL,
-            8
-          ),
+          ("**", InfixL, 8),
           -- comparations
-          ( "==",
-            Infix,
-            4
-          ), -- deep-value-wise equality test
-          ( "!=",
-            Infix,
-            4
-          ), -- inversed identity-wise equality test
+          ("==", Infix, 4), -- deep-value-wise equality test
+          ("!=", Infix, 4), -- inversed identity-wise equality test
           -- C style here, as (/=) is used for inplace division
-          ( "is not",
-            Infix,
-            4
-          ), -- identity-wise negative equality test
-          ( "is",
-            Infix,
-            4
-          ), -- identity-wise equality test
+          ("is not", Infix, 4), -- identity-wise negative equality test
+          ("is", Infix, 4), -- identity-wise equality test
           (">", Infix, 4),
           (">=", Infix, 4),
           ("<", Infix, 4),
-          ( "<=",
-            Infix,
-            4
-          ),
+          ("<=", Infix, 4),
           -- logical/nullish boolean
           ("&&", InfixL, 3),
           ("||", InfixL, 3),
           ("and", InfixL, 3),
-          ( "or",
-            InfixL,
-            3
-          ),
-          -- emulate the ternary operator in C:
-          --       onCnd ? oneThing : theOther
-          --  * Python
-          --       onCnd and oneThing or theOther
-          --  * Edh
-          --       onCnd &> oneThing |> theOther
-          ("&>", InfixL, 3),
-          ( "|>",
-            InfixL,
-            3
-          ),
+          ("or", InfixL, 3),
           -- comprehension
           --  * list comprehension:
           --     [] =< for x from range(100) do x*x
@@ -457,67 +387,34 @@ installEdhBatteries world =
           --     {} =< for x from range(100) do (x, x*x)
           --  * args comprehension:
           --     () =< for x from range(100) do x*x
-          ( "=<",
-            InfixL,
-            2
-          ),
+          ("=<", InfixL, 2),
           -- prepand to list
           --     l = [3,7,5]
           --     2 :> l
           --     [2,3,7,5]
-          ( ":>",
-            InfixR,
-            2
-          ),
+          (":>", InfixR, 2),
           -- the pair constructor, creates pairs in Edh
-          ( ":",
-            InfixL,
-            2
-          ),
+          (":", InfixL, 2),
           -- reverse left-list and prepend to right-list
           --     l = [3,7,5]
           --     [9,2] >> l
           --     [2,9,3,7,5]
-          ( ">>",
-            InfixR,
-            2
-          ),
+          (">>", InfixR, 2),
           -- element-of test
-          ( "?<=",
-            Infix,
-            4
-          ),
+          ("?<=", Infix, 4),
           -- prefix test
-          ( "|*",
-            Infix,
-            4
-          ),
+          ("|*", Infix, 4),
           -- suffix test
-          ( "*|",
-            Infix,
-            4
-          ),
+          ("*|", Infix, 4),
           -- prefix cut (pattern only)
-          ( ">@",
-            InfixL,
-            3
-          ),
+          (">@", InfixL, 3),
           -- suffix cut (pattern only)
-          ( "@<",
-            InfixL,
-            3
-          ),
+          ("@<", InfixL, 3),
           -- publish to sink
           --     evsPub <- outEvent
-          ( "<-",
-            InfixR,
-            1
-          ),
+          ("<-", InfixR, 1),
           -- string coercing concatenation
-          ( "++",
-            InfixL,
-            2
-          ),
+          ("++", InfixL, 2),
           -- logging
           ("<|", Infix, 1)
         ]
