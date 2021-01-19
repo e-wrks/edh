@@ -22,7 +22,7 @@ import Language.Edh.IOPD (iopdUpdate, odEmpty, odNull)
 import Language.Edh.RtTypes
 import Prelude
 
--- | operator (::) - silent annotation
+-- | operator (::) - attribute type annotation
 --
 -- this should have lowest possible precedence and do nothing when eval'ed
 -- so an arbitrary expression, so long as it's syntactically correct,
@@ -33,20 +33,34 @@ import Prelude
 --
 --   x :: StringType
 --   x = 'Hello'
-silentAnnoProc :: EdhIntrinsicOp
-silentAnnoProc _ _ !exit = exitEdhTx exit nil
+attrAnnoProc :: EdhIntrinsicOp
+attrAnnoProc _ _ !exit = exitEdhTx exit nil
 
--- | operator (!) - left-dropping annotation
+-- | operator (:=:) - type synonym annotation
 --
--- left-hand expression is for static analysing tools only, right-hand
+-- this should have lowest possible precedence and do nothing when eval'ed
+-- so an arbitrary expression, so long as it's syntactically correct,
+-- can be placed anywhere serving annotation purpose e.g.
+--
+--   CntCallback :=: ( int!DecimalType ) -> nil
+--   countdown :: (int!DecimalType, CntCallback) -> nil
+--   method countdown( fromNum, cb ) {
+--     for n from range(fromNum:0:-1) do cb(n)
+--   }
+typeAnnoProc :: EdhIntrinsicOp
+typeAnnoProc _ _ !exit = exitEdhTx exit nil
+
+-- | operator (!) - free-form lhs annotation
+--
+-- left-hand-side expression is for static analysing tools only, right-hand
 -- expression takes full effect, e.g.
 --
 --   `js!expr {value: 5}`
 --
 -- can be used to tell the analyzer that the expression is gonna be executed
 -- by a JavaScript interpreter.
-leftAnnoProc :: EdhIntrinsicOp
-leftAnnoProc _ !rhExpr !exit = evalExprSrc rhExpr exit
+lhsFreeFormAnnoProc :: EdhIntrinsicOp
+lhsFreeFormAnnoProc _ !rhExpr !exit = evalExprSrc rhExpr exit
 
 -- | error(***) - throw an @Exception@
 --

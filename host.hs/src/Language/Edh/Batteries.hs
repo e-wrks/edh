@@ -312,8 +312,9 @@ installEdhBatteries world =
         [ -- format: (symbol, precedence)
 
           -- annotations
-          ("::", Infix, -9),
-          ("!", InfixR, 0),
+          ("::", Infix, -9), -- attribute type annotation
+          (":=:", Infix, -9), -- type synonym annotation
+          ("!", InfixR, 0), -- free-form lhs annotation
           -- arrows, make it higher than (=), so an arrow procedure can be
           -- assigned to some attribute without quoting
           ("=>", InfixR, 1),
@@ -477,8 +478,9 @@ installEdhBatteries world =
                   ("->", branchProc),
                   ("$=>", catchProc),
                   ("@=>", finallyProc),
-                  ("::", silentAnnoProc),
-                  ("!", leftAnnoProc),
+                  ("::", attrAnnoProc),
+                  (":=:", typeAnnoProc),
+                  ("!", lhsFreeFormAnnoProc),
                   ("<|", loggingProc)
                 ]
           ]
