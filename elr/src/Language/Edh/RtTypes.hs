@@ -1441,9 +1441,9 @@ data Expr
     InterpreterExpr !ProcDecl
   | ProducerExpr !ProcDecl
   | -- | operator definition
-    OpDefiExpr !OpFixity !Precedence !OpSymbol !ProcDecl
+    OpDefiExpr !OpFixity !Precedence !OpSymSrc !ProcDecl
   | -- | operator override
-    OpOvrdExpr !OpFixity !Precedence !OpSymbol !ProcDecl
+    OpOvrdExpr !OpFixity !Precedence !OpSymSrc !ProcDecl
   | BlockExpr ![StmtSrc]
   | ScopedBlockExpr ![StmtSrc]
   | YieldExpr !ExprSrc
@@ -1461,7 +1461,7 @@ data Expr
         index'target :: !ExprSrc
       }
   | CallExpr !ExprSrc !ArgsPacker
-  | InfixExpr !OpSymbol !ExprSrc !ExprSrc
+  | InfixExpr !OpSymSrc !ExprSrc !ExprSrc
   | -- specify a default by Edh code
     DefaultExpr !ExprSrc
   | -- to support interpolation within expressions, with source form

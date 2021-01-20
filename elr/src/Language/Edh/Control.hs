@@ -19,6 +19,8 @@ import Text.Megaparsec
   )
 import Prelude
 
+type OpSymSrc = (OpSymbol, SrcRange)
+
 type OpSymbol = Text
 
 data OpFixity = InfixL | InfixR | Infix

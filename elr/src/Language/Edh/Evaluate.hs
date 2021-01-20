@@ -481,7 +481,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     ThatRef {} -> throwEdh ets EvalError "can not assign to that"
     SuperRef {} -> throwEdh ets EvalError "can not assign to super"
   -- dereferencing attribute assignment
-  InfixExpr "@" (ExprSrc !tgtExpr _) (ExprSrc !addrRef _) ->
+  InfixExpr ("@", _) (ExprSrc !tgtExpr _) (ExprSrc !addrRef _) ->
     runEdhTx ets $
       evalExpr' addrRef Nothing $ \ !addrVal _ets ->
         case edhUltimate addrVal of
@@ -3776,8 +3776,8 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
 evalExpr' (DefaultExpr (ExprSrc !exprDef _)) _docCmt !exit = \ !ets -> do
   !u <- unsafeIOToSTM newUnique
   exitEdh ets exit $ EdhDefault u exprDef (Just ets)
-evalExpr' (InfixExpr !opSym !lhExpr !rhExpr) _docCmt !exit =
-  evalInfixSrc opSym lhExpr rhExpr exit
+evalExpr' (InfixExpr !opSymSrc !lhExpr !rhExpr) _docCmt !exit =
+  evalInfixSrc opSymSrc lhExpr rhExpr exit
 -- defining an Edh class
 evalExpr' (ClassExpr HostDecl {}) _ _ =
   throwEdhTx EvalError "bug: eval host class decl"
@@ -4037,9 +4037,9 @@ evalExpr' (ProducerExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _)) !docCmt !exit
       asr
     alwaysWithOutlet (SingleReceiver !sr) = PackReceiver [bypassOutlet, sr]
     alwaysWithOutlet wr@WildReceiver {} = wr
-evalExpr' (OpDefiExpr !opFixity !opPrec !opSym !opProc) !docCmt !exit =
+evalExpr' (OpDefiExpr !opFixity !opPrec (!opSym, _opSpan) !opProc) !docCmt !exit =
   defineOperator opFixity opPrec opSym opProc docCmt exit Nothing
-evalExpr' (OpOvrdExpr !opFixity !opPrec !opSym !opProc) !docCmt !exit =
+evalExpr' (OpOvrdExpr !opFixity !opPrec (!opSym, _opSpan) !opProc) !docCmt !exit =
   \ !ets ->
     let !ctx = edh'context ets
         !scope = contextScope ctx
@@ -4063,14 +4063,14 @@ evalExpr' (SymbolExpr !attr) _docCmt !exit = \ !ets -> do
 evalInfix :: OpSymbol -> Expr -> Expr -> EdhHostProc
 evalInfix !opSym !lhExpr !rhExpr !exit !ets =
   evalInfixSrc
-    opSym
+    (opSym, noSrcRange)
     (ExprSrc lhExpr noSrcRange)
     (ExprSrc rhExpr noSrcRange)
     exit
     ets
 
-evalInfixSrc :: OpSymbol -> ExprSrc -> ExprSrc -> EdhHostProc
-evalInfixSrc !opSym !lhExpr !rhExpr !exit !ets =
+evalInfixSrc :: OpSymSrc -> ExprSrc -> ExprSrc -> EdhHostProc
+evalInfixSrc (!opSym, _opSpan) !lhExpr !rhExpr !exit !ets =
   resolveEdhCtxAttr scope (AttrByName opSym) >>= \case
     Nothing -> runEdhTx ets $
       evalExprSrc lhExpr $ \ !lhVal ->
