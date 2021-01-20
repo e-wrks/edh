@@ -355,7 +355,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
   -- recognize `_` as similar to the wildcard pattern match in Haskell,
   -- it always matches
   AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "_") _)) -> afterMatch
-  InfixExpr "|" (ExprSrc !matchExpr _) (ExprSrc !guardExpr _) ->
+  InfixExpr ("|", _) (ExprSrc !matchExpr _) (ExprSrc !guardExpr _) ->
     handlePattern matchExpr (valueMatch matchExpr $ chkGuard guardExpr) $
       \ !ps -> do
         updAttrs ps
@@ -453,7 +453,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    "="
+                    ("=", _)
                     (ExprSrc (CallExpr (ExprSrc (AttrExpr !clsRef) _) !apkr) _)
                     (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !instAddr _))) _)
                   )
@@ -519,7 +519,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    ":>"
+                    (":>", _)
                     ( ExprSrc
                         ( AttrExpr
                             (DirectRef (AttrAddrSrc (NamedAttr !headName) _))
@@ -560,10 +560,10 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    ">@"
+                    (">@", _)
                     ( ExprSrc
                         ( InfixExpr
-                            "@<"
+                            ("@<", _)
                             ( ExprSrc
                                 ( AttrExpr
                                     ( DirectRef
@@ -612,7 +612,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    ">@"
+                    (">@", _)
                     !prefixExpr
                     ( ExprSrc
                         ( AttrExpr
@@ -639,7 +639,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    "@<"
+                    ("@<", _)
                     ( ExprSrc
                         ( AttrExpr
                             (DirectRef (AttrAddrSrc (NamedAttr !prefixName) _))
@@ -734,7 +734,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         -- {( x:y:z:... )} -- pair pattern
         [ StmtSrc
             ( ExprStmt
-                (ParenExpr (ExprSrc pairPattern@(InfixExpr ":" _ _) _))
+                (ParenExpr (ExprSrc pairPattern@(InfixExpr (":", _) _ _) _))
                 _docCmt
               )
             _
@@ -760,7 +760,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    ":="
+                    (":=", _)
                     ( ExprSrc
                         ( AttrExpr
                             (DirectRef (AttrAddrSrc (NamedAttr !termName) _))
@@ -847,7 +847,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                 Just (Just resi, (AttrByName lastAttr, lastVal) : matches)
               _ -> Just (Nothing, (AttrByName lastAttr, v) : matches)
           InfixExpr
-            ":"
+            (":", _)
             (ExprSrc !leftExpr _)
             ( ExprSrc
                 ( AttrExpr
@@ -880,7 +880,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                                   ( Nothing,
                                     (AttrByName leftAttr, leftVal) : matches'
                                   )
-                        InfixExpr ":" _ _ ->
+                        InfixExpr (":", _) _ _ ->
                           matchPairPattern leftExpr leftVal matches'
                         _ -> Nothing
                 _ -> Just (Nothing, [])

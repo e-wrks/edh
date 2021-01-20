@@ -144,7 +144,7 @@ makeOpProc !args !exit = case args of
     exitEdh ets exit $
       EdhExpr
         xu
-        (InfixExpr op (ExprSrc lhe noSrcRange) (ExprSrc rhe noSrcRange))
+        (InfixExpr (op, noSrcRange) (ExprSrc lhe noSrcRange) (ExprSrc rhe noSrcRange))
         ""
   _ ->
     throwEdhTx EvalError $ "invalid arguments to makeOp: " <> T.pack (show args)

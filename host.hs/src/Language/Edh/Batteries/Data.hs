@@ -433,7 +433,7 @@ concatProc !lhExpr !rhExpr !exit !ets =
         EdhDefault
           u
           ( InfixExpr
-              "++"
+              ("++", noSrcRange)
               ( ExprSrc
                   ( CallExpr
                       ( ExprSrc
