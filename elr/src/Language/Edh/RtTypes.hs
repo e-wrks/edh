@@ -1091,6 +1091,8 @@ edhDeCaseWrap :: EdhValue -> EdhValue
 edhDeCaseWrap (EdhCaseClose !val) = edhDeCaseWrap val
 edhDeCaseWrap EdhCaseOther = nil
 edhDeCaseWrap EdhFallthrough = nil
+edhDeCaseWrap EdhBreak = nil
+edhDeCaseWrap EdhContinue = nil
 edhDeCaseWrap !val = val
 
 edhUltimate :: EdhValue -> EdhValue
