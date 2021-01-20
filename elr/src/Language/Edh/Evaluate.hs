@@ -3688,7 +3688,7 @@ evalExpr' (IndexExpr !ixExpr !tgtExpr) _docCmt !exit =
                 "invalid index to an apk: " <> edhTypeNameOf badIdxVal
           -- indexing an object, by calling its ([]) method with ixVal as the single arg
           EdhObject !obj -> \ !ets ->
-            lookupEdhObjAttr obj (AttrByName "[]") >>= \case
+            lookupEdhObjAttr obj (AttrByName "([])") >>= \case
               (_, EdhNil) ->
                 throwEdh ets EvalError $
                   "no ([]) method from: "

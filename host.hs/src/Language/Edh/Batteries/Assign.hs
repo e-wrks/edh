@@ -38,7 +38,7 @@ assignProc (ExprSrc !lhe _) !rhExpr !exit !ets =
           -- indexing assign to an object, by calling its ([=])
           -- method with ixVal and rhv as the args
           EdhObject obj ->
-            lookupEdhObjAttr obj (AttrByName "[=]") >>= \case
+            lookupEdhObjAttr obj (AttrByName "([=])") >>= \case
               (_, EdhNil) -> exitEdh ets exit edhNA
               (this', EdhProcedure (EdhMethod !mth'proc) _) ->
                 runEdhTx ets $
@@ -104,7 +104,7 @@ assignWithOpProc !withOpSym lhExpr@(ExprSrc !lhe _) !rhExpr !exit !ets =
           -- indexing assign to an object, by calling its ([op=]) method
           -- with ixVal and rhv as the args
           EdhObject obj ->
-            let !magicMthName = "[" <> withOpSym <> "=]"
+            let !magicMthName = "([" <> withOpSym <> "=])"
              in lookupEdhObjAttr obj (AttrByName magicMthName) >>= \case
                   (_, EdhNil) -> exitEdh ets exit edhNA
                   (!this', EdhProcedure (EdhMethod !mth'proc) _) ->
@@ -127,9 +127,9 @@ assignWithOpProc !withOpSym lhExpr@(ExprSrc !lhe _) !rhExpr !exit !ets =
                         exit
                   (_, !badIndexer) ->
                     throwEdh ets EvalError $
-                      "malformed magic method ("
+                      "malformed magic method "
                         <> magicMthName
-                        <> ") on "
+                        <> " on "
                         <> T.pack (show obj)
                         <> " - "
                         <> edhTypeNameOf badIndexer

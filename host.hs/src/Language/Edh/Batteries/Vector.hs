@@ -39,24 +39,23 @@ createVectorClass !clsOuterScope =
                   EdhMethod,
                   wrapHostProc vecEqProc
                 ),
-                -- TODO support vectorized (non)equality tests and ordering comparisons
-                ( "[]",
-                  EdhMethod,
-                  wrapHostProc vecIdxReadProc
-                ),
-                -- TODO figure out the criteria and implementation of element-wise vector
-                --      operations, trigger it just when 2 vectors have the same length?
-                ("[=]", EdhMethod, wrapHostProc vecIdxWriteProc),
-                ("[++=]", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "++"),
-                ("[+=]", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "+"),
-                ("[-=]", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "-"),
-                ("[*=]", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "*"),
-                ("[/=]", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "/"),
-                ("[//=]", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "//"),
-                ("[%=]", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "%"),
-                ("[**=]", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "**"),
-                ("[&&=]", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "&&"),
-                ("[||=]", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "||"),
+                -- TODO support vectorized (non)equality tests and ordering
+                --      comparisons
+                ("([])", EdhMethod, wrapHostProc vecIdxReadProc),
+                -- TODO figure out the criteria and implementation of
+                --      element-wise vector operations, trigger it just when 2
+                --      vectors have the same length?
+                ("([=])", EdhMethod, wrapHostProc vecIdxWriteProc),
+                ("([++=])", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "++"),
+                ("([+=])", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "+"),
+                ("([-=])", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "-"),
+                ("([*=])", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "*"),
+                ("([/=])", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "/"),
+                ("([//=])", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "//"),
+                ("([%=])", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "%"),
+                ("([**=])", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "**"),
+                ("([&&=])", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "&&"),
+                ("([||=])", EdhMethod, wrapHostProc $ vecIdxAssignWithOpProc "||"),
                 ("(++)", EdhMethod, wrapHostProc $ vecCopyWithOpProc False "++"),
                 ("(++.)", EdhMethod, wrapHostProc $ vecCopyWithOpProc True "++"),
                 ("(+)", EdhMethod, wrapHostProc $ vecCopyWithOpProc False "+"),
