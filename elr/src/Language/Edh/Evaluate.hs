@@ -11,7 +11,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import qualified Data.HashMap.Strict as Map
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef
 import qualified Data.Lossless.Decimal as D
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)

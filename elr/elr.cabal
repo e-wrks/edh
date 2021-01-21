@@ -75,6 +75,7 @@ library
     , text
     , time
     , transformers
+    , unix
     , unordered-containers
     , uuid
     , vector

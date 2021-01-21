@@ -9,6 +9,7 @@ import qualified Data.ByteString as B
 import Data.Dynamic (Dynamic, Typeable, fromDynamic)
 import qualified Data.HashMap.Strict as Map
 import Data.Hashable (Hashable (hashWithSalt))
+import Data.IORef
 import Data.Lossless.Decimal as D
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -479,8 +480,14 @@ data EdhWorld = EdhWorld
     edh'scope'wrapper :: !(Scope -> STM Object),
     -- wrapping a host exceptin as an Edh object
     edh'exception'wrapper :: !(SomeException -> STM Object),
-    -- create a new module object
-    edh'module'class :: !Object
+    -- the class of module objects
+    edh'module'class :: !Object,
+    -- the number of times a metric trap is requested
+    --
+    -- an Edh thread should maintain the last request number it has responded
+    -- to, and do respond (e.g. print out the backtrace & time cost of previous
+    -- and/or next STM transaction) to each new request it sees
+    edh'trap'request :: !(IORef Int)
   }
 
 instance Eq EdhWorld where

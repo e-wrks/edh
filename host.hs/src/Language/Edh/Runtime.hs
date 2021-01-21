@@ -14,6 +14,7 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.ByteString as B
 import Data.Dynamic (fromDynamic, toDyn)
 import qualified Data.HashMap.Strict as Map
+import Data.IORef
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -39,6 +40,8 @@ import Language.Edh.InterOp
   )
 import Language.Edh.PkgMan (locateEdhMainModule)
 import Language.Edh.RtTypes
+import Language.Edh.Utils
+import System.Posix.Signals
 import Prelude
 
 createEdhWorld :: EdhConsole -> IO EdhWorld
@@ -326,6 +329,10 @@ createEdhWorld !console = do
   -- the container of loaded modules
   !modus <- newTMVarIO $ Map.fromList [("batteries/meta", metaModu)]
 
+  !trapReq <- newIORef 0
+  -- record a trap request on SIGQUIT
+  addSignalHandler keyboardTermination $ modifyIORef' trapReq (+ 1)
+
   -- assembly the world with pieces prepared above
   let !world =
         EdhWorld
@@ -336,7 +343,8 @@ createEdhWorld !console = do
             edh'world'console = console,
             edh'scope'wrapper = edhWrapScope,
             edh'exception'wrapper = edhWrapException,
-            edh'module'class = clsModule
+            edh'module'class = clsModule,
+            edh'trap'request = trapReq
           }
 
   return world
