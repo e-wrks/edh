@@ -54,6 +54,7 @@ getEdhErrCtx !unwind !ets =
   where
     !ctx = edh'context ets
 
+    -- @remind look here for how to pretty-show backtrace of Edh call stack
     prettyFrame :: EdhCallFrame -> ErrContext
     prettyFrame (EdhCallFrame !scope !exe'loc _) =
       "📜 "

@@ -168,6 +168,7 @@ type Parser = ParsecT Void Text (State EdhParserState)
 -- so goes this simplified parsing err type name
 type ParserError = ParseErrorBundle Text Void
 
+-- TODO declare `HasCallStack =>` for each ctor?
 data EdhError
   = -- | thrown to halt the whole Edh program with a result
     --
