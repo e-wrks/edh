@@ -2,6 +2,7 @@ module Language.Edh.RtTypes where
 
 -- import           Debug.Trace
 
+import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Exception (SomeException)
 import Data.ByteString (ByteString)
@@ -580,6 +581,7 @@ type LogLevel = Int
 -- | The state of an Edh program
 data EdhProgState = EdhProgState
   { edh'prog'world :: !EdhWorld,
+    edh'prog'main :: !ThreadId,
     edh'prog'result :: !(TMVar (Either SomeException EdhValue)),
     edh'fork'queue :: !(TBQueue (EdhThreadState, EdhThreadState -> STM ()))
   }

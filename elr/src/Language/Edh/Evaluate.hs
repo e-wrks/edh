@@ -21,6 +21,7 @@ import Data.Text.Encoding.Error (lenientDecode)
 import Data.Typeable (Proxy (..), Typeable, typeRep)
 import qualified Data.UUID as UUID
 import Data.Unique (newUnique)
+import GHC.Clock
 import GHC.Conc (forkIOWithUnmask, myThreadId, unsafeIOToSTM)
 import Language.Edh.Control
 import Language.Edh.CoreLang
@@ -5383,11 +5384,12 @@ driveEdhProgram !haltResult !world !prog = do
   let !eps =
         EdhProgState
           { edh'prog'world = world,
+            edh'prog'main = mainThId,
             edh'prog'result = haltResult,
             edh'fork'queue = forkQueue
           }
-      keepForking :: IO ()
-      keepForking =
+      keepForking :: Int -> IO ()
+      keepForking !trapDone =
         atomically
           ( (Nothing <$ readTMVar haltResult)
               `orElse` (Just <$> readTBQueue forkQueue)
@@ -5403,18 +5405,35 @@ driveEdhProgram !haltResult !world !prog = do
                   EdhDoSTM etsForkee $
                     False
                       <$ actForkee etsForkee
-              void $
-                mask_ $
-                  forkIOWithUnmask $ \ !unmask ->
-                    catch
-                      ( unmask $
-                          driveEdhThread
-                            eps
-                            (edh'defers etsForkee)
-                            (edh'task'queue etsForkee)
-                      )
-                      onSideThreadExc
-              keepForking
+              !forkeeThId <- mask_ $
+                forkIOWithUnmask $ \ !unmask ->
+                  catch
+                    ( unmask $
+                        driveEdhThread
+                          eps
+                          (edh'defers etsForkee)
+                          (edh'task'queue etsForkee)
+                    )
+                    onSideThreadExc
+              readIORef trapReq >>= \ !trapNo ->
+                if trapNo == trapDone
+                  then keepForking trapNo
+                  else do
+                    atomically $
+                      logger
+                        100
+                        ( Just $
+                            T.pack $
+                              "Trap#" <> show trapNo
+                                <> " Program "
+                                <> show mainThId
+                                <> " forked Edh "
+                                <> show forkeeThId
+                        )
+                        $ ArgsPack
+                          [EdhString $ getEdhErrCtx 0 etsForker]
+                          odEmpty
+                    keepForking trapNo
         where
           -- derive thread state for the forkee thread
           deriveForkeeState :: EdhThreadState -> IO EdhThreadState
@@ -5446,7 +5465,7 @@ driveEdhProgram !haltResult !world !prog = do
   void $
     mask_ $
       forkIOWithUnmask $ \ !unmask ->
-        catch (unmask keepForking) onSideThreadExc
+        catch (unmask $ keepForking =<< readIORef trapReq) onSideThreadExc
   -- start the main thread
   flip
     finally
@@ -5488,6 +5507,10 @@ driveEdhProgram !haltResult !world !prog = do
                 <$ prog etsAtBoot
         -- drive the main Edh thread
         driveEdhThread eps defers mainQueue
+  where
+    !trapReq = edh'trap'request world
+    !console = edh'world'console world
+    !logger = consoleLogger console
 
 drivePerceiver :: EdhValue -> EdhThreadState -> (TVar Bool -> EdhTx) -> IO Bool
 drivePerceiver !ev !etsOrigin !reaction = do
@@ -5520,8 +5543,14 @@ drivePerceiver !ev !etsOrigin !reaction = do
   readTVarIO breakThread
 
 driveEdhThread :: EdhProgState -> TVar [DeferRecord] -> TBQueue EdhTask -> IO ()
-driveEdhThread !eps !defers !tq = taskLoop
+driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
   where
+    !mainThId = edh'prog'main eps
+    !world = edh'prog'world eps
+    !trapReq = edh'trap'request world
+    !console = edh'world'console world
+    !logger = consoleLogger console
+
     !edhWrapException = edh'exception'wrapper $ edh'prog'world eps
     nextTaskFromQueue :: TBQueue EdhTask -> STM (Maybe EdhTask)
     nextTaskFromQueue =
@@ -5655,60 +5684,90 @@ driveEdhThread !eps !defers !tq = taskLoop
                     throwIn
            in throwIn
 
-    taskLoop =
-      atomically (nextTaskFromQueue tq) >>= \case
-        -- this thread is done, go terminate it
-        Nothing -> terminateThread (return ())
-        -- note during actIO, perceivers won't fire, program termination won't
-        -- stop this thread
-        Just (EdhDoIO !ets !actIO) ->
-          try actIO >>= \case
-            -- terminate this thread
-            Right True -> terminateThread (return ())
-            -- continue running this thread
-            Right False -> taskLoop
-            Left (e :: SomeException) -> case edhKnownError e of
-              -- explicit terminate requested
-              Just ThreadTerminate -> terminateThread (return ())
-              -- this'll propagate to main thread if not on it
-              Just !err -> terminateThread (throwIO err)
-              -- give a chance for the Edh code to handle an unknown exception
-              Nothing -> do
+    taskLoop !trapDone = do
+      !trapNo <- readIORef trapReq
+      !trapStartNS <-
+        if trapNo == trapDone
+          then return 0
+          else getMonotonicTimeNSec
+      atomically (nextTaskFromQueue tq) >>= oneTask trapStartNS trapNo
+      where
+        oneTask !trapStartNS !trapDone' = \case
+          -- this thread is done, go terminate it
+          Nothing -> terminateThread (return ())
+          -- note during actIO, perceivers won't fire, program termination
+          -- won't stop this thread
+          Just (EdhDoIO !ets !actIO) ->
+            try actIO >>= doneOne ets
+          Just (EdhDoSTM !ets !actSTM) ->
+            try (goSTM ets actSTM) >>= doneOne ets
+          where
+            doneOne !etsDone !result = do
+              unless (trapStartNS == 0) $ do
+                !doneNS <- getMonotonicTimeNSec
+                let !secCost =
+                      -- leverage lossless decimal's pretty show of numbers
+                      (fromIntegral (doneNS - trapStartNS) :: D.Decimal) / 1e9
+                !thId <- myThreadId
                 atomically $
-                  edhWrapException e
-                    >>= \ !exo ->
-                      writeTBQueue tq $
-                        EdhDoSTM ets $
-                          False
-                            <$ edhThrow
-                              ets
-                              (EdhObject exo)
-                -- continue running this thread for the queued exception handler
-                taskLoop
-        Just (EdhDoSTM !ets !actSTM) ->
-          try (goSTM ets actSTM) >>= \case
-            -- terminate this thread
-            Right True -> terminateThread (return ())
-            -- continue running this thread
-            Right False -> taskLoop
-            Left (e :: SomeException) -> case edhKnownError e of
-              -- explicit terminate requested
-              Just ThreadTerminate -> terminateThread (return ())
-              -- this'll propagate to main thread if not on it
-              Just !err -> terminateThread (throwIO err)
-              -- give a chance for the Edh code to handle an unknown exception
-              Nothing -> do
-                atomically $
-                  edhWrapException e
-                    >>= \ !exo ->
-                      writeTBQueue tq $
-                        EdhDoSTM ets $
-                          False
-                            <$ edhThrow
-                              ets
-                              (EdhObject exo)
-                -- continue running this thread for the queued exception handler
-                taskLoop
+                  logger
+                    100
+                    ( Just $
+                        T.pack $
+                          "Trap#" <> show trapDone'
+                            <> " Program "
+                            <> show mainThId
+                            <> " Edh "
+                            <> show thId
+                            <> " tx cost "
+                            <> show secCost
+                            <> " second(s)"
+                    )
+                    $ ArgsPack [EdhString $ getEdhErrCtx 0 etsDone] odEmpty
+
+              case result of
+                -- terminate this thread
+                Right True -> terminateThread (return ())
+                -- continue running this thread
+                Right False -> goMore
+                Left (e :: SomeException) -> case edhKnownError e of
+                  -- explicit terminate requested
+                  Just ThreadTerminate -> terminateThread (return ())
+                  -- this'll propagate to main thread if not on it
+                  Just !err -> terminateThread (throwIO err)
+                  -- give a chance for the Edh code to handle an unknown exception
+                  Nothing -> do
+                    atomically $
+                      edhWrapException e
+                        >>= \ !exo ->
+                          writeTBQueue tq $
+                            EdhDoSTM etsDone $
+                              False <$ edhThrow etsDone (EdhObject exo)
+                    -- continue running this thread for the queued exception handler
+                    goMore
+              where
+                goMore =
+                  readIORef trapReq >>= \ !trapNo ->
+                    if trapNo == trapDone'
+                      then taskLoop trapNo
+                      else do
+                        !thId <- myThreadId
+                        atomically $
+                          logger
+                            100
+                            ( Just $
+                                T.pack $
+                                  "Trap#" <> show trapNo
+                                    <> " Program "
+                                    <> show mainThId
+                                    <> " Edh "
+                                    <> show thId
+                                    <> " tx done"
+                            )
+                            $ ArgsPack [EdhString $ getEdhErrCtx 0 etsDone] odEmpty
+                        !trapStartNS' <- getMonotonicTimeNSec
+                        atomically (nextTaskFromQueue tq)
+                          >>= oneTask trapStartNS' trapNo
 
     goSTM :: EdhThreadState -> STM Bool -> IO Bool
     goSTM !etsTask !actTask = loopSTM
