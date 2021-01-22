@@ -5686,13 +5686,14 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
 
     taskLoop !trapDone = do
       !trapNo <- readIORef trapReq
+      !nextTask <- atomically (nextTaskFromQueue tq)
       !trapStartNS <-
         if trapNo == trapDone
           then return 0
           else getMonotonicTimeNSec
-      atomically (nextTaskFromQueue tq) >>= oneTask trapStartNS trapNo
+      oneTask trapNo trapStartNS nextTask
       where
-        oneTask !trapStartNS !trapDone' = \case
+        oneTask !trapDone' !trapStartNS = \case
           -- this thread is done, go terminate it
           Nothing -> terminateThread (return ())
           -- note during actIO, perceivers won't fire, program termination
@@ -5725,17 +5726,41 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
                     )
                     $ ArgsPack [EdhString $ getEdhErrCtx 0 etsDone] odEmpty
 
+              !trapNo <- readIORef trapReq
+              unless (trapNo == trapDone') $ do
+                !thId <- myThreadId
+                atomically $
+                  logger
+                    100
+                    ( Just $
+                        T.pack $
+                          "Trap#" <> show trapNo
+                            <> " Program "
+                            <> show mainThId
+                            <> " Edh "
+                            <> show thId
+                            <> " tx done"
+                    )
+                    $ ArgsPack [EdhString $ getEdhErrCtx 0 etsDone] odEmpty
+
               case result of
                 -- terminate this thread
                 Right True -> terminateThread (return ())
                 -- continue running this thread
-                Right False -> goMore
+                Right False -> do
+                  !nextTask <- atomically (nextTaskFromQueue tq)
+                  !trapStartNS' <-
+                    if trapNo == trapDone'
+                      then return 0
+                      else getMonotonicTimeNSec
+                  oneTask trapNo trapStartNS' nextTask
                 Left (e :: SomeException) -> case edhKnownError e of
                   -- explicit terminate requested
                   Just ThreadTerminate -> terminateThread (return ())
                   -- this'll propagate to main thread if not on it
                   Just !err -> terminateThread (throwIO err)
-                  -- give a chance for the Edh code to handle an unknown exception
+                  -- give a chance for the Edh code to handle an unknown
+                  -- exception
                   Nothing -> do
                     atomically $
                       edhWrapException e
@@ -5743,31 +5768,14 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
                           writeTBQueue tq $
                             EdhDoSTM etsDone $
                               False <$ edhThrow etsDone (EdhObject exo)
-                    -- continue running this thread for the queued exception handler
-                    goMore
-              where
-                goMore =
-                  readIORef trapReq >>= \ !trapNo ->
-                    if trapNo == trapDone'
-                      then taskLoop trapNo
-                      else do
-                        !thId <- myThreadId
-                        atomically $
-                          logger
-                            100
-                            ( Just $
-                                T.pack $
-                                  "Trap#" <> show trapNo
-                                    <> " Program "
-                                    <> show mainThId
-                                    <> " Edh "
-                                    <> show thId
-                                    <> " tx done"
-                            )
-                            $ ArgsPack [EdhString $ getEdhErrCtx 0 etsDone] odEmpty
-                        !trapStartNS' <- getMonotonicTimeNSec
-                        atomically (nextTaskFromQueue tq)
-                          >>= oneTask trapStartNS' trapNo
+                    -- continue running this thread for the queued exception
+                    -- handler
+                    !nextTask <- atomically (nextTaskFromQueue tq)
+                    !trapStartNS' <-
+                      if trapNo == trapDone'
+                        then return 0
+                        else getMonotonicTimeNSec
+                    oneTask trapNo trapStartNS' nextTask
 
     goSTM :: EdhThreadState -> STM Bool -> IO Bool
     goSTM !etsTask !actTask = loopSTM

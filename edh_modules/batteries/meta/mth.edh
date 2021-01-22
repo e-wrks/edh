@@ -136,7 +136,7 @@ export {
    #
    # the `__grow__(newCap)` magic is attempted against objects
    #}
-  method cap( container, newCap ) pass
+  method grow( container, newCap ) pass
 
   len :: ( Any ) -> int!DecimalType
   {##
