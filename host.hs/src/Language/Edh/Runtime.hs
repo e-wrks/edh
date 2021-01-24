@@ -41,6 +41,7 @@ import Language.Edh.InterOp
 import Language.Edh.PkgMan (locateEdhMainModule)
 import Language.Edh.RtTypes
 import Language.Edh.Utils
+import System.Environment (lookupEnv)
 import System.Posix.Signals
 import Prelude
 
@@ -331,7 +332,13 @@ createEdhWorld !console = do
 
   !trapReq <- newIORef 0
   -- record a trap request on SIGQUIT
-  addSignalHandler keyboardTermination $ modifyIORef' trapReq (+ 1)
+  lookupEnv "EDH_TRAP_SIGQUIT" >>= \case
+    Nothing -> pure ()
+    Just "" -> pure ()
+    Just "0" -> pure ()
+    Just "NO" -> pure ()
+    Just {} ->
+      addSignalHandler keyboardTermination $ modifyIORef' trapReq (+ 1)
 
   -- assembly the world with pieces prepared above
   let !world =
