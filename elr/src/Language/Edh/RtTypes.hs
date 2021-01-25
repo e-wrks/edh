@@ -687,6 +687,11 @@ edhContSTM' !actSTM !ets =
   writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets actSTM
 {-# INLINE edhContSTM' #-}
 
+edhContSTM'' :: EdhThreadState -> STM Bool -> STM ()
+edhContSTM'' !ets !actSTM =
+  writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets actSTM
+{-# INLINE edhContSTM'' #-}
+
 -- | Schedule an IO action to be performed in current Edh thread, but after
 -- current STM tx committed, and after some txs, those possibly already
 -- scheduled.
@@ -703,6 +708,10 @@ edhContIO !actIO = edhContIO' (False <$ actIO)
 edhContIO' :: IO Bool -> EdhTx
 edhContIO' !actIO !ets = writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
 {-# INLINE edhContIO' #-}
+
+edhContIO'' :: EdhThreadState -> IO Bool -> STM ()
+edhContIO'' !ets !actIO = writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
+{-# INLINE edhContIO'' #-}
 
 -- | Start the specified Edh computation for running in current Edh thread with
 -- the specified state.

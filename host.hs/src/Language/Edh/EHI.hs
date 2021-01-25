@@ -142,7 +142,11 @@ module Language.Edh.EHI
     endOfEdh,
     forkEdh,
     edhContSTM,
+    edhContSTM',
+    edhContSTM'',
     edhContIO,
+    edhContIO',
+    edhContIO'',
 
     -- ** Reflective manipulation
     DocComment,
