@@ -2031,7 +2031,7 @@ parseEdh' ::
   Text ->
   STM (Either ParserError ([StmtSrc], Maybe DocComment))
 parseEdh' !world !srcName !lineNo !srcCode = do
-  !pd <- takeTMVar wops -- update 'worldOperators' atomically wrt parsing
+  !pd <- readTMVar wops
   let ((_, !pr), EdhParserState !pd' _) =
         runState
           ( runParserT'
@@ -2061,10 +2061,14 @@ parseEdh' !world !srcName !lineNo !srcCode = do
           )
           (EdhParserState pd (SrcPos 0 0))
   case pr of
-    -- update operator precedence dict on success of parsing
-    Right _ -> putTMVar wops pd'
-    -- restore original precedence dict on failure of parsing
-    _ -> putTMVar wops pd
+    Right _ -> when (Map.size pd' > Map.size pd) $ do
+      -- update world wide operator precedence dict, on success of parsing
+      -- todo further reduce retry with the expensive parsing, in case many
+      --      src files define new operators get parsed concurrently
+      void $ takeTMVar wops
+      putTMVar wops pd'
+    -- keep original precedence dict on failure of parsing
+    _ -> pure ()
   return pr
   where
     !wops = edh'world'operators world
@@ -5402,9 +5406,7 @@ driveEdhProgram !haltResult !world !prog = do
               -- bootstrap on the forkee thread
               atomically $
                 writeTBQueue (edh'task'queue etsForkee) $
-                  EdhDoSTM etsForkee $
-                    False
-                      <$ actForkee etsForkee
+                  EdhDoSTM etsForkee $ False <$ actForkee etsForkee
               !forkeeThId <- mask_ $
                 forkIOWithUnmask $ \ !unmask ->
                   catch
@@ -5792,11 +5794,10 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
                 True -> do
                   -- a perceiver is terminating this thread, the task action
                   -- has not been executed, re-queue it so it can get notified
-                  -- by a ThreadTerminate exception. note the actTask won't be
-                  -- really executed anyhow, as True is being returned here,
-                  -- just its etsTask to provide the target context to where a
+                  -- by a ThreadTerminate exception.
+                  -- the etsTask will provide the target context to where a
                   -- ThreadTerminate exception will be thrown at
-                  atomically $ writeTBQueue tq $ EdhDoSTM etsTask actTask
+                  atomically $ writeTBQueue tq $ EdhDoSTM etsTask (return True)
                   return True
                 False ->
                   -- there've been one or more perceivers fired, the tx job have
