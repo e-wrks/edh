@@ -40,6 +40,7 @@ module Language.Edh.EHI
     -- * Event processing
     EventSink (..),
     newEventSink,
+    newEventSink',
     subscribeEvents,
     postEvent,
     publishEvent,

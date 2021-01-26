@@ -25,17 +25,24 @@ import Language.Edh.RtTypes
   )
 import Prelude
 
--- | Create a new event sink
+-- | Create a new lingering event sink
 newEventSink :: STM EventSink
-newEventSink = do
+newEventSink = newEventSink' True
+
+-- | Create a new event sink with lingering or not specified
+newEventSink' :: Bool -> STM EventSink
+newEventSink' !lingering = do
   !u <- unsafeIOToSTM newUnique
-  !mrv <- newTVar nil
+  !mrv <-
+    if lingering
+      then Just <$> newTVar nil
+      else return Nothing
   !chan <- newBroadcastTChan
   !subc <- newTVar 0
   return
     EventSink
       { evs'uniq = u,
-        evs'mrv = Just mrv,
+        evs'mrv = mrv,
         evs'chan = chan,
         evs'subc = subc
       }
