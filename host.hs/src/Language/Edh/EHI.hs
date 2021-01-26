@@ -144,9 +144,11 @@ module Language.Edh.EHI
     edhContSTM,
     edhContSTM',
     edhContSTM'',
+    edhContSTM''',
     edhContIO,
     edhContIO',
     edhContIO'',
+    edhContIO''',
 
     -- ** Reflective manipulation
     DocComment,
