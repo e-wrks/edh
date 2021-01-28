@@ -105,7 +105,19 @@ executable edh
     TypeOperators
     ViewPatterns
 
-  ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-maxN31
+  -- more HECs usually result in worse performance in shared cloud computing
+  -- environments, e.g. a Gitpod workspace exposes 16 cores to the VM, but
+  -- those hardware threads are mostly busy doing some jobs for the others,
+  -- attempts to leverage more of them will be losing (up to 15x slower),
+  -- possibly due to extra waiting time & scheduling overhead.
+  --
+  -- but multi-cores are the norm for event distribution & hosting, which is
+  -- our purpose.
+  --
+  -- custom interpreters can be built on purpose with more HECs enabled, but
+  -- pay attention to https://github.com/commercialhaskell/stack/issues/680
+  -- which suggests -N >=32 is always a bad idea
+  ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-maxN3
 
   -- same dependencies as edh, so you can:
   -- cabal v2-repl "--repl-options=-isrc" edh
@@ -153,7 +165,7 @@ executable runedh
     TypeOperators
     ViewPatterns
 
-  ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-maxN31
+  ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-maxN3
 
   -- same dependencies as edh, so you can:
   -- cabal v2-repl "--repl-options=-isrc" runedh
@@ -201,7 +213,7 @@ executable edhm
     TypeOperators
     ViewPatterns
 
-  ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-maxN31
+  ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-maxN3
 
   -- same dependencies as edh, so you can:
   -- cabal v2-repl "--repl-options=-isrc" edhm
