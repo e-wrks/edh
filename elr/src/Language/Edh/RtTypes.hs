@@ -1336,12 +1336,17 @@ data ArgSender
   | SendKwArg !AttrAddrSrc !ExprSrc
   deriving (Eq, Show)
 
+sentArgExprSrc :: ArgSender -> ExprSrc
+sentArgExprSrc (UnpackPosArgs !x) = x
+sentArgExprSrc (UnpackKwArgs !x) = x
+sentArgExprSrc (UnpackPkArgs !x) = x
+sentArgExprSrc (SendPosArg !x) = x
+sentArgExprSrc (SendKwArg _ !x) = x
+
 argSenderSpan :: ArgSender -> SrcRange
-argSenderSpan (UnpackPosArgs (ExprSrc _ !src'span)) = src'span
-argSenderSpan (UnpackKwArgs (ExprSrc _ !src'span)) = src'span
-argSenderSpan (UnpackPkArgs (ExprSrc _ !src'span)) = src'span
-argSenderSpan (SendPosArg (ExprSrc _ !src'span)) = src'span
-argSenderSpan (SendKwArg (AttrAddrSrc _ !src'span) _) = src'span
+argSenderSpan !sndr = src'span
+  where
+    (ExprSrc _ !src'span) = sentArgExprSrc sndr
 
 -- | Procedure declaration, result of parsing
 data ProcDecl

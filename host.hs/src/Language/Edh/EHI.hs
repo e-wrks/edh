@@ -187,6 +187,7 @@ module Language.Edh.EHI
     ArgReceiver (..),
     ArgsPacker (..),
     ArgSender (..),
+    sentArgExprSrc,
     argSenderSpan,
     ProcDecl (..),
     procedureName,
