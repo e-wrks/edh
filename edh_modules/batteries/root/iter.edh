@@ -6,7 +6,7 @@ import * 'batteries/meta'
 
 export {
 
-  # resembles `range` in Python
+  {## resembles `range` in Python #}
   generator range( start, stop=None, step=None ) {
 
     if stop is None && step is None then case start of {
@@ -48,13 +48,12 @@ export {
     }
   }
 
-  {#
-  resembles `enumerate` in Python
-
-  enumerating tuple/list/dict is quite the same, but to enumerate
-  a generator, you need to pass the generator proc here followed by
-  its args, instead of calling it your self. as generators in Edh
-  can only be call by a for-from-do loop.
+  {## resembles `enumerate` in Python
+   #
+   # enumerating tuple/list/dict is quite the same, but to enumerate
+   # a generator, you need to pass the generator proc here followed by
+   # its args, instead of calling it your self. as generators in Edh
+   # can only be call by a for-from-do loop.
    #}
   generator enumerate( g, ***gargs ) {
     n = 0
@@ -76,14 +75,14 @@ export {
     }
   }
 
-  # resembles `replicate` in Haskell
+  {## resembles `replicate` in Haskell #}
   method replicate( n, *args ) {
     apk = ()
     for _ from range( n ) do apk = ( apk=<args )
     return apk
   }
 
-  # resembles `zip` in Haskell
+  {## resembles `zip` in Haskell #}
   generator zip( xs, ys ) {
     while true case xs of {
       { x :> xs } -> case ys of {
@@ -94,7 +93,7 @@ export {
     }
   }
 
-  # resembles `zip3` in Haskell
+  {## resembles `zip3` in Haskell #}
   generator zip3( xs, ys, zs ) {
     while true case xs of {
       { x :> xs } -> case ys of {
