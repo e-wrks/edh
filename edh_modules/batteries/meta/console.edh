@@ -14,16 +14,37 @@ import * './exc'
 error( 'Executing meta module: ' ++ __name__ )
 
 
+{##
+ # Console is a namespace containing constants, methods for interaction
+ # with the os environment.
+ #}
 export namespace console () export {
+  {##
+   # Constant for logging to target at DEBUG level
+   #}
   debug = 10
+  {##
+   # Constant for logging to target at INFO level
+   #}
   info = 20
+  {##
+   # Constant for logging to target at WARNING level
+   #}
   warn = 30
+  {##
+   # Constant for logging to target at ERROR level
+   #}
   error = 40
+  {##
+   # Constant for logging to target at FATAL level
+   #}
   fatal = 50
 
   logLevel :: int!DecimalType
   {##
-   # controlled by environment variable EDH_LOG_LEVEL
+   # Configured logging level by the environment
+   #
+   # Controlled by environment variable `EDH_LOG_LEVEL`
    #}
   logLevel = this.info # the default
 
