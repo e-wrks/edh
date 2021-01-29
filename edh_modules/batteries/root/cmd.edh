@@ -4,7 +4,7 @@
 import * 'batteries/meta'
 
 {##
- # Class @Command@ is used to define parametric command objects
+ # Class `Command` is used to define parametric command objects
  #}
 export data Command ( cmd, ***apk ) {
 
@@ -18,7 +18,25 @@ export data Command ( cmd, ***apk ) {
 }
 
 export {
-  # common repl commands
+
+  {##
+   # The `quit` command is usually interpreted by a REPL to stop running
+   #}
   quit = Command( 'quit' )
+
+  {##
+   # The `dir` command is usually interpreted by a REPL to show you what's
+   # inside some scope
+   #
+   # The target scope(s) can usually be specified as arguments to this command,
+   # while current scope is implied when no one is specified
+   #}
   dir = Command( 'dir' )
+
+  {##
+   # The `bookmark` command is usually not interpreted, but serving as the
+   # value of those attributes defined soly for bookmarking purpose
+   #}
+  bookmark = Command( 'bookmark' )
+
 }
