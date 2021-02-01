@@ -8,15 +8,38 @@ import * './str'
 
 export {
 
-  if console.logLevel <= console.debug then {
+  if console.logLevel > console.debug then {
 
-    # world-wide indicator whether the world is under debugging
-    debug=this # alias to this module when debugging
+    # not debugging
+    debug = false
+    interpreter assert( assertion, msg= None, ***details ) pass
 
-    # the advantage of being an interpreter procedure here, is no eval of rest
-    # exprs as long as the assertion stands
+  } else {
+
+    {##
+     # World-wide indicator whether the world is under debugging.
+     #
+     # This is controlled by the world's logging level, which in turn is
+     # controlled by os environment variable `EDH_LOG_LEVEL`.
+     #
+     # The idiom like below would come handy:
+   ```edh
+debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
+   ```
+     #}
+    debug = true
+
+    {##
+     # Calling `assert()` is nop when not debugging, or it'll err out unless
+     # `assertion` is true.
+     #
+     # Failure message and details can optionally be supplied as arguments.
+     #
+     # The advantage of being an interpreter procedure here, is no eval of rest
+     # exprs as long as the assertion stands.
+     #}
     interpreter assert( callerScope,
-      assertion, msg=None, ***details
+      assertion, msg= None, ***details
     ) case callerScope.eval( assertion ) of {
       true -> { pass } # as it should be
 
@@ -41,16 +64,14 @@ export {
       )
     }
 
-  } else {
-
-    debug=false # not debugging
-
-    # assert being nop when not debugging
-    method assert(*** _ ) pass
-
   }
 
-  # the default basic implementation for the `dir` command
+  {##
+   # The default basic implementation for the `dir` command
+   #
+   # CAVEAT:
+   #  This output to the stdout by `console.print()`
+   #}
   interpreter printDir( callerScope, ofThe= None, ) case (
     if ofThe is not None
     then callerScope.eval( ofThe )
@@ -67,8 +88,10 @@ export {
     }
   }
 
-  # basic implementation of a string form for `dir` command to
-  # output to a remote console
+  {##
+   # Basic implementation of a string form for `dir` command to
+   # output to a remote console
+   #}
   interpreter sprintDir( callerScope, ofThe= None, ) case (
     if ofThe is not None
     then callerScope.eval( ofThe )
@@ -92,6 +115,15 @@ export {
     }
   }
 
+  {##
+   # Run a REPL at current code location, interacting with *stdio*.
+   #
+   # CAVEATs:
+   #  *) This will hook up stdin/stdout, be aware that concurrent REPLs
+   #     hooking stdio will create poor UX if not rendered it unusable at all
+   #
+   #  *) This can terminate the process when *stdin* is already at EOF
+   #}
   interpreter replHere( callerScope, prompt=None ) {
     prompt = prompt and callerScope.eval( prompt ) or repr( callerScope )
 
@@ -152,12 +184,18 @@ export {
 
   }
 
-  {#
-   # run a repl within an object's (probably a module) scope, e.g.
+  {##
+   # Run a REPL within an object's (probably a module) scope, e.g.
   ```edh
   m = { import (**_) 'batteries/magic' }
   replWith(m)
   ```
+   #
+   # CAVEATs:
+   #  *) This will hook up stdin/stdout, be aware that concurrent REPLs
+   #     hooking stdio will create poor UX if not rendered it unusable at all
+   #
+   #  *) This can terminate the process when *stdin* is already at EOF
    #}
   method replWith( obj ) {
     if type( obj ) is not ObjectType
