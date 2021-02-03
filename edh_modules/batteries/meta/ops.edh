@@ -17,28 +17,58 @@ error( 'Executing meta module: ' ++ __name__ )
 export {
 
   {##
-   # The annotation operator
+   # the annotation operator
+   #
+   # relatable to type annotation syntax in Haskell
+   #
+   # the results are merely sought to be human readable as far, may be
+   # re-purposed for machine readability in future versions of Đ. Some
+   # certain frameworks / libraries may experiment with it.
    #}
   infix -9 (::) ( callerScope, lhx, rhx ) pass
 
   {##
-   # The left-dropping annotation operator
+   # the left-dropping annotation operator
+   #
+   # usually used to annotate the rhs artifact with some non-referential,
+   # possibly chained lhs expression, e.g.
+```edh
+body'height :: positive!int!cm!DecimalType
+body'height = 176
+```
+   #
+   # the results are merely sought to be human readable as far, may be
+   # re-purposed for machine readability in future versions of Đ. Some
+   # certain frameworks / libraries may experiment with it.
    #}
   infixr 0 (!) ( callerScope, lhx, rhx ) pass
 
   {##
-   # The procedure call operator
+   # the pair cons operator
+   #
+   # relatable to the list cons operator (:) in Haskell, the cons operator
+   # (:) in Đ does appending-cons, by being left-associative. Contrasted to
+   # (:) in Haskell, which is right-associative thus does prepending-cons.
+   #
+   # And there is neither *empty-pair* nor *unary-pair* in Đ, so technically
+   # speaking, pair in Đ can be said to be a non-empty, appending-cons list
+   # type mandating arity >= 2
+   #}
+  infixl 2 (:) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # the procedure call operator
    #
    # At par to function application operator ($) as in Haskell
    #}
-  infixr -5 ($) ( lhx, rhx ) pass
+  infixr -5 ($) ( callerScope, lhx, rhx ) pass
 
   {##
-   # The flipped procedure call operator
+   # the flipped procedure call operator
    #
    # At par to flipped function application operator (&) as in Haskell
    #}
-  infixl 0 (|) ( lhx, rhx ) pass
+  infixl 0 (|) ( callerScope, lhx, rhx ) pass
 
 
   # TODO the rest of all available host operators need meta def/doc here
