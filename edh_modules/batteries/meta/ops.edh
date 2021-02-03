@@ -17,13 +17,30 @@ error( 'Executing meta module: ' ++ __name__ )
 export {
 
   {##
-   # annotation operator
+   # The annotation operator
    #}
-  infix -9 (::) ( _callerScope, _lhx, _rhx ) pass
+  infix -9 (::) ( callerScope, lhx, rhx ) pass
 
   {##
-   # left-dropping annotation
+   # The left-dropping annotation operator
    #}
-  infixr 0 (!) ( _callerScope, _lhx, _rhx ) pass
+  infixr 0 (!) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # The procedure call operator
+   #
+   # At par to function application operator ($) as in Haskell
+   #}
+  infixr -5 ($) ( lhx, rhx ) pass
+
+  {##
+   # The flipped procedure call operator
+   #
+   # At par to flipped function application operator (&) as in Haskell
+   #}
+  infixl 0 (|) ( lhx, rhx ) pass
+
+
+  # TODO the rest of all available host operators need meta def/doc here
 
 }
