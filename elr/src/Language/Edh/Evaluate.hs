@@ -3758,7 +3758,7 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
       Just !intoExpr ->
         runEdhTx ets $
           evalExprSrc' intoExpr docCmt $ \ !intoVal ->
-            case intoVal of
+            case edhUltimate intoVal of
               EdhObject !intoObj -> case edh'obj'store intoObj of
                 HashStore !hs -> importInto fsChk hs argsRcvr srcExpr exit
                 ClassStore !cls ->
@@ -3767,6 +3767,7 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
                   throwEdhTx UsageError $
                     "can not import into a host object of class "
                       <> objClassName intoObj
+              EdhNil -> exitEdhTx exit nil
               _ ->
                 throwEdhTx UsageError $
                   "can only import into an object, not a "
