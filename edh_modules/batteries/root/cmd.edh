@@ -34,8 +34,16 @@ export {
   dir = Command( 'dir' )
 
   {##
-   # The `bookmark` command is usually not interpreted, but serving as the
-   # value of those attributes defined soly for bookmarking purpose
+   # A bookmark usually lead you to some location of interest,
+   # via code navigation
+   #
+   # Being a command per se, arbitrary detailed data can be associated with a
+   # bookmark attribute, by _calling_ it, e.g.
+```edh
+amazing'algorithm'21 = bookmark(
+  type= 'algo', category= 'sort', complexity= 'O(log N)',
+)
+```
    #}
   bookmark = Command( 'bookmark' )
 
