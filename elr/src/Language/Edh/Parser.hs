@@ -227,18 +227,19 @@ parseArgsReceiver =
     return $ SingleReceiver singleArg
 
 parsePackReceiver :: Parser ArgsReceiver
-parsePackReceiver =
-  symbol "(" *> (PackReceiver . reverse <$> parseArgRecvs [] False False)
+parsePackReceiver = do
+  void $ symbol "("
+  PackReceiver . reverse <$> parseArgRecvs [] False False
 
 parseArgRecvs :: [ArgReceiver] -> Bool -> Bool -> Parser [ArgReceiver]
-parseArgRecvs !rs !kwConsumed !posConsumed =
+parseArgRecvs !rs !kwConsumed !posConsumed = do
+  void optionalComma
   (symbol ")" $> rs) <|> do
     !nextArg <-
-      ( if posConsumed
+      (<* optionalComma) $
+        if posConsumed
           then restPkArgs <|> restKwArgs <|> parseKwRecv True
           else nextPosArg
-        )
-        <* optionalComma
     case nextArg of
       RecvRestPosArgs _ -> parseArgRecvs (nextArg : rs) kwConsumed True
       RecvRestKwArgs _ -> parseArgRecvs (nextArg : rs) True posConsumed
@@ -339,11 +340,12 @@ parseArgSends ::
   Bool ->
   [ArgSender] ->
   Parser (Bool, [ArgSender], IntplSrcInfo)
-parseArgSends !si !closeSym !commaAppeared !ss =
-  (symbol closeSym >> return (commaAppeared, ss, si)) <|> do
+parseArgSends !si !closeSym !commaAppeared !ss = do
+  !commaAppeared' <- (commaAppeared ||) <$> optionalComma
+  (symbol closeSym >> return (commaAppeared', ss, si)) <|> do
     (!arg, !si') <- nextArg
-    !commaHere <- optionalComma
-    parseArgSends si' closeSym (commaAppeared || commaHere) $ arg : ss
+    !commaAppeared'' <- (commaAppeared' ||) <$> optionalComma
+    parseArgSends si' closeSym commaAppeared'' $ arg : ss
   where
     nextArg,
       unpackPkArgs,
