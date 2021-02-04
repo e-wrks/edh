@@ -696,7 +696,8 @@ parseListExpr !si = do
   return (ListExpr $ reverse es, si')
   where
     parseElem :: IntplSrcInfo -> [ExprSrc] -> Parser ([ExprSrc], IntplSrcInfo)
-    parseElem si' es =
+    parseElem si' es = do
+      void optionalComma
       (symbol "]" >> return (es, si')) <|> do
         (!x, !si'') <- parseExpr si'
         void optionalComma
@@ -888,8 +889,9 @@ parseDictOrBlock !si0 =
       optionalSemicolon >>= \case
         True -> fail "should be block instead of dict"
         -- note: keep the order of entries reversed here as written in source
-        False ->
-          optionalComma *> (symbol "}" $> (DictExpr es, si)) <|> do
+        False -> do
+          void optionalComma
+          (symbol "}" $> (DictExpr es, si)) <|> do
             (!e, !si') <- nextEntry
             parseDictEntries si' (e : es)
       where
