@@ -1,1 +1,18 @@
-{## The Tour of Đ #}
+{## Đ the Language #}
+
+
+{## What's Đ
+ # - A Business Integration language, as well as a User Interface language
+
+The birth of Đ has two main goals:
+
+ * To integrate distributed, heterogeneous software components for business goals
+  > Đ fosters comprehensive support for _events_ to be exchanged and hosted, asynchronously, at multiple application / deployment sites. An _event_ is an atomic piece of data, encapsulating the information of something just happend in one place, and sent to another place for its consequences to be realized there. _Event_ is conceptually coherent to *Algebraic Data Type* in mathematics and a functional programming language, but it's not practical to be a mechanical utility in an imperative/procedural langauge like Đ. So _event_ stays conceptual in Đ the language.
+
+ * To be usable directly by users of all roles in the organization, especially the business stake-holders
+  > Đ is even more _dynamic_, _interactive_ than Python, from standalone REPLs to WebREPLs, to the extensive IDE features, it's fine-tuned for frictionless developer experience, where anyone could be the developer.
+
+ #} {;
+  {## What's Đ #}
+  export what's'edh = bookmark
+}
