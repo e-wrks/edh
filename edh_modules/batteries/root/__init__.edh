@@ -16,7 +16,6 @@ export {
   import * './ho'
   import * './iter'
   import * './str'
-  import * './concur'
   import * './evt'
   import * './math'
   import * './slice'
