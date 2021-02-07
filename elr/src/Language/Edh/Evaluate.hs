@@ -311,16 +311,23 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
 -- The target would be an object in most common cases, but can be some type of
 -- value with virtual attributes, but currently all virtual attributes are
 -- readonly, not mutable virtual attribute supported yet.
-setEdhAttr :: Expr -> AttrKey -> EdhValue -> EdhTxExit EdhValue -> EdhTx
+setEdhAttr ::
+  Expr ->
+  AttrKey ->
+  EdhValue ->
+  EdhTxExit (Maybe Object, EdhValue) ->
+  EdhTx
 setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
   -- no magic layer laid over assignment via `this` ref
   AttrExpr ThisRef {} ->
     let !this = edh'scope'this scope
-     in setObjAttr ets this key val $ \ !valSet -> exitEdh ets exit valSet
+     in setObjAttr ets this key val $
+          \ !valSet -> exitEdh ets exit (Just this, valSet)
   -- no magic layer laid over assignment via `that` ref
   AttrExpr ThatRef {} ->
     let !that = edh'scope'that scope
-     in setObjAttr ets that key val $ \ !valSet -> exitEdh ets exit valSet
+     in setObjAttr ets that key val $
+          \ !valSet -> exitEdh ets exit (Just that, valSet)
   -- not allowing assignment via super
   AttrExpr SuperRef {} -> throwEdh ets EvalError "can not assign via super"
   _ -> runEdhTx ets $
@@ -336,7 +343,7 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
               key
               val
               (trySelfMagic tgtObj)
-              exit
+              $ \ !valSet -> exitEdhTx exit (Just tgtObj, valSet)
         -- no virtual attribute supported yet
         _ -> edhValueDesc ets tgtVal $ \ !badDesc ->
           throwEdh ets EvalError $ "invalid assignment target, " <> badDesc
@@ -346,13 +353,14 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
 
     trySelfMagic :: Object -> EdhTx
     trySelfMagic !obj _ets = setObjAttr' ets obj key val tryMagic $
-      \ !valSet -> exitEdh ets exit valSet
+      \ !valSet -> exitEdh ets exit (Just obj, valSet)
       where
         tryMagic :: STM ()
         tryMagic = readTVar (edh'obj'supers obj) >>= trySelves . (obj :)
         trySelves :: [Object] -> STM ()
         trySelves [] =
-          writeObjAttr ets obj key val $ \ !valSet -> exitEdh ets exit valSet
+          writeObjAttr ets obj key val $
+            \ !valSet -> exitEdh ets exit (Just obj, valSet)
         trySelves (o : rest) =
           lookupEdhSelfMagic o (AttrByName "(@=)") >>= \case
             EdhNil -> trySelves rest
@@ -366,13 +374,15 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
         callSelfMagic :: ProcDefi -> Object -> Object -> STM ()
         callSelfMagic !magicMth !this !that =
           let !args =
-                if val == EdhNil then [attrKeyValue key] else [attrKeyValue key, val]
+                if val == EdhNil
+                  then [attrKeyValue key]
+                  else [attrKeyValue key, val]
            in runEdhTx ets $
                 callEdhMethod this that magicMth (ArgsPack args odEmpty) id $
                   \ !magicRtn _ets -> case edhUltimate magicRtn of
-                    EdhDefault {} -> writeObjAttr ets obj key val $
-                      \ !valSet -> exitEdh ets exit valSet
-                    _ -> exitEdh ets exit magicRtn
+                    EdhDefault {} -> writeObjAttr ets that key val $
+                      \ !valSet -> exitEdh ets exit (Just that, valSet)
+                    _ -> exitEdh ets exit (Just that, magicRtn)
 
 writeObjAttr ::
   EdhThreadState ->
@@ -477,7 +487,9 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     -- assign to an addressed attribute
     IndirectRef (ExprSrc !tgtExpr _) (AttrAddrSrc !addr' _) ->
       resolveEdhAttrAddr ets addr' $
-        \ !key -> runEdhTx ets $ setEdhAttr tgtExpr key rhVal exit
+        \ !key ->
+          runEdhTx ets $
+            setEdhAttr tgtExpr key rhVal $ exitMaybeExpTo key
     -- god forbidden things
     ThisRef {} -> throwEdh ets EvalError "can not assign to this"
     ThatRef {} -> throwEdh ets EvalError "can not assign to that"
@@ -489,11 +501,14 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
         case edhUltimate addrVal of
           EdhExpr _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _ ->
             resolveEdhAttrAddr ets addr $
-              \ !key -> runEdhTx ets $ setEdhAttr tgtExpr key rhVal exit
+              \ !key ->
+                runEdhTx ets $ setEdhAttr tgtExpr key rhVal $ exitMaybeExpTo key
           EdhString !attrName ->
-            runEdhTx ets $ setEdhAttr tgtExpr (AttrByName attrName) rhVal exit
+            let !key = AttrByName attrName
+             in runEdhTx ets $ setEdhAttr tgtExpr key rhVal $ exitMaybeExpTo key
           EdhSymbol !sym ->
-            runEdhTx ets $ setEdhAttr tgtExpr (AttrBySym sym) rhVal exit
+            let !key = AttrBySym sym
+             in runEdhTx ets $ setEdhAttr tgtExpr key rhVal $ exitMaybeExpTo key
           _ ->
             throwEdh ets EvalError $
               "invalid attribute reference type - " <> edhTypeNameOf addrVal
@@ -505,6 +520,11 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     !ctx = edh'context ets
     scope = contextScope ctx
     esScope = edh'scope'entity scope
+
+    exitMaybeExpTo :: AttrKey -> EdhTxExit (Maybe Object, EdhValue)
+    exitMaybeExpTo !key (!maybeOwner, !valSet) = case maybeOwner of
+      Just !o -> \_ets -> exitWithChkExportTo o key valSet
+      _ -> exitEdhTx exit valSet
 
     exitWithChkExportTo :: Object -> AttrKey -> EdhValue -> STM ()
     exitWithChkExportTo !obj !artKey !artVal = do
