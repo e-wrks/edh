@@ -1,25 +1,7 @@
 {## Đ the Language #}
 
-
 {## What's Đ
  # - A Business Integration language, as well as a User Interface language
-
-Đ is given birth for two main goals:
-
- * To upscale business-oriented integration of distributed, heterogeneous software components
-  > State of art architecture requires expensive modeling of the business, before design of various (restful as you've likely heard of) communication protocols, then deployments continuously refactored into distributed spaghetti code.
-  > Đ fosters comprehensive support for *event*s to be exchanged and hosted, asynchronously, at multiple application / deployment sites, as well as within a local process by the operating system.
-  > An *event* is a consistent (not necessarily atomic) piece of data, encapsulating the information of something just happend in one place, and sent to another place for its consequences to be realized there. *Event* is conceptually coherent to *Algebraic Data Type* in mathematics as well as a functional programming language, but it's not practical to be a mechanical utility in a procedural langauge like Đ. So *event* stays conceptual in Đ the language.
-
- * To be directly usable by users of all roles in the organization, especially stake-holders of the business
-  > Đ is even more *dynamic* and *interactive* than Python, also it facilitates effectful functionality composition in a novel way. From REPLs atop stdio, to WebREPLs, to the extensive IDE features, it's fine-tuned for frictionless developer experience, where anyone could be the developer.
-  > Most people have been accustomed to GUI (Graphical User Interface) for interaction with a computer system, while visual languages still lack sufficient expressiveness in many tasks for global efficiency. Text based communication, governed by grammar (syntax, semantics, pragmatics), can be way more productive and constructive in such cases, and fortunately modern IDEs have filled much of the gap between GUI and TUI (Terminal User Interface), especially when we put Code Lens into good use:
-    https://code.visualstudio.com/blogs/2017/02/12/code-lens-roundup
-  > Inspired by Jupyter code cells:
-    https://donjayamanne.github.io/pythonVSCodeDocs/docs/jupyter_getting-started/#Running-a-cell-in-a-kernel
-  Each Đ code cell (a piece of code) is individually executable by a single mouse click, on a *Code Lens* above it reads [Run Cell] (note the click/execution can be repeated).
-  > This is much closer to a GUI, yet with more flexible variance & context. The greatest advantage of this tactic is, a user can make slight changes to the code in a template cell, then execute it to achieve tasks in need of a complex phrasing of scription. Traditional TUI requires the user to type out a complete sentence for the job, which needs greatly internalized knowledge about what/how he/she is doing, as well as mental effort nevertheless; while traditional GUI might be just inable to provide the flexibility needed due to level of complexity of the task.
-  > So with Đ and its tooling, we can obtain more advantages at the same time, from both worlds:  expressiveness from text languages as well as intuition from visual languages.
 
  #} {;
   {## What's Đ #}
