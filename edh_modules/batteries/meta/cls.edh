@@ -43,7 +43,7 @@ case xx of {{ namespace:ns }} -> {
   class scope {
 
     scope :: () -> scope
-    scope :: ( ofObj!ObjectType ) -> scope
+    scope :: ( ofObj= ObjectType ) -> scope
     {##
      # wrap the caller's scope or the object specified by `ofObj` as a
      # reflective object
