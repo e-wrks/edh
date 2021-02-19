@@ -239,7 +239,7 @@ defProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valName) _))) _) 
         !scope = contextScope ctx
         !es = edh'scope'entity scope
         !key = AttrByName valName
-        !rhv = edhDeCaseWrap rhVal
+        !rhv = edhDeCaseClose rhVal
         !nv = EdhNamedValue valName rhv
         doAssign = do
           iopdInsert key nv es
@@ -278,7 +278,7 @@ defMissingProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valName) _
   iopdLookup key es >>= \case
     Nothing -> runEdhTx ets $
       evalExprSrc rhExpr $ \ !rhVal _ets -> do
-        let !rhv = edhDeCaseWrap rhVal
+        let !rhv = edhDeCaseClose rhVal
             !nv = EdhNamedValue valName rhv
         iopdInsert key nv es
         defineScopeAttr ets key nv

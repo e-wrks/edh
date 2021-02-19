@@ -907,7 +907,6 @@ callEdhOperator' !this !that !mth !prede !proc'loc (StmtSrc !body'stmt _) !args 
           edhSwitchState ets $
             exitEdhTx exit $ case edhDeCaseWrap mthRtn of
               EdhReturn !rtnVal -> rtnVal
-              -- todo translate break/continue to nil here?
               !rtnVal -> rtnVal
   where
     !callerCtx = edh'context ets
@@ -1080,7 +1079,7 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
             _ -> case posArgs' of
               (posArg : posArgs'') -> exit'' (posArg, posArgs'', kwArgs'')
               [] -> case argDefault of
-                -- always eval the default value atomically in callee's contex
+                -- always eval the default value atomically in callee's context
                 Just (ExprSrc !defaultExpr _) ->
                   runEdhTx etsRecv $
                     evalExpr' defaultExpr Nothing $ \ !val _ets ->
@@ -2249,31 +2248,42 @@ evalStmtSrc (StmtSrc !stmt !ss) !exit !ets =
     !ctx = edh'context ets
     !tip = edh'ctx'tip ctx
 
-evalCaseBranches :: ExprSrc -> EdhTxExit EdhValue -> EdhTx
-evalCaseBranches expr@(ExprSrc !x !src'span) !exit = case x of
+evalCaseBranches :: EdhValue -> ExprSrc -> EdhTxExit EdhValue -> EdhTx
+evalCaseBranches !tgtVal expr@(ExprSrc !x !src'span) !exit !ets = case x of
   -- case-of with a block is normal
   BlockExpr !stmts ->
-    \ !ets -> runEdhTx (etsMovePC ets src'span) $ evalBlock stmts exit
+    runEdhTx (etsMovePC etsCase src'span) $
+      evalBlock stmts $ edhSwitchState ets . exit
   ScopedBlockExpr !stmts ->
-    \ !ets -> runEdhTx (etsMovePC ets src'span) $ evalScopedBlock stmts exit
+    runEdhTx (etsMovePC etsCase src'span) $
+      evalScopedBlock stmts $ edhSwitchState ets . exit
   -- single branch case is some special
-  _ -> evalExprSrc expr $ \ !val -> case val of
-    -- the only branch did match, let not the branch match escape
-    (EdhCaseClose !v) -> exitEdhTx exit $ edhDeCaseClose v
-    -- the only branch didn't match. non-exhaustive case is bad smell in FP,
-    -- but kinda norm in imperative style, some equvilant to if-then without an
-    -- else clause. anyway the nonmatch should not escape here
-    EdhCaseOther -> exitEdhTx exit nil
-    -- yield should have been handled by 'evalExpr''
-    (EdhYield _) -> throwEdhTx EvalError "bug yield reached block"
-    -- ctrl to be propagated outwards, as this is the only stmt, no need to
-    -- be specifically written out
-    -- EdhFallthrough    -> exitEdhTx exit EdhFallthrough
-    -- EdhBreak          -> exitEdhTx exit EdhBreak
-    -- EdhContinue       -> exitEdhTx exit EdhContinue
-    -- (EdhReturn !v)    -> exitEdhTx exit (EdhReturn v)
-    -- other vanilla result, propagate as is
-    _ -> exitEdhTx exit val
+  _ -> runEdhTx etsCase $
+    evalExprSrc expr $ \ !val -> edhSwitchState ets $ case val of
+      -- the only branch did match, let not the branch match escape
+      (EdhCaseClose !v) -> exitEdhTx exit $ edhDeCaseClose v
+      -- the only branch didn't match. non-exhaustive case is bad smell in FP,
+      -- but kinda norm in imperative style, some equvilant to if-then without an
+      -- else clause. anyway the nonmatch should not escape here
+      EdhCaseOther -> exitEdhTx exit nil
+      -- yield should have been handled by 'evalExpr''
+      (EdhYield _) -> throwEdhTx EvalError "bug yield reached block"
+      -- ctrl to be propagated outwards, as this is the only stmt, no need to
+      -- be specifically written out
+      -- EdhFallthrough    -> exitEdhTx exit EdhFallthrough
+      -- EdhBreak          -> exitEdhTx exit EdhBreak
+      -- EdhContinue       -> exitEdhTx exit EdhContinue
+      -- (EdhReturn !v)    -> exitEdhTx exit (EdhReturn v)
+      -- other vanilla result, propagate as is
+      _ -> exitEdhTx exit val
+  where
+    !etsCase =
+      ets
+        { edh'context = (edh'context ets) {edh'ctx'match = tv}
+        }
+    !tv = case edhDeCaseClose tgtVal of
+      EdhCaseOther -> nil
+      !v -> v
 
 evalScopedBlock :: [StmtSrc] -> EdhTxExit EdhValue -> EdhTx
 evalScopedBlock !stmts !exit !ets = do
@@ -2411,17 +2421,8 @@ evalStmt !stmt !exit = case stmt of
       evalExprSrc tgtExpr $ \ !val !etsForker ->
         runEdhTx (etsMovePC etsForker src'span) $
           forkEdh
-            ( \ !etsForkee ->
-                etsForkee
-                  { edh'context =
-                      (edh'context etsForkee)
-                        { edh'ctx'match =
-                            edhDeCaseWrap
-                              val
-                        }
-                  }
-            )
-            (evalCaseBranches branchesExpr endOfEdh)
+            id
+            (evalCaseBranches val branchesExpr endOfEdh)
             (\() -> exitEdhTx exit nil)
     (CallExpr !calleeExpr (ArgsPacker !argsSndr _)) ->
       evalExprSrc calleeExpr $ \ !calleeVal !etsForker ->
@@ -2451,13 +2452,8 @@ evalStmt !stmt !exit = case stmt of
         evalExprSrc tgtExpr $ \ !val !etsSched ->
           schedDefered
             etsSched
-            ( \ !etsDefer ->
-                etsDefer
-                  { edh'context =
-                      (edh'context etsDefer) {edh'ctx'match = edhDeCaseWrap val}
-                  }
-            )
-            $ evalCaseBranches branchesExpr endOfEdh
+            id
+            $ evalCaseBranches val branchesExpr endOfEdh
       (CallExpr !calleeExpr (ArgsPacker !argsSndr _)) ->
         evalExprSrc calleeExpr $ \ !calleeVal !etsSched ->
           edhPrepareCall etsSched calleeVal argsSndr $
@@ -2478,7 +2474,7 @@ evalStmt !stmt !exit = case stmt of
       EdhSink !sink -> do
         let reactor !breakThread =
               evalStmtSrc bodyStmt $ \ !reactResult _etsReactor ->
-                case edhDeCaseWrap reactResult of
+                case edhDeCaseClose reactResult of
                   EdhBreak -> writeTVar breakThread True
                   -- todo warn or even err out in case return/continue/default
                   --      etc. are returned to here?
@@ -2509,24 +2505,18 @@ evalStmt !stmt !exit = case stmt of
     evalExprSrc excExpr $ \ !exv -> edhThrowTx $ edhDeCaseClose exv
   WhileStmt !cndExpr !bodyStmt -> do
     let doWhile :: EdhTx
-        doWhile = evalExprSrc cndExpr $ \ !cndVal ->
-          case edhDeCaseWrap cndVal of
-            EdhBool True -> evalStmtSrc bodyStmt $ \ !blkVal ->
-              case edhDeCaseWrap blkVal of
-                -- early stop of procedure
-                rtnVal@EdhReturn {} -> exitEdhTx exit rtnVal
-                -- break while loop
-                EdhBreak -> exitEdhTx exit nil
-                -- continue while loop
-                _ -> doWhile
-            EdhBool False -> exitEdhTx exit nil
-            EdhNil -> exitEdhTx exit nil
-            _ ->
-              throwEdhTx EvalError $
-                "invalid condition value for while: "
-                  <> edhTypeNameOf cndVal
-                  <> ": "
-                  <> T.pack (show cndVal)
+        doWhile = evalExprSrc cndExpr $ \ !cndVal !ets ->
+          edhValueNull ets cndVal $ \case
+            True -> exitEdh ets exit nil
+            False -> runEdhTx ets $
+              evalStmtSrc bodyStmt $ \ !blkVal ->
+                case edhDeCaseClose blkVal of
+                  -- early stop of procedure
+                  rtnVal@EdhReturn {} -> exitEdhTx exit rtnVal
+                  -- break while loop
+                  EdhBreak -> exitEdhTx exit nil
+                  -- continue while loop
+                  _ -> doWhile
     doWhile
   ExtendsStmt !superExpr -> evalExprSrc superExpr $ \ !superVal !ets ->
     let !this = edh'scope'this $ contextScope $ edh'context ets
@@ -3583,13 +3573,10 @@ evalExpr' (VoidExpr !expr) !docCmt !exit =
     _ -> exitEdhTx exit EdhNil
 evalExpr' (AtoIsoExpr !expr) !docCmt !exit = \ !ets ->
   runEdhTx ets {edh'in'tx = True} $ -- ensure in'tx state
-    evalExprSrc' (deParen1 expr) docCmt
-    -- a complex expression is better quoted within
-    -- a pair of parenthesis; and we strip off only 1 layer of parenthesis
-    -- here, so in case a pure context intended, double-parenthesis quoting
-    -- will work
-    $
-      \ !val -> edhSwitchState ets $ exit $ edhDeCaseWrap val
+  -- a complex expression is better quoted within a pair of parenthesis;
+  -- and we strip off only 1 layer of parenthesis here, so in case a pure
+  -- context intended, double-parenthesis quoting will work
+    evalExprSrc' (deParen1 expr) docCmt $ edhSwitchState ets . exit
 evalExpr' (IfExpr !cond !cseq !alt) _docCmt !exit =
   evalExprSrc cond $ \ !val !ets -> edhValueNull ets val $ \case
     False -> runEdhTx ets $ evalStmtSrc cseq exit
@@ -3614,17 +3601,8 @@ evalExpr' (ParenExpr !x) !docCmt !exit = \ !ets ->
 evalExpr' (BlockExpr !stmts) _docCmt !exit = evalBlock stmts exit
 evalExpr' (ScopedBlockExpr !stmts) _docCmt !exit = evalScopedBlock stmts exit
 evalExpr' (CaseExpr !tgtExpr !branchesExpr) !docCmt !exit =
-  evalExprSrc' tgtExpr docCmt $ \ !tgtVal !ets ->
-    runEdhTx
-      ets
-        { edh'context =
-            (edh'context ets)
-              { edh'ctx'match = edhDeCaseWrap tgtVal
-              }
-        }
-      $ evalCaseBranches branchesExpr $
-        -- restore original tx state after block done
-        \ !blkResult _ets -> exitEdh ets exit blkResult
+  evalExprSrc' tgtExpr docCmt $ \ !tgtVal ->
+    evalCaseBranches tgtVal branchesExpr exit
 -- yield stmt evals to the value of caller's `do` expression
 evalExpr' (YieldExpr !yieldExpr) !docCmt !exit =
   evalExprSrc' yieldExpr docCmt $ \ !valToYield !ets ->

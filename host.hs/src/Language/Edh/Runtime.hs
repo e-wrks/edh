@@ -584,7 +584,7 @@ createEdhWorld !console = do
             EdhExpr _ !expr _ ->
               runEdhTx etsEval $
                 evalExpr expr $ \ !val _ets ->
-                  exitEdh ets exit $ edhDeCaseWrap val
+                  exitEdh ets exit $ edhDeCaseClose val
             !badExpr -> edhValueDesc ets badExpr $ \ !badDesc ->
               throwEdh ets EvalError $ "not an expr: " <> badDesc
 
