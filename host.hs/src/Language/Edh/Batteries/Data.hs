@@ -241,12 +241,10 @@ defProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valName) _))) _) 
         !key = AttrByName valName
         !rhv = edhDeCaseClose rhVal
         !nv = EdhNamedValue valName rhv
-        doAssign = do
-          iopdInsert key nv es
-          defineScopeAttr ets key nv
+        doDefine = defineScopeAttr ets key nv
     iopdLookup key es >>= \case
       Nothing -> do
-        doAssign
+        doDefine
         exitEdh ets exit nv
       Just oldDef@(EdhNamedValue !n !v) ->
         if v /= rhv
@@ -262,10 +260,10 @@ defProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valName) _))) _) 
                   <> " }"
           else do
             -- avoid writing the entity if all same
-            unless (n == valName) doAssign
+            unless (n == valName) doDefine
             exitEdh ets exit nv
       _ -> do
-        doAssign
+        doDefine
         exitEdh ets exit nv
 defProc !lhExpr _ _ =
   throwEdhTx EvalError $ "invalid value definition: " <> T.pack (show lhExpr)
@@ -280,7 +278,6 @@ defMissingProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valName) _
       evalExprSrc rhExpr $ \ !rhVal _ets -> do
         let !rhv = edhDeCaseClose rhVal
             !nv = EdhNamedValue valName rhv
-        iopdInsert key nv es
         defineScopeAttr ets key nv
         exitEdh ets exit nv
     Just !preVal -> exitEdh ets exit preVal
