@@ -52,7 +52,7 @@ import System.Console.Haskeline
     withInterrupt,
   )
 import System.Environment (lookupEnv)
-import System.IO (stderr, stdout)
+import System.IO (hFlush, stderr, stdout)
 import Text.Megaparsec (Parsec, runParser, takeRest)
 import Text.Megaparsec.Char (space)
 import qualified Text.Megaparsec.Char.Lexer as L
@@ -172,7 +172,9 @@ defaultEdhConsole !inputSettings = do
               bracket
                 (atomically $ takeTMVar outputTk)
                 (atomically . putTMVar outputTk)
-                $ \() -> TIO.hPutStr stdout txt
+                $ \() -> do
+                  TIO.hPutStr stdout txt
+                  hFlush stdout
             ioLoop
           ConsoleIn !cmdIn !ps1 !ps2 -> do
             -- mark out idle before starting input, or flush request will hang
