@@ -214,8 +214,8 @@ conReadCommandProc
       !cio = consoleIO $ edh'world'console world
 
 -- | host method console.print(*args, **kwargs)
-conPrintProc :: ArgsPack -> EdhHostProc
-conPrintProc (ArgsPack !args !kwargs) !exit !ets =
+conPrintProc :: "eol" ?: Text -> ArgsPack -> EdhHostProc
+conPrintProc (defaultArg "\n" -> !eol) (ArgsPack !args !kwargs) !exit !ets =
   if edh'in'tx ets
     then
       throwEdh
@@ -230,21 +230,21 @@ conPrintProc (ArgsPack !args !kwargs) !exit !ets =
     printVS [] [] = atomically $ exitEdh ets exit nil
     printVS [] ((k, v) : rest) = case v of
       EdhString !s -> do
-        cio $ ConsoleOut $ "  " <> attrKeyStr k <> "= " <> s <> "\n"
+        cio $ ConsoleOut $ "  " <> attrKeyStr k <> "= " <> s <> eol
         printVS [] rest
       _ -> atomically $
         edhValueRepr ets v $ \ !s -> runEdhTx ets $
           edhContIO $ do
-            cio $ ConsoleOut $ "  " <> attrKeyStr k <> "= " <> s <> "\n"
+            cio $ ConsoleOut $ "  " <> attrKeyStr k <> "= " <> s <> eol
             printVS [] rest
     printVS (v : rest) !kvs = case v of
       EdhString !s -> do
-        cio $ ConsoleOut $ s <> "\n"
+        cio $ ConsoleOut $ s <> eol
         printVS rest kvs
       _ -> atomically $
         edhValueRepr ets v $ \ !s -> runEdhTx ets $
           edhContIO $ do
-            cio $ ConsoleOut $ s <> "\n"
+            cio $ ConsoleOut $ s <> eol
             printVS rest kvs
 
 conNowProc :: EdhHostProc
