@@ -213,9 +213,9 @@ conReadCommandProc
       !world = edh'prog'world $ edh'thread'prog ets
       !cio = consoleIO $ edh'world'console world
 
--- | host method console.print(*args, **kwargs)
-conPrintProc :: "eol" ?: Text -> ArgsPack -> EdhHostProc
-conPrintProc (defaultArg "\n" -> !eol) (ArgsPack !args !kwargs) !exit !ets =
+-- | host method console.print(*args, eol= '\n', **kwargs)
+conPrintProc :: RestPosArgs -> "eol" ?: Text -> RestPackArgs -> EdhHostProc
+conPrintProc !args (defaultArg "\n" -> !eol) (ArgsPack _ !kwargs) !exit !ets =
   if edh'in'tx ets
     then
       throwEdh
