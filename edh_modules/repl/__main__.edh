@@ -31,11 +31,13 @@ while true { # this is the *Loop* in so-called REPL
 
 } $=> { # catch exceptions
 
-  { { IOError: ioExc } } -> {
+  { IOError() = ioExc } -> {
     console.fatal<| 'IO error - ' ++ ioExc
     rethrow # escalate it to the program loop of the
     # host interpreter, let it decide what to do.
   }
+
+  { ThreadTerminate() } -> {pass}
 
   { cmdExc } -> {
     # the exception can have happened in a descendant goroutine/thread,
