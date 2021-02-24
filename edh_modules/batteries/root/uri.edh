@@ -18,8 +18,7 @@ import * 'batteries/meta'
 
 
 {##
- # a pattern eanbled data class for URI
- #
+ # A pattern eanbled data class for URI
 
 ```edh
  # %%
@@ -35,7 +34,7 @@ of { URI( scheme, authority, path, query, fragment ) } -> {
   console.print$ repr$ uri
   console.print$ str$ uri
 }
- # %%
+ # %#
 ```
  #}
 export data URI(
@@ -47,7 +46,7 @@ export data URI(
 ) {
 
   {##
-   # convert the URI object to string form
+   # Convert the URI object to string form
    #}
   method __str__() {
     uri = this.scheme ++ '://' ++ this.authority ++ this.path
@@ -57,7 +56,7 @@ export data URI(
   }
 
   {##
-   # match a string as URI object
+   # Match a string as URI object
    #
    # TODO write some Haskell code to help decodeURI
    # https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/decodeURI
@@ -87,12 +86,13 @@ export data URI(
   }
 
   {##
-   # meant to be called *statically* as @URI.parse(xxx)@
-   # this method throws for failure of conversion
+   # Meant to be called *statically* as @URI.parse(xxx)@
+   #
+   # Note this method throws for failure of conversion
    #}
-  method parse ( s ) case s of {
+  method parse ( v ) case v|str of {
     { URI() = uri } -> uri
-    error( 'bad URI: ' ++ desc( s ) )
+    error( 'bad URI: ' ++ desc( v ) )
   }
 
 }
