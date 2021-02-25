@@ -1112,6 +1112,13 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhExpr _ (LitExpr l) _) = hashWithSalt s l
   hashWithSalt s (EdhExpr u _ _) = hashWithSalt s u
 
+edhDeReturn :: EdhValue -> EdhValue
+edhDeReturn (EdhReturn !val) = edhDeReturn val
+edhDeReturn (EdhYield !val) = edhDeReturn val
+edhDeReturn (EdhCaseClose !val) = edhDeReturn val
+edhDeReturn EdhCaseOther = nil
+edhDeReturn !val = val
+
 edhDeCaseClose :: EdhValue -> EdhValue
 edhDeCaseClose (EdhCaseClose !val) = edhDeCaseClose val
 edhDeCaseClose !val = val

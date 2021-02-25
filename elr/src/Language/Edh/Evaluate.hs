@@ -1657,21 +1657,11 @@ edhPrepareForLoop
                     pb
                     apk
                     scopeMod
-                    $ \ !gnrRtn -> edhSwitchState ets $ case gnrRtn of
-                      -- todo what's the case a generator would return a
-                      -- continue?
-                      EdhContinue -> exitEdhTx exit nil
-                      -- todo what's the case a generator would return a
-                      -- break?
-                      EdhBreak -> exitEdhTx exit nil
-                      -- it'll be double return, in case do block issued return
-                      -- and propagated here or the generator can make it that
-                      -- way, which is black magic
-
-                      -- unwrap the return, as result of this for-loop
-                      EdhReturn !rtnVal -> exitEdhTx exit rtnVal
-                      -- otherwise passthrough
-                      _ -> exitEdhTx exit gnrRtn
+                    $ \ !gnrRtn ->
+                      edhSwitchState ets $
+                        exitEdhTx exit $
+                          -- unwrap double-return, cease break/continue, etc.
+                          edhDeCaseWrap gnrRtn
       loopCallGenr _ _ !callee _ _ _ =
         throwEdh etsLoopPrep EvalError $
           "bug: unexpected generator: " <> T.pack (show callee)
@@ -1701,12 +1691,12 @@ edhPrepareForLoop
                   runEdhTx etsTry $ evalStmtSrc doStmt exitOne
             doneOne !doResult = case edhDeCaseClose doResult of
               EdhContinue ->
-                -- send nil to generator on continue
-                genrCont $ Right nil
+                -- propagate explicit { continue } to generator
+                genrCont $ Right EdhContinue
               EdhBreak ->
                 -- break out of the for-from-do loop,
-                -- the generator on <break> yielded will return
-                -- nil, effectively have the for loop eval to nil
+                -- the generator on <break> yielded should return {break},
+                -- effectively have the for loop eval to nil
                 genrCont $ Right EdhBreak
               EdhCaseOther ->
                 -- send nil to generator on no-match of a branch
@@ -1719,10 +1709,10 @@ edhPrepareForLoop
                 -- Edh code should not use this pattern
                 throwEdh ets UsageError "double return from do-of-for?"
               EdhReturn !rtnVal ->
-                -- early return from for-from-do, the generator on
-                -- double wrapped return yielded, will unwrap one
-                -- level and return the result, effectively have the
-                -- for loop eval to return that
+                -- early return from for-from-do, the generator should
+                -- propagate the double return as yield result to it,
+                -- effectively have the for-from-do expression as a whole,
+                -- eval to a return of the result
                 genrCont $ Right $ EdhReturn $ EdhReturn rtnVal
               !val -> do
                 -- vanilla val from do, send to generator
@@ -3621,27 +3611,23 @@ evalExpr' (YieldExpr !yieldExpr) !docCmt !exit =
         -- no exception occurred in the @do@ block, check its intent
         Right !doResult -> case edhDeCaseClose doResult of
           EdhContinue ->
-            -- for loop should send nil here instead in
-            -- case continue issued from the do block
-            throwEdh ets EvalError "bug: <continue> reached yield"
+            -- explicit { continue } is propagated to here,
+            -- let the generator see nil in this case
+            exitEdh ets exit nil
           EdhBreak ->
-            -- for loop is breaking, let the generator
-            -- return nil
-            -- the generator can intervene the return, that'll be
-            -- black magic
-            exitEdh ets exit $ EdhReturn EdhNil
-          EdhReturn EdhReturn {} ->
+            -- for loop is breaking, let the generator `return { break }` here.
+            -- the generator can intervene the return, that'll be black magic
+            exitEdh ets exit $ EdhReturn EdhBreak
+          dblRtn@(EdhReturn EdhReturn {}) ->
             -- this must be synthesiszed,
-            -- in case do block issued return, the for loop wrap it as
+            -- in case do block issued return, the for loop would wrap it as
             -- double return, so as to let the yield expr in the generator
-            -- propagate the value return, as the result of the for loop
-            -- the generator can intervene the return, that'll be
-            -- black magic
-            exitEdh ets exit doResult
+            -- propagate the value returning, as the result of the for loop.
+            -- the generator can intervene the return, that'll be black magic
+            exitEdh ets exit dblRtn
           EdhReturn {} ->
-            -- for loop should have double-wrapped the
-            -- return, which is handled above, in case its do block
-            -- issued a return
+            -- in case its do block issued a return, the for loop should have
+            -- double-wrapped the return, which is handled above
             throwEdh ets EvalError "bug: <return> reached yield"
           !val -> exitEdh ets exit val
 evalExpr' (ForExpr !argsRcvr !iterExpr !doStmt) _docCmt !exit = \ !ets ->

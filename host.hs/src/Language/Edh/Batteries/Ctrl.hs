@@ -743,15 +743,15 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         --
 
         -- { continue } -- match with continue
-        [StmtSrc ContinueStmt _] -> case ctxMatch of
+        [StmtSrc ContinueStmt _] -> case edhDeReturn ctxMatch of
           EdhContinue -> matchExit []
           _ -> exitEdh ets exit EdhCaseOther
         -- { break } -- match with break
-        [StmtSrc BreakStmt _] -> case ctxMatch of
+        [StmtSrc BreakStmt _] -> case edhDeReturn ctxMatch of
           EdhBreak -> matchExit []
           _ -> exitEdh ets exit EdhCaseOther
         -- { fallthrough } -- match with fallthrough
-        [StmtSrc FallthroughStmt _] -> case ctxMatch of
+        [StmtSrc FallthroughStmt _] -> case edhDeReturn ctxMatch of
           EdhFallthrough -> matchExit []
           _ -> exitEdh ets exit EdhCaseOther
         -- { return <attr> } -- capture return value

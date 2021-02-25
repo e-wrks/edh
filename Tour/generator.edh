@@ -1,67 +1,73 @@
 
-
+# %%
 generator ss n while true n = yield n*n
 for n from ss( 3 ) do { console.info<|n; if n > 100 then break else n }
+# %#
 
 
-{
-  generator g () {
-    yield 1
-    yield 2
-    return 3
-  }
-
-  result = for n from g() do console.info <| 'got ' ++ n
-  console.info <| 'Result is: ' ++ result
+# %%
+generator g () {
+  yield 1
+  yield 2
+  return 3
 }
 
+result = for n from g() do console.info <| 'got ' ++ n
+console.info <| 'Result is: ' ++ result
+# %#
 
-{
-  generator g() {
 
-    # a `yield` expression in a generator procedure evals to:
-    #   *) `return nil` on `break` from do block of the loop
-    #   *) `return {return val}` on `return val` from do block of the loop
-    #   *) exception from do block of the loop re-thrown from its position
-
-    {
-
-      case yield 'something' of {
-        { return nil } -> {
-          console.info<| 'the do block broke the for loop'
-          return nil # cooperate nicely,
-          # or cast black magic if you wish
-        }
-        { return rtn } -> {
-          console.info<| 'early returning from do block: ' ++ rtn
-          return rtn # cooperate nicely,
-          # or cast black magic if you wish
-        }
-        { xchg'val } -> {
-          console.info<| 'the do block sent ' ++ xchg'val ++ " to generator's yield"
-        }
-        console.info<| 'the do block continued the for loop'
+# %% # Technical details
+generator g() {
+  # a `yield` expression in a generator procedure evals to:
+  #   *) `return {break}` on `break` from do block of the loop
+  #   *) `return {return val}` on `return val` from do block of the loop
+  #   *) exception from do block of the loop re-thrown from its position
+  {
+    case yield 'something' of {
+      { break } -> { # Note it should actually match `return {break}`
+        # but if the pattern is written as so, that technically matches
+        # `return nil` instead, so we just use the `{ break }` pattern
+        console.info<| 'the do block broke the for loop'
+        return nil # cooperate nicely,
+        # effectively same as `return {break}`
+        # or cast black magic if you wish
       }
-
-    } $=> { exc } -> {
-      console.warn<| 'the do block throwed an exceptin: ' ++ show( exc )
-
-      # if we do rethrow, the exception will be propagated to outer of
-      # the calling for loop
-      # rethrow
+      { return rtn } -> {
+        case rtn of {
+          { return _ } -> { pass }
+          error$ 'bug: plain return should never be result for yield'
+        }
+        console.info<| 'early returning from do block: ' ++ show(rtn)
+        return rtn # cooperate nicely,
+        # or cast black magic if you wish
+      }
+      { xchg'val } -> {
+        console.info<| 'the do block evaluated to '
+        ++ show(xchg'val) ++ " for generator's yield result"
+      }
+      console.info<| "the do block eval'ed to nil"
     }
+  } $=> { exc } -> {
+    console.warn<| 'the do block throwed an exceptin: ' ++ show( exc )
 
+    # if we do rethrow, the exception will be propagated to outer of
+    # the calling for loop
+    # rethrow
   }
 }
+# %#
 
-for _ from g() do pass
-
-for _ from g() do continue
-
-for _ from g() do break
-
-for _ from g() do return 'otherthing'
-
-for _ from g() do return nil
-
-for _ from g() do throw 'stop it!'
+# %%
+'Loop result: ' ++ show( for _ from g() do pass )
+# %%
+'Loop result: ' ++ show( for _ from g() do continue )
+# %%
+'Loop result: ' ++ show( for _ from g() do break )
+# %%
+'Loop result: ' ++ show( for _ from g() do return 'otherthing' )
+# %%
+'Loop result: ' ++ show( for _ from g() do return nil )
+# %%
+'Loop result: ' ++ show( for _ from g() do throw 'stop it!' )
+# %# #
