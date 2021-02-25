@@ -1719,7 +1719,7 @@ edhPrepareForLoop
                 -- Edh code should not use this pattern
                 throwEdh ets UsageError "double return from do-of-for?"
               EdhReturn !rtnVal ->
-                -- early return from for-from-do, the geneerator on
+                -- early return from for-from-do, the generator on
                 -- double wrapped return yielded, will unwrap one
                 -- level and return the result, effectively have the
                 -- for loop eval to return that
@@ -3603,7 +3603,7 @@ evalExpr' (ScopedBlockExpr !stmts) _docCmt !exit = evalScopedBlock stmts exit
 evalExpr' (CaseExpr !tgtExpr !branchesExpr) !docCmt !exit =
   evalExprSrc' tgtExpr docCmt $ \ !tgtVal ->
     evalCaseBranches tgtVal branchesExpr exit
--- yield stmt evals to the value of caller's `do` expression
+-- yield expr evals to the value of caller's `do` expression
 evalExpr' (YieldExpr !yieldExpr) !docCmt !exit =
   evalExprSrc' yieldExpr docCmt $ \ !valToYield !ets ->
     case edh'ctx'genr'caller $ edh'context ets of

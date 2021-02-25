@@ -754,6 +754,29 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [StmtSrc FallthroughStmt _] -> case ctxMatch of
           EdhFallthrough -> matchExit []
           _ -> exitEdh ets exit EdhCaseOther
+        -- { return <attr> } -- capture return value
+        [ StmtSrc
+            ( ReturnStmt
+                ( ExprSrc
+                    ( AttrExpr
+                        (DirectRef (AttrAddrSrc (NamedAttr !valueName) _))
+                      )
+                    _
+                  )
+              )
+            _
+          ] -> case ctxMatch of
+            EdhReturn !rtnVal ->
+              matchExit [(AttrByName valueName, noneNil rtnVal)]
+            _ -> exitEdh ets exit EdhCaseOther
+        -- { return <expr> } -- match with expected return value
+        [StmtSrc (ReturnStmt !expectExpr) _] -> case ctxMatch of
+          EdhReturn !rtnVal -> runEdhTx ets $
+            evalExprSrc expectExpr $ \ !expectVal _ets ->
+              edhNamelyEqual ets expectVal rtnVal $ \case
+                True -> matchExit []
+                False -> exitEdh ets exit EdhCaseOther
+          _ -> exitEdh ets exit EdhCaseOther
         --
 
         -- { term := value } -- definition pattern
