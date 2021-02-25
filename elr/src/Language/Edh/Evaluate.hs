@@ -1659,9 +1659,11 @@ edhPrepareForLoop
                     scopeMod
                     $ \ !gnrRtn ->
                       edhSwitchState ets $
-                        exitEdhTx exit $
-                          -- unwrap double-return, cease break/continue, etc.
-                          edhDeCaseWrap gnrRtn
+                        exitEdhTx exit $ case gnrRtn of
+                          -- unwrap double-return
+                          EdhReturn rtn@EdhReturn {} -> rtn
+                          -- cease break/continue, etc.
+                          _ -> edhDeCaseWrap gnrRtn
       loopCallGenr _ _ !callee _ _ _ =
         throwEdh etsLoopPrep EvalError $
           "bug: unexpected generator: " <> T.pack (show callee)
