@@ -217,8 +217,14 @@ parseLetStmt !si = do
   void $ keyword "let"
   !ar <- parseArgsReceiver
   equalSign
-  (!argSender, !si') <- parseArgsSender si
+  (!argSender, !si') <- parseArgsSender
   return (LetStmt ar argSender, si')
+  where
+    parseArgsSender :: Parser (ArgsPacker, IntplSrcInfo)
+    parseArgsSender =
+      parseArgsPacker si <|> do
+        (!x, !si') <- parseExpr si
+        return (ArgsPacker [SendPosArg x] (exprSrcSpan x), si')
 
 parseArgsReceiver :: Parser ArgsReceiver
 parseArgsReceiver =
@@ -319,12 +325,6 @@ parseAttrRef = do
           DirectRef <$> parseAttrAddrSrc
         ]
 
-parseArgsSender :: IntplSrcInfo -> Parser (ArgsPacker, IntplSrcInfo)
-parseArgsSender !si =
-  parseArgsPacker si <|> do
-    (!x, !si') <- parseExpr si
-    return (ArgsPacker [SendPosArg x] (exprSrcSpan x), si')
-
 parseArgsPacker :: IntplSrcInfo -> Parser (ArgsPacker, IntplSrcInfo)
 parseArgsPacker !si = do
   !startPos <- getSourcePos
@@ -388,7 +388,7 @@ parseNamespaceExpr !si = do
   !startPos <- getSourcePos
   void $ keyword "namespace"
   !pn <- parseAttrAddrSrc
-  (!argSender, !si') <- parseArgsSender si
+  (!argSender, !si') <- parseArgsPacker si
   (!body, !si'') <- parseProcBody si'
   EdhParserState _ !lexeme'end <- get
   return
