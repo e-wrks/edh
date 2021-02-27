@@ -993,8 +993,12 @@ parsePrefixExpr !si =
         (!x, !si') <- parseExpr si
         return (AtoIsoExpr x, si'),
       keyword "default" >> do
-        (!x, !si') <- parseExpr si
-        return (DefaultExpr x, si'),
+        (!apkr, !si') <-
+          optional (parseArgsPacker si) >>= \case
+            Nothing -> return (Nothing, si)
+            Just (!apkr'', !si'') -> return (Just apkr'', si'')
+        (!x, !si'') <- parseExpr si'
+        return (DefaultExpr apkr x, si''),
       -- technically accept the new keyword anywhere as an expr prefix,
       -- to better inter-op with some other languages like JavaScript
       -- todo mandate it's actually calling a class (constructor) method?

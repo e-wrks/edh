@@ -7,9 +7,10 @@ import Data.Lossless.Decimal
     decimalToInteger,
     powerDecimal,
   )
-import Language.Edh.Batteries.Data (concatProc)
+import Language.Edh.Batteries.Data
 import Language.Edh.Control
 import Language.Edh.Evaluate
+import Language.Edh.IOPD
 import Language.Edh.RtTypes
 import Prelude
 
@@ -38,8 +39,8 @@ subtProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
     EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum - rhNum)
-        _ -> exitEdhTx exit edhNA
-    _ -> exitEdhTx exit edhNA
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
 -- | operator (*)
 mulProc :: EdhIntrinsicOp
@@ -48,8 +49,8 @@ mulProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
     EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum * rhNum)
-        _ -> exitEdhTx exit edhNA
-    _ -> exitEdhTx exit edhNA
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
 -- | operator (/)
 divProc :: EdhIntrinsicOp
@@ -58,8 +59,8 @@ divProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
     EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum / rhNum)
-        _ -> exitEdhTx exit edhNA
-    _ -> exitEdhTx exit edhNA
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
 -- | operator (//) integer division, following Python
 -- http://python-history.blogspot.com/2010/08/why-pythons-integer-division-floors.html
@@ -67,14 +68,14 @@ divIntProc :: EdhIntrinsicOp
 divIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
     EdhDecimal !lhNum -> case decimalToInteger lhNum of
-      Nothing -> exitEdhTx exit edhNA
+      Nothing -> intrinsicOpReturnNA'WithLHV exit lhVal
       Just !lhi -> evalExprSrc rhExpr $ \ !rhVal -> case edhUltimate rhVal of
         EdhDecimal !rhNum -> case decimalToInteger rhNum of
-          Nothing -> exitEdhTx exit edhNA
+          Nothing -> intrinsicOpReturnNA exit lhVal rhVal
           Just !rhi ->
             exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `div` rhi
-        _ -> exitEdhTx exit edhNA
-    _ -> exitEdhTx exit edhNA
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
 -- | operator (%) modulus of integer division, following Python
 -- http://python-history.blogspot.com/2010/08/why-pythons-integer-division-floors.html
@@ -82,13 +83,13 @@ modIntProc :: EdhIntrinsicOp
 modIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
     EdhDecimal !lhNum -> case decimalToInteger lhNum of
-      Nothing -> exitEdhTx exit edhNA
+      Nothing -> intrinsicOpReturnNA'WithLHV exit lhVal
       Just lhi -> evalExprSrc rhExpr $ \ !rhVal -> case edhUltimate rhVal of
         EdhDecimal !rhNum -> case decimalToInteger rhNum of
-          Nothing -> exitEdhTx exit edhNA
+          Nothing -> intrinsicOpReturnNA exit lhVal rhVal
           Just rhi -> exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `mod` rhi
-        _ -> exitEdhTx exit edhNA
-    _ -> exitEdhTx exit edhNA
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
 -- | operator (**)
 powProc :: EdhIntrinsicOp
@@ -98,8 +99,8 @@ powProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum ->
           exitEdhTx exit (EdhDecimal $ powerDecimal lhNum rhNum)
-        _ -> exitEdhTx exit edhNA
-    _ -> exitEdhTx exit edhNA
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
 -- | operator (and)
 nullishAndProc :: EdhIntrinsicOp
@@ -126,8 +127,8 @@ logicalAndProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
     EdhBool lhBool -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhBool rhBool -> exitEdhTx exit (EdhBool $ lhBool && rhBool)
-        _ -> exitEdhTx exit edhNA
-    _ -> exitEdhTx exit edhNA
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
 -- | operator (||)
 logicalOrProc :: EdhIntrinsicOp
@@ -136,8 +137,8 @@ logicalOrProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
     EdhBool lhBool -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhBool rhBool -> exitEdhTx exit (EdhBool $ lhBool || rhBool)
-        _ -> exitEdhTx exit edhNA
-    _ -> exitEdhTx exit edhNA
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
 -- | operator (==) and (!=)
 valEqProc :: (Bool -> Bool) -> EdhIntrinsicOp
@@ -148,7 +149,11 @@ valEqProc !inversion !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
         EdhObject {} ->
           -- same object, give default result, so magic enabled,
           -- vectorized equality test to itself is possible
-          exitEdh ets exit =<< mkDefault (LitExpr $ BoolLiteral $ inversion True)
+          exitEdh ets exit
+            =<< mkDefault''
+              Nothing
+              (ArgsPack [lhVal, rhVal] odEmpty)
+              (LitExpr $ BoolLiteral $ inversion True)
         _ ->
           -- identity equal and not an object, can conclude value equal here
           exitEdh ets exit $ EdhBool $ inversion True
@@ -158,7 +163,11 @@ valEqProc !inversion !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
       Just !conclusion -> exitEdh ets exit $ EdhBool $ inversion conclusion
       -- allow magic methods to be invoked, but default to not equal
       Nothing ->
-        exitEdh ets exit =<< mkDefault (LitExpr $ BoolLiteral $ inversion False)
+        exitEdh ets exit
+          =<< mkDefault''
+            Nothing
+            (ArgsPack [lhVal, rhVal] odEmpty)
+            (LitExpr $ BoolLiteral $ inversion False)
 
 -- | operator (is)
 idEqProc :: EdhIntrinsicOp
@@ -206,5 +215,5 @@ edhCompareValue' ::
   EdhTxExit EdhValue -> EdhValue -> EdhValue -> (Ordering -> Bool) -> EdhTx
 edhCompareValue' !exit !lhVal !rhVal !cm !ets =
   edhCompareValue ets lhVal rhVal $ \case
-    Nothing -> exitEdh ets exit edhNA
+    Nothing -> runEdhTx ets $ intrinsicOpReturnNA exit lhVal rhVal
     Just !ord -> exitEdh ets exit $ EdhBool $ cm ord

@@ -196,7 +196,7 @@ getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
               (ArgsPack [attrKeyValue key] odEmpty)
               id
               $ \ !magicRtn _ets -> case edhUltimate magicRtn of
-                EdhDefault _ !exprDef !etsDef ->
+                EdhDefault _ _ !exprDef !etsDef ->
                   runEdhTx (fromMaybe ets etsDef) $
                     evalExpr (deExpr' exprDef) $
                       \ !defVal _ets -> chkMagicExit defVal
@@ -256,7 +256,7 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
           (ArgsPack [attrKeyValue key] odEmpty)
           id
           $ \ !magicRtn _ets -> case edhUltimate magicRtn of
-            EdhDefault _ !exprDef !etsDef ->
+            EdhDefault _ _ !exprDef !etsDef ->
               runEdhTx (fromMaybe ets etsDef) $
                 evalExpr (deExpr' exprDef) $
                   \ !defVal _ets -> case defVal of
@@ -295,7 +295,7 @@ setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
           (ArgsPack [attrKeyValue key, val] odEmpty)
           id
           $ \ !magicRtn _ets -> case edhUltimate magicRtn of
-            EdhDefault _ !exprDef !etsDef ->
+            EdhDefault _ _ !exprDef !etsDef ->
               runEdhTx (fromMaybe ets etsDef) $
                 evalExpr (deExpr' exprDef) $
                   \ !defVal _ets -> case defVal of
@@ -3766,9 +3766,16 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
       throwEdhTx
         EvalError
         "import from filesystem is prohibited from a sandboxed environment"
-evalExpr' (DefaultExpr (ExprSrc !exprDef _)) _docCmt !exit = \ !ets -> do
-  !u <- unsafeIOToSTM newUnique
-  exitEdh ets exit $ EdhDefault u exprDef (Just ets)
+evalExpr' (DefaultExpr Nothing (ExprSrc !exprDef _)) _docCmt !exit = \ !ets ->
+  do
+    !u <- unsafeIOToSTM newUnique
+    exitEdh ets exit $ EdhDefault u (ArgsPack [] odEmpty) exprDef (Just ets)
+evalExpr'
+  (DefaultExpr (Just (ArgsPacker !argsSndr _)) (ExprSrc !exprDef _))
+  _docCmt
+  !exit = \ !ets -> packEdhArgs ets argsSndr $ \ !apk -> do
+    !u <- unsafeIOToSTM newUnique
+    exitEdh ets exit $ EdhDefault u apk exprDef (Just ets)
 evalExpr' (InfixExpr !opSymSrc !lhExpr !rhExpr) _docCmt !exit =
   evalInfixSrc opSymSrc lhExpr rhExpr exit
 -- defining an Edh class
@@ -4188,7 +4195,7 @@ evalInfixSrc (!opSym, _opSpan) !lhExpr !rhExpr !exit !ets =
       where
         chkExitMagic :: EdhTxExit EdhValue
         chkExitMagic !result _ets = case edhUltimate result of
-          EdhDefault _ !exprDef !etsDef ->
+          EdhDefault _ _ !exprDef !etsDef ->
             -- eval default expression with possibly the designated thread state
             runEdhTx (fromMaybe ets etsDef) $
               evalExpr (deExpr' exprDef) $
@@ -4201,11 +4208,29 @@ evalInfixSrc (!opSym, _opSpan) !lhExpr !rhExpr !exit !ets =
                   _ -> exitEdh ets exit defVal
           _ -> exitEdh ets exit result
 
-    tryMagicWithDefault :: Expr -> Maybe EdhThreadState -> STM ()
-    tryMagicWithDefault !exprDef !etsDef =
-      runEdhTx ets $
-        evalExprSrc lhExpr $ \ !lhVal -> evalExprSrc rhExpr $
-          \ !rhVal _ets -> tryMagicWithDefault' exprDef etsDef lhVal rhVal
+    tryMagicWithDefault :: ArgsPack -> Expr -> Maybe EdhThreadState -> STM ()
+    tryMagicWithDefault !apkDef !exprDef !etsDef = case apkDef of
+      ArgsPack [!lhVal, !rhVal] !kwargs
+        | odNull kwargs -> tryMagicWithDefault' exprDef etsDef lhVal rhVal
+      ArgsPack [] !kwargs -> evalAsNecessary kwargs $ \ !lhVal !rhVal ->
+        tryMagicWithDefault' exprDef etsDef lhVal rhVal
+      _ -> edhValueDesc ets (EdhArgsPack apkDef) $ \ !apkDesc ->
+        throwEdh ets UsageError $ "unexpected apk for default: " <> apkDesc
+      where
+        evalAsNecessary :: KwArgs -> (EdhValue -> EdhValue -> STM ()) -> STM ()
+        evalAsNecessary !kwargs !withVals =
+          case odLookup (AttrByName "lhv") kwargs of
+            Just !lhVal -> withLHS lhVal
+            Nothing -> runEdhTx ets $
+              evalExprSrc lhExpr $ \ !lhVal _ets -> withLHS lhVal
+          where
+            withLHS :: EdhValue -> STM ()
+            withLHS !lhVal = case odLookup (AttrByName "rhv") kwargs of
+              Just !rhVal -> withVals lhVal rhVal
+              Nothing -> runEdhTx ets $
+                evalExprSrc rhExpr $ \ !rhVal _ets ->
+                  withVals lhVal rhVal
+
     tryMagicWithDefault' ::
       Expr -> Maybe EdhThreadState -> EdhValue -> EdhValue -> STM ()
     tryMagicWithDefault' !exprDef !etsDef !lhVal !rhVal =
@@ -4226,8 +4251,8 @@ evalInfixSrc (!opSym, _opSpan) !lhExpr !rhExpr !exit !ets =
         runEdhTx ets $
           iop'proc lhExpr rhExpr $ \ !rtnVal _ets ->
             case edhUltimate rtnVal of
-              EdhDefault _ !exprDef !etsDef ->
-                tryMagicWithDefault (deExpr' exprDef) etsDef
+              EdhDefault _ !apkDef !exprDef !etsDef ->
+                tryMagicWithDefault apkDef (deExpr' exprDef) etsDef
               -- exit with original thread state
               _ -> exitEdh ets exit rtnVal
       -- calling an operator procedure
@@ -4245,7 +4270,7 @@ evalInfixSrc (!opSym, _opSpan) !lhExpr !rhExpr !exit !ets =
                     op'pred
                     [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
                     $ \ !rtnVal _ets -> case edhUltimate rtnVal of
-                      EdhDefault _ !exprDef !etsDef ->
+                      EdhDefault _ _apkDef !exprDef !etsDef ->
                         tryMagicWithDefault' (deExpr' exprDef) etsDef lhVal rhVal
                       _ -> exitEdh ets exit rtnVal
           -- 3 pos-args - caller scope + lh/rh expr receiving operator
@@ -4264,8 +4289,8 @@ evalInfixSrc (!opSym, _opSpan) !lhExpr !rhExpr !exit !ets =
                   edhExpr rhu rhExpr ""
                 ]
                 $ \ !rtnVal _ets -> case edhUltimate rtnVal of
-                  EdhDefault _ !exprDef !etsDef ->
-                    tryMagicWithDefault (deExpr' exprDef) etsDef
+                  EdhDefault _ !apkDef !exprDef !etsDef ->
+                    tryMagicWithDefault apkDef (deExpr' exprDef) etsDef
                   _ -> exitEdh ets exit rtnVal
           _ ->
             throwEdh ets UsageError $
@@ -4585,7 +4610,7 @@ edhValueEqual !ets !lhVal !rhVal !exit =
     chkMagicRtn mthLoc !naExit !magicRtn = case edhUltimate magicRtn of
       EdhBool !conclusion -> exit $ Just conclusion
       EdhNil -> naExit
-      EdhDefault _ !exprDef !etsDef ->
+      EdhDefault _ _ !exprDef !etsDef ->
         runEdhTx (fromMaybe ets etsDef) $
           evalExpr (deExpr' exprDef) $
             \ !defVal _ets -> case defVal of
@@ -4796,7 +4821,7 @@ edhCompareValue !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
       where
         chkMagicRtn :: EdhTxExit EdhValue
         chkMagicRtn !magicRtn _ets = case edhUltimate magicRtn of
-          EdhDefault _ !exprDef !etsDef ->
+          EdhDefault _ _ !exprDef !etsDef ->
             runEdhTx (fromMaybe ets etsDef) $
               evalExpr (deExpr' exprDef) $
                 \ !defVal _ets -> chkMagicExit defVal

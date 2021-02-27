@@ -198,9 +198,15 @@ mkUUID :: STM UUID.UUID
 mkUUID = unsafeIOToSTM UUID.nextRandom
 
 mkDefault :: Expr -> STM EdhValue
-mkDefault !x = do
+mkDefault = mkDefault' $ ArgsPack [] odEmpty
+
+mkDefault' :: ArgsPack -> Expr -> STM EdhValue
+mkDefault' = mkDefault'' Nothing
+
+mkDefault'' :: Maybe EdhThreadState -> ArgsPack -> Expr -> STM EdhValue
+mkDefault'' !etsMaybe !apk !x = do
   !u <- unsafeIOToSTM newUnique
-  return $ EdhDefault u x Nothing
+  return $ EdhDefault u apk x etsMaybe
 
 -- | A list in Edh is a multable, singly-linked, prepend list.
 data List = List !Unique !(TVar [EdhValue])
@@ -979,8 +985,12 @@ data EdhValue
     --
     -- - @NA := default nil@ can be used to prefer an even more deferred default
     --   if any exists, then an all-nil default chain will finally result in
-    --   @nil@, i.e. non-exist
-    EdhDefault !Unique !Expr !(Maybe EdhThreadState)
+    --   a conclusion of not/applicable at all
+    --
+    -- the apk can be used to pass back intermediate result values evaluated
+    -- from expressions, e.g lhs and rhs of an infix operator, to avoid
+    -- duplicate evaluation of expressions involved
+    EdhDefault !Unique !ArgsPack !Expr !(Maybe EdhThreadState)
   | -- | event sink
     EdhSink !EventSink
   | -- | named value, a.k.a. term definition
@@ -1016,9 +1026,10 @@ instance Show EdhValue where
   show (EdhYield v) = "<yield: " ++ show v ++ ">"
   show (EdhReturn v) = "<return: " ++ show v ++ ">"
   show (EdhOrd ord) = show ord
-  show (EdhDefault _ x _) = case x of
-    ExprWithSrc _ [SrcSeg src] -> "default " <> T.unpack src
-    _ -> "<default: " ++ show x ++ ">"
+  show (EdhDefault _ apk x _) = case x of
+    ExprWithSrc _ [SrcSeg src] ->
+      "default " <> show apk <> T.unpack src
+    _ -> "<default: " ++ show apk ++ show x ++ ">"
   show (EdhSink v) = show v
   show (EdhNamedValue n v@EdhNamedValue {}) =
     -- Edh operators are all left-associative, parenthesis needed
@@ -1066,7 +1077,7 @@ instance Eq EdhValue where
   EdhYield x'v == EdhYield y'v = x'v == y'v
   EdhReturn x'v == EdhReturn y'v = x'v == y'v
   EdhOrd x == EdhOrd y = x == y
-  EdhDefault x'u _ _ == EdhDefault y'u _ _ = x'u == y'u
+  EdhDefault x'u _ _ _ == EdhDefault y'u _ _ _ = x'u == y'u
   EdhSink x == EdhSink y = x == y
   EdhNamedValue x'n x'v == EdhNamedValue y'n y'v = x'n == y'n && x'v == y'v
   EdhNamedValue _ x'v == y = x'v == y
@@ -1105,7 +1116,7 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhYield v) = s `hashWithSalt` (-7 :: Int) `hashWithSalt` v
   hashWithSalt s (EdhReturn v) = s `hashWithSalt` (-8 :: Int) `hashWithSalt` v
   hashWithSalt s (EdhOrd o) = s `hashWithSalt` (-10 :: Int) `hashWithSalt` o
-  hashWithSalt s (EdhDefault u _ _) =
+  hashWithSalt s (EdhDefault u _ _ _) =
     s `hashWithSalt` (-9 :: Int) `hashWithSalt` u
   hashWithSalt s (EdhSink x) = hashWithSalt s x
   hashWithSalt s (EdhNamedValue _ v) = hashWithSalt s v
@@ -1160,7 +1171,11 @@ edhNothing = EdhNamedValue "Nothing" EdhNil
 edhNA :: EdhValue
 edhNA =
   EdhNamedValue "NA" $
-    EdhDefault (unsafePerformIO newUnique) (LitExpr NilLiteral) Nothing
+    EdhDefault
+      (unsafePerformIO newUnique)
+      (ArgsPack [] odEmpty)
+      (LitExpr NilLiteral)
+      Nothing
 {-# NOINLINE edhNA #-}
 
 -- | With `nil` converted to `None` so the result will never be `nil`.
@@ -1506,7 +1521,7 @@ data Expr
   | CallExpr !ExprSrc !ArgsPacker
   | InfixExpr !OpSymSrc !ExprSrc !ExprSrc
   | -- specify a default by Edh code
-    DefaultExpr !ExprSrc
+    DefaultExpr !(Maybe ArgsPacker) !ExprSrc
   | -- to support interpolation within expressions, with source form
     ExprWithSrc !ExprSrc ![SourceSeg]
   | IntplExpr !ExprSrc
