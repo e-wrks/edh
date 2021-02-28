@@ -58,6 +58,20 @@ decimalIsNaN (Decimal d _e n) = d == 0 && n == 0
 decimalIsInf :: Decimal -> Bool
 decimalIsInf (Decimal d _e n) = d == 0 && n /= 0
 
+normalizeInteger :: Integer -> Decimal
+normalizeInteger i = Decimal d e $ if neg then - n else n
+  where
+    neg = i < 0
+    p = abs i
+
+    (p1, !c5) = countPrimeFactor 5 p
+    (p2, !c2) = countPrimeFactor 2 p1
+
+    (d, e, n)
+      | c2 == c5 = (1, c2, p2)
+      | c2 < c5 = (2 ^ (c5 - c2), c5, p2)
+      | otherwise = (5 ^ (c2 - c5), c2, p2) -- c2 > c5
+
 normalizeDecimal :: Decimal -> Decimal
 normalizeDecimal (Decimal d e n)
   | d == 0 = Decimal 0 0 $ if n == 0 then 0 else if n < 0 then (-1) else 1
@@ -67,16 +81,42 @@ normalizeDecimal (Decimal d e n)
     neg = if n < 0 then d > 0 else d < 0
     pn = abs n
     pd = abs d
-    nsn =
-      -- normalized scientific numerator
-      Scientific.normalize $ Scientific.scientific (pn * pn) 0
-    n' = Scientific.coefficient nsn
-    nsd =
-      -- normalized scientific denominator
-      Scientific.normalize $ Scientific.scientific (pd * pn) $ fromInteger (- e)
-    d' = Scientific.coefficient nsd
-    e' =
-      fromIntegral $ Scientific.base10Exponent nsn - Scientific.base10Exponent nsd
+
+    (pn', n5) = countPrimeFactor 5 pn
+    (pn'', n2) = countPrimeFactor 2 pn'
+
+    (pd', d5) = countPrimeFactor 5 pd
+    (pd'', d2) = countPrimeFactor 2 pd'
+
+    (pn5, pd5)
+      | n5 > d5 = (n5 - d5, 0)
+      | otherwise = (0, d5 - n5)
+    (pn2, pd2)
+      | n2 > d2 = (n2 - d2, 0)
+      | otherwise = (0, d2 - n2)
+
+    (d', e', n')
+      | pd'' == 1 =
+        let (ea1, nm1, pd5', pd2') =
+              if pn5 > pn2
+                then (pn5, 1, pd5, pd2 + pn5 - pn2)
+                else (pn2, 1, pd5 + pn2 - pn5, pd2)
+            (ea2, nm2, dm) =
+              if pd5' > pd2'
+                then (- pd5', 2 ^ (pd5' - pd2'), 1)
+                else (- pd2', 5 ^ (pd2' - pd5'), 1)
+         in (pd'' * dm, e + ea1 + ea2, pn'' * nm1 * nm2)
+      | otherwise =
+        let (ea1, nm) =
+              if pn5 > pn2
+                then (pn2, 5 ^ (pn5 - pn2))
+                else (pn5, 2 ^ (pn2 - pn5))
+            (ea2, dm) =
+              if pd5 > pd2
+                then (- pd2, 5 ^ (pd5 - pd2))
+                else (- pd5, 2 ^ (pd2 - pd5))
+         in (pd'' * dm, e + ea1 + ea2, pn'' * nm)
+
     (n'', d'') = simplify n' d'
 
     simplify :: Integer -> Integer -> (Integer, Integer)
@@ -119,7 +159,7 @@ instance Hashable Decimal where
     s `hashWithSalt` d `hashWithSalt` e `hashWithSalt` n
 
 instance Num Decimal where
-  fromInteger = uncurry (Decimal 1) . (decodeRadix'10 0 . fromIntegral)
+  fromInteger = normalizeInteger
   (+) = addDecimal
   (*) = mulDecimal
   abs (Decimal d e n) = Decimal (abs d) e (abs n)
@@ -265,10 +305,9 @@ showDecimal v
       "" -> ""
       ds_' -> '.' : ds_'
 
-decodeRadix'10 :: Integer -> Integer -> (Integer, Integer)
-decodeRadix'10 e_ n_
-  | n_ == 0 = (0, 0)
-  | r == 0 = decodeRadix'10 (e_ + 1) n_'
-  | otherwise = (e_, n_)
-  where
-    (n_', r) = quotRem n_ 10
+countPrimeFactor :: Integer -> Integer -> (Integer, Integer)
+countPrimeFactor !f !i =
+  let (q, r) = quotRem i f
+   in case r of
+        0 -> let (i', r') = countPrimeFactor f q in (i', r' + 1)
+        _ -> (i, 0)

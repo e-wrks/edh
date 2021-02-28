@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name: lossless-decimal
-version: 0.1.2.0
+version: 0.2.0.0
 license: BSD-3-Clause
 copyright: Compl Yue
 maintainer: compl.yue@icloud.com
@@ -26,8 +26,23 @@ library
     exposed-modules:
         Data.Lossless.Decimal
     hs-source-dirs: src
-    default-language: Haskell2010
-    default-extensions: NoImplicitPrelude OverloadedStrings
+    default-language:   Haskell2010
+    default-extensions:
+        NoImplicitPrelude
+        BangPatterns
+        ConstraintKinds
+        DataKinds
+        FlexibleContexts
+        FlexibleInstances
+        GADTs
+        KindSignatures
+        LambdaCase
+        OverloadedStrings
+        ScopedTypeVariables
+        TupleSections
+        TypeApplications
+        TypeOperators
+        ViewPatterns
     ghc-options: -Wall
     build-depends:
         base >=4.12 && <5
