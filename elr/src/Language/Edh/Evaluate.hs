@@ -1231,7 +1231,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                     -- underscore, the user may just want its side-effect
                     pkArgs xs exit
                   _ -> resolveEdhAttrAddr ets kwAddr $ \ !kwKey -> do
-                    iopdInsert kwKey (noneNil $ edhDeCaseWrap val) kwIOPD
+                    edhSetValue kwKey (edhDeCaseWrap val) kwIOPD
                     pkArgs xs exit
   pkArgs argSenders $ \ !posArgs -> do
     !kwArgs <- iopdSnapshot kwIOPD
