@@ -306,6 +306,7 @@ showDecimal v
       ds_' -> '.' : ds_'
 
 countPrimeFactor :: Integer -> Integer -> (Integer, Integer)
+countPrimeFactor _ 0 = (0, 0)
 countPrimeFactor !f !i =
   let (q, r) = quotRem i f
    in case r of
