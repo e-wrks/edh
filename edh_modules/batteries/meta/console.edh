@@ -86,14 +86,20 @@ export namespace console () export {
     pass
   }
 
+  log :: ( *Any, level= DecimalType, **Any ) -> nil
+  {##
+   # log messages to stderr
+   #}
+  method log( *args, level= console.info, **kwargs ) void {
+  }
 
-  print :: (* Any, **Any ) -> nil
+  print :: ( *Any, eol= StringType, **Any ) -> nil
   {##
    # print things to stdout
    #
    # `repr` will be used to convert each argument to string form for the print
    #}
-  method print(* args, **kwargs ) void {
+  method print( *args, eol= '\n', **kwargs ) void {
   }
 
 

@@ -2598,14 +2598,10 @@ importFromApk !tgtEnt !argsRcvr !fromApk !done !ets =
            in logger
                 30 -- warning
                 (Just $ prettySrcLoc $ contextSrcLoc ctx)
-                ( ArgsPack
-                    [ EdhString $
-                        "bad artifact as "
-                          <> edhExportsMagicName
-                          <> ", it is a "
-                          <> badDesc
-                    ]
-                    odEmpty
+                ( "bad artifact as "
+                    <> edhExportsMagicName
+                    <> ", it is a "
+                    <> badDesc
                 )
     done
   where
@@ -3553,7 +3549,7 @@ evalExpr' (PrefixExpr Guard !expr') !docCmt !exit = \ !ets -> do
   (consoleLogger $ edh'world'console world)
     30
     (Just $ prettySrcLoc $ contextSrcLoc $ edh'context ets)
-    (ArgsPack [EdhString "standalone guard treated as plain value."] odEmpty)
+    "standalone guard treated as plain value."
   runEdhTx ets $ evalExprSrc' expr' docCmt exit
 evalExpr' (VoidExpr !expr) !docCmt !exit =
   evalExprSrc' expr docCmt $ \case
@@ -5444,9 +5440,7 @@ driveEdhProgram !haltResult !world !prog = do
                                 <> " forked Edh "
                                 <> show forkeeThId
                         )
-                        $ ArgsPack
-                          [EdhString $ getEdhErrCtx 0 etsForker]
-                          odEmpty
+                        $ getEdhErrCtx 0 etsForker
                     keepForking trapNo
         where
           -- derive thread state for the forkee thread
@@ -5738,7 +5732,7 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
                             <> show secCost
                             <> " second(s)"
                     )
-                    $ ArgsPack [EdhString $ getEdhErrCtx 0 etsDone] odEmpty
+                    $ getEdhErrCtx 0 etsDone
 
               !trapNo <- readIORef trapReq
               unless (trapNo == trapDone') $ do
@@ -5755,7 +5749,7 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
                             <> show thId
                             <> " tx done"
                     )
-                    $ ArgsPack [EdhString $ getEdhErrCtx 0 etsDone] odEmpty
+                    $ getEdhErrCtx 0 etsDone
 
               case result of
                 -- terminate this thread

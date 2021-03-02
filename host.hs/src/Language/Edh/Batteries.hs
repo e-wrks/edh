@@ -121,20 +121,10 @@ defaultEdhConsole !inputSettings = do
           $ \() -> TIO.hPutStr stderr lr
         logPrinter
       logger :: EdhLogger
-      logger !level !srcLoc !logArgs = do
+      logger !level !srcLoc !logPayload = do
         void $ tryTakeTMVar logIdle
-        case logArgs of
-          ArgsPack [!argVal] !kwargs
-            | odNull kwargs ->
-              writeTQueue logQueue $! logPrefix <> logString argVal <> "\n"
-          _ ->
-            -- todo: format structured log record,
-            -- with some log parsers in mind
-            writeTQueue logQueue $! logPrefix <> T.pack (show logArgs) <> "\n"
+        writeTQueue logQueue $! logPrefix <> logPayload <> "\n"
         where
-          logString :: EdhValue -> Text
-          logString (EdhString s) = s
-          logString v = T.pack $ show v
           logPrefix :: Text
           logPrefix =
             ( case srcLoc of
@@ -548,6 +538,7 @@ installEdhBatteries world =
                 [ (EdhMethod, "exit", wrapHostProc conExitProc),
                   (EdhMethod, "readSource", wrapHostProc conReadSourceProc),
                   (EdhMethod, "readCommand", wrapHostProc conReadCommandProc),
+                  (EdhMethod, "log", wrapHostProc conLogProc),
                   (EdhMethod, "print", wrapHostProc conPrintProc),
                   (EdhMethod, "now", wrapHostProc conNowProc),
                   (EdhGnrtor, "everyMicros", wrapHostProc conEveryMicrosProc),

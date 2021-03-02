@@ -580,7 +580,7 @@ data EdhInput = EdhInput
   }
   deriving (Eq, Show)
 
-type EdhLogger = LogLevel -> Maybe Text -> ArgsPack -> STM ()
+type EdhLogger = LogLevel -> Maybe Text -> Text -> STM ()
 
 type LogLevel = Int
 
