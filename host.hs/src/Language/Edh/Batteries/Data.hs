@@ -899,14 +899,6 @@ prpdProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
             exitEdh ets exit rhVal
           _ -> exitEdhTx exit edhNA
 
--- | operator (<-) - event publisher
-evtPubProc :: EdhIntrinsicOp
-evtPubProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
-  case edhUltimate lhVal of
-    EdhSink !es -> evalExprSrc rhExpr $
-      \ !rhVal -> publishEvent es (edhDeCaseWrap rhVal) exit
-    _ -> exitEdhTx exit edhNA
-
 -- | operator (>>) - list reverse prepender
 lstrvrsPrpdProc :: EdhIntrinsicOp
 lstrvrsPrpdProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->

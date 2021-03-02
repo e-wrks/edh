@@ -2,19 +2,20 @@ module Language.Edh.Batteries.Evt where
 
 -- import           Debug.Trace
 
-import Control.Concurrent.STM (readTVar)
-import Language.Edh.Args (mandatoryArg, type (!:))
-import Language.Edh.Control (EdhErrorTag (UsageError))
-import Language.Edh.Evaluate (edhValueDesc, throwEdh)
+import Control.Concurrent.STM
+import Language.Edh.Args
+import Language.Edh.Control
+import Language.Edh.Evaluate
 import Language.Edh.RtTypes
-  ( EdhHostProc,
-    EdhValue (EdhBool, EdhSink),
-    EventSink (evs'mrv, evs'subc),
-    edhUltimate,
-    exitEdh,
-    nil,
-  )
 import Prelude
+
+-- | operator (<-) - event publisher
+evtPubProc :: EdhIntrinsicOp
+evtPubProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  case edhUltimate lhVal of
+    EdhSink !es -> evalExprSrc rhExpr $
+      \ !rhVal -> publishEvent es (edhDeCaseClose rhVal) exit
+    _ -> exitEdhTx exit edhNA
 
 -- | virtual property <sink>.subseq
 --
