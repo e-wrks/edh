@@ -997,8 +997,8 @@ parsePrefixExpr !si =
           optional (parseArgsPacker si) >>= \case
             Nothing -> return (Nothing, si)
             Just (!apkr'', !si'') -> return (Just apkr'', si'')
-        (!x, !si'') <- parseExpr si'
-        return (DefaultExpr apkr x, si''),
+        !x <- parseExprWithSrc 
+        return (DefaultExpr apkr x, si'),
       -- technically accept the new keyword anywhere as an expr prefix,
       -- to better inter-op with some other languages like JavaScript
       -- todo mandate it's actually calling a class (constructor) method?
@@ -1040,6 +1040,13 @@ parseExprLit :: Parser ExprSrc
 parseExprLit = do
   !startPos <- getSourcePos
   void $ keyword "expr"
+  parseExprWithSrc' startPos
+
+parseExprWithSrc :: Parser ExprSrc
+parseExprWithSrc = getSourcePos >>= parseExprWithSrc'
+
+parseExprWithSrc' :: SourcePos -> Parser ExprSrc
+parseExprWithSrc' !startPos = do
   !s <- getInput
   !o <- getOffset
   (!x, (!s', !o', !sss)) <- parseExprPrec Nothing (-20) (s, o, [])

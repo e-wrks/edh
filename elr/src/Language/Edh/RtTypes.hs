@@ -1028,8 +1028,8 @@ instance Show EdhValue where
   show (EdhOrd ord) = show ord
   show (EdhDefault _ apk x _) = case x of
     ExprWithSrc _ [SrcSeg src] ->
-      "default " <> show apk <> T.unpack src
-    _ -> "<default: " ++ show apk ++ show x ++ ">"
+      "default " <> show apk <> " " <> T.unpack src
+    _ -> "<default: " ++ show apk ++ " " ++ show x ++ ">"
   show (EdhSink v) = show v
   show (EdhNamedValue n v@EdhNamedValue {}) =
     -- Edh operators are all left-associative, parenthesis needed
@@ -1174,7 +1174,7 @@ edhNA =
     EdhDefault
       (unsafePerformIO newUnique)
       (ArgsPack [] odEmpty)
-      (LitExpr NilLiteral)
+      (ExprWithSrc (ExprSrc (LitExpr NilLiteral) noSrcRange) [SrcSeg "nil"])
       Nothing
 {-# NOINLINE edhNA #-}
 
