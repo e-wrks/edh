@@ -5604,7 +5604,7 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
     terminateThread :: IO () -> IO ()
     terminateThread !done = do
       !doneVar <- newIORef done
-      !tqTerm <- newTBQueueIO 10
+      !tqTerm <- newTBQueueIO 50
       let driveOut :: IO ()
           driveOut =
             atomically (nextTaskFromQueue tqTerm) >>= \case
