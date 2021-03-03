@@ -1,5 +1,5 @@
 {##
- # this module is meant to be imported by an Edh language server, into every
+ # this module is meant to be imported by an Đ language server, into every
  # meta world's root scope at analysis time, reflecting definition information
  # of the corresponding host artifacts at runtime.
  #
@@ -11,68 +11,73 @@
 if meta'only!false then export {
 
   {##
-   # thrown to the main Edh thread, when an Edh program is halted
-   #
-   # can also be thrown from any Edh thread by application code to halt the
-   # whold program
+   # Thrown to the main Đ thread, when an Đ program is halted
+
+Can also be thrown from any Đ thread by application code to halt the whold program
+
    #}
   data ProgramHalt ( haltValue = None ) pass
 
   {##
-   # thrown to an Edh thread when the whole Edh program has been halted
+   # Thrown to an Đ thread when it has been terminated
+
+Note that all forkee threads of the main thread of an Đ program, either directly or indirectly forked, will be terminated once the program has been halted, usually because the main thread is terminated.
+
+Also note that an exception occurred in any of the forkee threads, if uncaught, will be rethrown to the main thread, usually causing program halt.
+
    #}
   data ThreadTerminate() pass
 
   {##
-   # generic IO error occurred at runtime
+   # Generic IO error occurred at runtime
    #}
   data IOError( message, ***details ) pass
 
   {##
-   # generic peer error occurred at runtime
+   # Generic peer error occurred at runtime
    #}
   data PeerError( peerSite, details ) pass
 
   {##
-   # root class for application/framework/library defined exceptions
+   # Root class for application/framework/library defined exceptions
    #}
   data Exception( message, context='<stack-trace>', ***details ) pass
 
   {##
-   # generic package error occurred at runtime
+   # Generic package error occurred at runtime
    #}
   data PackageError( message, context='<stack-trace>', ***details ) pass
 
   {##
-   # parsing error occurred at runtime
+   # Parsing error occurred at runtime
    #}
   data ParseError( message, context='<stack-trace>', ***details ) pass
 
   {##
-   # generic evaluation error occurred at runtime
+   # Generic evaluation error occurred at runtime
    #}
   data EvalError( message, context='<stack-trace>', ***details ) pass
 
   {##
-   # generic usage error occurred at runtime
+   # Generic usage error occurred at runtime
    #}
   data UsageError( message, context='<stack-trace>', ***details ) pass
 
   {##
-   # report an unexpected error
+   # Report an unexpected error
    #}
   method error( message, context='<stack-trace>', ***details ) pass
 
   {##
-   # check the assertion holds when debugging
-   #
-   # assertions are not evaluated when not debugging, they still serve good
-   # documentation anyway
+   # Check the assertion holds when debugging
+
+Assertions are not evaluated when not debugging, they still serve good documentation anyway
+
    #}
   method assert( assertion, msg=None, ***details ) pass
 
 }
 
 
-# this module should never get imported by any Edh interpreter for the run
+# this module should never get imported by any Đ interpreter for the run
 error( 'Executing meta module: ' ++ __name__ )
