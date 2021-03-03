@@ -34,8 +34,12 @@ module Language.Edh.EHI
     prettySrcRange,
     lspSrcPosFromParsec,
     lspSrcLocFromParsec,
-    contextSrcLoc,
     edhScopeSrcLoc,
+    contextScope,
+    contextSrcLoc,
+    callingScope,
+    callingSrcLoc,
+    callingFrame,
 
     -- * Event processing
     EventSink (..),
@@ -81,8 +85,6 @@ module Language.Edh.EHI
     installedEdhModule,
     importEdhModule,
     moduleContext,
-    contextScope,
-    callingScope,
     parseEdh,
     parseEdh',
     evalEdh,

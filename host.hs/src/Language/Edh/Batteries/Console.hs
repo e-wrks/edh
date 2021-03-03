@@ -57,7 +57,7 @@ conLogProc
         exit
     where
       !ctx = edh'context ets
-      (SrcLoc !doc (SrcRange !stmt'start _stmt'end)) = contextSrcLoc ctx
+      (SrcLoc !doc (SrcRange !stmt'start _stmt'end)) = callingSrcLoc ctx
 
       evalMsg !exit' = exit' $ case args of
         [!val] | odNull kwargs -> val
@@ -128,7 +128,7 @@ defaultEdhPS1, defaultEdhPS2 :: Text
 defaultEdhPS1 = "Đ: "
 defaultEdhPS2 = "Đ| "
 
--- | host method console.readSource(ps1="(db)Đ: ", ps2="(db)Đ| ")
+-- | host method console.readSource(ps1="Đ: ", ps2="Đ| ")
 conReadSourceProc ::
   "ps1" ?: Text -> "ps2" ?: Text -> "locInfo" ?: Bool -> EdhHostProc
 conReadSourceProc

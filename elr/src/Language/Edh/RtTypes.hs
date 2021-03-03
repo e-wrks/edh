@@ -258,9 +258,12 @@ contextSrcLoc = edh'exe'src'loc . edh'ctx'tip
 callingScope :: Context -> Scope
 callingScope = edh'frame'scope . callingFrame
 
+callingSrcLoc :: Context -> SrcLoc
+callingSrcLoc = edh'exe'src'loc . callingFrame
+
 callingFrame :: Context -> EdhCallFrame
 callingFrame (Context !tip !stack _ _ _ _ _) = case stack of
-  callerFrame : _ -> callerFrame
+  f : _ -> f
   _ -> tip
 
 -- the yield receiver, a.k.a. the caller's continuation
