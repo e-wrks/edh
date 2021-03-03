@@ -1,5 +1,5 @@
 {##
- # this module is meant to be imported by an Edh language server, into every
+ # this module is meant to be imported by an Đ language server, into every
  # meta world's root scope at analysis time, reflecting definition information
  # of the corresponding host artifacts at runtime.
  #
@@ -10,52 +10,41 @@
 
 import * './exc'
 
-# this module should never get imported by any Edh interpreter for the run
+# this module should never get imported by any Đ interpreter for the run
 error( 'Executing meta module: ' ++ __name__ )
 
 
 {##
- # Console is a namespace containing constants, methods for interaction
- # with the os environment.
+ # Console is a namespace containing constants, methods for interaction with the os environment.
  #}
 export namespace console () export {
-  {##
-   # Constant for logging to target at DEBUG level
-   #}
+  {## Constant for logging to target at DEBUG level #}
   debug = 10
-  {##
-   # Constant for logging to target at INFO level
-   #}
+  {## Constant for logging to target at INFO level #}
   info = 20
-  {##
-   # Constant for logging to target at WARNING level
-   #}
+  {## Constant for logging to target at WARNING level #}
   warn = 30
-  {##
-   # Constant for logging to target at ERROR level
-   #}
+  {## Constant for logging to target at ERROR level #}
   error = 40
-  {##
-   # Constant for logging to target at FATAL level
-   #}
+  {## Constant for logging to target at FATAL level #}
   fatal = 50
 
   logLevel :: int!DecimalType
   {##
    # Configured logging level by the environment
-   #
-   # Controlled by environment variable `EDH_LOG_LEVEL`
+
+Controlled by os environment variable `EDH_LOG_LEVEL`
+
    #}
   logLevel = this.info # the default
 
 
   exit :: ( Any ) -> { throw ProgramHalt }
   {##
-   # halt current Edh program with an optional value
-   #
-   # if the program is run by the main thread of an Edh interpreter process,
-   # this will quit the process with an exit code from `haltValue` if it is an
-   # integer number.
+   # Halt current Đ program with an optional value
+
+If the program is run by the main thread of an Đ interpreter process, this will quit the process with an exit code from `haltValue` if it is an integer number.
+
    #}
   method exit( haltValue=None ) {
     throw ProgramHalt( haltValue )
@@ -64,7 +53,7 @@ export namespace console () export {
 
   readSource :: ( StringType || None, String || None ) -> StringType
   {##
-   # read a piece of source code from stdin
+   # Read a piece of source code from stdin
    #}
   method readSource( ps1= "Đ: ", ps2= "Đ| " ) {
     '<text-read-from-stdin>'
@@ -75,12 +64,10 @@ export namespace console () export {
     StringType || None, String || None, ObjectType || None,
   ) -> Any
   {##
-   # read a piece of source code from stdin, evaluate as Edh source and return
-   # the result
-   #
-   # `inScopeOf` can be specified for the contextual scope, or the source will
-   # be evaluated as in the caller's scope. it can be a reflective scope object
-   # or a vanilla Edh object (including namespace objects and module objects)
+   # Read a piece of source code from stdin, evaluate as Đ source and return the result
+
+`inScopeOf` can be specified for the contextual scope, or the source will be evaluated as in the caller's scope. it can be a reflective scope object or a vanilla Đ object (including namespace objects and module objects)
+
    #}
   method readCommand( ps1= "Đ: ", ps2= "Đ| ", inScopeOf= None ) {
     pass
@@ -88,16 +75,17 @@ export namespace console () export {
 
   log :: ( *Any, level= DecimalType, **Any ) -> nil
   {##
-   # log messages to stderr
+   # Log messages to stderr
    #}
   method log( *args, level= console.info, **kwargs ) void {
   }
 
   print :: ( *Any, eol= StringType, **Any ) -> nil
   {##
-   # print things to stdout
-   #
-   # `repr` will be used to convert each argument to string form for the print
+   # Print things to stdout
+
+`repr` will be used to convert each non-string argument to string form for the print
+
    #}
   method print( *args, eol= '\n', **kwargs ) void {
   }
@@ -105,8 +93,7 @@ export namespace console () export {
 
   now :: () -> int!DecimalType
   {##
-   # obtain nanoseconds ellapsed since epoch in UTC, from the underlying
-   # operating system
+   # Obtain nanoseconds ellapsed since epoch in UTC, from the underlying operating system
    #}
   method now() 0
 
@@ -115,10 +102,10 @@ export namespace console () export {
   :: ( s!int!DecimalType, BoolType || None )
   -> [ ns!int!DecimalType ] =>* nil
   {##
-   # yield `this.now()` at the specified interval
-   #
-   # the first yield may wait an interval or not, according to how `wait1st` is
-   # specified
+   # Yield `this.now()` at the specified interval
+
+The first yield may wait an interval or not, according to how `wait1st` is specified
+
    #}
   generator everySeconds( interval, wait1st=true ) void {
     yield this.now()
@@ -129,9 +116,9 @@ export namespace console () export {
   -> [ ns!int!DecimalType ] =>* nil
   {##
    # yield `this.now()` at the specified interval
-   #
-   # the first yield may wait an interval or not, according to how `wait1st` is
-   # specified
+
+The first yield may wait an interval or not, according to how `wait1st` is specified
+
    #}
   generator everyMicros( interval, wait1st=true ) void {
     yield this.now()
@@ -142,9 +129,9 @@ export namespace console () export {
   -> [ ns!int!DecimalType ] =>* nil
   {##
    # yield `this.now()` at the specified interval
-   #
-   # the first yield may wait an interval or not, according to how `wait1st` is
-   # specified
+
+The first yield may wait an interval or not, according to how `wait1st` is specified
+
    #}
   generator everyMillis( interval, wait1st=true ) void {
     yield this.now()
