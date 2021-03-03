@@ -5614,64 +5614,66 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
                 readTVarIO defers >>= driveDefers toBeDone
 
               -- note during actIO, perceivers won't fire
-              Just (EdhDoIO !ets !actIO) ->
-                try actIO >>= \case
-                  -- terminate this thread, we are already doing it
-                  Right True -> driveOut
-                  -- continue running rest cleanup txs
-                  Right False -> driveOut
-                  Left (e :: SomeException) -> case edhKnownError e of
-                    -- terminate this thread, we are already doing it
-                    Just ThreadTerminate -> driveOut
-                    -- uncaught error on cleanup, schedule it to be finally
-                    -- propagated to main thread
-                    -- todo this overwrites previous errors when multiple occurred,
-                    -- is it okay?
-                    Just !err -> do
-                      writeIORef doneVar (throwIO err)
-                      driveOut
-
-                    -- give a chance for the Edh code to handle an unknown exception
-                    Nothing -> do
-                      atomically $
-                        edhWrapException e >>= \ !exo ->
-                          writeTBQueue tqTerm $
-                            EdhDoSTM ets $
-                              False
-                                <$ edhThrow
-                                  ets
-                                  (EdhObject exo)
+              Just (EdhDoIO !etsOrig !actIO) ->
+                let !ets = etsOrig {edh'task'queue = tqTerm}
+                 in try actIO >>= \case
+                      -- terminate this thread, we are already doing it
+                      Right True -> driveOut
                       -- continue running rest cleanup txs
-                      driveOut
-              Just (EdhDoSTM !ets !actSTM) ->
-                try (goSTM ets actSTM) >>= \case
-                  -- terminate this thread, we are already doing it
-                  Right True -> driveOut
-                  -- continue running rest cleanup txs
-                  Right False -> driveOut
-                  Left (e :: SomeException) -> case edhKnownError e of
-                    -- terminate this thread, we are already doing it
-                    Just ThreadTerminate -> driveOut
-                    -- uncaught error on cleanup, schedule it to be finally
-                    -- propagated to main thread
-                    -- todo this overwrites previous errors when multiple occurred,
-                    -- is it okay?
-                    Just !err -> do
-                      writeIORef doneVar (throwIO err)
-                      driveOut
+                      Right False -> driveOut
+                      Left (e :: SomeException) -> case edhKnownError e of
+                        -- terminate this thread, we are already doing it
+                        Just ThreadTerminate -> driveOut
+                        -- uncaught error on cleanup, schedule it to be finally
+                        -- propagated to main thread
+                        -- todo this overwrites previous errors when multiple occurred,
+                        -- is it okay?
+                        Just !err -> do
+                          writeIORef doneVar (throwIO err)
+                          driveOut
 
-                    -- give a chance for the Edh code to handle an unknown exception
-                    Nothing -> do
-                      atomically $
-                        edhWrapException e >>= \ !exo ->
-                          writeTBQueue tqTerm $
-                            EdhDoSTM ets $
-                              False
-                                <$ edhThrow
-                                  ets
-                                  (EdhObject exo)
+                        -- give a chance for the Edh code to handle an unknown exception
+                        Nothing -> do
+                          atomically $
+                            edhWrapException e >>= \ !exo ->
+                              writeTBQueue tqTerm $
+                                EdhDoSTM ets $
+                                  False
+                                    <$ edhThrow
+                                      ets
+                                      (EdhObject exo)
+                          -- continue running rest cleanup txs
+                          driveOut
+              Just (EdhDoSTM !etsOrig !actSTM) ->
+                let !ets = etsOrig {edh'task'queue = tqTerm}
+                 in try (goSTM ets actSTM) >>= \case
+                      -- terminate this thread, we are already doing it
+                      Right True -> driveOut
                       -- continue running rest cleanup txs
-                      driveOut
+                      Right False -> driveOut
+                      Left (e :: SomeException) -> case edhKnownError e of
+                        -- terminate this thread, we are already doing it
+                        Just ThreadTerminate -> driveOut
+                        -- uncaught error on cleanup, schedule it to be finally
+                        -- propagated to main thread
+                        -- todo this overwrites previous errors when multiple occurred,
+                        -- is it okay?
+                        Just !err -> do
+                          writeIORef doneVar (throwIO err)
+                          driveOut
+
+                        -- give a chance for the Edh code to handle an unknown exception
+                        Nothing -> do
+                          atomically $
+                            edhWrapException e >>= \ !exo ->
+                              writeTBQueue tqTerm $
+                                EdhDoSTM ets $
+                                  False
+                                    <$ edhThrow
+                                      ets
+                                      (EdhObject exo)
+                          -- continue running rest cleanup txs
+                          driveOut
 
       atomically (edhWrapException $ toException ThreadTerminate)
         >>= \ !termExObj ->
@@ -5682,14 +5684,20 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
                   -- all pending txs got a ThreadTerminate() thrown in,
                   -- drive their consequences out
                   Nothing -> driveOut
-                  Just (EdhDoIO !ets _actIO) -> do
-                    atomically $
-                      edhThrow ets {edh'task'queue = tqTerm} termExVal
-                    throwIn
-                  Just (EdhDoSTM !ets _actSTM) -> do
-                    atomically $
-                      edhThrow ets {edh'task'queue = tqTerm} termExVal
-                    throwIn
+                  Just (EdhDoIO !etsOrig _actIO) ->
+                    let !ets = etsOrig {edh'task'queue = tqTerm}
+                     in do
+                          atomically $
+                            writeTBQueue tqTerm $
+                              EdhDoSTM ets $ True <$ edhThrow ets termExVal
+                          throwIn
+                  Just (EdhDoSTM !etsOrig _actSTM) ->
+                    let !ets = etsOrig {edh'task'queue = tqTerm}
+                     in do
+                          atomically $
+                            writeTBQueue tqTerm $
+                              EdhDoSTM ets $ True <$ edhThrow ets termExVal
+                          throwIn
            in throwIn
 
     taskLoop !trapDone = do
