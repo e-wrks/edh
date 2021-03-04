@@ -37,9 +37,8 @@ loggingProc
       !ctx = edh'context ets
       (SrcLoc !doc _) = contextSrcLoc ctx
 
-      evalMsg !exit' = runEdhTx ets $
-        evalExprSrc rhExpr $
-          \ !rhVal _ets -> exit' $ edhDeCaseWrap rhVal
+      evalMsg !exit' = evalExprSrc rhExpr $
+        \ !rhVal -> exit' $ edhDeCaseWrap rhVal
 
 -- | host method console.log(*args, level= console.info, **kwargs)
 conLogProc :: RestPosArgs -> "level" ?: EdhValue -> RestPackArgs -> EdhHostProc
@@ -63,16 +62,21 @@ conLogProc
         [!val] | odNull kwargs -> val
         _ -> EdhArgsPack $ ArgsPack args kwargs
 
-conOutputLog :: Text -> EdhValue -> ((EdhValue -> STM ()) -> STM ()) -> EdhTxExit EdhValue -> EdhTx
+conOutputLog ::
+  Text ->
+  EdhValue ->
+  ((EdhValue -> EdhTx) -> EdhTx) ->
+  EdhTxExit EdhValue ->
+  EdhTx
 conOutputLog !logPos !levelVal !evalMsg !exit !ets =
   case parseSpec levelVal of
     Just !logLevel ->
       if logLevel < 0
-        then -- as the log queue is a TBQueue per se, log msgs from a failing STM
-        -- transaction has no way to go into the queue then get logged, but the
-        -- failing cases are especially in need of diagnostics, so negative log
-        -- level number is used to instruct a debug trace.
-        do
+        then do
+          -- as the log queue is a TBQueue per se, log msgs from a failing STM
+          -- transaction has no way to go into the queue then get logged, but
+          -- the failing cases are especially in need of diagnostics, so
+          -- negative log level number is used to instruct a debug trace.
           !th <- unsafeIOToSTM myThreadId
           let !tracePrefix =
                 " 🐞 "
@@ -80,27 +84,29 @@ conOutputLog !logPos !levelVal !evalMsg !exit !ets =
                   <> " 👉 "
                   <> T.unpack logPos
                   <> " ❗ "
-          evalMsg $ \ !msgVal -> edhValueStr ets msgVal $ \ !logStr ->
-            trace (tracePrefix ++ T.unpack logStr) $
-              exitEdh ets exit nil
+          runEdhTx ets $
+            evalMsg $ \ !msgVal !ets' -> edhValueStr ets' msgVal $ \ !logStr ->
+              trace (tracePrefix ++ T.unpack logStr) $
+                exitEdh ets' exit nil
         else
           if logLevel < conLogLevel
             then -- drop log msg without even eval it
               exitEdh ets exit nil
-            else evalMsg $ \ !msgVal -> do
-              let !srcLoc =
-                    if conLogLevel <= 20
-                      then -- with source location info
-                        Just logPos
-                      else -- no source location info
-                        Nothing
-              case msgVal of
-                EdhString !logStr -> do
-                  logger logLevel srcLoc logStr
-                  exitEdh ets exit nil
-                !logVal -> edhValueJson ets logVal $ \ !logJson -> do
-                  logger logLevel srcLoc logJson
-                  exitEdh ets exit nil
+            else runEdhTx ets $
+              evalMsg $ \ !msgVal !ets' -> do
+                let !srcLoc =
+                      if conLogLevel <= 20
+                        then -- with source location info
+                          Just logPos
+                        else -- no source location info
+                          Nothing
+                case msgVal of
+                  EdhString !logStr -> do
+                    logger logLevel srcLoc logStr
+                    exitEdh ets' exit nil
+                  !logVal -> edhValueJson ets' logVal $ \ !logJson -> do
+                    logger logLevel srcLoc logJson
+                    exitEdh ets' exit nil
     _ ->
       throwEdh ets EvalError $
         "invalid log target: " <> T.pack (show levelVal)
