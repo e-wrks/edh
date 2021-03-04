@@ -5536,17 +5536,16 @@ drivePerceiver !ev !etsOrigin !reaction = do
               (edh'context etsOrigin)
                 { edh'ctx'genr'caller = Nothing,
                   edh'ctx'match = ev,
-                  -- todo should set pure to True or False here? or just inherit as is?
-                  -- , edh'ctx'pure         = True
+                  -- todo should set pure to True or False here?
+                  --      or just inherit as is?
+                  -- edh'ctx'pure = True,
                   edh'ctx'exporting = False,
                   edh'ctx'eff'defining = False
                 }
           }
   atomically $
     writeTBQueue reactTaskQueue $
-      EdhDoSTM etsPerceiver $
-        False
-          <$ reaction breakThread etsPerceiver
+      EdhDoSTM etsPerceiver $ False <$ reaction breakThread etsPerceiver
   driveEdhThread (edh'thread'prog etsOrigin) reactDefers reactTaskQueue
   readTVarIO breakThread
 
@@ -5714,10 +5713,12 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
           Nothing -> terminateThread (return ())
           -- note during actIO, perceivers won't fire, program termination
           -- won't stop this thread
-          Just (EdhDoIO !ets !actIO) ->
-            try actIO >>= doneOne ets
-          Just (EdhDoSTM !ets !actSTM) ->
-            try (goSTM ets actSTM) >>= doneOne ets
+          Just (EdhDoIO !etsOrig !actIO) ->
+            let !ets = etsOrig {edh'task'queue = tq}
+             in try actIO >>= doneOne ets
+          Just (EdhDoSTM !etsOrig !actSTM) ->
+            let !ets = etsOrig {edh'task'queue = tq}
+             in try (goSTM ets actSTM) >>= doneOne ets
           where
             doneOne !etsDone !result = do
               unless (trapStartNS == 0) $ do
