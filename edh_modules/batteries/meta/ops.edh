@@ -17,58 +17,113 @@ error( 'Executing meta module: ' ++ __name__ )
 export {
 
   {##
-   # the annotation operator
-   #
-   # relatable to type annotation syntax in Haskell
-   #
-   # the results are merely sought to be human readable as far, may be
-   # re-purposed for machine readability in future versions of Đ. Some
-   # certain frameworks / libraries may experiment with it.
+   # Annotation operator
+
+Relatable to type annotation syntax in Haskell
+
+The results are merely sought to be human readable as far, may be re-purposed for machine readability in future versions of Đ. Some certain frameworks / libraries may experiment with it.
+
    #}
   infix -9 (::) ( callerScope, lhx, rhx ) pass
 
   {##
-   # the left-dropping annotation operator
-   #
-   # usually used to annotate the rhs artifact with some non-referential,
-   # possibly chained lhs expression, e.g.
+   # Left-dropping annotation operator
+
+Usually used to annotate the rhs artifact with some non-referential, possibly chained lhs expression, e.g.
+
 ```edh
 body'height :: positive!int!cm!DecimalType
 body'height = 176
 ```
-   #
-   # the results are merely sought to be human readable as far, may be
-   # re-purposed for machine readability in future versions of Đ. Some
-   # certain frameworks / libraries may experiment with it.
+
+The results are merely sought to be human readable as far, may be re-purposed for machine readability in future versions of Đ. Some certain frameworks / libraries may experiment with it.
+
    #}
   infixr 0 (!) ( callerScope, lhx, rhx ) pass
 
+
   {##
-   # the pair cons operator
-   #
-   # relatable to the list cons operator (:) in Haskell, the cons operator
-   # (:) in Đ does appending-cons, by being left-associative. Contrasted to
-   # (:) in Haskell, which is right-associative thus does prepending-cons.
-   #
-   # And there is neither *empty-pair* nor *unary-pair* in Đ, so technically
-   # speaking, pair in Đ can be said to be a non-empty, appending-cons list
-   # type mandating arity >= 2
+   # Pair cons operator
+
+Relatable to the list cons operator (:) in Haskell, the cons operator (:) in Đ does appending-cons, by being left-associative. Contrasted to (:) in Haskell, which is right-associative thus does prepending-cons.
+
+And there is neither *empty-pair* nor *unary-pair* in Đ, so technically speaking, pair in Đ can be said to be a non-empty, appending-cons list type mandating arity >= 2
+
    #}
   infixl 2 (:) ( callerScope, lhx, rhx ) pass
 
+
   {##
-   # the procedure call operator
-   #
-   # At par to function application operator ($) as in Haskell
+   # Procedure call operator
+
+At par to function application operator ($) as in Haskell
+
    #}
   infixr -5 ($) ( callerScope, lhx, rhx ) pass
 
   {##
-   # the flipped procedure call operator
-   #
-   # At par to flipped function application operator (&) as in Haskell
+   # Flipped procedure call operator
+
+At par to flipped function application operator (&) as in Haskell
+
    #}
   infixl 0 (|) ( callerScope, lhx, rhx ) pass
+
+
+  {##
+   # Short-circuiting, nullish logical AND operator
+
+This operator is strict on its lhs operand, and uses `null` semantics to check the result value of lhs evaluation, giving out falsy lhs value, or otherwise whatever evaluated from rhs expression.
+
+   #}
+  infixl 3 (and) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # Short-circuiting, nullish logical OR operator
+
+This operator is strict on its lhs operand, and uses `null` semantics to check the result value of lhs evaluation, giving out truthy lhs value, or otherwise whatever evaluated from rhs expression.
+
+   #}
+  infixl 3 (or) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # Strict boolean logical AND operator
+
+This operator is strict on both operands, and errs out when either side evaluates to value of type other than `BoolType`.
+
+   #}
+  infixl 3 (&&) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # Strict boolean logical OR operator
+
+This operator is strict on both operands, and errs out when either side evaluates to value of type other than `BoolType`.
+
+   #}
+  infixl 3 (||) ( callerScope, lhx, rhx ) pass
+
+
+  {##
+   # catch operator
+
+Let its rhs expression match & handle exceptions occurred during evaluation of its lhs expression.
+
+This operator gives out result of lhs evaluation when no exception occurred, and in case an exception occurred, the rhs expression will be evaluated with the exception value as matching target, then according to the evaluation result of rhs expression:
+
+ * no-match -> propagate the exception outwards
+ * rethrow -> propagate the exception outwards
+ * otherwise -> give out the result as the whole expression
+
+   #}
+  infixl -2 ($=>) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # finally operator
+
+Execute its rhs expression before the result of lhs execution is given out.
+
+   #}
+  infixl -2 (@=>) ( callerScope, lhx, rhx ) pass
 
 
   # TODO the rest of all available host operators need meta def/doc here
