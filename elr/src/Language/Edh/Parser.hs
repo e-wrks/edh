@@ -997,7 +997,7 @@ parsePrefixExpr !si =
           optional (parseArgsPacker si) >>= \case
             Nothing -> return (Nothing, si)
             Just (!apkr'', !si'') -> return (Just apkr'', si'')
-        !x <- parseExprWithSrc 
+        !x <- parseExprWithSrc
         return (DefaultExpr apkr x, si'),
       -- technically accept the new keyword anywhere as an expr prefix,
       -- to better inter-op with some other languages like JavaScript
@@ -1112,65 +1112,62 @@ parseExprPrec !precedingOp !prec !si =
   lookAhead illegalExprKws >>= \case
     True -> fail "illegal keyword in expression"
     False ->
-      ((,si) <$> parseExprLit) <|> parseIntplExpr si <|> parseMoreExpr
-        <|> do
-          EdhParserState _ !missed'start <- get
-          !missed'end <- getSourcePos
-          let !missed'span = lspSrcRangeFromParsec' missed'start missed'end
-              !missedExpr =
-                ExprSrc
+      (parseExpr1st >>= \(!x, !si') -> parseMoreOps precedingOp si' x) <|> do
+        EdhParserState _ !missed'start <- get
+        !missed'end <- getSourcePos
+        let !missed'span = lspSrcRangeFromParsec' missed'start missed'end
+            !missedExpr =
+              ExprSrc
+                ( AttrExpr
+                    (DirectRef (AttrAddrSrc MissedAttrName missed'span))
+                )
+                missed'span
+        case precedingOp of
+          Nothing ->
+            parseMoreInfix Nothing si missedExpr >>= \case
+              ( ExprSrc
                   ( AttrExpr
-                      (DirectRef (AttrAddrSrc MissedAttrName missed'span))
-                  )
-                  missed'span
-          case precedingOp of
-            Nothing ->
-              parseMoreInfix Nothing si missedExpr >>= \case
-                ( ExprSrc
-                    ( AttrExpr
-                        (DirectRef (AttrAddrSrc MissedAttrName _))
-                      )
-                    _,
-                  _
-                  ) -> empty
-                !lhsMissedResult -> return lhsMissedResult
-            Just {} -> return (missedExpr, si)
+                      (DirectRef (AttrAddrSrc MissedAttrName _))
+                    )
+                  _,
+                _
+                ) -> empty
+              !lhsMissedResult -> return lhsMissedResult
+          Just {} -> return (missedExpr, si)
   where
-    parseMoreExpr :: Parser (ExprSrc, IntplSrcInfo)
-    parseMoreExpr = do
-      !startPos <- getSourcePos
-      (!x, !si') <-
-        choice
-          [ parsePrefixExpr si,
-            parseYieldExpr si,
-            parseForExpr si,
-            parseIfExpr si,
-            parseCaseExpr si,
-            parsePerformExpr si,
-            parseBehaveExpr si,
-            parseListExpr si,
-            parseScopedBlock si,
-            parseDictOrBlock si,
-            parseOpAddrOrApkOrParen si,
-            parseExportExpr si,
-            parseImportExpr si,
-            parseNamespaceExpr si,
-            parseClassExpr si,
-            parseDataExpr si,
-            parseMethodExpr si,
-            parseGeneratorExpr si,
-            parseInterpreterExpr si,
-            parseProducerExpr si,
-            parseOpDeclOvrdExpr si,
-            (,si) <$> parseSymbolExpr,
-            (,si) . LitExpr <$> parseLitExpr,
-            (,si) . AttrExpr <$> parseAttrRef
-          ]
-      EdhParserState _ !lexeme'end <- get
-      parseMoreOps
-        precedingOp
-        si'
-        (ExprSrc x (lspSrcRangeFromParsec startPos lexeme'end))
+    parseExpr1st :: Parser (ExprSrc, IntplSrcInfo)
+    parseExpr1st =
+      ((,si) <$> parseExprLit) <|> parseIntplExpr si <|> do
+        !startPos <- getSourcePos
+        (!x, !si') <-
+          choice
+            [ parsePrefixExpr si,
+              parseYieldExpr si,
+              parseForExpr si,
+              parseIfExpr si,
+              parseCaseExpr si,
+              parsePerformExpr si,
+              parseBehaveExpr si,
+              parseListExpr si,
+              parseScopedBlock si,
+              parseDictOrBlock si,
+              parseOpAddrOrApkOrParen si,
+              parseExportExpr si,
+              parseImportExpr si,
+              parseNamespaceExpr si,
+              parseClassExpr si,
+              parseDataExpr si,
+              parseMethodExpr si,
+              parseGeneratorExpr si,
+              parseInterpreterExpr si,
+              parseProducerExpr si,
+              parseOpDeclOvrdExpr si,
+              (,si) <$> parseSymbolExpr,
+              (,si) . LitExpr <$> parseLitExpr,
+              (,si) . AttrExpr <$> parseAttrRef
+            ]
+        EdhParserState _ !lexeme'end <- get
+        return (ExprSrc x (lspSrcRangeFromParsec startPos lexeme'end), si')
 
     parseMoreOps ::
       Maybe (OpSymSrc, OpFixity) ->
