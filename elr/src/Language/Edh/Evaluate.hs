@@ -1050,12 +1050,12 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
                     throwEdh
                       etsCaller
                       EvalError
-                      "missing attribute name"
+                      "incomplete syntax: missing attribute name"
                   MissedAttrSymbol ->
                     throwEdh
                       etsCaller
                       EvalError
-                      "missing symbolic attribute name"
+                      "incomplete syntax: missing symbolic attribute name"
                 Just addr@IndirectRef {} ->
                   -- do assignment in callee's context,
                   -- and return to caller's afterwards
@@ -1857,12 +1857,12 @@ resolveEdhAttrAddr !ets MissedAttrName _exit =
   throwEdh
     ets
     EvalError
-    "missing attribute name"
+    "incomplete syntax: missing attribute name"
 resolveEdhAttrAddr !ets MissedAttrSymbol _exit =
   throwEdh
     ets
     EvalError
-    "missing symbolic attribute name"
+    "incomplete syntax: missing symbolic attribute name"
 {-# INLINE resolveEdhAttrAddr #-}
 
 -- | Throw a tagged error from Edh computation
@@ -3507,7 +3507,7 @@ evalExprSrc' (ExprSrc !expr !ss) !docCmt !exit !ets =
 
 evalExpr' :: Expr -> Maybe DocComment -> EdhTxExit EdhValue -> EdhTx
 evalExpr' IntplExpr {} _docCmt _exit =
-  throwEdhTx EvalError "bug: interpolating out side of expr range."
+  throwEdhTx UsageError "{$ $} interpolation outside expr definition"
 evalExpr' (ExprWithSrc (ExprSrc !x _) !sss) !docCmt !exit = \ !ets ->
   intplExpr ets x $ \x' -> do
     let intplSrc :: SourceSeg -> (Text -> STM ()) -> STM ()
