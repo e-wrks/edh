@@ -14,7 +14,14 @@ evtPubProc :: EdhIntrinsicOp
 evtPubProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
     EdhSink !es -> evalExprSrc rhExpr $
-      \ !rhVal -> publishEvent es (edhDeCaseClose rhVal) exit
+      \ !rhVal ->
+        let -- allow special values to be published, e.g. {break}
+            !val2Pub = edhDeCaseClose rhVal
+            -- but shield those special values for the result of this op, or it
+            -- can be interpreted the same as such a value standalone, which
+            -- would implement wrong semantics.
+            !val2Rtn = edhDeCaseWrap val2Pub
+         in publishEvent es val2Pub $ \() -> exitEdhTx exit val2Rtn
     _ -> exitEdhTx exit edhNA
 
 -- | virtual property <sink>.subseq

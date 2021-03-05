@@ -903,11 +903,13 @@ callEdhOperator' !this !that !mth !prede !proc'loc (StmtSrc !body'stmt _) !args 
         -- operator procedure's runtime scope
         Just !predOp -> iopdInsert (edh'procedure'name mth) predOp es
       runEdhTx etsMth $
-        evalStmt body'stmt $ \ !mthRtn ->
+        evalStmt body'stmt $ \ !bodyResult ->
           edhSwitchState ets $
-            exitEdhTx exit $ case edhDeCaseWrap mthRtn of
+            exitEdhTx exit $ case edhDeCaseWrap bodyResult of
+              -- explicit return
               EdhReturn !rtnVal -> rtnVal
-              !rtnVal -> rtnVal
+              -- no explicit return
+              !mthRtn -> mthRtn
   where
     !callerCtx = edh'context ets
     !new'stack = edh'ctx'tip callerCtx : edh'ctx'stack callerCtx
@@ -1486,13 +1488,15 @@ callEdhMethod'
                 }
             !etsMth = etsCaller {edh'context = mthCtx}
         runEdhTx etsMth $
-          evalStmt body'stmt $ \ !mthRtn ->
+          evalStmt body'stmt $ \ !bodyResult ->
             edhSwitchState etsCaller $
-              exitEdhTx exit $ case edhDeCaseWrap mthRtn of
+              exitEdhTx exit $ case edhDeCaseWrap bodyResult of
                 -- explicit return
+                -- note it can be a wrapped double return, e.g. for generators
+                --      to propagate the return issued from loop-body
                 EdhReturn !rtnVal -> rtnVal
                 -- no explicit return
-                _ -> mthRtn
+                !mthRtn -> mthRtn
     where
       !callerCtx = edh'context etsCaller
       !new'stack = edh'ctx'tip callerCtx : edh'ctx'stack callerCtx
@@ -1658,12 +1662,8 @@ edhPrepareForLoop
                     apk
                     scopeMod
                     $ \ !gnrRtn ->
-                      edhSwitchState ets $
-                        exitEdhTx exit $ case gnrRtn of
-                          -- unwrap double-return
-                          EdhReturn rtn@EdhReturn {} -> rtn
-                          -- cease break/continue, etc.
-                          _ -> edhDeCaseWrap gnrRtn
+                      -- note it can be a return from unwrapped double-return
+                      edhSwitchState ets $ exitEdhTx exit gnrRtn
       loopCallGenr _ _ !callee _ _ _ =
         throwEdh etsLoopPrep EvalError $
           "bug: unexpected generator: " <> T.pack (show callee)
@@ -2402,12 +2402,12 @@ evalStmt !stmt !exit = case stmt of
   ReturnStmt !expr -> \ !ets -> -- use a pure ctx to eval the return expr
     runEdhTx ets {edh'context = (edh'context ets) {edh'ctx'pure = True}} $
       evalExprSrc expr $
-        \ !v2r -> edhSwitchState ets $ case edhDeCaseWrap v2r of
-          -- actually when a generator procedure checks the result of its `yield`
-          -- for the case of early return from the do block, if it wants to
-          -- cooperate, double return is the only option
-          -- throwEdhTx UsageError "you don't double return"
-          !val -> exitEdhTx exit (EdhReturn val)
+        \ !v2r ->
+          edhSwitchState ets $
+            -- when a generator procedure checks the result of its `yield` for
+            -- the case of early return issued from the loop body, it needs to
+            -- double-return to cooperate, we must support it here
+            exitEdhTx exit $ EdhReturn $ edhDeCaseWrap v2r
   GoStmt expr@(ExprSrc !x !src'span) -> case x of
     CaseExpr !tgtExpr !branchesExpr ->
       evalExprSrc tgtExpr $ \ !val !etsForker ->
@@ -5169,13 +5169,13 @@ edhRegulateIndex !ets !len !idx !exit =
               <> T.pack (show len)
         else exit posIdx
 
-publishEvent :: EventSink -> EdhValue -> EdhTxExit EdhValue -> EdhTx
+publishEvent :: EventSink -> EdhValue -> EdhTxExit () -> EdhTx
 publishEvent !sink !val !exit !ets =
   postEvent sink val >>= \case
-    True -> exitEdh ets exit val
+    True -> exitEdh ets exit ()
     False ->
       if val == EdhNil
-        then exitEdh ets exit EdhNil -- allow repeated marking of eos
+        then exitEdh ets exit () -- allow repeated marking of eos
         else throwEdh ets UsageError "attempt to publish into a sink at eos"
 
 -- | Fork a new Edh thread to run the specified event producer, but hold the
