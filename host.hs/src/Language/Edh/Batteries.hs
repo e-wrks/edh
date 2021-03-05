@@ -134,8 +134,8 @@ defaultEdhConsole !inputSettings = do
               $ case level of
                 _ | level >= 50 -> "🔥 "
                 _ | level >= 40 -> "❗ "
-                _ | level >= 30 -> "⚠️ "
-                _ | level >= 20 -> "ℹ️ "
+                _ | level >= 30 -> "\x26A0\xFE0F  " --  ⚠️
+                _ | level >= 20 -> "\x2139\xFE0F  " -- ℹ️
                 _ | level >= 10 -> "🐞 "
                 _ -> "😥 "
       ioLoop :: InputT IO ()
