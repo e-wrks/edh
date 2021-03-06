@@ -80,7 +80,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
     { { scope: ofScope } }
     -> console.print( ofScope.lexiLoc, **ofScope.attrs() )
     { otherVal } -> {
-      ; | type( otherVal ) is ObjectType -> {
+      ; | type( otherVal ) ?<= ( ObjectType, ClassType, HostClassType, ) -> {
         ofScope = scope( ofObj= otherVal )
         console.print( desc( otherVal ), **ofScope.attrs() )
       }
@@ -103,7 +103,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
       '  ' ++ k ++ '= ' ++ v
     )
     { otherVal } -> {
-      ; | type( otherVal ) is ObjectType -> {
+      ; | type( otherVal ) ?<= ( ObjectType, ClassType, HostClassType, ) -> {
         ofScope = scope( ofObj= otherVal )
         join( sep= '\n',
           desc( otherVal ),
@@ -153,10 +153,14 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
               # todo special treatment for module/namespace ?
               # { { module:_ } } -> printDir( ofThe= scope( ofObj=tgtScope ) )
               # { { namespace:_ } } -> printDir( ofThe= scope( ofObj=tgtScope ) )
-              ; | type( tgtScope ) is ObjectType -> printDir(
+              ; | type( tgtScope ) ?<= (
+                ObjectType, ClassType, HostClassType,
+              ) -> printDir(
                 ofThe= scope( ofObj=tgtScope )
               )
-              _ -> console.print( 'Unexpected args to dir command: ' ++ cmd.apk )
+              _ -> console.print(
+                'Unexpected args to dir command: ' ++ cmd.apk
+              )
             }
             _ -> console.print( 'Unexpected args to dir command: ' ++ cmd.apk )
           }
@@ -228,7 +232,9 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
               # todo special treatment for module/namespace ?
               # { { module:_ } } -> printDir( ofThe= scope( ofObj=tgtScope ) )
               # { { namespace:_ } } -> printDir( ofThe= scope( ofObj=tgtScope ) )
-              ; | type( tgtScope ) is ObjectType -> printDir(
+              ; | type( tgtScope ) ?<= (
+                ObjectType, ClassType, HostClassType,
+              ) -> printDir(
                 ofThe= scope( ofObj=tgtScope )
               )
               _ -> console.print( 'Unexpected args to dir command: ' ++ cmd.apk )
