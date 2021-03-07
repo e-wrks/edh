@@ -1048,6 +1048,13 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
                     -- todo support this ?
                     throwEdh etsCaller UsageError $
                       "do you mean `this.@" <> symName <> "` instead ?"
+                  IntplSymAttr !src _x ->
+                    -- todo support this ?
+                    throwEdh etsCaller UsageError $
+                      "do you mean `this.@( " <> src <> " )` instead ?"
+                  LitSymAttr !sym -> do
+                    edhSetValue (AttrBySym sym) argVal em
+                    exit' (ArgsPack posArgs'' kwArgs'')
                   MissedAttrName ->
                     throwEdh
                       etsCaller
@@ -1853,6 +1860,18 @@ resolveEdhAttrAddr !ets (SymbolicAttr !symName) !exit =
             "no symbol/string named "
               <> T.pack (show symName)
               <> " available"
+resolveEdhAttrAddr !ets (IntplSymAttr src !x) !exit = runEdhTx ets $
+  evalExprSrc x $
+    \ !symVal _ets -> case edhUltimate symVal of
+      EdhSymbol !sym -> exit $ AttrBySym sym
+      _ -> edhValueDesc ets symVal $ \ !badDesc ->
+        throwEdh ets UsageError $
+          "symbol interpolation given unexpected value: "
+            <> badDesc
+            <> "\n 🔣  evaluated from @( "
+            <> src
+            <> " )"
+resolveEdhAttrAddr _ (LitSymAttr !sym) !exit = exit $ AttrBySym sym
 resolveEdhAttrAddr !ets MissedAttrName _exit =
   throwEdh
     ets
@@ -2981,10 +3000,27 @@ intplArgSender !ets (SendKwArg !addr !x) !exit =
   intplExprSrc ets x $ \ !x' -> exit $ SendKwArg addr x'
 
 intplAttrRef :: EdhThreadState -> AttrRef -> (AttrRef -> STM ()) -> STM ()
-intplAttrRef !ets !addr !exit = case addr of
-  IndirectRef !x' !a ->
-    intplExprSrc ets x' $ \ !x'' -> exit $ IndirectRef x'' a
-  _ -> exit addr
+intplAttrRef !ets !ref !exit = case ref of
+  DirectRef (AttrAddrSrc !addr !src'span) -> intplSym addr $ \ !addr' ->
+    exit $ DirectRef $ AttrAddrSrc addr' src'span
+  IndirectRef !x' (AttrAddrSrc !addr !src'span) ->
+    intplExprSrc ets x' $ \ !x'' -> intplSym addr $ \ !addr' ->
+      exit $ IndirectRef x'' $ AttrAddrSrc addr' src'span
+  _ -> exit ref
+  where
+    intplSym :: AttrAddr -> (AttrAddr -> STM ()) -> STM ()
+    intplSym (IntplSymAttr src !x) !exit' = runEdhTx ets $
+      evalExprSrc x $
+        \ !symVal _ets -> case edhUltimate symVal of
+          EdhSymbol !sym -> exit' $ LitSymAttr sym
+          _ -> edhValueDesc ets symVal $ \ !badDesc ->
+            throwEdh ets UsageError $
+              "symbol interpolation given unexpected value: "
+                <> badDesc
+                <> "\n 🔣  evaluated from @( "
+                <> src
+                <> " )"
+    intplSym !addr !exit' = exit' addr
 
 intplArgsRcvr ::
   EdhThreadState -> ArgsReceiver -> (ArgsReceiver -> STM ()) -> STM ()

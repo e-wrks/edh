@@ -796,10 +796,20 @@ parseAttrAddr = parseAtNotation <|> NamedAttr <$> parseAttrName
     parseAtNotation =
       char '@' *> sc
         *> choice
-          [ QuaintAttr <$> parseStringLit,
+          [ between (symbol "(") (symbol ")") parseIntplSymAttr,
+            QuaintAttr <$> parseStringLit,
             SymbolicAttr <$> parseAlphNumName,
             pure MissedAttrSymbol
           ]
+
+    parseIntplSymAttr :: Parser AttrAddr
+    parseIntplSymAttr = do
+      !s <- getInput
+      !o <- getOffset
+      (!x, _) <- parseExprPrec Nothing (-20) (s, o, [])
+      !o' <- getOffset
+      let !src = maybe "" (T.stripEnd . fst) $ takeN_ (o' - o) s
+      return $ IntplSymAttr src x
 
 parseAttrName :: Parser Text
 parseAttrName = parseMagicName <|> parseAlphNumName
@@ -809,7 +819,8 @@ parseAttrName = parseMagicName <|> parseAlphNumName
     parseMagicName :: Parser Text
     parseMagicName =
       ("(" <>) . (<> ")")
-        <$> between (symbol "(") (symbol ")") (parseOpLit' isMagicChar)
+        <$> try
+        $ between (symbol "(") (symbol ")") (parseOpLit' isMagicChar)
     -- to allow magic method names for indexing (assignment) i.e. ([]) ([=]),
     -- and right-hand operator overriding e.g. (*.) (/.)
     isMagicChar :: Char -> Bool
@@ -853,7 +864,7 @@ parseOpLit' p =
     [kwLit "is not", kwLit "is", kwLit "and", kwLit "or", lexeme opLit]
   where
     kwLit !kw = keyword kw >> return kw
-    opLit = takeWhile1P (Just "operator symbol") p
+    opLit = takeWhile1P (Just "some operator symbol") p
 
 parseScopedBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseScopedBlock !si0 = void (symbol "{@") >> parseRest [] si0
@@ -924,21 +935,19 @@ parseOpAddrOrApkOrParen :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseOpAddrOrApkOrParen !si = do
   !startPos <- getSourcePos
   void $ symbol "("
-  choice
-    [ try $ do
-        !opSym <- parseOpLit
-        void $ symbol ")"
-        EdhParserState _ !lexeme'end <- get
-        return
-          ( AttrExpr $
-              DirectRef $
-                AttrAddrSrc
-                  (NamedAttr opSym)
-                  (lspSrcRangeFromParsec startPos lexeme'end),
-            si
-          ),
-      parseApkRest startPos si ")" False
-    ]
+  (<|> parseApkRest startPos si ")" False) $
+    try $ do
+      !opSym <- parseOpLit
+      void $ symbol ")"
+      EdhParserState _ !lexeme'end <- get
+      return
+        ( AttrExpr $
+            DirectRef $
+              AttrAddrSrc
+                (NamedAttr opSym)
+                (lspSrcRangeFromParsec startPos lexeme'end),
+          si
+        )
 
 parseApkRest :: SourcePos -> IntplSrcInfo -> Text -> Bool -> Parser (Expr, IntplSrcInfo)
 parseApkRest !startPos !si !closeSym !mustApk = do

@@ -1291,11 +1291,17 @@ data AttrAddr
     -- literal string
     QuaintAttr !Text
   | -- | dynamic at-notation i.e. get the symbol or string value from current
-    -- scope, then use it to address attributes
+    -- scope, then use it to address an attribute
     SymbolicAttr !AttrName
+  | -- | interpolated at-notation i.e. obtain a symbol value from arbitrary
+    -- expression, then use it to address an attribute
+    IntplSymAttr !Text !ExprSrc
+  | -- | addressing attributes with a literal symbol value, usually being the
+    -- result after `IntplSymAttr` interpolated
+    LitSymAttr !Symbol
   | MissedAttrName
   | MissedAttrSymbol
-  deriving (Eq, Ord)
+  deriving (Eq)
 
 instance Show AttrAddr where
   show = T.unpack . attrAddrStr
@@ -1305,6 +1311,8 @@ instance Hashable AttrAddr where
   hashWithSalt s (QuaintAttr name) = s `hashWithSalt` name
   hashWithSalt s (SymbolicAttr sym) =
     s `hashWithSalt` ("@" :: Text) `hashWithSalt` sym
+  hashWithSalt s (IntplSymAttr src _x) = s `hashWithSalt` src
+  hashWithSalt s (LitSymAttr sym) = s `hashWithSalt` sym
   hashWithSalt s MissedAttrName = s `hashWithSalt` (101 :: Int)
   hashWithSalt s MissedAttrSymbol = s `hashWithSalt` (102 :: Int)
 
@@ -1312,6 +1320,8 @@ attrAddrStr :: AttrAddr -> Text
 attrAddrStr (NamedAttr n) = n
 attrAddrStr (QuaintAttr n) = T.pack ("@" <> show n)
 attrAddrStr (SymbolicAttr s) = "@" <> s
+attrAddrStr (IntplSymAttr src _x) = "@( " <> src <> " )"
+attrAddrStr (LitSymAttr s) = symbolName s
 attrAddrStr MissedAttrName = "<?>"
 attrAddrStr MissedAttrSymbol = "@<?>"
 
