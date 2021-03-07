@@ -819,8 +819,7 @@ parseAttrName = parseMagicName <|> parseAlphNumName
     parseMagicName :: Parser Text
     parseMagicName =
       ("(" <>) . (<> ")")
-        <$> try
-        $ between (symbol "(") (symbol ")") (parseOpLit' isMagicChar)
+        <$> between (symbol "(") (symbol ")") (parseOpLit' isMagicChar)
     -- to allow magic method names for indexing (assignment) i.e. ([]) ([=]),
     -- and right-hand operator overriding e.g. (*.) (/.)
     isMagicChar :: Char -> Bool
