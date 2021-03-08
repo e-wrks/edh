@@ -255,13 +255,15 @@ parseArgRecvs !rs !kwConsumed !posConsumed = do
     nextPosArg = restPkArgs <|> restKwArgs <|> restPosArgs <|> parseKwRecv True
     restPkArgs = do
       void $ symbol "***"
-      RecvRestPkArgs <$> parseAttrAddrSrc
+      RecvRestPkArgs <$> optionalArgName
     restKwArgs = do
       void $ symbol "**"
-      RecvRestKwArgs <$> parseAttrAddrSrc
+      RecvRestKwArgs <$> optionalArgName
     restPosArgs = do
       void $ symbol "*"
-      RecvRestPosArgs <$> parseAttrAddrSrc
+      RecvRestPosArgs <$> optionalArgName
+    optionalArgName =
+      parseAttrAddrSrc <|> return (AttrAddrSrc (NamedAttr "_") noSrcRange)
 
 parseKwRecv :: Bool -> Parser ArgReceiver
 parseKwRecv !inPack = do
