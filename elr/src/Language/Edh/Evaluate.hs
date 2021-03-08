@@ -3431,13 +3431,13 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
                   callEdhMethod this' o mth (ArgsPack [] odEmpty) id $
                     \ !mthRtn _ets -> case mthRtn of
                       EdhString !json -> exit json
-                      _ -> edhValueRepr ets mthRtn exit
+                      _ -> edhValueJson ets mthRtn exit
               (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
                 runEdhTx ets $
                   callEdhMethod this that mth (ArgsPack [] odEmpty) id $
                     \ !mthRtn _ets -> case mthRtn of
                       EdhString !json -> exit json
-                      _ -> edhValueRepr ets mthRtn exit
+                      _ -> edhValueJson ets mthRtn exit
               (_, !jsonVal) -> valJson jsonVal exit
         case edh'obj'store o of
           ClassStore {} ->
