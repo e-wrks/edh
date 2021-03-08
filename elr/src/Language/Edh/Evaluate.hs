@@ -426,8 +426,10 @@ setObjAttr' !ets !obj !key !val !naExit !exit =
       callSetter this' obj setter
     (_, EdhBoundProc (EdhDescriptor _getter (Just !setter)) this that _) ->
       callSetter this that setter
-    (_, EdhProcedure (EdhDescriptor !getter Nothing) _) -> readonly getter
-    (_, EdhBoundProc (EdhDescriptor !getter Nothing) _ _ _) -> readonly getter
+    (!owner, EdhProcedure (EdhDescriptor !getter Nothing) _) ->
+      readonly owner getter
+    (!owner, EdhBoundProc (EdhDescriptor !getter Nothing) _ _ _) ->
+      readonly owner getter
     _ -> naExit
   where
     callSetter !this !that !setter =
@@ -437,12 +439,12 @@ setObjAttr' !ets !obj !key !val !naExit !exit =
        in runEdhTx ets $
             callEdhMethod this that setter (ArgsPack args odEmpty) id $
               \ !propRtn _ets -> exit propRtn
-    readonly !getter =
+    readonly !owner !getter =
       throwEdh ets UsageError $
         "property `"
           <> T.pack (show $ edh'procedure'name getter)
           <> "` of class "
-          <> objClassName obj
+          <> objClassName owner
           <> " is readonly"
 
 -- | Assign an evaluated value to a target expression
