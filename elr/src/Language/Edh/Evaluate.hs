@@ -3167,66 +3167,70 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
             <> objClassName o
 
 adtFields ::
-  EdhThreadState -> Object -> ([(Text, EdhValue)] -> STM ()) -> STM ()
-adtFields !ets !obj !exit = case edh'obj'store obj of
-  HashStore !hs ->
-    iopdSnapshot hs >>= \ !ds -> do
-      let go :: [ArgReceiver] -> [(Text, EdhValue)] -> STM ()
-          go [] !fs = exit $ reverse fs
-          go (dr : rest) !fs = case dr of
-            RecvArg _ Just {} _ ->
-              throwEdh
-                ets
-                UsageError
-                "rename of data class field not supported yet"
-            RecvArg (AttrAddrSrc SymbolicAttr {} _) _ _ ->
-              throwEdh
-                ets
-                UsageError
-                "symbolic data class field not supported yet"
-            RecvArg (AttrAddrSrc (NamedAttr !fn) _) Nothing _ ->
-              case odLookup (AttrByName fn) ds of
-                Just !fv -> go rest ((fn <> "= ", fv) : fs)
-                Nothing -> throwEdh ets EvalError $ "missing data field: " <> fn
-            RecvRestPosArgs (AttrAddrSrc (NamedAttr !fn) _) ->
-              case odLookup (AttrByName fn) ds of
-                Just !fv -> go rest (("*", fv) : fs)
-                Nothing -> throwEdh ets EvalError $ "missing data field: " <> fn
-            RecvRestKwArgs (AttrAddrSrc (NamedAttr !fn) _) ->
-              case odLookup (AttrByName fn) ds of
-                Just !fv -> go rest (("**", fv) : fs)
-                Nothing -> throwEdh ets EvalError $ "missing data field: " <> fn
-            RecvRestPkArgs (AttrAddrSrc (NamedAttr !fn) _) ->
-              case odLookup (AttrByName fn) ds of
-                Just !fv -> go rest (("***", fv) : fs)
-                Nothing -> throwEdh ets EvalError $ "missing data field: " <> fn
-            _ ->
-              throwEdh
-                ets
-                UsageError
-                "symbolic repacked data class field not supported yet"
-      case edh'obj'store $ edh'obj'class obj of
-        ClassStore !cls ->
-          case edh'procedure'args $ edh'procedure'decl $ edh'class'proc cls of
-            WildReceiver ->
-              throwEdh ets EvalError "bug: not a data class for adtFields"
-            PackReceiver !drs -> go drs []
-            SingleReceiver !dr -> go [dr] []
-        _ -> throwEdh ets EvalError "bug: data class not bearing ClassStore"
-  _ -> throwEdh ets EvalError "bug: data class instance not bearing HashStore"
+  EdhThreadState -> Object -> Object -> ([(Text, EdhValue)] -> STM ()) -> STM ()
+adtFields !ets !dataCls !obj !exit = do
+  let go :: [ArgReceiver] -> [(Text, EdhValue)] -> STM ()
+      go [] !fs = exit $ reverse fs
+      go (dr : rest) !fs = case dr of
+        RecvArg _ Just {} _ ->
+          throwEdh
+            ets
+            UsageError
+            "rename of data class field not supported yet"
+        RecvArg (AttrAddrSrc SymbolicAttr {} _) _ _ ->
+          throwEdh
+            ets
+            UsageError
+            "symbolic data class field not supported yet"
+        RecvArg (AttrAddrSrc (NamedAttr !fn) _) Nothing _ ->
+          lookupEdhObjAttr obj (AttrByName fn) >>= \case
+            (_owner, EdhNil) ->
+              throwEdh ets EvalError $ "missing data field: " <> fn
+            (_owner, !fv) -> go rest ((fn <> "= ", fv) : fs)
+        RecvRestPosArgs (AttrAddrSrc (NamedAttr !fn) _) ->
+          lookupEdhObjAttr obj (AttrByName fn) >>= \case
+            (_owner, EdhNil) ->
+              throwEdh ets EvalError $ "missing data field: " <> fn
+            (_owner, !fv) -> go rest (("*", fv) : fs)
+        RecvRestKwArgs (AttrAddrSrc (NamedAttr !fn) _) ->
+          lookupEdhObjAttr obj (AttrByName fn) >>= \case
+            (_owner, EdhNil) ->
+              throwEdh ets EvalError $ "missing data field: " <> fn
+            (_owner, !fv) -> go rest (("**", fv) : fs)
+        RecvRestPkArgs (AttrAddrSrc (NamedAttr !fn) _) ->
+          lookupEdhObjAttr obj (AttrByName fn) >>= \case
+            (_owner, EdhNil) ->
+              throwEdh ets EvalError $ "missing data field: " <> fn
+            (_owner, !fv) -> go rest (("***", fv) : fs)
+        _ ->
+          throwEdh
+            ets
+            UsageError
+            "symbolic repacked data class field not supported yet"
+  case edh'obj'store dataCls of
+    ClassStore !cls ->
+      case edh'procedure'args $ edh'procedure'decl $ edh'class'proc cls of
+        WildReceiver ->
+          throwEdh ets EvalError "bug: not a data class for adtFields"
+        PackReceiver !drs -> go drs []
+        SingleReceiver !dr -> go [dr] []
+    _ -> throwEdh ets EvalError "bug: data class not bearing ClassStore"
 
 adtReprProc :: ArgsPack -> EdhHostProc
-adtReprProc _ !exit !ets = adtFields ets thisObj $ \ !dfs ->
-  let rp = if length dfs < 3 then unnamed else named
-   in edhProcessReprs ets (rp <$> dfs) $ \ !dfTokens ->
-        exitEdh ets exit $
-          EdhString $
-            objClassName thisObj
-              <> "("
-              <> T.intercalate ", " dfTokens
-              <> ")"
+adtReprProc _ !exit !ets = adtFields ets (edh'obj'class thisObj) thatObj $
+  \ !dfs ->
+    let rp = if length dfs < 3 then unnamed else named
+     in edhProcessReprs ets (rp <$> dfs) $ \ !dfTokens ->
+          exitEdh ets exit $
+            EdhString $
+              objClassName thisObj
+                <> "("
+                <> T.intercalate ", " dfTokens
+                <> ")"
   where
-    !thisObj = edh'scope'this $ contextScope $ edh'context ets
+    !scope = contextScope $ edh'context ets
+    !thisObj = edh'scope'this scope
+    !thatObj = edh'scope'that scope
     unnamed :: (Text, EdhValue) -> (EdhValue, Text -> Text)
     unnamed (!k, !v) = if "*" `T.isPrefixOf` k then (v, (k <>)) else (v, id)
     named :: (Text, EdhValue) -> (EdhValue, Text -> Text)
@@ -4721,30 +4725,36 @@ edhKeyedListEq !ets !l1 !l2 !exit = go l1 l2
 adtEqProc :: ArgsPack -> EdhHostProc
 adtEqProc !apk !exit !ets = case apk of
   ArgsPack [EdhObject !objOther] !kwargs | odNull kwargs ->
-    adtFields ets thisObj $ \ !thisFields ->
+    adtFields ets (edh'obj'class thisObj) thatObj $ \ !thatFields ->
       resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
         Nothing -> exitEdh ets exit $ EdhBool False
-        Just !dataObjOther -> adtFields ets dataObjOther $ \ !otherFields ->
-          edhKeyedListEq ets thisFields otherFields $ \case
-            Nothing -> exitEdh ets exit $ EdhBool False
-            Just !conclusion -> exitEdh ets exit $ EdhBool conclusion
+        Just {} -> adtFields ets (edh'obj'class thisObj) objOther $
+          \ !otherFields ->
+            edhKeyedListEq ets thatFields otherFields $ \case
+              Nothing -> exitEdh ets exit $ EdhBool False
+              Just !conclusion -> exitEdh ets exit $ EdhBool conclusion
   _ -> exitEdh ets exit edhNA -- todo interpret kwargs or throw?
   where
-    !thisObj = edh'scope'this $ contextScope $ edh'context ets
+    !scope = contextScope $ edh'context ets
+    !thisObj = edh'scope'this scope
+    !thatObj = edh'scope'that scope
 
 adtCmpProc :: ArgsPack -> EdhHostProc
 adtCmpProc !apk !exit !ets = case apk of
   ArgsPack [EdhObject !objOther] !kwargs | odNull kwargs ->
-    adtFields ets thisObj $ \ !thisFields ->
+    adtFields ets (edh'obj'class thisObj) thatObj $ \ !thatFields ->
       resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
         Nothing -> exitEdh ets exit edhNA
-        Just !dataObjOther -> adtFields ets dataObjOther $ \ !otherFields ->
-          edhCmpKeyedList ets thisFields otherFields $ \case
-            Nothing -> exitEdh ets exit edhNA
-            Just !conclusion -> exitEdh ets exit $ EdhOrd conclusion
+        Just {} -> adtFields ets (edh'obj'class thisObj) objOther $
+          \ !otherFields ->
+            edhCmpKeyedList ets thatFields otherFields $ \case
+              Nothing -> exitEdh ets exit edhNA
+              Just !conclusion -> exitEdh ets exit $ EdhOrd conclusion
   _ -> exitEdh ets exit edhNA -- todo interpret kwargs or throw?
   where
-    !thisObj = edh'scope'this $ contextScope $ edh'context ets
+    !scope = contextScope $ edh'context ets
+    !thisObj = edh'scope'this scope
+    !thatObj = edh'scope'that scope
 
 edhCmpList ::
   EdhThreadState ->
