@@ -1866,6 +1866,7 @@ resolveEdhAttrAddr !ets (IntplSymAttr src !x) !exit = runEdhTx ets $
   evalExprSrc x $
     \ !symVal _ets -> case edhUltimate symVal of
       EdhSymbol !sym -> exit $ AttrBySym sym
+      EdhString !nm -> exit $ AttrByName nm
       _ -> edhValueDesc ets symVal $ \ !badDesc ->
         throwEdh ets UsageError $
           "symbol interpolation given unexpected value: "
@@ -3015,6 +3016,7 @@ intplAttrRef !ets !ref !exit = case ref of
       evalExprSrc x $
         \ !symVal _ets -> case edhUltimate symVal of
           EdhSymbol !sym -> exit' $ LitSymAttr sym
+          EdhString !nm -> exit' $ QuaintAttr nm
           _ -> edhValueDesc ets symVal $ \ !badDesc ->
             throwEdh ets UsageError $
               "symbol interpolation given unexpected value: "
