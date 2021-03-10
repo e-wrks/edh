@@ -9,22 +9,15 @@ import * 'batteries/meta'
 
 export {
 
-  # partial application
+  {##
+   # Partially apply a procedure
+   #}
   method partial (*** apk1 ) method apply'to ( f ) {
-    # for the at-notation (@fn) of the wrapper's procedure name to work, an
-    # attribute of the key value is needed in scope
-    fn = f.name
-
-    # or to make an even fancy procedure name of the wrapper like this?
-    # fn = f.name ++ '|partial' ++ repr( apk1 )
-
-    # note this relies on the fact that the expression of a `return` statement
-    # is evaluated as being pure, i.e. no attribute will get defined into scope
-    # during the evaluation
-    #
-    # this is crucial for correctness, in case `f.name` happens to be one of
-    # `apk1`, `f`, or `fn`, which clashes with our attributes in local scope
-    return method @fn (*** apk2 ) {
+    # note this relies on the fact that the expression of a `return` statement is evaluated in a pure context, so the method definition won't bind the defined procedure value to an attribute in current scope. this is crucial for correctness, in case `f.name` happens to be either `apk1` or `f`, which clashes with our attributes in local scope
+    return method @( f.name )
+    # or to make an even fancier procedure name of the wrapper like below?
+    # @( f.name ++ '|partial' ++ repr( apk1 ) )
+    (*** apk2 ) {
       f(*** apk1, *** apk2 )
     }
   }
