@@ -189,9 +189,11 @@ parseDeferStmt !si = do
   (!expr, !si') <- parseExpr si
   return (DeferStmt expr, si')
 
-parseEffectStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseEffectStmt !si = try $ do
-  !docCmt <- optional immediateDocComment
+parseEffectStmt ::
+  Maybe DocComment ->
+  IntplSrcInfo ->
+  Parser (Stmt, IntplSrcInfo)
+parseEffectStmt !docCmt !si = do
   void $ keyword "effect"
   (!s, !si') <- parseExpr si
   return (EffectStmt s docCmt, si')
@@ -587,11 +589,14 @@ parseSymbolExpr = do
   sc
   SymbolExpr <$> parseAlphNumName
 
-parseReturnStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseReturnStmt !si = do
+parseReturnStmt ::
+  Maybe DocComment ->
+  IntplSrcInfo ->
+  Parser (Stmt, IntplSrcInfo)
+parseReturnStmt !docCmt !si = do
   void $ keyword "return"
   (!x, !si') <- parseExpr si
-  return (ReturnStmt x, si')
+  return (ReturnStmt x docCmt, si')
 
 parseThrowStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseThrowStmt !si = do
@@ -602,12 +607,13 @@ parseThrowStmt !si = do
 parseStmt' :: Int -> IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
 parseStmt' !prec !si = do
   void optionalSemicolon
+  !docCmt <- optional immediateDocComment
   !startPos <- getSourcePos
   (!stmt, !si') <-
     choice
       [ parseGoStmt si,
         parseDeferStmt si,
-        parseEffectStmt si,
+        parseEffectStmt docCmt si,
         parseLetStmt si,
         parseExtendsStmt si,
         parsePerceiveStmt si,
@@ -620,13 +626,12 @@ parseStmt' !prec !si = do
         -- TODO validate fallthrough must within a branch block
         (FallthroughStmt, si) <$ keyword "fallthrough",
         (RethrowStmt, si) <$ keyword "rethrow",
-        parseReturnStmt si,
+        parseReturnStmt docCmt si,
         parseThrowStmt si,
         (,si) <$> parseVoidStmt,
         -- NOTE: statements above should probably all be detected by
         -- `illegalExprKws` as invalid start for an expr
         do
-          !docCmt <- optional immediateDocComment
           (ExprSrc !x _, !si') <- parseExprPrec Nothing prec si
           return (ExprStmt x docCmt, si')
       ]

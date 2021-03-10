@@ -2421,9 +2421,10 @@ evalStmt !stmt !exit = case stmt of
   ContinueStmt -> exitEdhTx exit EdhContinue
   FallthroughStmt -> exitEdhTx exit EdhFallthrough
   RethrowStmt -> exitEdhTx exit EdhRethrow
-  ReturnStmt !expr -> \ !ets -> -- use a pure ctx to eval the return expr
+  ReturnStmt !expr !docCmt -> \ !ets ->
+    -- use a pure ctx to eval the return expr
     runEdhTx ets {edh'context = (edh'context ets) {edh'ctx'pure = True}} $
-      evalExprSrc expr $
+      evalExprSrc' expr docCmt $
         \ !v2r ->
           edhSwitchState ets $
             -- when a generator procedure checks the result of its `yield` for
@@ -3074,7 +3075,8 @@ intplStmt !ets !stmt !exit = case stmt of
   WhileStmt !cond !act -> intplExprSrc ets cond $ \ !cond' ->
     intplStmtSrc ets act $ \ !act' -> exit $ WhileStmt cond' act'
   ThrowStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ ThrowStmt x'
-  ReturnStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ ReturnStmt x'
+  ReturnStmt !x !docCmt -> intplExprSrc ets x $ \ !x' ->
+    exit $ ReturnStmt x' docCmt
   ExprStmt !x !docCmt -> intplExpr ets x $ \ !x' -> exit $ ExprStmt x' docCmt
   _ -> exit stmt
 

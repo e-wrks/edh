@@ -762,7 +762,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                         (DirectRef (AttrAddrSrc (NamedAttr !valueName) _))
                       )
                     _
-                  )
+                  ) _docCmt
               )
             _
           ] -> case ctxMatch of
@@ -770,7 +770,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
               matchExit [(AttrByName valueName, noneNil rtnVal)]
             _ -> exitEdh ets exit EdhCaseOther
         -- { return <expr> } -- match with expected return value
-        [StmtSrc (ReturnStmt !expectExpr) _] -> case ctxMatch of
+        [StmtSrc (ReturnStmt !expectExpr _docCmt) _] -> case ctxMatch of
           EdhReturn !rtnVal -> runEdhTx ets $
             evalExprSrc expectExpr $ \ !expectVal _ets ->
               edhNamelyEqual ets expectVal rtnVal $ \case

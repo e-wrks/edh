@@ -1258,7 +1258,7 @@ data Stmt
     --   ($=>) as `catch` and (@=>) as `finally` operators
     ThrowStmt !ExprSrc
   | -- | early stop from a procedure
-    ReturnStmt !ExprSrc
+    ReturnStmt !ExprSrc !(Maybe DocComment)
   | -- | expression with precedence
     ExprStmt !Expr !(Maybe DocComment)
   deriving (Eq, Show)
