@@ -4103,21 +4103,50 @@ evalExpr' (SymbolExpr !attr) _docCmt !exit = \ !ets -> do
   exitEdh ets exit sym
 
 evalInfix :: OpSymbol -> Expr -> Expr -> EdhHostProc
-evalInfix !opSym !lhExpr !rhExpr !exit !ets =
+evalInfix !opSym !lhExpr !rhExpr !exit =
   evalInfixSrc
     (opSym, noSrcRange)
     (ExprSrc lhExpr noSrcRange)
     (ExprSrc rhExpr noSrcRange)
     exit
-    ets
+
+evalInfix' ::
+  OpSymbol ->
+  (EdhValue -> EdhValue -> EdhTx) ->
+  Expr ->
+  Expr ->
+  EdhHostProc
+evalInfix' !opSym !notApplicable !lhExpr !rhExpr !exit =
+  evalInfixSrc'
+    (opSym, noSrcRange)
+    notApplicable
+    (ExprSrc lhExpr noSrcRange)
+    (ExprSrc rhExpr noSrcRange)
+    exit
 
 evalInfixSrc :: OpSymSrc -> ExprSrc -> ExprSrc -> EdhHostProc
-evalInfixSrc (!opSym, _opSpan) !lhExpr !rhExpr !exit !ets =
+evalInfixSrc op@(!opSym, _opSpan) = evalInfixSrc' op $ \ !lhVal !rhVal !ets ->
+  edhValueDesc ets lhVal $ \ !lhDesc -> edhValueDesc ets rhVal $ \ !rhDesc ->
+    throwEdh ets EvalError $
+      "operator ("
+        <> opSym
+        <> ") not applicable to "
+        <> lhDesc
+        <> " and "
+        <> rhDesc
+
+evalInfixSrc' ::
+  OpSymSrc ->
+  (EdhValue -> EdhValue -> EdhTx) ->
+  ExprSrc ->
+  ExprSrc ->
+  EdhHostProc
+evalInfixSrc' (!opSym, _opSpan) !notApplicable !lhExpr !rhExpr !exit !ets =
   resolveEdhCtxAttr scope (AttrByName opSym) >>= \case
     Nothing -> runEdhTx ets $
       evalExprSrc lhExpr $ \ !lhVal ->
         evalExprSrc rhExpr $ \ !rhVal _ets ->
-          tryMagicMethod lhVal rhVal $ notApplicable lhVal rhVal
+          tryMagicMethod lhVal rhVal $ runEdhTx ets $ notApplicable lhVal rhVal
     Just (!opVal, !op'lexi) -> case opVal of
       EdhProcedure !callable _ ->
         callProc (edh'scope'this op'lexi) (edh'scope'that op'lexi) callable
@@ -4131,16 +4160,6 @@ evalInfixSrc (!opSym, _opSpan) !lhExpr !rhExpr !exit !ets =
   where
     magicName = "(" <> opSym <> ")"
     rhMagicName = "(" <> opSym <> ".)"
-
-    notApplicable !lhVal !rhVal = edhValueDesc ets lhVal $ \ !lhDesc ->
-      edhValueDesc ets rhVal $ \ !rhDesc ->
-        throwEdh ets EvalError $
-          "operator ("
-            <> opSym
-            <> ") not applicable to "
-            <> lhDesc
-            <> " and "
-            <> rhDesc
 
     tryMagicMethod :: EdhValue -> EdhValue -> STM () -> STM ()
     tryMagicMethod !lhVal !rhVal !naExit = case edhUltimate lhVal of
@@ -4282,7 +4301,7 @@ evalInfixSrc (!opSym, _opSpan) !lhExpr !rhExpr !exit !ets =
         runEdhTx (fromMaybe ets etsDef) $
           evalExpr (deExpr' exprDef) $
             \ !resultDef _ets -> case resultDef of
-              EdhNil -> notApplicable lhVal rhVal
+              EdhNil -> runEdhTx ets $ notApplicable lhVal rhVal
               -- exit with original thread state
               _ -> exitEdh ets exit resultDef
 
