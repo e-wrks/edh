@@ -456,37 +456,62 @@ concatProc !lhExpr !rhExpr !exit !ets =
           _ -> intrinsicOpReturnNA exit lhVal rhVal
         _ -> defaultConvert lhVal rhVal
   where
+    isDefaulting !v = case edhUltimate v of
+      EdhDefault {} -> True
+      _ -> False
     defaultConvert :: EdhValue -> EdhValue -> EdhTx
     defaultConvert !lhVal !rhVal =
-      intrinsicOpReturnDefault exit lhVal rhVal $
-        InfixExpr
-          ("++", noSrcRange)
-          ( ExprSrc
-              ( CallExpr
-                  ( ExprSrc
-                      (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "str") noSrcRange)))
-                      noSrcRange
+      if isDefaulting lhVal || isDefaulting rhVal
+        then -- don't apply to defaulting values
+          exitEdhTx exit edhNA
+        else
+          intrinsicOpReturnDefault exit lhVal rhVal $
+            InfixExpr
+              ("++", noSrcRange)
+              ( ExprSrc
+                  ( CallExpr
+                      ( ExprSrc
+                          ( AttrExpr
+                              ( DirectRef
+                                  (AttrAddrSrc (NamedAttr "str") noSrcRange)
+                              )
+                          )
+                          noSrcRange
+                      )
+                      ( ArgsPacker
+                          [ SendPosArg
+                              ( ExprSrc
+                                  (LitExpr (ValueLiteral lhVal))
+                                  noSrcRange
+                              )
+                          ]
+                          noSrcRange
+                      )
                   )
-                  ( ArgsPacker
-                      [SendPosArg (ExprSrc (LitExpr (ValueLiteral lhVal)) noSrcRange)]
-                      noSrcRange
-                  )
+                  noSrcRange
               )
-              noSrcRange
-          )
-          ( ExprSrc
-              ( CallExpr
-                  ( ExprSrc
-                      (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "str") noSrcRange)))
-                      noSrcRange
+              ( ExprSrc
+                  ( CallExpr
+                      ( ExprSrc
+                          ( AttrExpr
+                              ( DirectRef
+                                  (AttrAddrSrc (NamedAttr "str") noSrcRange)
+                              )
+                          )
+                          noSrcRange
+                      )
+                      ( ArgsPacker
+                          [ SendPosArg
+                              ( ExprSrc
+                                  (LitExpr (ValueLiteral rhVal))
+                                  noSrcRange
+                              )
+                          ]
+                          noSrcRange
+                      )
                   )
-                  ( ArgsPacker
-                      [SendPosArg (ExprSrc (LitExpr (ValueLiteral rhVal)) noSrcRange)]
-                      noSrcRange
-                  )
+                  noSrcRange
               )
-              noSrcRange
-          )
 
 -- | utility repr(*args,**kwargs) - repr extractor
 reprProc :: ArgsPack -> EdhHostProc
