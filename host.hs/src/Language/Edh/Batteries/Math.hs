@@ -159,9 +159,14 @@ valEqProc !inversion !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
           exitEdh ets exit $ EdhBool $ inversion True
       else vanillaTest ets lhVal rhVal
   where
+    -- allow magic methods to be invoked
     vanillaTest !ets !lhVal !rhVal = edhValueEqual ets lhVal rhVal $ \case
-      Just !conclusion -> exitEdh ets exit $ EdhBool $ inversion conclusion
-      -- allow magic methods to be invoked, but default to not equal
+      Just !conclusion ->
+        exitEdh ets exit
+          =<< mkDefault''
+            Nothing
+            (ArgsPack [lhVal, rhVal] odEmpty)
+            (LitExpr $ BoolLiteral $ inversion conclusion)
       Nothing ->
         exitEdh ets exit
           =<< mkDefault''
