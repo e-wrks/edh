@@ -829,8 +829,7 @@ parseAttrName = parseMagicName <|> parseAlphNumName
     parseMagicName :: Parser Text
     parseMagicName =
       ("(" <>) . (<> ")")
-        <$> between (symbol "(") (symbol ")")
-        $ indexMagic <|> nonIdxMagic
+        <$> between (symbol "(") (symbol ")") (indexMagic <|> nonIdxMagic)
     indexMagic =
       -- indexing (assignments) e.g. ([]) ([=]) ([+=])
       between (symbol "[") (symbol "]") parseOpLit
