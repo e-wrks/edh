@@ -144,9 +144,12 @@ isDigit :: Char -> Bool
 isDigit = flip elem ['0' .. '9']
 
 isOperatorChar :: Char -> Bool
-isOperatorChar c =
+isOperatorChar !c = c == '~' || isOperatorChar' c
+
+isOperatorChar' :: Char -> Bool
+isOperatorChar' !c =
   if c < toEnum 128
-    then c `elem` ("=~!@#$%^&|:<>?*+-/" :: [Char])
+    then c `elem` ("=!@#$%^&|:<>?*+-/" :: [Char])
     else case Char.generalCategory c of
       Char.MathSymbol -> True
       Char.CurrencySymbol -> True
@@ -826,11 +829,17 @@ parseAttrName = parseMagicName <|> parseAlphNumName
     parseMagicName :: Parser Text
     parseMagicName =
       ("(" <>) . (<> ")")
-        <$> between (symbol "(") (symbol ")") (parseOpLit' isMagicChar)
-    -- to allow magic method names for indexing (assignment) i.e. ([]) ([=]),
-    -- and right-hand operator overriding e.g. (*.) (/.)
-    isMagicChar :: Char -> Bool
-    isMagicChar c = elem c (".[]" :: [Char]) || isOperatorChar c
+        <$> between (symbol "(") (symbol ")")
+        $ indexMagic <|> nonIdxMagic
+    indexMagic =
+      -- indexing (assignments) e.g. ([]) ([=]) ([+=])
+      between (symbol "[") (symbol "]") parseOpLit
+    nonIdxMagic =
+      parseOpLit >>= \ !opLit ->
+        optional (symbol ".") >>= \case
+          Nothing -> return opLit
+          -- right-hand-side operator overriding e.g. (-.) (/.)
+          Just {} -> return $ opLit <> "."
 
 parseAlphNumName :: Parser AttrName
 parseAlphNumName = (detectIllegalIdent >>) $
@@ -862,15 +871,25 @@ parseOpSrc = do
   return (opSym, SrcRange (lspSrcPosFromParsec startPos) lexeme'end)
 
 parseOpLit :: Parser Text
-parseOpLit = parseOpLit' isOperatorChar
-
-parseOpLit' :: (Char -> Bool) -> Parser Text
-parseOpLit' p =
+parseOpLit =
   choice
-    [kwLit "is not", kwLit "is", kwLit "and", kwLit "or", lexeme opLit]
+    [ kwLit "is not",
+      kwLit "is",
+      kwLit "and",
+      kwLit "or",
+      lexeme alphanumOpLit,
+      lexeme opLit
+    ]
   where
     kwLit !kw = keyword kw >> return kw
-    opLit = takeWhile1P (Just "some operator symbol") p
+    alphanumOpLit = do
+      void $ char '~'
+      !rest <- takeWhileP (Just "some operator symbol") $
+        \ !c -> isIdentChar c || isOperatorChar' c
+      optional (char '~') >>= \case
+        Nothing -> return $ "~" <> rest
+        Just {} -> return $ "~" <> rest <> "~"
+    opLit = takeWhile1P (Just "some operator symbol") isOperatorChar
 
 parseScopedBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseScopedBlock !si0 = void (symbol "{@") >> parseRest [] si0
