@@ -3,6 +3,7 @@ module Language.Edh.Evaluate where
 -- import           Debug.Trace
 -- import           GHC.Stack
 
+import Control.Applicative
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad.State.Strict
@@ -20,7 +21,7 @@ import Data.Text.Encoding (Decoding (Some), decodeUtf8With, streamDecodeUtf8With
 import Data.Text.Encoding.Error (lenientDecode)
 import Data.Typeable (Proxy (..), Typeable, typeRep)
 import qualified Data.UUID as UUID
-import Data.Unique (newUnique)
+import Data.Unique
 import GHC.Clock
 import GHC.Conc (forkIOWithUnmask, myThreadId, unsafeIOToSTM)
 import Language.Edh.Control
@@ -1165,12 +1166,12 @@ packEdhArgs !ets !argSenders !pkExit = do
               EdhSymbol !sym -> exit' $ AttrBySym sym
               _ -> nopExit
             dictKvs2Kwl ::
-              [(ItemKey, EdhValue)] ->
+              [(EdhValue, EdhValue)] ->
               ([(AttrKey, EdhValue)] -> STM ()) ->
               STM ()
             dictKvs2Kwl !ps !exit' = go ps []
               where
-                go :: [(ItemKey, EdhValue)] -> [(AttrKey, EdhValue)] -> STM ()
+                go :: [(EdhValue, EdhValue)] -> [(AttrKey, EdhValue)] -> STM ()
                 go [] !kvl = exit' kvl
                 go ((k, v) : rest) !kvl =
                   edhVal2Kw k (go rest kvl) $ \ !k' -> go rest ((k', v) : kvl)
@@ -2692,7 +2693,7 @@ importFromObject !tgtEnt !argsRcvr !fromObj !done !ets =
               throwEdh ets UsageError $ "bad object export list - " <> badDesc
           where
             transEntries ::
-              [(ItemKey, EdhValue)] ->
+              [(EdhValue, EdhValue)] ->
               [(AttrKey, EdhValue)] ->
               [(AttrKey, EdhValue)]
             transEntries [] result = result
@@ -3123,10 +3124,8 @@ evalDictLit ::
   [(EdhValue, EdhValue)] ->
   EdhTxExit EdhValue ->
   EdhTx
-evalDictLit [] !dsl !exit !ets = do
-  !u <- unsafeIOToSTM newUnique
-  !dsv <- edhDictFromList dsl
-  exitEdh ets exit $ EdhDict $ Dict u dsv
+evalDictLit [] !dsl !exit !ets =
+  createEdhDict dsl >>= exitEdh ets exit . EdhDict
 -- entry order in DictExpr is reversed as from source, it is reversed again
 -- here, so the final dsl here is the same order as in source code
 evalDictLit ((k, v) : entries) !dsl !exit !ets = case k of
@@ -3172,9 +3171,9 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
             <> " on class "
             <> objClassName o
 
-adtFields ::
+dtcFields ::
   EdhThreadState -> Object -> Object -> ([(Text, EdhValue)] -> STM ()) -> STM ()
-adtFields !ets !dataCls !obj !exit = do
+dtcFields !ets !dataCls !obj !exit = do
   let go :: [ArgReceiver] -> [(Text, EdhValue)] -> STM ()
       go [] !fs = exit $ reverse fs
       go (dr : rest) !fs = case dr of
@@ -3217,13 +3216,13 @@ adtFields !ets !dataCls !obj !exit = do
     ClassStore !cls ->
       case edh'procedure'args $ edh'procedure'decl $ edh'class'proc cls of
         WildReceiver ->
-          throwEdh ets EvalError "bug: not a data class for adtFields"
+          throwEdh ets EvalError "bug: not a data class for dtcFields"
         PackReceiver !drs -> go drs []
         SingleReceiver !dr -> go [dr] []
     _ -> throwEdh ets EvalError "bug: data class not bearing ClassStore"
 
-adtReprProc :: ArgsPack -> EdhHostProc
-adtReprProc _ !exit !ets = adtFields ets (edh'obj'class thisObj) thatObj $
+dtcReprProc :: ArgsPack -> EdhHostProc
+dtcReprProc _ !exit !ets = dtcFields ets (edh'obj'class thisObj) thatObj $
   \ !dfs ->
     let rp = if length dfs < 3 then unnamed else named
      in edhProcessReprs ets (rp <$> dfs) $ \ !dfTokens ->
@@ -3694,7 +3693,7 @@ evalExpr' (IndexExpr !ixExpr !tgtExpr) _docCmt !exit =
      in evalExprSrc tgtExpr $ \ !tgtV -> case edhDeCaseWrap tgtV of
           -- indexing a dict
           (EdhDict (Dict _ !d)) -> \ !ets ->
-            iopdLookup ixVal d >>= \case
+            lookupDictItem ixVal d >>= \case
               Nothing -> exitEdh ets exit nil
               Just !val -> exitEdh ets exit val
           -- indexing an apk
@@ -3849,9 +3848,14 @@ evalExpr'
           allocatorProc !apkCtor !exitCtor !etsCtor = case argsRcvr of
             -- a normal class
             WildReceiver -> exitCtor . HashStore =<< iopdEmpty
-            -- a data class (ADT)
+            -- a data class
             _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
-              iopdFromList (odToList dataAttrs) >>= exitCtor . HashStore
+              let !diKey =
+                    ( AttrByName "__id__",
+                      EdhArgsPack $ ArgsPack [EdhObject clsObj] dataAttrs
+                    )
+               in iopdFromList (diKey : odToList dataAttrs)
+                    >>= exitCtor . HashStore
 
           !clsProc =
             ProcDefi
@@ -3894,16 +3898,16 @@ evalExpr'
       case argsRcvr of
         -- a normal class
         WildReceiver -> pure ()
-        -- a data class (ADT)
+        -- a data class
         _ -> do
           !clsArts <-
             sequence $
               [ (AttrByName nm,) <$> mkHostProc clsScope mc nm hp
                 | (mc, nm, hp) <-
-                    [ (EdhMethod, "__repr__", (adtReprProc, WildReceiver)),
-                      (EdhMethod, "__str__", (adtReprProc, WildReceiver)),
-                      (EdhMethod, "__eq__", (adtEqProc, WildReceiver)),
-                      (EdhMethod, "__compare__", (adtCmpProc, WildReceiver))
+                    [ (EdhMethod, "__repr__", (dtcReprProc, WildReceiver)),
+                      (EdhMethod, "__str__", (dtcReprProc, WildReceiver)),
+                      (EdhMethod, "__eq__", (dtcEqProc, WildReceiver)),
+                      (EdhMethod, "__compare__", (dtcCmpProc, WildReceiver))
                     ]
               ]
           iopdUpdate clsArts cs
@@ -4528,7 +4532,7 @@ defineOperator !opFixity !opPrec !opSym !opProc !docCmt !exit !predecessor !ets 
       defineOpVal $ EdhProcedure op Nothing
 
 val2DictEntry ::
-  EdhThreadState -> EdhValue -> ((ItemKey, EdhValue) -> STM ()) -> STM ()
+  EdhThreadState -> EdhValue -> ((EdhValue, EdhValue) -> STM ()) -> STM ()
 val2DictEntry _ (EdhPair !k !v) !exit = exit (k, v)
 val2DictEntry _ (EdhArgsPack (ArgsPack [!k, !v] !kwargs)) !exit
   | odNull kwargs = exit (k, v)
@@ -4546,7 +4550,7 @@ pvlToDict !ets !pvl !exit = do
   go pvl
 
 pvlToDictEntries ::
-  EdhThreadState -> [EdhValue] -> ([(ItemKey, EdhValue)] -> STM ()) -> STM ()
+  EdhThreadState -> [EdhValue] -> ([(EdhValue, EdhValue)] -> STM ()) -> STM ()
 pvlToDictEntries !ets !pvl !exit = do
   let go !entries [] = exit entries
       go !entries (p : rest) =
@@ -4591,14 +4595,16 @@ edhValueNull !ets (EdhObject !o) !exit =
         "invalid value type from __null__: " <> edhTypeNameOf badVal
 edhValueNull _ _ !exit = exit False
 
-edhIdentEqual :: EdhValue -> EdhValue -> Bool
+edhIdentEqual :: EdhValue -> EdhValue -> STM Bool
 edhIdentEqual (EdhNamedValue x'n x'v) (EdhNamedValue y'n y'v) =
-  x'n == y'n && edhIdentEqual x'v y'v
-edhIdentEqual EdhNamedValue {} _ = False
-edhIdentEqual _ EdhNamedValue {} = False
+  if x'n == y'n
+    then edhIdentEqual x'v y'v
+    else return False
+edhIdentEqual EdhNamedValue {} _ = return False
+edhIdentEqual _ EdhNamedValue {} = return False
 edhIdentEqual (EdhDecimal (D.Decimal 0 0 0)) (EdhDecimal (D.Decimal 0 0 0)) =
-  True
-edhIdentEqual x y = x == y
+  return True
+edhIdentEqual x y = liftA2 (==) (edhValueIdent x) (edhValueIdent y)
 
 edhNamelyEqual ::
   EdhThreadState -> EdhValue -> EdhValue -> (Bool -> STM ()) -> STM ()
@@ -4747,13 +4753,13 @@ edhKeyedListEq !ets !l1 !l2 !exit = go l1 l2
           Just True -> go lhRest rhRest
           !maybeConclusion -> exit maybeConclusion
 
-adtEqProc :: ArgsPack -> EdhHostProc
-adtEqProc !apk !exit !ets = case apk of
+dtcEqProc :: ArgsPack -> EdhHostProc
+dtcEqProc !apk !exit !ets = case apk of
   ArgsPack [EdhObject !objOther] !kwargs | odNull kwargs ->
-    adtFields ets (edh'obj'class thisObj) thatObj $ \ !thatFields ->
+    dtcFields ets (edh'obj'class thisObj) thatObj $ \ !thatFields ->
       resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
         Nothing -> exitEdh ets exit $ EdhBool False
-        Just {} -> adtFields ets (edh'obj'class thisObj) objOther $
+        Just {} -> dtcFields ets (edh'obj'class thisObj) objOther $
           \ !otherFields ->
             edhKeyedListEq ets thatFields otherFields $ \case
               Nothing -> exitEdh ets exit $ EdhBool False
@@ -4764,13 +4770,13 @@ adtEqProc !apk !exit !ets = case apk of
     !thisObj = edh'scope'this scope
     !thatObj = edh'scope'that scope
 
-adtCmpProc :: ArgsPack -> EdhHostProc
-adtCmpProc !apk !exit !ets = case apk of
+dtcCmpProc :: ArgsPack -> EdhHostProc
+dtcCmpProc !apk !exit !ets = case apk of
   ArgsPack [EdhObject !objOther] !kwargs | odNull kwargs ->
-    adtFields ets (edh'obj'class thisObj) thatObj $ \ !thatFields ->
+    dtcFields ets (edh'obj'class thisObj) thatObj $ \ !thatFields ->
       resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
         Nothing -> exitEdh ets exit edhNA
-        Just {} -> adtFields ets (edh'obj'class thisObj) objOther $
+        Just {} -> dtcFields ets (edh'obj'class thisObj) objOther $
           \ !otherFields ->
             edhCmpKeyedList ets thatFields otherFields $ \case
               Nothing -> exitEdh ets exit edhNA

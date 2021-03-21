@@ -178,13 +178,15 @@ valEqProc !inversion !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
 idEqProc :: EdhIntrinsicOp
 idEqProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   evalExprSrc rhExpr $
-    \ !rhVal -> exitEdhTx exit (EdhBool $ edhIdentEqual lhVal rhVal)
+    \ !rhVal !ets ->
+      (EdhBool <$> edhIdentEqual lhVal rhVal) >>= exitEdh ets exit
 
 -- | operator (is not)
 idNotEqProc :: EdhIntrinsicOp
 idNotEqProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   evalExprSrc rhExpr $
-    \ !rhVal -> exitEdhTx exit (EdhBool $ not $ edhIdentEqual lhVal rhVal)
+    \ !rhVal !ets ->
+      (EdhBool . not <$> edhIdentEqual lhVal rhVal) >>= exitEdh ets exit
 
 -- | operator (>)
 isGtProc :: EdhIntrinsicOp

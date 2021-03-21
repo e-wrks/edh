@@ -97,26 +97,43 @@ iopdSize (IOPD _mv !wpv !nhv _av) = do
   !nh <- readTVar nhv
   return $ wp - nh
 
-iopdInsert :: forall k v. (Eq k, Hashable k) => k -> v -> IOPD k v -> STM ()
-iopdInsert !key !val d@(IOPD !mv !wpv _nhv !av) =
-  {- HLINT ignore "Redundant <$>" -}
-  Map.lookup key <$> readTVar mv >>= \case
-    Just !i ->
-      readTVar av >>= unsafeIOToSTM . flip MV.unsafeRead i
-        >>= flip writeTVar (Just (key, val))
-    Nothing -> do
-      !entry <- newTVar $ Just (key, val)
-      !wp0 <- readTVar wpv
-      !a0 <- readTVar av
-      if wp0 >= MV.length a0 then iopdReserve 7 d else pure ()
-      !wp <- readTVar wpv
-      !a <- readTVar av
-      if wp >= MV.length a
-        then error "bug: iopd reservation malfunctioned"
-        else pure ()
-      unsafeIOToSTM $ MV.unsafeWrite a wp entry
-      modifyTVar' mv $ Map.insert key wp
-      writeTVar wpv (wp + 1)
+iopdInsert ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  k ->
+  v ->
+  IOPD k v ->
+  STM ()
+iopdInsert = iopdInsert' pure
+
+iopdInsert' ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  (k -> STM k) ->
+  k ->
+  v ->
+  IOPD k v ->
+  STM ()
+iopdInsert' !keyMap !key !val d@(IOPD !mv !wpv _nhv !av) =
+  keyMap key >>= \ !key' ->
+    {- HLINT ignore "Redundant <$>" -}
+    Map.lookup key' <$> readTVar mv >>= \case
+      Just !i ->
+        readTVar av >>= unsafeIOToSTM . flip MV.unsafeRead i
+          >>= flip writeTVar (Just (key, val))
+      Nothing -> do
+        !entry <- newTVar $ Just (key, val)
+        !wp0 <- readTVar wpv
+        !a0 <- readTVar av
+        if wp0 >= MV.length a0 then iopdReserve 7 d else pure ()
+        !wp <- readTVar wpv
+        !a <- readTVar av
+        if wp >= MV.length a
+          then error "bug: iopd reservation malfunctioned"
+          else pure ()
+        unsafeIOToSTM $ MV.unsafeWrite a wp entry
+        modifyTVar' mv $ Map.insert key' wp
+        writeTVar wpv (wp + 1)
 
 iopdReserve :: forall k v. (Eq k, Hashable k) => Int -> IOPD k v -> STM ()
 iopdReserve !moreCap (IOPD _mv !wpv _nhv !av) = do
@@ -133,8 +150,22 @@ iopdReserve !moreCap (IOPD _mv !wpv _nhv !av) = do
         return a'
       writeTVar av aNew
 
-iopdUpdate :: forall k v. (Eq k, Hashable k) => [(k, v)] -> IOPD k v -> STM ()
-iopdUpdate !ps !d =
+iopdUpdate ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  [(k, v)] ->
+  IOPD k v ->
+  STM ()
+iopdUpdate = iopdUpdate' pure
+
+iopdUpdate' ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  (k -> STM k) ->
+  [(k, v)] ->
+  IOPD k v ->
+  STM ()
+iopdUpdate' !keyMap !ps !d =
   if null ps
     then return ()
     else do
@@ -143,33 +174,78 @@ iopdUpdate !ps !d =
   where
     upd [] = return ()
     upd ((!key, !val) : rest) = do
-      iopdInsert key val d
+      iopdInsert' keyMap key val d
       upd rest
 
-iopdLookup :: forall k v. (Eq k, Hashable k) => k -> IOPD k v -> STM (Maybe v)
-iopdLookup !key (IOPD !mv _wpv _nhv !av) =
-  Map.lookup key <$> readTVar mv >>= \case
-    Nothing -> return Nothing
-    Just !i ->
-      (fmap snd <$>) $
-        readTVar av >>= unsafeIOToSTM . flip MV.unsafeRead i
-          >>= readTVar
+iopdLookup ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  k ->
+  IOPD k v ->
+  STM (Maybe v)
+iopdLookup = iopdLookup' pure
+
+iopdLookup' ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  (k -> STM k) ->
+  k ->
+  IOPD k v ->
+  STM (Maybe v)
+iopdLookup' !keyMap !key (IOPD !mv _wpv _nhv !av) =
+  keyMap key >>= \ !key' ->
+    Map.lookup key' <$> readTVar mv >>= \case
+      Nothing -> return Nothing
+      Just !i ->
+        (fmap snd <$>) $
+          readTVar av >>= unsafeIOToSTM . flip MV.unsafeRead i
+            >>= readTVar
 
 iopdLookupDefault ::
-  forall k v. (Eq k, Hashable k) => v -> k -> IOPD k v -> STM v
-iopdLookupDefault !defaultVal !key !iopd =
-  iopdLookup key iopd >>= \case
+  forall k v.
+  (Eq k, Hashable k) =>
+  v ->
+  k ->
+  IOPD k v ->
+  STM v
+iopdLookupDefault = iopdLookupDefault' pure
+
+iopdLookupDefault' ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  (k -> STM k) ->
+  v ->
+  k ->
+  IOPD k v ->
+  STM v
+iopdLookupDefault' !keyMap !defaultVal !key !iopd =
+  iopdLookup' keyMap key iopd >>= \case
     Nothing -> return defaultVal
     Just !val -> return val
 
-iopdDelete :: forall k v. (Eq k, Hashable k) => k -> IOPD k v -> STM ()
-iopdDelete !key (IOPD !mv _wpv !nhv !av) =
-  Map.lookup key <$> readTVar mv >>= \case
-    Nothing -> return ()
-    Just !i -> do
-      readTVar av >>= unsafeIOToSTM . flip MV.unsafeRead i
-        >>= flip writeTVar Nothing
-      modifyTVar' nhv (+ 1)
+iopdDelete ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  k ->
+  IOPD k v ->
+  STM ()
+iopdDelete = iopdDelete' pure
+
+iopdDelete' ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  (k -> STM k) ->
+  k ->
+  IOPD k v ->
+  STM ()
+iopdDelete' !keyMap !key (IOPD !mv _wpv !nhv !av) =
+  keyMap key >>= \ !key' ->
+    Map.lookup key' <$> readTVar mv >>= \case
+      Nothing -> return ()
+      Just !i -> do
+        readTVar av >>= unsafeIOToSTM . flip MV.unsafeRead i
+          >>= flip writeTVar Nothing
+        modifyTVar' nhv (+ 1)
 
 iopdKeys :: forall k v. (Eq k, Hashable k) => IOPD k v -> STM [k]
 iopdKeys (IOPD _mv !wpv _nhv !av) = do
@@ -216,38 +292,45 @@ iopdToReverseList (IOPD _mv !wpv _nhv !av) = do
           Just !entry -> go (entry : entries) (i + 1)
   go [] 0
 
-iopdFromList :: forall k v. (Eq k, Hashable k) => [(k, v)] -> STM (IOPD k v)
-iopdFromList = iopdFromList' Just
+iopdFromList ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  [(k, v)] ->
+  STM (IOPD k v)
+iopdFromList = iopdFromList' pure Just
 
 iopdFromList' ::
   forall k v.
   (Eq k, Hashable k) =>
+  (k -> STM k) ->
   ((k, v) -> Maybe (k, v)) ->
   [(k, v)] ->
   STM (IOPD k v)
-iopdFromList' !entryMod !entries = do
+iopdFromList' !keyMap !entryMod !entries = do
   !tves <-
     sequence $
       [ case entryMod e of
-          Nothing -> (key,True,) <$> newTVar Nothing
-          ev@Just {} -> (key,False,) <$> newTVar ev
-        | e@(!key, _) <- entries
+          Nothing -> keyMap k >>= \ !key -> (key,True,) <$> newTVar Nothing
+          Just (k', v) ->
+            keyMap k' >>= \ !key -> (key,False,) <$> newTVar (Just (k', v))
+        | e@(!k, _) <- entries
       ]
   (!mNew, !wpNew, !nhNew, !aNew) <- unsafeIOToSTM $ do
     !a <- MV.unsafeNew $ length entries
     let go [] !m !wp !nh = return (m, wp, nh, a)
-        go ((!key, !del, !ev) : rest) !m !wp !nh = case Map.lookup key m of
-          Nothing ->
-            if del
-              then go rest m wp nh
-              else do
-                MV.unsafeWrite a wp ev
-                go rest (Map.insert key wp m) (wp + 1) nh
-          Just !i -> do
-            MV.unsafeWrite a i ev
-            if del
-              then go rest (Map.delete key m) wp (nh + 1)
-              else go rest m wp nh
+        go ((!key, !del, !ev) : rest) !m !wp !nh =
+          case Map.lookup key m of
+            Nothing ->
+              if del
+                then go rest m wp nh
+                else do
+                  MV.unsafeWrite a wp ev
+                  go rest (Map.insert key wp m) (wp + 1) nh
+            Just !i -> do
+              MV.unsafeWrite a i ev
+              if del
+                then go rest (Map.delete key m) wp (nh + 1)
+                else go rest m wp nh
     go tves Map.empty 0 0
   !mv <- newTVar mNew
   !wpv <- newTVar wpNew

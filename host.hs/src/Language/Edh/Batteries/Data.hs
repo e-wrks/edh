@@ -2,18 +2,9 @@ module Language.Edh.Batteries.Data where
 
 -- import           Debug.Trace
 
+import Control.Applicative
 import Control.Concurrent.STM
-  ( STM,
-    modifyTVar',
-    newTVar,
-    readTVar,
-    writeTVar,
-  )
-import Control.Monad.Reader
-  ( unless,
-    when,
-  )
-import qualified Data.Bits as Bits
+import Control.Monad
 import Data.ByteString (ByteString)
 import Data.Lossless.Decimal as D (Decimal, nan)
 import Data.Maybe (fromMaybe)
@@ -21,7 +12,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.UUID as UUID
-import Data.Unique (hashUnique, newUnique)
+import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
 import Language.Edh.Control
@@ -300,15 +291,7 @@ uuidCtorProc (Just !uuidTxt) !exit !ets = case UUID.fromText uuidTxt of
   Just !uuid -> exitEdh ets exit $ EdhUUID uuid
   _ -> throwEdh ets UsageError $ "invalid uuid string: " <> uuidTxt
 
--- | utility id(val) -- obtain unique evident value of a value
---
--- this follows the semantic of Python's `id` function for object values and
--- a few other types, notably including event sink values;
--- and for values of immutable types, this follows the semantic of Haskell to
--- just return the value itself.
---
--- but unlike Python's `id` function which returns integers, here we return
--- `UUID`s for objects et al.
+-- | utility id(val) -- obtain identity value of a value
 --
 -- this is useful e.g. in log records you have no other way to write
 -- information about an event sink, so that it can be evident whether the sink
@@ -316,70 +299,8 @@ uuidCtorProc (Just !uuidTxt) !exit !ets = case UUID.fromText uuidTxt of
 -- is always '<sink>'. though it's not a problem when you have those values
 -- pertaining to an interactive repl session, where `is` operator can easily
 -- tell you that.
---
--- todo
---   *) hashUnique doesn't guarantee free of collision, better impl?
 idProc :: EdhValue -> EdhHostProc
-idProc !val !exit = exitEdhTx exit $ identityOf val
-  where
-    idFromInt :: Int -> EdhValue
-    idFromInt !i =
-      EdhUUID $
-        UUID.fromWords
-          0xcafe
-          0xface
-          (fromIntegral $ Bits.shiftR i 32)
-          (fromIntegral i)
-
-    identityOf :: EdhValue -> EdhValue
-    identityOf (EdhObject !o) = idOfObj o
-    identityOf (EdhSink !s) = idFromInt $ hashUnique $ evs'uniq s
-    identityOf (EdhNamedValue !n !v) = EdhNamedValue n (identityOf v)
-    identityOf (EdhPair !l !r) = EdhPair (identityOf l) (identityOf r)
-    identityOf (EdhDict (Dict !u _)) = idFromInt $ hashUnique u
-    identityOf (EdhList (List !u _)) = idFromInt $ hashUnique u
-    identityOf (EdhProcedure !p _) = idOfProc p
-    identityOf (EdhBoundProc !p !this !that _) =
-      EdhPair (EdhPair (idOfProc p) (idOfObj this)) (idOfObj that)
-    identityOf (EdhExpr !u _ _) = idFromInt $ hashUnique u
-    identityOf (EdhArgsPack (ArgsPack !args !kwargs)) =
-      go
-        args
-        (odToList kwargs)
-        []
-        []
-      where
-        go ::
-          [EdhValue] ->
-          [(AttrKey, EdhValue)] ->
-          [EdhValue] ->
-          [(AttrKey, EdhValue)] ->
-          EdhValue
-        go [] [] !idArgs !idKwArgs =
-          EdhArgsPack $ ArgsPack (reverse idArgs) (odFromList $ reverse idKwArgs)
-        go [] ((!k, !v) : restKwArgs) !idArgs !idKwArgs =
-          go [] restKwArgs idArgs ((k, identityOf v) : idKwArgs)
-        go (v : restArgs) !kwargs' !idArgs !idKwArgs =
-          go restArgs kwargs' (identityOf v : idArgs) idKwArgs
-    identityOf !v = v
-
-    idOfObj :: Object -> EdhValue
-    idOfObj o = idFromInt $ hashUnique $ edh'obj'ident o
-
-    idOfProcDefi :: ProcDefi -> EdhValue
-    idOfProcDefi !def = idFromInt $ hashUnique $ edh'procedure'ident def
-
-    idOfProc :: EdhProcDefi -> EdhValue
-    idOfProc (EdhIntrOp _ _ !def) =
-      idFromInt $ hashUnique $ intrinsic'op'uniq def
-    idOfProc (EdhOprtor _ _ _ !def) = idOfProcDefi def
-    idOfProc (EdhMethod !def) = idOfProcDefi def
-    idOfProc (EdhGnrtor !def) = idOfProcDefi def
-    idOfProc (EdhIntrpr !def) = idOfProcDefi def
-    idOfProc (EdhPrducr !def) = idOfProcDefi def
-    idOfProc (EdhDescriptor !getter !maybeSetter) = case maybeSetter of
-      Nothing -> idOfProcDefi getter
-      Just !setter -> EdhPair (idOfProcDefi getter) (idOfProcDefi setter)
+idProc !val !exit !ets = edhValueIdent val >>= exitEdh ets exit
 
 -- | utility str(*args,**kwargs) - convert to string
 strProc :: ArgsPack -> EdhHostProc

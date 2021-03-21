@@ -2,9 +2,12 @@ module Language.Edh.RtTypes where
 
 -- import           Debug.Trace
 
+import Control.Applicative
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Exception (SomeException)
+import Control.Monad
+import qualified Data.Bits as Bits
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import Data.Dynamic (Dynamic, Typeable, fromDynamic)
@@ -16,7 +19,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
-import Data.Unique (Unique, newUnique)
+import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Control
 import Language.Edh.IOPD
@@ -34,12 +37,6 @@ edhSetValue ::
 edhSetValue !key !val !d = case val of
   EdhNil -> iopdDelete key d
   _ -> iopdInsert key val d
-
--- | `nil` carries deletion semantics in Edh
-edhDictFromList :: [(EdhValue, EdhValue)] -> STM (IOPD EdhValue EdhValue)
-edhDictFromList = iopdFromList' $ \e@(_k, !v) -> case v of
-  EdhNil -> Nothing
-  _ -> Just e
 
 -- | A pack of evaluated argument values with positional/keyword origin,
 -- this works in places of tuples in other languages, apk in Edh can be
@@ -105,29 +102,98 @@ instance Hashable Dict where
 instance Show Dict where
   show _ = "<dict>"
 
-type ItemKey = EdhValue
-
 type DictStore = IOPD EdhValue EdhValue
 
--- | create a new Edh dict from a list of entries
+-- | Create a new Edh dict from a list of entries
 --
--- nil keys and nil values are filtered out so have no effect
-createEdhDict :: [(ItemKey, EdhValue)] -> STM Dict
+-- Note nil key will be treated as None, nil value triggers deletion semantics
+createEdhDict :: [(EdhValue, EdhValue)] -> STM Dict
 createEdhDict !entries = do
-  u <- unsafeIOToSTM newUnique
-  Dict u
-    <$> iopdFromList
-      [e | e@(key, val) <- entries, key /= EdhNil && val /= EdhNil]
+  !u <- unsafeIOToSTM newUnique
+  Dict u <$> iopdFromList' edhValueIdent entryMod entries
+  where
+    entryMod (!k, !v) = case v of
+      EdhNil -> Nothing
+      _ -> Just (noneNil k, v)
 
 -- | setting to `nil` value means deleting the item by the specified key
-setDictItem :: ItemKey -> EdhValue -> DictStore -> STM ()
+setDictItem :: EdhValue -> EdhValue -> DictStore -> STM ()
 setDictItem !k !v !d = case v of
-  EdhNil -> iopdDelete k d
-  _ -> iopdInsert k v d
+  EdhNil -> iopdDelete' edhValueIdent k d
+  _ -> iopdInsert' edhValueIdent k v d
+
+lookupDictItem :: EdhValue -> DictStore -> STM (Maybe EdhValue)
+lookupDictItem = iopdLookup' edhValueIdent
 
 dictEntryList :: DictStore -> STM [EdhValue]
 dictEntryList !d =
   (<$> iopdToList d) $ fmap $ \(k, v) -> EdhArgsPack $ ArgsPack [k, v] odEmpty
+
+-- | Identity value of an arbitrary value
+--
+-- this follows the semantic of Python's `id` function for object values and
+-- a few other types, notably including event sink values;
+-- and for values of immutable types, this follows the semantic of Haskell to
+-- just return the value itself.
+--
+-- but unlike Python's `id` function which returns integers, here we return
+-- `UUID`s for objects et al.
+edhValueIdent :: EdhValue -> STM EdhValue
+edhValueIdent = identityOf
+  where
+    idFromInt :: Int -> EdhValue
+    -- todo hashUnique doesn't guarantee free of collision, better impl?
+    idFromInt !i =
+      EdhUUID $
+        UUID.fromWords
+          0xcafe
+          0xface
+          (fromIntegral $ Bits.shiftR i 32)
+          (fromIntegral i)
+
+    identityOf :: EdhValue -> STM EdhValue
+    identityOf (EdhObject !o) = idOfObj o
+    identityOf (EdhSink !s) = return $ idFromInt $ hashUnique $ evs'uniq s
+    identityOf (EdhNamedValue !n !v) = EdhNamedValue n <$> identityOf v
+    identityOf (EdhPair !l !r) = liftA2 EdhPair (identityOf l) (identityOf r)
+    identityOf (EdhDict (Dict !u _)) = return $ idFromInt $ hashUnique u
+    identityOf (EdhList (List !u _)) = return $ idFromInt $ hashUnique u
+    identityOf (EdhProcedure !p _) = return $ idOfProc p
+    identityOf (EdhBoundProc !p !this !that _) =
+      EdhPair (idOfProc p) <$> liftA2 EdhPair (idOfObj this) (idOfObj that)
+    identityOf (EdhExpr !u _ _) = return $ idFromInt $ hashUnique u
+    identityOf (EdhArgsPack (ArgsPack !args !kwargs)) =
+      EdhArgsPack
+        <$> liftA2
+          ArgsPack
+          (sequence $ identityOf <$> args)
+          (odMapSTM identityOf kwargs)
+    identityOf !v = return v
+
+    idOfObj :: Object -> STM EdhValue
+    idOfObj o = case edh'obj'store o of
+      HashStore !hs ->
+        iopdLookup (AttrByName "__id__") hs >>= \case
+          Just !idv -> identityOf idv
+          _ -> return ouid
+      _ -> return ouid
+      where
+        ouid = idFromInt $ hashUnique $ edh'obj'ident o
+
+    idOfProcDefi :: ProcDefi -> EdhValue
+    idOfProcDefi !def = idFromInt $ hashUnique $ edh'procedure'ident def
+
+    idOfProc :: EdhProcDefi -> EdhValue
+    idOfProc (EdhIntrOp _ _ !def) =
+      idFromInt $ hashUnique $ intrinsic'op'uniq def
+    idOfProc (EdhOprtor _ _ _ !def) = idOfProcDefi def
+    idOfProc (EdhMethod !def) = idOfProcDefi def
+    idOfProc (EdhGnrtor !def) = idOfProcDefi def
+    idOfProc (EdhIntrpr !def) = idOfProcDefi def
+    idOfProc (EdhPrducr !def) = idOfProcDefi def
+    idOfProc (EdhDescriptor !getter !maybeSetter) = case maybeSetter of
+      Nothing -> idOfProcDefi getter
+      Just !setter -> EdhPair (idOfProcDefi getter) (idOfProcDefi setter)
 
 -- | Backing storage for a scope or a hash object
 type EntityStore = IOPD AttrKey EdhValue
