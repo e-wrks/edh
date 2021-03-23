@@ -458,7 +458,7 @@ instance Hashable Class where
 
 type EdhObjectAllocator = EdhAllocExit -> EdhTx
 
-type EdhAllocExit = ObjectStore -> STM ()
+type EdhAllocExit = Maybe Unique -> ObjectStore -> STM ()
 
 edhClassName :: Object -> Text
 edhClassName !clsObj = case edh'obj'store clsObj of

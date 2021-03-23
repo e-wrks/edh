@@ -109,7 +109,7 @@ createVectorClass !clsOuterScope =
                   _ -> V.fromListN len vs
             !mvec <- unsafeIOToSTM $ V.thaw vec
             !mvv <- newTVar mvec
-            ctorExit $ HostStore $ toDyn mvv
+            ctorExit Nothing $ HostStore $ toDyn mvv
       case odLookup (AttrByName "length") ctorKwargs of
         Nothing -> doIt (-1) ctorArgs
         Just (EdhDecimal !d) -> case D.decimalToInteger d of

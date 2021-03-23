@@ -174,8 +174,10 @@ createEdhWorld !console = do
       scopeAllocator (optionalArg -> !maybeOfObj) !exit !ets =
         case maybeOfObj of
           Just !obj ->
-            objectScope obj >>= \ !objScope -> exit $ HostStore $ toDyn objScope
-          Nothing -> exit $ HostStore $ toDyn $ contextScope $ edh'context ets
+            objectScope obj
+              >>= \ !objScope -> exit Nothing $ HostStore $ toDyn objScope
+          Nothing ->
+            exit Nothing $ HostStore $ toDyn $ contextScope $ edh'context ets
   !clsScope <-
     atomically $
       mkHostClass' rootScope "scope" (allocEdhObj scopeAllocator) hsScope []
@@ -613,11 +615,12 @@ createEdhWorld !console = do
       _ -> createErr $ EdhArgsPack apk
       where
         createErr !hv =
-          exit $ HostStore $ toDyn $ toException $ ProgramHalt $ toDyn hv
+          exit Nothing $
+            HostStore $ toDyn $ toException $ ProgramHalt $ toDyn hv
 
     -- this is called in case a ThreadTerminate is constructed by Edh code
     thTermAllocator _ !exit _ =
-      exit $ HostStore $ toDyn $ toException ThreadTerminate
+      exit Nothing $ HostStore $ toDyn $ toException ThreadTerminate
 
     -- creating an IOError from Edh code
     ioErrAllocator apk@(ArgsPack !args !kwargs) !exit !ets = case args of
@@ -626,7 +629,7 @@ createEdhWorld !console = do
         \ !repr -> createErr $ T.unpack repr
       where
         createErr !msg =
-          exit $
+          exit Nothing $
             HostStore $
               toDyn $
                 toException $
@@ -636,7 +639,7 @@ createEdhWorld !console = do
 
     -- a peer error is most prolly created from Edh code
     peerErrAllocator !apk !exit _ =
-      exit $
+      exit Nothing $
         HostStore $
           toDyn $
             toException
@@ -649,7 +652,8 @@ createEdhWorld !console = do
 
     -- creating a tagged Edh error from Edh code
     errAllocator !tag !apk !exit !ets =
-      exit $ HostStore $ toDyn $ toException $ edhCreateError 0 ets tag apk
+      exit Nothing $
+        HostStore $ toDyn $ toException $ edhCreateError 0 ets tag apk
 
     mthErrRepr :: EdhHostProc
     mthErrRepr !exit !ets = case edh'obj'store errObj of
@@ -680,7 +684,13 @@ createEdhWorld !console = do
           Just (EdhError _tag !msg _details _cc) ->
             if T.null msg
               then exitEdh ets exit $ EdhString $ errClsName <> "()"
-              else exitEdh ets exit $ EdhString $ errClsName <> "(`" <> msg <> "`)"
+              else
+                exitEdh ets exit $
+                  EdhString $
+                    errClsName
+                      <> "(`"
+                      <> msg
+                      <> "`)"
           _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
         Nothing -> exitEdh ets exit $ EdhString $ errClsName <> "()"
       _ -> exitEdh ets exit $ EdhString $ errClsName <> "()"
@@ -707,8 +717,12 @@ createEdhWorld !console = do
                   <> T.pack
                     (show exc)
         _ ->
-          exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
-      _ -> exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
+          exitEdh ets exit $
+            EdhString $
+              "bogus error object of: "
+                <> errClsName
+      _ ->
+        exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
       where
         !errObj = edh'scope'this $ contextScope $ edh'context ets
         !errClsName = objClassName errObj
@@ -728,10 +742,14 @@ createEdhWorld !console = do
                       <> detailsStr
               _ -> exitEdh ets exit $ EdhString $ T.pack (show err)
           _ ->
-            exitEdh ets exit $ EdhString $ errClsName <> ": " <> T.pack (show exc)
+            exitEdh ets exit $
+              EdhString $ errClsName <> ": " <> T.pack (show exc)
         _ ->
-          exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
-      _ -> exitEdh ets exit $ EdhString $ "bogus error object of: " <> errClsName
+          exitEdh ets exit $
+            EdhString $ "bogus error object of: " <> errClsName
+      _ ->
+        exitEdh ets exit $
+          EdhString $ "bogus error object of: " <> errClsName
       where
         !errObj = edh'scope'this $ contextScope $ edh'context ets
         !errClsName = objClassName errObj
@@ -787,7 +805,7 @@ createEdhWorld !console = do
       !extraArts
       !exit
       _ets =
-        exit . HashStore =<< iopdFromList moduArts
+        exit Nothing . HashStore =<< iopdFromList moduArts
         where
           moduArts =
             odToList extraArts
@@ -827,7 +845,8 @@ declareEdhOperators world declLoc opps = do
       Map.unionWithKey chkCompatible (return <$> opPD) $
         Map.fromList $
           (<$> opps) $
-            \(sym, fixity, precedence) -> (sym, return (fixity, precedence, declLoc))
+            \(sym, fixity, precedence) ->
+              (sym, return (fixity, precedence, declLoc))
   putTMVar wops opPD'
   where
     !wops = edh'world'operators world
@@ -929,7 +948,8 @@ installEdhModule !world !moduId !preInstall = do
         preInstall ets {edh'context = moduCtx} $ do
           !moduSlot <- newTVar $ ModuLoaded modu
           !moduMap <- takeTMVar (edh'world'modules world)
-          putTMVar (edh'world'modules world) $ Map.insert moduId moduSlot moduMap
+          putTMVar (edh'world'modules world) $
+            Map.insert moduId moduSlot moduMap
   return modu
 
 installedEdhModule :: EdhWorld -> ModuleId -> IO (Maybe Object)
@@ -942,7 +962,8 @@ installedEdhModule !world !moduId =
         Just !moduSlotVar ->
           readTVar moduSlotVar >>= \case
             ModuLoaded !modu -> return $ Just modu
-            ModuLoading !loadScope _ -> return $ Just $ edh'scope'this loadScope
+            ModuLoading !loadScope _ ->
+              return $ Just $ edh'scope'this loadScope
             _ -> return Nothing
 
 runEdhModule ::

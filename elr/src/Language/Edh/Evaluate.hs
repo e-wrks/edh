@@ -611,8 +611,12 @@ edhConstructObj !clsObj !apk !exit !ets =
                             Just !supers ->
                               runEdhTx ets $
                                 edh'class'allocator cls apkCtor' $
-                                  \ !es -> do
-                                    !oid <- unsafeIOToSTM newUnique
+                                  \ !oidMaybe !es -> do
+                                    !oid <-
+                                      maybe
+                                        (unsafeIOToSTM newUnique)
+                                        return
+                                        oidMaybe
                                     !ss <- newTVar supers
                                     let !o = Object oid es co ss
                                     -- put into instance map by class
@@ -3847,7 +3851,7 @@ evalExpr'
       let allocatorProc :: ArgsPack -> EdhObjectAllocator
           allocatorProc !apkCtor !exitCtor !etsCtor = case argsRcvr of
             -- a normal class
-            WildReceiver -> exitCtor . HashStore =<< iopdEmpty
+            WildReceiver -> exitCtor Nothing . HashStore =<< iopdEmpty
             -- a data class
             _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
               let !diKey =
@@ -3855,7 +3859,7 @@ evalExpr'
                       EdhArgsPack $ ArgsPack [EdhObject clsObj] dataAttrs
                     )
                in iopdFromList (diKey : odToList dataAttrs)
-                    >>= exitCtor . HashStore
+                    >>= exitCtor Nothing . HashStore
 
           !clsProc =
             ProcDefi
