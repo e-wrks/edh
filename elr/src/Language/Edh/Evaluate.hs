@@ -2491,30 +2491,38 @@ evalStmt !stmt !exit = case stmt of
         schedDefered etsSched id $ evalExpr' expr Nothing endOfEdh
   PerceiveStmt !sinkExpr !bodyStmt ->
     evalExprSrc sinkExpr $ \ !sinkVal !ets -> case edhUltimate sinkVal of
-      EdhSink !sink -> do
-        let reactor !breakThread =
-              evalStmtSrc bodyStmt $ \ !reactResult _etsReactor ->
-                case edhDeCaseClose reactResult of
-                  EdhBreak -> writeTVar breakThread True
-                  -- todo warn or even err out in case return/continue/default
-                  --      etc. are returned to here?
-                  _ -> return ()
-        subscribeEvents sink >>= \case
-          Nothing -> case evs'mrv sink of -- already at eos
-            Nothing -> pure () -- non-lingering, nothing to do
-            Just {} ->
-              -- a lingering sink, trigger an immediate nil perceiving
-              runEdhTx ets $ edhContIO' $ drivePerceiver nil ets reactor
-          Just (!perceiverChan, !lingerVal) -> do
-            modifyTVar'
-              (edh'perceivers ets)
-              (PerceiveRecord perceiverChan ets reactor :)
-            case lingerVal of
-              Nothing -> pure ()
-              Just !mrv ->
-                -- mrv lingering, trigger an immediate perceiving
-                runEdhTx ets $ edhContIO' $ drivePerceiver mrv ets reactor
-        exitEdh ets exit nil
+      EdhSink !sink ->
+        if edh'in'tx ets
+          then do
+            modifyTVar' (evs'atoms sink) $ \ !prev'atoms !ev ->
+              runEdhTx
+                ets {edh'context = (edh'context ets) {edh'ctx'match = ev}}
+                $ evalStmtSrc bodyStmt $ \_ _ets -> prev'atoms ev
+            exitEdh ets exit nil
+          else do
+            let reactor !breakThread =
+                  evalStmtSrc bodyStmt $ \ !reactResult _etsReactor ->
+                    case edhDeCaseClose reactResult of
+                      EdhBreak -> writeTVar breakThread True
+                      -- todo warn or even err out in case return/continue/default
+                      --      etc. are returned to here?
+                      _ -> return ()
+            subscribeEvents sink >>= \case
+              Nothing -> case evs'mrv sink of -- already at eos
+                Nothing -> pure () -- non-lingering, nothing to do
+                Just {} ->
+                  -- a lingering sink, trigger an immediate nil perceiving
+                  runEdhTx ets $ edhContIO' $ drivePerceiver nil ets reactor
+              Just (!perceiverChan, !lingerVal) -> do
+                modifyTVar'
+                  (edh'perceivers ets)
+                  (PerceiveRecord perceiverChan ets reactor :)
+                case lingerVal of
+                  Nothing -> pure ()
+                  Just !mrv ->
+                    -- mrv lingering, trigger an immediate perceiving
+                    runEdhTx ets $ edhContIO' $ drivePerceiver mrv ets reactor
+            exitEdh ets exit nil
       _ ->
         throwEdh ets EvalError $
           "can only perceive from an event sink, not a "
@@ -5263,19 +5271,23 @@ publishEvent !sink !val !exit !ets =
 -- production until current thread has later started consuming events from the
 -- sink returned here.
 launchEventProducer :: EdhTxExit EventSink -> EventSink -> EdhTx -> EdhTx
-launchEventProducer !exit sink@(EventSink _ _ _ !subc) !producerTx !etsConsumer =
-  readTVar subc >>= \ !subcBefore ->
-    if subcBefore < 0
-      then throwEdh etsConsumer UsageError "producer outlet already at eos"
-      else
-        let prodThAct !etsProducer = do
-              !subcNow <- readTVar subc
-              when (subcNow == subcBefore) retry
-              producerTx etsProducer
-         in runEdhTx etsConsumer $
-              forkEdh id prodThAct $
-                const $
-                  exitEdhTx exit sink
+launchEventProducer
+  !exit
+  sink@(EventSink _ _ _ _ !subc)
+  !producerTx
+  !etsConsumer =
+    readTVar subc >>= \ !subcBefore ->
+      if subcBefore < 0
+        then throwEdh etsConsumer UsageError "producer outlet already at eos"
+        else
+          let prodThAct !etsProducer = do
+                !subcNow <- readTVar subc
+                when (subcNow == subcBefore) retry
+                producerTx etsProducer
+           in runEdhTx etsConsumer $
+                forkEdh id prodThAct $
+                  const $
+                    exitEdhTx exit sink
 
 mkHostClass' ::
   Scope ->

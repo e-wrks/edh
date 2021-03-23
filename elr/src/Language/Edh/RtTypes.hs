@@ -867,6 +867,9 @@ data EventSink = EventSink
     evs'mrv :: !(Maybe (TVar EdhValue)),
     -- | the broadcast channel
     evs'chan :: !(TChan EdhValue),
+    -- | a chain of atomic actions to be injected into the publishing
+    -- transaction for an event
+    evs'atoms :: TVar (EdhValue -> STM ()),
     -- | subscriber counter, will remain negative once the sink is marked eos
     -- (by publishing a `nil` value into it), or increase every time the sink
     -- is subscribed (a subscriber's channel dup'ped from `evs'chan`)
@@ -874,13 +877,13 @@ data EventSink = EventSink
   }
 
 instance Eq EventSink where
-  EventSink x'u _ _ _ == EventSink y'u _ _ _ = x'u == y'u
+  EventSink x'u _ _ _ _ == EventSink y'u _ _ _ _ = x'u == y'u
 
 instance Ord EventSink where
-  compare (EventSink x'u _ _ _) (EventSink y'u _ _ _) = compare x'u y'u
+  compare (EventSink x'u _ _ _ _) (EventSink y'u _ _ _ _) = compare x'u y'u
 
 instance Hashable EventSink where
-  hashWithSalt s (EventSink s'u _ _ _) = hashWithSalt s s'u
+  hashWithSalt s (EventSink s'u _ _ _ _) = hashWithSalt s s'u
 
 instance Show EventSink where
   show EventSink {} = "<sink>"

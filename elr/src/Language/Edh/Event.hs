@@ -38,12 +38,14 @@ newEventSink' !lingering = do
       then Just <$> newTVar nil
       else return Nothing
   !chan <- newBroadcastTChan
+  !atomsVar <- newTVar $ const $ return ()
   !subc <- newTVar 0
   return
     EventSink
       { evs'uniq = u,
         evs'mrv = mrv,
         evs'chan = chan,
+        evs'atoms = atomsVar,
         evs'subc = subc
       }
 
@@ -55,7 +57,7 @@ newEventSink' !lingering = do
 -- CAVEAT: should not by other means be dup'ing the broadcast channel,
 --         to obtain a subscriber's channel.
 subscribeEvents :: EventSink -> STM (Maybe (TChan EdhValue, Maybe EdhValue))
-subscribeEvents (EventSink _ !mrv !bcc !subc) =
+subscribeEvents (EventSink _ !mrv !bcc _ !subc) =
   readTVar subc >>= \ !oldSubc ->
     if oldSubc < 0
       then return Nothing
@@ -72,7 +74,7 @@ subscribeEvents (EventSink _ !mrv !bcc !subc) =
 
 -- | Post an event into a sink
 postEvent :: EventSink -> EdhValue -> STM Bool
-postEvent (EventSink _ !mrv !chan !subc) !val =
+postEvent (EventSink _ !mrv !chan !atomsVar !subc) !val =
   readTVar subc >>= \ !oldSubc ->
     if oldSubc < 0
       then return False
@@ -82,6 +84,8 @@ postEvent (EventSink _ !mrv !chan !subc) !val =
           Nothing -> pure ()
           Just !mrvv -> writeTVar mrvv val
         when (val == EdhNil) $ writeTVar subc (-1) -- mark end-of-stream
+        !atoms <- readTVar atomsVar
+        atoms val
         return True
 
 -- | Fork a new thread to do event producing, with current thread assumed
