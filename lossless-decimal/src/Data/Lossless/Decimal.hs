@@ -163,7 +163,7 @@ instance Num Decimal where
   (+) = addDecimal
   (*) = mulDecimal
   abs (Decimal d e n) = Decimal (abs d) e (abs n)
-  signum (Decimal d e n) = Decimal (abs d) e $ signum n * signum d
+  signum (Decimal d _e n) = Decimal 1 0 $ signum n * signum d
   negate = negateDecimal
 
 instance Real Decimal where
