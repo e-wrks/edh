@@ -174,6 +174,16 @@ instance Fractional Decimal where
   fromRational x = normalizeDecimal $ Decimal (denominator x) 0 (numerator x)
   (/) = divDecimal
 
+instance RealFrac Decimal where
+  properFraction (Decimal d e n) =
+    if e < 0
+      then
+        let (q, r) = n `quotRem` (d * 10 ^ (- e))
+         in (fromInteger q, Decimal d e r)
+      else
+        let (q, r) = (n * 10 ^ e) `quotRem` d
+         in (fromInteger q, normalizeDecimal $ Decimal d 0 r)
+
 decimalGreater :: Decimal -> Decimal -> Bool
 decimalGreater x@(Decimal x'd _x'e x'n) y@(Decimal y'd _y'e y'n)
   | -- always False when nan involved
