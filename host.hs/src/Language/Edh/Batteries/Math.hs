@@ -7,6 +7,7 @@ import Data.Lossless.Decimal
     decimalToInteger,
     powerDecimal,
   )
+import Language.Edh.Args
 import Language.Edh.Batteries.Data
 import Language.Edh.Control
 import Language.Edh.Evaluate
@@ -101,6 +102,20 @@ powProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
           exitEdhTx exit (EdhDecimal $ powerDecimal lhNum rhNum)
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     _ -> intrinsicOpReturnNA'WithLHV exit lhVal
+
+-- | virtual property DecimalType.trunc
+--
+-- truncate to integer toward zero
+decTruncProc :: "d" !: Decimal -> EdhHostProc
+decTruncProc (mandatoryArg -> d) !exit =
+  exitEdhTx exit $ EdhDecimal $ fromInteger $ truncate d
+
+-- | virtual property DecimalType.round
+--
+-- round to integer toward zero
+decRoundProc :: "d" !: Decimal -> EdhHostProc
+decRoundProc (mandatoryArg -> d) !exit =
+  exitEdhTx exit $ EdhDecimal $ fromInteger $ round d
 
 -- | operator (and)
 nullishAndProc :: EdhIntrinsicOp

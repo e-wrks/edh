@@ -484,6 +484,8 @@ installEdhBatteries world =
             | (mc, nm, hp) <-
                 [ (EdhMethod, "__StringType_bytes__", wrapHostProc strEncodeProc),
                   (EdhMethod, "__BlobType_utf8string__", wrapHostProc blobDecodeProc),
+                  (EdhMethod, "__DecimalType_trunc__", wrapHostProc decTruncProc),
+                  (EdhMethod, "__DecimalType_round__", wrapHostProc decRoundProc),
                   (EdhMethod, "UUID", wrapHostProc uuidCtorProc),
                   (EdhMethod, "error", wrapHostProc errorProc),
                   (EdhMethod, "id", wrapHostProc idProc),
