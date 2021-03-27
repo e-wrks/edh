@@ -15,3 +15,10 @@ export method min( n, *rest ) {
   for i from rest do if i < n then n = i
   return n
 }
+
+
+{## Resembles `Number.prototype.toFixed()` as in JavaScript #}
+export method __DecimalType_toFixed__(n) return method toFixed(digs= 0) {
+  amp = 10**digs
+  return repr( (amp * n).round / amp )
+}

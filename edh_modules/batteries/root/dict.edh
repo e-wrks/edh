@@ -4,8 +4,6 @@
 import * 'batteries/meta'
 
 
-# virtual attributes of various value (non-object) types
-
 export method __DictType_push__ ( d )
 {##
  # update the dict for the specified key to associate with specified value

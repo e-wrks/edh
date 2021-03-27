@@ -12,7 +12,8 @@ export {
   # alias this module
   batteries = this
 
-  import * './vattr'
+  import * './dict'
+  import * './vec'
   import * './ho'
   import * './iter'
   import * './str'
