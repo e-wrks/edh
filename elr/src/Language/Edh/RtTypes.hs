@@ -153,7 +153,7 @@ edhValueIdent = identityOf
 
     identityOf :: EdhValue -> STM EdhValue
     identityOf (EdhObject !o) = idOfObj o
-    identityOf (EdhSink !s) = return $ idFromInt $ hashUnique $ evs'uniq s
+    identityOf (EdhEvs !s) = return $ idFromInt $ hashUnique $ evs'uniq s
     identityOf (EdhNamedValue !n !v) = EdhNamedValue n <$> identityOf v
     identityOf (EdhPair !l !r) = liftA2 EdhPair (identityOf l) (identityOf r)
     identityOf (EdhDict (Dict !u _)) = return $ idFromInt $ hashUnique u
@@ -854,7 +854,7 @@ type EdhHostProc = EdhTxExit EdhValue -> EdhTx
 
 -- | An event sink is similar to a Go channel, but is broadcast
 -- in nature, in contrast to the unicast nature of channels in Go.
-data EventSink = EventSink
+data EdhSink = EdhSink
   { evs'uniq :: !Unique,
     -- | most recent value for the lingering copy of an event sink
     --
@@ -876,17 +876,17 @@ data EventSink = EventSink
     evs'subc :: !(TVar Int)
   }
 
-instance Eq EventSink where
-  EventSink x'u _ _ _ _ == EventSink y'u _ _ _ _ = x'u == y'u
+instance Eq EdhSink where
+  EdhSink x'u _ _ _ _ == EdhSink y'u _ _ _ _ = x'u == y'u
 
-instance Ord EventSink where
-  compare (EventSink x'u _ _ _ _) (EventSink y'u _ _ _ _) = compare x'u y'u
+instance Ord EdhSink where
+  compare (EdhSink x'u _ _ _ _) (EdhSink y'u _ _ _ _) = compare x'u y'u
 
-instance Hashable EventSink where
-  hashWithSalt s (EventSink s'u _ _ _ _) = hashWithSalt s s'u
+instance Hashable EdhSink where
+  hashWithSalt s (EdhSink s'u _ _ _ _) = hashWithSalt s s'u
 
-instance Show EventSink where
-  show EventSink {} = "<sink>"
+instance Show EdhSink where
+  show EdhSink {} = "<sink>"
 
 -- | executable precedures
 data EdhProcDefi
@@ -1064,7 +1064,7 @@ data EdhValue
     -- duplicate evaluation of expressions involved
     EdhDefault !Unique !ArgsPack !Expr !(Maybe EdhThreadState)
   | -- | event sink
-    EdhSink !EventSink
+    EdhEvs !EdhSink
   | -- | named value, a.k.a. term definition
     EdhNamedValue !AttrName !EdhValue
   | -- | reflective expr, with source (or not, if empty)
@@ -1102,7 +1102,7 @@ instance Show EdhValue where
     ExprWithSrc _ [SrcSeg src] ->
       "default " <> show apk <> " " <> T.unpack src
     _ -> "<default: " ++ show apk ++ " " ++ show x ++ ">"
-  show (EdhSink v) = show v
+  show (EdhEvs v) = show v
   show (EdhNamedValue n v@EdhNamedValue {}) =
     -- Edh operators are all left-associative, parenthesis needed
     T.unpack n <> " := (" <> show v <> ")"
@@ -1150,7 +1150,7 @@ instance Eq EdhValue where
   EdhReturn x'v == EdhReturn y'v = x'v == y'v
   EdhOrd x == EdhOrd y = x == y
   EdhDefault x'u _ _ _ == EdhDefault y'u _ _ _ = x'u == y'u
-  EdhSink x == EdhSink y = x == y
+  EdhEvs x == EdhEvs y = x == y
   EdhNamedValue x'n x'v == EdhNamedValue y'n y'v = x'n == y'n && x'v == y'v
   EdhNamedValue _ x'v == y = x'v == y
   x == EdhNamedValue _ y'v = x == y'v
@@ -1190,7 +1190,7 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhOrd o) = s `hashWithSalt` (-10 :: Int) `hashWithSalt` o
   hashWithSalt s (EdhDefault u _ _ _) =
     s `hashWithSalt` (-9 :: Int) `hashWithSalt` u
-  hashWithSalt s (EdhSink x) = hashWithSalt s x
+  hashWithSalt s (EdhEvs x) = hashWithSalt s x
   hashWithSalt s (EdhNamedValue _ v) = hashWithSalt s v
   hashWithSalt s (EdhExpr _ (LitExpr l) _) = hashWithSalt s l
   hashWithSalt s (EdhExpr u _ _) = hashWithSalt s u
@@ -1716,7 +1716,7 @@ edhTypeOf EdhYield {} = YieldType
 edhTypeOf EdhReturn {} = ReturnType
 edhTypeOf EdhOrd {} = OrdType
 edhTypeOf EdhDefault {} = DefaultType
-edhTypeOf EdhSink {} = SinkType
+edhTypeOf EdhEvs {} = SinkType
 edhTypeOf (EdhNamedValue _ v) = edhTypeOf v
 edhTypeOf EdhExpr {} = ExprType
 

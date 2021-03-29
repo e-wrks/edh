@@ -20,18 +20,18 @@ import Language.Edh.Control
   )
 import Language.Edh.RtTypes
   ( EdhValue (EdhNil),
-    EventSink (..),
+    EdhSink (..),
     nil,
   )
 import Prelude
 
 -- | Create a new lingering event sink
-newEventSink :: STM EventSink
-newEventSink = newEventSink' True
+newEdhSink :: STM EdhSink
+newEdhSink = newEdhSink' True
 
 -- | Create a new event sink with lingering or not specified
-newEventSink' :: Bool -> STM EventSink
-newEventSink' !lingering = do
+newEdhSink' :: Bool -> STM EdhSink
+newEdhSink' !lingering = do
   !u <- unsafeIOToSTM newUnique
   !mrv <-
     if lingering
@@ -41,7 +41,7 @@ newEventSink' !lingering = do
   !atomsVar <- newTVar $ const $ return ()
   !subc <- newTVar 0
   return
-    EventSink
+    EdhSink
       { evs'uniq = u,
         evs'mrv = mrv,
         evs'chan = chan,
@@ -56,8 +56,8 @@ newEventSink' !lingering = do
 --
 -- CAVEAT: should not by other means be dup'ing the broadcast channel,
 --         to obtain a subscriber's channel.
-subscribeEvents :: EventSink -> STM (Maybe (TChan EdhValue, Maybe EdhValue))
-subscribeEvents (EventSink _ !mrv !bcc _ !subc) =
+subscribeEvents :: EdhSink -> STM (Maybe (TChan EdhValue, Maybe EdhValue))
+subscribeEvents (EdhSink _ !mrv !bcc _ !subc) =
   readTVar subc >>= \ !oldSubc ->
     if oldSubc < 0
       then return Nothing
@@ -73,8 +73,8 @@ subscribeEvents (EventSink _ !mrv !bcc _ !subc) =
               !ev -> return $ Just (subChan, Just ev)
 
 -- | Post an event into a sink
-postEvent :: EventSink -> EdhValue -> STM Bool
-postEvent (EventSink _ !mrv !chan !atomsVar !subc) !val =
+postEvent :: EdhSink -> EdhValue -> STM Bool
+postEvent (EdhSink _ !mrv !chan !atomsVar !subc) !val =
   readTVar subc >>= \ !oldSubc ->
     if oldSubc < 0
       then return False
@@ -100,10 +100,10 @@ postEvent (EventSink _ !mrv !chan !atomsVar !subc) !val =
 -- CAVEAT: if the returned sink is never subscribed before current thread
 --         exits, it'll be detected as stm deadlock and your process may
 --         get killed.
-forkEventProducer :: (EventSink -> IO ()) -> IO EventSink
+forkEventProducer :: (EdhSink -> IO ()) -> IO EdhSink
 forkEventProducer !producingAct = do
   (!sink, !subcBefore) <- atomically $ do
-    !sink <- newEventSink
+    !sink <- newEdhSink
     (sink,) <$> readTVar (evs'subc sink)
   !consumerThId <- myThreadId
   _producerThId <- forkIOWithUnmask $ \unmask ->
@@ -123,10 +123,10 @@ forkEventProducer !producingAct = do
 --
 -- Any exception occurs in the consuming action will be propagated to
 -- current thread as an asynchronous exception.
-forkEventConsumer :: (EventSink -> IO ()) -> IO EventSink
+forkEventConsumer :: (EdhSink -> IO ()) -> IO EdhSink
 forkEventConsumer !consumingAct = do
   (!sink, !subcBefore) <- atomically $ do
-    !sink <- newEventSink
+    !sink <- newEdhSink
     (sink,) <$> readTVar (evs'subc sink)
   !consumerDone <- newEmptyTMVarIO
   !producerThId <- myThreadId
@@ -162,10 +162,10 @@ forkEventConsumer !consumingAct = do
 -- CAVEAT: if the returned sink is never subscribed by any thread seen it,
 --         it'll be detected as stm deadlock and your process may
 --         get killed.
-waitEventConsumer :: (EventSink -> IO ()) -> IO EventSink
+waitEventConsumer :: (EdhSink -> IO ()) -> IO EdhSink
 waitEventConsumer !consumingAct = do
   (!sink, !subcBefore) <- atomically $ do
-    !sink <- newEventSink
+    !sink <- newEdhSink
     (sink,) <$> readTVar (evs'subc sink)
   !producerThId <- myThreadId
   _consumerThId <- forkIOWithUnmask $ \unmask ->

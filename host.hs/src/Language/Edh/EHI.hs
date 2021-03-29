@@ -42,9 +42,9 @@ module Language.Edh.EHI
     callingFrame,
 
     -- * Event processing
-    EventSink (..),
-    newEventSink,
-    newEventSink',
+    EdhSink (..),
+    newEdhSink,
+    newEdhSink',
     subscribeEvents,
     postEvent,
     publishEvent,

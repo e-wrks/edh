@@ -1354,9 +1354,9 @@ edhPrepareCall'
           ProcDecl _ _ !pb !pl ->
             case edhUltimate <$> odLookup (AttrByName "outlet") kwargs of
               Nothing -> do
-                outlet <- newEventSink
+                outlet <- newEdhSink
                 callMaker $ \ !exit ->
-                  launchEventProducer (exit . EdhSink) outlet $
+                  launchEventProducer (exit . EdhEvs) outlet $
                     callEdhMethod'
                       Nothing
                       this
@@ -1367,12 +1367,12 @@ edhPrepareCall'
                       ( ArgsPack args $
                           odFromList $
                             odToList kwargs
-                              ++ [(AttrByName "outlet", EdhSink outlet)]
+                              ++ [(AttrByName "outlet", EdhEvs outlet)]
                       )
                       scopeMod
                       endOfEdh
-              Just (EdhSink !outlet) -> callMaker $ \exit ->
-                launchEventProducer (exit . EdhSink) outlet $
+              Just (EdhEvs !outlet) -> callMaker $ \exit ->
+                launchEventProducer (exit . EdhEvs) outlet $
                   callEdhMethod'
                     Nothing
                     this
@@ -1790,7 +1790,7 @@ edhPrepareForLoop
 
         case edhUltimate iterVal of
           -- loop from an event sink
-          (EdhSink !sink) ->
+          (EdhEvs !sink) ->
             subscribeEvents sink >>= \case
               Nothing -> exitEdh ets exit nil -- already at eos
               Just (!subChan, !mrv) -> case mrv of
@@ -2491,7 +2491,7 @@ evalStmt !stmt !exit = case stmt of
         schedDefered etsSched id $ evalExpr' expr Nothing endOfEdh
   PerceiveStmt !sinkExpr !bodyStmt ->
     evalExprSrc sinkExpr $ \ !sinkVal !ets -> case edhUltimate sinkVal of
-      EdhSink !sink ->
+      EdhEvs !sink ->
         if edh'in'tx ets
           then do
             modifyTVar' (evs'atoms sink) $ \ !prev'atoms !ev ->
@@ -3137,7 +3137,7 @@ evalLiteral = \case
   BoolLiteral !v -> return (EdhBool v)
   NilLiteral -> return nil
   TypeLiteral !v -> return (EdhType v)
-  SinkCtor -> EdhSink <$> newEventSink
+  SinkCtor -> EdhEvs <$> newEdhSink
   ValueLiteral !v -> return v
 
 evalAttrRef :: AttrRef -> EdhTxExit EdhValue -> EdhTx
@@ -5295,7 +5295,7 @@ edhRegulateIndex !ets !len !idx !exit =
               <> T.pack (show len)
         else exit posIdx
 
-publishEvent :: EventSink -> EdhValue -> EdhTxExit () -> EdhTx
+publishEvent :: EdhSink -> EdhValue -> EdhTxExit () -> EdhTx
 publishEvent !sink !val !exit !ets =
   postEvent sink val >>= \case
     True -> exitEdh ets exit ()
@@ -5307,10 +5307,10 @@ publishEvent !sink !val !exit !ets =
 -- | Fork a new Edh thread to run the specified event producer, but hold the
 -- production until current thread has later started consuming events from the
 -- sink returned here.
-launchEventProducer :: EdhTxExit EventSink -> EventSink -> EdhTx -> EdhTx
+launchEventProducer :: EdhTxExit EdhSink -> EdhSink -> EdhTx -> EdhTx
 launchEventProducer
   !exit
-  sink@(EventSink _ _ _ _ !subc)
+  sink@(EdhSink _ _ _ _ !subc)
   !producerTx
   !etsConsumer =
     readTVar subc >>= \ !subcBefore ->
