@@ -47,7 +47,7 @@ module Language.Edh.EHI
     newEdhSink',
     subscribeEvents,
     postEvent,
-    publishEvent,
+    postEdhEvent,
     forkEventProducer,
     forkEventConsumer,
     waitEventConsumer,
@@ -318,6 +318,7 @@ module Language.Edh.EHI
 
     -- * standalone modules
     module Language.Edh.IOPD,
+    module Language.Edh.HostEvs,
   )
 where
 
@@ -326,8 +327,9 @@ import Language.Edh.Args
 import Language.Edh.Batteries
 import Language.Edh.Control
 import Language.Edh.CoreLang
+import Language.Edh.EdhEvs
 import Language.Edh.Evaluate
-import Language.Edh.Event
+import Language.Edh.HostEvs
 import Language.Edh.IOPD
 import Language.Edh.InterOp
 import Language.Edh.PkgMan

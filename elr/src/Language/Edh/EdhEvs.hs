@@ -1,4 +1,4 @@
-module Language.Edh.Event where
+module Language.Edh.EdhEvs where
 
 -- import           Debug.Trace
 -- import           System.IO.Unsafe

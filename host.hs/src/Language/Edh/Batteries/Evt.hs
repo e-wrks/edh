@@ -21,7 +21,7 @@ evtPubProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
             -- can be interpreted the same as such a value standalone, which
             -- would implement wrong semantics.
             !val2Rtn = edhDeCaseWrap val2Pub
-         in publishEvent es val2Pub $ \() -> exitEdhTx exit val2Rtn
+         in postEdhEvent es val2Pub $ \() -> exitEdhTx exit val2Rtn
     _ -> exitEdhTx exit edhNA
 
 -- | virtual property <sink>.subseq

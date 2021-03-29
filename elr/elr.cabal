@@ -32,7 +32,8 @@ library
     Language.Edh.PkgMan
     Language.Edh.RtTypes
     Language.Edh.Utils
-    Language.Edh.Event
+    Language.Edh.EdhEvs
+    Language.Edh.HostEvs
     Language.Edh.InterOp
     Language.Edh.Parser
 

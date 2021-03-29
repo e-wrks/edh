@@ -26,7 +26,7 @@ import GHC.Clock
 import GHC.Conc (forkIOWithUnmask, myThreadId, unsafeIOToSTM)
 import Language.Edh.Control
 import Language.Edh.CoreLang
-import Language.Edh.Event
+import Language.Edh.EdhEvs
 import Language.Edh.IOPD
 import Language.Edh.Parser
 import Language.Edh.PkgMan
@@ -5295,8 +5295,8 @@ edhRegulateIndex !ets !len !idx !exit =
               <> T.pack (show len)
         else exit posIdx
 
-publishEvent :: EdhSink -> EdhValue -> EdhTxExit () -> EdhTx
-publishEvent !sink !val !exit !ets =
+postEdhEvent :: EdhSink -> EdhValue -> EdhTxExit () -> EdhTx
+postEdhEvent !sink !val !exit !ets =
   postEvent sink val >>= \case
     True -> exitEdh ets exit ()
     False ->
