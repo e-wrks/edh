@@ -18,6 +18,7 @@ import * './decor'
 
 export {
 
+
   {##
    # the namespace class is only addressable in instance resolution patterns,
    # e.g.
@@ -36,6 +37,7 @@ case xx of {{ namespace:ns }} -> {
     __name__ :: StringType
 
   }
+
 
   {##
    # the scope wrapper class
@@ -108,6 +110,7 @@ case xx of {{ namespace:ns }} -> {
 
   }
 
+
   {##
    # the module class
    #
@@ -121,5 +124,16 @@ case xx of {{ namespace:ns }} -> {
     __file__ :: StringType
 
   }
+
+
+  {##
+   # Boxed Vector for Đ values, non-transactional, mutable anytime
+   #}
+  export class Vector {
+
+    method append(*args) pass
+
+  }
+
 
 }

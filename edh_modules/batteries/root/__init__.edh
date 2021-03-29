@@ -13,7 +13,6 @@ export {
   batteries = this
 
   import * './dict'
-  import * './vec'
   import * './ho'
   import * './iter'
   import * './str'
