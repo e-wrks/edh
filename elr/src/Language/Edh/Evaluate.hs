@@ -2952,6 +2952,9 @@ intplExpr !ets !x !exit = case x of
   IntplExpr !x' -> runEdhTx ets $
     evalExprSrc x' $ \ !val _ets ->
       exit $ LitExpr $ ValueLiteral val
+  ExprWithSrc {} -> exit x
+  SymbolExpr {} -> exit x
+  LitExpr {} -> exit x
   PrefixExpr !pref !x' ->
     intplExprSrc ets x' $ \ !x'' -> exit $ PrefixExpr pref x''
   VoidExpr !x' -> intplExprSrc ets x' $ \ !x'' -> exit $ VoidExpr x''
@@ -2967,30 +2970,68 @@ intplExpr !ets !x !exit = case x of
     \ !entries' -> exit $ DictExpr entries'
   ListExpr !es ->
     seqcontSTM (intplExprSrc ets <$> es) $ \ !es' -> exit $ ListExpr es'
-  ArgsPackExpr (ArgsPacker !argSenders !apkrSpan) ->
-    seqcontSTM (intplArgSender ets <$> argSenders) $
-      \ !argSenders' -> exit $ ArgsPackExpr $ ArgsPacker argSenders' apkrSpan
+  ArgsPackExpr !apkr ->
+    intplArgsPacker ets apkr $ \ !apkr' -> exit $ ArgsPackExpr apkr'
   ParenExpr !x' -> intplExprSrc ets x' $ \ !x'' -> exit $ ParenExpr x''
+  ImportExpr !rcvr !xFrom !maybeInto -> intplArgsRcvr ets rcvr $ \ !rcvr' ->
+    intplExprSrc ets xFrom $ \ !xFrom' -> case maybeInto of
+      Nothing -> exit $ ImportExpr rcvr' xFrom' Nothing
+      Just !into -> intplExprSrc ets into $ \ !into' ->
+        exit $ ImportExpr rcvr' xFrom' (Just into')
+  ExportExpr !xExp ->
+    intplExprSrc ets xExp $ \ !xExp' -> exit $ ExportExpr xExp'
+  NamespaceExpr !pd !apkr -> intplProcDecl ets pd $ \ !pd' ->
+    intplArgsPacker ets apkr $ \ !apkr' -> exit $ NamespaceExpr pd' apkr'
+  ClassExpr !pd -> intplProcDecl ets pd $ \ !pd' -> exit $ ClassExpr pd'
+  MethodExpr !pd -> intplProcDecl ets pd $ \ !pd' -> exit $ MethodExpr pd'
+  GeneratorExpr !pd ->
+    intplProcDecl ets pd $ \ !pd' -> exit $ GeneratorExpr pd'
+  InterpreterExpr !pd ->
+    intplProcDecl ets pd $ \ !pd' -> exit $ InterpreterExpr pd'
+  ProducerExpr !pd -> intplProcDecl ets pd $ \ !pd' -> exit $ ProducerExpr pd'
+  OpDefiExpr !fixity !prec !sym !pd ->
+    intplProcDecl ets pd $ \ !pd' -> exit $ OpDefiExpr fixity prec sym pd'
+  OpOvrdExpr !fixity !prec !sym !pd ->
+    intplProcDecl ets pd $ \ !pd' -> exit $ OpOvrdExpr fixity prec sym pd'
   BlockExpr !ss ->
     seqcontSTM (intplStmtSrc ets <$> ss) $ \ !ss' -> exit $ BlockExpr ss'
+  ScopedBlockExpr !ss ->
+    seqcontSTM (intplStmtSrc ets <$> ss) $ \ !ss' -> exit $ ScopedBlockExpr ss'
   YieldExpr !x' -> intplExprSrc ets x' $ \ !x'' -> exit $ YieldExpr x''
   ForExpr !rcvs !fromX !doX -> intplExprSrc ets fromX $ \ !fromX' ->
     intplStmtSrc ets doX $ \ !doX' -> exit $ ForExpr rcvs fromX' doX'
+  PerformExpr !addr ->
+    intplAttrAddrSrc ets addr $ \ !addr' -> exit $ PerformExpr addr'
+  BehaveExpr !addr ->
+    intplAttrAddrSrc ets addr $ \ !addr' -> exit $ BehaveExpr addr'
   AttrExpr !addr -> intplAttrRef ets addr $ \ !addr' -> exit $ AttrExpr addr'
   IndexExpr !v !t -> intplExprSrc ets v $
     \ !v' -> intplExprSrc ets t $ \ !t' -> exit $ IndexExpr v' t'
   CallExpr !v (ArgsPacker !args !argsSpan) -> intplExprSrc ets v $ \ !v' ->
-    seqcontSTM (intplArgSndr ets <$> args) $
+    seqcontSTM (intplArgSender ets <$> args) $
       \ !args' -> exit $ CallExpr v' $ ArgsPacker args' argsSpan
   InfixExpr !op !lhe !rhe -> intplExprSrc ets lhe $ \ !lhe' ->
     intplExprSrc ets rhe $ \ !rhe' -> exit $ InfixExpr op lhe' rhe'
-  ImportExpr !rcvrs !xFrom !maybeInto ->
-    intplArgsRcvr ets rcvrs $ \ !rcvrs' ->
-      intplExprSrc ets xFrom $ \ !xFrom' -> case maybeInto of
-        Nothing -> exit $ ImportExpr rcvrs' xFrom' Nothing
-        Just !oInto -> intplExprSrc ets oInto $
-          \ !oInto' -> exit $ ImportExpr rcvrs' xFrom' $ Just oInto'
-  _ -> exit x
+  DefaultExpr !maybeApkr !xDefault ->
+    intplExprSrc ets xDefault $ \ !xDefault' -> case maybeApkr of
+      Nothing -> exit $ DefaultExpr Nothing xDefault'
+      Just !apkr -> intplArgsPacker ets apkr $ \ !apkr' ->
+        exit $ DefaultExpr (Just apkr') xDefault'
+
+intplArgsPacker ::
+  EdhThreadState ->
+  ArgsPacker ->
+  (ArgsPacker -> STM ()) ->
+  STM ()
+intplArgsPacker !ets (ArgsPacker !argSenders !apkrSpan) !exit =
+  seqcontSTM (intplArgSender ets <$> argSenders) $
+    \ !argSenders' -> exit $ ArgsPacker argSenders' apkrSpan
+
+intplProcDecl :: EdhThreadState -> ProcDecl -> (ProcDecl -> STM ()) -> STM ()
+intplProcDecl _ets pd@HostDecl {} !exit = exit pd
+intplProcDecl !ets (ProcDecl !addr !args !body !loc) !exit =
+  intplAttrAddrSrc ets addr $ \ !addr' -> intplArgsRcvr ets args $ \ !args' ->
+    intplStmtSrc ets body $ \ !body' -> exit $ ProcDecl addr' args' body' loc
 
 intplDictEntry ::
   EdhThreadState ->
@@ -3004,41 +3045,33 @@ intplDictEntry !ets (AddrDictKey !k, !x) !exit = intplAttrRef ets k $
 intplDictEntry !ets (ExprDictKey !k, !x) !exit = intplExprSrc ets k $
   \ !k' -> intplExprSrc ets x $ \ !x' -> exit (ExprDictKey k', x')
 
-intplArgSender :: EdhThreadState -> ArgSender -> (ArgSender -> STM ()) -> STM ()
-intplArgSender !ets (UnpackPosArgs !x) !exit =
-  intplExprSrc ets x $ \ !x' -> exit $ UnpackPosArgs x'
-intplArgSender !ets (UnpackKwArgs !x) !exit =
-  intplExprSrc ets x $ \ !x' -> exit $ UnpackKwArgs x'
-intplArgSender !ets (UnpackPkArgs !x) !exit =
-  intplExprSrc ets x $ \ !x' -> exit $ UnpackPkArgs x'
-intplArgSender !ets (SendPosArg !x) !exit =
-  intplExprSrc ets x $ \ !x' -> exit $ SendPosArg x'
-intplArgSender !ets (SendKwArg !addr !x) !exit =
-  intplExprSrc ets x $ \ !x' -> exit $ SendKwArg addr x'
-
 intplAttrRef :: EdhThreadState -> AttrRef -> (AttrRef -> STM ()) -> STM ()
 intplAttrRef !ets !ref !exit = case ref of
-  DirectRef (AttrAddrSrc !addr !src'span) -> intplSym addr $ \ !addr' ->
-    exit $ DirectRef $ AttrAddrSrc addr' src'span
-  IndirectRef !x' (AttrAddrSrc !addr !src'span) ->
-    intplExprSrc ets x' $ \ !x'' -> intplSym addr $ \ !addr' ->
-      exit $ IndirectRef x'' $ AttrAddrSrc addr' src'span
+  DirectRef !addr -> intplAttrAddrSrc ets addr $ \ !addr' ->
+    exit $ DirectRef addr'
+  IndirectRef !x' !addr ->
+    intplExprSrc ets x' $ \ !x'' -> intplAttrAddrSrc ets addr $ \ !addr' ->
+      exit $ IndirectRef x'' addr'
   _ -> exit ref
-  where
-    intplSym :: AttrAddr -> (AttrAddr -> STM ()) -> STM ()
-    intplSym (IntplSymAttr src !x) !exit' = runEdhTx ets $
-      evalExprSrc x $
-        \ !symVal _ets -> case edhUltimate symVal of
-          EdhSymbol !sym -> exit' $ LitSymAttr sym
-          EdhString !nm -> exit' $ QuaintAttr nm
-          _ -> edhValueDesc ets symVal $ \ !badDesc ->
-            throwEdh ets UsageError $
-              "symbol interpolation given unexpected value: "
-                <> badDesc
-                <> "\n 🔣  evaluated from @( "
-                <> src
-                <> " )"
-    intplSym !addr !exit' = exit' addr
+
+intplAttrAddrSrc :: EdhThreadState -> AttrAddrSrc -> (AttrAddrSrc -> STM ()) -> STM ()
+intplAttrAddrSrc !ets (AttrAddrSrc !addr !src'span) !exit =
+  intplAttrAddr ets addr $ \ !addr' -> exit $ AttrAddrSrc addr' src'span
+
+intplAttrAddr :: EdhThreadState -> AttrAddr -> (AttrAddr -> STM ()) -> STM ()
+intplAttrAddr !ets (IntplSymAttr src !x) !exit' = runEdhTx ets $
+  evalExprSrc x $
+    \ !symVal _ets -> case edhUltimate symVal of
+      EdhSymbol !sym -> exit' $ LitSymAttr sym
+      EdhString !nm -> exit' $ QuaintAttr nm
+      _ -> edhValueDesc ets symVal $ \ !badDesc ->
+        throwEdh ets UsageError $
+          "symbol interpolation given unexpected value: "
+            <> badDesc
+            <> "\n 🔣  evaluated from @( "
+            <> src
+            <> " )"
+intplAttrAddr _ets !addr !exit' = exit' addr
 
 intplArgsRcvr ::
   EdhThreadState -> ArgsReceiver -> (ArgsReceiver -> STM ()) -> STM ()
@@ -3051,24 +3084,28 @@ intplArgsRcvr !ets !a !exit = case a of
   where
     intplArgRcvr :: ArgReceiver -> (ArgReceiver -> STM ()) -> STM ()
     intplArgRcvr !a' !exit' = case a' of
-      RecvArg !attrAddr !maybeAddr !maybeDefault -> case maybeAddr of
-        Nothing -> case maybeDefault of
-          Nothing -> exit' $ RecvArg attrAddr Nothing Nothing
-          Just !x -> intplExprSrc ets x $
-            \ !x' -> exit' $ RecvArg attrAddr Nothing $ Just x'
-        Just !addr -> intplAttrRef ets addr $ \ !addr' -> case maybeDefault of
-          Nothing -> exit' $ RecvArg attrAddr (Just addr') Nothing
-          Just !x -> intplExprSrc ets x $
-            \ !x' -> exit' $ RecvArg attrAddr (Just addr') $ Just x'
+      RecvArg !attrAddr !maybeAddr !maybeDefault ->
+        intplAttrAddrSrc ets attrAddr $ \ !attrAddr' ->
+          case maybeAddr of
+            Nothing -> case maybeDefault of
+              Nothing -> exit' $ RecvArg attrAddr' Nothing Nothing
+              Just !x -> intplExprSrc ets x $
+                \ !x' -> exit' $ RecvArg attrAddr' Nothing $ Just x'
+            Just !addr -> intplAttrRef ets addr $ \ !addr' ->
+              case maybeDefault of
+                Nothing -> exit' $ RecvArg attrAddr' (Just addr') Nothing
+                Just !x -> intplExprSrc ets x $
+                  \ !x' -> exit' $ RecvArg attrAddr' (Just addr') $ Just x'
       _ -> exit' a'
 
-intplArgSndr :: EdhThreadState -> ArgSender -> (ArgSender -> STM ()) -> STM ()
-intplArgSndr !ets !a !exit' = case a of
+intplArgSender :: EdhThreadState -> ArgSender -> (ArgSender -> STM ()) -> STM ()
+intplArgSender !ets !a !exit' = case a of
   UnpackPosArgs !v -> intplExprSrc ets v $ \ !v' -> exit' $ UnpackPosArgs v'
   UnpackKwArgs !v -> intplExprSrc ets v $ \ !v' -> exit' $ UnpackKwArgs v'
   UnpackPkArgs !v -> intplExprSrc ets v $ \ !v' -> exit' $ UnpackPkArgs v'
   SendPosArg !v -> intplExprSrc ets v $ \ !v' -> exit' $ SendPosArg v'
-  SendKwArg !n !v -> intplExprSrc ets v $ \ !v' -> exit' $ SendKwArg n v'
+  SendKwArg !n !v -> intplAttrAddrSrc ets n $ \ !n' ->
+    intplExprSrc ets v $ \ !v' -> exit' $ SendKwArg n' v'
 
 intplStmtSrc :: EdhThreadState -> StmtSrc -> (StmtSrc -> STM ()) -> STM ()
 intplStmtSrc !ets (StmtSrc !stmt !sp) !exit' =
@@ -3080,7 +3117,7 @@ intplStmt !ets !stmt !exit = case stmt of
   DeferStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ DeferStmt x'
   LetStmt !rcvrs (ArgsPacker !sndrs !sndrsSpan) ->
     intplArgsRcvr ets rcvrs $ \ !rcvrs' ->
-      seqcontSTM (intplArgSndr ets <$> sndrs) $
+      seqcontSTM (intplArgSender ets <$> sndrs) $
         \ !sndrs' -> exit $ LetStmt rcvrs' $ ArgsPacker sndrs' sndrsSpan
   ExtendsStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ ExtendsStmt x'
   PerceiveStmt !sink !body -> intplExprSrc ets sink $ \ !sink' ->

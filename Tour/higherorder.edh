@@ -43,20 +43,24 @@ f3( 7 )
 {
   # decorator
 
-  interpreter decor( caller, fe ) case caller.eval( fe ) of { f } -> {
-    fn=f.name
-    caller.put( fn: method @fn (*** apk ) {
-        console.info<| 'Calling procedure `' ++ fn ++ '` with: ' ++ apk
-        f(*** apk )
+  # %% # A decorator is usually written in the host language, but as well, it can be written in Đ the surface language, in form of an interpreter procedure
+
+  interpreter decor( callerScope, fe ) case callerScope.eval( fe ) of { f } -> {
+    callerScope.eval( expr method @(f.name) ( ***apk ) {
+        console.info<| 'Calling procedure `' ++ {$ f.name $} ++ '` with: ' ++ apk
+        {$ f $} ( ***apk )
     } )
   }
 
-  # note ($) dollar operator is function application similar to ($) in Haskell
+  # %% # And used like this
 
   decor$
   method g ( a, b, c ) {
-    console.info<| 'this is g(), we have: ' ++ ( a=a, b=b, c=c )
+    console.info<| 'This is g(), we have: ' ++ ( a=a, b=b, c=c, )
   }
 
+  # %% # The decorated procedure can be used straight forward
+  g( 1, 2, 3 )
+
+  # %#
 }
-g( 1, 2, 3 )
