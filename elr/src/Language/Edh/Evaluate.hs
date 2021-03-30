@@ -4983,11 +4983,20 @@ edhCompareValue !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
       _ -> exit Nothing
 
 resolveEdhPerform :: EdhThreadState -> AttrKey -> (EdhValue -> STM ()) -> STM ()
-resolveEdhPerform !ets !effKey !exit =
+resolveEdhPerform !ets !effKey !exit = resolveEdhPerform' ets effKey $ \case
+  Just !effArt -> exit effArt
+  Nothing ->
+    throwEdh ets UsageError $ "no such effect: " <> T.pack (show effKey)
+
+resolveEdhPerform' ::
+  EdhThreadState ->
+  AttrKey ->
+  (Maybe EdhValue -> STM ()) ->
+  STM ()
+resolveEdhPerform' !ets !effKey !exit =
   resolveEffectfulAttr edhTargetStackForPerform (attrKeyValue effKey) >>= \case
-    Just (!effArt, _) -> exit effArt
-    Nothing ->
-      throwEdh ets UsageError $ "no such effect: " <> T.pack (show effKey)
+    Just (!effArt, _) -> exit $ Just effArt
+    Nothing -> exit Nothing
   where
     edhTargetStackForPerform :: [EdhCallFrame]
     edhTargetStackForPerform = case edh'effects'stack scope of
@@ -4998,11 +5007,20 @@ resolveEdhPerform !ets !effKey !exit =
         !scope = contextScope ctx
 
 resolveEdhBehave :: EdhThreadState -> AttrKey -> (EdhValue -> STM ()) -> STM ()
-resolveEdhBehave !ets !effKey !exit =
+resolveEdhBehave !ets !effKey !exit = resolveEdhBehave' ets effKey $ \case
+  Just !effArt -> exit effArt
+  Nothing ->
+    throwEdh ets UsageError $ "no such effect: " <> T.pack (show effKey)
+
+resolveEdhBehave' ::
+  EdhThreadState ->
+  AttrKey ->
+  (Maybe EdhValue -> STM ()) ->
+  STM ()
+resolveEdhBehave' !ets !effKey !exit =
   resolveEffectfulAttr edhTargetStackForBehave (attrKeyValue effKey) >>= \case
-    Just (!effArt, _) -> exit effArt
-    Nothing ->
-      throwEdh ets UsageError $ "no such effect: " <> T.pack (show effKey)
+    Just (!effArt, _) -> exit $ Just effArt
+    Nothing -> exit Nothing
   where
     edhTargetStackForBehave :: [EdhCallFrame]
     edhTargetStackForBehave = edh'ctx'stack ctx where !ctx = edh'context ets

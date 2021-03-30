@@ -1031,9 +1031,9 @@ performEdhEffect !effKey !args !kwargs !exit !ets =
 -- that call in effect resolution
 --
 -- otherwise this is the same as 'behaveEdhEffect''
-performEdhEffect' :: AttrKey -> (EdhValue -> EdhTx) -> EdhTx
+performEdhEffect' :: AttrKey -> (Maybe EdhValue -> EdhTx) -> EdhTx
 performEdhEffect' !effKey !exit !ets =
-  resolveEdhPerform ets effKey $ runEdhTx ets . exit
+  resolveEdhPerform' ets effKey $ runEdhTx ets . exit
 
 -- | perform an effectful call from current Edh context
 --
@@ -1058,6 +1058,6 @@ behaveEdhEffect !effKey !args !kwargs !exit !ets =
 -- | obtain an effectful value from current Edh context
 --
 -- use full stack in effect resolution
-behaveEdhEffect' :: AttrKey -> (EdhValue -> EdhTx) -> EdhTx
+behaveEdhEffect' :: AttrKey -> (Maybe EdhValue -> EdhTx) -> EdhTx
 behaveEdhEffect' !effKey !exit !ets =
-  resolveEdhBehave ets effKey $ runEdhTx ets . exit
+  resolveEdhBehave' ets effKey $ runEdhTx ets . exit
