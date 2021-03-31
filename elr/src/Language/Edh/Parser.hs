@@ -832,7 +832,11 @@ parseAttrName = parseMagicName <|> parseAlphNumName
         <$> between (symbol "(") (symbol ")") (indexMagic <|> nonIdxMagic)
     indexMagic =
       -- indexing (assignments) e.g. ([]) ([=]) ([+=])
-      between (symbol "[") (symbol "]") parseOpLit
+      ("[" <>) . (<> "]")
+        <$> between
+          (symbol "[")
+          (symbol "]")
+          (fromMaybe "" <$> optional parseOpLit)
     nonIdxMagic =
       parseOpLit >>= \ !opLit ->
         optional (symbol ".") >>= \case
