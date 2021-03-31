@@ -5993,3 +5993,60 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
           tryReadTChan evc >>= \case
             Just !ev -> perceiverChk ((ev, r) : gotevl) rest
             Nothing -> perceiverChk gotevl rest
+
+-- | perform an effectful call from current Edh context
+--
+-- if performing from an effectful procedure call, use the outer stack of
+-- that call in effect resolution
+--
+-- otherwise this is the same as 'behaveEdhEffect'
+performEdhEffect ::
+  AttrKey ->
+  [EdhValue] ->
+  [(AttrName, EdhValue)] ->
+  (EdhValue -> EdhTx) ->
+  EdhTx
+performEdhEffect !effKey !args !kwargs !exit !ets =
+  resolveEdhPerform ets effKey $ \ !effVal ->
+    edhPrepareCall'
+      ets
+      effVal
+      (ArgsPack args $ odFromList $ [(AttrByName k, v) | (k, v) <- kwargs])
+      $ \ !mkCall -> runEdhTx ets $ mkCall exit
+
+-- | obtain an effectful value from current Edh context
+--
+-- if performing from an effectful procedure call, use the outer stack of
+-- that call in effect resolution
+--
+-- otherwise this is the same as 'behaveEdhEffect''
+performEdhEffect' :: AttrKey -> (Maybe EdhValue -> EdhTx) -> EdhTx
+performEdhEffect' !effKey !exit !ets =
+  resolveEdhPerform' ets effKey $ runEdhTx ets . exit
+
+-- | perform an effectful call from current Edh context
+--
+-- use full stack in effect resolution, may create infinite loops in effectful
+-- procedure calls if one effectful procedure would make unconditional
+-- recursive effectful call into itself, or there is some mutually recursive
+-- pattern between multiple procedures
+behaveEdhEffect ::
+  AttrKey ->
+  [EdhValue] ->
+  [(AttrName, EdhValue)] ->
+  (EdhValue -> EdhTx) ->
+  EdhTx
+behaveEdhEffect !effKey !args !kwargs !exit !ets =
+  resolveEdhBehave ets effKey $ \ !effVal ->
+    edhPrepareCall'
+      ets
+      effVal
+      (ArgsPack args $ odFromList $ [(AttrByName k, v) | (k, v) <- kwargs])
+      $ \ !mkCall -> runEdhTx ets $ mkCall exit
+
+-- | obtain an effectful value from current Edh context
+--
+-- use full stack in effect resolution
+behaveEdhEffect' :: AttrKey -> (Maybe EdhValue -> EdhTx) -> EdhTx
+behaveEdhEffect' !effKey !exit !ets =
+  resolveEdhBehave' ets effKey $ runEdhTx ets . exit

@@ -318,6 +318,7 @@ module Language.Edh.EHI
 
     -- * standalone modules
     module Language.Edh.IOPD,
+    module Language.Edh.Comput,
     module Language.Edh.HostEvs,
   )
 where
@@ -325,6 +326,7 @@ where
 import qualified Data.Lossless.Decimal as D
 import Language.Edh.Args
 import Language.Edh.Batteries
+import Language.Edh.Comput
 import Language.Edh.Control
 import Language.Edh.CoreLang
 import Language.Edh.EdhEvs
