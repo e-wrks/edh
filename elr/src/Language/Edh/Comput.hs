@@ -125,9 +125,13 @@ appliedHostArg !typeName !argName = AppliedArg typeName argName $
         HostStore !dd -> case fromDynamic dd of
           Just !comput ->
             readTVar (comput'thunk comput) >>= \case
-              Effected !dynEff -> case fromDynamic dynEff of
-                Just (_ :: t) -> exit dynEff
+              Effected !effected -> case fromDynamic effected of
+                Just (_ :: t) -> exit effected
                 Nothing -> badArg
+              Applied !applied | null (comput'effectful'args comput) ->
+                case fromDynamic applied of
+                  Just (_ :: t) -> exit applied
+                  Nothing -> badArg
               _ -> edhValueDesc ets val $ \ !badDesc ->
                 throwEdh ets UsageError $
                   "comput given for " <> attrKeyStr argName
@@ -171,9 +175,13 @@ performHostArg' !typeName !argName !effDefault =
                 HostStore !dd -> case fromDynamic dd of
                   Just !comput ->
                     readTVar (comput'thunk comput) >>= \case
-                      Effected !dynEff -> case fromDynamic dynEff of
-                        Just (_ :: t) -> exit (val, dynEff)
+                      Effected !effected -> case fromDynamic effected of
+                        Just (_ :: t) -> exit (val, effected)
                         Nothing -> badArg
+                      Applied !applied | null (comput'effectful'args comput) ->
+                        case fromDynamic applied of
+                          Just (_ :: t) -> exit (val, applied)
+                          Nothing -> badArg
                       _ -> edhValueDesc ets val $ \ !badDesc ->
                         throwEdh ets UsageError $
                           "comput given for " <> attrKeyStr argName
