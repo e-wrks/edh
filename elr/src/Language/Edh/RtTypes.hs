@@ -10,7 +10,7 @@ import Control.Monad
 import qualified Data.Bits as Bits
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
-import Data.Dynamic (Dynamic, Typeable, fromDynamic)
+import Data.Dynamic
 import qualified Data.HashMap.Strict as Map
 import Data.Hashable (Hashable (hashWithSalt))
 import Data.IORef
@@ -552,6 +552,8 @@ data EdhWorld = EdhWorld
     edh'world'modules :: !(TMVar (Map.HashMap ModuleId (TVar ModuSlot))),
     -- | for console logging, input and output
     edh'world'console :: !EdhConsole,
+    -- | wrapping any host value as object
+    edh'value'wrapper :: !(Dynamic -> STM Object),
     -- wrapping a scope as object for reflective purpose
     edh'scope'wrapper :: !(Scope -> STM Object),
     -- wrapping a host exceptin as an Edh object
@@ -1815,13 +1817,24 @@ objectScope !obj = case edh'obj'store obj of
       _ -> error "bug: class of an object not bearing ClassStore"
     ocProc = edh'class'proc oc
 
+-- | Wrap any host value as an object
+edhWrapHostValue :: Typeable t => EdhThreadState -> t -> STM Object
+edhWrapHostValue !ets !v = edhWrapHostValue' ets (toDyn v)
+
+-- | Wrap any host value as an object
+edhWrapHostValue' :: EdhThreadState -> Dynamic -> STM Object
+edhWrapHostValue' !ets = edhWrapValue
+  where
+    !world = edh'prog'world $ edh'thread'prog ets
+    edhWrapValue = edh'value'wrapper world
+
 -- | Create a reflective object capturing the specified scope as from the
 -- specified context
 --
 -- todo currently only lexical context is recorded, the call frames may
 --      be needed in the future
 mkScopeWrapper :: EdhThreadState -> Scope -> STM Object
-mkScopeWrapper !ets !scope = edhWrapScope scope
+mkScopeWrapper !ets = edhWrapScope
   where
     !world = edh'prog'world $ edh'thread'prog ets
     edhWrapScope = edh'scope'wrapper world

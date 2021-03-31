@@ -229,6 +229,8 @@ module Language.Edh.EHI
     resolveEdhInstance,
     objectScope,
     mkScopeWrapper,
+    edhWrapHostValue,
+    edhWrapHostValue',
     mkHostClass,
     mkHostClass',
     mkObjSandbox,

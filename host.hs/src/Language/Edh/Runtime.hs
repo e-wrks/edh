@@ -4,44 +4,29 @@ module Language.Edh.Runtime where
 
 import Control.Concurrent.STM
 import Control.Exception
-  ( Exception (toException),
-    SomeException,
-    throwIO,
-    tryJust,
-  )
-import Control.Monad (void)
-import Control.Monad.IO.Class (MonadIO (liftIO))
+import Control.Monad
+import Control.Monad.IO.Class
 import qualified Data.ByteString as B
-import Data.Dynamic (fromDynamic, toDyn)
+import Data.Dynamic
 import qualified Data.HashMap.Strict as Map
 import Data.IORef
-import Data.Maybe (fromMaybe)
+import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Encoding (Decoding (Some), streamDecodeUtf8With)
-import Data.Text.Encoding.Error (lenientDecode)
-import Data.Unique (newUnique)
+import Data.Text.Encoding
+import Data.Text.Encoding.Error
+import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
-  ( defaultArg,
-    mandatoryArg,
-    optionalArg,
-    type (!:),
-    type (?:),
-  )
 import Language.Edh.Control
-import Language.Edh.CoreLang (lookupEdhSelfAttr)
+import Language.Edh.CoreLang
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
 import Language.Edh.InterOp
-  ( EdhAllocator (allocEdhObj),
-    mkHostProperty,
-    wrapHostProc,
-  )
-import Language.Edh.PkgMan (locateEdhMainModule)
+import Language.Edh.PkgMan
 import Language.Edh.RtTypes
 import Language.Edh.Utils
-import System.Environment (lookupEnv)
+import System.Environment
 import System.Posix.Signals
 import Prelude
 
@@ -148,6 +133,42 @@ createEdhWorld !console = do
         ]
   atomically $
     iopdUpdate [(AttrByName "namespace", EdhObject nsClassObj)] hsRoot
+
+  -- the host value wrapper class
+  !hsHostValue <-
+    atomically $
+      (iopdFromList =<<) $
+        sequence $
+          [ (AttrByName nm,) <$> mkHostProc rootScope EdhMethod nm hp
+            | (nm, hp) <-
+                [ ("__repr__", wrapHostProc mthValueRepr)
+                ]
+          ]
+  let hostValueAllocator :: EdhObjectAllocator
+      hostValueAllocator _exit !ets =
+        throwEdh
+          ets
+          UsageError
+          "you can not create a host value from script"
+  !clsHostValue <-
+    atomically $
+      mkHostClass'
+        rootScope
+        "<host-value>"
+        (allocEdhObj hostValueAllocator)
+        hsHostValue
+        []
+  let edhWrapValue :: Dynamic -> STM Object
+      edhWrapValue !dd = do
+        !idHostValue <- unsafeIOToSTM newUnique
+        !ss <- newTVar []
+        return
+          Object
+            { edh'obj'ident = idHostValue,
+              edh'obj'store = HostStore dd,
+              edh'obj'class = clsHostValue,
+              edh'obj'supers = ss
+            }
 
   -- the `scope` class
   !hsScope <-
@@ -350,6 +371,7 @@ createEdhWorld !console = do
             edh'world'operators = opPD,
             edh'world'modules = modus,
             edh'world'console = console,
+            edh'value'wrapper = edhWrapValue,
             edh'scope'wrapper = edhWrapScope,
             edh'exception'wrapper = edhWrapException,
             edh'module'class = clsModule,
@@ -449,6 +471,16 @@ createEdhWorld !console = do
               Nothing -> return "It's an anonymous namespace"
               _ -> return "It's a bogus-namespace"
           _ -> return "It's a bogus-namespace"
+
+    mthValueRepr :: EdhHostProc
+    mthValueRepr !exit !ets = case edh'obj'store this of
+      HostStore !dd ->
+        exitEdh ets exit $
+          EdhString $ "<host-value: " <> T.pack (show dd) <> ">"
+      _ -> exitEdh ets exit $ EdhString "<bogus host-value>"
+      where
+        !scope = contextScope $ edh'context ets
+        !this = edh'scope'this scope
 
     mthScopeRepr :: EdhHostProc
     mthScopeRepr !exit !ets =
