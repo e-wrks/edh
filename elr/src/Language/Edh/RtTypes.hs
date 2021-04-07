@@ -141,27 +141,29 @@ dictEntryList !d =
 edhValueIdent :: EdhValue -> STM EdhValue
 edhValueIdent = identityOf
   where
-    idFromInt :: Int -> EdhValue
-    -- todo hashUnique doesn't guarantee free of collision, better impl?
-    idFromInt !i =
+    idFromUnique :: Unique -> EdhValue
+    idFromUnique !u =
       EdhUUID $
         UUID.fromWords
           0xcafe
           0xface
           (fromIntegral $ Bits.shiftR i 32)
           (fromIntegral i)
+      where
+        -- todo hashUnique doesn't guarantee free of collision, better impl?
+        i = hashUnique u
 
     identityOf :: EdhValue -> STM EdhValue
     identityOf (EdhObject !o) = idOfObj o
-    identityOf (EdhEvs !s) = return $ idFromInt $ hashUnique $ evs'uniq s
+    identityOf (EdhEvs !s) = return $ idFromUnique $ evs'uniq s
     identityOf (EdhNamedValue !n !v) = EdhNamedValue n <$> identityOf v
     identityOf (EdhPair !l !r) = liftA2 EdhPair (identityOf l) (identityOf r)
-    identityOf (EdhDict (Dict !u _)) = return $ idFromInt $ hashUnique u
-    identityOf (EdhList (List !u _)) = return $ idFromInt $ hashUnique u
+    identityOf (EdhDict (Dict !u _)) = return $ idFromUnique u
+    identityOf (EdhList (List !u _)) = return $ idFromUnique u
     identityOf (EdhProcedure !p _) = return $ idOfProc p
     identityOf (EdhBoundProc !p !this !that _) =
       EdhPair (idOfProc p) <$> liftA2 EdhPair (idOfObj this) (idOfObj that)
-    identityOf (EdhExpr !u _ _) = return $ idFromInt $ hashUnique u
+    identityOf (EdhExpr !u _ _) = return $ idFromUnique u
     identityOf (EdhArgsPack (ArgsPack !args !kwargs)) =
       EdhArgsPack
         <$> liftA2
@@ -178,14 +180,14 @@ edhValueIdent = identityOf
           _ -> return ouid
       _ -> return ouid
       where
-        ouid = idFromInt $ hashUnique $ edh'obj'ident o
+        ouid = idFromUnique $ edh'obj'ident o
 
     idOfProcDefi :: ProcDefi -> EdhValue
-    idOfProcDefi !def = idFromInt $ hashUnique $ edh'procedure'ident def
+    idOfProcDefi !def = idFromUnique $ edh'procedure'ident def
 
     idOfProc :: EdhProcDefi -> EdhValue
     idOfProc (EdhIntrOp _ _ !def) =
-      idFromInt $ hashUnique $ intrinsic'op'uniq def
+      idFromUnique $ intrinsic'op'uniq def
     idOfProc (EdhOprtor _ _ _ !def) = idOfProcDefi def
     idOfProc (EdhMethod !def) = idOfProcDefi def
     idOfProc (EdhGnrtor !def) = idOfProcDefi def
