@@ -564,33 +564,30 @@ createComputClass
                   Unapplied {} ->
                     exitEdh ets exit $
                       EdhString $
-                        " * Unapplied * "
-                          <> clsName
+                        clsName
                           <> "(\n"
                           <> T.unlines argReprs
-                          <> ")\n"
+                          <> ") {# Unapplied #}"
                   Applied {} ->
                     seqcontSTM (effRepr <$> effArgs) $ \ !effsRepr ->
                       exitEdh ets exit $
                         EdhString $
-                          " * Applied * "
-                            <> clsName
+                          clsName
                             <> "(\n"
                             <> T.unlines argReprs
-                            <> ") * Effectful * (\n"
+                            <> ") {# Applied\n"
                             <> T.unlines effsRepr
-                            <> ")\n"
+                            <> "#}"
                   Effected {} ->
                     seqcontSTM (effRepr <$> effArgs) $ \ !effsRepr ->
                       exitEdh ets exit $
                         EdhString $
-                          " * Effected * "
-                            <> clsName
+                          clsName
                             <> "(\n"
                             <> T.unlines argReprs
-                            <> ") * Effectful * (\n"
+                            <> ") {# Effected\n"
                             <> T.unlines effsRepr
-                            <> ")\n"
+                            <> "#}"
         where
           appliedRepr ::
             (AppliedArg, Maybe (EdhValue, Dynamic)) ->
