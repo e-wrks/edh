@@ -142,7 +142,8 @@ getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
         -- attribute access on descendant objects, via obj ref
         EdhObject !obj ->
           runEdhTx ets $
-            getObjAttrWSM (AttrByName "(@<-)") obj key (trySelfMagic obj) exit
+            getObjAttrWSM (AttrByName "(@<-)") obj key (trySelfMagic obj) $
+              \(_super, !magicVal) -> exit magicVal
         -- getting attr from an apk
         EdhArgsPack (ArgsPack _ !kwargs) ->
           exitEdh ets exit $ odLookupDefault EdhNil key kwargs
@@ -236,21 +237,22 @@ getObjAttrWSM ::
   Object ->
   AttrKey ->
   EdhTx ->
-  EdhTxExit EdhValue ->
+  EdhTxExit (Object, EdhValue) ->
   EdhTx
 getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
   lookupEdhSuperAttr obj magicSpell >>= \case
     (_, EdhNil) -> runEdhTx ets exitNoMagic
-    (!super', EdhProcedure (EdhMethod !magicMth) _) ->
-      withMagicMethod magicMth super' obj
-    (_, EdhBoundProc (EdhMethod !magicMth) !this !that _) ->
-      withMagicMethod magicMth this that
+    (!super, EdhProcedure (EdhMethod !magicMth) _) ->
+      withMagicMethod super magicMth super obj
+    (!super, EdhBoundProc (EdhMethod !magicMth) !this !that _) ->
+      withMagicMethod super magicMth this that
     (_, !magicVal) ->
       throwEdh ets UsageError $
-        "invalid magic method type: " <> edhTypeNameOf magicVal
+        "invalid magic (spell= " <> attrKeyStr magicSpell <> ") method type: "
+          <> edhTypeNameOf magicVal
   where
-    withMagicMethod :: ProcDefi -> Object -> Object -> STM ()
-    withMagicMethod !magicMth !this !that =
+    withMagicMethod :: Object -> ProcDefi -> Object -> Object -> STM ()
+    withMagicMethod !super !magicMth !this !that =
       runEdhTx ets $
         callEdhMethod
           this
@@ -264,9 +266,9 @@ getObjAttrWSM !magicSpell !obj !key !exitNoMagic !exitWithMagic !ets =
                 evalExpr (deExpr' exprDef) $
                   \ !defVal _ets -> case defVal of
                     EdhNil -> runEdhTx ets exitNoMagic
-                    _ -> exitEdh ets exitWithMagic defVal
+                    _ -> exitEdh ets exitWithMagic (super, defVal)
             -- note don't bind a magic method here
-            _ -> exitEdh ets exitWithMagic magicRtn
+            _ -> exitEdh ets exitWithMagic (super, magicRtn)
 
 -- | Try set an attribute into an object, with super magic
 setObjAttrWSM ::
@@ -280,8 +282,8 @@ setObjAttrWSM ::
 setObjAttrWSM !magicSpell !obj !key !val !exitNoMagic !exitWithMagic !ets =
   lookupEdhSuperAttr obj magicSpell >>= \case
     (_, EdhNil) -> runEdhTx ets exitNoMagic
-    (!super', EdhProcedure (EdhMethod !magicMth) _) ->
-      withMagicMethod magicMth super' obj
+    (!super, EdhProcedure (EdhMethod !magicMth) _) ->
+      withMagicMethod magicMth super obj
     (_, EdhBoundProc (EdhMethod !magicMth) !this !that _) ->
       withMagicMethod magicMth this that
     (_, !magicVal) ->
@@ -3359,7 +3361,29 @@ edhValueRepr !ets !val !exitRepr = case val of
     case edh'obj'store o of
       ClassStore {} ->
         lookupEdhObjAttr (edh'obj'class o) (AttrByName "__repr__") >>= withMagic
-      _ -> lookupEdhObjAttr o (AttrByName "__repr__") >>= withMagic
+      _ -> do
+        let withDirectAttr =
+              lookupEdhObjAttr o (AttrByName "__repr__") >>= withMagic
+        runEdhTx ets $
+          getObjAttrWSM
+            (AttrByName "(@<-)")
+            o
+            (AttrByName "__repr__")
+            (const withDirectAttr)
+            $ \(super, !magicVal) -> case magicVal of
+              EdhNil -> const withDirectAttr
+              EdhString !repr -> const $ exitRepr repr
+              EdhBoundProc (EdhMethod !mth) !this !that _ ->
+                callEdhMethod this that mth (ArgsPack [] odEmpty) id $
+                  \ !mthRtn _ets -> case mthRtn of
+                    EdhString !repr -> exitRepr repr
+                    _ -> edhValueRepr ets mthRtn exitRepr
+              EdhProcedure (EdhMethod !mth) _ ->
+                callEdhMethod super o mth (ArgsPack [] odEmpty) id $
+                  \ !mthRtn _ets -> case mthRtn of
+                    EdhString !repr -> exitRepr repr
+                    _ -> edhValueRepr ets mthRtn exitRepr
+              !reprVal -> const $ edhValueRepr ets reprVal exitRepr
 
   -- repr of named value is just its name
   EdhNamedValue !n _v -> exitRepr n
