@@ -229,6 +229,8 @@ getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
 -- intercepting the attr resolution
 
 -- | Try get an attribute from an object, with super magic
+--
+-- TODO support defaulting along the list of super objs?
 getObjAttrWSM ::
   AttrKey ->
   Object ->
