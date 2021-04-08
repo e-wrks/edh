@@ -124,7 +124,7 @@ appliedHostArg !typeName !argName = AppliedArg typeName argName $
       EdhObject !obj -> case edh'obj'store obj of
         HostStore !dd -> case fromDynamic dd of
           Just !comput ->
-            readTVar (comput'thunk comput) >>= \case
+            case comput'thunk comput of
               Effected !effected -> case fromDynamic effected of
                 Just (_ :: t) -> exit effected
                 Nothing -> badArg
@@ -174,7 +174,7 @@ performHostArg' !typeName !argName !effDefault =
               EdhObject !obj -> case edh'obj'store obj of
                 HostStore !dd -> case fromDynamic dd of
                   Just !comput ->
-                    readTVar (comput'thunk comput) >>= \case
+                    case comput'thunk comput of
                       Effected !effected -> case fromDynamic effected of
                         Just (_ :: t) -> exit (val, effected)
                         Nothing -> badArg
@@ -212,9 +212,9 @@ data ComputThunk = Unapplied !Dynamic | Applied !Dynamic | Effected !Dynamic
 -- And with dynamic effects
 data Comput = Comput
   { -- | Thunk in possibly different stages
-    comput'thunk :: !(TVar ComputThunk),
+    comput'thunk :: !ComputThunk,
     -- | Formal arguments to be applied, with all or partial values collected
-    comput'applied'args :: !(TVar [(AppliedArg, Maybe (EdhValue, Dynamic))]),
+    comput'applied'args :: ![(AppliedArg, Maybe (EdhValue, Dynamic))],
     -- | Effectful arguments to be additionally applied per each call, with
     -- values collected in case of an effected computation.
     comput'effectful'args :: ![(EffectfulArg, Maybe (EdhValue, Dynamic))]
@@ -224,60 +224,53 @@ applyComputArgs ::
   Comput ->
   EdhThreadState ->
   ArgsPack ->
-  (ComputThunk -> STM ()) ->
+  (Comput -> STM ()) ->
   STM ()
 applyComputArgs
-  (Comput !thunkVar !appliedVar !effs)
+  comput@(Comput !thunk !appliedArgs !effectfulArgs)
   !ets
   apk@(ArgsPack !args !kwargs)
-  !exit =
-    readTVar thunkVar >>= \case
-      thunk@Effected {} ->
-        if null args && odNull kwargs
-          then exit thunk
-          else edhValueRepr ets (EdhArgsPack apk) $ \ !badRepr ->
-            throwEdh ets UsageError $
-              "extranenous args to effected comput result:" <> badRepr
-      Applied applied ->
-        if null args && odNull kwargs
-          then processApplied applied
-          else edhValueRepr ets (EdhArgsPack apk) $ \ !badRepr ->
-            throwEdh ets UsageError $
-              "extranenous args to applied comput result:" <> badRepr
-      thunk@(Unapplied !unapplied) -> (readTVar appliedVar >>=) $
-        applyArgs $
-          \ !argsApplied -> do
-            writeTVar appliedVar argsApplied
-            allApplied [] argsApplied >>= \case
-              Nothing -> exit thunk
-              Just !dds -> case hostApply dds unapplied of
-                Just !applied -> processApplied applied
-                Nothing ->
-                  throwEdh
-                    ets
-                    UsageError
-                    "some computation argument not applicable"
+  !exit = case thunk of
+    Effected {} ->
+      if null args && odNull kwargs
+        then exit comput
+        else edhValueRepr ets (EdhArgsPack apk) $ \ !badRepr ->
+          throwEdh ets UsageError $
+            "extranenous args to effected comput result:" <> badRepr
+    Applied applied ->
+      if null args && odNull kwargs
+        then processApplied applied appliedArgs
+        else edhValueRepr ets (EdhArgsPack apk) $ \ !badRepr ->
+          throwEdh ets UsageError $
+            "extranenous args to applied comput result:" <> badRepr
+    Unapplied !unapplied -> applyArgs appliedArgs $ \ !appliedArgs' ->
+      allApplied [] appliedArgs' >>= \case
+        Nothing -> exit $ Comput thunk appliedArgs' effectfulArgs
+        Just !dds -> case hostApply dds unapplied of
+          Just !applied -> processApplied applied appliedArgs'
+          Nothing ->
+            throwEdh ets UsageError "some computation argument not applicable"
     where
-      processApplied :: Dynamic -> STM ()
-      processApplied !applied =
-        if not $ null effs
-          then do
-            let !thunk = Applied applied
-            writeTVar thunkVar thunk
-            exit thunk
-          else case fromDynamic applied of
-            Just (effected :: Dynamic) -> do
-              let !thunk = Effected effected
-              writeTVar thunkVar thunk
-              exit thunk
+      processApplied ::
+        Dynamic ->
+        [(AppliedArg, Maybe (EdhValue, Dynamic))] ->
+        STM ()
+      processApplied !applied !appliedArgs' =
+        if not $ null effectfulArgs
+          then -- expect a subsequent call in effectful context to get effected
+            exit $ Comput (Applied applied) appliedArgs' effectfulArgs
+          else -- no effectful requirements, take effect now
+          case fromDynamic applied of
+            Just (effected :: Dynamic) ->
+              exit $ Comput (Effected effected) appliedArgs' []
             Nothing -> case fromDynamic applied of
               Just (act :: IO Dynamic) ->
+                -- effect the IO computation
                 runEdhTx ets $
                   edhContIO $
-                    act >>= \ !effected -> atomically $ do
-                      let !thunk = Effected effected
-                      writeTVar thunkVar thunk
-                      exit thunk
+                    act >>= \ !effected ->
+                      atomically $
+                        exit $ Comput (Effected effected) appliedArgs' []
               Nothing -> case fromDynamic applied of
                 Just
                   ( act ::
@@ -285,14 +278,13 @@ applyComputArgs
                       (Dynamic -> STM ()) ->
                       STM ()
                     ) ->
-                    act ets $ \ !effected -> do
-                      let !thunk = Effected effected
-                      writeTVar thunkVar thunk
-                      exit thunk
-                Nothing -> do
-                  let !thunk = Applied applied
-                  writeTVar thunkVar thunk
-                  exit thunk
+                    -- effect the Edh computation
+                    act ets $ \ !effected ->
+                      exit $ Comput (Effected effected) appliedArgs' []
+                Nothing ->
+                  -- other type of host computation,
+                  -- leave it applied but not effected
+                  exit $ Comput (Applied applied) appliedArgs' []
 
       hostApply :: [Dynamic] -> Dynamic -> Maybe Dynamic
       hostApply [] !df = Just df
@@ -307,10 +299,10 @@ applyComputArgs
       allApplied got ((_, Just (_, dd)) : rest) = allApplied (dd : got) rest
 
       applyArgs ::
-        ([(AppliedArg, Maybe (EdhValue, Dynamic))] -> STM ()) ->
         [(AppliedArg, Maybe (EdhValue, Dynamic))] ->
+        ([(AppliedArg, Maybe (EdhValue, Dynamic))] -> STM ()) ->
         STM ()
-      applyArgs !apkApplied !pending =
+      applyArgs !pending !apkApplied =
         applyKwArgs [] pending kwargs
         where
           applyPosArgs ::
@@ -390,7 +382,7 @@ constructComput'' !args !kwargs !clsComput !exit =
         Nothing -> edhValueDesc ets (EdhObject clsComput) $ \ !badDesc ->
           throwEdh ets UsageError $ "not a comput class" <> badDesc
         Just !comput ->
-          runEdhTx ets . exit . (obj,) =<< readTVar (comput'thunk comput)
+          runEdhTx ets $ exit (obj, comput'thunk comput)
 
 createComputClass ::
   Typeable t =>
@@ -424,56 +416,58 @@ createComputClass
     where
       computAllocator :: ArgsPack -> EdhObjectAllocator
       computAllocator !apk !ctorExit !etsCtor = do
-        !thunkVar <- newTVar $ Unapplied $ toDyn hostComput
-        !appliedVar <- newTVar $ (,Nothing) <$> ctorAppArgs
-        let !comput = Comput thunkVar appliedVar $ (,Nothing) <$> ctorEffArgs
-        applyComputArgs comput etsCtor apk $ \case
-          Applied !applied ->
-            if null ctorEffArgs
-              then case fromDynamic applied of
-                Just (act :: IO Dynamic) ->
-                  runEdhTx etsCtor $
-                    edhContIO $
-                      act >>= \ !effected -> atomically $ do
-                        writeTVar thunkVar $ Effected effected
-                        ctorExit Nothing $ HostStore $ toDyn comput
-                Nothing ->
-                  if null ctorAppArgs
-                    then case fromDynamic applied of
-                      Just (act :: IO ()) -> do
-                        -- so it is a niladic IO computation with unit result,
-                        -- assuming that only its side-effects are desirable
-                        -- from the scripting perspective
-                        --
-                        -- let's realize such side-effects at construction, so
-                        -- no instance ever needs to be stored and called by
-                        -- scripts, though we have to return the object store
-                        -- as an object allocator, the scripts should never
-                        -- be interested in the constructed object, except to
-                        -- examine it did get effected
-                        writeTVar thunkVar $ Effected $ toDyn ()
-                        runEdhTx etsCtor $
-                          edhContIO $
-                            (act >>) $
-                              atomically $
-                                ctorExit Nothing $ HostStore $ toDyn comput
-                      Nothing -> ctorExit Nothing $ HostStore $ toDyn comput
-                    else ctorExit Nothing $ HostStore $ toDyn comput
-              else ctorExit Nothing $ HostStore $ toDyn comput
-          _ -> ctorExit Nothing $ HostStore $ toDyn comput
+        let !comput =
+              Comput
+                (Unapplied $ toDyn hostComput)
+                ((,Nothing) <$> ctorAppArgs)
+                ((,Nothing) <$> ctorEffArgs)
+        applyComputArgs comput etsCtor apk $ \ !comput' ->
+          case comput'thunk comput' of
+            Applied !applied ->
+              if null (comput'effectful'args comput')
+                then case fromDynamic applied of
+                  Just (act :: IO ()) ->
+                    -- so it is a niladic IO computation with unit result,
+                    -- assuming that only its side-effects are desirable
+                    -- from the scripting perspective
+                    --
+                    -- let's realize such side-effects at construction, so
+                    -- no instance ever needs to be stored and called by
+                    -- scripts, though we have to return the object store
+                    -- as an object allocator, the scripts should never
+                    -- be interested in the constructed object, except to
+                    -- examine it did get effected
+                    runEdhTx etsCtor $
+                      edhContIO $
+                        (act >>) $
+                          atomically $
+                            ctorExit Nothing $
+                              HostStore $
+                                toDyn
+                                  comput'
+                                    { comput'thunk = Effected $ toDyn ()
+                                    }
+                  Nothing ->
+                    -- other type of host computation,
+                    -- leave it however applied
+                    ctorExit Nothing $ HostStore $ toDyn comput'
+                else -- expect a subsequent call in effectful context
+                  ctorExit Nothing $ HostStore $ toDyn comput'
+            _ ->
+              -- leave it effected, or not fully applied
+              ctorExit Nothing $ HostStore $ toDyn comput'
 
       -- Obtain an argument by name
       argReadProc :: EdhValue -> EdhHostProc
       argReadProc !keyVal !exit !ets = withThisHostObj ets $
-        \(Comput _thunkVar !appliedVar effArgs) ->
+        \(Comput _thunk !appliedArgs effArgs) ->
           edhValueAsAttrKey ets keyVal $ \ !argKey -> do
             let --
 
                 matchAppArg ::
                   STM () ->
-                  [(AppliedArg, Maybe (EdhValue, Dynamic))] ->
                   STM ()
-                matchAppArg !naExit = match
+                matchAppArg !naExit = match appliedArgs
                   where
                     match ::
                       [(AppliedArg, Maybe (EdhValue, Dynamic))] -> STM ()
@@ -499,40 +493,31 @@ createComputClass
                           Nothing -> exitEdh ets exit edhNothing
                         else match rest
 
-            (readTVar appliedVar >>=) $
-              matchAppArg $ matchEffArg $ exitEdh ets exit edhNA
+            matchAppArg $ matchEffArg $ exitEdh ets exit edhNA
 
       reprProc :: ArgsPack -> EdhHostProc
       reprProc _ !exit !ets = withThisHostObj ets $
-        \(Comput !thunkVar !appliedVar effArgs) ->
-          (readTVar appliedVar >>=) . (. fmap appliedRepr) $
-            flip seqcontSTM $
-              \ !argReprs ->
-                readTVar thunkVar >>= \case
-                  Unapplied {} ->
-                    exitEdh ets exit $
-                      EdhString $
-                        clsName <> "( " <> T.unwords argReprs <> " )\n"
-                  Applied {} ->
-                    seqcontSTM (effRepr <$> effArgs) $ \ !effsRepr ->
-                      exitEdh ets exit $
-                        EdhString $
-                          clsName
-                            <> "( "
-                            <> T.unwords argReprs
-                            <> " ) {# "
-                            <> T.unwords effsRepr
-                            <> " #}"
-                  Effected {} ->
-                    seqcontSTM (effRepr <$> effArgs) $ \ !effsRepr ->
-                      exitEdh ets exit $
-                        EdhString $
-                          clsName
-                            <> "( "
-                            <> T.unwords argReprs
-                            <> " ) {# "
-                            <> T.unwords effsRepr
-                            <> " #}"
+        \(Comput !thunk !appliedArgs effArgs) ->
+          seqcontSTM (appliedRepr <$> appliedArgs) $ \ !argReprs ->
+            case thunk of
+              Unapplied {} ->
+                exitEdh ets exit $
+                  EdhString $
+                    clsName <> "( " <> T.unwords argReprs <> " )\n"
+              Applied {} ->
+                seqcontSTM (effRepr <$> effArgs) $ \ !effsRepr ->
+                  exitEdh ets exit $
+                    EdhString $
+                      clsName <> "( " <> T.unwords argReprs <> " ) {# "
+                        <> T.unwords effsRepr
+                        <> " #}"
+              Effected {} ->
+                seqcontSTM (effRepr <$> effArgs) $ \ !effsRepr ->
+                  exitEdh ets exit $
+                    EdhString $
+                      clsName <> "( " <> T.unwords argReprs <> " ) {# "
+                        <> T.unwords effsRepr
+                        <> " #}"
         where
           appliedRepr ::
             (AppliedArg, Maybe (EdhValue, Dynamic)) ->
@@ -556,38 +541,30 @@ createComputClass
 
       showProc :: ArgsPack -> EdhHostProc
       showProc _ !exit !ets = withThisHostObj ets $
-        \(Comput !thunkVar !appliedVar effArgs) ->
-          (readTVar appliedVar >>=) . (. fmap appliedRepr) $
-            flip seqcontSTM $
-              \ !argReprs ->
-                readTVar thunkVar >>= \case
-                  Unapplied {} ->
-                    exitEdh ets exit $
-                      EdhString $
-                        clsName
-                          <> "(\n"
-                          <> T.unlines argReprs
-                          <> ") {# Unapplied #}"
-                  Applied {} ->
-                    seqcontSTM (effRepr <$> effArgs) $ \ !effsRepr ->
-                      exitEdh ets exit $
-                        EdhString $
-                          clsName
-                            <> "(\n"
-                            <> T.unlines argReprs
-                            <> ") {# Applied\n"
-                            <> T.unlines effsRepr
-                            <> "#}"
-                  Effected {} ->
-                    seqcontSTM (effRepr <$> effArgs) $ \ !effsRepr ->
-                      exitEdh ets exit $
-                        EdhString $
-                          clsName
-                            <> "(\n"
-                            <> T.unlines argReprs
-                            <> ") {# Effected\n"
-                            <> T.unlines effsRepr
-                            <> "#}"
+        \(Comput !thunk !appliedArgs effArgs) ->
+          seqcontSTM (appliedRepr <$> appliedArgs) $ \ !argReprs ->
+            case thunk of
+              Unapplied {} ->
+                exitEdh ets exit $
+                  EdhString $
+                    clsName <> "(\n" <> T.unlines argReprs
+                      <> ") {# Unapplied #}"
+              Applied {} ->
+                seqcontSTM (effRepr <$> effArgs) $ \ !effsRepr ->
+                  exitEdh ets exit $
+                    EdhString $
+                      clsName <> "(\n" <> T.unlines argReprs
+                        <> ") {# Applied\n"
+                        <> T.unlines effsRepr
+                        <> "#}"
+              Effected {} ->
+                seqcontSTM (effRepr <$> effArgs) $ \ !effsRepr ->
+                  exitEdh ets exit $
+                    EdhString $
+                      clsName <> "(\n" <> T.unlines argReprs
+                        <> ") {# Effected\n"
+                        <> T.unlines effsRepr
+                        <> "#}"
         where
           appliedRepr ::
             (AppliedArg, Maybe (EdhValue, Dynamic)) ->
@@ -598,9 +575,7 @@ createComputClass
           appliedRepr (AppliedArg !anno !name _, Just (v, _d)) !exit' =
             edhValueRepr ets v $ \ !vRepr ->
               exit' $
-                "  " <> attrKeyStr name <> "= " <> vRepr
-                  <> " :: "
-                  <> anno
+                "  " <> attrKeyStr name <> "= " <> vRepr <> " :: " <> anno
                   <> ","
 
           effRepr ::
@@ -612,106 +587,91 @@ createComputClass
           effRepr (EffectfulArg !anno !name _, Just (v, _d)) !exit' =
             edhValueRepr ets v $ \ !vRepr ->
               exit' $
-                "  " <> attrKeyStr name <> "= " <> vRepr
-                  <> " :: "
-                  <> anno
+                "  " <> attrKeyStr name <> "= " <> vRepr <> " :: " <> anno
                   <> ","
 
       callProc :: ArgsPack -> EdhHostProc
       callProc !apk !exit !ets = withThisHostObj ets $
-        \ !comput -> applyComputArgs comput ets apk $ \case
-          Unapplied {} -> exitEdh ets exit $ EdhObject this
-          Applied !applied -> do
-            let !effArgs = comput'effectful'args comput
-            seqcontSTM (extractEffArg <$> effArgs) $
-              \ !effs ->
-                case hostApply effs applied of
-                  Nothing ->
-                    throwEdh
-                      ets
-                      UsageError
-                      "some effectful argument not applicable"
-                  Just !applied' -> case fromDynamic applied' of
-                    Just (act :: IO Dynamic) ->
-                      runEdhTx ets $
-                        edhContIO $
-                          act >>= \ !effected -> atomically $ do
-                            -- Create a new object representing the effected
-                            -- result
-                            !newOid <- unsafeIOToSTM newUnique
-                            !newThunk <- newTVar $ Effected effected
-                            exitEdh ets exit $
-                              EdhObject
-                                this
-                                  { edh'obj'ident = newOid,
-                                    edh'obj'store =
-                                      HostStore $
-                                        toDyn comput {comput'thunk = newThunk}
-                                  }
-                    Nothing -> case fromDynamic applied' of
-                      Just
-                        ( act ::
-                            EdhThreadState ->
-                            (Dynamic -> STM ()) ->
-                            STM ()
-                          ) ->
-                          act ets $ \ !effected -> do
-                            -- Create a new object representing the effected
-                            -- result
-                            !newOid <- unsafeIOToSTM newUnique
-                            !newThunk <- newTVar $ Effected effected
-                            exitEdh ets exit $
-                              EdhObject
-                                this
-                                  { edh'obj'ident = newOid,
-                                    edh'obj'store =
-                                      HostStore $
-                                        toDyn comput {comput'thunk = newThunk}
-                                  }
+        \ !comput -> applyComputArgs comput ets apk $ \ !comput' ->
+          case comput'thunk comput' of
+            Applied !applied -> do
+              let !effArgs = comput'effectful'args comput'
+              seqcontSTM (extractEffArg <$> effArgs) $
+                \ !effs -> do
+                  let effArgs' =
+                        zipWith
+                          ( \(!ea, _) !av ->
+                              (ea, Just av)
+                          )
+                          effArgs
+                          effs
+                      exitWithEffected !effected = do
+                        !newOid <- unsafeIOToSTM newUnique
+                        exitEdh ets exit $
+                          EdhObject
+                            this
+                              { edh'obj'ident = newOid,
+                                edh'obj'store =
+                                  HostStore $
+                                    toDyn
+                                      comput'
+                                        { comput'thunk = Effected effected,
+                                          comput'effectful'args = effArgs'
+                                        }
+                              }
+
+                  case hostApply effs applied of
+                    Nothing ->
+                      throwEdh
+                        ets
+                        UsageError
+                        "some effectful argument not applicable"
+                    Just !applied' -> case fromDynamic applied' of
+                      Just (act :: IO Dynamic) ->
+                        -- effect the IO computation
+                        runEdhTx ets $
+                          edhContIO $ act >>= atomically . exitWithEffected
                       Nothing -> case fromDynamic applied' of
                         Just
                           ( act ::
                               EdhThreadState ->
-                              (EdhValue -> STM ()) ->
+                              (Dynamic -> STM ()) ->
                               STM ()
                             ) ->
-                            act ets $ exitEdh ets exit
+                            -- effect the Edh computation
+                            act ets exitWithEffected
                         Nothing -> case fromDynamic applied' of
-                          Just (act :: IO EdhValue) ->
-                            runEdhTx ets $
-                              edhContIO $
-                                act >>= (atomically . exitEdh ets exit)
+                          Just
+                            ( act ::
+                                EdhThreadState ->
+                                (EdhValue -> STM ()) ->
+                                STM ()
+                              ) ->
+                              -- effect the Edh computation
+                              act ets $ exitEdh ets exit
                           Nothing -> case fromDynamic applied' of
-                            Just (act :: IO ()) ->
+                            Just (act :: IO EdhValue) ->
+                              -- effect the IO computation
                               runEdhTx ets $
                                 edhContIO $
-                                  act >> atomically (exitEdh ets exit nil)
-                            Nothing -> do
-                              let !effected =
-                                    fromMaybe applied' $ fromDynamic applied
-                              -- Create a new object representing the effected
-                              -- result
-                              !newOid <- unsafeIOToSTM newUnique
-                              !newThunk <- newTVar $ Effected effected
-                              exitEdh ets exit $
-                                EdhObject
-                                  this
-                                    { edh'obj'ident = newOid,
-                                      edh'obj'store =
-                                        HostStore $
-                                          toDyn
-                                            comput
-                                              { comput'thunk = newThunk,
-                                                comput'effectful'args =
-                                                  zipWith
-                                                    ( \(!ea, _) !av ->
-                                                        (ea, Just av)
-                                                    )
-                                                    effArgs
-                                                    effs
-                                              }
-                                    }
-          Effected {} -> exitEdh ets exit $ EdhObject this
+                                  act >>= (atomically . exitEdh ets exit)
+                            Nothing -> case fromDynamic applied' of
+                              Just (act :: IO ()) ->
+                                -- effect the IO side-effect
+                                runEdhTx ets $
+                                  edhContIO $
+                                    act >> atomically (exitEdh ets exit nil)
+                              Nothing ->
+                                exitWithEffected $
+                                  fromMaybe applied' $ fromDynamic applied
+            _ -> do
+              !newOid <- unsafeIOToSTM newUnique
+              exitEdh ets exit $
+                EdhObject
+                  this
+                    { edh'obj'ident = newOid,
+                      edh'obj'store = HostStore $ toDyn comput'
+                    }
         where
           !ctx = edh'context ets
           !scope = contextScope ctx
