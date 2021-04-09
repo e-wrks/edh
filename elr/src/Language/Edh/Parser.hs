@@ -1045,8 +1045,8 @@ parsePrefixExpr !si =
         return (x, si')
     ]
 
--- NOTE: keywords for statements will parse as identifier in an expr,
---       if not forbidden here.
+-- NOTE: keywords for statements or other constructs will parse as identifier
+--       in an expr, if not forbidden here.
 illegalExprKws :: Parser Bool
 illegalExprKws =
   True
@@ -1059,6 +1059,7 @@ illegalExprKws =
         keyword "extends",
         keyword "perceive",
         keyword "while",
+        keyword "of",
         keyword "from",
         keyword "do",
         keyword "break",
