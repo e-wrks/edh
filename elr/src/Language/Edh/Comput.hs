@@ -534,7 +534,7 @@ createComputClass
             (Text -> STM ()) ->
             STM ()
           effRepr (EffectfulArg _anno !name _, Nothing) !exit' =
-            exit' $ attrKeyStr name <> ",\n"
+            exit' $ attrKeyStr name <> ","
           effRepr (EffectfulArg _anno !name _, Just (v, _d)) !exit' =
             edhValueRepr ets v $ \ !vRepr ->
               exit' $ attrKeyStr name <> "= " <> vRepr <> ","
@@ -544,25 +544,31 @@ createComputClass
         \(Comput !thunk !appliedArgs effArgs) ->
           seqcontSTM (appliedRepr <$> appliedArgs) $ \ !argReprs ->
             case thunk of
-              Unapplied {} ->
+              Unapplied !unapplied ->
                 exitEdh ets exit $
                   EdhString $
                     clsName <> "(\n" <> T.unlines argReprs
-                      <> ") {# Unapplied #}"
-              Applied {} ->
+                      <> ") {# Unapplied "
+                      <> T.pack (show unapplied)
+                      <> " #}"
+              Applied !applied ->
                 seqcontSTM (effRepr <$> effArgs) $ \ !effsRepr ->
                   exitEdh ets exit $
                     EdhString $
                       clsName <> "(\n" <> T.unlines argReprs
-                        <> ") {# Applied\n"
+                        <> ") {# Applied "
+                        <> T.pack (show applied)
+                        <> "\n"
                         <> T.unlines effsRepr
                         <> "#}"
-              Effected {} ->
+              Effected !effected ->
                 seqcontSTM (effRepr <$> effArgs) $ \ !effsRepr ->
                   exitEdh ets exit $
                     EdhString $
                       clsName <> "(\n" <> T.unlines argReprs
-                        <> ") {# Effected\n"
+                        <> ") {# Effected "
+                        <> T.pack (show effected)
+                        <> "\n"
                         <> T.unlines effsRepr
                         <> "#}"
         where
@@ -583,7 +589,7 @@ createComputClass
             (Text -> STM ()) ->
             STM ()
           effRepr (EffectfulArg !anno !name _, Nothing) !exit' =
-            exit' $ "  " <> attrKeyStr name <> " :: " <> anno <> ",\n"
+            exit' $ "  " <> attrKeyStr name <> " :: " <> anno <> ","
           effRepr (EffectfulArg !anno !name _, Just (v, _d)) !exit' =
             edhValueRepr ets v $ \ !vRepr ->
               exit' $
