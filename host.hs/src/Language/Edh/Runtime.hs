@@ -474,9 +474,9 @@ createEdhWorld !console = do
 
     mthValueRepr :: EdhHostProc
     mthValueRepr !exit !ets = case edh'obj'store this of
-      HostStore !dd ->
+      HostStore (Dynamic !tr _) ->
         exitEdh ets exit $
-          EdhString $ "<host-value: " <> T.pack (show dd) <> ">"
+          EdhString $ "<host-value:< " <> T.pack (show tr) <> ">>"
       _ -> exitEdh ets exit $ EdhString "<bogus host-value>"
       where
         !scope = contextScope $ edh'context ets
