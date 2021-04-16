@@ -5317,7 +5317,8 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
                             if iStart' > iStop'
                               then
                                 throwEdh ets EvalError $
-                                  "can not step from "
+                                  "can not step " <> T.pack (show iStep)
+                                    <> " from "
                                     <> T.pack (show iStart)
                                     <> " to "
                                     <> T.pack (show iStop)
