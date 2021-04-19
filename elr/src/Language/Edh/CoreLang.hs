@@ -80,7 +80,10 @@ fillClassMRO !cls !superClasses =
     l !c = case edh'obj'store c of
       ClassStore (Class _ _ _ !mro) -> Right . (c :) <$> readTVar mro
       _ ->
-        return $ Left $ "class expected but given an object of " <> objClassName c
+        return $
+          Left $
+            "class expected but given an object of "
+              <> objClassName c
 
     merge :: [[Object]] -> [Object] -> Either Text [Object]
     merge [] !result = return $ reverse result
@@ -111,7 +114,8 @@ fillClassMRO !cls !superClasses =
             checkTail [] neTails = (True, neTails)
             checkTail ([] : _) _ = error "bug: empty list in rest of the lists"
             checkTail (l2c@(h' : t') : rest) neTails
-              | h' == h = checkTail rest $ if null t' then neTails else t' : neTails
+              | h' == h =
+                checkTail rest $ if null t' then neTails else t' : neTails
               | h `elem` t' = (False, [])
               | otherwise = checkTail rest (l2c : neTails)
 
@@ -131,17 +135,17 @@ resolveEdhInstance !classObj !that =
 -- * Edh object attribute resolution
 
 lookupEdhObjAttr :: Object -> AttrKey -> STM (Object, EdhValue)
-lookupEdhObjAttr !this !key =
-  lookupEdhSelfAttr this key >>= \case
-    EdhNil -> case edh'obj'store this of
+lookupEdhObjAttr !obj !key =
+  lookupEdhSelfAttr obj key >>= \case
+    EdhNil -> case edh'obj'store obj of
       ClassStore !cls -> readTVar (edh'class'mro cls) >>= searchSuperClasses
-      _ -> lookupEdhSuperAttr this key
-    !val -> return (this, val)
+      _ -> lookupEdhSuperAttr obj key
+    !val -> return (obj, val)
   where
     searchSuperClasses :: [Object] -> STM (Object, EdhValue)
     searchSuperClasses !supers = lookupFromSupers supers
       where
-        lookupFromSupers [] = return (this, EdhNil)
+        lookupFromSupers [] = return (obj, EdhNil)
         lookupFromSupers (super : rest) =
           lookupEdhSelfAttr super key >>= \ !val -> case val of
             EdhNil -> lookupFromSupers rest
@@ -149,12 +153,12 @@ lookupEdhObjAttr !this !key =
 {-# INLINE lookupEdhObjAttr #-}
 
 lookupEdhSuperAttr :: Object -> AttrKey -> STM (Object, EdhValue)
-lookupEdhSuperAttr !this !key = readTVar (edh'obj'supers this) >>= searchSupers
+lookupEdhSuperAttr !obj !key = readTVar (edh'obj'supers obj) >>= searchSupers
   where
     searchSupers :: [Object] -> STM (Object, EdhValue)
     searchSupers !supers = lookupFromSupers supers
       where
-        lookupFromSupers [] = return (this, EdhNil)
+        lookupFromSupers [] = return (obj, EdhNil)
         lookupFromSupers (super : rest) =
           lookupEdhSelfAttr super key >>= \ !val -> case val of
             EdhNil -> lookupFromSupers rest
@@ -162,7 +166,7 @@ lookupEdhSuperAttr !this !key = readTVar (edh'obj'supers this) >>= searchSupers
 {-# INLINE lookupEdhSuperAttr #-}
 
 lookupEdhSelfAttr :: Object -> AttrKey -> STM EdhValue
-lookupEdhSelfAttr !this !key = case edh'obj'store this of
+lookupEdhSelfAttr !obj !key = case edh'obj'store obj of
   HostStore {} -> lookupFromClass
   HashStore !es ->
     iopdLookup key es >>= \case
@@ -174,7 +178,7 @@ lookupEdhSelfAttr !this !key = case edh'obj'store this of
       Nothing -> lookupFromClass
   where
     lookupFromClass =
-      if clsObj == this
+      if clsObj == obj
         then return EdhNil -- reached ultimate meta class of the world
         else case edh'obj'store clsObj of
           ClassStore !cls ->
@@ -183,11 +187,11 @@ lookupEdhSelfAttr !this !key = case edh'obj'store this of
               Nothing -> return EdhNil -- don't resort to meta class here
           _ -> return EdhNil -- todo should complain loudly here?
       where
-        !clsObj = edh'obj'class this
+        !clsObj = edh'obj'class obj
 {-# INLINE lookupEdhSelfAttr #-}
 
 lookupEdhSelfMagic :: Object -> AttrKey -> STM EdhValue
-lookupEdhSelfMagic !this !key = case edh'obj'store this of
+lookupEdhSelfMagic !obj !key = case edh'obj'store obj of
   HostStore {} ->
     -- a host object can only have magic attributes on its class
     lookupFromClass
@@ -209,18 +213,18 @@ lookupEdhSelfMagic !this !key = case edh'obj'store this of
           Nothing -> return EdhNil -- don't resort to meta class here
       _ -> return EdhNil -- todo should complain loudly here?
       where
-        !clsObj = edh'obj'class this
+        !clsObj = edh'obj'class obj
 {-# INLINE lookupEdhSelfMagic #-}
 
 lookupEdhObjMagic :: Object -> AttrKey -> STM (Object, EdhValue)
-lookupEdhObjMagic !this !key =
-  (this :) <$> readTVar (edh'obj'supers this) >>= searchMagic
+lookupEdhObjMagic !obj !key =
+  (obj :) <$> readTVar (edh'obj'supers obj) >>= searchMagic
   where
-    searchMagic [] = return (this, EdhNil)
-    searchMagic (obj : rest) =
-      lookupEdhSelfMagic obj key >>= \case
+    searchMagic [] = return (obj, EdhNil)
+    searchMagic (o : rest) =
+      lookupEdhSelfMagic o key >>= \case
         EdhNil -> searchMagic rest
-        !art -> return (obj, art)
+        !art -> return (o, art)
 {-# INLINE lookupEdhObjMagic #-}
 
 -- * import/export

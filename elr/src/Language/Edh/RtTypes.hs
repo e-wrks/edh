@@ -452,6 +452,9 @@ data Class = Class
     edh'class'mro :: !(TVar [Object])
   }
 
+instance Show Class where
+  show cls = ("class:" <>) $ T.unpack $ procedureName $ edh'class'proc cls
+
 instance Eq Class where
   Class x'p _ _ _ == Class y'p _ _ _ = x'p == y'p
 
@@ -507,6 +510,11 @@ data ObjectStore
   = HashStore !EntityStore
   | ClassStore !Class -- in case this is a class object
   | HostStore !Dynamic
+
+instance Show ObjectStore where
+  show HashStore {} = "<<HashStore>>"
+  show (ClassStore cls) = "<<ClassStore:" <> show cls <> ">>"
+  show (HostStore (Dynamic tr _)) = "<<HostStore:" <> show tr <> ">>"
 
 -- | Try cast and unveil an Object's storage of a known type, while not
 -- considering any super object eligible
