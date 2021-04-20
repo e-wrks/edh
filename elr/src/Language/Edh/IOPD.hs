@@ -484,6 +484,15 @@ odFromList !entries =
         go entries Map.empty 0
    in OrderedDict mNew aNew
 
+odUpdate ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  [(k, v)] ->
+  OrderedDict k v ->
+  OrderedDict k v
+-- todo perf. optim.
+odUpdate ul d = odFromList $ reverse $ reverse ul ++ odToReverseList d
+
 odUnion ::
   forall k v.
   (Eq k, Hashable k) =>
