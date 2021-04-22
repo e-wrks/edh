@@ -46,13 +46,19 @@ library
     BangPatterns
     ConstraintKinds
     DataKinds
+    DerivingStrategies
     FlexibleContexts
     FlexibleInstances
     GADTs
+    GeneralizedNewtypeDeriving
     KindSignatures
     LambdaCase
+    MultiWayIf
     OverloadedStrings
+    PatternSynonyms
+    RankNTypes
     ScopedTypeVariables
+    StandaloneDeriving
     TupleSections
     TypeApplications
     TypeOperators
@@ -93,13 +99,19 @@ executable edh
     BangPatterns
     ConstraintKinds
     DataKinds
+    DerivingStrategies
     FlexibleContexts
     FlexibleInstances
     GADTs
+    GeneralizedNewtypeDeriving
     KindSignatures
     LambdaCase
+    MultiWayIf
     OverloadedStrings
+    PatternSynonyms
+    RankNTypes
     ScopedTypeVariables
+    StandaloneDeriving
     TupleSections
     TypeApplications
     TypeOperators
@@ -153,13 +165,19 @@ executable runedh
     BangPatterns
     ConstraintKinds
     DataKinds
+    DerivingStrategies
     FlexibleContexts
     FlexibleInstances
     GADTs
+    GeneralizedNewtypeDeriving
     KindSignatures
     LambdaCase
+    MultiWayIf
     OverloadedStrings
+    PatternSynonyms
+    RankNTypes
     ScopedTypeVariables
+    StandaloneDeriving
     TupleSections
     TypeApplications
     TypeOperators
@@ -201,13 +219,19 @@ executable edhm
     BangPatterns
     ConstraintKinds
     DataKinds
+    DerivingStrategies
     FlexibleContexts
     FlexibleInstances
     GADTs
+    GeneralizedNewtypeDeriving
     KindSignatures
     LambdaCase
+    MultiWayIf
     OverloadedStrings
+    PatternSynonyms
+    RankNTypes
     ScopedTypeVariables
+    StandaloneDeriving
     TupleSections
     TypeApplications
     TypeOperators

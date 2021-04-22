@@ -44,13 +44,19 @@ library
     BangPatterns
     ConstraintKinds
     DataKinds
+    DerivingStrategies
     FlexibleContexts
     FlexibleInstances
     GADTs
+    GeneralizedNewtypeDeriving
     KindSignatures
     LambdaCase
+    MultiWayIf
     OverloadedStrings
+    PatternSynonyms
+    RankNTypes
     ScopedTypeVariables
+    StandaloneDeriving
     TupleSections
     TypeApplications
     TypeOperators

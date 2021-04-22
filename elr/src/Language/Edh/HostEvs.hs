@@ -7,6 +7,7 @@ import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
 import Data.IORef
+import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
 import System.IO
 import Prelude
@@ -81,11 +82,19 @@ newtype EventListener t = EventListener
   { on'event :: AtomEvq -> t -> STM (Maybe (EventListener t))
   }
 
+-- | The polymorphic event sink wrapper
+data SomeEventSink = forall t. SomeEventSink (EventSink t)
+
+instance Eq SomeEventSink where
+  SomeEventSink x == SomeEventSink y = isSameEventSink x y
+
 -- | An event sink conveys an event stream, with possibly multiple event
 -- producers and / or multiple event consumers (i.e. listeners and handlers
 -- subscribed to the event sink via 'listenEvents' and 'handleEvents')
 data EventSink t = EventSink
-  { -- | Derive a consequent event from an upstream event, as part of the
+  { -- | Unique identifier of the event sink, fmap won't change this identity
+    event'sink'ident :: Unique,
+    -- | Derive a consequent event from an upstream event, as part of the
     -- spreading event hierarchy underlying
     --
     -- The atomic event queue should remain the same for event hierarchy
@@ -142,6 +151,7 @@ handleEvents !evs !handler =
 -- | Create a new event sink
 newEventSink :: forall t. IO (EventSink t)
 newEventSink = do
+  !esid <- newUnique
   !eosRef <- newIORef False
   !rcntRef <- newTVarIO Nothing
   !subsRef <- newIORef []
@@ -165,7 +175,14 @@ newEventSink = do
       doneEvs :: IO ()
       doneEvs = writeIORef eosRef True
 
-  return $ EventSink spreadEvt recentEvt publishEvt listenEvs atEoS doneEvs
+  return $ EventSink esid spreadEvt recentEvt publishEvt listenEvs atEoS doneEvs
+
+isSameEventSink :: forall a b. EventSink a -> EventSink b -> Bool
+isSameEventSink a b = event'sink'ident a == event'sink'ident b
+
+-- | Note identity of event sinks won't change after fmap'ped
+instance Eq (EventSink a) where
+  (==) = isSameEventSink
 
 -- | Note that this 'Functor' instance is lawless w.r.t. event
 -- spreading/publishing, i.e. 'spreadEvent' and 'publishEvent' are prohibited
@@ -174,35 +191,52 @@ newEventSink = do
 -- Though it is lawful otherwise, i.e. w.r.t. event consuming and EoS semantics.
 instance Functor EventSink where
   fmap :: forall a b. (a -> b) -> EventSink a -> EventSink b
-  fmap f (EventSink _spreadEvt recentEvt _publishEvt listenEvs atEoS doneEvs) =
-    do
-      let spreadEvt' :: AtomEvq -> b -> STM ()
-          spreadEvt' _ _ =
-            throwSTM $
-              userError
-                "prohibited against a decorated event sink"
+  fmap
+    f
+    ( EventSink
+        !esid
+        _spreadEvt
+        recentEvt
+        _publishEvt
+        listenEvs
+        atEoS
+        doneEvs
+      ) =
+      do
+        let spreadEvt' :: AtomEvq -> b -> STM ()
+            spreadEvt' _ _ =
+              throwSTM $
+                userError
+                  "prohibited against a decorated event sink"
 
-          recentEvt' :: STM (Maybe b)
-          recentEvt' = fmap f <$> recentEvt
+            recentEvt' :: STM (Maybe b)
+            recentEvt' = fmap f <$> recentEvt
 
-          publishEvt' :: b -> IO EndOfStream
-          publishEvt' _ =
-            throwIO $
-              userError
-                "prohibited against a decorated event sink"
+            publishEvt' :: b -> IO EndOfStream
+            publishEvt' _ =
+              throwIO $
+                userError
+                  "prohibited against a decorated event sink"
 
-          listenEvs' :: EventListener b -> IO ()
-          listenEvs' !listener = listenEvs $ deleListener listener
-            where
-              deleListener :: EventListener b -> EventListener a
-              deleListener (EventListener listener') =
-                EventListener $ \aeq evd ->
-                  listener' aeq (f evd) >>= \case
-                    Nothing -> return Nothing
-                    Just !nextListener ->
-                      return $ Just $ deleListener nextListener
+            listenEvs' :: EventListener b -> IO ()
+            listenEvs' !listener = listenEvs $ deleListener listener
+              where
+                deleListener :: EventListener b -> EventListener a
+                deleListener (EventListener listener') =
+                  EventListener $ \aeq evd ->
+                    listener' aeq (f evd) >>= \case
+                      Nothing -> return Nothing
+                      Just !nextListener ->
+                        return $ Just $ deleListener nextListener
 
-      EventSink spreadEvt' recentEvt' publishEvt' listenEvs' atEoS doneEvs
+        EventSink
+          esid
+          spreadEvt'
+          recentEvt'
+          publishEvt'
+          listenEvs'
+          atEoS
+          doneEvs
 
 _spread'event ::
   forall t.
@@ -326,60 +360,72 @@ once !evs !handler = handleEvents evs $ \ !aeq !evd -> do
   handler aeq evd
   return StopHandling
 
--- | Derive a new event stream, as part of the spreading of an upstream event
+-- | Spread new event stream(s), as part of the spreading of an upstream event
 -- stream
 --
--- Any failure in the derivation will prevent publishing of the original event
+-- Any failure in the spreading will prevent publishing of the original event
 -- hierarchy at all, such a failure will be thrown at the publisher of the
 -- original root event.
 --
--- The derivation stops after the outlet event sink reaches EoS.
-deriveEvents ::
-  forall t t'.
+-- The spreading stops after the 'stopOnEoS' callback indicates so, per any
+-- downstream event sink reaches EoS.
+spreadEvents ::
+  forall t.
   EventSink t ->
-  EventSink t' ->
-  (t -> STM (Maybe t')) ->
+  ((forall t'. EventSink t' -> t' -> STM ()) -> t -> STM ()) ->
+  (SomeEventSink -> STM Bool) ->
   IO ()
-deriveEvents !intake !outlet !deriver = do
-  !eos <- newTVarIO False
-  handleEvents intake $ \ !aeq !evd ->
-    readTVar eos >>= \case
+spreadEvents !intake !deriver !stopOnEoS = do
+  !stopVar <- newTVarIO False
+  handleEvents intake $ \ !aeq !evd -> do
+    let spreader :: forall t'. EventSink t' -> t' -> STM ()
+        spreader evs' d' =
+          unsafeIOToSTM (atEndOfStream evs') >>= \case
+            True ->
+              stopOnEoS (SomeEventSink evs') >>= \case
+                True -> writeTVar stopVar True
+                False -> spreadEvent evs' aeq d'
+            False -> spreadEvent evs' aeq d'
+    readTVar stopVar >>= \case
       True -> return StopHandling
-      False ->
-        (>> return KeepHandling) $ do
-          deriver evd >>= \case
-            Nothing -> pure ()
-            Just !evd' -> spreadEvent outlet aeq evd'
-          conseqIO aeq $
-            atEndOfStream outlet >>= \case
-              True -> atomically $ writeTVar eos True
-              False -> pure ()
+      False -> do
+        deriver spreader evd
+        readTVar stopVar >>= \case
+          True -> return StopHandling
+          False -> return KeepHandling
 
--- | Generate a new event stream, as a consequence of an upstream event stream
+-- | Generate new event stream(s), as the consequence of the specified upstream
+-- event stream
 --
 -- Failures in the generation won't prevent publishing of the original event,
 -- other consequences / subsequences of the original event hierarchy will
 -- propagate anyway.
 --
--- The generation stops after the outlet event sink reaches EoS.
+-- The generation stops after the 'stopOnEoS' callback indicates so, per any
+-- downstream event sink reaches EoS.
 generateEvents ::
-  forall t t'.
+  forall t.
   EventSink t ->
-  EventSink t' ->
-  (t -> IO (Maybe t')) ->
+  ((forall t'. EventSink t' -> t' -> IO ()) -> t -> IO ()) ->
+  (SomeEventSink -> IO Bool) ->
   IO ()
-generateEvents !intake !outlet !deriver = do
-  !eos <- newTVarIO False
-  let markEoS = \case
-        True -> atomically $ writeTVar eos True
-        False -> pure ()
+generateEvents !intake !deriver !stopOnEoS = do
+  !stopVar <- newTVarIO False
+  let publisher :: forall t'. EventSink t' -> t' -> IO ()
+      publisher evs' d' = do
+        atEndOfStream evs' >>= markStop
+        publishEvent evs' d' >>= markStop
+        where
+          markStop = \case
+            True ->
+              stopOnEoS (SomeEventSink evs') >>= \case
+                True -> atomically $ writeTVar stopVar True
+                False -> pure ()
+            False -> pure ()
+
   handleEvents intake $ \ !aeq !evd ->
-    readTVar eos >>= \case
+    readTVar stopVar >>= \case
       True -> return StopHandling
-      False ->
-        (>> return KeepHandling) $
-          conseqIO aeq $
-            (markEoS =<<) $
-              deriver evd >>= \case
-                Nothing -> atEndOfStream outlet
-                Just !evd' -> publishEvent outlet evd'
+      False -> do
+        conseqIO aeq $ deriver publisher evd
+        return KeepHandling
