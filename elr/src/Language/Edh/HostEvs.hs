@@ -164,7 +164,7 @@ newEventSink = do
       recentEvt = readTVar rcntRef
 
       publishEvt :: t -> IO EndOfStream
-      publishEvt = _publish'event atEoS rcntRef subsRef
+      publishEvt = _publish'event eosRef rcntRef subsRef
 
       listenEvs :: EventListener t -> IO ()
       listenEvs = _listen'events atEoS subsRef
@@ -279,13 +279,13 @@ _spread'to'subscribers !aeq !evd !subs = spread [] subs
 
 _publish'event ::
   forall t.
-  IO EndOfStream ->
+  IORef EndOfStream ->
   TVar (Maybe t) ->
   IORef [EventListener t] ->
   t ->
   IO EndOfStream
-_publish'event !eos !rcntRef !subsRef !evd =
-  eos >>= \case
+_publish'event !eosRef !rcntRef !subsRef !evd =
+  readIORef eosRef >>= \case
     True -> return True
     False ->
       readIORef subsRef >>= \case
@@ -309,9 +309,16 @@ _publish'event !eos !rcntRef !subsRef !evd =
           -- execute the subsequences
           readTVarIO subseqs >>= propagate
 
-          -- it might have been marked eos as part of the consequences or
-          -- subsequences, return the latest status now
-          eos
+          -- now let's check if it has lost all its subscribers after even
+          -- subsequences realized, and if that's the case, mark it EoS
+          readIORef eosRef >>= \case
+            True -> return True
+            False ->
+              readIORef subsRef >>= \case
+                [] -> do
+                  writeIORef eosRef True
+                  return True
+                _ -> return False
   where
     propagate :: [IO ()] -> IO ()
     propagate [] = return ()
