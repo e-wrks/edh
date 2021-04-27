@@ -3429,7 +3429,7 @@ edhObjStr !ets !obj !exitStr = case edh'obj'store obj of
       getObjAttrWithMagic'
         obj
         (AttrByName "__str__")
-        (const $ exitStr $ T.pack (show obj))
+        (const $ edhObjRepr ets obj exitStr) -- try use repr
         (\ !r _ets -> withMagic r)
   where
     withMagic = \case
