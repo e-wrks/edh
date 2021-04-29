@@ -1918,7 +1918,7 @@ throwEdhTx !et !msg !ets = throwEdh ets et msg
 --
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent actions following it, be cautious.
-throwEdh :: EdhThreadState -> EdhErrorTag -> Text -> STM ()
+throwEdh :: EdhThreadState -> EdhErrorTag -> Text -> STM a
 throwEdh !ets !tag !msg = throwEdh' ets tag msg []
 {-# INLINE throwEdh #-}
 
@@ -1928,7 +1928,7 @@ throwEdh !ets !tag !msg = throwEdh' ets tag msg []
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent actions following it, be cautious.
 throwEdh' ::
-  EdhThreadState -> EdhErrorTag -> Text -> [(AttrKey, EdhValue)] -> STM ()
+  EdhThreadState -> EdhErrorTag -> Text -> [(AttrKey, EdhValue)] -> STM a
 throwEdh' !ets !tag !msg !details =
   let !edhErr = EdhError tag msg errDetails $ getEdhErrCtx 0 ets
    in edhWrapException (toException edhErr)
@@ -1949,8 +1949,10 @@ edhThrowTx = flip edhThrow
 --
 -- a bit similar to `return` in Haskell, this doesn't cease the execution
 -- of subsequent actions following it, be cautious.
-edhThrow :: EdhThreadState -> EdhValue -> STM ()
-edhThrow !ets !exv = propagateExc exv $ edh'ctx'tip ctx : edh'ctx'stack ctx
+edhThrow :: EdhThreadState -> EdhValue -> STM a
+edhThrow !ets !exv = do
+  propagateExc exv $ edh'ctx'tip ctx : edh'ctx'stack ctx
+  return undefined
   where
     !ctx = edh'context ets
     propagateExc :: EdhValue -> [EdhCallFrame] -> STM ()
@@ -1959,7 +1961,7 @@ edhThrow !ets !exv = propagateExc exv $ edh'ctx'tip ctx : edh'ctx'stack ctx
       edh'exc'handler frame ets exv' $ \ !exv'' -> propagateExc exv'' stack
 {-# INLINE edhThrow #-}
 
-edhErrorUncaught :: EdhThreadState -> EdhValue -> STM ()
+edhErrorUncaught :: EdhThreadState -> EdhValue -> STM a
 edhErrorUncaught !ets !exv = case exv of
   EdhObject !exo -> case edh'obj'store exo of
     HostStore !hsd -> case fromDynamic hsd of
@@ -2031,7 +2033,7 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
             goRecover :: a -> STM ()
             goRecover !result =
               isRecoverable exv >>= \case
-                False -> goRethrow exv
+                False -> void $ goRethrow exv
                 True ->
                   if throwerThId /= handlerThId
                     then -- not on same thread, cease the recovery continuation
@@ -2042,7 +2044,8 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
             -- the catch block doesn't want to catch this exception, propagate
             -- it outward
             goRethrow :: EdhValue -> STM ()
-            goRethrow !exv' = edh'exc'handler frameOuter etsThrower exv' rethrow
+            goRethrow !exv' =
+              edh'exc'handler frameOuter etsThrower exv' rethrow
 
         passOn etsThrower exv goRecover goRethrow
 
@@ -2605,11 +2608,21 @@ importInto ::
 importInto !fsChk !tgtEnt !argsRcvr srcExpr@(ExprSrc x _) !exit = case x of
   LitExpr (StringLiteral !importSpec) ->
     -- import from specified path
-    fsChk importSpec $ importEdhModule' tgtEnt argsRcvr importSpec exit
+    fsChk importSpec $
+      importEdhModule'
+        tgtEnt
+        argsRcvr
+        importSpec
+        (exit . EdhObject)
   _ -> evalExprSrc srcExpr $ \ !srcVal -> case edhDeCaseClose srcVal of
     EdhString !importSpec ->
       -- import from dynamic path
-      fsChk importSpec $ importEdhModule' tgtEnt argsRcvr importSpec exit
+      fsChk importSpec $
+        importEdhModule'
+          tgtEnt
+          argsRcvr
+          importSpec
+          (exit . EdhObject)
     EdhObject !fromObj -> \ !ets -> -- import from an object
       runEdhTx ets $
         importFromObject tgtEnt argsRcvr fromObj $
@@ -2735,16 +2748,19 @@ importFromObject !tgtEnt !argsRcvr !fromObj !done !ets =
 -- | Import some Edh module
 --
 -- Note the returned module object may still be under going initialization run
-importEdhModule :: Text -> EdhTxExit EdhValue -> EdhTx
+importEdhModule :: Text -> EdhTxExit Object -> EdhTx
 importEdhModule !importSpec !exit =
   importEdhModule'' importSpec (\_modu !done _ets -> done) exit
 
 -- | Import some Edh module into specified entity
+--
+-- Note the returned module object may still be under going initialization run,
+-- and the receiving may be performed either synchronously or asynchronously
 importEdhModule' ::
   EntityStore ->
   ArgsReceiver ->
   Text ->
-  EdhTxExit EdhValue ->
+  EdhTxExit Object ->
   EdhTx
 importEdhModule' !tgtEnt !argsRcvr !importSpec !exit !ets =
   runEdhTx ets $
@@ -2763,7 +2779,7 @@ importEdhModule' !tgtEnt !argsRcvr !importSpec !exit !ets =
 importEdhModule'' ::
   Text ->
   (Object -> STM () -> EdhTx) ->
-  EdhTxExit EdhValue ->
+  EdhTxExit Object ->
   EdhTx
 importEdhModule'' !importSpec !loadAct !impExit !etsImp =
   if edh'in'tx etsImp
@@ -2777,7 +2793,7 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
       -- returning the module object
       ModuLoaded !modu ->
         runEdhTx etsImp $
-          loadAct modu $ exitEdh etsImp impExit $ EdhObject modu
+          loadAct modu $ exitEdh etsImp impExit modu
       -- import error has been encountered, propagate the error immediately
       ModuFailed !exvImport -> edhThrow etsImp exvImport
       -- enqueue the load action to be performed later, then return the module
@@ -2793,7 +2809,7 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
         -- though this should rarely happen, the race condition seems real.
         modifyTVar' postQueue $
           (:) $ \ !modu -> runEdhTx etsImp $ loadAct modu $ return ()
-        exitEdh etsImp impExit $ EdhObject $ edh'scope'this loadScope
+        exitEdh etsImp impExit $ edh'scope'this loadScope
   where
     runModuleSource :: Scope -> FilePath -> EdhTxExit EdhValue -> EdhTx
     runModuleSource !scopeLoad !moduFile !exit !ets =
