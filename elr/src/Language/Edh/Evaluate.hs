@@ -571,14 +571,21 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
           "no way defining effects into a host object of class "
             <> objClassName obj
 
+-- | Create an Edh host object from the specified class and host data
+--
+-- note the caller is responsible to make sure the supplied host data
+-- is compatible with the class
+edhCreateHostObj :: forall t. Typeable t => Object -> t -> STM Object
+edhCreateHostObj !clsObj !hd = edhCreateHostObj' clsObj (toDyn hd) []
+
 -- | Create an Edh host object from the specified class, host storage data and
 -- list of super objects.
 --
 -- note the caller is responsible to make sure the supplied host storage data
 -- is compatible with the class, the super objects are compatible with the
 -- class' mro.
-edhCreateHostObj :: Object -> Dynamic -> [Object] -> STM Object
-edhCreateHostObj !clsObj !hsd !supers = do
+edhCreateHostObj' :: Object -> Dynamic -> [Object] -> STM Object
+edhCreateHostObj' !clsObj !hsd !supers = do
   !oid <- unsafeIOToSTM newUnique
   !ss <- newTVar supers
   return $ Object oid (HostStore hsd) clsObj ss
