@@ -32,6 +32,7 @@ import Language.Edh.Parser
 import Language.Edh.PkgMan
 import Language.Edh.RtTypes
 import Language.Edh.Utils
+import Numeric
 import Text.Megaparsec
   ( PosState (..),
     State (..),
@@ -3342,8 +3343,31 @@ edhProcessReprs !ets !srcList !exit = go srcList []
     go ((!v, !p) : rest) !result =
       edhValueRepr ets v $ \ !r -> go rest (p r : result)
 
+escapeString :: Text -> Text
+escapeString !txt = T.pack $ ("\"" <>) $ (<> "\"") $ go $ T.unpack txt
+  where
+    go :: [Char] -> [Char]
+    go [] = []
+    go (c : rest) = escape c $ go rest
+
+    escape :: Char -> ShowS
+    escape !c = case c of
+      '\\' -> (++) "\\\\"
+      '"' -> (++) "\\\""
+      '\n' -> (++) "\\n"
+      '\t' -> (++) "\\t"
+      '\r' -> (++) "\\r"
+      -- todo support more? e.g. \b \g
+      _
+        | v < 20 -> ("\\u00" <>) . showHex v
+        | otherwise -> (c :)
+      where
+        v = fromEnum c
+
 edhValueRepr :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
 edhValueRepr !ets !val !exitRepr = case val of
+  -- string
+  EdhString !txt -> exitRepr $ escapeString txt
   -- pair repr
   EdhPair !v1 !v2 -> edhValueRepr ets v1 $ \ !repr1 ->
     edhValueRepr ets v2 $ \ !repr2 -> exitRepr $ repr1 <> ":" <> repr2
@@ -3387,8 +3411,6 @@ edhValueRepr !ets !val !exitRepr = case val of
     LT -> "LT"
     GT -> "GT"
   -- todo specially handle return/default etc. ?
-
-  -- TODO handle Text repr with more performant impl.
 
   -- repr of other values, fallback to its 'Show' instance
   _ -> exitRepr $ T.pack $ show val

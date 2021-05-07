@@ -12,7 +12,7 @@ import qualified Data.Char as Char
 import Data.Functor (($>))
 import qualified Data.HashMap.Strict as Map
 import Data.Lossless.Decimal as D (Decimal (Decimal), inf, nan)
-import Data.Maybe (fromMaybe)
+import Data.Maybe
 import Data.Scientific (Scientific (base10Exponent, coefficient))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -726,7 +726,36 @@ parseStringLit = lexeme $ do
         string "\"\"\"",
         string "\""
       ]
-  T.pack <$> manyTill L.charLiteral (string delim)
+  T.pack <$> manyTill charLiteral (string delim)
+  where
+    charLiteral :: Parser Char
+    charLiteral =
+      label "literal character" $
+        anySingle >>= \case
+          '\\' ->
+            anySingle >>= \case
+              '\\' -> return '\\'
+              '"' -> return '"'
+              '\'' -> return '\''
+              '`' -> return '`'
+              'u' -> unicodeDigs 4
+              'n' -> return '\n'
+              't' -> return '\t'
+              'r' -> return '\r'
+              -- todo support more? e.g. \b \g
+              !c -> return c
+          !c -> return c
+
+    unicodeDigs :: Int -> Parser Char
+    unicodeDigs !maxDigs = label "unicode digits" $ go maxDigs 0
+      where
+        go :: Int -> Int -> Parser Char
+        go d v
+          | d <= 0 = return $ toEnum v
+          | otherwise =
+            (<|> return (toEnum v)) $
+              satisfy Char.isHexDigit >>= \ !c ->
+                go (d - 1) $ v * 16 + fromIntegral (Char.digitToInt c)
 
 parseBoolLit :: Parser Bool
 parseBoolLit = (keyword "true" $> True) <|> (keyword "false" $> False)
