@@ -891,7 +891,12 @@ parseAlphNumName = (detectIllegalIdent >>) $
           True <$ keyword "that",
           True <$ keyword "super",
           True <$ parseLitExpr,
-          illegalExprKws,
+          {-
+          It's somewhat desirable for certain keywords e.g. `from`, to be used as method names, argument names, and etc.
+          Especially considering source level interoperation with JavaScript etc.
+          But it can also create confusions in certain circumstances, let's allow it for some time and see.
+          -}
+          -- illegalExprKws,
           return False
         ]
 
