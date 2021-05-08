@@ -345,7 +345,7 @@ type EdhGenrCaller =
   --    result given back as the yielded value is processed,
   --    suitable to be the eval result of that `yield` action
   (Either (EdhThreadState, EdhValue) EdhValue -> STM ()) ->
-  STM ()
+  EdhTx
 
 data EdhCallFrame = EdhCallFrame
   { -- | the scope of this call frame

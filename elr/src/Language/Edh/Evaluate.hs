@@ -1713,8 +1713,8 @@ edhPrepareForLoop
         EdhTxExit EdhValue ->
         EdhValue ->
         (Either (EdhThreadState, EdhValue) EdhValue -> STM ()) ->
-        STM ()
-      recvYield !ets !exit !yielded'val !genrCont = do
+        EdhTx
+      recvYield !ets !exit !yielded'val !genrCont !etsGenr = do
         let doOne !exitOne !etsTry =
               recvEdhArgs
                 etsTry
@@ -1763,8 +1763,8 @@ edhPrepareForLoop
           EdhContinue -> throwEdh ets EvalError "generator yielded continue"
           EdhBreak -> throwEdh ets EvalError "generator yielded break"
           EdhReturn {} -> throwEdh ets EvalError "generator yielded return"
-          _ ->
-            edhCatch ets doOne doneOne $ \ !etsThrower !exv _recover rethrow ->
+          _ -> edhCatch etsDo doOne doneOne $
+            \ !etsThrower !exv _recover rethrow ->
               case exv of
                 EdhNil -> rethrow nil -- no exception occurred in do block
                 _ ->
@@ -1772,6 +1772,19 @@ edhPrepareForLoop
                   -- propagate to the generator, the genr may catch it or
                   -- the exception will propagate to outer of for-from-do
                   genrCont $ Left (etsThrower, exv)
+        where
+          ctx = edh'context ets
+          ctxGenr = edh'context etsGenr
+          -- stack the looper's tip frame on top of the generator's stack
+          etsDo =
+            etsGenr
+              { edh'context =
+                  ctxGenr
+                    { edh'ctx'tip = edh'ctx'tip ctx,
+                      edh'ctx'stack =
+                        edh'ctx'tip ctxGenr : edh'ctx'stack ctxGenr
+                    }
+              }
 
       loopOverValue :: EdhValue -> STM ()
       loopOverValue !iterVal = forLooper $ \ !exit !ets -> do
@@ -3762,38 +3775,39 @@ evalExpr' (YieldExpr !yieldExpr) !docCmt !exit =
   evalExprSrc' yieldExpr docCmt $ \ !valToYield !ets ->
     case edh'ctx'genr'caller $ edh'context ets of
       Nothing -> throwEdh ets UsageError "unexpected yield"
-      Just !yieldVal -> yieldVal (edhDeCaseClose valToYield) $ \case
-        -- the @do@ block has an exception thrown but uncaught
-        Left (!etsThrower, !exv) ->
-          -- propagate the exception to the enclosing generator
-          --
-          -- note we can actually be encountering the exception occurred from
-          -- a descendant thread forked by the thread running the enclosing
-          -- generator, @etsThrower@ has the correct task queue, and @ets@
-          -- has the correct contextual callstack anyway
-          edhThrow etsThrower {edh'context = edh'context ets} exv
-        -- no exception occurred in the @do@ block, check its intent
-        Right !doResult -> case edhDeCaseClose doResult of
-          EdhContinue ->
-            -- explicit { continue } is propagated to here,
-            -- let the generator see nil in this case
-            exitEdh ets exit nil
-          EdhBreak ->
-            -- for loop is breaking, let the generator `return { break }` here.
-            -- the generator can intervene the return, that'll be black magic
-            exitEdh ets exit $ EdhReturn EdhBreak
-          dblRtn@(EdhReturn EdhReturn {}) ->
-            -- this must be synthesiszed,
-            -- in case do block issued return, the for loop would wrap it as
-            -- double return, so as to let the yield expr in the generator
-            -- propagate the value returning, as the result of the for loop.
-            -- the generator can intervene the return, that'll be black magic
-            exitEdh ets exit dblRtn
-          EdhReturn {} ->
-            -- in case its do block issued a return, the for loop should have
-            -- double-wrapped the return, which is handled above
-            throwEdh ets EvalError "bug: <return> reached yield"
-          !val -> exitEdh ets exit val
+      Just !yieldVal -> runEdhTx ets $
+        yieldVal (edhDeCaseClose valToYield) $ \case
+          -- the @do@ block has an exception thrown but uncaught
+          Left (!etsThrower, !exv) ->
+            -- propagate the exception to the enclosing generator
+            --
+            -- note we can actually be encountering the exception occurred from
+            -- a descendant thread forked by the thread running the enclosing
+            -- generator, @etsThrower@ has the correct task queue, and @ets@
+            -- has the correct contextual callstack anyway
+            edhThrow etsThrower {edh'context = edh'context ets} exv
+          -- no exception occurred in the @do@ block, check its intent
+          Right !doResult -> case edhDeCaseClose doResult of
+            EdhContinue ->
+              -- explicit { continue } is propagated to here,
+              -- let the generator see nil in this case
+              exitEdh ets exit nil
+            EdhBreak ->
+              -- for loop is breaking, let the generator `return { break }` here
+              -- the generator can intervene the return, that'll be black magic
+              exitEdh ets exit $ EdhReturn EdhBreak
+            dblRtn@(EdhReturn EdhReturn {}) ->
+              -- this must be synthesiszed,
+              -- in case do block issued return, the for loop would wrap it as
+              -- double return, so as to let the yield expr in the generator
+              -- propagate the value returning, as the result of the for loop.
+              -- the generator can intervene the return, that'll be black magic
+              exitEdh ets exit dblRtn
+            EdhReturn {} ->
+              -- in case its do block issued a return, the for loop should have
+              -- double-wrapped the return, which is handled above
+              throwEdh ets EvalError "bug: <return> reached yield"
+            !val -> exitEdh ets exit val
 evalExpr' (ForExpr !argsRcvr !iterExpr !doStmt) _docCmt !exit = \ !ets ->
   edhPrepareForLoop ets argsRcvr iterExpr doStmt (const $ return ()) $
     \ !runLoop -> runEdhTx ets (runLoop exit)
