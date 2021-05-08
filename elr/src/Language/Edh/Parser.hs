@@ -738,10 +738,11 @@ parseStringLit = lexeme $ do
               '"' -> return '"'
               '\'' -> return '\''
               '`' -> return '`'
-              'u' -> unicodeDigs 4
               'n' -> return '\n'
               't' -> return '\t'
               'r' -> return '\r'
+              'u' -> unicodeDigs 4
+              'U' -> unicodeDigs 8
               -- todo support more? e.g. \b \g
               !c -> return c
           !c -> return c
