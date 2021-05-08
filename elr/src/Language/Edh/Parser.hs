@@ -833,14 +833,15 @@ parseAttrAddr :: Parser AttrAddr
 parseAttrAddr = parseAtNotation <|> NamedAttr <$> parseAttrName
   where
     parseAtNotation :: Parser AttrAddr
-    parseAtNotation =
-      char '@' *> sc
-        *> choice
-          [ between (symbol "(") (symbol ")") parseIntplSymAttr,
-            QuaintAttr <$> parseStringLit,
-            SymbolicAttr <$> parseAlphNumName,
-            pure MissedAttrSymbol
-          ]
+    parseAtNotation = do
+      void $ char '@'
+      sc
+      choice
+        [ between (symbol "(") (symbol ")") parseIntplSymAttr,
+          QuaintAttr <$> parseStringLit,
+          SymbolicAttr <$> parseAlphNumName,
+          pure MissedAttrSymbol
+        ]
 
     parseIntplSymAttr :: Parser AttrAddr
     parseIntplSymAttr = do
@@ -881,10 +882,11 @@ parseAlphNumName = (detectIllegalIdent >>) $
     !anRest <- takeWhileP Nothing isIdentChar
     return $ anStart <> anRest
   where
-    detectIllegalIdent =
-      lookAhead illegalIdentifier >>= \case
-        True -> fail "illegal identifier"
-        False -> return ()
+    detectIllegalIdent = do
+      !eps <- get -- save parsing states
+      !followedByIllegalIdent <- lookAhead illegalIdentifier
+      put eps -- restore parsing states (esp. lexeme end)
+      when followedByIllegalIdent $ fail "illegal identifier"
     illegalIdentifier :: Parser Bool
     illegalIdentifier =
       choice
@@ -1167,12 +1169,12 @@ parseIntplExpr (s, o, sss) = do
   void $ string "$}"
   !s' <- getInput
   !o'' <- getOffset
-  !endPos <- getSourcePos
+  EdhParserState _ !lexeme'end <- get
   void $ optional sc -- but consume the optional spaces wrt parsing
   return
     ( ExprSrc
         (IntplExpr x)
-        (SrcRange (lspSrcPosFromParsec startPos) (lspSrcPosFromParsec endPos)),
+        (lspSrcRangeFromParsec startPos lexeme'end),
       (s', o'', sss'')
     )
 
@@ -1255,11 +1257,11 @@ parseExprPrec !precedingOp !prec !si =
                 (IndexExpr idx expr)
                 (SrcRange (exprSrcStart expr) (exprSrcEnd idx)),
           parseArgsPacker si' >>= \(!aps, !si'') -> do
-            !endPos <- getSourcePos
+            EdhParserState _ !lexeme'end <- get
             parseMoreOps pOp si'' $
               ExprSrc
                 (CallExpr expr aps)
-                (SrcRange (exprSrcStart expr) (lspSrcPosFromParsec endPos)),
+                (SrcRange (exprSrcStart expr) lexeme'end),
           parseIndirectRef pOp si' expr,
           parseMoreInfix pOp si' expr
         ]
