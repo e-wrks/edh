@@ -4434,9 +4434,8 @@ evalInfixSrc' (!opSym, _opSpan) !notApplicable !lhExpr !rhExpr !exit !ets =
     tryMagicWithDefault' ::
       Expr -> Maybe EdhThreadState -> EdhValue -> EdhValue -> STM ()
     tryMagicWithDefault' !exprDef !etsDef !lhVal !rhVal =
-      tryMagicMethod lhVal rhVal
-      -- eval default expression with possibly the designated thread state
-      $
+      tryMagicMethod lhVal rhVal $
+        -- eval default expression with possibly the designated thread state
         runEdhTx (fromMaybe ets etsDef) $
           evalExpr (deExpr' exprDef) $
             \ !resultDef _ets -> case resultDef of
@@ -5030,6 +5029,7 @@ edhCompareValue !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
         chkMagicRtn :: EdhTxExit EdhValue
         chkMagicRtn !magicRtn _ets = case edhUltimate magicRtn of
           EdhDefault _ _ !exprDef !etsDef ->
+            -- TODO honor its defaulting semantics
             runEdhTx (fromMaybe ets etsDef) $
               evalExpr (deExpr' exprDef) $
                 \ !defVal _ets -> chkMagicExit defVal
