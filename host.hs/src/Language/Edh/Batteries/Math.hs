@@ -155,24 +155,57 @@ logicalOrProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
+-- * equality comparisons
+
 -- | operator (==) and (!=)
 valEqProc :: (Bool -> Bool) -> EdhIntrinsicOp
 valEqProc !inversion !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
-  evalExprSrc rhExpr $ \ !rhVal !ets ->
-    if lhVal == rhVal
-      then case lhVal of
-        EdhObject {} ->
-          -- same object, give default result, so magic enabled,
-          -- vectorized equality test to itself is possible
-          exitEdh ets exit
-            =<< mkDefault''
-              Nothing
-              (ArgsPack [lhVal, rhVal] odEmpty)
-              (LitExpr $ BoolLiteral $ inversion True)
-        _ ->
-          -- identity equal and not an object, can conclude value equal here
-          exitEdh ets exit $ EdhBool $ inversion True
-      else vanillaTest ets lhVal rhVal
+  case rhExpr of
+    ExprSrc
+      (InfixExpr rhSym@(opSym, _) midExpr@(ExprSrc _ mid'span) !rhExpr')
+      _
+        | opSym `elem` ["==", "!="] -> evalExprSrc midExpr $ \ !midVal -> do
+          -- chaining equality comparisons
+          -- todo support magic vectorization in this case?
+          let rhCmp :: EdhTx
+              rhCmp =
+                evalInfixSrc
+                  rhSym
+                  (ExprSrc (LitExpr (ValueLiteral midVal)) mid'span)
+                  rhExpr'
+                  exit
+          if lhVal == midVal
+            then
+              if inversion True
+                then rhCmp
+                else -- short circuit
+                  exitEdhTx exit $ EdhBool False
+            else \ !ets -> edhValueEqual ets lhVal midVal $ \case
+              Nothing ->
+                if inversion False
+                  then runEdhTx ets rhCmp
+                  else -- short circuit
+                    exitEdh ets exit $ EdhBool False
+              Just !conclusion ->
+                if inversion conclusion
+                  then runEdhTx ets rhCmp
+                  else -- short circuit
+                    exitEdh ets exit $ EdhBool False
+    _ -> evalExprSrc rhExpr $ \ !rhVal !ets ->
+      if lhVal == rhVal
+        then case lhVal of
+          EdhObject {} ->
+            -- same object, give default result, so magic enabled,
+            -- vectorized equality test to itself is possible
+            exitEdh ets exit
+              =<< mkDefault''
+                Nothing
+                (ArgsPack [lhVal, rhVal] odEmpty)
+                (LitExpr $ BoolLiteral $ inversion True)
+          _ ->
+            -- identity equal and not an object, can conclude value equal here
+            exitEdh ets exit $ EdhBool $ inversion True
+        else vanillaTest ets lhVal rhVal
   where
     -- allow magic methods to be invoked
     vanillaTest !ets !lhVal !rhVal = edhValueEqual ets lhVal rhVal $ \case
@@ -189,6 +222,8 @@ valEqProc !inversion !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
             (ArgsPack [lhVal, rhVal] odEmpty)
             (LitExpr $ BoolLiteral $ inversion False)
 
+-- * identity equality tests
+
 -- | operator (is)
 idEqProc :: EdhIntrinsicOp
 idEqProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
@@ -203,39 +238,66 @@ idNotEqProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
     \ !rhVal !ets ->
       (EdhBool . not <$> edhIdentEqual lhVal rhVal) >>= exitEdh ets exit
 
+-- * ordering comparisons
+
 -- | operator (>)
 isGtProc :: EdhIntrinsicOp
-isGtProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
-  evalExprSrc rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
-    GT -> True
-    _ -> False
+isGtProc = edhOrdCmpOp $ \case
+  GT -> True
+  _ -> False
 
 -- | operator (>=)
 isGeProc :: EdhIntrinsicOp
-isGeProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
-  evalExprSrc rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
-    GT -> True
-    EQ -> True
-    _ -> False
+isGeProc = edhOrdCmpOp $ \case
+  GT -> True
+  EQ -> True
+  _ -> False
 
 -- | operator (<)
 isLtProc :: EdhIntrinsicOp
-isLtProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
-  evalExprSrc rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
-    LT -> True
-    _ -> False
+isLtProc = edhOrdCmpOp $ \case
+  LT -> True
+  _ -> False
 
 -- | operator (<=)
 isLeProc :: EdhIntrinsicOp
-isLeProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
-  evalExprSrc rhExpr $ \ !rhVal -> edhCompareValue' exit lhVal rhVal $ \case
-    LT -> True
-    EQ -> True
-    _ -> False
+isLeProc = edhOrdCmpOp $ \case
+  LT -> True
+  EQ -> True
+  _ -> False
 
-edhCompareValue' ::
-  EdhTxExit EdhValue -> EdhValue -> EdhValue -> (Ordering -> Bool) -> EdhTx
-edhCompareValue' !exit !lhVal !rhVal !cm !ets =
-  edhCompareValue ets lhVal rhVal $ \case
-    Nothing -> runEdhTx ets $ intrinsicOpReturnNA exit lhVal rhVal
-    Just !ord -> exitEdh ets exit $ EdhBool $ cm ord
+edhOrdCmpOp :: (Ordering -> Bool) -> EdhIntrinsicOp
+edhOrdCmpOp !cm !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  case rhExpr of
+    ExprSrc
+      (InfixExpr rhSym@(opSym, _) midExpr@(ExprSrc _ mid'span) !rhExpr')
+      _
+        | opSym `elem` [">", ">=", "<", "<="] ->
+          evalExprSrc midExpr $ \ !midVal !ets -> do
+            -- chaining ordering comparisons
+            edhCompareValue ets lhVal midVal $ \case
+              Nothing ->
+                edhValueDesc ets lhVal $
+                  \ !lhDesc -> edhValueDesc ets midVal $ \ !midDesc ->
+                    throwEdh ets EvalError $
+                      "chained comparison ("
+                        <> opSym
+                        <> ") not applicable to "
+                        <> lhDesc
+                        <> " and "
+                        <> midDesc
+              Just !ord ->
+                if cm ord
+                  then
+                    runEdhTx ets $
+                      evalInfixSrc
+                        rhSym
+                        (ExprSrc (LitExpr (ValueLiteral midVal)) mid'span)
+                        rhExpr'
+                        exit
+                  else -- short circuit
+                    exitEdh ets exit $ EdhBool False
+    _ -> evalExprSrc rhExpr $ \ !rhVal !ets ->
+      edhCompareValue ets lhVal rhVal $ \case
+        Nothing -> runEdhTx ets $ intrinsicOpReturnNA exit lhVal rhVal
+        Just !ord -> exitEdh ets exit $ EdhBool $ cm ord

@@ -358,16 +358,19 @@ installEdhBatteries world =
           ("//", InfixL, 7),
           ("%", InfixL, 7),
           ("**", InfixL, 8),
-          -- comparations
-          ("==", Infix, 4), -- deep-value-wise equality test
-          ("!=", Infix, 4), -- inversed identity-wise equality test
-          -- C style here, as (/=) is used for inplace division
-          ("is not", Infix, 4), -- identity-wise negative equality test
-          ("is", Infix, 4), -- identity-wise equality test
-          (">", Infix, 4),
-          (">=", Infix, 4),
-          ("<", Infix, 4),
-          ("<=", Infix, 4),
+          -- identity equality tests
+          ("is not", Infix, 4),
+          ("is", Infix, 4),
+          -- instant equality comparisons, chainable
+          ("==", InfixR, 4),
+          -- C style here, not following Haskell, as (/=) has been used for
+          -- inplace division
+          ("!=", InfixR, 4),
+          -- ordering comparisons, chainable
+          (">", InfixR, 4),
+          (">=", InfixR, 4),
+          ("<", InfixR, 4),
+          ("<=", InfixR, 4),
           -- logical/nullish boolean
           ("&&", InfixL, 3),
           ("||", InfixL, 3),
