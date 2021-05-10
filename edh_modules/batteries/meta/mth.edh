@@ -271,4 +271,12 @@ export {
    #}
   method makeOp( lhExpr, op, rhExpr ) pass
 
+
+  unzip :: (ExprType) -> ArgsPackType
+  {##
+   # unzip a series of tuples from either a tuple, a list or enumeration with a
+   # for-loop, into a tuple of tuples
+   #}
+  interpreter unzip( for'expr ) pass
+
 }

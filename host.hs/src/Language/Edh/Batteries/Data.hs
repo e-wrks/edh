@@ -861,6 +861,75 @@ lstrvrsPrpdProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
         _ -> exitEdhTx exit edhNA
     _ -> exitEdhTx exit edhNA
 
+-- | unzip utility - unzip a series of tuples from either a tuple, a list or
+-- enumeration with a for-loop, into a tuple of tuples
+unzipProc :: "tuples" !: Expr -> EdhHostProc
+unzipProc (mandatoryArg -> !tuplesExpr) !exit !ets =
+  case deParen' tuplesExpr of
+    ForExpr !argsRcvr !iterExpr !doExpr -> do
+      !stripsVar <- newTVar []
+      edhPrepareForLoop
+        ets
+        argsRcvr
+        iterExpr
+        doExpr
+        ( \ !val -> case val of
+            EdhArgsPack (ArgsPack !args !kwargs)
+              | odNull kwargs ->
+                modifyTVar' stripsVar $ log1 args
+            _ -> edhValueDesc ets val $
+              \ !badDesc ->
+                throwEdh ets UsageError $
+                  "element tuple expected from the unzip series, but given: "
+                    <> badDesc
+        )
+        $ \ !runLoop -> runEdhTx ets $
+          runLoop $ \_ _ets ->
+            readTVar stripsVar
+              >>= exitEdh ets exit . EdhArgsPack . flip ArgsPack odEmpty
+                . fmap mkStrip
+    _ -> runEdhTx ets $
+      evalExpr tuplesExpr $ \ !tuplesVal _ets ->
+        case edhUltimate tuplesVal of
+          EdhArgsPack (ArgsPack !s !kwargs) | odNull kwargs ->
+            unzipSeries s $ \ !strips ->
+              exitEdh ets exit $
+                EdhArgsPack $ ArgsPack (mkStrip <$> strips) odEmpty
+          EdhList (List _u !sVar) -> do
+            !s <- readTVar sVar
+            unzipSeries s $ \ !strips ->
+              exitEdh ets exit $
+                EdhArgsPack $ ArgsPack (mkStrip <$> strips) odEmpty
+          _ -> edhValueDesc ets tuplesVal $ \ !badDesc ->
+            throwEdh ets UsageError $
+              "unzip series should be a tuple or list, but given: "
+                <> badDesc
+  where
+    unzipSeries :: [EdhValue] -> ([[EdhValue]] -> STM ()) -> STM ()
+    unzipSeries s !exit' = go s []
+      where
+        go :: [EdhValue] -> [[EdhValue]] -> STM ()
+        go [] strips = exit' strips
+        go (v : rest) strips = case edhUltimate v of
+          EdhArgsPack (ArgsPack !vs !kwargs)
+            | odNull kwargs ->
+              go rest $ log1 vs strips
+          EdhList (List _u !vsVar) -> do
+            !vs <- readTVar vsVar
+            go rest $ log1 vs strips
+          _ -> edhValueDesc ets v $ \ !badDesc ->
+            throwEdh ets UsageError $
+              "element tuple expected from the unzip series, but given: "
+                <> badDesc
+
+    log1 :: [EdhValue] -> [[EdhValue]] -> [[EdhValue]]
+    log1 [] !strips = strips
+    log1 (v : rest) [] = [v] : log1 rest []
+    log1 (v : rest) (strip : strips) = (v : strip) : log1 rest strips
+
+    mkStrip :: [EdhValue] -> EdhValue
+    mkStrip vs = EdhArgsPack $ flip ArgsPack odEmpty $! reverse vs
+
 -- | operator (=<) - comprehension maker, appender
 --  * list comprehension:
 --     [] =< for x from range(10) do x*x
