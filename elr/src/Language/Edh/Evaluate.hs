@@ -1787,9 +1787,8 @@ edhPrepareForLoop
           etsDo =
             etsGenr
               { edh'context =
-                  ctxGenr
-                    { edh'ctx'tip = edh'ctx'tip ctx,
-                      edh'ctx'stack =
+                  ctx
+                    { edh'ctx'stack =
                         edh'ctx'tip ctxGenr : edh'ctx'stack ctxGenr
                     }
               }
