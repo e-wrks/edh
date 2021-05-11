@@ -883,7 +883,7 @@ unzipProc (mandatoryArg -> !tuplesExpr) !exit !ets =
                   "element tuple expected from the unzip series, but given: "
                     <> badDesc
         )
-        $ \ !runLoop -> runEdhTx ets $
+        $ \_iterVal !runLoop -> runEdhTx ets $
           runLoop $ \_ _ets ->
             readTVar stripsVar
               >>= exitEdh ets exit . EdhArgsPack . flip ArgsPack odEmpty
@@ -954,7 +954,9 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
           iterExpr
           doExpr
           (\ !val -> modifyTVar' l (++ [val]))
-          (\ !runLoop -> runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal)
+          ( \_iterVal !runLoop ->
+              runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal
+          )
       EdhDict (Dict _ !d) ->
         edhPrepareForLoop
           ets
@@ -962,7 +964,9 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
           iterExpr
           doExpr
           (\ !val -> insertToDict ets val d)
-          (\ !runLoop -> runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal)
+          ( \_iterVal !runLoop ->
+              runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal
+          )
       EdhArgsPack (ArgsPack !args !kwargs) -> do
         !posArgs <- newTVar args
         !kwArgs <- iopdFromList $ odToList kwargs
@@ -977,7 +981,7 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
                 iopdUpdate (odToList kwargs') kwArgs
               _ -> modifyTVar' posArgs (++ [val])
           )
-          $ \ !runLoop -> runEdhTx ets $
+          $ \_iterVal !runLoop -> runEdhTx ets $
             runLoop $ \_ _ets -> do
               args' <- readTVar posArgs
               kwargs' <- iopdSnapshot kwArgs

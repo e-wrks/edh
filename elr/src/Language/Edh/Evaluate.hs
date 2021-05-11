@@ -1560,7 +1560,7 @@ edhPrepareForLoop ::
   ExprSrc ->
   StmtSrc ->
   (EdhValue -> STM ()) ->
-  ((EdhTxExit EdhValue -> EdhTx) -> STM ()) ->
+  (EdhValue -> (EdhTxExit EdhValue -> EdhTx) -> STM ()) ->
   STM ()
 edhPrepareForLoop
   !etsLoopPrep
@@ -1582,11 +1582,12 @@ edhPrepareForLoop
           evalExprSrc calleeExpr $ \ !calleeVal _ets ->
             case calleeVal of
               EdhBoundProc callee@EdhGnrtor {} !this !that !effOuter ->
-                loopCallGenr iter'span argsSndr callee this that $
+                loopCallGenr calleeVal iter'span argsSndr callee this that $
                   flip (maybe id) effOuter $
                     \ !outerStack !s -> s {edh'effects'stack = outerStack}
               EdhProcedure callee@EdhGnrtor {} !effOuter ->
                 loopCallGenr
+                  calleeVal
                   iter'span
                   argsSndr
                   callee
@@ -1599,11 +1600,11 @@ edhPrepareForLoop
                 lookupEdhObjAttr obj (AttrByName "__call__")
                   >>= \(!this', !mth) -> case mth of
                     EdhBoundProc callee@EdhGnrtor {} !this !that !effOuter ->
-                      loopCallGenr iter'span argsSndr callee this that $
+                      loopCallGenr mth iter'span argsSndr callee this that $
                         flip (maybe id) effOuter $
                           \ !outerStack !s -> s {edh'effects'stack = outerStack}
                     EdhProcedure callee@EdhGnrtor {} !effOuter ->
-                      loopCallGenr iter'span argsSndr callee this' obj $
+                      loopCallGenr mth iter'span argsSndr callee this' obj $
                         flip (maybe id) effOuter $
                           \ !outerStack !s -> s {edh'effects'stack = outerStack}
                     -- not a callable generator object, assume to loop over
@@ -1612,6 +1613,11 @@ edhPrepareForLoop
                       \ !mkCall -> runEdhTx etsLoopPrep $
                         mkCall $ \ !iterVal _ets -> loopOverValue iterVal
               -- calling other procedures, assume to loop over its return value
+              -- todo should producer procedures be specially handled here?
+              --      the sink returned from it will assume sync producing
+              --      semantics if this for-loop is prefixed with `go`, in this
+              --      case both current thread and the producer procedure's
+              --      thread are assumed event producers.
               _ ->
                 runEdhTx etsLoopPrep $
                   evalExprSrc iterExpr $ \ !iterVal _ets ->
@@ -1625,6 +1631,7 @@ edhPrepareForLoop
       scopeLooper = contextScope $ edh'context etsLoopPrep
 
       loopCallGenr ::
+        EdhValue ->
         SrcRange ->
         [ArgSender] ->
         EdhProcDefi ->
@@ -1633,6 +1640,7 @@ edhPrepareForLoop
         (Scope -> Scope) ->
         STM ()
       loopCallGenr
+        !loopTgt
         !caller'span
         !argsSndr
         (EdhGnrtor !gnr'proc)
@@ -1642,7 +1650,7 @@ edhPrepareForLoop
           packEdhArgs etsLoopPrep argsSndr $ \ !apk ->
             case edh'procedure'decl gnr'proc of
               -- calling a host generator
-              HostDecl !hp -> forLooper $ \ !exit !ets -> do
+              HostDecl !hp -> forLooper loopTgt $ \ !exit !ets -> do
                 -- a host procedure views the same scope entity as of the
                 -- caller's call frame
                 {- HLINT ignore "Reduce duplication" -}
@@ -1681,7 +1689,7 @@ edhPrepareForLoop
                     edhSwitchState ets $ exitEdhTx exit val
 
               -- calling an Edh generator
-              ProcDecl _ _ !pb !pl -> forLooper $ \ !exit !ets -> do
+              ProcDecl _ _ !pb !pl -> forLooper loopTgt $ \ !exit !ets -> do
                 let !looperCtx = edh'context ets
                     !looperFrame = edh'ctx'tip looperCtx
                     !callerFrame = frameMovePC looperFrame caller'span
@@ -1700,7 +1708,7 @@ edhPrepareForLoop
                     $ \ !gnrRtn ->
                       -- note it can be a return from unwrapped double-return
                       edhSwitchState ets $ exitEdhTx exit gnrRtn
-      loopCallGenr _ _ !callee _ _ _ =
+      loopCallGenr _ _ _ !callee _ _ _ =
         throwEdh etsLoopPrep EvalError $
           "bug: unexpected generator: " <> T.pack (show callee)
 
@@ -1787,7 +1795,7 @@ edhPrepareForLoop
               }
 
       loopOverValue :: EdhValue -> STM ()
-      loopOverValue !iterVal = forLooper $ \ !exit !ets -> do
+      loopOverValue !iterVal = forLooper ultIterVal $ \ !exit !ets -> do
         let !ctx = edh'context ets
             !scope = contextScope ctx
             -- do one iteration
@@ -1823,7 +1831,7 @@ edhPrepareForLoop
                   EdhArgsPack !apk -> do1 apk $ iterEvt subChan
                   !v -> do1 (ArgsPack [v] odEmpty) $ iterEvt subChan
 
-        case edhUltimate iterVal of
+        case ultIterVal of
           -- loop from an event sink
           (EdhEvs !sink) ->
             subscribeEvents sink >>= \case
@@ -1846,7 +1854,9 @@ edhPrepareForLoop
           (EdhArgsPack (ArgsPack !args !kwargs))
             | null args ->
               iterThem
-                [ArgsPack [attrKeyValue k, v] odEmpty | (k, v) <- odToList kwargs]
+                [ ArgsPack [attrKeyValue k, v] odEmpty
+                  | (k, v) <- odToList kwargs
+                ]
           -- loop from a list
           (EdhList (List _ !l)) -> do
             !ll <- readTVar l
@@ -1873,6 +1883,8 @@ edhPrepareForLoop
                 <> edhTypeNameOf iterVal
                 <> ": "
                 <> T.pack (show iterVal)
+        where
+          !ultIterVal = edhUltimate iterVal
 
 -- todo this should really be in `CoreLang.hs`, but there has no access to
 --      'throwEdh' without cyclic imports, maybe some day we shall try
@@ -2483,18 +2495,38 @@ evalStmt !stmt !exit = case stmt of
           forkEdh
             id
             (evalCaseBranches val branchesExpr endOfEdh)
-            (\() -> exitEdhTx exit nil)
+            $ \() -> exitEdhTx exit nil
     (CallExpr !calleeExpr (ArgsPacker !argsSndr _)) ->
-      evalExprSrc calleeExpr $ \ !calleeVal !etsForker ->
-        edhPrepareCall etsForker calleeVal argsSndr $ \ !mkCall ->
-          runEdhTx (etsMovePC etsForker src'span) $
-            forkEdh id (mkCall endOfEdh) (\() -> exitEdhTx exit nil)
-    (ForExpr !argsRcvr !iterExpr !doStmt) -> \ !etsForker ->
-      edhPrepareForLoop etsForker argsRcvr iterExpr doStmt (const $ return ()) $
-        \ !runLoop ->
-          runEdhTx (etsMovePC etsForker src'span) $
-            forkEdh id (runLoop endOfEdh) (\() -> exitEdhTx exit nil)
-    _ -> forkEdh id (evalExprSrc expr endOfEdh) (\() -> exitEdhTx exit nil)
+      evalExprSrc calleeExpr $ \ !calleeVal !etsForker -> do
+        let !etsForking = etsMovePC etsForker src'span
+        edhPrepareCall etsForking calleeVal argsSndr $ \ !mkCall ->
+          runEdhTx etsForking $
+            forkEdh id (mkCall endOfEdh) $ \() -> exitEdhTx exit nil
+    (ForExpr !argsRcvr !iterExpr !doStmt) -> \ !etsForker -> do
+      let !etsForking = etsMovePC etsForker src'span
+      edhPrepareForLoop
+        etsForking
+        argsRcvr
+        iterExpr
+        doStmt
+        (const $ return ())
+        $ \ !iterVal !runLoop -> case iterVal of
+          EdhEvs !sink -> do
+            -- @remind assuming sync-producing semantics, the for-loop to
+            -- be forked is assumed the consumer, here we wait the sink
+            -- get subscribed by it, before continuing current thread
+            let !subc = evs'subc sink
+            !subcBefore <- readTVar subc
+            if subcBefore < 0
+              then exitEdh etsForking exit nil -- the sink alread at eos
+              else runEdhTx etsForking $
+                forkEdh id (runLoop endOfEdh) $ \() -> edhContSTM $ do
+                  !subcNow <- readTVar subc
+                  when (subcNow == subcBefore) retry
+                  exitEdh etsForking exit nil
+          _ -> runEdhTx etsForking $
+            forkEdh id (runLoop endOfEdh) $ \() -> exitEdhTx exit nil
+    _ -> forkEdh id (evalExprSrc expr endOfEdh) $ \() -> exitEdhTx exit nil
   DeferStmt (ExprSrc !expr !src'span) -> do
     let schedDefered ::
           EdhThreadState ->
@@ -2525,7 +2557,7 @@ evalStmt !stmt !exit = case stmt of
           iterExpr
           doStmt
           (const $ return ())
-          $ \ !runLoop ->
+          $ \_iterVal !runLoop ->
             schedDefered etsSched id (runLoop endOfEdh)
       _ -> \ !etsSched ->
         schedDefered etsSched id $ evalExpr' expr Nothing endOfEdh
@@ -3810,7 +3842,7 @@ evalExpr' (YieldExpr !yieldExpr) !docCmt !exit =
             !val -> exitEdh ets exit val
 evalExpr' (ForExpr !argsRcvr !iterExpr !doStmt) _docCmt !exit = \ !ets ->
   edhPrepareForLoop ets argsRcvr iterExpr doStmt (const $ return ()) $
-    \ !runLoop -> runEdhTx ets (runLoop exit)
+    \_iterVal !runLoop -> runEdhTx ets (runLoop exit)
 evalExpr' (PerformExpr (AttrAddrSrc !effAddr _)) _docCmt !exit = \ !ets ->
   resolveEdhAttrAddr ets effAddr $
     \ !effKey -> resolveEdhPerform ets effKey $ exitEdh ets exit
