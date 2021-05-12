@@ -4,11 +4,8 @@
 import * 'batteries/meta'
 
 
-export method join( fst= '', *rest, sep= ', ' )
-if type( fst ) is ArgsPackType and null( rest )
-then join(*** fst ) # called by $, &, or | operator with an apk
-else { # called by the normal () operator
-  s = '' ++ fst # do coerce to string now, in case only one arg passed
+export method join( fst= '', *rest, sep= ', ' ) {
+  s = str(fst) # do coerce to string now, in case only one arg passed
   for one from rest do s = s ++ sep ++ one
-  s
+  return s
 }
