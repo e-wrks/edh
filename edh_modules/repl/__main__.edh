@@ -29,6 +29,9 @@ while true { # this is the *Loop* in so-called REPL
     }
   @}
 
+  # clear lingering errors on a subsequent sucess
+  cmdExc = nil
+
 } $=> { # catch exceptions
 
   { IOError() = ioExc } -> {
