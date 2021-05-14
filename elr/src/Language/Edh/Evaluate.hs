@@ -2148,7 +2148,7 @@ parseEdh' !world !srcName !lineNo !srcCode = do
           )
           (EdhParserState pd (SrcPos 0 0))
   case pr of
-    Right _ -> when (Map.size pd' > Map.size pd) $ do
+    Right _ -> when (numOps pd' > numOps pd) $ do
       -- update world wide operator precedence dict, on success of parsing
       -- todo further reduce retry with the expensive parsing, in case many
       --      src files define new operators get parsed concurrently
@@ -2159,6 +2159,7 @@ parseEdh' !world !srcName !lineNo !srcCode = do
   return pr
   where
     !wops = edh'world'operators world
+    numOps = Map.size . operator'declarations
 
 evalEdh :: Text -> Text -> EdhTxExit EdhValue -> EdhTx
 evalEdh !srcName = evalEdh' srcName 1

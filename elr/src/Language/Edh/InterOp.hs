@@ -10,7 +10,6 @@ import Control.Concurrent.STM
   )
 import Data.ByteString (ByteString)
 import Data.Dynamic (Typeable, fromDynamic, toDyn)
-import qualified Data.HashMap.Strict as Map
 import Data.Lossless.Decimal as D (Decimal, decimalToInteger)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
@@ -22,14 +21,10 @@ import GHC.TypeLits
   ( KnownSymbol,
     symbolVal,
   )
-import Language.Edh.Args (NamedEdhArg (..))
+import Language.Edh.Args
 import Language.Edh.Control
-  ( EdhError (EdhError),
-    EdhErrorTag (UsageError),
-    OpSymbol,
-  )
-import Language.Edh.Evaluate (edhValueRepr, throwEdh, throwEdhTx)
-import Language.Edh.IOPD (odEmpty, odNull, odTakeOut)
+import Language.Edh.Evaluate
+import Language.Edh.IOPD
 import Language.Edh.RtTypes
 import Prelude
 
@@ -2040,7 +2035,7 @@ mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
 mkIntrinsicOp !world !opSym !iop = do
   !u <- unsafeIOToSTM newUnique
   {- HLINT ignore "Redundant <$>" -}
-  Map.lookup opSym <$> readTMVar (edh'world'operators world) >>= \case
+  lookupOpFromDict opSym <$> readTMVar (edh'world'operators world) >>= \case
     Nothing ->
       throwSTM $
         EdhError

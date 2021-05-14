@@ -10,7 +10,6 @@ import Control.Monad
 import Control.Monad.State.Strict (MonadState (get, put))
 import qualified Data.Char as Char
 import Data.Functor (($>))
-import qualified Data.HashMap.Strict as Map
 import Data.Lossless.Decimal as D (Decimal (Decimal), inf, nan)
 import Data.Maybe
 import Data.Scientific (Scientific (base10Exponent, coefficient))
@@ -142,22 +141,6 @@ isIdentChar c = c == '_' || c == '\'' || Char.isAlphaNum c
 
 isDigit :: Char -> Bool
 isDigit = flip elem ['0' .. '9']
-
-isOperatorChar :: Char -> Bool
-isOperatorChar !c = c == '~' || isOperatorChar' c
-
-isOperatorChar' :: Char -> Bool
-isOperatorChar' !c =
-  if c < toEnum 128
-    then c `elem` ("=!@#$%^&|:<>?*+-/" :: [Char])
-    else case Char.generalCategory c of
-      Char.MathSymbol -> True
-      Char.CurrencySymbol -> True
-      Char.ModifierSymbol -> True
-      Char.OtherSymbol -> True
-      Char.DashPunctuation -> True
-      Char.OtherPunctuation -> True
-      _ -> False
 
 equalSign :: Parser ()
 equalSign = char '=' >> notFollowedBy (satisfy isOperatorChar) >> sc
@@ -502,7 +485,8 @@ parseOpDeclOvrdExpr !si = do
   -- can be any integer, no space allowed between +/- sign and digit(s)
   !precDecl <- optional $ L.signed (pure ()) L.decimal <* sc
   !errRptPos <- getOffset
-  opSymSrc@(!opSym, !opSpan) <- between (symbol "(") (symbol ")") parseOpSrc
+  opSymSrc@(!opSym, !opSpan) <- parseOpDeclSymSrc
+  -- TODO check opSym can not be certain "reserved" keywords
   !argsErrRptPos <- getOffset
   !argsRcvr <- parseArgsReceiver
   -- valid forms of args receiver for operators:
@@ -521,21 +505,21 @@ parseOpDeclOvrdExpr !si = do
               (lspSrcLocFromParsec startPos lexeme'end)
       ps@(EdhParserState !opPD _) <- get
       case precDecl of
-        Nothing -> case Map.lookup opSym opPD of
+        Nothing -> case lookupOpFromDict opSym opPD of
           Nothing -> do
             setOffset errRptPos
             fail $
-              "you forget to specify the precedence for operator: "
+              "you forget to specify the precedence for operator: ("
                 <> T.unpack opSym
-                <> " ?"
+                <> ") ?"
           Just (origFixity, origPrec, _) ->
             return (OpOvrdExpr origFixity origPrec opSymSrc procDecl, si')
-        Just opPrec -> case Map.lookup opSym opPD of
+        Just opPrec -> case lookupOpFromDict opSym opPD of
           Nothing -> do
             put
               ps
                 { edh'parser'op'dict =
-                    Map.insert
+                    insertOpIntoDict
                       opSym
                       ( fixity,
                         opPrec,
@@ -553,9 +537,9 @@ parseOpDeclOvrdExpr !si = do
               then do
                 setOffset errRptPos
                 fail $
-                  "redeclaring operator "
+                  "redeclaring operator ("
                     <> T.unpack opSym
-                    <> " with a different precedence ("
+                    <> ") with a different precedence ("
                     <> show opPrec
                     <> " vs "
                     <> show origPrec
@@ -570,9 +554,9 @@ parseOpDeclOvrdExpr !si = do
                     then do
                       setOffset errRptPos
                       fail $
-                        "redeclaring operator "
+                        "redeclaring operator ("
                           <> T.unpack opSym
-                          <> " with a different fixity ("
+                          <> ") with a different fixity ("
                           <> show fixity
                           <> " vs "
                           <> show origFixity
@@ -584,6 +568,21 @@ parseOpDeclOvrdExpr !si = do
     _ -> do
       setOffset argsErrRptPos
       fail "invalid operator arguments receiver"
+  where
+    parseOpDeclSymSrc :: Parser (OpSymbol, SrcRange)
+    parseOpDeclSymSrc = do
+      !startPos <- getSourcePos
+      void $ symbol "("
+      !opSym <- takeWhile1P (Just "operator symbol") (/= ')')
+      void $ char ')'
+      !endPos <- getSourcePos
+      !s <- get
+      put s {edh'parser'lexeme'end = lspSrcPosFromParsec endPos}
+      void sc
+      return
+        ( T.strip opSym,
+          SrcRange (lspSrcPosFromParsec startPos) (lspSrcPosFromParsec endPos)
+        )
 
 parseSymbolExpr :: Parser Expr
 parseSymbolExpr = do
@@ -911,24 +910,11 @@ parseOpSrc = do
   return (opSym, SrcRange (lspSrcPosFromParsec startPos) lexeme'end)
 
 parseOpLit :: Parser Text
-parseOpLit =
-  choice
-    [ kwLit "is not",
-      kwLit "is",
-      kwLit "and",
-      kwLit "or",
-      lexeme alphanumOpLit,
-      lexeme opLit
-    ]
+parseOpLit = (lexeme opLit <|>) $ do
+  EdhParserState (GlobalOpDict _decls !quaint'ops) _lexem'end <- get
+  choice $ kwLit <$> reverse quaint'ops
   where
     kwLit !kw = keyword kw >> return kw
-    alphanumOpLit = do
-      void $ char '~'
-      !rest <- takeWhileP (Just "some operator symbol") $
-        \ !c -> isIdentChar c || isOperatorChar' c
-      optional (char '~') >>= \case
-        Nothing -> return $ "~" <> rest
-        Just {} -> return $ "~" <> rest <> "~"
     opLit = takeWhile1P (Just "some operator symbol") isOperatorChar
 
 parseScopedBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -1085,27 +1071,30 @@ parsePrefixExpr !si =
 -- NOTE: keywords for statements or other constructs will parse as identifier
 --       in an expr, if not forbidden here.
 illegalExprKws :: Parser Bool
-illegalExprKws =
+illegalExprKws = do
+  EdhParserState (GlobalOpDict _decls !quaint'ops) _lexem'end <- get
   True
     <$ choice
-      [ keyword "go",
-        keyword "defer",
-        keyword "effect",
-        keyword "let",
-        keyword "as",
-        keyword "extends",
-        keyword "perceive",
-        keyword "while",
-        keyword "of",
-        keyword "from",
-        keyword "do",
-        keyword "break",
-        keyword "continue",
-        keyword "fallthrough",
-        keyword "return",
-        keyword "throw",
-        keyword "pass"
-      ]
+      ( [ keyword "go",
+          keyword "defer",
+          keyword "effect",
+          keyword "let",
+          keyword "as",
+          keyword "extends",
+          keyword "perceive",
+          keyword "while",
+          keyword "of",
+          keyword "from",
+          keyword "do",
+          keyword "break",
+          keyword "continue",
+          keyword "fallthrough",
+          keyword "return",
+          keyword "throw",
+          keyword "pass"
+        ]
+          ++ (keyword <$> quaint'ops)
+      )
     <|> return False
 
 -- besides hardcoded prefix operators, all other operators are infix binary
@@ -1304,7 +1293,7 @@ parseExprPrec !precedingOp !prec !si =
             Nothing -> return Nothing
             Just opSymSrc@(!opSym, _opSpan) -> do
               EdhParserState !opPD _ <- get
-              case Map.lookup opSym opPD of
+              case lookupOpFromDict opSym opPD of
                 Nothing -> do
                   setOffset errRptPos
                   fail $ "undeclared operator: " <> T.unpack opSym

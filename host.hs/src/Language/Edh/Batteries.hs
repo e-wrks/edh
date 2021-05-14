@@ -358,6 +358,11 @@ installEdhBatteries world =
           ("//", InfixL, 7),
           ("%", InfixL, 7),
           ("**", InfixL, 8),
+          -- element-of tests
+          ("in", Infix, 4),
+          ("not in", Infix, 4),
+          ("is in", Infix, 4),
+          ("is not in", Infix, 4),
           -- identity equality tests
           ("is not", Infix, 4),
           ("is", Infix, 4),

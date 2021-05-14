@@ -5,8 +5,11 @@ import Control.Exception
     SomeException,
   )
 import Control.Monad.State.Strict (State)
+import qualified Data.Char as Char
 import Data.Dynamic (Dynamic, toDyn)
 import qualified Data.HashMap.Strict as Map
+import qualified Data.List as L
+import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void (Void)
@@ -159,7 +162,43 @@ data EdhParserState = EdhParserState
     edh'parser'lexeme'end :: !SrcPos
   }
 
-type GlobalOpDict = Map.HashMap OpSymbol (OpFixity, Precedence, OpDeclLoc)
+data GlobalOpDict = GlobalOpDict
+  { -- | precedence & fixity of known operators
+    operator'declarations ::
+      Map.HashMap OpSymbol (OpFixity, Precedence, OpDeclLoc),
+    -- | operators with non-standard character(s) in their symbol
+    -- invariant: ascendingly sorted,
+    -- so parsing against this list should attempt in reverse order
+    quaint'operators :: [OpSymbol]
+  }
+
+lookupOpFromDict ::
+  OpSymbol -> GlobalOpDict -> Maybe (OpFixity, Precedence, OpDeclLoc)
+lookupOpFromDict !sym (GlobalOpDict !decls _) = Map.lookup sym decls
+
+insertOpIntoDict ::
+  OpSymbol -> (OpFixity, Precedence, OpDeclLoc) -> GlobalOpDict -> GlobalOpDict
+insertOpIntoDict !sym !decl (GlobalOpDict !decls !quaint'ops) =
+  GlobalOpDict (Map.insert sym decl decls) $
+    if contain'nonstd'op'char
+      then L.insert sym quaint'ops
+      else quaint'ops
+  where
+    contain'nonstd'op'char :: Bool
+    contain'nonstd'op'char = isJust $ T.find (not . isOperatorChar) sym
+
+isOperatorChar :: Char -> Bool
+isOperatorChar !c =
+  if c < toEnum 128
+    then c `elem` ("=!@#$%^&|:<>?*+-/" :: [Char])
+    else case Char.generalCategory c of
+      Char.MathSymbol -> True
+      Char.CurrencySymbol -> True
+      Char.ModifierSymbol -> True
+      Char.OtherSymbol -> True
+      Char.DashPunctuation -> True
+      Char.OtherPunctuation -> True
+      _ -> False
 
 -- no backtracking needed for precedence dict, so it
 -- can live in the inner monad of 'ParsecT'.

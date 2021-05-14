@@ -10,6 +10,7 @@ import qualified Data.ByteString as B
 import Data.Dynamic
 import qualified Data.HashMap.Strict as Map
 import Data.IORef
+import qualified Data.List as L
 import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -337,7 +338,7 @@ createEdhWorld !console = do
   atomically $ iopdUpdate [(AttrByName "module", EdhObject clsModule)] hsRoot
 
   -- operator precedence dict
-  !opPD <- newTMVarIO Map.empty
+  !opPD <- newTMVarIO $ GlobalOpDict Map.empty []
 
   -- the meta host module
   !metaModu <-
@@ -870,66 +871,66 @@ createEdhWorld !console = do
 
 declareEdhOperators ::
   EdhWorld -> OpDeclLoc -> [(OpSymbol, OpFixity, Precedence)] -> STM ()
-declareEdhOperators world declLoc opps = do
-  opPD <- takeTMVar wops
-  opPD' <-
-    sequence $
-      Map.unionWithKey chkCompatible (return <$> opPD) $
-        Map.fromList $
-          (<$> opps) $
-            \(sym, fixity, precedence) ->
-              (sym, return (fixity, precedence, declLoc))
-  putTMVar wops opPD'
+declareEdhOperators !world !declLoc !opps = do
+  GlobalOpDict !decls !quaint'ops <- takeTMVar wops
+  let chkCompatible :: (OpSymbol, OpFixity, Precedence) -> STM ()
+      chkCompatible (!sym, !fixty, !precedence) = case Map.lookup sym decls of
+        Nothing -> return ()
+        Just (prevFixity, prevPrec, prevDeclLoc) ->
+          if prevPrec /= precedence
+            then
+              throwSTM $
+                EdhError
+                  UsageError
+                  ( "precedence change from "
+                      <> T.pack (show prevPrec)
+                      <> " (declared at "
+                      <> prevDeclLoc
+                      <> ") to "
+                      <> T.pack (show precedence)
+                      <> " (declared at "
+                      <> T.pack (show declLoc)
+                      <> ") for operator: "
+                      <> sym
+                  )
+                  (toDyn nil)
+                  "<edh>"
+            else case fixty of
+              Infix -> return ()
+              _ ->
+                when (fixty /= prevFixity) $
+                  throwSTM $
+                    EdhError
+                      UsageError
+                      ( "fixity change from "
+                          <> T.pack (show prevFixity)
+                          <> " (declared at "
+                          <> prevDeclLoc
+                          <> ") to "
+                          <> T.pack (show fixty)
+                          <> " (declared at "
+                          <> T.pack (show declLoc)
+                          <> ") for operator: "
+                          <> sym
+                      )
+                      (toDyn nil)
+                      "<edh>"
+      decls' = Map.fromList $
+        flip fmap opps $ \(sym, fixity, precedence) ->
+          (sym, (fixity, precedence, declLoc))
+  sequence_ $ chkCompatible <$> opps
+  putTMVar wops $
+    GlobalOpDict (Map.union decls decls') $
+      L.sort $
+        quaint'ops
+          ++ [ sym
+               | (sym, _fixty, _precedence) <- opps,
+                 contain'nonstd'op'char sym
+             ]
   where
     !wops = edh'world'operators world
-    chkCompatible ::
-      OpSymbol ->
-      STM (OpFixity, Precedence, Text) ->
-      STM (OpFixity, Precedence, Text) ->
-      STM (OpFixity, Precedence, Text)
-    chkCompatible sym prev newly = do
-      (prevFixity, prevPrec, prevDeclLoc) <- prev
-      (newFixity, newPrec, newDeclLoc) <- newly
-      if prevPrec /= newPrec
-        then
-          throwSTM $
-            EdhError
-              UsageError
-              ( "precedence change from "
-                  <> T.pack (show prevPrec)
-                  <> " (declared at "
-                  <> prevDeclLoc
-                  <> ") to "
-                  <> T.pack (show newPrec)
-                  <> " (declared at "
-                  <> T.pack (show newDeclLoc)
-                  <> ") for operator: "
-                  <> sym
-              )
-              (toDyn nil)
-              "<edh>"
-        else case newFixity of
-          Infix -> return (prevFixity, prevPrec, prevDeclLoc)
-          _ ->
-            if newFixity /= prevFixity
-              then
-                throwSTM $
-                  EdhError
-                    UsageError
-                    ( "fixity change from "
-                        <> T.pack (show prevFixity)
-                        <> " (declared at "
-                        <> prevDeclLoc
-                        <> ") to "
-                        <> T.pack (show newFixity)
-                        <> " (declared at "
-                        <> T.pack (show newDeclLoc)
-                        <> ") for operator: "
-                        <> sym
-                    )
-                    (toDyn nil)
-                    "<edh>"
-              else return (newFixity, prevPrec, prevDeclLoc)
+    contain'nonstd'op'char :: OpSymbol -> Bool
+    contain'nonstd'op'char sym = isJust $ T.find (not . isOperatorChar) sym
 
 haltEdhProgram :: EdhThreadState -> EdhValue -> STM ()
 haltEdhProgram !ets !hv =
