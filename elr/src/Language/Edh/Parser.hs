@@ -910,7 +910,7 @@ parseOpSrc = do
   return (opSym, SrcRange (lspSrcPosFromParsec startPos) lexeme'end)
 
 parseOpLit :: Parser Text
-parseOpLit = (lexeme opLit <|>) $ do
+parseOpLit = (<|> lexeme opLit) $ do
   EdhParserState (GlobalOpDict _decls !quaint'ops) _lexem'end <- get
   choice $ kwLit <$> reverse quaint'ops
   where
