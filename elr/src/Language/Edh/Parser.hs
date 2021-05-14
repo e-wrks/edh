@@ -12,7 +12,6 @@ import qualified Data.Char as Char
 import Data.Functor (($>))
 import Data.Lossless.Decimal as D (Decimal (Decimal), inf, nan)
 import Data.Maybe
-import Data.Scientific (Scientific (base10Exponent, coefficient))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Language.Edh.Control
@@ -51,7 +50,7 @@ docComment = do
       !cumLines = [line | not $ T.null $ T.strip line]
   if done
     then do
-      void sc
+      sc
       return cumLines
     else cmtLines cumLines
   where
@@ -63,7 +62,7 @@ docComment = do
       let !line = maybe "" fst $ takeN_ (o' - o) s
       if done
         then do
-          void sc
+          sc
           return
             $! reverse
               ( if T.null (T.strip line)
@@ -108,7 +107,7 @@ symbol !t = do
   !sp <- getSourcePos
   !s <- get
   put s {edh'parser'lexeme'end = lspSrcPosFromParsec sp}
-  void sc
+  sc
   return r
 
 lexeme :: Parser a -> Parser a
@@ -117,7 +116,7 @@ lexeme !p = do
   !sp <- getSourcePos
   !s <- get
   put s {edh'parser'lexeme'end = lspSrcPosFromParsec sp}
-  void sc
+  sc
   return r
 
 keyword :: Text -> Parser SrcRange
@@ -139,15 +138,17 @@ isIdentStart !c = c == '_' || Char.isAlpha c
 isIdentChar :: Char -> Bool
 isIdentChar c = c == '_' || c == '\'' || Char.isAlphaNum c
 
-isDigit :: Char -> Bool
-isDigit = flip elem ['0' .. '9']
+dotAlone :: Parser ()
+dotAlone = do
+  void $ char '.'
+  notFollowedBy $ char '.' <|> satisfy isOperatorChar
 
 equalSign :: Parser ()
 equalSign = char '=' >> notFollowedBy (satisfy isOperatorChar) >> sc
 
 parseProgram :: Parser ([StmtSrc], Maybe DocComment)
 parseProgram = do
-  void sc
+  sc
   !docCmt <- optional docComment
   !s <- getInput
   (!ss, _) <- parseStmts (s, 0, []) []
@@ -284,26 +285,29 @@ parseAttrRef :: Parser AttrRef
 parseAttrRef = do
   !startPos <- getSourcePos
   let moreAddr :: AttrRef -> Parser AttrRef
-      moreAddr !p1 = (<|> return p1) $ do
-        EdhParserState _ !lexeme'end <- get
-        let !leading'span = lspSrcRangeFromParsec startPos lexeme'end
-        void $ symbol "."
-        EdhParserState _ !after'dot <- get
-        !missEndPos <- getSourcePos
-        choice
-          [ do
-              AttrAddrSrc !addr (SrcRange _ !addr'end) <- parseAttrAddrSrc
-              moreAddr $
-                IndirectRef
-                  (ExprSrc (AttrExpr p1) leading'span)
-                  (AttrAddrSrc addr (SrcRange after'dot addr'end)),
-            moreAddr $
-              IndirectRef
-                (ExprSrc (AttrExpr p1) leading'span)
-                ( AttrAddrSrc MissedAttrName $
-                    SrcRange after'dot $ lspSrcPosFromParsec missEndPos
-                )
-          ]
+      moreAddr !p1 = try more <|> return p1
+        where
+          more = do
+            EdhParserState _ !lexeme'end <- get
+            let leading'span = lspSrcRangeFromParsec startPos lexeme'end
+            lexeme dotAlone
+            EdhParserState _ after'dot <- get
+            missEndPos <- getSourcePos
+            choice
+              [ do
+                  AttrAddrSrc !addr (SrcRange _ !addr'end) <- parseAttrAddrSrc
+                  moreAddr $
+                    IndirectRef
+                      (ExprSrc (AttrExpr p1) leading'span)
+                      (AttrAddrSrc addr (SrcRange after'dot addr'end)),
+                moreAddr $
+                  IndirectRef
+                    (ExprSrc (AttrExpr p1) leading'span)
+                    ( AttrAddrSrc MissedAttrName $
+                        SrcRange after'dot $ lspSrcPosFromParsec missEndPos
+                    )
+              ]
+
   leadingPart >>= moreAddr
   where
     leadingPart :: Parser AttrRef
@@ -481,7 +485,7 @@ parseOpDeclOvrdExpr !si = do
         Infix <$ keyword "infix",
         Infix <$ keyword "operator"
       ]
-  void sc
+  sc
   -- can be any integer, no space allowed between +/- sign and digit(s)
   !precDecl <- optional $ L.signed (pure ()) L.decimal <* sc
   !errRptPos <- getOffset
@@ -578,7 +582,7 @@ parseOpDeclOvrdExpr !si = do
       !endPos <- getSourcePos
       !s <- get
       put s {edh'parser'lexeme'end = lspSrcPosFromParsec endPos}
-      void sc
+      sc
       return
         ( T.strip opSym,
           SrcRange (lspSrcPosFromParsec startPos) (lspSrcPosFromParsec endPos)
@@ -760,11 +764,67 @@ parseStringLit = lexeme $ do
 parseBoolLit :: Parser Bool
 parseBoolLit = (keyword "true" $> True) <|> (keyword "false" $> False)
 
+-- todo support HEX/OCT ?
 parseDecLit :: Parser Decimal
 parseDecLit = lexeme $ do
-  -- todo support HEX/OCT ?
-  !sn <- L.signed (return ()) L.scientific
-  return $ Decimal 1 (fromIntegral $ base10Exponent sn) (coefficient sn)
+  (!n, !e) <- b10Dec
+  return $ Decimal 1 e n
+  where
+    b10Dec :: Parser (Integer, Integer)
+    b10Dec = do
+      !sign'n <- signNum
+      !n <- b10Int =<< b10Dig
+      choice
+        [ try $ do
+            void $ char 'e' <|> char 'E'
+            !sign'e <- signNum
+            !e <- b10Int =<< b10Dig
+            return (sign'n * n, sign'e * e),
+          try $ do
+            dotAlone
+            !d <- b10Dig
+            (n', e') <- b10DecPoints (n * 10 + d) (-1)
+            return (sign'n * n', e'),
+          return (sign'n * n, 0)
+        ]
+
+    b10DecPoints :: Integer -> Integer -> Parser (Integer, Integer)
+    b10DecPoints !n !e =
+      choice
+        [ do
+            !d <- b10Dig
+            b10DecPoints (n * 10 + d) (e - 1),
+          try $ do
+            void $ char 'e' <|> char 'E'
+            !sign'e <- signNum
+            !e' <- b10Int =<< b10Dig
+            return (n, e + sign'e * e'),
+          return (n, e)
+        ]
+
+    signNum :: Parser Integer
+    signNum =
+      choice
+        [ char '+' >> sc >> return 1,
+          char '-' >> sc >> return (-1),
+          return 1
+        ]
+
+    b10Int :: Integer -> Parser Integer
+    b10Int !n = tryMoreDig n <|> return n
+
+    tryMoreDig :: Integer -> Parser Integer
+    tryMoreDig !n =
+      -- todo validate for `_` to appear at certain pos only?
+      (char '_' >> tryMoreDig n) <|> do
+        !d <- b10Dig
+        b10Int $ n * 10 + d
+
+    b10Dig :: Parser Integer
+    b10Dig = do
+      {- HLINT ignore "Use isDigit" -}
+      !c <- satisfy $ \ !c -> c >= '0' && c <= '9'
+      return $ toInteger (fromEnum c - fromEnum '0')
 
 parseLitExpr :: Parser Literal
 parseLitExpr =
@@ -912,10 +972,18 @@ parseOpSrc = do
 parseOpLit :: Parser Text
 parseOpLit = (<|> lexeme opLit) $ do
   EdhParserState (GlobalOpDict _decls !quaint'ops) _lexem'end <- get
-  choice $ kwLit <$> reverse quaint'ops
+  choice $ quaintOp <$> reverse quaint'ops
   where
-    kwLit !kw = keyword kw >> return kw
-    opLit = takeWhile1P (Just "some operator symbol") isOperatorChar
+    quaintOp :: OpSymbol -> Parser OpSymbol
+    quaintOp !sym =
+      lexeme $
+        if isIdentChar $ T.last sym
+          then string sym <* notFollowedBy (satisfy isIdentChar)
+          else string sym
+    opLit =
+      takeWhile1P (Just "some operator symbol") isOperatorChar
+        -- or it's an augmented closing bracket
+        <* notFollowedBy (oneOf ("}])" :: [Char]))
 
 parseScopedBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseScopedBlock !si0 = void (symbol "{@") >> parseRest [] si0
@@ -1260,8 +1328,8 @@ parseExprPrec !precedingOp !prec !si =
       IntplSrcInfo ->
       ExprSrc ->
       Parser (ExprSrc, IntplSrcInfo)
-    parseIndirectRef !pOp !si' !tgtExpr = do
-      symbol "." >> sc
+    parseIndirectRef !pOp !si' !tgtExpr = try $ do
+      lexeme dotAlone
       addr@(AttrAddrSrc _ !addr'span) <- parseAttrAddrSrc
       parseMoreOps pOp si' $
         flip ExprSrc (SrcRange (exprSrcStart tgtExpr) (src'end addr'span)) $
@@ -1337,10 +1405,7 @@ parseExprPrec !precedingOp !prec !si =
 parseInfixOp :: Parser OpSymSrc
 parseInfixOp = do
   !startPos <- getSourcePos
-  !opSym <-
-    parseOpLit
-      -- or it's an augmented closing bracket
-      <* notFollowedBy (oneOf ("}])" :: [Char]))
+  !opSym <- parseOpLit
   EdhParserState _ !lexeme'end <- get
   return (opSym, SrcRange (lspSrcPosFromParsec startPos) lexeme'end)
 
