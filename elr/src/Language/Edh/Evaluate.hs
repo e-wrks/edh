@@ -1874,12 +1874,25 @@ edhPrepareForLoop
           -- TODO define the magic method for an object to be able to respond
           --      to for-from-do looping
 
-          _ ->
-            throwEdh ets EvalError $
-              "can not do a for loop from "
-                <> edhTypeNameOf iterVal
-                <> ": "
-                <> T.pack (show iterVal)
+          _ -> parseEdhIndex ets ultIterVal $ \case
+            Right (EdhSlice (Just !start) (Just !stop) !step) -> do
+              let !stepN = fromMaybe (if stop >= start then 1 else -1) step
+                  iterRange :: Int -> STM ()
+                  iterRange !i =
+                    do1 (ArgsPack [EdhDecimal $ fromIntegral i] odEmpty) $ do
+                      let i' = i + stepN
+                      if stepN > 0
+                        then
+                          if i' >= stop
+                            then exitEdh ets exit nil
+                            else iterRange i'
+                        else
+                          if i' <= stop
+                            then exitEdh ets exit nil
+                            else iterRange i'
+              iterRange start
+            _ -> edhValueDesc ets iterVal $ \ !badDesc ->
+              throwEdh ets EvalError $ "can not do a for loop from " <> badDesc
         where
           !ultIterVal = edhUltimate iterVal
 
