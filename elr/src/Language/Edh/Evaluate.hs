@@ -1208,8 +1208,6 @@ packEdhArgs !ets !argSenders !pkExit = do
                 case edhUltimate val of
                   (EdhArgsPack (ArgsPack !posArgs _kwArgs)) ->
                     pkArgs xs $ \ !posArgs' -> exit (posArgs ++ posArgs')
-                  (EdhPair !k !v) ->
-                    pkArgs xs $ \ !posArgs -> exit ([k, noneNil v] ++ posArgs)
                   (EdhList (List _ !l)) -> pkArgs xs $ \ !posArgs -> do
                     ll <- readTVar l
                     exit ((noneNil <$> ll) ++ posArgs)
