@@ -577,7 +577,18 @@ parseOpDeclOvrdExpr !si = do
     parseOpDeclSymSrc = do
       !startPos <- getSourcePos
       void $ symbol "("
-      !opSym <- takeWhile1P (Just "operator symbol") (/= ')')
+      sc
+      !opSym <-
+        optional (char '~') >>= \case
+          Just {} -> do
+            !rest <- takeWhileP (Just "freeform operator symbol") $
+              \ !c -> c == '~' || isIdentChar c || isOperatorChar c
+            return $ "~" <> rest
+          Nothing ->
+            takeWhile1P
+              (Just "some operator symbol")
+              (not . (`elem` ("#(){}" :: [Char])))
+      sc
       void $ char ')'
       !endPos <- getSourcePos
       !s <- get
@@ -970,20 +981,29 @@ parseOpSrc = do
   return (opSym, SrcRange (lspSrcPosFromParsec startPos) lexeme'end)
 
 parseOpLit :: Parser Text
-parseOpLit = (<|> lexeme opLit) $ do
-  EdhParserState (GlobalOpDict _decls !quaint'ops) _lexem'end <- get
-  choice $ quaintOp <$> reverse quaint'ops
+parseOpLit = choice [quaintOpLit, freeformOpLit, stdOpLit]
   where
-    quaintOp :: OpSymbol -> Parser OpSymbol
-    quaintOp !sym =
-      lexeme $
-        if isIdentChar $ T.last sym
-          then string sym <* notFollowedBy (satisfy isIdentChar)
-          else string sym
-    opLit =
-      takeWhile1P (Just "some operator symbol") isOperatorChar
-        -- or it's an augmented closing bracket
-        <* notFollowedBy (oneOf ("}])" :: [Char]))
+    quaintOpLit = do
+      EdhParserState (GlobalOpDict _decls !quaint'ops) _lexem'end <- get
+      choice $ quaintOp <$> reverse quaint'ops
+      where
+        quaintOp :: OpSymbol -> Parser OpSymbol
+        quaintOp !sym =
+          lexeme $
+            if isIdentChar $ T.last sym
+              then string sym <* notFollowedBy (satisfy isIdentChar)
+              else string sym
+    freeformOpLit = lexeme $ do
+      void $ char '~'
+      !rest <- takeWhileP (Just "freeform operator symbol") $
+        \ !c -> c == '~' || isIdentChar c || isOperatorChar c
+      return $ "~" <> rest
+    stdOpLit =
+      try $
+        lexeme $
+          takeWhile1P (Just "some operator symbol") isOperatorChar
+            -- or it's an augmented closing bracket
+            <* notFollowedBy (oneOf ("}])" :: [Char]))
 
 parseScopedBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseScopedBlock !si0 = void (symbol "{@") >> parseRest [] si0
