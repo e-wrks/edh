@@ -862,6 +862,7 @@ parseLitExpr =
       TypeLiteral DictType <$ litKw "DictType",
       TypeLiteral ListType <$ litKw "ListType",
       TypeLiteral PairType <$ litKw "PairType",
+      TypeLiteral RangeType <$ litKw "RangeType",
       TypeLiteral ArgsPackType <$ litKw "ArgsPackType",
       TypeLiteral IntrinsicType <$ litKw "IntrinsicType",
       TypeLiteral HostClassType <$ litKw "HostClassType",

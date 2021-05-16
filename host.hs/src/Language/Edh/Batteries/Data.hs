@@ -278,6 +278,17 @@ defMissingProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valName) _
 defMissingProc !lhExpr _ _ !ets =
   throwEdh ets EvalError $ "invalid value definition: " <> T.pack (show lhExpr)
 
+-- | operator (..) (^..) (..^) (^..^) - range constructor
+rangeCtorProc ::
+  (EdhValue -> EdhBound) -> (EdhValue -> EdhBound) -> EdhIntrinsicOp
+rangeCtorProc !lhBndCtor !rhBndCtor !lhExpr !rhExpr !exit =
+  evalExprSrc lhExpr $ \ !lhVal -> evalExprSrc rhExpr $ \ !rhVal ->
+    exitEdhTx
+      exit
+      $ EdhRange
+        (lhBndCtor $ edhDeCaseWrap lhVal)
+        (rhBndCtor $ edhDeCaseWrap rhVal)
+
 -- | operator (:) - pair constructor
 pairCtorProc :: EdhIntrinsicOp
 pairCtorProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->

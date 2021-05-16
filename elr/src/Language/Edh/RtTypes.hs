@@ -157,6 +157,22 @@ edhValueIdent = identityOf
     identityOf (EdhObject !o) = idOfObj o
     identityOf (EdhEvs !s) = return $ idFromUnique $ evs'uniq s
     identityOf (EdhNamedValue !n !v) = EdhNamedValue n <$> identityOf v
+    identityOf (EdhRange (ClosedBound !l) (ClosedBound !u)) = do
+      l'i <- identityOf l
+      u'i <- identityOf u
+      return $ EdhRange (ClosedBound l'i) (ClosedBound u'i)
+    identityOf (EdhRange (ClosedBound !l) (OpenBound !u)) = do
+      l'i <- identityOf l
+      u'i <- identityOf u
+      return $ EdhRange (ClosedBound l'i) (OpenBound u'i)
+    identityOf (EdhRange (OpenBound !l) (ClosedBound !u)) = do
+      l'i <- identityOf l
+      u'i <- identityOf u
+      return $ EdhRange (OpenBound l'i) (ClosedBound u'i)
+    identityOf (EdhRange (OpenBound !l) (OpenBound !u)) = do
+      l'i <- identityOf l
+      u'i <- identityOf u
+      return $ EdhRange (OpenBound l'i) (OpenBound u'i)
     identityOf (EdhPair !l !r) = liftA2 EdhPair (identityOf l) (identityOf r)
     identityOf (EdhDict (Dict !u _)) = return $ idFromUnique u
     identityOf (EdhList (List !u _)) = return $ idFromUnique u
@@ -1017,6 +1033,21 @@ callableLoc = \case
 -- database for storage, will tend to define a generated UUID
 -- attribute or the like.
 
+data EdhBound = OpenBound EdhValue | ClosedBound EdhValue
+  deriving (Eq)
+
+edhBoundValue :: EdhBound -> EdhValue
+edhBoundValue (OpenBound v) = v
+edhBoundValue (ClosedBound v) = v
+
+edhBoundMarkChar :: EdhBound -> Text
+edhBoundMarkChar OpenBound {} = "^"
+edhBoundMarkChar ClosedBound {} = ""
+
+instance Hashable EdhBound where
+  hashWithSalt s (OpenBound b) = s `hashWithSalt` (1 :: Int) `hashWithSalt` b
+  hashWithSalt s (ClosedBound b) = s `hashWithSalt` (2 :: Int) `hashWithSalt` b
+
 -- | everything in Edh is a value
 data EdhValue
   = -- | type itself is a kind of (immutable) value
@@ -1029,6 +1060,8 @@ data EdhValue
   | EdhString !Text
   | EdhSymbol !Symbol
   | EdhUUID !UUID.UUID
+  | -- range with lower & upper bounds
+    EdhRange !EdhBound !EdhBound
   | -- immutable containers
     --   the elements may still pointer to mutable data
     EdhPair !EdhValue !EdhValue
@@ -1094,6 +1127,14 @@ instance Show EdhValue where
   show (EdhString v) = show v
   show (EdhSymbol v) = show v
   show (EdhUUID v) = "UUID('" <> UUID.toString v <> "')"
+  show (EdhRange (ClosedBound lower) (ClosedBound upper)) =
+    show lower <> " .. " <> show upper
+  show (EdhRange (OpenBound lower) (ClosedBound upper)) =
+    show lower <> " ^.. " <> show upper
+  show (EdhRange (ClosedBound lower) (OpenBound upper)) =
+    show lower <> " ..^ " <> show upper
+  show (EdhRange (OpenBound lower) (OpenBound upper)) =
+    show lower <> " ^..^ " <> show upper
   show (EdhPair k v) = show k <> ":" <> show v
   show (EdhArgsPack v) = show v
   show (EdhDict v) = show v
@@ -1143,6 +1184,7 @@ instance Eq EdhValue where
   EdhString x == EdhString y = x == y
   EdhSymbol x == EdhSymbol y = x == y
   EdhUUID x == EdhUUID y = x == y
+  EdhRange x'l x'u == EdhRange y'l y'u = x'l == y'l && x'u == y'u
   EdhPair x'k x'v == EdhPair y'k y'v = x'k == y'k && x'v == y'v
   EdhArgsPack x == EdhArgsPack y = x == y
   EdhDict x == EdhDict y = x == y
@@ -1182,6 +1224,7 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhString x) = hashWithSalt s x
   hashWithSalt s (EdhSymbol x) = hashWithSalt s x
   hashWithSalt s (EdhUUID x) = hashWithSalt s x
+  hashWithSalt s (EdhRange l u) = s `hashWithSalt` l `hashWithSalt` u
   hashWithSalt s (EdhPair k v) = s `hashWithSalt` k `hashWithSalt` v
   hashWithSalt s (EdhArgsPack x) = hashWithSalt s x
   hashWithSalt s (EdhDict x) = hashWithSalt s x
@@ -1658,6 +1701,7 @@ data EdhTypeValue
   | HostClassType
   | DictType
   | ListType
+  | RangeType
   | PairType
   | ArgsPackType
   | HostMethodType
@@ -1706,6 +1750,7 @@ edhTypeOf EdhBlob {} = BlobType
 edhTypeOf EdhString {} = StringType
 edhTypeOf EdhSymbol {} = SymbolType
 edhTypeOf EdhUUID {} = UUIDType
+edhTypeOf EdhRange {} = RangeType
 edhTypeOf EdhPair {} = PairType
 edhTypeOf EdhArgsPack {} = ArgsPackType
 edhTypeOf EdhDict {} = DictType

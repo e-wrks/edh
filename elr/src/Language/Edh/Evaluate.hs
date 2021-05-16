@@ -3411,6 +3411,14 @@ edhValueRepr :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
 edhValueRepr !ets !val !exitRepr = case val of
   -- string
   EdhString !txt -> exitRepr $ escapeString txt
+  -- range repr
+  EdhRange !lower !upper -> edhValueRepr ets (edhBoundValue lower) $
+    \ !reprLower -> edhValueRepr ets (edhBoundValue upper) $ \ !reprUpper ->
+      exitRepr $
+        reprLower <> " " <> edhBoundMarkChar lower <> ".."
+          <> edhBoundMarkChar upper
+          <> " "
+          <> reprUpper
   -- pair repr
   EdhPair !v1 !v2 -> edhValueRepr ets v1 $ \ !repr1 ->
     edhValueRepr ets v2 $ \ !repr2 -> exitRepr $ repr1 <> ":" <> repr2
@@ -5151,6 +5159,59 @@ parseEdhIndex !ets !val !exit = case val of
   EdhNamedValue "Any" _ -> exit $ Right EdhAny
   EdhNamedValue _ !termVal -> parseEdhIndex ets termVal exit
   -- range
+  EdhRange !lower !upper -> sliceNum (edhBoundValue lower) $ \case
+    Left !err -> exit $ Left err
+    Right !lowerVal -> sliceNum (edhBoundValue upper) $ \case
+      Left !err -> exit $ Left err
+      Right !upperVal ->
+        case lowerVal of
+          Just !start -> case upperVal of
+            Just !stop ->
+              if stop >= start
+                then do
+                  -- ascending
+                  let !startN = Just $ case lower of
+                        OpenBound {} -> start + 1
+                        ClosedBound {} -> start
+                      !stopN = Just $ case upper of
+                        OpenBound {} -> stop
+                        ClosedBound {} -> stop + 1
+                  exit $ Right $ EdhSlice startN stopN $ Just 1
+                else do
+                  -- descending
+                  let !startN = Just $ case lower of
+                        OpenBound {} -> start -1
+                        ClosedBound {} -> start
+                      !stopN = Just $ case upper of
+                        OpenBound {} -> stop
+                        ClosedBound {} -> stop -1
+                  exit $ Right $ EdhSlice startN stopN $ Just $ -1
+            _ ->
+              -- assuming ascending
+              exit $
+                Right $
+                  EdhSlice
+                    ( Just $ case lower of
+                        OpenBound {} -> start + 1
+                        ClosedBound {} -> start
+                    )
+                    Nothing
+                    $ Just 1
+          _ -> case upperVal of
+            Just !stop ->
+              -- assuming ascending
+              exit $
+                Right $
+                  EdhSlice
+                    Nothing
+                    ( Just $ case upper of
+                        OpenBound {} -> stop -1
+                        ClosedBound {} -> stop
+                    )
+                    Nothing
+            _ -> edhValueDesc ets val $ \ !rngDesc ->
+              throwEdh ets UsageError $ "invalid range as index: " <> rngDesc
+  -- range pair
   EdhPair (EdhPair !startVal !stopVal) !stepVal -> sliceNum startVal $ \case
     Left !err -> exit $ Left err
     Right !start -> sliceNum stopVal $ \case

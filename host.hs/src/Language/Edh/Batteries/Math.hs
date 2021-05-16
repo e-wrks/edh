@@ -2,6 +2,7 @@ module Language.Edh.Batteries.Math where
 
 -- import           Debug.Trace
 
+import Control.Concurrent.STM
 import Data.Lossless.Decimal
   ( Decimal (Decimal),
     decimalToInteger,
@@ -222,21 +223,46 @@ valEqProc !inversion !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
             (ArgsPack [lhVal, rhVal] odEmpty)
             (LitExpr $ BoolLiteral $ inversion False)
 
+-- * in range test
+
+inRangeProc :: (Bool -> Bool) -> EdhIntrinsicOp
+inRangeProc inverse !lhExpr !rhExpr !exit !ets = runEdhTx ets $
+  evalExprSrc lhExpr $ \ !lhVal ->
+    evalExprSrc rhExpr $
+      \ !rhVal _ets -> case edhUltimate rhVal of
+        EdhRange !lb !ub -> do
+          let rhCmp = edhCompareValue ets lhVal (edhBoundValue ub) $ \case
+                Nothing -> exitEdh ets exit edhNA
+                Just LT -> exitEdh ets exit $ EdhBool $ inverse True
+                Just GT -> exitEdh ets exit $ EdhBool $ inverse False
+                Just EQ -> case ub of
+                  OpenBound {} -> exitEdh ets exit $ EdhBool $ inverse False
+                  ClosedBound {} -> exitEdh ets exit $ EdhBool $ inverse True
+          edhCompareValue ets lhVal (edhBoundValue lb) $ \case
+            Nothing -> exitEdh ets exit edhNA
+            Just GT -> rhCmp
+            Just LT -> exitEdh ets exit $ EdhBool $ inverse False
+            Just EQ -> case lb of
+              OpenBound {} -> exitEdh ets exit $ EdhBool $ inverse False
+              ClosedBound {} -> rhCmp
+        EdhList (List _u !lv) -> readTVar lv >>= chkInList lhVal
+        EdhArgsPack (ArgsPack !vs !kwargs)
+          | odNull kwargs ->
+            chkInList lhVal vs
+        _ -> edhValueDesc ets rhVal $ \ !badDesc ->
+          throwEdh ets UsageError $ "bad range/container: " <> badDesc
+  where
+    chkInList :: EdhValue -> [EdhValue] -> STM ()
+    chkInList !v !vs = exitEdh ets exit $ EdhBool $ inverse $ v `elem` vs
+
 -- * identity equality tests
 
 -- | operator (is)
-idEqProc :: EdhIntrinsicOp
-idEqProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+idEqProc :: (Bool -> Bool) -> EdhIntrinsicOp
+idEqProc inverse !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   evalExprSrc rhExpr $
     \ !rhVal !ets ->
-      (EdhBool <$> edhIdentEqual lhVal rhVal) >>= exitEdh ets exit
-
--- | operator (is not)
-idNotEqProc :: EdhIntrinsicOp
-idNotEqProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
-  evalExprSrc rhExpr $
-    \ !rhVal !ets ->
-      (EdhBool . not <$> edhIdentEqual lhVal rhVal) >>= exitEdh ets exit
+      (EdhBool . inverse <$> edhIdentEqual lhVal rhVal) >>= exitEdh ets exit
 
 -- * ordering comparisons
 
