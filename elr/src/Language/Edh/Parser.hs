@@ -1003,8 +1003,8 @@ parseOpLit = choice [quaintOpLit, freeformOpLit, stdOpLit]
       try $
         lexeme $
           takeWhile1P (Just "some operator symbol") isOperatorChar
-            -- or it's an augmented closing bracket
-            <* notFollowedBy (oneOf ("}])" :: [Char]))
+            -- or it's an augmented closing brace
+            <* notFollowedBy (char '}')
 
 parseScopedBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseScopedBlock !si0 = void (symbol "{@") >> parseRest [] si0

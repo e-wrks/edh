@@ -18,6 +18,7 @@ export {
   import * './str'
   import * './evt'
   import * './math'
+  import * './ops'
   import * './slice'
   import * './reflect'
   import * './cmd'

@@ -323,15 +323,16 @@ installEdhBatteries world =
           -- address an attribute off an object if possible, nil otherwise
           ("?", InfixL, 10),
           ("?@", InfixL, 10),
-          -- the function application operator
+          -- the procedure call operators
           ("$", InfixR, -5), -- make it lower than procedure body definition
-          -- (i.e. -3 to be cross checked with `parseProcBody`), or decorators
-          -- can go wrong the flipped function application operator, in UNIX
-          -- pipe semantics
+          -- (i.e. -3, to be cross checked with `parseProcBody`), or decorators
+          -- can go wrong with the flipped procedure call operator (|), which
+          -- is in UNIX pipe semantics
           ("|", InfixL, 0), -- make it slightly higher than (->),
-          -- so the guard syntax in pattern matching works nicely the flipped
-          -- function application operator, in Haskell convention
-          ("&", InfixL, -4), -- make it one higher than ($) as in Haskell
+          -- so the guard syntax in pattern matching works nicely with this
+          -- flipped procedure call operator (regardless of its UNIX pipe
+          -- semantics), in Haskell style
+          --
           -- assignments, make them lower than (++),
           -- so don't need to quote `a = b ++ c`
           ("=", InfixR, 0),
@@ -366,8 +367,6 @@ installEdhBatteries world =
           -- in range tests
           ("in", Infix, 4),
           ("not in", Infix, 4),
-          ("is in", Infix, 4),
-          ("is not in", Infix, 4),
           -- identity equality tests
           ("is not", Infix, 4),
           ("is", Infix, 4),
@@ -433,7 +432,6 @@ installEdhBatteries world =
                 [ ("@", attrDerefAddrProc),
                   ("$", fapProc),
                   ("|", ffapProc),
-                  ("&", ffapProc),
                   (":=", defProc),
                   ("?:=", defMissingProc),
                   ("..", rangeCtorProc ClosedBound ClosedBound),
@@ -468,8 +466,6 @@ installEdhBatteries world =
                   ("is", idEqProc id),
                   ("not in", inRangeProc not),
                   ("in", inRangeProc id),
-                  ("is not in", inRangeProc not),
-                  ("is in", inRangeProc id),
                   (">", isGtProc),
                   (">=", isGeProc),
                   ("<", isLtProc),
