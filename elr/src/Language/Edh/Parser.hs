@@ -645,7 +645,7 @@ parseStmt' !prec !si = do
         parseThrowStmt si,
         (,si) <$> parseVoidStmt,
         -- NOTE: statements above should probably all be detected by
-        -- `illegalExprKws` as invalid start for an expr
+        -- `illegalExprStarting` as invalid start for an expr
         do
           (ExprSrc !x _, !si') <- parseExprPrec Nothing prec si
           return (ExprStmt x docCmt, si')
@@ -968,7 +968,7 @@ parseAlphNumName = (detectIllegalIdent >>) $
           Especially considering source level interoperation with JavaScript etc.
           But it can also create confusions in certain circumstances, let's allow it for some time and see.
           -}
-          -- illegalExprKws,
+          -- True <$ illegalExprStarting,
           return False
         ]
 
@@ -1157,32 +1157,34 @@ parsePrefixExpr !si =
 
 -- NOTE: keywords for statements or other constructs will parse as identifier
 --       in an expr, if not forbidden here.
-illegalExprKws :: Parser Bool
-illegalExprKws = do
+illegalExprStarting :: Parser (Maybe Text)
+illegalExprStarting = do
   EdhParserState (GlobalOpDict _decls !quaint'ops) _lexem'end <- get
-  True
-    <$ choice
-      ( [ keyword "go",
-          keyword "defer",
-          keyword "effect",
-          keyword "let",
-          keyword "as",
-          keyword "extends",
-          keyword "perceive",
-          keyword "while",
-          keyword "of",
-          keyword "from",
-          keyword "do",
-          keyword "break",
-          keyword "continue",
-          keyword "fallthrough",
-          keyword "return",
-          keyword "throw",
-          keyword "pass"
+  Just
+    <$> choice
+      ( [ illegalWord "go",
+          illegalWord "defer",
+          illegalWord "effect",
+          illegalWord "let",
+          illegalWord "as",
+          illegalWord "extends",
+          illegalWord "perceive",
+          illegalWord "while",
+          illegalWord "of",
+          illegalWord "from",
+          illegalWord "do",
+          illegalWord "break",
+          illegalWord "continue",
+          illegalWord "fallthrough",
+          illegalWord "return",
+          illegalWord "throw",
+          illegalWord "pass"
         ]
-          ++ (keyword <$> quaint'ops)
+          ++ (illegalWord <$> quaint'ops)
       )
-    <|> return False
+    <|> return Nothing
+  where
+    illegalWord !wd = wd <$ keyword wd
 
 -- besides hardcoded prefix operators, all other operators are infix binary
 -- operators, they can be declared and further overridden everywhere
@@ -1260,9 +1262,10 @@ parseExprPrec ::
   IntplSrcInfo ->
   Parser (ExprSrc, IntplSrcInfo)
 parseExprPrec !precedingOp !prec !si =
-  lookAhead illegalExprKws >>= \case
-    True -> fail "illegal keyword in expression"
-    False ->
+  lookAhead illegalExprStarting >>= \case
+    Just !illegalWord ->
+      fail $ "illegal start of expression: `" <> T.unpack illegalWord <> "`"
+    Nothing ->
       (parseExpr1st >>= \(!x, !si') -> parseMoreOps precedingOp si' x) <|> do
         EdhParserState _ !missed'start <- get
         !missed'end <- getSourcePos
