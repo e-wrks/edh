@@ -54,6 +54,27 @@ And there is neither *empty-pair* nor *unary-pair* in Đ, so technically speakin
 
 
   {##
+   # Closed-Closed range constructor
+   #}
+  infix 5 (..) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # Open-Closed range constructor
+   #}
+  infix 5 (^..) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # Closed-Open range constructor
+   #}
+  infix 5 (..^) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # Open-Open range constructor
+   #}
+  infix 5 (^..^) ( callerScope, lhx, rhx ) pass
+
+
+  {##
    # Procedure call operator
 
 At par to function application operator ($) as in Haskell
@@ -68,6 +89,38 @@ At par to flipped function application operator (&) as in Haskell
 
    #}
   infixl 0 (|) ( callerScope, lhx, rhx ) pass
+
+
+  {##
+   # Identity equality test operator
+   #}
+  infix 4 (is) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # Identity inequality test operator
+   #}
+  infix 4 (is not) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # Instant equality test operator
+   #}
+  infix 4 (==) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # Instant inequality test operator
+   #}
+  infix 4 (!=) ( callerScope, lhx, rhx ) pass
+
+
+  {##
+   # In-Range test operator
+   #}
+  infix 4 (in) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # Not-In-Range test operator
+   #}
+  infix 4 (not in) ( callerScope, lhx, rhx ) pass
 
 
   {##
