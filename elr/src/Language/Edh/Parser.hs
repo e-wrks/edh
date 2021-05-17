@@ -138,10 +138,8 @@ isIdentStart !c = c == '_' || Char.isAlpha c
 isIdentChar :: Char -> Bool
 isIdentChar c = c == '_' || c == '\'' || Char.isAlphaNum c
 
-dotAlone :: Parser ()
-dotAlone = do
-  void $ char '.'
-  notFollowedBy $ char '.' <|> satisfy isOperatorChar
+singleDot :: Parser ()
+singleDot = char '.' >> notFollowedBy (char '.') >> sc
 
 equalSign :: Parser ()
 equalSign = char '=' >> notFollowedBy (satisfy isOperatorChar) >> sc
@@ -290,7 +288,7 @@ parseAttrRef = do
           more = do
             EdhParserState _ !lexeme'end <- get
             let leading'span = lspSrcRangeFromParsec startPos lexeme'end
-            lexeme dotAlone
+            singleDot
             EdhParserState _ after'dot <- get
             missEndPos <- getSourcePos
             choice
@@ -792,7 +790,7 @@ parseDecLit = lexeme $ do
             !e <- b10Int =<< b10Dig
             return (sign'n * n, sign'e * e),
           try $ do
-            dotAlone
+            singleDot
             !d <- b10Dig
             (n', e') <- b10DecPoints (n * 10 + d) (-1)
             return (sign'n * n', e'),
@@ -1350,7 +1348,7 @@ parseExprPrec !precedingOp !prec !si =
       ExprSrc ->
       Parser (ExprSrc, IntplSrcInfo)
     parseIndirectRef !pOp !si' !tgtExpr = try $ do
-      lexeme dotAlone
+      singleDot
       addr@(AttrAddrSrc _ !addr'span) <- parseAttrAddrSrc
       parseMoreOps pOp si' $
         flip ExprSrc (SrcRange (exprSrcStart tgtExpr) (src'end addr'span)) $
