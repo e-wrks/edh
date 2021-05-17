@@ -12,11 +12,4 @@ Note the precedence -4 follows Haskell for it to be 1 higher than that of ($), w
    #}
   infixl -4 (&) () (|)
 
-
-  {## Operator (is in) is (in) redeclared for intuition in certain cases #}
-  infix 4 (is in) () (in)
-
-  {## Operator (is not in) is (not in) redeclared for intuition in certain cases #}
-  infix 4 (is not in) () (not in)
-
 }

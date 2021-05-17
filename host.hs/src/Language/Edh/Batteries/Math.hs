@@ -225,8 +225,16 @@ valEqProc !inversion !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
 
 -- * in range test
 
-inRangeProc :: (Bool -> Bool) -> EdhIntrinsicOp
-inRangeProc inverse !lhExpr !rhExpr !exit !ets = runEdhTx ets $
+inRangeProc ::
+  (Bool -> Bool) ->
+  ( EdhThreadState ->
+    EdhValue ->
+    EdhValue ->
+    (Maybe Bool -> STM ()) ->
+    STM ()
+  ) ->
+  EdhIntrinsicOp
+inRangeProc inverse eqTester !lhExpr !rhExpr !exit !ets = runEdhTx ets $
   evalExprSrc lhExpr $ \ !lhVal ->
     evalExprSrc rhExpr $
       \ !rhVal _ets -> case edhUltimate rhVal of
@@ -253,7 +261,11 @@ inRangeProc inverse !lhExpr !rhExpr !exit !ets = runEdhTx ets $
           throwEdh ets UsageError $ "bad range/container: " <> badDesc
   where
     chkInList :: EdhValue -> [EdhValue] -> STM ()
-    chkInList !v !vs = exitEdh ets exit $ EdhBool $ inverse $ v `elem` vs
+    chkInList _ [] =
+      exitEdh ets exit $ EdhBool $ inverse False
+    chkInList !v (e : rest) = eqTester ets v e $ \case
+      Just True -> exitEdh ets exit $ EdhBool $ inverse True
+      _ -> chkInList v rest
 
 -- * identity equality tests
 

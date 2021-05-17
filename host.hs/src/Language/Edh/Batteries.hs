@@ -23,10 +23,6 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Void (Void)
 import Language.Edh.Batteries.Assign
-  ( assignMissingProc,
-    assignProc,
-    assignWithOpProc,
-  )
 import Language.Edh.Batteries.Console
 import Language.Edh.Batteries.Ctrl
 import Language.Edh.Batteries.Data
@@ -367,6 +363,8 @@ installEdhBatteries world =
           -- in range tests
           ("in", Infix, 4),
           ("not in", Infix, 4),
+          ("is in", Infix, 4),
+          ("is not in", Infix, 4),
           -- identity equality tests
           ("is not", Infix, 4),
           ("is", Infix, 4),
@@ -425,6 +423,13 @@ installEdhBatteries world =
         ]
 
       -- global operators at world root scope
+      let idEqTester ::
+            EdhThreadState ->
+            EdhValue ->
+            EdhValue ->
+            (Maybe Bool -> STM ()) ->
+            STM ()
+          idEqTester _ets !v1 !v2 !exit = edhIdentEqual v1 v2 >>= exit . Just
       !basicOperators <-
         sequence
           [ (AttrByName sym,) <$> mkIntrinsicOp world sym iop
@@ -464,8 +469,10 @@ installEdhBatteries world =
                   ("!=", valEqProc not),
                   ("is not", idEqProc not),
                   ("is", idEqProc id),
-                  ("not in", inRangeProc not),
-                  ("in", inRangeProc id),
+                  ("in", inRangeProc id edhValueEqual),
+                  ("not in", inRangeProc not edhValueEqual),
+                  ("is in", inRangeProc id idEqTester),
+                  ("is not in", inRangeProc not idEqTester),
                   (">", isGtProc),
                   (">=", isGeProc),
                   ("<", isLtProc),
