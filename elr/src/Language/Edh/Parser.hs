@@ -191,13 +191,24 @@ parseExportExpr !si = do
 
 parseImportExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseImportExpr !si = do
-  void $ keyword "import"
-  !ar <- parseArgsReceiver
-  (!se, !si') <- parseExpr si
+  (!ar, !se, !si') <- pyStyle <|> jsStyle
   (<|> return (ImportExpr ar se Nothing, si')) $ do
     void $ keyword "into"
     (!intoExpr, !si'') <- parseExpr si'
     return (ImportExpr ar se (Just intoExpr), si'')
+  where
+    pyStyle = do
+      void $ keyword "from"
+      (!se, !si') <- parseExpr si
+      void $ keyword "import"
+      !ar <- parseArgsReceiver
+      return (ar, se, si')
+    jsStyle = do
+      void $ keyword "import"
+      !ar <- parseArgsReceiver
+      void $ optional $ keyword "from"
+      (!se, !si') <- parseExpr si
+      return (ar, se, si')
 
 parseLetStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseLetStmt !si = do
@@ -1218,7 +1229,6 @@ illegalExprStarting = do
           illegalWord "perceive",
           illegalWord "while",
           illegalWord "of",
-          illegalWord "from",
           illegalWord "do",
           illegalWord "break",
           illegalWord "continue",
