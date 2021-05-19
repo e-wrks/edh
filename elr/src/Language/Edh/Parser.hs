@@ -101,6 +101,13 @@ immediateDocComment = docComment >>= moreAfterSemicolons
       (<|> return gotCmt) $
         try (sc >> docComment) >>= moreAfter
 
+stringSrc :: Text -> Parser SrcRange
+stringSrc !t = do
+  !spStart <- getSourcePos
+  void $ string t
+  !spEnd <- getSourcePos
+  return $ SrcRange (lspSrcPosFromParsec spStart) (lspSrcPosFromParsec spEnd)
+
 symbol :: Text -> Parser Text
 symbol !t = do
   !r <- string t
@@ -228,18 +235,23 @@ parseLetStmt !si = do
 
 parseArgsReceiver :: Parser ArgsReceiver
 parseArgsReceiver =
-  (symbol "*" $> WildReceiver) <|> parsePackReceiver <|> do
-    !singleArg <- parseKwRecv False
-    return $ SingleReceiver singleArg
+  wildReceiver <|> dropReceiver <|> packReceiver <|> singleReceiver
   where
-    parsePackReceiver :: Parser ArgsReceiver
-    parsePackReceiver =
+    wildReceiver = symbol "*" $> WildReceiver
+
+    dropReceiver =
+      SingleReceiver . RecvRestPkArgs . AttrAddrSrc (NamedAttr "_")
+        <$> keyword "_"
+
+    packReceiver =
       choice
         [ symbol "(" >> PackReceiver . reverse <$> parseRestArgRecvs ")",
           -- following is for JavaScript src level compatibility
           symbol "[" >> PackReceiver . reverse <$> parseRestArgRecvs "]",
           symbol "{" >> PackReceiver . reverse <$> parseRestArgRecvs "}"
         ]
+
+    singleReceiver = SingleReceiver <$> parseKwRecv False
 
 parseRestArgRecvs :: Text -> Parser [ArgReceiver]
 parseRestArgRecvs !endSymbol = parseArgRecvs [] False False
@@ -260,18 +272,17 @@ parseRestArgRecvs !endSymbol = parseArgRecvs [] False False
 
     nextPosArg, restKwArgs, restPosArgs :: Parser ArgReceiver
     nextPosArg = restPkArgs <|> restKwArgs <|> restPosArgs <|> parseKwRecv True
-    restPkArgs = do
+    restPkArgs =
       -- `...` for src level compatibility with JavaScript destructuring syntax
-      void $ symbol "***" <|> symbol "..."
-      RecvRestPkArgs <$> optionalArgName
-    restKwArgs = do
-      void $ symbol "**"
-      RecvRestKwArgs <$> optionalArgName
-    restPosArgs = do
-      void $ symbol "*"
-      RecvRestPosArgs <$> optionalArgName
-    optionalArgName =
-      parseAttrAddrSrc <|> return (AttrAddrSrc (NamedAttr "_") noSrcRange)
+      (RecvRestPkArgs <$>) $
+        optionalArgName
+          =<< lexeme (stringSrc "***" <|> stringSrc "...")
+    restKwArgs =
+      (RecvRestKwArgs <$>) $ optionalArgName =<< lexeme (stringSrc "**")
+    restPosArgs =
+      (RecvRestPosArgs <$>) $ optionalArgName =<< lexeme (stringSrc "*")
+    optionalArgName src'span =
+      parseAttrAddrSrc <|> return (AttrAddrSrc (NamedAttr "_") src'span)
 
 parseKwRecv :: Bool -> Parser ArgReceiver
 parseKwRecv !inPack = do
@@ -1144,7 +1155,8 @@ parseOpAddrOrApkOrParen !si = do
           si
         )
 
-parseApkRest :: SourcePos -> IntplSrcInfo -> Text -> Bool -> Parser (Expr, IntplSrcInfo)
+parseApkRest ::
+  SourcePos -> IntplSrcInfo -> Text -> Bool -> Parser (Expr, IntplSrcInfo)
 parseApkRest !startPos !si !closeSym !mustApk = do
   !mustApk' <-
     optionalComma >>= \case
