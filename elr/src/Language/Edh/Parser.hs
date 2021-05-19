@@ -250,7 +250,7 @@ parseRestArgRecvs !endSymbol = parseArgRecvs [] False False
     nextPosArg, restKwArgs, restPosArgs :: Parser ArgReceiver
     nextPosArg = restPkArgs <|> restKwArgs <|> restPosArgs <|> parseKwRecv True
     restPkArgs = do
-      -- `...` for JavaScript src level syntax compatibility
+      -- `...` for src level compatibility with JavaScript destructuring syntax
       void $ symbol "***" <|> symbol "..."
       RecvRestPkArgs <$> optionalArgName
     restKwArgs = do
@@ -356,7 +356,8 @@ parseArgSends !si !closeSym !commaAppeared !ss = do
         Parser (ArgSender, IntplSrcInfo)
     nextArg = unpackPkArgs <|> unpackKwArgs <|> unpackPosArgs <|> parse1ArgSend
     unpackPkArgs = do
-      void $ string "***"
+      -- `...` for src level compatibility with JavaScript spread syntax
+      void $ string "***" <|> string "..."
       notFollowedBy $ satisfy isOperatorChar
       sc
       (!x, !si') <- parseExpr si
