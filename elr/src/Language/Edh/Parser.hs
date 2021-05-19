@@ -201,7 +201,9 @@ parseImportExpr !si = do
 
 parseLetStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseLetStmt !si = do
-  void $ keyword "let"
+  -- `const` has no different semantics than `let` in Edh,
+  -- merely for JavaScript src level compatibility
+  void $ keyword "let" <|> keyword "const"
   !ar <- parseArgsReceiver
   equalSign
   (!argSender, !si') <- parseArgsSender
@@ -220,28 +222,36 @@ parseArgsReceiver =
     return $ SingleReceiver singleArg
   where
     parsePackReceiver :: Parser ArgsReceiver
-    parsePackReceiver = do
-      void $ symbol "("
-      PackReceiver . reverse <$> parseArgRecvs [] False False
+    parsePackReceiver =
+      choice
+        [ symbol "(" >> PackReceiver . reverse <$> parseRestArgRecvs ")",
+          -- following is for JavaScript src level compatibility
+          symbol "[" >> PackReceiver . reverse <$> parseRestArgRecvs "]",
+          symbol "{" >> PackReceiver . reverse <$> parseRestArgRecvs "}"
+        ]
 
-parseArgRecvs :: [ArgReceiver] -> Bool -> Bool -> Parser [ArgReceiver]
-parseArgRecvs !rs !kwConsumed !posConsumed = do
-  void optionalComma
-  (symbol ")" $> rs) <|> do
-    !nextArg <-
-      (<* optionalComma) $
-        if posConsumed
-          then restPkArgs <|> restKwArgs <|> parseKwRecv True
-          else nextPosArg
-    case nextArg of
-      RecvRestPosArgs _ -> parseArgRecvs (nextArg : rs) kwConsumed True
-      RecvRestKwArgs _ -> parseArgRecvs (nextArg : rs) True posConsumed
-      _ -> parseArgRecvs (nextArg : rs) kwConsumed posConsumed
+parseRestArgRecvs :: Text -> Parser [ArgReceiver]
+parseRestArgRecvs !endSymbol = parseArgRecvs [] False False
   where
+    parseArgRecvs :: [ArgReceiver] -> Bool -> Bool -> Parser [ArgReceiver]
+    parseArgRecvs !rs !kwConsumed !posConsumed = do
+      void optionalComma
+      (symbol endSymbol $> rs) <|> do
+        !nextArg <-
+          (<* optionalComma) $
+            if posConsumed
+              then restPkArgs <|> restKwArgs <|> parseKwRecv True
+              else nextPosArg
+        case nextArg of
+          RecvRestPosArgs _ -> parseArgRecvs (nextArg : rs) kwConsumed True
+          RecvRestKwArgs _ -> parseArgRecvs (nextArg : rs) True posConsumed
+          _ -> parseArgRecvs (nextArg : rs) kwConsumed posConsumed
+
     nextPosArg, restKwArgs, restPosArgs :: Parser ArgReceiver
     nextPosArg = restPkArgs <|> restKwArgs <|> restPosArgs <|> parseKwRecv True
     restPkArgs = do
-      void $ symbol "***"
+      -- `...` for JavaScript src level syntax compatibility
+      void $ symbol "***" <|> symbol "..."
       RecvRestPkArgs <$> optionalArgName
     restKwArgs = do
       void $ symbol "**"
@@ -694,12 +704,12 @@ parseYieldExpr !si = do
 parseForExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseForExpr !si = do
   void $ keyword "for"
-  (!edhSyntax, !ar, !iter, !si') <- parseLoopHead
-  if edhSyntax
-    then void $ keyword "do"
-    else void $ optional $ keyword "do"
-  (!doX, !si'') <- parseStmt si'
-  return (ForExpr ar iter doX, si'')
+  (!jsSyntax, !ar, !iter, !si') <- parseLoopHead
+  if jsSyntax
+    then void $ optional $ keyword "do"
+    else void $ keyword "do"
+  (!bodyExpr, !si'') <- parseStmt si'
+  return (ForExpr ar iter bodyExpr, si'')
   where
     parseLoopHead :: Parser (Bool, ArgsReceiver, ExprSrc, IntplSrcInfo)
     parseLoopHead =
@@ -708,33 +718,32 @@ parseForExpr !si = do
             -- possibly JavaScript compatible syntax
             void $ symbol "("
             !jsSyntax <-
-              isJust
-                <$> optional (void (keyword "let") <|> void (keyword "const"))
+              isJust <$> optional (void $ keyword "let" <|> keyword "const")
             -- js compatible syntax is triggered by `let` or `const` keyword
             if jsSyntax
               then do
-                !singleArg <- parseKwRecv False
-                void (keyword "of") <|> void (keyword "in")
+                !ar <- parseArgsReceiver
+                void $ keyword "of" <|> keyword "in"
                 (!iter, !si') <- parseExpr si
                 void $ symbol ")"
-                return (False, SingleReceiver singleArg, iter, si')
+                return (True, ar, iter, si')
               else do
-                ars <- parseArgRecvs [] False False
+                ars <- parseRestArgRecvs ")"
                 void $ keyword "from"
                 (!iter, !si') <- parseExpr si
-                return (True, PackReceiver $ reverse $! ars, iter, si'),
+                return (False, PackReceiver $ reverse $! ars, iter, si'),
           do
             -- wild arg receiver is exclusively Edh syntax
             void $ symbol "*"
             void $ keyword "from"
             (!iter, !si') <- parseExpr si
-            return (True, WildReceiver, iter, si'),
+            return (False, WildReceiver, iter, si'),
           do
             -- single arg receiver is exclusively Edh syntax
             !singleArg <- parseKwRecv False
             void $ keyword "from"
             (!iter, !si') <- parseExpr si
-            return (True, SingleReceiver singleArg, iter, si')
+            return (False, SingleReceiver singleArg, iter, si')
         ]
 
 parsePerformExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -1202,6 +1211,7 @@ illegalExprStarting = do
           illegalWord "defer",
           illegalWord "effect",
           illegalWord "let",
+          illegalWord "const", -- reserved for JavaScript src compatibility
           illegalWord "as",
           illegalWord "extends",
           illegalWord "perceive",
