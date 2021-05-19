@@ -1,35 +1,43 @@
 
-{
-  method countdown(n) case type(n) of {
+# %% #
+method countdown(n) case type(n) of {
 
-    DecimalType -> {
-      
-      n < 1 -> console.info <| '  🎉 instantly !!'
+  ;| n is nan -> console.info<| 'Not a number! No counting!'
 
-      n > 5 -> {
-        console.warn <| "  😓 that's too many to count, doing my most ..."
-        n = 5
-        fallthrough # similar to `fallthrough` in Go
-      }
+  DecimalType -> {
 
-      # (:-) will be parsed as another operator, sep (1 space used below) needed here
-      for i from range(n : 0 : -1) do console.info <| '  ⏲️  ' ++ i
-      console.info <| '  🎉 !!'
+    ;| n < 1 -> console.info<| '  🎉 instantly !!'
 
+    ;| n > 5 -> {
+      console.warn<| "  😓 that's too many to count, doing my most ..."
+      n = 5
+      fallthrough # similar to `fallthrough` in Go
     }
 
-    _ -> # the underscore condition always matches, similar to underscore in Haskell
-      console.error <| "I don't know what you want from a " ++ type(n) ++ ': ' ++ n
+    # (:-) will be parsed as another operator, sep (1 space used below) needed here
+    for i from n:0: -1 do console.info<| '  ⏲️  ' ++ i
+    console.info<| '  🎉 !!'
 
-    console.fatal <| "don't worry, this will never happen."
   }
+
+  _ -> # the underscore condition always matches, similar to underscore in Haskell
+  console.error<| "I don't know what you want from sth that be " ++ show(n)
+
+  console.fatal<| "don't worry, this will never happen."
 }
 
+
+# %% #
 countdown(3)
 
+# %% #
 countdown(50)
 
+# %% #
 countdown(-1)
 
+# %% #
 countdown('the hell')
 
+# %% #
+countdown(nan)
