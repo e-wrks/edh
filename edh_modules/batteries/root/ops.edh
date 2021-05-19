@@ -12,4 +12,11 @@ Note the precedence -4 follows Haskell for it to be 1 higher than that of ($), w
    #}
   infixl -4 (&) () (|)
 
+
+  {## Operator (===) is (is) redeclared for source level compatibility with JavaScript #}
+  infix 4 (===) () (is)
+  {## Operator (!==) is (is not) redeclared for source level compatibility with JavaScript #}
+  infix 4 (!==) () (is not)
+
+
 }

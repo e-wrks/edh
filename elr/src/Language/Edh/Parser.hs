@@ -218,11 +218,11 @@ parseArgsReceiver =
   (symbol "*" $> WildReceiver) <|> parsePackReceiver <|> do
     !singleArg <- parseKwRecv False
     return $ SingleReceiver singleArg
-
-parsePackReceiver :: Parser ArgsReceiver
-parsePackReceiver = do
-  void $ symbol "("
-  PackReceiver . reverse <$> parseArgRecvs [] False False
+  where
+    parsePackReceiver :: Parser ArgsReceiver
+    parsePackReceiver = do
+      void $ symbol "("
+      PackReceiver . reverse <$> parseArgRecvs [] False False
 
 parseArgRecvs :: [ArgReceiver] -> Bool -> Bool -> Parser [ArgReceiver]
 parseArgRecvs !rs !kwConsumed !posConsumed = do
@@ -667,7 +667,7 @@ parseIfExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseIfExpr !si = do
   void $ keyword "if"
   (!cond, !si') <- parseExpr si
-  void $ keyword "then"
+  void $ optional $ keyword "then"
   (!cseq, !si2) <- parseStmt si'
   (!alt, !si3) <-
     {- HLINT ignore "Use first" -}
@@ -694,12 +694,48 @@ parseYieldExpr !si = do
 parseForExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseForExpr !si = do
   void $ keyword "for"
-  !ar <- parseArgsReceiver
-  void $ keyword "from"
-  (!iter, !si') <- parseExpr si
-  void $ keyword "do"
+  (!edhSyntax, !ar, !iter, !si') <- parseLoopHead
+  if edhSyntax
+    then void $ keyword "do"
+    else void $ optional $ keyword "do"
   (!doX, !si'') <- parseStmt si'
   return (ForExpr ar iter doX, si'')
+  where
+    parseLoopHead :: Parser (Bool, ArgsReceiver, ExprSrc, IntplSrcInfo)
+    parseLoopHead =
+      choice
+        [ do
+            -- possibly JavaScript compatible syntax
+            void $ symbol "("
+            !jsSyntax <-
+              isJust
+                <$> optional (void (keyword "let") <|> void (keyword "const"))
+            -- js compatible syntax is triggered by `let` or `const` keyword
+            if jsSyntax
+              then do
+                !singleArg <- parseKwRecv False
+                void (keyword "of") <|> void (keyword "in")
+                (!iter, !si') <- parseExpr si
+                void $ symbol ")"
+                return (False, SingleReceiver singleArg, iter, si')
+              else do
+                ars <- parseArgRecvs [] False False
+                void $ keyword "from"
+                (!iter, !si') <- parseExpr si
+                return (True, PackReceiver $ reverse $! ars, iter, si'),
+          do
+            -- wild arg receiver is exclusively Edh syntax
+            void $ symbol "*"
+            void $ keyword "from"
+            (!iter, !si') <- parseExpr si
+            return (True, WildReceiver, iter, si'),
+          do
+            -- single arg receiver is exclusively Edh syntax
+            !singleArg <- parseKwRecv False
+            void $ keyword "from"
+            (!iter, !si') <- parseExpr si
+            return (True, SingleReceiver singleArg, iter, si')
+        ]
 
 parsePerformExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parsePerformExpr !si = do
