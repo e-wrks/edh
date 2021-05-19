@@ -235,9 +235,13 @@ parseLetStmt !si = do
 
 parseArgsReceiver :: Parser ArgsReceiver
 parseArgsReceiver =
-  wildReceiver <|> dropReceiver <|> packReceiver <|> singleReceiver
+  packReceiver <|> dropReceiver <|> wildReceiver <|> singleReceiver
   where
-    wildReceiver = symbol "*" $> WildReceiver
+    wildReceiver = do
+      void $ symbol "*"
+      (<|> return WildReceiver) $ do
+        void $ keyword "as"
+        SingleReceiver . RecvRestPkArgs <$> parseAttrAddrSrc
 
     dropReceiver =
       SingleReceiver . RecvRestPkArgs . AttrAddrSrc (NamedAttr "_")
@@ -727,14 +731,12 @@ parseYieldExpr !si = do
 parseForExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseForExpr !si = do
   void $ keyword "for"
-  (!jsSyntax, !ar, !iter, !si') <- parseLoopHead
-  if jsSyntax
-    then void $ optional $ keyword "do"
-    else void $ keyword "do"
+  (!ar, !iter, !si') <- parseLoopHead
+  void $ optional $ keyword "do"
   (!bodyExpr, !si'') <- parseStmt si'
   return (ForExpr ar iter bodyExpr, si'')
   where
-    parseLoopHead :: Parser (Bool, ArgsReceiver, ExprSrc, IntplSrcInfo)
+    parseLoopHead :: Parser (ArgsReceiver, ExprSrc, IntplSrcInfo)
     parseLoopHead =
       choice
         [ do
@@ -742,31 +744,44 @@ parseForExpr !si = do
             void $ symbol "("
             !jsSyntax <-
               isJust <$> optional (void $ keyword "let" <|> keyword "const")
-            -- js compatible syntax is triggered by `let` or `const` keyword
             if jsSyntax
               then do
+                -- js compatible syntax is triggered by `let` or `const` keyword
                 !ar <- parseArgsReceiver
                 void $ keyword "of" <|> keyword "in"
                 (!iter, !si') <- parseExpr si
                 void $ symbol ")"
-                return (True, ar, iter, si')
+                return (ar, iter, si')
               else do
+                -- Edh or Python-like syntax
                 ars <- parseRestArgRecvs ")"
-                void $ keyword "from"
+                void $ keyword "from" <|> keyword "in"
                 (!iter, !si') <- parseExpr si
-                return (False, PackReceiver $ reverse $! ars, iter, si'),
+                return (PackReceiver $ reverse $! ars, iter, si'),
           do
-            -- wild arg receiver is exclusively Edh syntax
+            -- drop receiver, exclusively Edh syntax
+            !src'span <- keyword "_"
+            let !ar =
+                  SingleReceiver $
+                    RecvRestPkArgs $ AttrAddrSrc (NamedAttr "_") src'span
+            void $ keyword "from"
+            (!iter, !si') <- parseExpr si
+            return (ar, iter, si'),
+          do
+            -- wild arg receiver, exclusively Edh syntax
             void $ symbol "*"
+            !ar <- (<|> return WildReceiver) $ do
+              void $ keyword "as"
+              SingleReceiver . RecvRestPkArgs <$> parseAttrAddrSrc
             void $ keyword "from"
             (!iter, !si') <- parseExpr si
-            return (False, WildReceiver, iter, si'),
+            return (ar, iter, si'),
           do
-            -- single arg receiver is exclusively Edh syntax
+            -- single arg receiver, Edh or Python-like syntax
             !singleArg <- parseKwRecv False
-            void $ keyword "from"
+            void $ keyword "from" <|> keyword "in"
             (!iter, !si') <- parseExpr si
-            return (False, SingleReceiver singleArg, iter, si')
+            return (SingleReceiver singleArg, iter, si')
         ]
 
 parsePerformExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
