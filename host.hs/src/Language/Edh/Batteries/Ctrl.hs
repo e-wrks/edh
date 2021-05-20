@@ -237,8 +237,11 @@ methodArrowArgsReceiver ::
   Expr ->
   (Either Text ArgsReceiver -> STM ()) ->
   STM ()
-methodArrowArgsReceiver (AttrExpr (DirectRef !argAttr)) !exit =
-  exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing
+methodArrowArgsReceiver
+  (AttrExpr (DirectRef argAttr@(AttrAddrSrc !addr _)))
+  !exit = case addr of
+    NamedAttr "_" -> exit $ Right $ SingleReceiver $ RecvRestPkArgs argAttr
+    _ -> exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing
 methodArrowArgsReceiver (ArgsPackExpr (ArgsPacker !argSndrs _)) !exit =
   cnvrt argSndrs []
   where
@@ -762,7 +765,8 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                         (DirectRef (AttrAddrSrc (NamedAttr !valueName) _))
                       )
                     _
-                  ) _docCmt
+                  )
+                _docCmt
               )
             _
           ] -> case ctxMatch of
