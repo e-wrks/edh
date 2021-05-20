@@ -1073,7 +1073,7 @@ parseOpLit = choice [quaintOpLit, freeformOpLit, stdOpLit]
         quaintOp !sym =
           lexeme $
             if isIdentChar $ T.last sym
-              then string sym <* notFollowedBy (satisfy isIdentChar)
+              then try $ string sym <* notFollowedBy (satisfy isIdentChar)
               else string sym
     freeformOpLit = lexeme $ do
       void $ char '~'
