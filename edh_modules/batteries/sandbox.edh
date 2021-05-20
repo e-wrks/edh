@@ -29,7 +29,7 @@ export {
     print, everyMicros, everyMillis, everySeconds,
     # censored:
     # logLevel, now, exit, readSource, readCommand,
-    **_
+    **
   ) genuineConsole
 
 }

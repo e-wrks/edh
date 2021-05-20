@@ -191,7 +191,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
   {##
    # Run a REPL within an object's (probably a module) scope, e.g.
   ```edh
-  m = { import (**_) 'batteries/magic' }
+  m = { import _ 'batteries/magic' }
   replWith(m)
   ```
    #
