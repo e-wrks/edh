@@ -2744,8 +2744,7 @@ importFromObject !tgtEnt !argsRcvr !fromObj !done !ets =
     -- those from farther objects
     sequence_ $ reverse $ collect1 arts <$> fromObj : supers
     !arts' <- iopdSnapshot arts
-    runEdhTx ets $
-      importFromApk tgtEnt argsRcvr (ArgsPack [] arts') done
+    runEdhTx ets $ importFromApk tgtEnt argsRcvr (ArgsPack [] arts') done
   where
     moduClass = edh'module'class $ edh'prog'world $ edh'thread'prog ets
 
@@ -2771,19 +2770,22 @@ importFromObject !tgtEnt !argsRcvr !fromObj !done !ets =
                     -- note this seems not preventing cps exiting,
                     -- at least we can get an error thrown
                     throwEdh ets EvalError $
-                      "bad class for the object to be imported - "
-                        <> badDesc
+                      "bad class for the object to be imported - " <> badDesc
       ClassStore !cls -> collectExp (edh'class'store cls) id
-      HostStore {} -> case edh'obj'store $ edh'obj'class obj of
-        ClassStore !cls ->
-          collectExp (edh'class'store cls) (doBindTo obj fromObj)
-        _ ->
-          edhValueDesc ets (EdhObject $ edh'obj'class fromObj) $ \ !badDesc ->
-            -- note this seems not preventing cps exiting,
-            -- at least we can get an error thrown
-            throwEdh ets EvalError $
-              "bad class for the host object to be imported - "
-                <> badDesc
+      HostStore !hsd -> case fromDynamic hsd of
+        Just (fromScope :: Scope) ->
+          let !this = edh'scope'this fromScope
+              !that = edh'scope'that fromScope
+           in collectExp (edh'scope'entity fromScope) (doBindTo this that)
+        Nothing -> case edh'obj'store $ edh'obj'class obj of
+          ClassStore !cls ->
+            collectExp (edh'class'store cls) (doBindTo obj fromObj)
+          _ ->
+            edhValueDesc ets (EdhObject $ edh'obj'class fromObj) $ \ !badDesc ->
+              -- note this seems not preventing cps exiting,
+              -- at least we can get an error thrown
+              throwEdh ets EvalError $
+                "bad class for the host object to be imported - " <> badDesc
       where
         collectExp :: EntityStore -> (EdhValue -> EdhValue) -> STM ()
         collectExp !esFrom !binder =
@@ -2801,7 +2803,7 @@ importFromObject !tgtEnt !argsRcvr !fromObj !done !ets =
               [(EdhValue, EdhValue)] ->
               [(AttrKey, EdhValue)] ->
               [(AttrKey, EdhValue)]
-            transEntries [] result = result
+            transEntries [] result = reverse result -- maintain order as exp
             transEntries ((!key, !val) : rest) result = case key of
               EdhString !expKey ->
                 transEntries rest $ (AttrByName expKey, binder val) : result
@@ -3976,10 +3978,18 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
                 HashStore !hs -> importInto fsChk hs argsRcvr srcExpr exit
                 ClassStore !cls ->
                   importInto fsChk (edh'class'store cls) argsRcvr srcExpr exit
-                HostStore {} ->
-                  throwEdhTx UsageError $
-                    "can not import into a host object of class "
-                      <> objClassName intoObj
+                HostStore !hsd -> case fromDynamic hsd of
+                  Just (intoScope :: Scope) ->
+                    importInto
+                      fsChk
+                      (edh'scope'entity intoScope)
+                      argsRcvr
+                      srcExpr
+                      exit
+                  Nothing ->
+                    throwEdhTx UsageError $
+                      "can not import into a host object of class "
+                        <> objClassName intoObj
               EdhNil -> exitEdhTx exit nil
               _ ->
                 throwEdhTx UsageError $
