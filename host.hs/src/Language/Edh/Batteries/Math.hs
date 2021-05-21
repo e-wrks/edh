@@ -254,9 +254,20 @@ inRangeProc inverse eqTester !lhExpr !rhExpr !exit !ets = runEdhTx ets $
               OpenBound {} -> exitEdh ets exit $ EdhBool $ inverse False
               ClosedBound {} -> rhCmp
         EdhList (List _u !lv) -> readTVar lv >>= chkInList lhVal
-        EdhArgsPack (ArgsPack !vs !kwargs)
-          | odNull kwargs ->
-            chkInList lhVal vs
+        EdhDict (Dict _ !ds) ->
+          iopdLookup lhVal ds >>= \case
+            Nothing -> exitEdh ets exit $ EdhBool $ inverse False
+            Just {} -> exitEdh ets exit $ EdhBool $ inverse True
+        EdhArgsPack (ArgsPack !vs !kwargs) ->
+          if null vs
+            then edhValueAsAttrKey'
+              ets
+              lhVal
+              (exitEdh ets exit $ EdhBool $ inverse False)
+              $ \ !lhKey -> case odLookup lhKey kwargs of
+                Nothing -> exitEdh ets exit $ EdhBool $ inverse False
+                Just {} -> exitEdh ets exit $ EdhBool $ inverse True
+            else chkInList lhVal vs
         _ -> edhValueDesc ets rhVal $ \ !badDesc ->
           throwEdh ets UsageError $ "bad range/container: " <> badDesc
   where
