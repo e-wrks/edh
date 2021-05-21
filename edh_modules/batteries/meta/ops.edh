@@ -169,6 +169,8 @@ This operator gives out result of lhs evaluation when no exception occurred, and
 
    #}
   infixl -2 ($=>) ( callerScope, lhx, rhx ) pass
+  {## flipped catch operator #}
+  infixr -2 (<=$) ( callerScope, lhx, rhx ) pass
 
   {##
    # finally operator
@@ -177,6 +179,8 @@ Execute its rhs expression before the result of lhs execution is given out.
 
    #}
   infixl -2 (@=>) ( callerScope, lhx, rhx ) pass
+  {## flipped finally operator #}
+  infixr -2 (<=@) ( callerScope, lhx, rhx ) pass
 
 
   # TODO the rest of all available host operators need meta def/doc here

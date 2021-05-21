@@ -311,8 +311,10 @@ installEdhBatteries world =
           ("->", InfixR, -1),
           -- catch
           ("$=>", InfixL, -2),
+          ("<=$", InfixR, -2),
           -- finally
           ("@=>", InfixL, -2),
+          ("<=@", InfixR, -2),
           -- the attribute key dereferencing operator
           ("@", InfixL, 10),
           -- attribute tempter,
@@ -493,7 +495,9 @@ installEdhBatteries world =
                   ("=>*", prodArrowProc),
                   ("->", branchProc),
                   ("$=>", catchProc),
+                  ("<=$", flip catchProc),
                   ("@=>", finallyProc),
+                  ("<=@", flip finallyProc),
                   ("::", attrAnnoProc),
                   (":=:", typeAnnoProc),
                   ("!", lhsFreeFormAnnoProc),
