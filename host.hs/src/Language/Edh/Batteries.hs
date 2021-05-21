@@ -310,11 +310,19 @@ installEdhBatteries world =
           -- branch
           ("->", InfixR, -1),
           -- catch
-          ("$=>", InfixL, -2),
-          ("<=$", InfixR, -2),
+          ("$=>", InfixL, -2), -- idiomatic Edh catch operator
+          -- for src level compatibility with JavaScript
+          ("catch", InfixL, -2),
+          ("<=$", InfixR, -2), -- idiomatic Edh flipped-catch operator
+          -- ~handle~ is catch flipped, resembles `handle` idiom in Haskell
+          ("~handle~", InfixR, -2),
           -- finally
-          ("@=>", InfixL, -2),
-          ("<=@", InfixR, -2),
+          ("@=>", InfixL, -2), -- idiomatic Edh finally operator
+          -- for src level compatibility with JavaScript
+          ("finally", InfixL, -2),
+          ("<=@", InfixR, -2), -- idiomatic Edh flipped-finally operator
+          -- ~anyway~ is finally flipped, counterpart to ~handle~
+          ("~anyway~", InfixR, -2),
           -- the attribute key dereferencing operator
           ("@", InfixL, 10),
           -- attribute tempter,

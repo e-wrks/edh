@@ -1230,11 +1230,10 @@ parsePrefixExpr !si =
             Just (!apkr'', !si'') -> return (Just apkr'', si'')
         !x <- parseExprWithSrc
         return (DefaultExpr apkr x, si'),
-      -- technically accept the new keyword anywhere as an expr prefix,
-      -- to better inter-op with some other languages like JavaScript
-      -- todo mandate it's actually calling a class (constructor) method?
+      -- technically accept the `new` and `try keyword anywhere as an expr
+      -- prefix, to better inter-op with some other languages like JavaScript
       do
-        void $ keyword "new"
+        void $ keyword "new" <|> keyword "try"
         (ExprSrc !x _, !si') <- parseExpr si
         return (x, si')
     ]

@@ -19,14 +19,24 @@ Note the precedence -4 follows Haskell for it to be 1 higher than that of ($), w
   infix 4 (!==) () (is not)
 
 
-  {## The ($=>) operator spelled out by redeclaration #}
-  infixl -2 (~catch~) () ($=>)
-  {## The (<=$) operator spelled out by redeclaration #}
+  {## The ($=>) operator spelled out with redeclaration
+   # Note this is for src level compatibility with JavaScript
+   #}
+  infixl -2 (catch) () ($=>)
+
+  {## The (@=>) operator spelled out with redeclaration
+   # Note this is for src level compatibility with JavaScript
+   #}
+  infixl -2 (finally) () (@=>)
+
+  {## The (<=$) operator spelled out with redeclaration
+   # Note this resembls `handle` idiom in Haskell
+   #}
   infixr -2 (~handle~) () (<=$)
 
-  {## The (@=>) operator spelled out by redeclaration #}
-  infixl -2 (~finally~) () (@=>)
-  {## The (<=@) operator spelled out by redeclaration #}
+  {## The (<=@) operator spelled out with redeclaration
+   # Note this is a counterpart to ~handle~
+   #}
   infixr -2 (~anyway~) () (<=@)
 
 }
