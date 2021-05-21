@@ -4,23 +4,13 @@ module Language.Edh.Batteries.Assign where
 
 import qualified Data.Text as T
 import Language.Edh.Control
-  ( EdhErrorTag (EvalError, UsageError),
-    OpSymbol,
-  )
-import Language.Edh.CoreLang (lookupEdhObjAttr)
+import Language.Edh.CoreLang
 import Language.Edh.Evaluate
-  ( assignEdhTarget,
-    callEdhMethod,
-    evalExprSrc,
-    evalInfix,
-    resolveEdhAttrAddr,
-    throwEdh,
-  )
-import Language.Edh.IOPD (iopdLookup, iopdLookupDefault, odEmpty)
+import Language.Edh.IOPD
 import Language.Edh.RtTypes
 import Prelude
 
--- | operator (=)
+-- | operator (=), unconditional assignment
 assignProc :: EdhIntrinsicOp
 assignProc (ExprSrc !lhe _) !rhExpr !exit !ets =
   runEdhTx etsAssign $ case lhe of
@@ -68,11 +58,9 @@ assignProc (ExprSrc !lhe _) !rhExpr !exit !ets =
                     <> T.pack (show badIndexer)
           _ -> exitEdh ets exit edhNA
     _ -> evalExprSrc rhExpr $ \ !rhVal ->
-      assignEdhTarget lhe (edhDeCaseWrap rhVal)
-      -- restore original tx state
-      $
-        edhSwitchState ets
-          . exitEdhTx exit
+      assignEdhTarget lhe (edhDeCaseWrap rhVal) $
+        -- restore original tx state
+        edhSwitchState ets . exitEdhTx exit
   where
     -- discourage artifact definition during assignment
     !etsAssign = ets {edh'context = (edh'context ets) {edh'ctx'pure = True}}
@@ -219,27 +207,52 @@ assignWithOpProc !withOpSym lhExpr@(ExprSrc !lhe _) !rhExpr !exit !ets =
     -- discourage artifact definition during assignment
     !etsAssign = ets {edh'context = (edh'context ets) {edh'ctx'pure = True}}
 
--- | operator (?=)
+-- | operator (?=), tentative assignment
 assignMissingProc :: EdhIntrinsicOp
-assignMissingProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "_") _))) _) _ _ !ets =
-  throwEdh ets UsageError "not so reasonable: _ ?= xxx"
-assignMissingProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _) !rhExpr !exit !ets =
-  resolveEdhAttrAddr ets addr $ \ !key -> do
-    let !es = edh'scope'entity $ contextScope $ edh'context ets
-    iopdLookup key es >>= \case
-      Nothing -> do
-        -- discourage artifact definition during assignment
-        let !etsAssign =
-              ets {edh'context = (edh'context ets) {edh'ctx'pure = True}}
-        runEdhTx etsAssign $
-          evalExprSrc rhExpr $ \ !rhVal _ets ->
-            let !rhv = edhDeCaseWrap rhVal
-             in do
-                  edhSetValue key rhv es
-                  exitEdh ets exit rhv
-      Just !preVal -> exitEdh ets exit preVal
+assignMissingProc
+  (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "_") _))) _)
+  _
+  _
+  !ets =
+    throwEdh ets UsageError "not so reasonable: _ ?= xxx"
+assignMissingProc
+  (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _)
+  !rhExpr
+  !exit
+  !ets =
+    resolveEdhAttrAddr ets addr $ \ !key -> do
+      let !es = edh'scope'entity $ contextScope $ edh'context ets
+      iopdLookup key es >>= \case
+        Nothing -> do
+          -- discourage artifact definition during assignment
+          let !etsAssign =
+                ets {edh'context = (edh'context ets) {edh'ctx'pure = True}}
+          runEdhTx etsAssign $
+            evalExprSrc rhExpr $ \ !rhVal _ets ->
+              let !rhv = edhDeCaseWrap rhVal
+               in do
+                    edhSetValue key rhv es
+                    exitEdh ets exit rhv
+        Just !preVal -> exitEdh ets exit preVal
 assignMissingProc !lhExpr _ _ !ets =
   throwEdh ets EvalError $
-    "invalid left-hand expression to (?=) "
-      <> T.pack
-        (show lhExpr)
+    "invalid left-hand expression to (?=) " <> T.pack (show lhExpr)
+
+-- | operator (|=), null overwritting assignment
+overwriteNullProc :: EdhIntrinsicOp
+overwriteNullProc !lhExpr !rhExpr !exit !ets =
+  runEdhTx etsOverwrite $
+    evalExprSrc lhExpr $ \ !lhVal _ets ->
+      edhValueNull etsOverwrite lhVal $ \case
+        False -> exitEdh ets exit lhVal
+        True ->
+          runEdhTx etsOverwrite $
+            assignProc lhExpr rhExpr $ edhSwitchState ets . exitEdhTx exit
+  where
+    !etsOverwrite =
+      ets
+        { -- mandate transaction for the check plus possible assign
+          edh'in'tx = True,
+          -- discourage artifact definition during assignment
+          edh'context = (edh'context ets) {edh'ctx'pure = True}
+        }

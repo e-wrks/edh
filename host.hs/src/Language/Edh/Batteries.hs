@@ -342,7 +342,8 @@ installEdhBatteries world =
           -- assignments, make them lower than (++),
           -- so don't need to quote `a = b ++ c`
           ("=", InfixR, 0),
-          ("?=", InfixR, 0),
+          ("?=", InfixR, 0), -- tentative assignment
+          ("|=", InfixR, 0), -- null overwritting assignment
           -- the definition operator, creates named value in Edh
           (":=", InfixR, 1),
           ("?:=", InfixR, 1),
@@ -488,6 +489,8 @@ installEdhBatteries world =
                   ("<", isLtProc),
                   ("<=", isLeProc),
                   ("=", assignProc),
+                  ("?=", assignMissingProc),
+                  ("|=", overwriteNullProc),
                   ("++=", assignWithOpProc "++"),
                   ("+=", assignWithOpProc "+"),
                   ("-=", assignWithOpProc "-"),
@@ -498,7 +501,6 @@ installEdhBatteries world =
                   ("**=", assignWithOpProc "**"),
                   ("&&=", assignWithOpProc "&&"),
                   ("||=", assignWithOpProc "||"),
-                  ("?=", assignMissingProc),
                   ("=>", arrowProc),
                   ("=>*", prodArrowProc),
                   ("->", branchProc),
