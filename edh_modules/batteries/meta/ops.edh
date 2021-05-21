@@ -113,12 +113,23 @@ At par to flipped function application operator (&) as in Haskell
 
 
   {##
-   # In-Range test operator
+   # In-Range/Container test operator, using identity equality test
+   #}
+  infix 4 (is in) ( callerScope, lhx, rhx ) pass
+
+  {##
+   # Not-In-Range/Container test operator, using identity equality test
+   #}
+  infix 4 (is not in) ( callerScope, lhx, rhx ) pass
+
+
+  {##
+   # In-Range/Container test operator, using instant equality test
    #}
   infix 4 (in) ( callerScope, lhx, rhx ) pass
 
   {##
-   # Not-In-Range test operator
+   # Not-In-Range/Container test operator, using instant equality test
    #}
   infix 4 (not in) ( callerScope, lhx, rhx ) pass
 

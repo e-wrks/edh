@@ -223,7 +223,7 @@ valEqProc !inversion !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
             (ArgsPack [lhVal, rhVal] odEmpty)
             (LitExpr $ BoolLiteral $ inversion False)
 
--- * in range test
+-- * in range/container test
 
 inRangeProc ::
   (Bool -> Bool) ->
