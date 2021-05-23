@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "type": "module",
+  "name": "edh",
+  "version": "0.3.0",
+  "description": "Event Distributing & Hosting",
+  "main": "index.js",
+  "author": "Compl Yue",
+  "license": "BSD-3-Clause"
+}

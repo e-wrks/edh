@@ -36,35 +36,35 @@
  */
 export class PubChan {
   constructor() {
-    const nxt = [null, null, null];
+    const nxt = [null, null, null]
     nxt[0] = new Promise((resolve, reject) => {
-      nxt[1] = resolve;
-      nxt[2] = reject;
-    });
-    this.nxt = nxt;
+      nxt[1] = resolve
+      nxt[2] = reject
+    })
+    this.nxt = nxt
   }
 
   write(ev) {
-    const nxt = [null, null, null];
+    const nxt = [null, null, null]
     nxt[0] = new Promise((resolve, reject) => {
-      nxt[1] = resolve;
-      nxt[2] = reject;
-    });
-    const [_prev, resolve, _reject] = this.nxt;
-    resolve([ev, nxt]);
-    this.nxt = nxt;
+      nxt[1] = resolve
+      nxt[2] = reject
+    })
+    const [_prev, resolve, _reject] = this.nxt
+    resolve([ev, nxt])
+    this.nxt = nxt
   }
 
   async *stream() {
-    var nxt = this.nxt;
+    var nxt = this.nxt
     while (true) {
-      const [curr, _resolve, _reject] = nxt;
-      var [ev, nxt] = await curr;
+      const [curr, _resolve, _reject] = nxt
+      var [ev, nxt] = await curr
       if (null === ev) {
-        return; // reached end-of-stream
+        return // reached end-of-stream
       } else {
-        yield ev;
-        ev = null;
+        yield ev
+        ev = null
       }
     }
   }
@@ -87,12 +87,12 @@ export class SubChan {
     Create a subscriber's channel from a publisher's channel
    */
   constructor(pubChan) {
-    this.nxt = pubChan.nxt;
+    this.nxt = pubChan.nxt
   }
   async read() {
-    let [ev, nxt] = await this.nxt;
-    this.nxt = nxt;
-    return ev;
+    let [ev, nxt] = await this.nxt
+    this.nxt = nxt
+    return ev
   }
 }
 
@@ -101,29 +101,29 @@ export class SubChan {
  */
 export class EventSink {
   constructor() {
-    this.seqn = 0;
-    this.mrv = null;
-    this.chan = new PubChan();
+    this.seqn = 0
+    this.mrv = null
+    this.chan = new PubChan()
   }
 
   publish(ev) {
     if (this.seqn >= Number.MAX_SAFE_INTEGER) {
       // 53-bit integer part of float64 wrap back to 1 on overflow
-      this.seqn = 1;
+      this.seqn = 1
     } else {
-      ++this.seqn;
+      ++this.seqn
     }
-    this.mrv = ev;
-    this.chan.write(ev);
+    this.mrv = ev
+    this.chan.write(ev)
   }
 
   async next() {
     if (this.seqn > 0 && null === this.mrv) {
-      return null; // already at eos
+      return null // already at eos
     }
-    const nxt = this.chan.nxt;
-    const [ev, _nxt] = await nxt;
-    return ev;
+    const nxt = this.chan.nxt
+    const [ev, _nxt] = await nxt
+    return ev
   }
 
   /**
@@ -133,19 +133,19 @@ export class EventSink {
   async *stream() {
     if (this.seqn > 0) {
       if (null === this.mrv) {
-        return; // already at eos
+        return // already at eos
       }
-      yield this.mrv;
+      yield this.mrv
     }
-    var nxt = this.chan.nxt;
+    var nxt = this.chan.nxt
     while (true) {
-      const [curr, _resolve, _reject] = nxt;
-      var [ev, nxt] = await curr;
+      const [curr, _resolve, _reject] = nxt
+      var [ev, nxt] = await curr
       if (null === ev) {
-        return; // reached end-of-stream
+        return // reached end-of-stream
       } else {
-        yield ev;
-        ev = null;
+        yield ev
+        ev = null
       }
     }
   }
@@ -158,33 +158,33 @@ export class EventSink {
     be missed by the calling consumer.
    */
   async *runProducer(producer) {
-    var nxt = this.chan.nxt;
-    const producerDone = producer().then((_) => null);
+    var nxt = this.chan.nxt
+    const producerDone = producer().then((_) => null)
     while (true) {
-      let [curr, _resolve, _reject] = nxt;
+      let [curr, _resolve, _reject] = nxt
       // rejection in producer will be propagated out of here immediately
-      const result = await Promise.race([producerDone, curr]);
+      const result = await Promise.race([producerDone, curr])
       if (null === result) {
         // producer done without exception
         // continue consuming the stream until eos
         while (true) {
-          var [ev, nxt] = await curr;
+          var [ev, nxt] = await curr
           if (null === ev) {
-            return; // reached end-of-stream
+            return // reached end-of-stream
           } else {
-            yield ev;
-            ev = null;
+            yield ev
+            ev = null
           }
-          [curr, _resolve, _reject] = nxt;
+          [curr, _resolve, _reject] = nxt
         }
       } else {
         // producer still running, next event produced
-        var [ev, nxt] = result;
+        var [ev, nxt] = result
         if (null === ev) {
-          return; // reached end-of-stream
+          return // reached end-of-stream
         } else {
-          yield ev;
-          ev = null;
+          yield ev
+          ev = null
         }
       }
     }
