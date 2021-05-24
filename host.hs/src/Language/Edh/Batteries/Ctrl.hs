@@ -230,6 +230,9 @@ arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
       WhileStmt (ExprSrc !cnd _) !body ->
         containsYield cnd || blockContainsYield [body]
           || blockContainsYield rest
+      DoWhileStmt !body (ExprSrc !cnd _) ->
+        containsYield cnd || blockContainsYield [body]
+          || blockContainsYield rest
       ExprStmt !x _docCmt -> containsYield x || blockContainsYield rest
       _ -> blockContainsYield rest
 

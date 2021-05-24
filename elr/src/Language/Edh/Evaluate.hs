@@ -2615,8 +2615,8 @@ evalStmt !stmt !exit = case stmt of
   ThrowStmt !excExpr ->
     evalExprSrc excExpr $ \ !exv -> edhThrowTx $ edhDeCaseClose exv
   WhileStmt !cndExpr !bodyStmt -> do
-    let doWhile :: EdhTx
-        doWhile = evalExprSrc cndExpr $ \ !cndVal !ets ->
+    let whileLoop :: EdhTx
+        whileLoop = evalExprSrc cndExpr $ \ !cndVal !ets ->
           edhValueNull ets cndVal $ \case
             True -> exitEdh ets exit nil
             False -> runEdhTx ets $
@@ -2627,7 +2627,21 @@ evalStmt !stmt !exit = case stmt of
                   -- break while loop
                   EdhBreak -> exitEdhTx exit nil
                   -- continue while loop
-                  _ -> doWhile
+                  _ -> whileLoop
+    whileLoop
+  DoWhileStmt !bodyStmt !cndExpr -> do
+    let doWhile :: EdhTx
+        doWhile = evalStmtSrc bodyStmt $ \ !blkVal ->
+          case edhDeCaseClose blkVal of
+            -- early stop of procedure
+            rtnVal@EdhReturn {} -> exitEdhTx exit rtnVal
+            -- break while loop
+            EdhBreak -> exitEdhTx exit nil
+            -- continue while loop
+            _ -> evalExprSrc cndExpr $ \ !cndVal !ets ->
+              edhValueNull ets cndVal $ \case
+                True -> exitEdh ets exit nil
+                False -> runEdhTx ets doWhile
     doWhile
   ExtendsStmt !superExpr -> evalExprSrc superExpr $ \ !superVal !ets ->
     let !this = edh'scope'this $ contextScope $ edh'context ets
@@ -3222,6 +3236,8 @@ intplStmt !ets !stmt !exit = case stmt of
     intplStmtSrc ets body $ \ !body' -> exit $ PerceiveStmt sink' body'
   WhileStmt !cond !act -> intplExprSrc ets cond $ \ !cond' ->
     intplStmtSrc ets act $ \ !act' -> exit $ WhileStmt cond' act'
+  DoWhileStmt !act !cond -> intplExprSrc ets cond $ \ !cond' ->
+    intplStmtSrc ets act $ \ !act' -> exit $ DoWhileStmt act' cond'
   ThrowStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ ThrowStmt x'
   ReturnStmt !x !docCmt -> intplExprSrc ets x $ \ !x' ->
     exit $ ReturnStmt x' docCmt

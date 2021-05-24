@@ -502,6 +502,21 @@ parseWhileStmt !si = do
   (!act, !si'') <- parseStmt si'
   return (WhileStmt cnd act, si'')
 
+parseDoWhileOrIfStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseDoWhileOrIfStmt !si = do
+  void $ keyword "do"
+  (!act, !si') <- parseStmt si
+  choice
+    [ do
+        void $ keyword "while"
+        (!cnd, !si'') <- parseExpr si'
+        return (DoWhileStmt act cnd, si''),
+      do
+        void $ keyword "if"
+        (!cnd, !si'') <- parseExpr si'
+        return (ExprStmt (IfExpr cnd act Nothing) Nothing, si'')
+    ]
+
 parseProcDecl :: SourcePos -> IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)
 parseProcDecl !startPos !si = do
   !pn <- parseAttrAddrSrc
@@ -669,6 +684,7 @@ parseStmt' !prec !si = do
         parseLetStmt si,
         parseExtendsStmt si,
         parsePerceiveStmt si,
+        parseDoWhileOrIfStmt si,
         parseWhileStmt si,
         -- TODO validate <break> must within a loop construct
         (BreakStmt, si) <$ keyword "break",
@@ -1255,7 +1271,6 @@ illegalExprStarting = do
           illegalWord "perceive",
           illegalWord "while",
           illegalWord "of",
-          illegalWord "do",
           illegalWord "break",
           illegalWord "continue",
           illegalWord "fallthrough",

@@ -1369,6 +1369,8 @@ data Stmt
     PerceiveStmt !ExprSrc !StmtSrc
   | -- | while loop
     WhileStmt !ExprSrc !StmtSrc
+  | -- | do while loop
+    DoWhileStmt !StmtSrc !ExprSrc
   | -- | break from a while/for loop, or terminate the Edh thread if given
     -- from a perceiver
     BreakStmt
