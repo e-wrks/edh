@@ -6,6 +6,7 @@ import Control.Applicative
 import Control.Concurrent.STM
 import Control.Monad
 import Data.ByteString (ByteString)
+import qualified Data.ByteString as B
 import Data.Lossless.Decimal as D (Decimal, nan)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -544,6 +545,12 @@ lenProc !v !kwargs !exit !ets = case edhUltimate v of
   EdhArgsPack (ArgsPack !posArgs _kwArgs) ->
     -- assuming tuple semantics, return number of positional arguments
     exitEdh ets exit $ EdhDecimal $ fromIntegral $ length posArgs
+  EdhString !txt ->
+    -- though strings are not indexable/slicable yet
+    exitEdh ets exit $ EdhDecimal $ fromIntegral $ T.length txt
+  EdhBlob !bytes ->
+    -- though blobs are not indexable/slicable yet
+    exitEdh ets exit $ EdhDecimal $ fromIntegral $ B.length bytes
   _ -> exitEdh ets exit $ EdhDecimal D.nan
 
 markProc :: EdhValue -> Decimal -> RestKwArgs -> EdhHostProc
