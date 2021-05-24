@@ -1554,6 +1554,7 @@ callEdhMethod'
 
 edhPrepareForLoop ::
   EdhThreadState -> -- ets to prepare the looping
+  Bool -> -- whether scoped loop
   ArgsReceiver ->
   ExprSrc ->
   StmtSrc ->
@@ -1562,9 +1563,10 @@ edhPrepareForLoop ::
   STM ()
 edhPrepareForLoop
   !etsLoopPrep
+  !scopedLoop
   !argsRcvr
   !iterExpr
-  !doStmt
+  !bodyStmt
   !iterCollector
   !forLooper =
     case deParen1 iterExpr of -- a complex expression is better quoted within
@@ -1589,8 +1591,8 @@ edhPrepareForLoop
                   iter'span
                   argsSndr
                   callee
-                  (edh'scope'this scopeLooper)
-                  (edh'scope'that scopeLooper)
+                  (edh'scope'this scopeLoopPrep)
+                  (edh'scope'that scopeLoopPrep)
                   $ flip (maybe id) effOuter $
                     \ !outerStack !s -> s {edh'effects'stack = outerStack}
               (EdhObject !obj) ->
@@ -1626,7 +1628,7 @@ edhPrepareForLoop
           evalExprSrc iterExpr $ \ !iterVal _ets ->
             loopOverValue $ edhDeCaseWrap iterVal
     where
-      scopeLooper = contextScope $ edh'context etsLoopPrep
+      scopeLoopPrep = contextScope $ edh'context etsLoopPrep
 
       loopCallGenr ::
         EdhValue ->
@@ -1648,11 +1650,11 @@ edhPrepareForLoop
           packEdhArgs etsLoopPrep argsSndr $ \ !apk ->
             case edh'procedure'decl gnr'proc of
               -- calling a host generator
-              HostDecl !hp -> forLooper loopTgt $ \ !exit !ets -> do
+              HostDecl !hp -> forLooper loopTgt $ \ !exit !etsLooper -> do
                 -- a host procedure views the same scope entity as of the
                 -- caller's call frame
                 {- HLINT ignore "Reduce duplication" -}
-                let !looperCtx = edh'context ets
+                let !looperCtx = edh'context etsLooper
                     !looperFrame = edh'ctx'tip looperCtx
                     !callerFrame = frameMovePC looperFrame caller'span
                     !calleeScope =
@@ -1673,39 +1675,43 @@ edhPrepareForLoop
                               (SrcLoc (SrcDoc "<host-code>") noSrcRange)
                               defaultEdhExcptHndlr,
                           edh'ctx'stack = callerFrame : edh'ctx'stack looperCtx,
-                          edh'ctx'genr'caller = Just $ recvYield ets exit,
+                          edh'ctx'genr'caller = Just $ recvYield etsLooper exit,
                           edh'ctx'match = true,
                           edh'ctx'pure = False,
                           edh'ctx'exporting = False,
                           edh'ctx'eff'defining = False
                         }
-                    !etsCallee = ets {edh'context = calleeCtx}
+                    !etsCallee = etsLooper {edh'context = calleeCtx}
                 runEdhTx etsCallee $
                   hp apk $ \ !val ->
                     -- a host generator is responsible to return a sense-making
                     -- result anyway
-                    edhSwitchState ets $ exitEdhTx exit val
+                    edhSwitchState etsLooper $ exitEdhTx exit val
 
               -- calling an Edh generator
-              ProcDecl _ _ !pb !pl -> forLooper loopTgt $ \ !exit !ets -> do
-                let !looperCtx = edh'context ets
-                    !looperFrame = edh'ctx'tip looperCtx
-                    !callerFrame = frameMovePC looperFrame caller'span
-                    !etsCaller =
-                      ets {edh'context = looperCtx {edh'ctx'tip = callerFrame}}
-                runEdhTx etsCaller $
-                  callEdhMethod'
-                    (Just $ recvYield ets exit)
-                    this
-                    that
-                    gnr'proc
-                    pl
-                    pb
-                    apk
-                    scopeMod
-                    $ \ !gnrRtn ->
-                      -- note it can be a return from unwrapped double-return
-                      edhSwitchState ets $ exitEdhTx exit gnrRtn
+              ProcDecl _ _ !pb !pl ->
+                forLooper loopTgt $ \ !exit !etsLooper -> do
+                  let !looperCtx = edh'context etsLooper
+                      !looperFrame = edh'ctx'tip looperCtx
+                      !callerFrame = frameMovePC looperFrame caller'span
+                      !etsCaller =
+                        etsLooper
+                          { edh'context =
+                              looperCtx {edh'ctx'tip = callerFrame}
+                          }
+                  runEdhTx etsCaller $
+                    callEdhMethod'
+                      (Just $ recvYield etsLooper exit)
+                      this
+                      that
+                      gnr'proc
+                      pl
+                      pb
+                      apk
+                      scopeMod
+                      $ \ !gnrRtn ->
+                        -- note it can be a return from unwrapped double-return
+                        edhSwitchState etsLooper $ exitEdhTx exit gnrRtn
       loopCallGenr _ _ _ !callee _ _ _ =
         throwEdh etsLoopPrep EvalError $
           "bug: unexpected generator: " <> T.pack (show callee)
@@ -1720,7 +1726,7 @@ edhPrepareForLoop
         EdhValue ->
         (Either (EdhThreadState, EdhValue) EdhValue -> STM ()) ->
         EdhTx
-      recvYield !ets !exit !yielded'val !genrCont !etsGenr = do
+      recvYield !etsLooper !exit !yielded'val !genrCont !etsGenr = do
         let doOne !exitOne !etsTry =
               recvEdhArgs
                 etsTry
@@ -1731,8 +1737,10 @@ edhPrepareForLoop
                     _ -> ArgsPack [yielded'val] odEmpty
                 )
                 $ \ !em -> do
-                  iopdUpdate (odToList em) (edh'scope'entity scopeLooper)
-                  runEdhTx etsTry $ evalStmtSrc doStmt exitOne
+                  iopdUpdate (odToList em) $
+                    edh'scope'entity $
+                      edh'frame'scope $ edh'ctx'tip $ edh'context etsTry
+                  runEdhTx etsTry $ evalStmtSrc bodyStmt exitOne
             doneOne !doResult = case edhDeCaseClose doResult of
               EdhContinue ->
                 -- propagate explicit { continue } to generator
@@ -1751,7 +1759,7 @@ edhPrepareForLoop
               EdhReturn EdhReturn {} ->
                 -- this has special meaning
                 -- Edh code should not use this pattern
-                throwEdh ets UsageError "double return from do-of-for?"
+                throwEdh etsLooper UsageError "double return from do-of-for?"
               EdhReturn !rtnVal ->
                 -- early return from for-from-do, the generator should
                 -- propagate the double return as yield result to it,
@@ -1765,66 +1773,99 @@ edhPrepareForLoop
         case yielded'val of
           EdhNil ->
             -- nil yielded from a generator effectively early stops
-            exitEdh ets exit nil
-          EdhContinue -> throwEdh ets EvalError "generator yielded continue"
-          EdhBreak -> throwEdh ets EvalError "generator yielded break"
-          EdhReturn {} -> throwEdh ets EvalError "generator yielded return"
-          _ -> edhCatch etsDo doOne doneOne $
-            \ !etsThrower !exv _recover rethrow ->
-              case exv of
-                EdhNil -> rethrow nil -- no exception occurred in do block
-                _ ->
-                  -- exception uncaught in do block
-                  -- propagate to the generator, the genr may catch it or
-                  -- the exception will propagate to outer of for-from-do
-                  genrCont $ Left (etsThrower, exv)
+            exitEdh etsLooper exit nil
+          EdhContinue ->
+            throwEdh etsLooper EvalError "generator yielded continue"
+          EdhBreak ->
+            throwEdh etsLooper EvalError "generator yielded break"
+          EdhReturn {} ->
+            throwEdh etsLooper EvalError "generator yielded return"
+          _ -> do
+            !ctxDo <-
+              if scopedLoop
+                then do
+                  !loopFrame <- adhocScopedFrame tipLooper
+                  return
+                    ctxLooper
+                      { edh'ctx'tip = loopFrame,
+                        -- push looper + generator call stack
+                        edh'ctx'stack =
+                          tipLooper :
+                          edh'ctx'tip ctxGenr : edh'ctx'stack ctxGenr
+                      }
+                else
+                  return
+                    ctxLooper
+                      { -- tip frame comes from the looper's ctx
+                        -- push generator call stack
+                        edh'ctx'stack =
+                          edh'ctx'tip ctxGenr : edh'ctx'stack ctxGenr
+                      }
+            let !etsDo = etsGenr {edh'context = ctxDo}
+            edhCatch etsDo doOne doneOne $
+              \ !etsThrower !exv _recover rethrow ->
+                case exv of
+                  EdhNil -> rethrow nil -- no exception occurred in do block
+                  _ ->
+                    -- exception uncaught in do block
+                    -- propagate to the generator, the genr may catch it or
+                    -- the exception will propagate to outer of for-from-do
+                    genrCont $ Left (etsThrower, exv)
         where
-          ctx = edh'context ets
+          ctxLooper = edh'context etsLooper
+          tipLooper = edh'ctx'tip ctxLooper
           ctxGenr = edh'context etsGenr
-          -- stack the looper's tip frame on top of the generator's stack
-          etsDo =
-            etsGenr
-              { edh'context =
-                  ctx
-                    { edh'ctx'stack =
-                        edh'ctx'tip ctxGenr : edh'ctx'stack ctxGenr
-                    }
-              }
 
       loopOverValue :: EdhValue -> STM ()
-      loopOverValue !iterVal = forLooper ultIterVal $ \ !exit !ets -> do
-        let !ctx = edh'context ets
-            !scope = contextScope ctx
+      loopOverValue !iterVal = forLooper ultIterVal $ \ !exit !etsLooper -> do
+        let !ctxLooper = edh'context etsLooper
+            tipLooper = edh'ctx'tip ctxLooper
+
             -- do one iteration
             do1 :: ArgsPack -> STM () -> STM ()
-            do1 !apk !next = recvEdhArgs ets ctx argsRcvr apk $ \ !em -> do
-              iopdUpdate (odToList em) (edh'scope'entity scope)
-              runEdhTx ets $
-                evalStmtSrc doStmt $ \ !doResult -> case doResult of
-                  EdhBreak ->
-                    -- break for loop
-                    exitEdhTx exit nil
-                  rtn@EdhReturn {} ->
-                    -- early return during for loop
-                    exitEdhTx exit rtn
-                  _ -> \_ets -> do
-                    -- continue for loop
-                    iterCollector doResult
-                    next
+            do1 !apk !next = do
+              !ctxDo <-
+                if scopedLoop
+                  then do
+                    !loopFrame <- adhocScopedFrame tipLooper
+                    return
+                      ctxLooper
+                        { edh'ctx'tip = loopFrame,
+                          -- push looper call stack
+                          edh'ctx'stack =
+                            tipLooper : edh'ctx'stack ctxLooper
+                        }
+                  else return ctxLooper
+              let !etsDo = etsLooper {edh'context = ctxDo}
+              recvEdhArgs etsDo ctxDo argsRcvr apk $ \ !em -> do
+                iopdUpdate (odToList em) $
+                  edh'scope'entity $ edh'frame'scope $ edh'ctx'tip ctxDo
+                runEdhTx etsDo $
+                  evalStmtSrc bodyStmt $ \ !doResult -> case doResult of
+                    EdhBreak ->
+                      -- break for loop
+                      edhSwitchState etsLooper $ exitEdhTx exit nil
+                    rtn@EdhReturn {} ->
+                      -- early return during for loop
+                      edhSwitchState etsLooper $ exitEdhTx exit rtn
+                    _ -> \_ets -> do
+                      -- continue for loop
+                      iterCollector doResult
+                      next
 
             -- loop over a series of args packs
             iterThem :: [ArgsPack] -> STM ()
-            iterThem [] = exitEdh ets exit nil
+            iterThem [] = exitEdh etsLooper exit nil
             iterThem (apk : apks) = do1 apk $ iterThem apks
 
             -- loop over a subscriber's channel of an event sink
             iterEvt :: TChan EdhValue -> STM ()
             iterEvt !subChan =
-              edhDoSTM ets $
+              edhDoSTM etsLooper $
                 readTChan subChan >>= \case
                   EdhNil ->
                     -- nil marks end-of-stream from an event sink
-                    exitEdh ets exit nil -- stop the for-from-do loop
+                    exitEdh etsLooper exit nil -- stop the for-from-do loop
                   EdhArgsPack !apk -> do1 apk $ iterEvt subChan
                   !v -> do1 (ArgsPack [v] odEmpty) $ iterEvt subChan
 
@@ -1832,7 +1873,7 @@ edhPrepareForLoop
           -- loop from an event sink
           (EdhEvs !sink) ->
             subscribeEvents sink >>= \case
-              Nothing -> exitEdh ets exit nil -- already at eos
+              Nothing -> exitEdh etsLooper exit nil -- already at eos
               Just (!subChan, !mrv) -> case mrv of
                 Nothing -> iterEvt subChan
                 Just !ev -> case ev of
@@ -1874,7 +1915,7 @@ edhPrepareForLoop
           -- TODO define the magic method for an object to be able to respond
           --      to for-from-do looping
 
-          _ -> parseEdhIndex ets ultIterVal $ \case
+          _ -> parseEdhIndex etsLooper ultIterVal $ \case
             Right (EdhSlice (Just !start) (Just !stop) !step) -> do
               let !stepN = fromMaybe (if stop >= start then 1 else -1) step
                   iterRange :: Int -> STM ()
@@ -1884,15 +1925,16 @@ edhPrepareForLoop
                       if stepN > 0
                         then
                           if i' >= stop
-                            then exitEdh ets exit nil
+                            then exitEdh etsLooper exit nil
                             else iterRange i'
                         else
                           if i' <= stop
-                            then exitEdh ets exit nil
+                            then exitEdh etsLooper exit nil
                             else iterRange i'
               iterRange start
-            _ -> edhValueDesc ets iterVal $ \ !badDesc ->
-              throwEdh ets EvalError $ "can not do a for loop from " <> badDesc
+            _ -> edhValueDesc etsLooper iterVal $ \ !badDesc ->
+              throwEdh etsLooper EvalError $
+                "can not do a for loop from " <> badDesc
         where
           !ultIterVal = edhUltimate iterVal
 
@@ -2367,38 +2409,42 @@ evalCaseBranches !tgtVal expr@(ExprSrc !x !src'span) !exit !ets = case x of
       EdhCaseOther -> nil
       !v -> v
 
-evalScopedBlock :: [StmtSrc] -> EdhTxExit EdhValue -> EdhTx
-evalScopedBlock !stmts !exit !ets = do
-  !esBlock <- iopdEmpty
+adhocScopedFrame :: EdhCallFrame -> STM EdhCallFrame
+adhocScopedFrame !baseOnFrame = do
+  !esAdhoc <- iopdEmpty
   !spid <- unsafeIOToSTM newUnique
-  let !ctx = edh'context ets
-      !currFrame = edh'ctx'tip ctx
-      !blockFrame = currFrame {edh'frame'scope = blockScope}
-      !currScope = edh'frame'scope currFrame
-      !blockScope =
-        currScope
-          { edh'scope'entity = esBlock,
-            -- current scope should be the lexical *outer* of the new nested *block*
-            -- scope, required for correct contextual attribute resolution, and
-            -- specifically, a `scope()` obtained from within the nested block should
-            -- have its @.outer@ point to current block
+  let !baseOnScope = edh'frame'scope baseOnFrame
+      !adhocScope =
+        baseOnScope
+          { edh'scope'entity = esAdhoc,
+            -- the base scope should be the lexical *outer* of the new nested
+            -- adhoc scope, required for correct contextual attribute
+            -- resolution, and specifically, a `scope()` obtained from within
+            -- the nested adhoc scope should have its @.outer@ point to the
+            -- base scope
             edh'scope'proc =
-              (edh'scope'proc currScope)
+              (edh'scope'proc baseOnScope)
                 { edh'procedure'ident = spid,
-                  edh'procedure'lexi = currScope
+                  edh'procedure'lexi = baseOnScope
                 }
           }
-      !etsBlock =
-        ets
-          { edh'context =
-              ctx
-                { edh'ctx'tip = blockFrame,
-                  edh'ctx'stack = currFrame : edh'ctx'stack ctx
-                }
+  return $ baseOnFrame {edh'frame'scope = adhocScope}
+
+evalScopedBlock :: [StmtSrc] -> EdhTxExit EdhValue -> EdhTx
+evalScopedBlock !stmts !exit !ets = do
+  !blockFrame <- adhocScopedFrame tip
+  let !etsBlock = ets {edh'context = ctxBlock}
+      !ctxBlock =
+        ctx
+          { edh'ctx'tip = blockFrame,
+            edh'ctx'stack = tip : edh'ctx'stack ctx
           }
   runEdhTx etsBlock $
     evalBlock stmts $ \ !blkResult ->
       edhSwitchState ets $ exitEdhTx exit blkResult
+  where
+    !ctx = edh'context ets
+    !tip = edh'ctx'tip ctx
 
 -- note a branch match should not escape out of a block, so adjacent blocks
 -- always execute sequentially
@@ -2513,10 +2559,11 @@ evalStmt !stmt !exit = case stmt of
         edhPrepareCall etsForking calleeVal argsSndr $ \ !mkCall ->
           runEdhTx etsForking $
             forkEdh id (mkCall endOfEdh) $ \() -> exitEdhTx exit nil
-    (ForExpr !argsRcvr !iterExpr !bodyStmt) -> \ !etsForker -> do
+    (ForExpr !scoped !argsRcvr !iterExpr !bodyStmt) -> \ !etsForker -> do
       let !etsForking = etsMovePC etsForker src'span
       edhPrepareForLoop
         etsForking
+        scoped
         argsRcvr
         iterExpr
         bodyStmt
@@ -2561,9 +2608,10 @@ evalStmt !stmt !exit = case stmt of
         evalExprSrc calleeExpr $ \ !calleeVal !etsSched ->
           edhPrepareCall etsSched calleeVal argsSndr $
             \ !mkCall -> schedDefered etsSched id (mkCall endOfEdh)
-      (ForExpr !argsRcvr !iterExpr !bodyStmt) -> \ !etsSched ->
+      (ForExpr !scoped !argsRcvr !iterExpr !bodyStmt) -> \ !etsSched ->
         edhPrepareForLoop
           etsSched
+          scoped
           argsRcvr
           iterExpr
           bodyStmt
@@ -3081,10 +3129,10 @@ intplExpr !ets !x !exit = case x of
   ScopedBlockExpr !ss ->
     seqcontSTM (intplStmtSrc ets <$> ss) $ \ !ss' -> exit $ ScopedBlockExpr ss'
   YieldExpr !x' -> intplExprSrc ets x' $ \ !x'' -> exit $ YieldExpr x''
-  ForExpr !rcvs !iterExpr !bodyStmt ->
+  ForExpr !scoped !rcvs !iterExpr !bodyStmt ->
     intplExprSrc ets iterExpr $ \ !iterExpr' ->
       intplStmtSrc ets bodyStmt $ \ !bodyStmt' ->
-        exit $ ForExpr rcvs iterExpr' bodyStmt'
+        exit $ ForExpr scoped rcvs iterExpr' bodyStmt'
   WhileExpr !cond !act -> intplExprSrc ets cond $ \ !cond' ->
     intplStmtSrc ets act $ \ !act' -> exit $ WhileExpr cond' act'
   DoWhileExpr !act !cond -> intplExprSrc ets cond $ \ !cond' ->
@@ -3850,9 +3898,16 @@ evalExpr' (YieldExpr !yieldExpr) !docCmt !exit =
               -- double-wrapped the return, which is handled above
               throwEdh ets EvalError "bug: <return> reached yield"
             !val -> exitEdh ets exit val
-evalExpr' (ForExpr !argsRcvr !iterExpr !bodyStmt) _docCmt !exit = \ !ets ->
-  edhPrepareForLoop ets argsRcvr iterExpr bodyStmt (const $ return ()) $
-    \_iterVal !runLoop -> runEdhTx ets (runLoop exit)
+evalExpr' (ForExpr !scoped !argsRcvr !iterExpr !bodyStmt) _docCmt !exit =
+  \ !ets ->
+    edhPrepareForLoop
+      ets
+      scoped
+      argsRcvr
+      iterExpr
+      bodyStmt
+      (const $ return ())
+      $ \_iterVal !runLoop -> runEdhTx ets (runLoop exit)
 evalExpr' (WhileExpr !cndExpr !bodyStmt) _docCmt !exit = do
   let whileLoop :: EdhTx
       whileLoop = evalExprSrc cndExpr $ \ !cndVal !ets ->

@@ -884,10 +884,11 @@ lstrvrsPrpdProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
 unzipProc :: "tuples" !: Expr -> EdhHostProc
 unzipProc (mandatoryArg -> !tuplesExpr) !exit !ets =
   case deParen' tuplesExpr of
-    ForExpr !argsRcvr !iterExpr !bodyStmt -> do
+    ForExpr !scoped !argsRcvr !iterExpr !bodyStmt -> do
       !stripsVar <- newTVar []
       edhPrepareForLoop
         ets
+        scoped
         argsRcvr
         iterExpr
         bodyStmt
@@ -963,53 +964,57 @@ unzipProc (mandatoryArg -> !tuplesExpr) !exit !ets =
 --      () =< (...) / [...] / {...}
 cprhProc :: EdhIntrinsicOp
 cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
-  ForExpr !argsRcvr !iterExpr !bodyStmt -> evalExprSrc lhExpr $ \ !lhVal !ets ->
-    case edhUltimate lhVal of
-      EdhList (List _ !l) ->
-        edhPrepareForLoop
-          ets
-          argsRcvr
-          iterExpr
-          bodyStmt
-          (\ !val -> modifyTVar' l (++ [val]))
-          ( \_iterVal !runLoop ->
-              runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal
-          )
-      EdhDict (Dict _ !d) ->
-        edhPrepareForLoop
-          ets
-          argsRcvr
-          iterExpr
-          bodyStmt
-          (\ !val -> insertToDict ets val d)
-          ( \_iterVal !runLoop ->
-              runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal
-          )
-      EdhArgsPack (ArgsPack !args !kwargs) -> do
-        !posArgs <- newTVar args
-        !kwArgs <- iopdFromList $ odToList kwargs
-        edhPrepareForLoop
-          ets
-          argsRcvr
-          iterExpr
-          bodyStmt
-          ( \ !val -> case val of
-              EdhArgsPack (ArgsPack !args' !kwargs') -> do
-                modifyTVar' posArgs (++ args')
-                iopdUpdate (odToList kwargs') kwArgs
-              _ -> modifyTVar' posArgs (++ [val])
-          )
-          $ \_iterVal !runLoop -> runEdhTx ets $
-            runLoop $ \_ _ets -> do
-              args' <- readTVar posArgs
-              kwargs' <- iopdSnapshot kwArgs
-              exitEdh ets exit (EdhArgsPack $ ArgsPack args' kwargs')
-      _ ->
-        throwEdh ets EvalError $
-          "don't know how to comprehend into a "
-            <> edhTypeNameOf lhVal
-            <> ": "
-            <> T.pack (show lhVal)
+  ForExpr !scoped !argsRcvr !iterExpr !bodyStmt ->
+    evalExprSrc lhExpr $ \ !lhVal !ets ->
+      case edhUltimate lhVal of
+        EdhList (List _ !l) ->
+          edhPrepareForLoop
+            ets
+            scoped
+            argsRcvr
+            iterExpr
+            bodyStmt
+            (\ !val -> modifyTVar' l (++ [val]))
+            ( \_iterVal !runLoop ->
+                runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal
+            )
+        EdhDict (Dict _ !d) ->
+          edhPrepareForLoop
+            ets
+            scoped
+            argsRcvr
+            iterExpr
+            bodyStmt
+            (\ !val -> insertToDict ets val d)
+            ( \_iterVal !runLoop ->
+                runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal
+            )
+        EdhArgsPack (ArgsPack !args !kwargs) -> do
+          !posArgs <- newTVar args
+          !kwArgs <- iopdFromList $ odToList kwargs
+          edhPrepareForLoop
+            ets
+            scoped
+            argsRcvr
+            iterExpr
+            bodyStmt
+            ( \ !val -> case val of
+                EdhArgsPack (ArgsPack !args' !kwargs') -> do
+                  modifyTVar' posArgs (++ args')
+                  iopdUpdate (odToList kwargs') kwArgs
+                _ -> modifyTVar' posArgs (++ [val])
+            )
+            $ \_iterVal !runLoop -> runEdhTx ets $
+              runLoop $ \_ _ets -> do
+                args' <- readTVar posArgs
+                kwargs' <- iopdSnapshot kwArgs
+                exitEdh ets exit (EdhArgsPack $ ArgsPack args' kwargs')
+        _ ->
+          throwEdh ets EvalError $
+            "don't know how to comprehend into a "
+              <> edhTypeNameOf lhVal
+              <> ": "
+              <> T.pack (show lhVal)
   _ -> evalExprSrc lhExpr $ \ !lhVal -> evalExprSrc rhExpr $ \ !rhVal !ets ->
     case edhUltimate lhVal of
       EdhArgsPack (ArgsPack !vs !kwvs) -> case edhUltimate rhVal of

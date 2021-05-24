@@ -215,7 +215,7 @@ arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
         Just !body -> blockContainsYield [body]
     containsYield (CaseExpr (ExprSrc !t _) (ExprSrc !x _)) =
       containsYield t || containsYield x
-    containsYield (ForExpr _ (ExprSrc !x _) !b) =
+    containsYield (ForExpr _ _ (ExprSrc !x _) !b) =
       containsYield x || blockContainsYield [b]
     containsYield (WhileExpr (ExprSrc !cnd _) !body) =
       containsYield cnd || blockContainsYield [body]

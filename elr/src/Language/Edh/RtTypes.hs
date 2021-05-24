@@ -1642,7 +1642,12 @@ data Expr
   | YieldExpr !ExprSrc
   | -- | a for-from-do loop is made an expression in Edh, so it can
     -- appear as the right-hand expr of the comprehension (=<) operator.
-    ForExpr !ArgsReceiver !ExprSrc !StmtSrc
+    ForExpr
+      { for'loop'scoped :: !Bool,
+        for'loop'args :: !ArgsReceiver,
+        for'loop'iter :: !ExprSrc,
+        for'loop'body :: !StmtSrc
+      }
   | -- | while loop
     WhileExpr !ExprSrc !StmtSrc
   | -- | do while loop

@@ -509,8 +509,9 @@ parseDoForOrWhileExpr !si = do
   choice
     [ do
         void $ keyword "for"
+        !scoped <- isJust <$> optional (symbol "@")
         (!ar, !iter, !si'') <- parseLoopHead si'
-        return (ForExpr ar iter bodyStmt, si''),
+        return (ForExpr scoped ar iter bodyStmt, si''),
       do
         void $ keyword "while"
         (!cnd, !si'') <- parseExpr si'
@@ -745,10 +746,11 @@ parseYieldExpr !si = do
 parseForExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseForExpr !si = do
   void $ keyword "for"
+  !scoped <- isJust <$> optional (symbol "@")
   (!ar, !iter, !si') <- parseLoopHead si
   void $ optional $ keyword "do"
   (!bodyStmt, !si'') <- parseStmt si'
-  return (ForExpr ar iter bodyStmt, si'')
+  return (ForExpr scoped ar iter bodyStmt, si'')
 
 parseLoopHead :: IntplSrcInfo -> Parser (ArgsReceiver, ExprSrc, IntplSrcInfo)
 parseLoopHead !si =
