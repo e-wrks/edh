@@ -884,13 +884,13 @@ lstrvrsPrpdProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
 unzipProc :: "tuples" !: Expr -> EdhHostProc
 unzipProc (mandatoryArg -> !tuplesExpr) !exit !ets =
   case deParen' tuplesExpr of
-    ForExpr !argsRcvr !iterExpr !doExpr -> do
+    ForExpr !argsRcvr !iterExpr !bodyStmt -> do
       !stripsVar <- newTVar []
       edhPrepareForLoop
         ets
         argsRcvr
         iterExpr
-        doExpr
+        bodyStmt
         ( \ !val -> case val of
             EdhArgsPack (ArgsPack !args !kwargs)
               | odNull kwargs ->
@@ -963,14 +963,14 @@ unzipProc (mandatoryArg -> !tuplesExpr) !exit !ets =
 --      () =< (...) / [...] / {...}
 cprhProc :: EdhIntrinsicOp
 cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
-  ForExpr !argsRcvr !iterExpr !doExpr -> evalExprSrc lhExpr $ \ !lhVal !ets ->
+  ForExpr !argsRcvr !iterExpr !bodyStmt -> evalExprSrc lhExpr $ \ !lhVal !ets ->
     case edhUltimate lhVal of
       EdhList (List _ !l) ->
         edhPrepareForLoop
           ets
           argsRcvr
           iterExpr
-          doExpr
+          bodyStmt
           (\ !val -> modifyTVar' l (++ [val]))
           ( \_iterVal !runLoop ->
               runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal
@@ -980,7 +980,7 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
           ets
           argsRcvr
           iterExpr
-          doExpr
+          bodyStmt
           (\ !val -> insertToDict ets val d)
           ( \_iterVal !runLoop ->
               runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal
@@ -992,7 +992,7 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
           ets
           argsRcvr
           iterExpr
-          doExpr
+          bodyStmt
           ( \ !val -> case val of
               EdhArgsPack (ArgsPack !args' !kwargs') -> do
                 modifyTVar' posArgs (++ args')

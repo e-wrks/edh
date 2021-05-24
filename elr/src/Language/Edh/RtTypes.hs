@@ -1367,10 +1367,6 @@ data Stmt
     -- the perceiption construct is somewhat similar to traditional signal
     -- handling mechanism in OS process management
     PerceiveStmt !ExprSrc !StmtSrc
-  | -- | while loop
-    WhileStmt !ExprSrc !StmtSrc
-  | -- | do while loop
-    DoWhileStmt !StmtSrc !ExprSrc
   | -- | break from a while/for loop, or terminate the Edh thread if given
     -- from a perceiver
     BreakStmt
@@ -1647,6 +1643,10 @@ data Expr
   | -- | a for-from-do loop is made an expression in Edh, so it can
     -- appear as the right-hand expr of the comprehension (=<) operator.
     ForExpr !ArgsReceiver !ExprSrc !StmtSrc
+  | -- | while loop
+    WhileExpr !ExprSrc !StmtSrc
+  | -- | do while loop
+    DoWhileExpr !StmtSrc !ExprSrc
   | -- | call out an effectful artifact, search only outer stack frames,
     -- if from an effectful procedure run
     PerformExpr !AttrAddrSrc

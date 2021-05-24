@@ -2513,13 +2513,13 @@ evalStmt !stmt !exit = case stmt of
         edhPrepareCall etsForking calleeVal argsSndr $ \ !mkCall ->
           runEdhTx etsForking $
             forkEdh id (mkCall endOfEdh) $ \() -> exitEdhTx exit nil
-    (ForExpr !argsRcvr !iterExpr !doStmt) -> \ !etsForker -> do
+    (ForExpr !argsRcvr !iterExpr !bodyStmt) -> \ !etsForker -> do
       let !etsForking = etsMovePC etsForker src'span
       edhPrepareForLoop
         etsForking
         argsRcvr
         iterExpr
-        doStmt
+        bodyStmt
         (const $ return ())
         $ \ !iterVal !runLoop -> case iterVal of
           EdhEvs !sink -> do
@@ -2561,12 +2561,12 @@ evalStmt !stmt !exit = case stmt of
         evalExprSrc calleeExpr $ \ !calleeVal !etsSched ->
           edhPrepareCall etsSched calleeVal argsSndr $
             \ !mkCall -> schedDefered etsSched id (mkCall endOfEdh)
-      (ForExpr !argsRcvr !iterExpr !doStmt) -> \ !etsSched ->
+      (ForExpr !argsRcvr !iterExpr !bodyStmt) -> \ !etsSched ->
         edhPrepareForLoop
           etsSched
           argsRcvr
           iterExpr
-          doStmt
+          bodyStmt
           (const $ return ())
           $ \_iterVal !runLoop ->
             schedDefered etsSched id (runLoop endOfEdh)
@@ -2614,35 +2614,6 @@ evalStmt !stmt !exit = case stmt of
             <> T.pack (show sinkVal)
   ThrowStmt !excExpr ->
     evalExprSrc excExpr $ \ !exv -> edhThrowTx $ edhDeCaseClose exv
-  WhileStmt !cndExpr !bodyStmt -> do
-    let whileLoop :: EdhTx
-        whileLoop = evalExprSrc cndExpr $ \ !cndVal !ets ->
-          edhValueNull ets cndVal $ \case
-            True -> exitEdh ets exit nil
-            False -> runEdhTx ets $
-              evalStmtSrc bodyStmt $ \ !blkVal ->
-                case edhDeCaseClose blkVal of
-                  -- early stop of procedure
-                  rtnVal@EdhReturn {} -> exitEdhTx exit rtnVal
-                  -- break while loop
-                  EdhBreak -> exitEdhTx exit nil
-                  -- continue while loop
-                  _ -> whileLoop
-    whileLoop
-  DoWhileStmt !bodyStmt !cndExpr -> do
-    let doWhile :: EdhTx
-        doWhile = evalStmtSrc bodyStmt $ \ !blkVal ->
-          case edhDeCaseClose blkVal of
-            -- early stop of procedure
-            rtnVal@EdhReturn {} -> exitEdhTx exit rtnVal
-            -- break while loop
-            EdhBreak -> exitEdhTx exit nil
-            -- continue while loop
-            _ -> evalExprSrc cndExpr $ \ !cndVal !ets ->
-              edhValueNull ets cndVal $ \case
-                True -> exitEdh ets exit nil
-                False -> runEdhTx ets doWhile
-    doWhile
   ExtendsStmt !superExpr -> evalExprSrc superExpr $ \ !superVal !ets ->
     let !this = edh'scope'this $ contextScope $ edh'context ets
      in case edhDeCaseClose superVal of
@@ -3110,8 +3081,14 @@ intplExpr !ets !x !exit = case x of
   ScopedBlockExpr !ss ->
     seqcontSTM (intplStmtSrc ets <$> ss) $ \ !ss' -> exit $ ScopedBlockExpr ss'
   YieldExpr !x' -> intplExprSrc ets x' $ \ !x'' -> exit $ YieldExpr x''
-  ForExpr !rcvs !fromX !doX -> intplExprSrc ets fromX $ \ !fromX' ->
-    intplStmtSrc ets doX $ \ !doX' -> exit $ ForExpr rcvs fromX' doX'
+  ForExpr !rcvs !iterExpr !bodyStmt ->
+    intplExprSrc ets iterExpr $ \ !iterExpr' ->
+      intplStmtSrc ets bodyStmt $ \ !bodyStmt' ->
+        exit $ ForExpr rcvs iterExpr' bodyStmt'
+  WhileExpr !cond !act -> intplExprSrc ets cond $ \ !cond' ->
+    intplStmtSrc ets act $ \ !act' -> exit $ WhileExpr cond' act'
+  DoWhileExpr !act !cond -> intplExprSrc ets cond $ \ !cond' ->
+    intplStmtSrc ets act $ \ !act' -> exit $ DoWhileExpr act' cond'
   PerformExpr !addr ->
     intplAttrAddrSrc ets addr $ \ !addr' -> exit $ PerformExpr addr'
   BehaveExpr !addr ->
@@ -3234,10 +3211,6 @@ intplStmt !ets !stmt !exit = case stmt of
   ExtendsStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ ExtendsStmt x'
   PerceiveStmt !sink !body -> intplExprSrc ets sink $ \ !sink' ->
     intplStmtSrc ets body $ \ !body' -> exit $ PerceiveStmt sink' body'
-  WhileStmt !cond !act -> intplExprSrc ets cond $ \ !cond' ->
-    intplStmtSrc ets act $ \ !act' -> exit $ WhileStmt cond' act'
-  DoWhileStmt !act !cond -> intplExprSrc ets cond $ \ !cond' ->
-    intplStmtSrc ets act $ \ !act' -> exit $ DoWhileStmt act' cond'
   ThrowStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ ThrowStmt x'
   ReturnStmt !x !docCmt -> intplExprSrc ets x $ \ !x' ->
     exit $ ReturnStmt x' docCmt
@@ -3877,9 +3850,38 @@ evalExpr' (YieldExpr !yieldExpr) !docCmt !exit =
               -- double-wrapped the return, which is handled above
               throwEdh ets EvalError "bug: <return> reached yield"
             !val -> exitEdh ets exit val
-evalExpr' (ForExpr !argsRcvr !iterExpr !doStmt) _docCmt !exit = \ !ets ->
-  edhPrepareForLoop ets argsRcvr iterExpr doStmt (const $ return ()) $
+evalExpr' (ForExpr !argsRcvr !iterExpr !bodyStmt) _docCmt !exit = \ !ets ->
+  edhPrepareForLoop ets argsRcvr iterExpr bodyStmt (const $ return ()) $
     \_iterVal !runLoop -> runEdhTx ets (runLoop exit)
+evalExpr' (WhileExpr !cndExpr !bodyStmt) _docCmt !exit = do
+  let whileLoop :: EdhTx
+      whileLoop = evalExprSrc cndExpr $ \ !cndVal !ets ->
+        edhValueNull ets cndVal $ \case
+          True -> exitEdh ets exit nil
+          False -> runEdhTx ets $
+            evalStmtSrc bodyStmt $ \ !blkVal ->
+              case edhDeCaseClose blkVal of
+                -- early stop of procedure
+                rtnVal@EdhReturn {} -> exitEdhTx exit rtnVal
+                -- break while loop
+                EdhBreak -> exitEdhTx exit nil
+                -- continue while loop
+                _ -> whileLoop
+  whileLoop
+evalExpr' (DoWhileExpr !bodyStmt !cndExpr) _docCmt !exit = do
+  let doWhile :: EdhTx
+      doWhile = evalStmtSrc bodyStmt $ \ !blkVal ->
+        case edhDeCaseClose blkVal of
+          -- early stop of procedure
+          rtnVal@EdhReturn {} -> exitEdhTx exit rtnVal
+          -- break while loop
+          EdhBreak -> exitEdhTx exit nil
+          -- continue while loop
+          _ -> evalExprSrc cndExpr $ \ !cndVal !ets ->
+            edhValueNull ets cndVal $ \case
+              True -> exitEdh ets exit nil
+              False -> runEdhTx ets doWhile
+  doWhile
 evalExpr' (PerformExpr (AttrAddrSrc !effAddr _)) _docCmt !exit = \ !ets ->
   resolveEdhAttrAddr ets effAddr $
     \ !effKey -> resolveEdhPerform ets effKey $ exitEdh ets exit

@@ -495,26 +495,26 @@ parseProducerExpr !si = do
   (!pd, !si') <- parseProcDecl startPos si
   return (ProducerExpr pd, si')
 
-parseWhileStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseWhileStmt !si = do
+parseWhileExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseWhileExpr !si = do
   void $ keyword "while"
   (!cnd, !si') <- parseExpr si
   (!act, !si'') <- parseStmt si'
-  return (WhileStmt cnd act, si'')
+  return (WhileExpr cnd act, si'')
 
-parseDoWhileOrIfStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseDoWhileOrIfStmt !si = do
+parseDoForOrWhileExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseDoForOrWhileExpr !si = do
   void $ keyword "do"
-  (!act, !si') <- parseStmt si
+  (!bodyStmt, !si') <- parseStmt si
   choice
     [ do
+        void $ keyword "for"
+        (!ar, !iter, !si'') <- parseLoopHead si'
+        return (ForExpr ar iter bodyStmt, si''),
+      do
         void $ keyword "while"
         (!cnd, !si'') <- parseExpr si'
-        return (DoWhileStmt act cnd, si''),
-      do
-        void $ keyword "if"
-        (!cnd, !si'') <- parseExpr si'
-        return (ExprStmt (IfExpr cnd act Nothing) Nothing, si'')
+        return (DoWhileExpr bodyStmt cnd, si'')
     ]
 
 parseProcDecl :: SourcePos -> IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)
@@ -684,8 +684,6 @@ parseStmt' !prec !si = do
         parseLetStmt si,
         parseExtendsStmt si,
         parsePerceiveStmt si,
-        parseDoWhileOrIfStmt si,
-        parseWhileStmt si,
         -- TODO validate <break> must within a loop construct
         (BreakStmt, si) <$ keyword "break",
         -- note <continue> can be the eval'ed value of a proc,
@@ -747,58 +745,58 @@ parseYieldExpr !si = do
 parseForExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseForExpr !si = do
   void $ keyword "for"
-  (!ar, !iter, !si') <- parseLoopHead
+  (!ar, !iter, !si') <- parseLoopHead si
   void $ optional $ keyword "do"
-  (!bodyExpr, !si'') <- parseStmt si'
-  return (ForExpr ar iter bodyExpr, si'')
-  where
-    parseLoopHead :: Parser (ArgsReceiver, ExprSrc, IntplSrcInfo)
-    parseLoopHead =
-      choice
-        [ do
-            -- possibly JavaScript compatible syntax
-            void $ symbol "("
-            !jsSyntax <-
-              isJust <$> optional (void $ keyword "let" <|> keyword "const")
-            if jsSyntax
-              then do
-                -- js compatible syntax is triggered by `let` or `const` keyword
-                !ar <- parseArgsReceiver
-                void $ keyword "of" <|> keyword "in"
-                (!iter, !si') <- parseExpr si
-                void $ symbol ")"
-                return (ar, iter, si')
-              else do
-                -- Edh or Python-like syntax
-                ars <- parseRestArgRecvs ")"
-                void $ keyword "from" <|> keyword "in"
-                (!iter, !si') <- parseExpr si
-                return (PackReceiver $ reverse $! ars, iter, si'),
-          do
-            -- drop receiver, exclusively Edh syntax
-            !src'span <- keyword "_"
-            let !ar =
-                  SingleReceiver $
-                    RecvRestPkArgs $ AttrAddrSrc (NamedAttr "_") src'span
-            void $ keyword "from"
+  (!bodyStmt, !si'') <- parseStmt si'
+  return (ForExpr ar iter bodyStmt, si'')
+
+parseLoopHead :: IntplSrcInfo -> Parser (ArgsReceiver, ExprSrc, IntplSrcInfo)
+parseLoopHead !si =
+  choice
+    [ do
+        -- possibly JavaScript compatible syntax
+        void $ symbol "("
+        !jsSyntax <-
+          isJust <$> optional (void $ keyword "let" <|> keyword "const")
+        if jsSyntax
+          then do
+            -- js compatible syntax is triggered by `let` or `const` keyword
+            !ar <- parseArgsReceiver
+            void $ keyword "of" <|> keyword "in"
             (!iter, !si') <- parseExpr si
-            return (ar, iter, si'),
-          do
-            -- wild arg receiver, exclusively Edh syntax
-            void $ symbol "*"
-            !ar <- (<|> return WildReceiver) $ do
-              void $ keyword "as"
-              SingleReceiver . RecvRestPkArgs <$> parseAttrAddrSrc
-            void $ keyword "from"
-            (!iter, !si') <- parseExpr si
-            return (ar, iter, si'),
-          do
-            -- single arg receiver, Edh or Python-like syntax
-            !singleArg <- parseKwRecv False
+            void $ symbol ")"
+            return (ar, iter, si')
+          else do
+            -- Edh or Python-like syntax
+            ars <- parseRestArgRecvs ")"
             void $ keyword "from" <|> keyword "in"
             (!iter, !si') <- parseExpr si
-            return (SingleReceiver singleArg, iter, si')
-        ]
+            return (PackReceiver $ reverse $! ars, iter, si'),
+      do
+        -- drop receiver, exclusively Edh syntax
+        !src'span <- keyword "_"
+        let !ar =
+              SingleReceiver $
+                RecvRestPkArgs $ AttrAddrSrc (NamedAttr "_") src'span
+        void $ keyword "from"
+        (!iter, !si') <- parseExpr si
+        return (ar, iter, si'),
+      do
+        -- wild arg receiver, exclusively Edh syntax
+        void $ symbol "*"
+        !ar <- (<|> return WildReceiver) $ do
+          void $ keyword "as"
+          SingleReceiver . RecvRestPkArgs <$> parseAttrAddrSrc
+        void $ keyword "from"
+        (!iter, !si') <- parseExpr si
+        return (ar, iter, si'),
+      do
+        -- single arg receiver, Edh or Python-like syntax
+        !singleArg <- parseKwRecv False
+        void $ keyword "from" <|> keyword "in"
+        (!iter, !si') <- parseExpr si
+        return (SingleReceiver singleArg, iter, si')
+    ]
 
 parsePerformExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parsePerformExpr !si = do
@@ -1269,7 +1267,6 @@ illegalExprStarting = do
           illegalWord "as",
           illegalWord "extends",
           illegalWord "perceive",
-          illegalWord "while",
           illegalWord "of",
           illegalWord "break",
           illegalWord "continue",
@@ -1396,6 +1393,8 @@ parseExprPrec !precedingOp !prec !si =
             [ parsePrefixExpr si,
               parseYieldExpr si,
               parseForExpr si,
+              parseDoForOrWhileExpr si,
+              parseWhileExpr si,
               parseIfExpr si,
               parseCaseExpr si,
               parsePerformExpr si,

@@ -217,6 +217,10 @@ arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
       containsYield t || containsYield x
     containsYield (ForExpr _ (ExprSrc !x _) !b) =
       containsYield x || blockContainsYield [b]
+    containsYield (WhileExpr (ExprSrc !cnd _) !body) =
+      containsYield cnd || blockContainsYield [body]
+    containsYield (DoWhileExpr !body (ExprSrc !cnd _)) =
+      containsYield cnd || blockContainsYield [body]
     containsYield (IndexExpr (ExprSrc !t _) (ExprSrc !x _)) =
       containsYield t || containsYield x
     containsYield (CallExpr (ExprSrc !x _) _) = containsYield x
@@ -227,12 +231,6 @@ arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
     blockContainsYield :: [StmtSrc] -> Bool
     blockContainsYield [] = False
     blockContainsYield (StmtSrc !stmt _ : rest) = case stmt of
-      WhileStmt (ExprSrc !cnd _) !body ->
-        containsYield cnd || blockContainsYield [body]
-          || blockContainsYield rest
-      DoWhileStmt !body (ExprSrc !cnd _) ->
-        containsYield cnd || blockContainsYield [body]
-          || blockContainsYield rest
       ExprStmt !x _docCmt -> containsYield x || blockContainsYield rest
       _ -> blockContainsYield rest
 
