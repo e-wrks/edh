@@ -1,0 +1,65 @@
+
+{##
+ # Run the *Loop* in so-called REPL
+  Read+Eval (console.readCommand) -> Print (console.print) -> Loop
+
+Note: `perform lastError |show` to see last error pretty shown
+
+Take this implementation as a minimum example, for more sophisticated REPLs, esp. w.r.t. command recognition & execution
+ #}
+export interpreter runREPL( replScope ) void while true {
+
+  case console.readCommand(
+    ps1= "(" ++ replScope.get('__name__') or '<repl>' ++ ")Đ: ",
+    ps2= "Đ| ",
+    inScopeOf= replScope,
+  ) of {@ # localize intermediate attrs within this scoped block
+    { batteries.Command(cmd, apk= cmdArgs) } -> case cmd of {
+      # todo
+      #  *) enrich custom behaviors according to `cmdArgs`
+      #  *) support more commands
+      'quit' -> { break }
+      'dir' -> case cmdArgs of {
+        {( )} -> { # bare dir command
+          printDir( ofThe= replScope )
+        }
+        {( tgt )} -> { # single arg as the target scope
+          printDir( ofThe= tgt )
+        }
+        _ -> console.print$ '⛔ Unexpected args to dir command: ' ++ cmdArgs
+      }
+      _ -> console.print$ '⛔ Unsupported command: ' ++ cmd
+    }
+
+    { cmdVal } -> { # capture & print a non-nil result value
+      console.print$ cmdVal
+    }
+  @}
+
+} $=> {
+  # catch exceptions with a handler block here.
+  # chained ($=>) handlers shall be more idiomatic, only if no wild matching involved, but not here
+
+  { ThreadTerminate() } -> {
+    # this usually occurs on a descandent thread, also possible on the main thread in case some perceiver is installed and *breaking* per some event
+    # `ThreadTerminate` is not catchable anyway, this won't hide it, but no need to log it
+  }
+
+  # the exception can be happening on a descendant thread, this handler is run first on the throwing thread, then if not matched, will be throwTo the main thread, thus have this handler run again on the main thread
+
+  { IOError() = ioExc } -> { effect lastError = ioExc
+    console.fatal<| 'IO error - ' ++ ioExc
+    rethrow # escalate it to the program loop of the host interpreter
+  }
+
+  { cmdExc } -> { effect lastError = cmdExc
+    # wild exception catching is never a good idea, here the speciality of REPL may justify it
+
+    # stdout is probably blocked as the loop is reading stdin, so `console.print()` won't timely show it, use error log instead.
+    console.error<| 'Recovered from error: ' ++ desc( cmdExc )
+
+    # TODO in case of asynchronous exception occurred, and thrown to the main thread then captured here, the last `console.readCommand()` above is interrupted, but the console IO loop is still reading stdin, and what ever read will subsequently be discarded anyway. this behavior may be rather surprising to the user, need to optimize UX for such cases.
+    console.info<| 'Your last input may have no effect due to the error.'
+  }
+
+}

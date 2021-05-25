@@ -84,7 +84,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
         ofScope = scope( ofObj= otherVal )
         console.print( desc( otherVal ), **ofScope.attrs() )
       }
-      console.print( 'Not an object but - ' ++ desc( otherVal ) )
+      console.print( '⛔ Not an object but - ' ++ desc( otherVal ) )
     }
   }
 
@@ -111,7 +111,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
           '  ' ++ k ++ '= ' ++ v
         )
       }
-      'Not an object but - ' ++ desc( otherVal )
+      '⛔ Not an object but - ' ++ desc( otherVal )
     }
   }
 
