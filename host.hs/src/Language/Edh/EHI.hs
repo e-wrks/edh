@@ -267,6 +267,8 @@ module Language.Edh.EHI
     edhValueAsAttrKey,
     EdhValue (..),
     EdhTypeValue (..),
+    EdhBound (..),
+    edhBoundValue,
     edhDeCaseClose,
     edhDeCaseWrap,
     edhUltimate,
