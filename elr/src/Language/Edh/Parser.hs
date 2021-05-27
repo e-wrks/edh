@@ -222,16 +222,54 @@ parseLetStmt !si = do
   -- `const` has no different semantics than `let` in Edh,
   -- merely for JavaScript src level compatibility
   void $ keyword "let" <|> keyword "const"
-  !ar <- parseArgsReceiver
-  equalSign
-  (!argSender, !si') <- parseArgsSender
-  return (LetStmt ar argSender, si')
+  (pairs, si') <- parsePairs [] si
+  case pairs of
+    [] -> return (VoidStmt, si')
+    [StmtSrc !stmt _] -> return (stmt, si')
+    !stmts -> return (flip ExprStmt Nothing $ BlockExpr stmts, si')
   where
-    parseArgsSender :: Parser (ArgsPacker, IntplSrcInfo)
-    parseArgsSender =
+    parsePairs :: [StmtSrc] -> IntplSrcInfo -> Parser ([StmtSrc], IntplSrcInfo)
+    parsePairs got si' = (<|> return (got, si')) $ do
+      !startPos <- getSourcePos
+      !ar <- parseArgsReceiver
+      choice
+        [ do
+            equalSign
+            (!argSender, !si'') <- parseArgsSender si'
+            EdhParserState _ !lexeme'end <- get
+            optional (symbol ",") >>= \case
+              Nothing ->
+                return
+                  ( StmtSrc
+                      (LetStmt ar argSender)
+                      (lspSrcRangeFromParsec startPos lexeme'end) :
+                    got,
+                    si''
+                  )
+              Just {} -> do
+                -- more assignment pairs to parse
+                (got', si''') <- parsePairs got si''
+                return
+                  ( StmtSrc
+                      (LetStmt ar argSender)
+                      (lspSrcRangeFromParsec startPos lexeme'end) :
+                    got',
+                    si'''
+                  ),
+          do
+            -- no rhs to assign, accept it as if not written, just for src level
+            -- compatibility with JavaScript variable definition
+            -- it is nothing in Edh semantics
+            void $ symbol ","
+            parsePairs got si',
+          -- no more assignment pairs, all done
+          return (got, si')
+        ]
+    parseArgsSender :: IntplSrcInfo -> Parser (ArgsPacker, IntplSrcInfo)
+    parseArgsSender si' =
       parseArgsPacker si <|> do
-        (!x, !si') <- parseExpr si
-        return (ArgsPacker [SendPosArg x] (exprSrcSpan x), si')
+        (!x, !si'') <- parseExpr si'
+        return (ArgsPacker [SendPosArg x] (exprSrcSpan x), si'')
 
 parseArgsReceiver :: Parser ArgsReceiver
 parseArgsReceiver =
