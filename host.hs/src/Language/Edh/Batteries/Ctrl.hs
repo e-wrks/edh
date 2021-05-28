@@ -22,17 +22,21 @@ import Language.Edh.IOPD (iopdUpdate, odEmpty, odNull)
 import Language.Edh.RtTypes
 import Prelude
 
--- | operator (::) - attribute type annotation
+-- | operator (=:) and (::) - attribute prototype/type annotation
 --
 -- this should have lowest possible precedence and do nothing when eval'ed
 -- so an arbitrary expression, so long as it's syntactically correct,
 -- can be placed anywhere serving annotation purpose e.g.
 --
---   abs :: ( DecimalType ) -> DecimalType
+--   abs :: ( Decimal ) -> Decimal
 --   method abs( n ) n<0 &> ( -n ) |> n
 --
---   x :: StringType
---   x = 'Hello'
+--   x :: String
+--   x =: 'Hello'
+--
+-- Currently els doesn't understand (::), while it thinks rhs of (=:) is a
+-- valid value expression as if assigned to its lhs attribute addressor, for
+-- sake of static analysis
 attrAnnoProc :: EdhIntrinsicOp
 attrAnnoProc _ _ !exit = exitEdhTx exit nil
 
@@ -42,8 +46,8 @@ attrAnnoProc _ _ !exit = exitEdhTx exit nil
 -- so an arbitrary expression, so long as it's syntactically correct,
 -- can be placed anywhere serving annotation purpose e.g.
 --
---   CntCallback :=: ( int!DecimalType ) -> nil
---   countdown :: (int!DecimalType, CntCallback) -> nil
+--   CntCallback :=: ( int!Decimal ) -> nil
+--   countdown :: (int!Decimal, CntCallback) -> nil
 --   method countdown( fromNum, cb ) {
 --     for n from range(fromNum:0:-1) do cb(n)
 --   }

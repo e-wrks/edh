@@ -300,6 +300,7 @@ installEdhBatteries world =
         [ -- format: (symbol, precedence)
 
           -- annotations
+          ("=:", Infix, -9), -- attribute prototype annotation
           ("::", Infix, -9), -- attribute type annotation
           (":=:", Infix, -9), -- type synonym annotation
           ("!", InfixR, 0), -- free-form lhs annotation
@@ -505,6 +506,7 @@ installEdhBatteries world =
                   ("<=$", flip catchProc),
                   ("@=>", finallyProc),
                   ("<=@", flip finallyProc),
+                  ("=:", attrAnnoProc),
                   ("::", attrAnnoProc),
                   (":=:", typeAnnoProc),
                   ("!", lhsFreeFormAnnoProc),
