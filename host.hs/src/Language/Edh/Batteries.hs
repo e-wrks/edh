@@ -414,8 +414,6 @@ installEdhBatteries world =
           --     [9,2] >> l
           --     [2,9,3,7,5]
           (">>", InfixR, 2),
-          -- element-of test
-          ("?<=", Infix, 4),
           -- prefix test
           ("|*", Infix, 4),
           -- suffix test
@@ -459,7 +457,6 @@ installEdhBatteries world =
                   ("?@", attrDerefTemptProc),
                   ("++", concatProc),
                   ("=<", cprhProc),
-                  ("?<=", elemProc),
                   ("|*", isPrefixOfProc),
                   ("*|", hasSuffixProc),
                   (":>", prpdProc),

@@ -814,20 +814,6 @@ listPopProc (List _ !lv) !exit !ets =
         (val : rest) -> writeTVar lv rest >> exitEdh ets' exit' val
         _ -> exitEdh ets' exit' def'val
 
--- | operator (?<=) - element-of tester
-elemProc :: EdhIntrinsicOp
-elemProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
-  evalExprSrc rhExpr $ \ !rhVal -> case edhUltimate rhVal of
-    EdhArgsPack (ArgsPack !vs _) -> exitEdhTx exit (EdhBool $ lhVal `elem` vs)
-    EdhList (List _ !l) -> \ !ets -> do
-      ll <- readTVar l
-      exitEdh ets exit $ EdhBool $ lhVal `elem` ll
-    EdhDict (Dict _ !ds) -> \ !ets ->
-      iopdLookup lhVal ds >>= \case
-        Nothing -> exitEdh ets exit $ EdhBool False
-        Just _ -> exitEdh ets exit $ EdhBool True
-    _ -> exitEdhTx exit edhNA
-
 -- | operator (|*) - prefix tester
 isPrefixOfProc :: EdhIntrinsicOp
 isPrefixOfProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
