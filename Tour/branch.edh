@@ -4,7 +4,7 @@ method countdown(n) case type(n) of {
 
   ;| n is nan -> console.info<| 'Not a number! No counting!'
 
-  DecimalType -> {
+  "Decimal" -> {
 
     ;| n < 1 -> console.info<| '  🎉 instantly !!'
 

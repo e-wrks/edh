@@ -32,7 +32,7 @@ The results are merely sought to be human readable as far, may be re-purposed fo
 Usually used to annotate the rhs artifact with some non-referential, possibly chained lhs expression, e.g.
 
 ```edh
-body'height :: positive!int!cm!DecimalType
+body'height :: positive!int!cm!Decimal
 body'height = 176
 ```
 
@@ -153,7 +153,7 @@ This operator is strict on its lhs operand, and uses `null` semantics to check t
   {##
    # Strict boolean logical AND operator
 
-This operator is strict on both operands, and errs out when either side evaluates to value of type other than `BoolType`.
+This operator is strict on both operands, and errs out when either side evaluates to value of type other than `Bool` type.
 
    #}
   infixl 3 (&&) ( callerScope, lhx, rhx ) pass
@@ -161,7 +161,7 @@ This operator is strict on both operands, and errs out when either side evaluate
   {##
    # Strict boolean logical OR operator
 
-This operator is strict on both operands, and errs out when either side evaluates to value of type other than `BoolType`.
+This operator is strict on both operands, and errs out when either side evaluates to value of type other than `Bool` type.
 
    #}
   infixl 3 (||) ( callerScope, lhx, rhx ) pass

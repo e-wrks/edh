@@ -44,10 +44,10 @@ class Data {
     }
 
     case type( ix ) of {
-      DecimalType -> {
+      "Decimal" -> {
         console.info <| 'Indexing 1d element: ' ++ ix
       }
-      StringType -> {
+      "String" -> {
         console.info <| 'Indexing column by name: ' ++ ix
       }
       _ -> {

@@ -3,7 +3,7 @@
 # (and) and (or) are nullish testing boolean operators, almost the same as in
 # Python.
 #
-# they don't require or coerce either operand to `BoolType`, and use `null()`
+# they don't require or coerce either operand to `Bool` type, and use `null()`
 # testing semantic to decide which operand to return, so they respect magic
 # method `__null__()` for object values (similar to `__bool__()` in Python)
 #
@@ -22,7 +22,7 @@ false and { console.print$ "impossible to get eval'ed"; true }
 # (&&) and (||) are boolean operators potentially carrying bit-wise and/or
 # vectorization semantics (as however implemented by magic methods from either
 # operands). in case no magic method present, both operands are required to be
-# of `BoolType`, or the operation is considered not applicable (NA is returned
+# of `Bool` type, or the operation is considered not applicable (NA is returned
 # to the runtime), so they are guaranteed to return exact `true` or `false`
 # value, where applicable and not overridden by some magic method.
 #

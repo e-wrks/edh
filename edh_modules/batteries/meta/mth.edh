@@ -16,7 +16,7 @@ error( 'Executing meta module: ' ++ __name__ )
 
 export {
 
-  sandbox :: ( ObjectType ) -> sandboxed!ObjectType
+  sandbox :: ( Object ) -> sandboxed!Object
   {##
    # transform a vanilla object into a sandbox object, idiomatic usage:
 ```ehd
@@ -35,13 +35,13 @@ export {
    #}
   method sandbox( origObj ) pass
 
-  UUID :: ( uuid'str= None ) -> UUIDType
-  UUID :: ( uuid'ns, uuid'word1, uuid'word2, ) -> UUIDType
+  UUID :: ( uuid'str= None ) -> UUID
+  UUID :: ( uuid'ns, uuid'word1, uuid'word2, ) -> UUID
   {##
    # restore or generate a UUID value
    #}
   method UUID( uuid'str= None ) {
-    uuid'str :: StringType || None
+    uuid'str :: String || None
   }
 
   id :: ( Any ) -> Any
@@ -56,7 +56,7 @@ export {
    #}
   method id( v ) pass
 
-  blob :: ( Any, orElse!Any= default error ) -> BlobType
+  blob :: ( Any, orElse!Any= default error ) -> Blob
   {##
    # coerce a value to blob
    #
@@ -71,8 +71,8 @@ export {
     orElse= default error( 'not convertible to blob: ' ++ desc( v ) )
   ) pass
 
-  str :: ( Any ) -> StringType
-  str :: ( ArgsPackType ) -> ArgsPackType
+  str :: ( Any ) -> String
+  str :: ( ArgsPack ) -> ArgsPack
   {##
    # convert arguments to string values
    #
@@ -85,8 +85,8 @@ export {
    #}
   method str(*** apk ) pass
 
-  repr :: ( Any ) -> StringType
-  repr :: ( ArgsPackType ) -> ArgsPackType
+  repr :: ( Any ) -> String
+  repr :: ( ArgsPack ) -> ArgsPack
   {##
    # convert arguments to string representations
    #
@@ -101,9 +101,9 @@ export {
    #}
   method repr(*** apk ) pass
 
-  json :: ( Any ) -> StringType
-  json :: ( *Any ) -> JsonArray!StringType
-  json :: ( **Any ) -> JsonObject!StringType
+  json :: ( Any ) -> String
+  json :: ( *Any ) -> JsonArray!String
+  json :: ( **Any ) -> JsonObject!String
   {##
    # convert arguments to stringified JSON representation
    #
@@ -120,7 +120,7 @@ export {
    #}
   method json(*** apk ) pass
 
-  cap :: ( Any ) -> int!DecimalType
+  cap :: ( Any ) -> int!Decimal
   {##
    # get capacity of a container
    #
@@ -130,7 +130,7 @@ export {
    #}
   method cap( container ) pass
 
-  grow :: ( Any, int!DecimalType ) -> nil
+  grow :: ( Any, int!Decimal ) -> nil
   {##
    # grow (or shrink to a smaller) capacity for a container
    #
@@ -138,7 +138,7 @@ export {
    #}
   method grow( container, newCap ) pass
 
-  len :: ( Any ) -> int!DecimalType
+  len :: ( Any ) -> int!Decimal
   {##
    # get length of a container
    #
@@ -148,7 +148,7 @@ export {
    #}
   method len( container ) pass
 
-  mark :: ( Any, int!DecimalType ) -> nil
+  mark :: ( Any, int!Decimal ) -> nil
   {##
    # mark valid data length for a container
    #
@@ -156,7 +156,7 @@ export {
    #}
   method mark( container, newLength ) pass
 
-  show :: ( Any, **kwargs!ArgsPackType ) -> StringType
+  show :: ( Any, **kwargs!ArgsPack ) -> String
   {##
    # pretty showing a value as string
    #
@@ -166,7 +166,7 @@ export {
    #}
   method show( v, **kwargs ) pass
 
-  desc :: ( Any, **kwargs!ArgsPackType ) -> StringType
+  desc :: ( Any, **kwargs!ArgsPack ) -> String
   {##
    # pretty describing a value as string
    #
@@ -176,7 +176,7 @@ export {
    #}
   method desc( v, **kwargs ) pass
 
-  dict :: (** kwargs!ArgsPackType ) -> DictType
+  dict :: (** kwargs!ArgsPack ) -> Dict
   {##
    # dict constructor
    #
@@ -184,7 +184,7 @@ export {
    #}
   method dict(** entries ) pass
 
-  null :: ( Any ) -> BoolType
+  null :: ( Any ) -> Bool
   {##
    # check null semantics
    #
@@ -194,7 +194,7 @@ export {
    #}
   method null( v ) pass
 
-  compare :: ( Any, Any ) -> OrdType || NA
+  compare :: ( Any, Any ) -> Ord || NA
   {##
    # compare two values
    #
@@ -211,8 +211,8 @@ export {
    #}
   method compare( v1, v2 ) pass
 
-  type :: ( Any ) -> TypeType
-  type ::( ArgsPackType ) -> ArgsPackType
+  type :: ( Any ) -> String
+  type ::( ArgsPack ) -> ArgsPack
   {##
    # obtain type of arguments
    #
@@ -223,9 +223,9 @@ export {
    #}
   method type(*** apk ) pass
 
-  constructor :: ( Any ) -> ClassType
-  constructor :: () -> ClassType
-  constructor :: ( ArgsPackType ) -> ArgsPackType
+  constructor :: ( Any ) -> Class
+  constructor :: () -> Class
+  constructor :: ( ArgsPack ) -> ArgsPack
   {##
    # obtain class of arguments
    #
@@ -240,9 +240,9 @@ export {
    #}
   method constructor(*** apk ) pass
 
-  supers :: () -> ObjectType
-  supers :: ( Any ) -> ObjectType
-  supers :: ( ArgsPackType ) -> ArgsPackType
+  supers :: () -> Object
+  supers :: ( Any ) -> Object
+  supers :: ( ArgsPack ) -> ArgsPack
   {##
    # obtain super objects of arguments
    #
@@ -257,7 +257,7 @@ export {
    #}
   method supers(*** apk ) pass
 
-  parseEdh :: ( StringType ) -> ExprType
+  parseEdh :: ( String ) -> Expr
   {##
    # parse Edh source code into expressions
    #
@@ -265,14 +265,14 @@ export {
    #}
   method parseEdh( srcCode, srcName= '<edh>', lineNo= 1 ) pass
 
-  makeOp :: ( ExprType, op!StringType, ExprType ) -> ExprType
+  makeOp :: ( Expr, op!String, Expr ) -> Expr
   {##
    # make an infix operator application expression
    #}
   method makeOp( lhExpr, op, rhExpr ) pass
 
 
-  unzip :: (ExprType) -> ArgsPackType
+  unzip :: (Expr) -> ArgsPack
   {##
    # unzip a series of tuples from either a tuple, a list or enumeration with a
    # for-loop, into a tuple of tuples

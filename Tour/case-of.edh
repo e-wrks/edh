@@ -1,17 +1,17 @@
 
 # %%
 method essay ( v ) case type( v ) of {
-  BoolType -> "to be or not to be, that's a problem"
+  "Bool" -> "to be or not to be, that's a problem"
 
-  DecimalType | v<2 -> "consume less, produce more"
-  DecimalType | v<10 -> "no more than " ++ v ++ " cups of coffee a day"
-  DecimalType -> "every one get his/her lucky number"
+  "Decimal" | v<2 -> "consume less, produce more"
+  "Decimal" | v<10 -> "no more than " ++ v ++ " cups of coffee a day"
+  "Decimal" -> "every one get his/her lucky number"
 
-  StringType -> { quiz=v fallthrough }
+  "String" -> { quiz=v fallthrough }
 
-  SymbolType -> { quiz= 'mistery attracts most people' fallthrough }
+  "Symbol" -> { quiz= 'mistery attracts most people' fallthrough }
 
-  ObjectType -> {
+  "Object" -> {
     quiz = 'I live in ' ++ v?__name__ or 'no where';
     fallthrough
   }

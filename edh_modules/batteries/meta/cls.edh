@@ -34,7 +34,7 @@ case xx of {{ namespace:ns }} -> {
    #}
   class @'namespace' {
 
-    __name__ :: StringType
+    __name__ :: String
 
   }
 
@@ -45,22 +45,22 @@ case xx of {{ namespace:ns }} -> {
   class scope {
 
     scope :: () -> scope
-    scope :: ( ofObj= ObjectType ) -> scope
+    scope :: ( ofObj= Object ) -> scope
     {##
      # wrap the caller's scope or the object specified by `ofObj` as a
      # reflective object
      #}
     method __init__( ofObj= None ) pass
 
-    eval :: ( ExprType, StringType= None ) -> Any
+    eval :: ( Expr, String= None ) -> Any
     {##
      # evaluate the specified expression within the wrapped scope
      #}
     method eval( expression, srcName= None ) pass
 
-    get :: ( StringType ) -> Any
-    get :: ( SymbolType ) -> Any
-    get :: ( ArgsPackType ) -> ArgsPackType
+    get :: ( String ) -> Any
+    get :: ( Symbol ) -> Any
+    get :: ( ArgsPack ) -> ArgsPack
     {##
      # lookup attribute(s) from the wrapped scope
      #
@@ -75,9 +75,9 @@ case xx of {{ namespace:ns }} -> {
     method get(*** apk ) pass
 
 
-    put :: ( StringType:Any ) -> nil
-    put :: ( SymbolType:Any ) -> nil
-    put :: ( ArgsPackType ) -> ArgsPackType
+    put :: ( String:Any ) -> nil
+    put :: ( Symbol:Any ) -> nil
+    put :: ( ArgsPack ) -> ArgsPack
     {##
      # put attributes into the wrapped scope
      #
@@ -90,7 +90,7 @@ case xx of {{ namespace:ns }} -> {
     method put(*** apk ) pass
 
 
-    attrs :: () -> keywords!ArgsPackType
+    attrs :: () -> keywords!ArgsPack
     {##
      # obtain all attributes from the wrapped scope
      #}
@@ -102,7 +102,7 @@ case xx of {{ namespace:ns }} -> {
      #}
     property$ method outer() pass
 
-    lexiLoc :: StringType
+    lexiLoc :: String
     {##
      # get source location of the wrapped scope
      #}
@@ -119,9 +119,9 @@ case xx of {{ namespace:ns }} -> {
    #}
   class module {
 
-    __name__ :: StringType
-    __path__ :: StringType
-    __file__ :: StringType
+    __name__ :: String
+    __path__ :: String
+    __file__ :: String
 
   }
 

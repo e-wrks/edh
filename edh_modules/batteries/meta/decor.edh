@@ -16,13 +16,13 @@ error( 'Executing meta module: ' ++ __name__ )
 
 export {
 
-  property :: ( MethodType ) -> DescriptorType
+  property :: ( Method ) -> Descriptor
   {##
    # decorate a method to be a property getter
    #}
   method property ( getterMth ) pass
 
-  setter :: ( MethodType ) -> DescriptorType
+  setter :: ( Method ) -> Descriptor
   {##
    # decorate a method to be a property setter
    #}

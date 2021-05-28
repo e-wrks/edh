@@ -96,10 +96,10 @@ Many( -1 )
 
 # %%
 
-Point :: ( DecimalType, DecimalType ) -> Point
+Point :: ( Decimal, Decimal ) -> Point
 data Point( x, y ) pass
 
-Circle :: ( Point, DecimalType ) -> Circle
+Circle :: ( Point, Decimal ) -> Circle
 data Circle( center, radius ) {
   property$
   method area() 3.14 * this.radius**2

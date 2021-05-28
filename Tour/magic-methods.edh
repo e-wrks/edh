@@ -10,7 +10,7 @@
 
     method (+) ( other ) case type( other ) of {
       # add to a constant
-      DecimalType -> {
+      "Decimal" -> {
         return Tensor( name= '(' ++ this.name ++ '+' ++ other ++ ')')
       }
 
@@ -44,7 +44,7 @@
 
     method (*) ( other ) case type( other ) of {
       # mul to a constant
-      DecimalType -> {
+      "Decimal" -> {
         return Tensor( name= '(' ++ this.name ++ '*' ++ other ++ ')')
       }
 
@@ -75,7 +75,7 @@
 
     method (-) ( other ) case type( other ) of {
       # sub a constant
-      DecimalType -> {
+      "Decimal" -> {
         return Tensor( name= '(' ++ this.name ++ '-' ++ other ++ ')')
       }
 
@@ -89,7 +89,7 @@
 
     method (-.) ( other ) case type( other ) of {
       # sub from a constant
-      DecimalType -> {
+      "Decimal" -> {
         return Tensor( name= '(' ++ other ++ '-' ++ this.name ++ ')')
       }
 
@@ -103,7 +103,7 @@
 
     method (/) ( other ) case type( other ) of {
       # div by a constant
-      DecimalType -> {
+      "Decimal" -> {
         return Tensor( name= '(' ++ this.name ++ '/' ++ other ++ ')')
       }
 
@@ -117,7 +117,7 @@
 
     method (/.) ( other ) case type( other ) of {
       # div to a constant
-      DecimalType -> {
+      "Decimal" -> {
         return Tensor( name= '(' ++ other ++ '/' ++ this.name ++ ')')
       }
 

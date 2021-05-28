@@ -29,7 +29,7 @@ export namespace console () export {
   {## Constant for logging to target at FATAL level #}
   fatal = 50
 
-  logLevel :: int!DecimalType
+  logLevel :: int!Decimal
   {##
    # Configured logging level by the environment
 
@@ -51,7 +51,7 @@ If the program is run by the main thread of an Đ interpreter process, this will
   }
 
 
-  readSource :: ( StringType || None, String || None ) -> StringType
+  readSource :: ( String || None, String || None ) -> String
   {##
    # Read a piece of source code from stdin
    #}
@@ -61,7 +61,7 @@ If the program is run by the main thread of an Đ interpreter process, this will
 
 
   readCommand :: (
-    StringType || None, String || None, ObjectType || None,
+    String || None, String || None, Object || None,
   ) -> Any
   {##
    # Read a piece of source code from stdin, evaluate as Đ source and return the result
@@ -73,14 +73,14 @@ If the program is run by the main thread of an Đ interpreter process, this will
     pass
   }
 
-  log :: ( *Any, level= DecimalType, **Any ) -> nil
+  log :: ( *Any, level= Decimal, **Any ) -> nil
   {##
    # Log messages to stderr
    #}
   method log( *args, level= console.info, **kwargs ) void {
   }
 
-  print :: ( *Any, eol= StringType, **Any ) -> nil
+  print :: ( *Any, eol= String, **Any ) -> nil
   {##
    # Print things to stdout
 
@@ -91,7 +91,7 @@ If the program is run by the main thread of an Đ interpreter process, this will
   }
 
 
-  now :: () -> int!DecimalType
+  now :: () -> int!Decimal
   {##
    # Obtain nanoseconds ellapsed since epoch in UTC, from the underlying operating system
    #}
@@ -99,8 +99,8 @@ If the program is run by the main thread of an Đ interpreter process, this will
 
 
   everySeconds
-  :: ( s!int!DecimalType, BoolType || None )
-  -> [ ns!int!DecimalType ] =>* nil
+  :: ( s!int!Decimal, Bool || None )
+  -> [ ns!int!Decimal ] =>* nil
   {##
    # Yield `this.now()` at the specified interval
 
@@ -112,8 +112,8 @@ The first yield may wait an interval or not, according to how `wait1st` is speci
   }
 
   everyMicros
-  :: ( us!int!DecimalType, BoolType || None )
-  -> [ ns!int!DecimalType ] =>* nil
+  :: ( us!int!Decimal, Bool || None )
+  -> [ ns!int!Decimal ] =>* nil
   {##
    # yield `this.now()` at the specified interval
 
@@ -125,8 +125,8 @@ The first yield may wait an interval or not, according to how `wait1st` is speci
   }
 
   everyMillis
-  :: ( ms!int!DecimalType, BoolType || None )
-  -> [ ns!int!DecimalType ] =>* nil
+  :: ( ms!int!Decimal, Bool || None )
+  -> [ ns!int!Decimal ] =>* nil
   {##
    # yield `this.now()` at the specified interval
 
