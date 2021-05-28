@@ -557,6 +557,9 @@ createEdhWorld !console = do
                 EdhArgsPack $ ArgsPack (reverse rtnArgs) (odFromList rtnKwArgs)
       where
         attrKeyFrom :: EdhValue -> (AttrKey -> STM ()) -> STM ()
+        attrKeyFrom
+          (EdhExpr _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _)
+          exit' = resolveEdhAttrAddr ets addr $ \ !key -> exit' key
         attrKeyFrom (EdhString attrName) !exit' = exit' $ AttrByName attrName
         attrKeyFrom (EdhSymbol sym) !exit' = exit' $ AttrBySym sym
         attrKeyFrom badVal _ =
