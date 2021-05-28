@@ -1048,11 +1048,9 @@ instance Hashable EdhBound where
   hashWithSalt s (OpenBound b) = s `hashWithSalt` (1 :: Int) `hashWithSalt` b
   hashWithSalt s (ClosedBound b) = s `hashWithSalt` (2 :: Int) `hashWithSalt` b
 
--- | everything in Edh is a value
+-- | everything is a value in Edh
 data EdhValue
-  = -- | type itself is a kind of (immutable) value
-    EdhType !EdhTypeValue
-  | -- term values (immutable)
+  = -- term values (immutable)
     EdhNil
   | EdhDecimal !Decimal
   | EdhBool !Bool
@@ -1119,7 +1117,6 @@ edhExpr :: Unique -> ExprSrc -> Text -> EdhValue
 edhExpr !u (ExprSrc !x _) !s = EdhExpr u x s
 
 instance Show EdhValue where
-  show (EdhType t) = show t
   show EdhNil = "nil"
   show (EdhDecimal v) = showDecimal v
   show (EdhBool v) = if v then "true" else "false"
@@ -1176,7 +1173,6 @@ instance Show EdhValue where
 -- for types of:  object/dict/list
 
 instance Eq EdhValue where
-  EdhType x == EdhType y = x == y
   EdhNil == EdhNil = True
   EdhDecimal x == EdhDecimal y = x == y
   EdhBool x == EdhBool y = x == y
@@ -1216,7 +1212,6 @@ instance Eq EdhValue where
   _ == _ = False
 
 instance Hashable EdhValue where
-  hashWithSalt s (EdhType x) = hashWithSalt s $ 1 + fromEnum x
   hashWithSalt s EdhNil = hashWithSalt s (0 :: Int)
   hashWithSalt s (EdhDecimal x) = hashWithSalt s x
   hashWithSalt s (EdhBool x) = hashWithSalt s x
@@ -1680,7 +1675,6 @@ data Literal
   | DecLiteral !Decimal
   | BoolLiteral !Bool
   | StringLiteral !Text
-  | TypeLiteral !EdhTypeValue
   | ValueLiteral !EdhValue
   deriving (Eq, Show)
 
@@ -1690,115 +1684,58 @@ instance Hashable Literal where
   hashWithSalt s (DecLiteral x) = hashWithSalt s x
   hashWithSalt s (BoolLiteral x) = hashWithSalt s x
   hashWithSalt s (StringLiteral x) = hashWithSalt s x
-  hashWithSalt s (TypeLiteral x) = hashWithSalt s x
   hashWithSalt s (ValueLiteral x) = hashWithSalt s x
-
--- | the type for the value of type of a value
--- note nil has no type, its type if you really ask, is nil
-data EdhTypeValue
-  = TypeType
-  | DecimalType
-  | BoolType
-  | StringType
-  | BlobType
-  | SymbolType
-  | UUIDType
-  | ObjectType
-  | ClassType
-  | HostClassType
-  | DictType
-  | ListType
-  | RangeType
-  | PairType
-  | ArgsPackType
-  | HostMethodType
-  | HostOperType
-  | HostGenrType
-  | IntrinsicType
-  | MethodType
-  | OperatorType
-  | GeneratorType
-  | InterpreterType
-  | ProducerType
-  | DescriptorType
-  | BreakType
-  | ContinueType
-  | CaseCloseType
-  | CaseOtherType
-  | FallthroughType
-  | RethrowType
-  | YieldType
-  | ReturnType
-  | OrdType
-  | DefaultType
-  | SinkType
-  | ExprType
-  deriving (Enum, Eq, Ord, Show)
-
-instance Hashable EdhTypeValue where
-  hashWithSalt s t = hashWithSalt s $ fromEnum t
 
 edhTypeNameOf :: EdhValue -> Text
 edhTypeNameOf EdhNil = "nil"
 edhTypeNameOf (EdhNamedValue n v) = n <> " := " <> edhTypeNameOf v
-edhTypeNameOf v = T.pack $ show $ edhTypeOf v
-
--- | Get the type tag of an value
---
--- Passing in a `nil` value will hit bottom (crash the process) here,
--- use `edhTypeNameOf` if all you want is a type name shown to user.
-edhTypeOf :: EdhValue -> EdhTypeValue
--- it's a taboo to get the type of a nil, either named or not
-edhTypeOf EdhNil = undefined
-edhTypeOf EdhType {} = TypeType
-edhTypeOf EdhDecimal {} = DecimalType
-edhTypeOf EdhBool {} = BoolType
-edhTypeOf EdhBlob {} = BlobType
-edhTypeOf EdhString {} = StringType
-edhTypeOf EdhSymbol {} = SymbolType
-edhTypeOf EdhUUID {} = UUIDType
-edhTypeOf EdhRange {} = RangeType
-edhTypeOf EdhPair {} = PairType
-edhTypeOf EdhArgsPack {} = ArgsPackType
-edhTypeOf EdhDict {} = DictType
-edhTypeOf EdhList {} = ListType
-edhTypeOf (EdhObject o) = case edh'obj'store o of
-  HashStore {} -> ObjectType
+edhTypeNameOf EdhDecimal {} = "Decimal"
+edhTypeNameOf EdhBool {} = "Bool"
+edhTypeNameOf EdhBlob {} = "Blob"
+edhTypeNameOf EdhString {} = "String"
+edhTypeNameOf EdhSymbol {} = "Symbol"
+edhTypeNameOf EdhUUID {} = "UUID"
+edhTypeNameOf EdhRange {} = "Range"
+edhTypeNameOf EdhPair {} = "Pair"
+edhTypeNameOf EdhArgsPack {} = "ArgsPack"
+edhTypeNameOf EdhDict {} = "Dict"
+edhTypeNameOf EdhList {} = "List"
+edhTypeNameOf (EdhObject o) = case edh'obj'store o of
+  HashStore {} -> "Object"
   ClassStore !cls -> case edh'procedure'decl $ edh'class'proc cls of
-    ProcDecl {} -> ClassType
-    HostDecl {} -> HostClassType
-  HostStore {} -> ObjectType -- TODO add a @HostObjectType@ to distinguish?
-edhTypeOf (EdhProcedure pc _) = edhProcTypeOf pc
-edhTypeOf (EdhBoundProc pc _ _ _) = edhProcTypeOf pc
-edhTypeOf EdhBreak = BreakType
-edhTypeOf EdhContinue = ContinueType
-edhTypeOf EdhCaseClose {} = CaseCloseType
-edhTypeOf EdhCaseOther = CaseOtherType
-edhTypeOf EdhFallthrough = FallthroughType
-edhTypeOf EdhRethrow = RethrowType
-edhTypeOf EdhYield {} = YieldType
-edhTypeOf EdhReturn {} = ReturnType
-edhTypeOf EdhOrd {} = OrdType
-edhTypeOf EdhDefault {} = DefaultType
-edhTypeOf EdhEvs {} = SinkType
-edhTypeOf (EdhNamedValue _ v) = edhTypeOf v
-edhTypeOf EdhExpr {} = ExprType
+    ProcDecl {} -> "Class"
+    HostDecl {} -> "HostClass"
+  HostStore {} -> "HostValue"
+edhTypeNameOf (EdhProcedure pc _) = edhProcTypeNameOf pc
+edhTypeNameOf (EdhBoundProc pc _ _ _) = edhProcTypeNameOf pc
+edhTypeNameOf EdhBreak = "Break"
+edhTypeNameOf EdhContinue = "Continue"
+edhTypeNameOf EdhCaseClose {} = "CaseClose"
+edhTypeNameOf EdhCaseOther = "CaseOther"
+edhTypeNameOf EdhFallthrough = "Fallthrough"
+edhTypeNameOf EdhRethrow = "Rethrow"
+edhTypeNameOf EdhYield {} = "Yield"
+edhTypeNameOf EdhReturn {} = "Return"
+edhTypeNameOf EdhOrd {} = "Ord"
+edhTypeNameOf EdhDefault {} = "Default"
+edhTypeNameOf EdhEvs {} = "Sink"
+edhTypeNameOf EdhExpr {} = "Expr"
 
-edhProcTypeOf :: EdhProcDefi -> EdhTypeValue
-edhProcTypeOf = \case
-  EdhIntrOp {} -> IntrinsicType
+edhProcTypeNameOf :: EdhProcDefi -> Text
+edhProcTypeNameOf = \case
+  EdhIntrOp {} -> "IntrinsicOperator"
   EdhOprtor _ _ _ !pd -> case edh'procedure'decl pd of
-    HostDecl {} -> HostOperType
-    ProcDecl {} -> OperatorType
+    HostDecl {} -> "HostOperator"
+    ProcDecl {} -> "Operator"
   EdhMethod !pd -> case edh'procedure'decl pd of
-    HostDecl {} -> HostMethodType
-    ProcDecl {} -> MethodType
+    HostDecl {} -> "HostMethod"
+    ProcDecl {} -> "Method"
   EdhGnrtor !pd -> case edh'procedure'decl pd of
-    HostDecl {} -> HostGenrType
-    ProcDecl {} -> GeneratorType
-  EdhIntrpr {} -> InterpreterType
-  EdhPrducr {} -> ProducerType
-  EdhDescriptor {} -> DescriptorType
+    HostDecl {} -> "HostGenerator"
+    ProcDecl {} -> "Generator"
+  EdhIntrpr {} -> "Interpreter"
+  EdhPrducr {} -> "Producer"
+  EdhDescriptor {} -> "Descriptor"
 
 objectScope :: Object -> STM Scope
 objectScope !obj = case edh'obj'store obj of

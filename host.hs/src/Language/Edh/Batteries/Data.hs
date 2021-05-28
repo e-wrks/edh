@@ -747,10 +747,7 @@ typeProc (ArgsPack !args !kwargs) !exit =
             (EdhArgsPack $ ArgsPack argsType $ odMap edhTypeValOf kwargs)
   where
     edhTypeValOf :: EdhValue -> EdhValue
-    -- it's a taboo to get the type of a nil, either named or not
-    edhTypeValOf EdhNil = edhNone
-    edhTypeValOf (EdhNamedValue _n EdhNil) = edhNone
-    edhTypeValOf v = EdhType $ edhTypeOf v
+    edhTypeValOf = EdhString . edhTypeNameOf
 
 procNameProc :: EdhValue -> EdhHostProc
 procNameProc !p !exit !ets = case p of

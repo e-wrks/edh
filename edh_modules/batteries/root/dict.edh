@@ -4,7 +4,7 @@
 import * 'batteries/meta'
 
 
-export method __DictType_push__ ( d )
+export method __Dict_push__ ( d )
 {##
  # update the dict for the specified key to associate with specified value
  #
@@ -15,7 +15,7 @@ method push ( k, v ) {
   d[ k ] = v
 }
 
-export method __DictType_pop__ ( d )
+export method __Dict_pop__ ( d )
 {##
  # try remove the entry associated with the specified key
  #

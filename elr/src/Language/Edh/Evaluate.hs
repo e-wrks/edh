@@ -3271,7 +3271,6 @@ evalLiteral = \case
   StringLiteral !v -> return (EdhString v)
   BoolLiteral !v -> return (EdhBool v)
   NilLiteral -> return nil
-  TypeLiteral !v -> return (EdhType v)
   SinkCtor -> EdhEvs <$> newEdhSink
   ValueLiteral !v -> return v
 

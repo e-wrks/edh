@@ -18,7 +18,7 @@ export method min( n, *rest ) {
 
 
 {## Resembles `Number.prototype.toFixed()` as in JavaScript #}
-export method __DecimalType_toFixed__(n) return method toFixed(digs= 0) {
+export method __Decimal_toFixed__(n) return method toFixed(digs= 0) {
   amp = 10**digs
   return repr( (amp * n).round / amp )
 }
