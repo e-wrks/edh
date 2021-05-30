@@ -733,21 +733,11 @@ cmpProc !v1 !v2 !exit !ets = edhCompareValue ets v1 v2 $ \case
   Nothing -> exitEdh ets exit edhNA
   Just !conclusion -> exitEdh ets exit $ EdhOrd conclusion
 
--- | utility type(*args,**kwargs) - value type introspector
-typeProc :: ArgsPack -> EdhHostProc
-typeProc (ArgsPack !args !kwargs) !exit =
-  let !argsType = edhTypeValOf <$> args
-   in if odNull kwargs
-        then case argsType of
-          [t] -> exitEdhTx exit t
-          _ -> exitEdhTx exit $ EdhArgsPack $ ArgsPack argsType odEmpty
-        else
-          exitEdhTx
-            exit
-            (EdhArgsPack $ ArgsPack argsType $ odMap edhTypeValOf kwargs)
-  where
-    edhTypeValOf :: EdhValue -> EdhValue
-    edhTypeValOf = EdhString . edhTypeNameOf
+-- | utility type(value) - value type introspector
+typeProc :: Expr -> EdhHostProc
+typeProc !valExpr !exit =
+  evalExpr' valExpr Nothing $ \ !val ->
+    exitEdhTx exit $ EdhString $ edhTypeNameOf val
 
 procNameProc :: EdhValue -> EdhHostProc
 procNameProc !p !exit !ets = case p of
