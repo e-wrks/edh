@@ -359,11 +359,23 @@ installEdhBatteries world =
           ("**=", InfixR, 2),
           ("&&=", InfixR, 3),
           ("||=", InfixR, 3),
+          -- in range tests
+          ("in", Infix, 4),
+          ("not in", Infix, 4),
+          ("is in", Infix, 4),
+          ("is not in", Infix, 4),
           -- the range constructor
           ("..", Infix, 5),
           ("^..", Infix, 5),
           ("..^", Infix, 5),
           ("^..^", Infix, 5),
+          -- prepand to list
+          --     l = [3,7,5]
+          --     2 :> l
+          --     [2,3,7,5]
+          (":>", InfixR, 5),
+          -- the pair constructor, creates pairs in Edh
+          (":", InfixL, 5),
           -- arithmetic
           ("+", InfixL, 6),
           ("-", InfixL, 6),
@@ -372,11 +384,6 @@ installEdhBatteries world =
           ("//", InfixL, 7),
           ("%", InfixL, 7),
           ("**", InfixL, 8),
-          -- in range tests
-          ("in", Infix, 4),
-          ("not in", Infix, 4),
-          ("is in", Infix, 4),
-          ("is not in", Infix, 4),
           -- identity equality tests
           ("is not", Infix, 4),
           ("is", Infix, 4),
@@ -403,13 +410,6 @@ installEdhBatteries world =
           --  * args comprehension:
           --     () =< for x from range(100) do x*x
           ("=<", InfixL, 2),
-          -- prepand to list
-          --     l = [3,7,5]
-          --     2 :> l
-          --     [2,3,7,5]
-          (":>", InfixR, 2),
-          -- the pair constructor, creates pairs in Edh
-          (":", InfixL, 2),
           -- reverse left-list and prepend to right-list
           --     l = [3,7,5]
           --     [9,2] >> l
