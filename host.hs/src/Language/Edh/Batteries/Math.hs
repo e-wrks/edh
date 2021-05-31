@@ -3,11 +3,7 @@ module Language.Edh.Batteries.Math where
 -- import           Debug.Trace
 
 import Control.Concurrent.STM
-import Data.Lossless.Decimal
-  ( Decimal (Decimal),
-    decimalToInteger,
-    powerDecimal,
-  )
+import Data.Lossless.Decimal as D
 import Language.Edh.Args
 import Language.Edh.Batteries.Data
 import Language.Edh.Control
@@ -237,39 +233,87 @@ inRangeProc ::
 inRangeProc inverse eqTester !lhExpr !rhExpr !exit !ets = runEdhTx ets $
   evalExprSrc lhExpr $ \ !lhVal ->
     evalExprSrc rhExpr $
-      \ !rhVal _ets -> case edhUltimate rhVal of
-        EdhRange !lb !ub -> do
-          let rhCmp = edhCompareValue ets lhVal (edhBoundValue ub) $ \case
-                Nothing -> exitEdh ets exit edhNA
-                Just LT -> exitEdh ets exit $ EdhBool $ inverse True
-                Just GT -> exitEdh ets exit $ EdhBool $ inverse False
-                Just EQ -> case ub of
-                  OpenBound {} -> exitEdh ets exit $ EdhBool $ inverse False
-                  ClosedBound {} -> exitEdh ets exit $ EdhBool $ inverse True
-          edhCompareValue ets lhVal (edhBoundValue lb) $ \case
-            Nothing -> exitEdh ets exit edhNA
-            Just GT -> rhCmp
-            Just LT -> exitEdh ets exit $ EdhBool $ inverse False
-            Just EQ -> case lb of
-              OpenBound {} -> exitEdh ets exit $ EdhBool $ inverse False
-              ClosedBound {} -> rhCmp
-        EdhArgsPack (ArgsPack !vs !kwargs) ->
-          if null vs
-            then edhValueAsAttrKey'
-              ets
-              lhVal
-              (exitEdh ets exit $ EdhBool $ inverse False)
-              $ \ !lhKey -> case odLookup lhKey kwargs of
-                Nothing -> exitEdh ets exit $ EdhBool $ inverse False
-                Just {} -> exitEdh ets exit $ EdhBool $ inverse True
-            else chkInList lhVal vs
-        EdhList (List _u !lv) -> readTVar lv >>= chkInList lhVal
-        EdhDict (Dict _ !ds) ->
-          iopdLookup lhVal ds >>= \case
-            Nothing -> exitEdh ets exit $ EdhBool $ inverse False
-            Just {} -> exitEdh ets exit $ EdhBool $ inverse True
-        _ -> edhValueDesc ets rhVal $ \ !badDesc ->
-          throwEdh ets UsageError $ "bad range/container: " <> badDesc
+      \ !rhVal _ets -> do
+        let badRHS = edhValueDesc ets rhVal $ \ !badDesc ->
+              throwEdh ets UsageError $ "bad range/container: " <> badDesc
+        case edhUltimate rhVal of
+          EdhRange !lb !ub -> do
+            let rhCmp = edhCompareValue ets lhVal (edhBoundValue ub) $ \case
+                  Nothing -> exitEdh ets exit edhNA
+                  Just LT -> exitEdh ets exit $ EdhBool $ inverse True
+                  Just GT -> exitEdh ets exit $ EdhBool $ inverse False
+                  Just EQ -> case ub of
+                    OpenBound {} -> exitEdh ets exit $ EdhBool $ inverse False
+                    ClosedBound {} -> exitEdh ets exit $ EdhBool $ inverse True
+            edhCompareValue ets lhVal (edhBoundValue lb) $ \case
+              Nothing -> exitEdh ets exit edhNA
+              Just GT -> rhCmp
+              Just LT -> exitEdh ets exit $ EdhBool $ inverse False
+              Just EQ -> case lb of
+                OpenBound {} -> exitEdh ets exit $ EdhBool $ inverse False
+                ClosedBound {} -> rhCmp
+          EdhArgsPack (ArgsPack !vs !kwargs) ->
+            if null vs
+              then edhValueAsAttrKey'
+                ets
+                lhVal
+                (exitEdh ets exit $ EdhBool $ inverse False)
+                $ \ !lhKey -> case odLookup lhKey kwargs of
+                  Nothing -> exitEdh ets exit $ EdhBool $ inverse False
+                  Just {} -> exitEdh ets exit $ EdhBool $ inverse True
+              else chkInList lhVal vs
+          EdhList (List _u !lv) -> readTVar lv >>= chkInList lhVal
+          EdhDict (Dict _ !ds) ->
+            iopdLookup lhVal ds >>= \case
+              Nothing -> exitEdh ets exit $ EdhBool $ inverse False
+              Just {} -> exitEdh ets exit $ EdhBool $ inverse True
+          !rhUltiVal -> parseEdhIndex ets rhUltiVal $ \case
+            Left _err -> badRHS
+            Right (EdhSlice (Just !start) (Just !stop) !maybeStep) ->
+              case maybeStep of
+                Nothing -> do
+                  let rhCmp =
+                        edhCompareValue
+                          ets
+                          lhVal
+                          (EdhDecimal $ fromIntegral stop)
+                          $ \case
+                            Nothing -> exitEdh ets exit edhNA
+                            Just LT ->
+                              exitEdh ets exit $ EdhBool $ inverse True
+                            _ -> exitEdh ets exit $ EdhBool $ inverse False
+                  edhCompareValue ets lhVal (EdhDecimal $ fromIntegral start) $
+                    \case
+                      Nothing -> exitEdh ets exit edhNA
+                      Just LT -> exitEdh ets exit $ EdhBool $ inverse False
+                      _ -> rhCmp
+                Just !step -> do
+                  let inDiscreteRange :: Integer -> Integer -> Integer -> STM ()
+                      inDiscreteRange !start' !stop' !step' =
+                        case edhUltimate lhVal of
+                          EdhDecimal !d -> case D.decimalToInteger d of
+                            Just !i
+                              | start' <= i && i < stop'
+                                  && ((i - start') `mod` step') == 0 ->
+                                exitEdh ets exit $ EdhBool $ inverse True
+                            _ -> exitEdh ets exit $ EdhBool $ inverse False
+                          _ -> exitEdh ets exit edhNA
+                  if
+                      | stop == start ->
+                        exitEdh ets exit $ EdhBool $ inverse False
+                      | stop > start && step > 0 ->
+                        inDiscreteRange
+                          (fromIntegral start)
+                          (fromIntegral stop)
+                          (fromIntegral step)
+                      | stop < start && step < 0 ->
+                        inDiscreteRange
+                          (fromIntegral stop)
+                          (fromIntegral start)
+                          (fromIntegral $ - step)
+                      | otherwise ->
+                        exitEdh ets exit $ EdhBool $ inverse False
+            _ -> badRHS
   where
     chkInList :: EdhValue -> [EdhValue] -> STM ()
     chkInList _ [] =
