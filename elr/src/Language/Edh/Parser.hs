@@ -222,6 +222,7 @@ parseLetStmt !si = do
   -- `const` has no different semantics than `let` in Edh,
   -- merely for JavaScript src level compatibility
   void $ keyword "let" <|> keyword "const"
+  void optionalComma
   (pairs, si') <- parsePairs [] si
   case pairs of
     [] -> return (VoidStmt, si')
