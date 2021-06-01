@@ -1165,8 +1165,8 @@ parseDictOrBlock !si0 =
           (!v, !si') <- parseExpr si
           return ((AddrDictKey k, v), si')
         exprEntry = try $ do
-          -- (:) should be infixl 2, cross check please
-          (!k, !si') <- parseExprPrec (Just ((":", noSrcRange), InfixL)) 2 si
+          -- (:) should be infixl 5, cross check please
+          (!k, !si') <- parseExprPrec (Just ((":", noSrcRange), InfixL)) 5 si
           entryColon
           (!v, !si'') <- parseExpr si'
           return ((ExprDictKey k, v), si'')

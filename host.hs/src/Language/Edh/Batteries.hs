@@ -375,6 +375,8 @@ installEdhBatteries world =
           --     [2,3,7,5]
           (":>", InfixR, 5),
           -- the pair constructor, creates pairs in Edh
+          -- note: this affects dict literal parsing,
+          --       cross check with `parseDictEntries` in parser
           (":", InfixL, 5),
           -- arithmetic
           ("+", InfixL, 6),
