@@ -521,7 +521,10 @@ installEdhBatteries world =
         sequence $
           [ (AttrByName nm,) <$> mkHostProc rootScope mc nm hp
             | (mc, nm, hp) <-
-                [ (EdhMethod, "__String_bytes__", wrapHostProc strEncodeProc),
+                [ (EdhMethod, "__String_strip__", wrapHostProc strStripProc),
+                  (EdhMethod, "__String_stripStart__", wrapHostProc strStripStartProc),
+                  (EdhMethod, "__String_stripEnd__", wrapHostProc strStripEndProc),
+                  (EdhMethod, "__String_bytes__", wrapHostProc strEncodeProc),
                   (EdhMethod, "__Blob_utf8string__", wrapHostProc blobDecodeProc),
                   (EdhMethod, "__Decimal_trunc__", wrapHostProc decTruncProc),
                   (EdhMethod, "__Decimal_round__", wrapHostProc decRoundProc),

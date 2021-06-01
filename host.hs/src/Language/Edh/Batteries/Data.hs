@@ -28,6 +28,15 @@ import Language.Edh.RtTypes
 import Language.Edh.Utils (seqcontSTM)
 import Prelude
 
+strStripProc :: Text -> EdhHostProc
+strStripProc !str !exit = exitEdhTx exit $ EdhString $ T.strip str
+
+strStripStartProc :: Text -> EdhHostProc
+strStripStartProc !str !exit = exitEdhTx exit $ EdhString $ T.stripStart str
+
+strStripEndProc :: Text -> EdhHostProc
+strStripEndProc !str !exit = exitEdhTx exit $ EdhString $ T.stripEnd str
+
 strEncodeProc :: Text -> EdhHostProc
 strEncodeProc !str !exit = exitEdhTx exit $ EdhBlob $ TE.encodeUtf8 str
 
