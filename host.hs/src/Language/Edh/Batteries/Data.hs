@@ -43,8 +43,9 @@ strEncodeProc !str !exit = exitEdhTx exit $ EdhBlob $ TE.encodeUtf8 str
 blobDecodeProc :: ByteString -> EdhHostProc
 blobDecodeProc !blob !exit = exitEdhTx exit $ EdhString $ TE.decodeUtf8 blob
 
-blobProc :: EdhValue -> RestKwArgs -> EdhHostProc
-blobProc !val !kwargs !exit !ets = case edhUltimate val of
+blobProc :: "val" ?: EdhValue -> RestKwArgs -> EdhHostProc
+blobProc (NamedEdhArg Nothing) _ !exit !ets = exitEdh ets exit $ EdhBlob ""
+blobProc (NamedEdhArg (Just !val)) !kwargs !exit !ets = case edhUltimate val of
   b@EdhBlob {} -> exitEdh ets exit b
   (EdhString !str) -> exitEdh ets exit $ EdhBlob $ TE.encodeUtf8 str
   (EdhObject !o) ->
