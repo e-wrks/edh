@@ -92,6 +92,7 @@ module Language.Edh.EHI
     haltEdhProgram,
     runEdhProgram,
     runEdhProgram',
+    edhMakeCall,
     edhPrepareCall,
     edhPrepareCall',
     callEdhMethod,

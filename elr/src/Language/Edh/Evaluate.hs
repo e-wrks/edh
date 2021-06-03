@@ -1277,6 +1277,11 @@ packEdhArgs !ets !argSenders !pkExit = do
     -- discourage artifact definition during args packing
     !etsPacking = ets {edh'context = (edh'context ets) {edh'ctx'pure = True}}
 
+-- | Make a synchronous call to a non-interpreter procedure
+edhMakeCall :: EdhValue -> ArgsPack -> EdhTxExit EdhValue -> EdhTx
+edhMakeCall !calleeVal !apk !exit !ets =
+  edhPrepareCall' ets calleeVal apk $ \ !mkCall -> runEdhTx ets $ mkCall exit
+
 -- Each Edh call is carried out in 2 phases, the preparation and the actual
 -- call execution. This is necessary to support the `go/defer` mechanism,
 -- where the preparation and call execution happen in different contexts.
