@@ -3,14 +3,10 @@ module Language.Edh.InterOp where
 -- import           System.IO.Unsafe               ( unsafePerformIO )
 
 import Control.Concurrent.STM
-  ( STM,
-    readTMVar,
-    readTVar,
-    throwSTM,
-  )
 import Data.ByteString (ByteString)
 import Data.Dynamic (Typeable, fromDynamic, toDyn)
-import Data.Lossless.Decimal as D (Decimal, decimalToInteger)
+import Data.Lossless.Decimal (Decimal)
+import qualified Data.Lossless.Decimal as D
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -163,7 +159,7 @@ instance EdhAllocator fn' => EdhAllocator (Maybe Decimal -> fn') where
 instance EdhAllocator fn' => EdhAllocator (Double -> fn') where
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
     EdhDecimal !val' ->
-      let !d = fromRational $ toRational val'
+      let !d = D.decimalToRealFloat val'
        in allocEdhObj (fn d) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
   allocEdhObj _ _ _ = throwEdhTx UsageError "missing anonymous arg"
@@ -174,7 +170,7 @@ instance EdhAllocator fn' => EdhAllocator (Maybe Double -> fn') where
     allocEdhObj (fn Nothing) (ArgsPack [] kwargs) exit
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
     EdhDecimal !val' ->
-      let !d = fromRational $ toRational val'
+      let !d = D.decimalToRealFloat val'
        in allocEdhObj (fn (Just d)) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
 
@@ -182,7 +178,7 @@ instance EdhAllocator fn' => EdhAllocator (Maybe Double -> fn') where
 instance EdhAllocator fn' => EdhAllocator (Float -> fn') where
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
     EdhDecimal !val' ->
-      let !d = fromRational $ toRational val'
+      let !d = D.decimalToRealFloat val'
        in allocEdhObj (fn d) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
   allocEdhObj _ _ _ = throwEdhTx UsageError "missing anonymous arg"
@@ -193,7 +189,7 @@ instance EdhAllocator fn' => EdhAllocator (Maybe Float -> fn') where
     allocEdhObj (fn Nothing) (ArgsPack [] kwargs) exit
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
     EdhDecimal !val' ->
-      let !d = fromRational $ toRational val'
+      let !d = D.decimalToRealFloat val'
        in allocEdhObj (fn (Just d)) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
 
@@ -615,7 +611,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg Doubl
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
         EdhDecimal !val' ->
-          let !d = fromRational $ toRational val'
+          let !d = D.decimalToRealFloat val'
            in allocEdhObj (fn (NamedEdhArg d)) (ArgsPack args kwargs') exit
         _ ->
           throwEdhTx UsageError $
@@ -627,7 +623,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg Doubl
         [] -> throwEdhTx UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
           EdhDecimal !val' ->
-            let !d = fromRational $ toRational val'
+            let !d = D.decimalToRealFloat val'
              in allocEdhObj (fn (NamedEdhArg d)) (ArgsPack args' kwargs') exit
           _ ->
             throwEdhTx UsageError $
@@ -644,7 +640,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Mayb
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
         EdhDecimal !val' ->
-          let !d = fromRational $ toRational val'
+          let !d = D.decimalToRealFloat val'
            in allocEdhObj
                 (fn (NamedEdhArg (Just d)))
                 (ArgsPack args kwargs')
@@ -659,7 +655,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Mayb
         [] -> allocEdhObj (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
         val : args' -> case val of
           EdhDecimal !val' ->
-            let !d = fromRational $ toRational val'
+            let !d = D.decimalToRealFloat val'
              in allocEdhObj
                   (fn (NamedEdhArg (Just d)))
                   (ArgsPack args' kwargs')
@@ -679,7 +675,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg Float
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
         EdhDecimal !val' ->
-          let !d = fromRational $ toRational val'
+          let !d = D.decimalToRealFloat val'
            in allocEdhObj (fn (NamedEdhArg d)) (ArgsPack args kwargs') exit
         _ ->
           throwEdhTx UsageError $
@@ -691,7 +687,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg Float
         [] -> throwEdhTx UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
           EdhDecimal !val' ->
-            let !d = fromRational $ toRational val'
+            let !d = D.decimalToRealFloat val'
              in allocEdhObj (fn (NamedEdhArg d)) (ArgsPack args' kwargs') exit
           _ ->
             throwEdhTx UsageError $
@@ -708,7 +704,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Mayb
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
         EdhDecimal !val' ->
-          let !d = fromRational $ toRational val'
+          let !d = D.decimalToRealFloat val'
            in allocEdhObj
                 (fn (NamedEdhArg (Just d)))
                 (ArgsPack args kwargs')
@@ -723,7 +719,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Mayb
         [] -> allocEdhObj (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
         val : args' -> case val of
           EdhDecimal !val' ->
-            let !d = fromRational $ toRational val'
+            let !d = D.decimalToRealFloat val'
              in allocEdhObj
                   (fn (NamedEdhArg (Just d)))
                   (ArgsPack args' kwargs')
@@ -2053,7 +2049,7 @@ instance EdhCallable fn' => EdhCallable (Maybe Decimal -> fn') where
 instance EdhCallable fn' => EdhCallable (Double -> fn') where
   callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
     EdhDecimal !val' ->
-      let !d = fromRational $ toRational val'
+      let !d = D.decimalToRealFloat val'
        in callFromEdh (fn d) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
   callFromEdh _ _ _ = throwEdhTx UsageError "missing anonymous arg"
@@ -2064,7 +2060,7 @@ instance EdhCallable fn' => EdhCallable (Maybe Double -> fn') where
     callFromEdh (fn Nothing) (ArgsPack [] kwargs) exit
   callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
     EdhDecimal !val' ->
-      let !d = fromRational $ toRational val'
+      let !d = D.decimalToRealFloat val'
        in callFromEdh (fn (Just d)) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
 
@@ -2072,7 +2068,7 @@ instance EdhCallable fn' => EdhCallable (Maybe Double -> fn') where
 instance EdhCallable fn' => EdhCallable (Float -> fn') where
   callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
     EdhDecimal !val' ->
-      let !d = fromRational $ toRational val'
+      let !d = D.decimalToRealFloat val'
        in callFromEdh (fn d) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
   callFromEdh _ _ _ = throwEdhTx UsageError "missing anonymous arg"
@@ -2083,7 +2079,7 @@ instance EdhCallable fn' => EdhCallable (Maybe Float -> fn') where
     callFromEdh (fn Nothing) (ArgsPack [] kwargs) exit
   callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
     EdhDecimal !val' ->
-      let !d = fromRational $ toRational val'
+      let !d = D.decimalToRealFloat val'
        in callFromEdh (fn (Just d)) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
 
@@ -2505,7 +2501,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg Double 
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
         EdhDecimal !val' ->
-          let !d = fromRational $ toRational val'
+          let !d = D.decimalToRealFloat val'
            in callFromEdh (fn (NamedEdhArg d)) (ArgsPack args kwargs') exit
         _ ->
           throwEdhTx UsageError $
@@ -2517,7 +2513,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg Double 
         [] -> throwEdhTx UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
           EdhDecimal !val' ->
-            let !d = fromRational $ toRational val'
+            let !d = D.decimalToRealFloat val'
              in callFromEdh (fn (NamedEdhArg d)) (ArgsPack args' kwargs') exit
           _ ->
             throwEdhTx UsageError $
@@ -2534,7 +2530,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Maybe 
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
         EdhDecimal !val' ->
-          let !d = fromRational $ toRational val'
+          let !d = D.decimalToRealFloat val'
            in callFromEdh
                 (fn (NamedEdhArg (Just d)))
                 (ArgsPack args kwargs')
@@ -2549,7 +2545,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Maybe 
         [] -> callFromEdh (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
         val : args' -> case val of
           EdhDecimal !val' ->
-            let !d = fromRational $ toRational val'
+            let !d = D.decimalToRealFloat val'
              in callFromEdh
                   (fn (NamedEdhArg (Just d)))
                   (ArgsPack args' kwargs')
@@ -2569,7 +2565,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg Float n
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
         EdhDecimal !val' ->
-          let !d = fromRational $ toRational val'
+          let !d = D.decimalToRealFloat val'
            in callFromEdh (fn (NamedEdhArg d)) (ArgsPack args kwargs') exit
         _ ->
           throwEdhTx UsageError $
@@ -2581,7 +2577,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg Float n
         [] -> throwEdhTx UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
           EdhDecimal !val' ->
-            let !d = fromRational $ toRational val'
+            let !d = D.decimalToRealFloat val'
              in callFromEdh (fn (NamedEdhArg d)) (ArgsPack args' kwargs') exit
           _ ->
             throwEdhTx UsageError $
@@ -2598,7 +2594,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Maybe 
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
         EdhDecimal !val' ->
-          let !d = fromRational $ toRational val'
+          let !d = D.decimalToRealFloat val'
            in callFromEdh
                 (fn (NamedEdhArg (Just d)))
                 (ArgsPack args kwargs')
@@ -2613,7 +2609,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Maybe 
         [] -> callFromEdh (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
         val : args' -> case val of
           EdhDecimal !val' ->
-            let !d = fromRational $ toRational val'
+            let !d = D.decimalToRealFloat val'
              in callFromEdh
                   (fn (NamedEdhArg (Just d)))
                   (ArgsPack args' kwargs')

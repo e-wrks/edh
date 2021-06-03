@@ -5,11 +5,6 @@ import Data.Char (chr, ord)
 import Data.Hashable (Hashable (hashWithSalt))
 import qualified Data.Scientific as Scientific
 import GHC.Real
-  ( denominator,
-    numerator,
-    (%),
-    (^^%^^),
-  )
 import Prelude
 
 data Decimal = Decimal
@@ -36,6 +31,18 @@ castDecimalToInteger x@(Decimal d e n)
   | e == 0 = n
   | otherwise = n * 10 ^ e
 {-# INLINE castDecimalToInteger #-}
+
+decimalToRealFloat :: RealFloat a => Decimal -> a
+decimalToRealFloat d
+  | decimalIsNaN d = 0 / 0
+  | decimalIsInf d = if d < 0 then -1 / 0 else 1 / 0
+  | otherwise = fromRational $ toRational d
+
+decimalFromRealFloat :: RealFloat a => a -> Decimal
+decimalFromRealFloat a
+  | isNaN a = nan
+  | isInfinite a = Decimal 0 0 $ if a < 0 then -1 else 1
+  | otherwise = decimalFromScientific $ Scientific.fromFloatDigits a
 
 decimalFromScientific :: Scientific.Scientific -> Decimal
 decimalFromScientific sn =
