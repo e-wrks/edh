@@ -430,6 +430,8 @@ installEdhBatteries world =
           ("<-", InfixR, 1),
           -- string coercing concatenation
           ("++", InfixL, 2),
+          -- for src level js compatibility, no implementation
+          ("--", InfixL, 2),
           -- logging
           ("<|", Infix, 1)
         ]

@@ -794,25 +794,41 @@ parseForExpr !si = do
 parseLoopHead :: IntplSrcInfo -> Parser (ArgsReceiver, ExprSrc, IntplSrcInfo)
 parseLoopHead !si =
   choice
-    [ do
-        -- possibly JavaScript compatible syntax
-        void $ symbol "("
-        !jsSyntax <-
-          isJust <$> optional (void $ keyword "let" <|> keyword "const")
-        if jsSyntax
-          then do
-            -- js compatible syntax is triggered by `let` or `const` keyword
-            !ar <- parseArgsReceiver
-            void $ keyword "of" <|> keyword "in"
-            (!iter, !si') <- parseExpr si
-            void $ symbol ")"
-            return (ar, iter, si')
-          else do
-            -- Edh or Python-like syntax
-            ars <- parseRestArgRecvs ")"
-            void $ keyword "from" <|> keyword "in"
-            (!iter, !si') <- parseExpr si
-            return (PackReceiver $ reverse $! ars, iter, si'),
+    [ symbol "(" -- possible JavaScript syntax
+        >> choice
+          [ do
+              -- js compatible syntax
+              void $ keyword "let" <|> keyword "const"
+              !ar <- parseArgsReceiver
+              choice
+                [ do
+                    void $ keyword "of" <|> keyword "in"
+                    (!iter, !si') <- parseExpr si
+                    void $ symbol ")"
+                    return (ar, iter, si'),
+                  do
+                    void equalSign
+                    (!iter, !si') <- parseExpr si
+                    -- todo `iter` is semantically in js the initial value, not
+                    --      the source, here only the syntax is accepted, the
+                    --      semantics is weird. to support `for(;;)` semantics?
+                    let dropRest si'' =
+                          optionalSemicolon >>= \case
+                            True -> do
+                              (_, !si''') <- parseExpr si''
+                              dropRest si'''
+                            False -> return si''
+                    !si'' <- dropRest si'
+                    void $ symbol ")"
+                    return (ar, iter, si'')
+                ],
+            do
+              -- Edh or Python-like syntax
+              ars <- parseRestArgRecvs ")"
+              void $ keyword "from" <|> keyword "in"
+              (!iter, !si') <- parseExpr si
+              return (PackReceiver $ reverse $! ars, iter, si')
+          ],
       do
         -- drop receiver, exclusively Edh syntax
         !src'span <- keyword "_"
