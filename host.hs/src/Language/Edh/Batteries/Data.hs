@@ -78,6 +78,14 @@ blobProc (NamedEdhArg (Just !val)) !kwargs !exit !ets = case edhUltimate val of
       Nothing -> edhValueDesc ets val $ \ !badDesc ->
         throwEdh ets UsageError $ "not convertible to blob: " <> badDesc
 
+rngLowerProc :: EdhValue -> EdhHostProc
+rngLowerProc (EdhRange !lb _ub) !exit = exitEdhTx exit $ edhBoundValue lb
+rngLowerProc _val _exit = throwEdhTx EvalError "not a range"
+
+rngUpperProc :: EdhValue -> EdhHostProc
+rngUpperProc (EdhRange _lb !ub) !exit = exitEdhTx exit $ edhBoundValue ub
+rngUpperProc _val _exit = throwEdhTx EvalError "not a range"
+
 propertyProc :: EdhValue -> Maybe EdhValue -> EdhHostProc
 propertyProc !getterVal !setterVal !exit !ets =
   case edh'obj'store caller'this of
