@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name: lossless-decimal
-version: 0.2.0.0
+version: 0.3.0.0
 license: BSD-3-Clause
 copyright: Compl Yue
 maintainer: compl.yue@icloud.com

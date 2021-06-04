@@ -65,6 +65,9 @@ decimalIsNaN (Decimal d _e n) = d == 0 && n == 0
 decimalIsInf :: Decimal -> Bool
 decimalIsInf (Decimal d _e n) = d == 0 && n /= 0
 
+decimalIsFinite :: Decimal -> Bool
+decimalIsFinite (Decimal d _e _n) = d /= 0
+
 normalizeInteger :: Integer -> Decimal
 normalizeInteger i = Decimal d e $ if neg then - n else n
   where
@@ -182,14 +185,14 @@ instance Fractional Decimal where
   (/) = divDecimal
 
 instance RealFrac Decimal where
-  properFraction (Decimal d e n) =
-    if e < 0
-      then
-        let (q, r) = n `quotRem` (d * 10 ^ (- e))
-         in (fromInteger q, Decimal d e r)
-      else
-        let (q, r) = (n * 10 ^ e) `quotRem` d
-         in (fromInteger q, normalizeDecimal $ Decimal d 0 r)
+  properFraction (Decimal d e n)
+    | d == 0 = (0, 0) -- the RealFrac instance of Double/Float works similarly
+    | e < 0 =
+      let (q, r) = n `quotRem` (d * 10 ^ (- e))
+       in (fromInteger q, Decimal d e r)
+    | otherwise =
+      let (q, r) = (n * 10 ^ e) `quotRem` d
+       in (fromInteger q, normalizeDecimal $ Decimal d 0 r)
 
 decimalGreater :: Decimal -> Decimal -> Bool
 decimalGreater x@(Decimal x'd _x'e x'n) y@(Decimal y'd _y'e y'n)
