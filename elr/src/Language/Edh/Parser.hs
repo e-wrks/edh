@@ -934,7 +934,7 @@ parseDecLit = lexeme $ do
   return $ Decimal 1 e n
   where
     b10Dec :: Parser (Integer, Integer)
-    b10Dec = do
+    b10Dec = try $ do
       !sign'n <- signNum
       !n <- b10Int =<< b10Dig
       choice
@@ -1411,7 +1411,9 @@ parseExprPrec !precedingOp !prec !si =
         !startPos <- getSourcePos
         (!x, !si') <-
           choice
-            [ parsePrefixExpr si,
+            [ (,si) . LitExpr <$> parseLitExpr,
+              (,si) <$> parseSymbolExpr,
+              parsePrefixExpr si,
               parseYieldExpr si,
               parseForExpr si,
               parseDoForOrWhileExpr si,
@@ -1434,8 +1436,6 @@ parseExprPrec !precedingOp !prec !si =
               parseInterpreterExpr si,
               parseProducerExpr si,
               parseOpDeclOvrdExpr si,
-              (,si) <$> parseSymbolExpr,
-              (,si) . LitExpr <$> parseLitExpr,
               (,si) . AttrExpr <$> parseAttrRef
             ]
         EdhParserState _ !lexeme'end <- get
