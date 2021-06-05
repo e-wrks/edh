@@ -1240,18 +1240,21 @@ parseIndexer !si = do
 parsePrefixExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parsePrefixExpr !si =
   choice
-    [ (symbol "+" >> notFollowedBy (satisfy isOperatorChar)) >> do
-        (!x, !si') <- parseExprPrec Nothing 9 si
-        return (PrefixExpr PrefixPlus x, si'),
-      (symbol "-" >> notFollowedBy (satisfy isOperatorChar)) >> do
-        (!x, !si') <- parseExprPrec Nothing 9 si
-        return (PrefixExpr PrefixMinus x, si'),
+    [ try $
+        prefixOp "+" >> do
+          (!x, !si') <- parseExprPrec Nothing 9 si
+          return (PrefixExpr PrefixPlus x, si'),
+      try $
+        prefixOp "-" >> do
+          (!x, !si') <- parseExprPrec Nothing 9 si
+          return (PrefixExpr PrefixMinus x, si'),
       keyword "not" >> do
         (!x, !si') <- parseExprPrec Nothing 4 si
         return (PrefixExpr Not x, si'),
-      (symbol "|" >> notFollowedBy (satisfy isOperatorChar)) >> do
-        (!x, !si') <- parseExprPrec Nothing 1 si
-        return (PrefixExpr Guard x, si'),
+      try $
+        prefixOp "|" >> sc >> do
+          (!x, !si') <- parseExprPrec Nothing 1 si
+          return (PrefixExpr Guard x, si'),
       keyword "void" >> do
         (!x, !si') <- parseExpr si
         return (VoidExpr x, si'),
@@ -1272,6 +1275,9 @@ parsePrefixExpr !si =
         (ExprSrc !x _, !si') <- parseExpr si
         return (x, si')
     ]
+  where
+    prefixOp :: Text -> Parser ()
+    prefixOp !opSym = string opSym >> notFollowedBy (satisfy isOperatorChar)
 
 -- NOTE: keywords for statements or other constructs will parse as identifier
 --       in an expr, if not forbidden here.
