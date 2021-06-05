@@ -247,8 +247,15 @@ overwriteNullProc !lhExpr !rhExpr !exit !ets =
         False -> exitEdh ets exit lhVal
         True ->
           runEdhTx etsOverwrite $
-            assignProc lhExpr rhExpr $ edhSwitchState ets . exitEdhTx exit
+            assignProc assignTgtExpr rhExpr $
+              edhSwitchState ets . exitEdhTx exit
   where
+    assignTgtExpr = case lhExpr of
+      ExprSrc
+        (InfixExpr ("?", _) !owner (ExprSrc (AttrExpr (DirectRef !addr)) _))
+        !expr'span -> ExprSrc (AttrExpr $ IndirectRef owner addr) expr'span
+      _ -> lhExpr
+
     !etsOverwrite =
       ets
         { -- mandate transaction for the check plus possible assign
