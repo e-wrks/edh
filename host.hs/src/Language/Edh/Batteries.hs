@@ -385,7 +385,7 @@ installEdhBatteries world =
           ("/", InfixL, 7),
           ("//", InfixL, 7),
           ("%", InfixL, 7),
-          ("**", InfixL, 8),
+          ("**", InfixR, 8),
           -- identity equality tests
           ("is not", Infix, 4),
           ("is", Infix, 4),
