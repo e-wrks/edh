@@ -4,8 +4,11 @@
 import * 'batteries/meta'
 
 
-export method join( fst= '', *rest, sep= ', ' ) {
-  s = str(fst) # do coerce to string now, in case only one arg passed
-  for one from rest do s = s ++ sep ++ one
-  return s
+export method __String_join__(sep) return method join( *all ) case all of {
+  { fst :> rest } -> {
+    s = str(fst) # do coerce to string now, in case only one arg passed
+    for one from rest do s = s ++ sep ++ one
+    return s
+  }
+  return ''
 }

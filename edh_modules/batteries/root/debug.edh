@@ -105,7 +105,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
     { otherVal } -> {
       ; | type( otherVal ) is in ( "Object", "Class", "HostClass", ) -> {
         ofScope = scope( ofObj= otherVal )
-        join( sep= '\n',
+        '\n'.join(
           desc( otherVal ),
           *() =< for ( k, v ) from ofScope.attrs() do
           '  ' ++ k ++ '= ' ++ v
