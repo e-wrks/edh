@@ -230,7 +230,7 @@ parseLetStmt !si = do
     !stmts -> return (flip ExprStmt NoDocCmt $ BlockExpr stmts, si')
   where
     parsePairs :: [StmtSrc] -> IntplSrcInfo -> Parser ([StmtSrc], IntplSrcInfo)
-    parsePairs got si' = (<|> return (got, si')) $ do
+    parsePairs got si' = do
       !startPos <- getSourcePos
       !ar <- parseArgsReceiver
       choice
