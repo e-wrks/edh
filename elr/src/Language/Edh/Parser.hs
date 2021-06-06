@@ -8,6 +8,7 @@ import Control.Applicative hiding
   )
 import Control.Monad
 import Control.Monad.State.Strict (MonadState (get, put))
+import Data.Char
 import qualified Data.Char as Char
 import Data.Functor (($>))
 import Data.Lossless.Decimal as D (Decimal (Decimal), inf, nan)
@@ -160,9 +161,9 @@ parseProgram = do
   return (ss, docCmt)
 
 parseStmts :: IntplSrcInfo -> [StmtSrc] -> Parser ([StmtSrc], IntplSrcInfo)
-parseStmts !si !ss =
+parseStmts !si !ss = do
+  void optionalSemicolon
   (eof >> return (reverse ss, si)) <|> do
-    void optionalSemicolon
     (!s, !si') <- parseStmt si
     parseStmts si' (s : ss)
 
@@ -714,35 +715,84 @@ parseThrowStmt !si = do
 parseStmt' :: Int -> IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
 parseStmt' !prec !si = do
   void optionalSemicolon
-  !docCmt <- optDocCmt <$> optional immediateDocComment
   !startPos <- getSourcePos
-  (!stmt, !si') <-
-    choice
-      [ parseGoStmt si,
-        parseDeferStmt si,
-        parseEffectStmt docCmt si,
-        parseLetStmt si,
-        parseExtendsStmt si,
-        parsePerceiveStmt si,
-        -- TODO validate <break> must within a loop construct
-        (BreakStmt, si) <$ keyword "break",
-        -- note <continue> can be the eval'ed value of a proc,
-        --      carrying NotImplemented semantics as in Python
-        (ContinueStmt, si) <$ keyword "continue",
-        -- TODO validate fallthrough must within a branch block
-        (FallthroughStmt, si) <$ keyword "fallthrough",
-        (RethrowStmt, si) <$ keyword "rethrow",
-        parseReturnStmt docCmt si,
-        parseThrowStmt si,
-        (,si) <$> parseVoidStmt,
-        -- NOTE: statements above should probably all be detected by
-        -- `illegalExprStarting` as invalid start for an expr
-        do
-          (ExprSrc !x _, !si') <- parseExprPrec Nothing prec si
-          return (ExprStmt x docCmt, si')
-      ]
-  EdhParserState _ !lexeme'end <- get
-  return (StmtSrc stmt (lspSrcRangeFromParsec startPos lexeme'end), si')
+  let legalStmt = do
+        !docCmt <- optDocCmt <$> optional immediateDocComment
+        (!stmt, !si') <-
+          choice
+            [ parseGoStmt si,
+              parseDeferStmt si,
+              parseEffectStmt docCmt si,
+              parseLetStmt si,
+              parseExtendsStmt si,
+              parsePerceiveStmt si,
+              -- TODO validate <break> must within a loop construct
+              (BreakStmt, si) <$ keyword "break",
+              -- note <continue> can be the eval'ed value of a proc,
+              --      carrying NotImplemented semantics as in Python
+              (ContinueStmt, si) <$ keyword "continue",
+              -- TODO validate fallthrough must within a branch block
+              (FallthroughStmt, si) <$ keyword "fallthrough",
+              (RethrowStmt, si) <$ keyword "rethrow",
+              parseReturnStmt docCmt si,
+              parseThrowStmt si,
+              (,si) <$> parseVoidStmt,
+              -- NOTE: statements above should probably all be detected by
+              -- `illegalExprStarting` as invalid start for an expr
+              do
+                (ExprSrc !x _, !si') <- parseExprPrec Nothing prec si
+                return (ExprStmt x docCmt, si')
+            ]
+        EdhParserState _ !lexeme'end <- get
+        return (StmtSrc stmt (lspSrcRangeFromParsec startPos lexeme'end), si')
+      withIllegal !errPos !errMsg = keepTrying
+        where
+          keepTrying =
+            choice
+              [ do
+                  eof
+                  !endPos <- getSourcePos
+                  return
+                    ( StmtSrc (IllegalSegment errMsg errPos) $
+                        lspSrcRangeFromParsec'' startPos endPos,
+                      si
+                    ),
+                do
+                  endPos <- getSourcePos
+                  anySingle >>= \case
+                    ';' -> getSourcePos >>= attemptLegal
+                    ',' -> getSourcePos >>= attemptLegal
+                    c | isSpace c -> attemptLegal endPos
+                    _ -> keepTrying
+              ]
+          attemptLegal !endPos = do
+            sc
+            observing (try legalStmt) >>= \case
+              Left _err -> keepTrying
+              Right (stmt@(StmtSrc _ !legal'span), !si') ->
+                return
+                  ( StmtSrc
+                      ( ExprStmt
+                          ( BlockExpr
+                              [ StmtSrc (IllegalSegment errMsg errPos) $
+                                  lspSrcRangeFromParsec'' startPos endPos,
+                                stmt
+                              ]
+                          )
+                          NoDocCmt
+                      )
+                      legal'span {src'start = lspSrcPosFromParsec startPos},
+                    si'
+                  )
+  observing (try legalStmt) >>= \case
+    Right !result -> return result
+    Left !err -> do
+      let err'offs = errorOffset err
+      !offs <- getOffset
+      void $ takeP (Just "illegal part") $ err'offs - offs
+      !errPos <- getSourcePos
+      withIllegal (lspSrcPosFromParsec errPos) $
+        T.pack $ parseErrorTextPretty err
 
 parseStmt :: IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
 parseStmt !si = parseStmt' (-10) si
@@ -1129,7 +1179,8 @@ parseScopedBlock !si0 = void (symbol "{@") >> parseRest [] si0
     parseRest !t !si =
       optionalSemicolon
         *> choice
-          [ symbol "@}" $> (ScopedBlockExpr $ reverse t, si),
+          [ (void (symbol "@}") <|> eof)
+              >> return (ScopedBlockExpr $ reverse t, si),
             do
               (!ss, !si') <- parseStmt si
               parseRest (ss : t) si'
@@ -1147,7 +1198,7 @@ parseDictOrBlock !si0 =
     parseBlockRest !t !si =
       optionalSemicolon
         *> choice
-          [ symbol "}" $> (BlockExpr $ reverse t, si),
+          [ (void (symbol "}") <|> eof) >> return (BlockExpr $ reverse t, si),
             do
               (!ss, !si') <- parseStmt si
               parseBlockRest (ss : t) si'

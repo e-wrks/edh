@@ -2697,6 +2697,11 @@ evalStmt !stmt !exit = case stmt of
       $ evalExprSrc' effs docCmt $
         \ !rtn -> edhSwitchState ets $ exit rtn
   VoidStmt -> exitEdhTx exit nil
+  IllegalSegment !err'msg !err'pos -> \ !ets -> do
+    let SrcLoc !doc _pos = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
+    -- todo add tolerating mode?
+    throwEdh ets EvalError $
+      "illegal code at: " <> prettySrcPos doc err'pos <> "\n" <> err'msg
 
 type FileSystemImportCheck = Text -> EdhTx -> EdhTx
 

@@ -1345,6 +1345,7 @@ data Stmt
   = -- | literal `pass` to fill a place where a statement needed,
     -- same as in Python
     VoidStmt
+  | IllegalSegment !Text !SrcPos
   | -- | similar to `go` in Go, starts goroutine
     GoStmt !ExprSrc
   | -- | not similar to `defer` in Go (in Go `defer` snapshots arg values

@@ -159,6 +159,12 @@ lspSrcRangeFromParsec' !start !sp =
     start
     (SrcPos (unPos (sourceLine sp) - 1) (unPos (sourceColumn sp) - 1))
 
+lspSrcRangeFromParsec'' :: SourcePos -> SourcePos -> SrcRange
+lspSrcRangeFromParsec'' !start !end =
+  SrcRange
+    (SrcPos (unPos (sourceLine start) - 1) (unPos (sourceColumn start) - 1))
+    (SrcPos (unPos (sourceLine end) - 1) (unPos (sourceColumn end) - 1))
+
 data EdhParserState = EdhParserState
   { -- global dict for operator info, as the parsing state
     edh'parser'op'dict :: !GlobalOpDict,
