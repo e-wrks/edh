@@ -1303,13 +1303,27 @@ edhPrepareCall ::
   -- callback to receive the prepared call
   ((EdhTxExit EdhValue -> EdhTx) -> STM ()) ->
   STM ()
-edhPrepareCall !etsCallPrep !calleeVal !argsSndr !callMaker = case calleeVal of
-  EdhProcedure EdhIntrpr {} _ -> packEdhExprs etsCallPrep argsSndr $
-    \ !apk -> edhPrepareCall' etsCallPrep calleeVal apk callMaker
-  EdhBoundProc EdhIntrpr {} _ _ _ -> packEdhExprs etsCallPrep argsSndr $
-    \ !apk -> edhPrepareCall' etsCallPrep calleeVal apk callMaker
-  _ -> packEdhArgs etsCallPrep argsSndr $
-    \ !apk -> edhPrepareCall' etsCallPrep calleeVal apk callMaker
+edhPrepareCall !etsCallPrep !calleeVal !argsSndr !callMaker =
+  if isInterpretingProc
+    then packEdhExprs etsCallPrep argsSndr $
+      \ !apk -> edhPrepareCall' etsCallPrep calleeVal apk callMaker
+    else packEdhArgs etsCallPrep argsSndr $
+      \ !apk -> edhPrepareCall' etsCallPrep calleeVal apk callMaker
+  where
+    isInterpretingProc = case calleeVal of
+      EdhProcedure EdhIntrpr {} _ -> True
+      EdhBoundProc EdhIntrpr {} _ _ _ -> True
+      EdhProcedure EdhIntrOp {} _ -> True
+      EdhBoundProc EdhIntrOp {} _ _ _ -> True
+      EdhProcedure (EdhOprtor _ _ _ !op'proc) _ ->
+        is3Args $ edh'procedure'args $ edh'procedure'decl op'proc
+      EdhBoundProc (EdhOprtor _ _ _ !op'proc) _ _ _ ->
+        is3Args $ edh'procedure'args $ edh'procedure'decl op'proc
+      _ -> False
+
+    is3Args = \case
+      PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}] -> True
+      _ -> False
 
 -- | Prepare an Edh call
 edhPrepareCall' ::
@@ -1360,17 +1374,20 @@ edhPrepareCall'
         -- calling a method procedure
         EdhMethod !mth ->
           callMaker $ \ !exit -> callEdhMethod this that mth apk scopeMod exit
+        --
+
         -- calling an interpreter procedure
         EdhIntrpr !mth -> do
           -- an Edh interpreter proc needs a `callerScope` as its 1st arg,
           -- while a host interpreter proc doesn't.
-          apk' <- case edh'procedure'decl mth of
+          !apk' <- case edh'procedure'decl mth of
             HostDecl {} -> return apk
             ProcDecl {} -> do
               let callerCtx = edh'context etsCallPrep
               !argCallerScope <- mkScopeWrapper etsCallPrep $ contextScope callerCtx
               return $ ArgsPack (EdhObject argCallerScope : args) kwargs
           callMaker $ \ !exit -> callEdhMethod this that mth apk' scopeMod exit
+        --
 
         -- calling a producer procedure
         EdhPrducr !mth -> case edh'procedure'decl mth of
@@ -1412,12 +1429,69 @@ edhPrepareCall'
                 throwEdh etsCallPrep UsageError $
                   "the value passed to a producer as `outlet` found to be a "
                     <> edhTypeNameOf badVal
+        --
+
         -- calling a generator
         (EdhGnrtor _) ->
           throwEdh
             etsCallPrep
             EvalError
             "can only call a generator method by for-from-do loop"
+        --
+
+        -- calling an operator
+        EdhIntrOp _fixity _op'prec !opDef -> case args of
+          [EdhExpr _ !lhx _, EdhExpr _ !rhx _]
+            | odNull kwargs ->
+              callMaker $ \ !exit ->
+                intrinsic'op
+                  opDef
+                  (ExprSrc lhx noSrcRange)
+                  (ExprSrc rhx noSrcRange)
+                  exit
+          -- todo support kwargs?
+          _ ->
+            throwEdh
+              etsCallPrep
+              UsageError
+              "an intrinsic operator can only be called with 2 positional args"
+        EdhOprtor _ _ !op'pred !op'proc -> case args of
+          [EdhExpr _ !lhx _, EdhExpr _ !rhx _] | odNull kwargs ->
+            case edh'procedure'args $ edh'procedure'decl op'proc of
+              (PackReceiver [RecvArg {}, RecvArg {}]) -> callMaker $ \ !exit ->
+                evalExpr lhx $ \ !lhVal ->
+                  evalExpr rhx $ \ !rhVal ->
+                    callEdhOperator
+                      this
+                      that
+                      op'proc
+                      op'pred
+                      [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
+                      exit
+              (PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}]) ->
+                callMaker $ \ !exit !etsCaller -> do
+                  !scopeWrapper <-
+                    mkScopeWrapper etsCaller $
+                      contextScope $ edh'context etsCaller
+                  runEdhTx etsCaller $
+                    callEdhOperator
+                      this
+                      that
+                      op'proc
+                      op'pred
+                      (EdhObject scopeWrapper : args)
+                      exit
+              _ ->
+                throwEdh etsCallPrep UsageError $
+                  "invalid operator signature: "
+                    <> T.pack
+                      (show $ edh'procedure'args $ edh'procedure'decl op'proc)
+          -- todo support kwargs?
+          _ ->
+            throwEdh etsCallPrep UsageError $
+              "an intrinsic operator can only be called with 2 positional args"
+        --
+
         _ ->
           throwEdh etsCallPrep EvalError $
             "`edhPrepareCall` can not be used to call a "
@@ -4631,7 +4705,7 @@ evalInfixSrc'
                         EdhDefault _ _apkDef !exprDef !etsDef ->
                           tryMagicWithDefault' (deExpr' exprDef) etsDef lhVal rhVal
                         _ -> exitEdh ets exit rtnVal
-            -- 3 pos-args - caller scope + lh/rh expr receiving operator
+            -- @remind 3 pos-args - caller scope + lh/rh expr receiving operator
             (PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}]) -> do
               !lhu <- unsafeIOToSTM newUnique
               !rhu <- unsafeIOToSTM newUnique
