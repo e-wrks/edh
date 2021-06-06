@@ -991,9 +991,9 @@ callableName = \case
       Nothing -> "<readonly property "
       Just _ -> "<property "
 
-callableDoc :: EdhProcDefi -> Maybe DocComment
+callableDoc :: EdhProcDefi -> OptDocCmt
 callableDoc = \case
-  EdhIntrOp _fixity _preced _ -> Nothing
+  EdhIntrOp _fixity _preced _ -> NoDocCmt
   EdhOprtor _fixity _preced _ !pd -> edh'procedure'doc pd
   EdhMethod !pd -> edh'procedure'doc pd
   EdhGnrtor !pd -> edh'procedure'doc pd
@@ -1321,12 +1321,25 @@ false :: EdhValue
 false = EdhBool False
 
 data StmtSrc = StmtSrc !Stmt !SrcRange
-  deriving (Eq, Show)
+  deriving (Eq)
+
+instance Show StmtSrc where
+  show (StmtSrc s _) = "{" <> show s <> "}"
 
 stmtSrcSpan :: StmtSrc -> SrcRange
 stmtSrcSpan (StmtSrc _ !s'span) = s'span
 
-type DocComment = [Text]
+optDocCmt :: Maybe [Text] -> OptDocCmt
+optDocCmt Nothing = NoDocCmt
+optDocCmt (Just !lines_) = DocCmt lines_
+
+data OptDocCmt = NoDocCmt | DocCmt [Text]
+  deriving (Eq)
+
+instance Show OptDocCmt where
+  show NoDocCmt = "<no-doc>"
+  show (DocCmt []) = "<empty-doc>"
+  show (DocCmt _lines) = "<with-doc>"
 
 data Stmt
   = -- | literal `pass` to fill a place where a statement needed,
@@ -1341,7 +1354,7 @@ data Stmt
   | -- | artifacts introduced within an `effect` statement will be put
     -- into effect namespace, which as currently implemented, a dict
     -- resides in current scope entity addressed by name `__exports__`
-    EffectStmt !ExprSrc !(Maybe DocComment)
+    EffectStmt !ExprSrc !OptDocCmt
   | -- | assignment with args (un/re)pack sending/receiving syntax
     LetStmt !ArgsReceiver !ArgsPacker
   | -- | super object declaration for a descendant object
@@ -1375,9 +1388,9 @@ data Stmt
     --   ($=>) as `catch` and (@=>) as `finally` operators
     ThrowStmt !ExprSrc
   | -- | early stop from a procedure
-    ReturnStmt !ExprSrc !(Maybe DocComment)
+    ReturnStmt !ExprSrc !OptDocCmt
   | -- | expression with precedence
-    ExprStmt !Expr !(Maybe DocComment)
+    ExprStmt !Expr !OptDocCmt
   deriving (Eq, Show)
 
 -- Attribute reference
@@ -1387,7 +1400,14 @@ data AttrRef
   | SuperRef !SrcRange
   | DirectRef !AttrAddrSrc
   | IndirectRef !ExprSrc !AttrAddrSrc
-  deriving (Eq, Show)
+  deriving (Eq)
+
+instance Show AttrRef where
+  show ThisRef {} = "this"
+  show ThatRef {} = "that"
+  show SuperRef {} = "super"
+  show (DirectRef addr) = show addr
+  show (IndirectRef owner addr) = show owner <> "." <> show addr
 
 attrRefSpan :: AttrRef -> SrcRange
 attrRefSpan (ThisRef !src'span) = src'span
@@ -1398,7 +1418,10 @@ attrRefSpan (IndirectRef (ExprSrc _ !tgt'span) (AttrAddrSrc _ !addr'span)) =
   SrcRange (src'start tgt'span) (src'end addr'span)
 
 data AttrAddrSrc = AttrAddrSrc !AttrAddr !SrcRange
-  deriving (Eq, Show)
+  deriving (Eq)
+
+instance Show AttrAddrSrc where
+  show (AttrAddrSrc addr _) = show addr
 
 -- | the key to address attributes against a left hand object or current scope
 data AttrAddr
@@ -1478,7 +1501,10 @@ data ArgReceiver
   deriving (Eq, Show)
 
 data ArgsPacker = ArgsPacker [ArgSender] SrcRange
-  deriving (Eq, Show)
+  deriving (Eq)
+
+instance Show ArgsPacker where
+  show (ArgsPacker sndrs _) = show sndrs
 
 data ArgSender
   = UnpackPosArgs !ExprSrc
@@ -1530,7 +1556,7 @@ data ProcDefi = ProcDefi
   { edh'procedure'ident :: !Unique,
     edh'procedure'name :: !AttrKey,
     edh'procedure'lexi :: !Scope,
-    edh'procedure'doc :: !(Maybe DocComment),
+    edh'procedure'doc :: !OptDocCmt,
     edh'procedure'decl :: !ProcDecl
   }
 
@@ -1575,7 +1601,10 @@ data DictKeyExpr
   deriving (Eq, Show)
 
 data ExprSrc = ExprSrc !Expr !SrcRange
-  deriving (Eq, Show)
+  deriving (Eq)
+
+instance Show ExprSrc where
+  show (ExprSrc x _) = "(" <> show x <> ")"
 
 exprSrcSpan :: ExprSrc -> SrcRange
 exprSrcSpan (ExprSrc _ !x'span) = x'span
@@ -1787,7 +1816,7 @@ objectScope !obj = case edh'obj'store obj of
                       { edh'procedure'ident = edh'obj'ident obj,
                         edh'procedure'name = AttrByName $ "module:" <> moduName,
                         edh'procedure'lexi = edh'procedure'lexi ocProc,
-                        edh'procedure'doc = Nothing,
+                        edh'procedure'doc = NoDocCmt,
                         edh'procedure'decl =
                           ProcDecl
                             { edh'procedure'addr =
@@ -1864,7 +1893,7 @@ mkHostProc !scope !vc !nm (!p, _args) = do
             { edh'procedure'ident = u,
               edh'procedure'name = AttrByName nm,
               edh'procedure'lexi = scope,
-              edh'procedure'doc = Nothing,
+              edh'procedure'doc = NoDocCmt,
               edh'procedure'decl = HostDecl p
             }
       )
@@ -1885,7 +1914,7 @@ mkSymbolicHostProc !scope !vc !sym (!p, _args) = do
             { edh'procedure'ident = u,
               edh'procedure'name = AttrBySym sym,
               edh'procedure'lexi = scope,
-              edh'procedure'doc = Nothing,
+              edh'procedure'doc = NoDocCmt,
               edh'procedure'decl = HostDecl p
             }
       )

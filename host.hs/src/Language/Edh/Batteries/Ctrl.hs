@@ -175,7 +175,7 @@ arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
                   (SrcRange (src'end lhSpan) (src'start rhSpan))
               )
               argsRcvr
-              (StmtSrc (ExprStmt rhExpr Nothing) rhSpan)
+              (StmtSrc (ExprStmt rhExpr NoDocCmt) rhSpan)
               (edh'exe'src'loc tip)
                 { src'range = SrcRange (src'start lhSpan) (src'end rhSpan)
                 }
@@ -185,7 +185,7 @@ arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
                 { edh'procedure'ident = idProc,
                   edh'procedure'name = AttrByName arrowName,
                   edh'procedure'lexi = scope,
-                  edh'procedure'doc = Nothing,
+                  edh'procedure'doc = NoDocCmt,
                   edh'procedure'decl = pd
                 }
           !boundMth =
@@ -284,7 +284,7 @@ prodArrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
                   (SrcRange (src'end lhSpan) (src'start rhSpan))
               )
               argsRcvr
-              (StmtSrc (ExprStmt rhExpr Nothing) rhSpan)
+              (StmtSrc (ExprStmt rhExpr NoDocCmt) rhSpan)
               (edh'exe'src'loc tip)
                 { src'range = SrcRange (src'start lhSpan) (src'end rhSpan)
                 }
@@ -294,7 +294,7 @@ prodArrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
                 { edh'procedure'ident = idProc,
                   edh'procedure'name = AttrByName arrowName,
                   edh'procedure'lexi = scope,
-                  edh'procedure'doc = Nothing,
+                  edh'procedure'doc = NoDocCmt,
                   edh'procedure'decl = pd
                 }
           !boundMth =
@@ -363,7 +363,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
   -- recognize `_` as similar to the wildcard pattern match in Haskell,
   -- it always matches
   AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "_") _)) -> afterMatch
-  InfixExpr ("|", _) (ExprSrc !matchExpr _) (ExprSrc !guardExpr _) ->
+  InfixExpr (OpSymSrc "|" _) (ExprSrc !matchExpr _) (ExprSrc !guardExpr _) ->
     handlePattern matchExpr (valueMatch matchExpr $ chkGuard guardExpr) $
       \ !ps -> do
         updAttrs ps
@@ -461,7 +461,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    ("=", _)
+                    (OpSymSrc "=" _)
                     (ExprSrc (CallExpr (ExprSrc (AttrExpr !clsRef) _) !apkr) _)
                     (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !instAddr _))) _)
                   )
@@ -527,7 +527,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    (":>", _)
+                    (OpSymSrc ":>" _)
                     ( ExprSrc
                         ( AttrExpr
                             (DirectRef (AttrAddrSrc (NamedAttr !headName) _))
@@ -568,10 +568,10 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    (">@", _)
+                    (OpSymSrc ">@" _)
                     ( ExprSrc
                         ( InfixExpr
-                            ("@<", _)
+                            (OpSymSrc "@<" _)
                             ( ExprSrc
                                 ( AttrExpr
                                     ( DirectRef
@@ -620,7 +620,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    (">@", _)
+                    (OpSymSrc ">@" _)
                     !prefixExpr
                     ( ExprSrc
                         ( AttrExpr
@@ -647,7 +647,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    ("@<", _)
+                    (OpSymSrc "@<" _)
                     ( ExprSrc
                         ( AttrExpr
                             (DirectRef (AttrAddrSrc (NamedAttr !prefixName) _))
@@ -742,7 +742,9 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         -- {( x:y:z:... )} -- pair pattern
         [ StmtSrc
             ( ExprStmt
-                (ParenExpr (ExprSrc pairPattern@(InfixExpr (":", _) _ _) _))
+                ( ParenExpr
+                    (ExprSrc pairPattern@(InfixExpr (OpSymSrc ":" _) _ _) _)
+                  )
                 _docCmt
               )
             _
@@ -792,7 +794,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    (":=", _)
+                    (OpSymSrc ":=" _)
                     ( ExprSrc
                         ( AttrExpr
                             (DirectRef (AttrAddrSrc (NamedAttr !termName) _))
@@ -879,7 +881,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                 Just (Just resi, (AttrByName lastAttr, lastVal) : matches)
               _ -> Just (Nothing, (AttrByName lastAttr, v) : matches)
           InfixExpr
-            (":", _)
+            (OpSymSrc ":" _)
             (ExprSrc !leftExpr _)
             ( ExprSrc
                 ( AttrExpr
@@ -912,7 +914,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                                   ( Nothing,
                                     (AttrByName leftAttr, leftVal) : matches'
                                   )
-                        InfixExpr (":", _) _ _ ->
+                        InfixExpr (OpSymSrc ":" _) _ _ ->
                           matchPairPattern leftExpr leftVal matches'
                         _ -> Nothing
                 _ -> Just (Nothing, [])

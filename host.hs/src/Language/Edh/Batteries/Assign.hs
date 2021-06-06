@@ -252,7 +252,11 @@ overwriteNullProc !lhExpr !rhExpr !exit !ets =
   where
     assignTgtExpr = case lhExpr of
       ExprSrc
-        (InfixExpr ("?", _) !owner (ExprSrc (AttrExpr (DirectRef !addr)) _))
+        ( InfixExpr
+            (OpSymSrc "?" _)
+            !owner
+            (ExprSrc (AttrExpr (DirectRef !addr)) _)
+          )
         !expr'span -> ExprSrc (AttrExpr $ IndirectRef owner addr) expr'span
       _ -> lhExpr
 

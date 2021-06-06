@@ -65,7 +65,7 @@ createEdhWorld !console = do
           idRoot
           (AttrByName "<root>")
           rootScope
-          (Just ["the root namespace"])
+          (DocCmt ["the root namespace"])
           (HostDecl phantomHostProc)
       rootObj = Object idRoot (HashStore hsRoot) nsClassObj ssRoot
 
@@ -75,7 +75,7 @@ createEdhWorld !console = do
           idSandbox
           (AttrByName "<sandbox>")
           sandboxScope
-          (Just ["the sandbox namespace"])
+          (DocCmt ["the sandbox namespace"])
           (HostDecl phantomHostProc)
       sandboxObj =
         Object idSandbox (HashStore hsSandbox) sandboxClassObj ssSandbox
@@ -88,7 +88,7 @@ createEdhWorld !console = do
           idMeta
           (AttrByName "class")
           rootScope
-          (Just ["the meta class"])
+          (DocCmt ["the meta class"])
           (HostDecl phantomHostProc)
       metaClass = Class metaProc hsMeta phantomAllocator mroMeta
       metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
@@ -98,7 +98,7 @@ createEdhWorld !console = do
           idNamespace
           (AttrByName "<namespace>")
           rootScope
-          (Just ["the namespace class"])
+          (DocCmt ["the namespace class"])
           (HostDecl phantomHostProc)
       nsClass = Class nsProc hsNamespace phantomAllocator mroNamespace
       nsClassObj =

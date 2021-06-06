@@ -39,7 +39,7 @@ edhSkipBlockCommentNested =
 
 -- | doc comment must start with "{##", this will return effective lines of
 -- the comment
-docComment :: Parser DocComment
+docComment :: Parser [Text]
 docComment = do
   void $ string "{##"
   -- treat the 1st line specially
@@ -90,7 +90,7 @@ docComment = do
 
 -- | get the doc comment immediately before next non-whitespace lexeme, return
 -- the last one if multiple consecutive doc comment blocks present.
-immediateDocComment :: Parser DocComment
+immediateDocComment :: Parser [Text]
 immediateDocComment = docComment >>= moreAfterSemicolons
   where
     moreAfterSemicolons gotCmt =
@@ -151,10 +151,10 @@ singleDot = char '.' >> notFollowedBy (char '.') >> sc
 equalSign :: Parser ()
 equalSign = char '=' >> notFollowedBy (satisfy isOperatorChar) >> sc
 
-parseProgram :: Parser ([StmtSrc], Maybe DocComment)
+parseProgram :: Parser ([StmtSrc], OptDocCmt)
 parseProgram = do
   sc
-  !docCmt <- optional docComment
+  !docCmt <- optDocCmt <$> optional docComment
   !s <- getInput
   (!ss, _) <- parseStmts (s, 0, []) []
   return (ss, docCmt)
@@ -182,7 +182,7 @@ parseDeferStmt !si = do
   return (DeferStmt expr, si')
 
 parseEffectStmt ::
-  Maybe DocComment ->
+  OptDocCmt ->
   IntplSrcInfo ->
   Parser (Stmt, IntplSrcInfo)
 parseEffectStmt !docCmt !si = do
@@ -227,7 +227,7 @@ parseLetStmt !si = do
   case pairs of
     [] -> return (VoidStmt, si')
     [StmtSrc !stmt _] -> return (stmt, si')
-    !stmts -> return (flip ExprStmt Nothing $ BlockExpr stmts, si')
+    !stmts -> return (flip ExprStmt NoDocCmt $ BlockExpr stmts, si')
   where
     parsePairs :: [StmtSrc] -> IntplSrcInfo -> Parser ([StmtSrc], IntplSrcInfo)
     parsePairs got si' = (<|> return (got, si')) $ do
@@ -579,7 +579,7 @@ parseOpDeclOvrdExpr !si = do
   -- can be any integer, no space allowed between +/- sign and digit(s)
   !precDecl <- optional $ L.signed (pure ()) L.decimal <* sc
   !errRptPos <- getOffset
-  opSymSrc@(!opSym, !opSpan) <- parseOpDeclSymSrc
+  opSymSrc@(OpSymSrc !opSym !opSpan) <- parseOpDeclSymSrc
   -- TODO check opSym can not be certain "reserved" keywords
   !argsErrRptPos <- getOffset
   !argsRcvr <- parseArgsReceiver
@@ -663,7 +663,7 @@ parseOpDeclOvrdExpr !si = do
       setOffset argsErrRptPos
       fail "invalid operator arguments receiver"
   where
-    parseOpDeclSymSrc :: Parser (OpSymbol, SrcRange)
+    parseOpDeclSymSrc :: Parser OpSymSrc
     parseOpDeclSymSrc = do
       !startPos <- getSourcePos
       void $ symbol "("
@@ -684,10 +684,10 @@ parseOpDeclOvrdExpr !si = do
       !s <- get
       put s {edh'parser'lexeme'end = lspSrcPosFromParsec endPos}
       sc
-      return
-        ( T.strip opSym,
-          SrcRange (lspSrcPosFromParsec startPos) (lspSrcPosFromParsec endPos)
-        )
+      return $
+        OpSymSrc
+          (T.strip opSym)
+          $ SrcRange (lspSrcPosFromParsec startPos) (lspSrcPosFromParsec endPos)
 
 parseSymbolExpr :: Parser Expr
 parseSymbolExpr = do
@@ -697,7 +697,7 @@ parseSymbolExpr = do
   SymbolExpr <$> parseAlphNumName
 
 parseReturnStmt ::
-  Maybe DocComment ->
+  OptDocCmt ->
   IntplSrcInfo ->
   Parser (Stmt, IntplSrcInfo)
 parseReturnStmt !docCmt !si = do
@@ -714,7 +714,7 @@ parseThrowStmt !si = do
 parseStmt' :: Int -> IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
 parseStmt' !prec !si = do
   void optionalSemicolon
-  !docCmt <- optional immediateDocComment
+  !docCmt <- optDocCmt <$> optional immediateDocComment
   !startPos <- getSourcePos
   (!stmt, !si') <-
     choice
@@ -1095,7 +1095,7 @@ parseOpSrc = do
   !startPos <- getSourcePos
   !opSym <- parseOpLit
   EdhParserState _ !lexeme'end <- get
-  return (opSym, SrcRange (lspSrcPosFromParsec startPos) lexeme'end)
+  return $ OpSymSrc opSym $ SrcRange (lspSrcPosFromParsec startPos) lexeme'end
 
 parseOpLit :: Parser Text
 parseOpLit = choice [quaintOpLit, freeformOpLit, stdOpLit]
@@ -1182,7 +1182,11 @@ parseDictOrBlock !si0 =
           return ((AddrDictKey k, v), si')
         exprEntry = try $ do
           -- (:) should be infixl 5, cross check please
-          (!k, !si') <- parseExprPrec (Just ((":", noSrcRange), InfixL)) 5 si
+          (!k, !si') <-
+            parseExprPrec
+              (Just (OpSymSrc ":" noSrcRange, InfixL))
+              5
+              si
           entryColon
           (!v, !si'') <- parseExpr si'
           return ((ExprDictKey k, v), si'')
@@ -1505,7 +1509,7 @@ parseExprPrec !precedingOp !prec !si =
           !errRptPos <- getOffset
           optional (try parseInfixOp) >>= \case
             Nothing -> return Nothing
-            Just opSymSrc@(!opSym, _opSpan) -> do
+            Just opSymSrc@(OpSymSrc !opSym _opSpan) -> do
               EdhParserState !opPD _ <- get
               case lookupOpFromDict opSym opPD of
                 Nothing -> do
@@ -1553,7 +1557,7 @@ parseInfixOp = do
   !startPos <- getSourcePos
   !opSym <- parseOpLit
   EdhParserState _ !lexeme'end <- get
-  return (opSym, SrcRange (lspSrcPosFromParsec startPos) lexeme'end)
+  return $ OpSymSrc opSym $ SrcRange (lspSrcPosFromParsec startPos) lexeme'end
 
 parseExpr :: IntplSrcInfo -> Parser (ExprSrc, IntplSrcInfo)
 parseExpr = parseExprPrec Nothing (-10)

@@ -17,15 +17,12 @@ import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
 import Language.Edh.Control
-  ( EdhErrorTag (EvalError, UsageError),
-    noSrcRange,
-  )
-import Language.Edh.CoreLang (lookupEdhObjMagic)
+import Language.Edh.CoreLang
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
-import Language.Edh.InterOp (mkHostProc')
+import Language.Edh.InterOp
 import Language.Edh.RtTypes
-import Language.Edh.Utils (seqcontSTM)
+import Language.Edh.Utils
 import Prelude
 
 strStripProc :: Text -> EdhHostProc
@@ -418,7 +415,7 @@ concatProc !lhExpr !rhExpr !exit !ets =
         else
           intrinsicOpReturnDefault exit lhVal rhVal $
             InfixExpr
-              ("++", noSrcRange)
+              (OpSymSrc "++" noSrcRange)
               ( ExprSrc
                   ( CallExpr
                       ( ExprSrc
@@ -688,10 +685,11 @@ descProc !v !kwargs !exit !ets = case edhUltimate v of
   _ ->
     edhValueDesc ets v $ \ !d -> exitEdh ets exit $ EdhString $ "It is a " <> d
   where
-    docString :: Maybe DocComment -> Text
+    docString :: OptDocCmt -> Text
     -- todo process ReST formatting?
-    docString !docCmt =
-      maybe "" (("\n * doc comments *\n" <>) . T.unlines) docCmt
+    docString NoDocCmt = ""
+    docString (DocCmt !docCmt) =
+      (("\n * doc comments *\n" <>) . T.unlines) docCmt
 
     classDocString :: Object -> Text
     classDocString !c = case edh'obj'store c of
@@ -754,7 +752,7 @@ cmpProc !v1 !v2 !exit !ets = edhCompareValue ets v1 v2 $ \case
 -- | utility type(value) - value type introspector
 typeProc :: Expr -> EdhHostProc
 typeProc !valExpr !exit =
-  evalExpr' valExpr Nothing $ \ !val ->
+  evalExpr' valExpr NoDocCmt $ \ !val ->
     exitEdhTx exit $ EdhString $ edhTypeNameOf val
 
 procNameProc :: EdhValue -> EdhHostProc

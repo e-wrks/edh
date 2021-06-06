@@ -180,7 +180,7 @@ valEqProc :: (Bool -> Bool) -> EdhIntrinsicOp
 valEqProc !inversion !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case rhExpr of
     ExprSrc
-      (InfixExpr rhSym@(opSym, _) midExpr@(ExprSrc _ mid'span) !rhExpr')
+      (InfixExpr rhSym@(OpSymSrc opSym _) midExpr@(ExprSrc _ mid'span) !rhExpr')
       _
         | opSym `elem` ["==", "!="] -> evalExprSrc midExpr $ \ !midVal -> do
           -- chaining equality comparisons
@@ -384,7 +384,7 @@ edhOrdCmpOp :: (Ordering -> Bool) -> EdhIntrinsicOp
 edhOrdCmpOp !cm !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case rhExpr of
     ExprSrc
-      (InfixExpr rhSym@(opSym, _) midExpr@(ExprSrc _ mid'span) !rhExpr')
+      (InfixExpr rhSym@(OpSymSrc opSym _) midExpr@(ExprSrc _ mid'span) !rhExpr')
       _
         | opSym `elem` [">", ">=", "<", "<="] ->
           evalExprSrc midExpr $ \ !midVal !ets -> do

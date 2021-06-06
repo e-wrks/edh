@@ -157,7 +157,7 @@ module Language.Edh.EHI
     edhContIO''',
 
     -- ** Reflective manipulation
-    DocComment,
+    OptDocCmt (..),
     StmtSrc (..),
     stmtSrcSpan,
     Stmt (..),
@@ -180,6 +180,7 @@ module Language.Edh.EHI
     AttrName,
     OpSymbol,
     OpFixity (..),
+    OpSymSrc (..),
     Precedence,
     OpDeclLoc,
     DictKeyExpr (..),

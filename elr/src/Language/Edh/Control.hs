@@ -22,7 +22,11 @@ import Text.Megaparsec
   )
 import Prelude
 
-type OpSymSrc = (OpSymbol, SrcRange)
+data OpSymSrc = OpSymSrc !OpSymbol !SrcRange
+  deriving (Eq)
+
+instance Show OpSymSrc where
+  show (OpSymSrc sym _) = show sym
 
 type OpSymbol = Text
 

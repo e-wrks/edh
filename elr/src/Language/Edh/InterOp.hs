@@ -64,7 +64,7 @@ mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
         { edh'procedure'ident = u,
           edh'procedure'name = AttrByName nm,
           edh'procedure'lexi = scope,
-          edh'procedure'doc = Nothing,
+          edh'procedure'doc = NoDocCmt,
           edh'procedure'decl = HostDecl $ callFromEdh getterProc
         }
   setter <- case maybeSetterProc of
@@ -77,7 +77,7 @@ mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
             { edh'procedure'ident = u,
               edh'procedure'name = AttrByName nm,
               edh'procedure'lexi = scope,
-              edh'procedure'doc = Nothing,
+              edh'procedure'doc = NoDocCmt,
               edh'procedure'decl = HostDecl $ callFromEdh setterProc
             }
   return $ EdhProcedure (EdhDescriptor getter setter) Nothing

@@ -11,32 +11,9 @@ import qualified Data.Text as T
 import Data.Unique (newUnique)
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
-  ( defaultArg,
-    mandatoryArg,
-    type (!:),
-    type (?:),
-  )
 import Language.Edh.Control
-  ( EdhError (EdhError),
-    EdhErrorTag (EvalError, ParseError, UsageError),
-    noSrcRange,
-  )
 import Language.Edh.Evaluate
-  ( edhThrow,
-    getEdhErrCtx,
-    mkObjSandbox,
-    mkScopeSandbox,
-    parseEdh',
-    throwEdh,
-    throwEdhTx,
-  )
 import Language.Edh.IOPD
-  ( iopdInsert,
-    odEmpty,
-    odMap,
-    odMapSTM,
-    odNull,
-  )
 import Language.Edh.RtTypes
 import Text.Megaparsec (errorBundlePretty)
 import Prelude
@@ -125,16 +102,17 @@ sandboxProc (mandatoryArg -> !origObj) !exit !ets =
     _ -> goObj
   where
     !ctx = edh'context ets
-    goObj = mkObjSandbox ets origObj $ \ !sbScope -> case objClassName origObj of
-      "_" -> throwEdh ets UsageError "anonymous sandbox is not reasonable"
-      !sbName -> do
-        let !sbVal = EdhObject $ edh'scope'this sbScope
-        unless (edh'ctx'pure ctx) $
-          iopdInsert
-            (AttrByName sbName)
-            sbVal
-            (edh'scope'entity $ contextScope ctx)
-        exitEdh ets exit sbVal
+    goObj =
+      mkObjSandbox ets origObj $ \ !sbScope -> case objClassName origObj of
+        "_" -> throwEdh ets UsageError "anonymous sandbox is not reasonable"
+        !sbName -> do
+          let !sbVal = EdhObject $ edh'scope'this sbScope
+          unless (edh'ctx'pure ctx) $
+            iopdInsert
+              (AttrByName sbName)
+              sbVal
+              (edh'scope'entity $ contextScope ctx)
+          exitEdh ets exit sbVal
 
 -- | utility makeOp(lhExpr, opSym, rhExpr)
 makeOpProc :: [EdhValue] -> EdhHostProc
@@ -144,7 +122,11 @@ makeOpProc !args !exit = case args of
     exitEdh ets exit $
       EdhExpr
         xu
-        (InfixExpr (op, noSrcRange) (ExprSrc lhe noSrcRange) (ExprSrc rhe noSrcRange))
+        ( InfixExpr
+            (OpSymSrc op noSrcRange)
+            (ExprSrc lhe noSrcRange)
+            (ExprSrc rhe noSrcRange)
+        )
         ""
   _ ->
     throwEdhTx EvalError $ "invalid arguments to makeOp: " <> T.pack (show args)
@@ -152,16 +134,21 @@ makeOpProc !args !exit = case args of
 -- | utility parseEdh(srcCode, srcName='<edh>', lineNo=1)
 parseEdhProc ::
   "srcCode" !: Text -> "srcName" ?: Text -> "lineNo" ?: Int -> EdhHostProc
-parseEdhProc (mandatoryArg -> !srcCode) (defaultArg "<edh>" -> !srcName) (defaultArg 1 -> !lineNo) !exit !ets =
-  parseEdh' world srcName lineNo srcCode >>= \case
-    Left !err -> do
-      let !msg = T.pack $ errorBundlePretty err
-          !edhWrapException = edh'exception'wrapper world
-          !edhErr = EdhError ParseError msg (toDyn nil) $ getEdhErrCtx 0 ets
-      edhWrapException (toException edhErr)
-        >>= \ !exo -> edhThrow ets (EdhObject exo)
-    Right (!stmts, _docCmt) -> do
-      !u <- unsafeIOToSTM newUnique
-      exitEdh ets exit $ EdhExpr u (BlockExpr stmts) srcCode
-  where
-    world = edh'prog'world $ edh'thread'prog ets
+parseEdhProc
+  (mandatoryArg -> !srcCode)
+  (defaultArg "<edh>" -> !srcName)
+  (defaultArg 1 -> !lineNo)
+  !exit
+  !ets =
+    parseEdh' world srcName lineNo srcCode >>= \case
+      Left !err -> do
+        let !msg = T.pack $ errorBundlePretty err
+            !edhWrapException = edh'exception'wrapper world
+            !edhErr = EdhError ParseError msg (toDyn nil) $ getEdhErrCtx 0 ets
+        edhWrapException (toException edhErr)
+          >>= \ !exo -> edhThrow ets (EdhObject exo)
+      Right (!stmts, _docCmt) -> do
+        !u <- unsafeIOToSTM newUnique
+        exitEdh ets exit $ EdhExpr u (BlockExpr stmts) srcCode
+    where
+      world = edh'prog'world $ edh'thread'prog ets
