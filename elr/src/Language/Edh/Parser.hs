@@ -1347,6 +1347,8 @@ illegalExprStarting = do
           illegalWord "let",
           illegalWord "const", -- reserved for JavaScript src compatibility
           illegalWord "as",
+          illegalWord "then",
+          illegalWord "else",
           illegalWord "extends",
           illegalWord "perceive",
           illegalWord "of",
