@@ -1488,7 +1488,9 @@ edhPrepareCall'
                       (show $ edh'procedure'args $ edh'procedure'decl op'proc)
           -- todo support kwargs?
           _ ->
-            throwEdh etsCallPrep UsageError $
+            throwEdh
+              etsCallPrep
+              UsageError
               "an intrinsic operator can only be called with 2 positional args"
         --
 
