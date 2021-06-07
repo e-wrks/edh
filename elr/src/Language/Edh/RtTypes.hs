@@ -328,9 +328,9 @@ data Context = Context
     -- context scope
     edh'ctx'pure :: !Bool,
     -- | whether running within an exporting stmt
-    edh'ctx'exporting :: !Bool,
+    edh'ctx'exp'target :: !(Maybe DictStore),
     -- | whether running within an effect stmt
-    edh'ctx'eff'defining :: !Bool
+    edh'ctx'eff'target :: !(Maybe DictStore)
   }
 
 contextScope :: Context -> Scope
@@ -646,8 +646,8 @@ worldContext !world =
       edh'ctx'genr'caller = Nothing,
       edh'ctx'match = true,
       edh'ctx'pure = False,
-      edh'ctx'exporting = False,
-      edh'ctx'eff'defining = False
+      edh'ctx'exp'target = Nothing,
+      edh'ctx'eff'target = Nothing
     }
 {-# INLINE worldContext #-}
 

@@ -14,7 +14,7 @@ import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import qualified Data.HashMap.Strict as Map
 import Data.IORef
 import qualified Data.Lossless.Decimal as D
-import Data.Maybe (fromMaybe)
+import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (Decoding (Some), decodeUtf8With, streamDecodeUtf8With)
@@ -473,10 +473,9 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     -- assign as attribute of local scope
     DirectRef (AttrAddrSrc !addr' _) ->
       resolveEdhAttrAddr ets addr' $ \ !key -> do
-        if edh'ctx'eff'defining ctx
-          then implantEffect esScope key rhVal
-          else edhSetValue key rhVal esScope
-
+        case edh'ctx'eff'target ctx of
+          Nothing -> edhSetValue key rhVal esScope
+          Just !dsEffs -> implantEffect key rhVal dsEffs
         exitWithChkExportTo (edh'scope'this scope) key rhVal
     -- exporting within a method procedure actually adds the artifact to
     -- its owning object's export table, besides changing the mth proc's
@@ -487,21 +486,21 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     IndirectRef (ExprSrc (AttrExpr ThisRef {}) _) (AttrAddrSrc !addr' _) ->
       let this = edh'scope'this scope
        in resolveEdhAttrAddr ets addr' $ \ !key ->
-            if edh'ctx'eff'defining ctx
-              then do
+            case edh'ctx'eff'target ctx of
+              Nothing -> setObjAttr ets this key rhVal $
+                \ !valSet -> exitWithChkExportTo this key valSet
+              Just _dsEffs -> do
                 defEffIntoObj this key
                 exitWithChkExportTo this key rhVal
-              else setObjAttr ets this key rhVal $
-                \ !valSet -> exitWithChkExportTo this key valSet
     IndirectRef (ExprSrc (AttrExpr ThatRef {}) _) (AttrAddrSrc !addr' _) ->
       let that = edh'scope'that scope
        in resolveEdhAttrAddr ets addr' $ \ !key ->
-            if edh'ctx'eff'defining ctx
-              then do
+            case edh'ctx'eff'target ctx of
+              Nothing -> setObjAttr ets that key rhVal $
+                \ !valSet -> exitWithChkExportTo that key valSet
+              Just _dsEffs -> do
                 defEffIntoObj that key
                 exitWithChkExportTo that key rhVal
-              else setObjAttr ets that key rhVal $
-                \ !valSet -> exitWithChkExportTo that key valSet
     -- assign to an addressed attribute
     IndirectRef (ExprSrc !tgtExpr _) (AttrAddrSrc !addr' _) ->
       resolveEdhAttrAddr ets addr' $
@@ -546,27 +545,30 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
 
     exitWithChkExportTo :: Object -> AttrKey -> EdhValue -> STM ()
     exitWithChkExportTo !obj !artKey !artVal = do
-      when (edh'ctx'exporting ctx) $ case edh'obj'store obj of
-        HashStore !hs -> expInto hs artKey artVal
-        ClassStore !cls -> expInto (edh'class'store cls) artKey artVal
-        HostStore _ ->
-          throwEdh ets UsageError $
-            "no way exporting to a host object of class "
-              <> objClassName obj
+      case edh'ctx'exp'target ctx of
+        Nothing -> pure ()
+        Just _dsExps -> case edh'obj'store obj of
+          HashStore !hs -> expInto hs artKey artVal
+          ClassStore !cls -> expInto (edh'class'store cls) artKey artVal
+          HostStore _ ->
+            throwEdh ets UsageError $
+              "no way exporting to a host object of class " <> objClassName obj
       exitEdh ets exit artVal
     expInto :: EntityStore -> AttrKey -> EdhValue -> STM ()
     expInto !es !artKey !artVal =
-      iopdLookup (AttrByName edhExportsMagicName) es >>= \case
-        Just (EdhDict (Dict _ !ds)) ->
-          edhSetValue (attrKeyValue artKey) artVal ds
-        _ -> do
-          !d <- EdhDict <$> createEdhDict [(attrKeyValue artKey, artVal)]
-          iopdInsert (AttrByName edhExportsMagicName) d es
+      edhSetValue (attrKeyValue artKey) artVal
+        =<< prepareMagicDict (AttrByName edhExportsMagicName) es
 
     defEffIntoObj :: Object -> AttrKey -> STM ()
     defEffIntoObj !obj !key = case edh'obj'store obj of
-      HashStore !hs -> implantEffect hs key rhVal
-      ClassStore !cls -> implantEffect (edh'class'store cls) key rhVal
+      HashStore !hs ->
+        implantEffect key rhVal
+          =<< prepareMagicDict (AttrByName edhEffectsMagicName) hs
+      ClassStore !cls ->
+        implantEffect key rhVal
+          =<< prepareMagicDict
+            (AttrByName edhEffectsMagicName)
+            (edh'class'store cls)
       HostStore _ ->
         throwEdh ets UsageError $
           "no way defining effects into a host object of class "
@@ -871,8 +873,8 @@ callEdhOperator !this !that !mth !prede !args !exit =
                 edh'ctx'genr'caller = Nothing,
                 edh'ctx'match = true,
                 edh'ctx'pure = False,
-                edh'ctx'exporting = False,
-                edh'ctx'eff'defining = False
+                edh'ctx'exp'target = Nothing,
+                edh'ctx'eff'target = Nothing
               }
           !etsMth = ets {edh'context = mthCtx}
       runEdhTx etsMth $
@@ -922,8 +924,8 @@ callEdhOperator' !this !that !mth !prede !proc'loc (StmtSrc !body'stmt _) !args 
                 edh'ctx'genr'caller = Nothing,
                 edh'ctx'match = true,
                 edh'ctx'pure = False,
-                edh'ctx'exporting = False,
-                edh'ctx'eff'defining = False
+                edh'ctx'exp'target = Nothing,
+                edh'ctx'eff'target = Nothing
               }
           !etsMth = ets {edh'context = mthCtx}
       case prede of
@@ -956,8 +958,8 @@ callEdhOperator' !this !that !mth !prede !proc'loc (StmtSrc !body'stmt _) !args 
           edh'ctx'genr'caller = Nothing,
           edh'ctx'match = true,
           edh'ctx'pure = False,
-          edh'ctx'exporting = False,
-          edh'ctx'eff'defining = False
+          edh'ctx'exp'target = Nothing,
+          edh'ctx'eff'target = Nothing
         }
 
 -- The Edh call convention is so called call-by-repacking, i.e. a new pack of
@@ -1542,8 +1544,8 @@ callEdhMethod !this !that !mth !apk !scopeMod !exit =
                 edh'ctx'genr'caller = Nothing,
                 edh'ctx'match = true,
                 edh'ctx'pure = False,
-                edh'ctx'exporting = False,
-                edh'ctx'eff'defining = False
+                edh'ctx'exp'target = Nothing,
+                edh'ctx'eff'target = Nothing
               }
           !etsMth = etsCaller {edh'context = mthCtx}
        in runEdhTx etsMth $
@@ -1605,8 +1607,8 @@ callEdhMethod'
                   edh'ctx'genr'caller = gnr'caller,
                   edh'ctx'match = true,
                   edh'ctx'pure = False,
-                  edh'ctx'exporting = False,
-                  edh'ctx'eff'defining = False
+                  edh'ctx'exp'target = Nothing,
+                  edh'ctx'eff'target = Nothing
                 }
             !etsMth = etsCaller {edh'context = mthCtx}
         runEdhTx etsMth $
@@ -1636,8 +1638,8 @@ callEdhMethod'
             edh'ctx'genr'caller = Nothing,
             edh'ctx'match = true,
             edh'ctx'pure = False,
-            edh'ctx'exporting = False,
-            edh'ctx'eff'defining = False
+            edh'ctx'exp'target = Nothing,
+            edh'ctx'eff'target = Nothing
           }
 
 edhPrepareForLoop ::
@@ -1766,8 +1768,8 @@ edhPrepareForLoop
                           edh'ctx'genr'caller = Just $ recvYield etsLooper exit,
                           edh'ctx'match = true,
                           edh'ctx'pure = False,
-                          edh'ctx'exporting = False,
-                          edh'ctx'eff'defining = False
+                          edh'ctx'exp'target = Nothing,
+                          edh'ctx'eff'target = Nothing
                         }
                     !etsCallee = etsLooper {edh'context = calleeCtx}
                 runEdhTx etsCallee $
@@ -2590,34 +2592,21 @@ evalStmt !stmt !exit = case stmt of
         !scope = contextScope ctx
     packEdhArgs ets argsSndr $ \ !apk ->
       recvEdhArgs ets ctx argsRcvr (deApk apk) $ \ !um -> do
-        if not (edh'ctx'eff'defining ctx)
-          then -- normal multi-assignment
+        case edh'ctx'eff'target ctx of
+          Nothing ->
+            -- normal multi-assignment
             iopdUpdate (odToList um) (edh'scope'entity scope)
-          else -- define effectful artifacts by multi-assignment
-            implantEffects (edh'scope'entity scope) (odToList um)
-        let !maybeExp2ent =
-              if not $ edh'ctx'exporting ctx
-                then Nothing -- not exporting
-                -- always export to current this object's scope, and possibly a
-                -- class object. a method procedure's scope has no way to be
-                -- imported from, only objects (most are module objects) can be
-                -- an import source.
-                else case edh'obj'store $ edh'scope'this scope of
-                  HashStore !hs -> Just hs
-                  ClassStore !cls -> Just (edh'class'store cls)
-                  _ -> Nothing
-        case maybeExp2ent of
+          Just !dsEffs ->
+            -- define effectful artifacts by multi-assignment
+            -- note that nil can not appear as for arg receiving,
+            -- so no processing of delete semantics
+            iopdUpdate [(attrKeyValue k, v) | (k, v) <- odToList um] dsEffs
+        case edh'ctx'exp'target ctx of
           Nothing -> pure ()
-          Just !exp2Ent -> do
-            -- do export what's assigned
-            let !impd = [(attrKeyValue k, v) | (k, v) <- odToList um]
-            iopdLookup (AttrByName edhExportsMagicName) exp2Ent >>= \case
-              Just (EdhDict (Dict _ !exp2ds)) -> iopdUpdate impd exp2ds
-              -- todo warn if of wrong type
-              _ -> do
-                !d <- EdhDict <$> createEdhDict impd
-                iopdInsert (AttrByName edhExportsMagicName) d exp2Ent
-
+          Just !dsExps ->
+            -- note that nil can not appear as for arg receiving,
+            -- so no processing of delete semantics
+            iopdUpdate [(attrKeyValue k, v) | (k, v) <- odToList um] dsExps
         exitEdh ets exit nil -- let statement evaluates to nil always
   BreakStmt -> exitEdhTx exit EdhBreak
   ContinueStmt -> exitEdhTx exit EdhContinue
@@ -2772,10 +2761,13 @@ evalStmt !stmt !exit = case stmt of
           _ -> edhValueDesc ets superVal $ \ !badDesc ->
             throwEdh ets UsageError $
               "can not extend a " <> badDesc
-  EffectStmt !effs !docCmt -> \ !ets ->
+  EffectStmt !effs !docCmt -> \ !ets -> do
+    !dsEffs <-
+      prepareMagicDict (AttrByName edhEffectsMagicName) $
+        edh'scope'entity $ contextScope $ edh'context ets
     runEdhTx
       ets
-        { edh'context = (edh'context ets) {edh'ctx'eff'defining = True}
+        { edh'context = (edh'context ets) {edh'ctx'eff'target = Just dsEffs}
         }
       $ evalExprSrc' effs docCmt $
         \ !rtn -> edhSwitchState ets $ exit rtn
@@ -2833,31 +2825,22 @@ importInto !fsChk !tgtEnt !argsRcvr srcExpr@(ExprSrc x _) !exit = case x of
 importFromApk :: EntityStore -> ArgsReceiver -> ArgsPack -> STM () -> EdhTx
 importFromApk !tgtEnt !argsRcvr !fromApk !done !ets =
   recvEdhArgs ets ctx argsRcvr fromApk $ \ !em -> do
-    if edh'ctx'eff'defining ctx
-      then -- importing effects
-        implantEffects tgtEnt (odToList em)
-      else -- normal import
-        iopdUpdate (odToList em) tgtEnt
-    when (edh'ctx'exporting ctx) $ do
-      -- do export what's imported
-      let !impd = [(attrKeyValue k, v) | (k, v) <- odToList em]
-      iopdLookup (AttrByName edhExportsMagicName) tgtEnt >>= \case
-        Just (EdhDict (Dict _ !dsExp)) -> iopdUpdate impd dsExp
-        Nothing -> do
-          !d <- EdhDict <$> createEdhDict impd
-          iopdInsert (AttrByName edhExportsMagicName) d tgtEnt
-        Just !badVal -> edhValueDesc ets badVal $ \ !badDesc ->
-          let !world = edh'prog'world $ edh'thread'prog ets
-              !console = edh'world'console world
-              !logger = consoleLogger console
-           in logger
-                30 -- warning
-                (Just $ prettySrcLoc $ contextSrcLoc ctx)
-                ( "bad artifact as "
-                    <> edhExportsMagicName
-                    <> ", it is a "
-                    <> badDesc
-                )
+    case edh'ctx'eff'target ctx of
+      Nothing -> iopdUpdate (odToList em) tgtEnt -- normal import
+      Just _dsEffs ->
+        -- importing effects
+        -- note that nil can not appear as for arg receiving,
+        -- so no processing of delete semantics
+        iopdUpdate [(attrKeyValue k, v) | (k, v) <- odToList em]
+          =<< prepareMagicDict (AttrByName edhEffectsMagicName) tgtEnt
+    case edh'ctx'exp'target ctx of
+      Nothing -> pure ()
+      Just _dsExps ->
+        -- do export what's imported
+        -- note that nil can not appear as for arg receiving,
+        -- so no processing of delete semantics
+        iopdUpdate [(attrKeyValue k, v) | (k, v) <- odToList em]
+          =<< prepareMagicDict (AttrByName edhExportsMagicName) tgtEnt
     done
   where
     !ctx = edh'context ets
@@ -3017,8 +3000,8 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
                           defaultEdhExcptHndlr,
                       edh'ctx'stack = edh'ctx'tip ctx : edh'ctx'stack ctx,
                       edh'ctx'pure = False,
-                      edh'ctx'exporting = False,
-                      edh'ctx'eff'defining = False
+                      edh'ctx'exp'target = Nothing,
+                      edh'ctx'eff'target = Nothing
                     }
                 !etsRunModu = ets {edh'context = ctxLoad}
              in runEdhTx etsRunModu $ evalEdh srcName moduSource exit
@@ -3806,49 +3789,37 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
 
 defineScopeAttr :: EdhThreadState -> AttrKey -> EdhValue -> STM ()
 defineScopeAttr !ets !key !val = when (key /= AttrByName "_") $ do
-  if edh'ctx'eff'defining ctx
-    then implantEffect esScope key val
-    else
+  case edh'ctx'eff'target ctx of
+    Nothing ->
       unless (edh'ctx'pure ctx) $
         edhSetValue key val (edh'scope'entity scope)
-  when (edh'ctx'exporting ctx) $ case edh'obj'store $ edh'scope'this scope of
-    HashStore !hs -> chkExport hs
-    ClassStore !cls -> chkExport (edh'class'store cls)
-    HostStore {} -> pure ()
+    Just !dsEffs -> implantEffect key val dsEffs
+  case edh'ctx'exp'target ctx of
+    Nothing -> pure ()
+    Just !dsExps -> edhSetValue (attrKeyValue key) val dsExps
   where
     !ctx = edh'context ets
     !scope = contextScope ctx
-    !esScope = edh'scope'entity scope
 
-    chkExport :: EntityStore -> STM ()
-    chkExport !es =
-      iopdLookup (AttrByName edhExportsMagicName) es >>= \case
-        Just (EdhDict (Dict _ !dsExp)) -> edhSetValue (attrKeyValue key) val dsExp
-        _ -> do
-          !d <- EdhDict <$> createEdhDict [(attrKeyValue key, val)]
-          iopdInsert (AttrByName edhExportsMagicName) d es
+defineEffect :: EdhThreadState -> AttrKey -> EdhValue -> STM ()
+defineEffect !ets !key !val =
+  implantEffect key val
+    =<< prepareMagicDict
+      (AttrByName edhEffectsMagicName)
+      (edh'scope'entity $ contextScope $ edh'context ets)
 
-implantEffect :: EntityStore -> AttrKey -> EdhValue -> STM ()
-implantEffect !tgtEnt !key !val =
-  iopdLookup (AttrByName edhEffectsMagicName) tgtEnt >>= \case
-    Just (EdhDict (Dict _ !dsEff)) -> edhSetValue (attrKeyValue key) val dsEff
-    _ -> unless (val == EdhNil) $ do
-      -- todo warn if of wrong type
-      !d <- EdhDict <$> createEdhDict [(attrKeyValue key, val)]
-      iopdInsert (AttrByName edhEffectsMagicName) d tgtEnt
+implantEffect :: AttrKey -> EdhValue -> DictStore -> STM ()
+implantEffect !key !val !dsEffs = edhSetValue (attrKeyValue key) val dsEffs
 
-implantEffects :: EntityStore -> [(AttrKey, EdhValue)] -> STM ()
--- todo assuming no nil in the list by far, change to edhSetValue one by one,
--- once nil can be the case
-implantEffects !tgtEnt !effs =
-  iopdLookup (AttrByName edhEffectsMagicName) tgtEnt >>= \case
-    Just (EdhDict (Dict _ !dsEff)) -> iopdUpdate effd dsEff
+prepareMagicDict :: AttrKey -> EntityStore -> STM DictStore
+prepareMagicDict !magicName !tgtEnt =
+  iopdLookup magicName tgtEnt >>= \case
+    Just (EdhDict (Dict _ !dsEff)) -> return dsEff
     _ -> do
       -- todo warn if of wrong type
-      !d <- EdhDict <$> createEdhDict effd
-      iopdInsert (AttrByName edhEffectsMagicName) d tgtEnt
-  where
-    !effd = [(attrKeyValue k, v) | (k, v) <- effs]
+      d@(Dict _ !dsEff) <- createEdhDict []
+      iopdInsert magicName (EdhDict d) tgtEnt
+      return dsEff
 
 evalExprSrc :: ExprSrc -> EdhTxExit EdhValue -> EdhTx
 evalExprSrc (ExprSrc !expr !ss) !exit !ets =
@@ -4118,10 +4089,25 @@ evalExpr' (IndexExpr !ixExpr !tgtExpr) _docCmt !exit =
                 <> edhTypeNameOf ixVal
                 <> ": "
                 <> T.pack (show ixVal)
-evalExpr' (ExportExpr !exps) !docCmt !exit = \ !ets ->
-  runEdhTx ets {edh'context = (edh'context ets) {edh'ctx'exporting = True}} $
-    evalExprSrc' exps docCmt $
-      \ !rtn -> edhSwitchState ets $ exitEdhTx exit rtn
+evalExpr' (ExportExpr !exps) !docCmt !exit = \ !ets -> do
+  let expTo !tgtEnt = do
+        !dsExps <- prepareMagicDict (AttrByName edhExportsMagicName) tgtEnt
+        runEdhTx
+          ets
+            { edh'context = (edh'context ets) {edh'ctx'exp'target = Just dsExps}
+            }
+          $ evalExprSrc' exps docCmt $
+            \ !rtn -> edhSwitchState ets $ exitEdhTx exit rtn
+  case edh'obj'store $ edh'scope'this $ contextScope $ edh'context ets of
+    -- always export to current this object's scope, and possibly a
+    -- class object. a method procedure's scope has no way to be
+    -- imported from, only objects (most are module objects) can be
+    -- an import source.
+    HashStore !hs -> expTo hs
+    ClassStore !cls -> expTo $ edh'class'store cls
+    -- unless this is a host object
+    -- todo warn in this case?
+    HostStore {} -> runEdhTx ets $ evalExprSrc' exps docCmt exit
 evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
   do
     let !ctx = edh'context ets
@@ -4250,8 +4236,8 @@ evalExpr'
                 edh'ctx'genr'caller = Nothing,
                 edh'ctx'match = true,
                 edh'ctx'pure = False,
-                edh'ctx'exporting = False,
-                edh'ctx'eff'defining = False
+                edh'ctx'exp'target = Nothing,
+                edh'ctx'eff'target = Nothing
               }
           !etsCls = ets {edh'context = clsCtx}
 
@@ -4347,8 +4333,8 @@ evalExpr'
                     edh'ctx'genr'caller = Nothing,
                     edh'ctx'match = true,
                     edh'ctx'pure = False,
-                    edh'ctx'exporting = False,
-                    edh'ctx'eff'defining = False
+                    edh'ctx'exp'target = Nothing,
+                    edh'ctx'eff'target = Nothing
                   }
               !etsNs = ets {edh'context = nsCtx}
 
@@ -4765,7 +4751,7 @@ defineOperator
   !exit
   !predecessor
   !ets =
-    if edh'ctx'eff'defining ctx
+    if isJust $ edh'ctx'eff'target ctx
       then
         throwEdh
           ets
@@ -6046,8 +6032,8 @@ driveEdhProgram !haltResult !world !prog = do
                       { edh'ctx'genr'caller = Nothing,
                         edh'ctx'match = true,
                         edh'ctx'pure = False,
-                        edh'ctx'exporting = False,
-                        edh'ctx'eff'defining = False
+                        edh'ctx'exp'target = Nothing,
+                        edh'ctx'eff'target = Nothing
                       }
                 }
             where
@@ -6122,8 +6108,8 @@ drivePerceiver !ev !etsOrigin !reaction = do
                   -- todo should set pure to True or False here?
                   --      or just inherit as is?
                   -- edh'ctx'pure = True,
-                  edh'ctx'exporting = False,
-                  edh'ctx'eff'defining = False
+                  edh'ctx'exp'target = Nothing,
+                  edh'ctx'eff'target = Nothing
                 }
           }
   atomically $

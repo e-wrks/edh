@@ -615,8 +615,8 @@ createEdhWorld !console = do
                               edh'ctx'genr'caller = Nothing,
                               edh'ctx'match = true,
                               edh'ctx'pure = False,
-                              edh'ctx'exporting = False,
-                              edh'ctx'eff'defining = False
+                              edh'ctx'exp'target = Nothing,
+                              edh'ctx'eff'target = Nothing
                             }
                       }
               runEdhTx etsEval $
