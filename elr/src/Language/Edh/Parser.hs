@@ -1054,6 +1054,8 @@ parseLitExpr =
       ValueLiteral (EdhOrd EQ) <$ litKw "EQ",
       ValueLiteral (EdhOrd LT) <$ litKw "LT",
       ValueLiteral (EdhOrd GT) <$ litKw "GT",
+      -- allow `pass` to appear as an expr in addition to stmt
+      NilLiteral <$ litKw "pass",
       DecLiteral <$> parseDecLit
     ]
   where
@@ -1356,8 +1358,7 @@ illegalExprStarting = do
           illegalWord "continue",
           illegalWord "fallthrough",
           illegalWord "return",
-          illegalWord "throw",
-          illegalWord "pass"
+          illegalWord "throw"
         ]
           ++ (illegalWord <$> quaint'ops)
       )
