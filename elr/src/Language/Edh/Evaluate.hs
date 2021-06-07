@@ -4170,16 +4170,13 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
       throwEdhTx
         EvalError
         "import from filesystem is prohibited from a sandboxed environment"
-evalExpr' (DefaultExpr Nothing (ExprSrc !exprDef _)) _docCmt !exit = \ !ets ->
+evalExpr' (DefaultExpr maybeApk (ExprSrc !exprDef _)) _docCmt !exit = \ !ets ->
   do
     !u <- unsafeIOToSTM newUnique
-    exitEdh ets exit $ EdhDefault u (ArgsPack [] odEmpty) exprDef (Just ets)
-evalExpr'
-  (DefaultExpr (Just (ArgsPacker !argsSndr _)) (ExprSrc !exprDef _))
-  _docCmt
-  !exit = \ !ets -> packEdhArgs ets argsSndr $ \ !apk -> do
-    !u <- unsafeIOToSTM newUnique
-    exitEdh ets exit $ EdhDefault u apk exprDef (Just ets)
+    let withApk !apk = exitEdh ets exit $ EdhDefault u apk exprDef (Just ets)
+    case maybeApk of
+      Nothing -> withApk $ ArgsPack [] odEmpty
+      Just (ArgsPacker !argsSndr _) -> packEdhArgs ets argsSndr withApk
 evalExpr' (InfixExpr !opSymSrc !lhExpr !rhExpr) _docCmt !exit =
   evalInfixSrc opSymSrc lhExpr rhExpr exit
 -- defining an Edh class
