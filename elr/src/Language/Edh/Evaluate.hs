@@ -101,7 +101,7 @@ edhValueAsAttrKey' ::
 edhValueAsAttrKey' !ets !keyVal !naExit !exit = case edhUltimate keyVal of
   EdhString !attrName -> exit $ AttrByName attrName
   EdhSymbol !sym -> exit $ AttrBySym sym
-  EdhExpr _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _ ->
+  EdhExpr _ _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _ ->
     resolveEdhAttrAddr ets addr exit
   _ -> naExit
 
@@ -517,7 +517,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     runEdhTx ets $
       evalExpr' addrRef NoDocCmt $ \ !addrVal _ets ->
         case edhUltimate addrVal of
-          EdhExpr _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _ ->
+          EdhExpr _ _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _ ->
             resolveEdhAttrAddr ets addr $
               \ !key ->
                 runEdhTx ets $ setEdhAttr tgtExpr key rhVal $ exitMaybeExpTo key
@@ -1155,16 +1155,23 @@ packEdhExprs !ets !pkrs !pkExit = do
           throwEdh ets EvalError "unpack to expr not supported yet"
         UnpackPkArgs _ ->
           throwEdh ets EvalError "unpack to expr not supported yet"
-        SendPosArg (ExprSrc !argExpr _) -> pkExprs xs $ \ !posArgs -> do
-          !xu <- unsafeIOToSTM newUnique
-          exit (EdhExpr xu argExpr "" : posArgs)
-        SendKwArg (AttrAddrSrc !kwAddr _) (ExprSrc !argExpr _) ->
+        SendPosArg (ExprSrc !argExpr !arg'span) -> pkExprs xs $
+          \ !posArgs -> do
+            !xu <- unsafeIOToSTM newUnique
+            exit $
+              EdhExpr xu curSrcLoc {src'range = arg'span} argExpr "" : posArgs
+        SendKwArg (AttrAddrSrc !kwAddr _) (ExprSrc !argExpr !arg'span) ->
           resolveEdhAttrAddr ets kwAddr $ \ !kwKey -> do
             !xu <- unsafeIOToSTM newUnique
-            iopdInsert kwKey (EdhExpr xu argExpr "") kwIOPD
+            iopdInsert
+              kwKey
+              (EdhExpr xu curSrcLoc {src'range = arg'span} argExpr "")
+              kwIOPD
             pkExprs xs $ \ !posArgs' -> exit posArgs'
   pkExprs pkrs $ \ !args ->
     iopdSnapshot kwIOPD >>= \ !kwargs -> pkExit $ ArgsPack args kwargs
+  where
+    curSrcLoc = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
 
 -- | Pack args as caller, normally in preparation of calling another procedure
 packEdhArgs :: EdhThreadState -> [ArgSender] -> (ArgsPack -> STM ()) -> STM ()
@@ -1441,7 +1448,7 @@ edhPrepareCall'
 
         -- calling an operator
         EdhIntrOp _fixity _op'prec !opDef -> case args of
-          [EdhExpr _ !lhx _, EdhExpr _ !rhx _]
+          [EdhExpr _ _ !lhx _, EdhExpr _ _ !rhx _]
             | odNull kwargs ->
               callMaker $ \ !exit ->
                 intrinsic'op
@@ -1456,7 +1463,7 @@ edhPrepareCall'
               UsageError
               "an intrinsic operator can only be called with 2 positional args"
         EdhOprtor _ _ !op'pred !op'proc -> case args of
-          [EdhExpr _ !lhx _, EdhExpr _ !rhx _] | odNull kwargs ->
+          [EdhExpr _ _ !lhx _, EdhExpr _ _ !rhx _] | odNull kwargs ->
             case edh'procedure'args $ edh'procedure'decl op'proc of
               (PackReceiver [RecvArg {}, RecvArg {}]) -> callMaker $ \ !exit ->
                 evalExpr lhx $ \ !lhVal ->
@@ -3862,8 +3869,8 @@ evalExprSrc' (ExprSrc !expr !ss) !docCmt !exit !ets =
 evalExpr' :: Expr -> OptDocCmt -> EdhTxExit EdhValue -> EdhTx
 evalExpr' IntplExpr {} _docCmt _exit =
   throwEdhTx UsageError "{$ $} interpolation outside expr definition"
-evalExpr' (ExprWithSrc (ExprSrc !x _) !sss) !docCmt !exit = \ !ets ->
-  intplExpr ets x $ \x' -> do
+evalExpr' (ExprWithSrc (ExprSrc !x !x'span) !sss) !docCmt !exit = \ !ets ->
+  intplExpr ets x $ \ !x' -> do
     let intplSrc :: SourceSeg -> (Text -> STM ()) -> STM ()
         intplSrc !ss !exit' = case ss of
           SrcSeg !s -> exit' s
@@ -3871,9 +3878,11 @@ evalExpr' (ExprWithSrc (ExprSrc !x _) !sss) !docCmt !exit = \ !ets ->
             runEdhTx ets $
               evalExprSrc' sx docCmt $ \ !val _ets ->
                 edhValueRepr ets (edhDeCaseWrap val) $ \ !rs -> exit' rs
+        curSrcLoc = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
     seqcontSTM (intplSrc <$> sss) $ \ !ssl -> do
       !u <- unsafeIOToSTM newUnique
-      exitEdh ets exit $ EdhExpr u x' $ T.concat ssl
+      exitEdh ets exit $
+        EdhExpr u curSrcLoc {src'range = x'span} x' $ T.concat ssl
 evalExpr' (LitExpr !lit) _docCmt !exit =
   \ !ets -> evalLiteral lit >>= exitEdh ets exit
 evalExpr' (PrefixExpr PrefixPlus !expr') !docCmt !exit =
@@ -4734,6 +4743,10 @@ evalInfixSrc'
         _ ->
           throwEdh ets UsageError $ "invalid operator: " <> T.pack (show callable)
 
+      edhExpr !u (ExprSrc !x !x'span) !s =
+        EdhExpr u curSrcLoc {src'range = x'span} x s
+      curSrcLoc = edh'exe'src'loc $ edh'ctx'tip ctx
+
       !ctx = edh'context ets
       !scope = contextScope ctx
 
@@ -4987,11 +5000,11 @@ edhValueNull _ (EdhDict (Dict _ ds)) !exit = iopdNull ds >>= exit
 edhValueNull _ (EdhList (List _ l)) !exit = readTVar l >>= exit . null
 edhValueNull _ (EdhArgsPack (ArgsPack args kwargs)) !exit =
   exit $ null args && odNull kwargs
-edhValueNull _ (EdhExpr _ (LitExpr NilLiteral) _) !exit = exit True
-edhValueNull _ (EdhExpr _ (LitExpr (DecLiteral d)) _) !exit =
+edhValueNull _ (EdhExpr _ _ (LitExpr NilLiteral) _) !exit = exit True
+edhValueNull _ (EdhExpr _ _ (LitExpr (DecLiteral d)) _) !exit =
   exit $ D.decimalIsNaN d || d == 0
-edhValueNull _ (EdhExpr _ (LitExpr (BoolLiteral b)) _) !exit = exit b
-edhValueNull _ (EdhExpr _ (LitExpr (StringLiteral s)) _) !exit =
+edhValueNull _ (EdhExpr _ _ (LitExpr (BoolLiteral b)) _) !exit = exit b
+edhValueNull _ (EdhExpr _ _ (LitExpr (StringLiteral s)) _) !exit =
   exit $ T.null s
 edhValueNull !ets (EdhObject !o) !exit =
   lookupEdhObjAttr o (AttrByName "__null__") >>= \case

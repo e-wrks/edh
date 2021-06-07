@@ -418,7 +418,7 @@ instance EdhAllocator fn' => EdhAllocator (Maybe (AttrName, EdhValue) -> fn') wh
 -- receive anonymous arg taking 'EdhExpr'
 instance EdhAllocator fn' => EdhAllocator (Expr -> fn') where
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
-    EdhExpr _ !expr _src ->
+    EdhExpr _ _ !expr _src ->
       allocEdhObj (fn expr) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
   allocEdhObj _ _ _ = throwEdhTx UsageError "missing anonymous arg"
@@ -428,14 +428,14 @@ instance EdhAllocator fn' => EdhAllocator (Maybe Expr -> fn') where
   allocEdhObj !fn (ArgsPack [] !kwargs) !exit =
     allocEdhObj (fn Nothing) (ArgsPack [] kwargs) exit
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
-    EdhExpr _ !expr _src ->
+    EdhExpr _ _ !expr _src ->
       allocEdhObj (fn (Just expr)) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
 
 -- receive anonymous arg taking 'EdhExpr' with src
 instance EdhAllocator fn' => EdhAllocator ((Expr, Text) -> fn') where
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
-    EdhExpr _ !expr !src ->
+    EdhExpr _ _ !expr !src ->
       allocEdhObj (fn (expr, src)) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
   allocEdhObj _ _ _ = throwEdhTx UsageError "missing anonymous arg"
@@ -445,7 +445,7 @@ instance EdhAllocator fn' => EdhAllocator (Maybe (Expr, Text) -> fn') where
   allocEdhObj !fn (ArgsPack [] !kwargs) !exit =
     allocEdhObj (fn Nothing) (ArgsPack [] kwargs) exit
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
-    EdhExpr _ !expr !src ->
+    EdhExpr _ _ !expr !src ->
       allocEdhObj (fn (Just (expr, src))) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
 
@@ -1603,7 +1603,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg Expr 
   allocEdhObj !fn (ArgsPack !args !kwargs) !exit =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ !expr _src ->
+        EdhExpr _ _ !expr _src ->
           allocEdhObj
             (fn (NamedEdhArg expr))
             (ArgsPack args kwargs')
@@ -1617,7 +1617,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg Expr 
       (Nothing, !kwargs') -> case args of
         [] -> throwEdhTx UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
-          EdhExpr _ !expr _src ->
+          EdhExpr _ _ !expr _src ->
             allocEdhObj
               (fn (NamedEdhArg expr))
               (ArgsPack args' kwargs')
@@ -1636,7 +1636,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Mayb
   allocEdhObj !fn (ArgsPack !args !kwargs) !exit =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ !expr _src ->
+        EdhExpr _ _ !expr _src ->
           allocEdhObj
             (fn (NamedEdhArg (Just expr)))
             (ArgsPack args kwargs')
@@ -1650,7 +1650,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Mayb
       (Nothing, !kwargs') -> case args of
         [] -> allocEdhObj (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
         val : args' -> case val of
-          EdhExpr _ !expr _src ->
+          EdhExpr _ _ !expr _src ->
             allocEdhObj
               (fn (NamedEdhArg (Just expr)))
               (ArgsPack args' kwargs')
@@ -1669,7 +1669,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Expr
   allocEdhObj !fn (ArgsPack !args !kwargs) !exit =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ !expr !src ->
+        EdhExpr _ _ !expr !src ->
           allocEdhObj
             (fn (NamedEdhArg (expr, src)))
             (ArgsPack args kwargs')
@@ -1683,7 +1683,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Expr
       (Nothing, !kwargs') -> case args of
         [] -> throwEdhTx UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
-          EdhExpr _ !expr !src ->
+          EdhExpr _ _ !expr !src ->
             allocEdhObj
               (fn (NamedEdhArg (expr, src)))
               (ArgsPack args' kwargs')
@@ -1702,7 +1702,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Mayb
   allocEdhObj !fn (ArgsPack !args !kwargs) !exit =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ !expr !src ->
+        EdhExpr _ _ !expr !src ->
           allocEdhObj
             (fn (NamedEdhArg (Just (expr, src))))
             (ArgsPack args kwargs')
@@ -1716,7 +1716,7 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Mayb
       (Nothing, !kwargs') -> case args of
         [] -> allocEdhObj (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
         val : args' -> case val of
-          EdhExpr _ !expr !src ->
+          EdhExpr _ _ !expr !src ->
             allocEdhObj
               (fn (NamedEdhArg (Just (expr, src))))
               (ArgsPack args' kwargs')
@@ -2308,7 +2308,7 @@ instance EdhCallable fn' => EdhCallable (Maybe (AttrName, EdhValue) -> fn') wher
 -- receive anonymous arg taking 'EdhExpr'
 instance EdhCallable fn' => EdhCallable (Expr -> fn') where
   callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
-    EdhExpr _ !expr _src ->
+    EdhExpr _ _ !expr _src ->
       callFromEdh (fn expr) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
   callFromEdh _ _ _ = throwEdhTx UsageError "missing anonymous arg"
@@ -2318,14 +2318,14 @@ instance EdhCallable fn' => EdhCallable (Maybe Expr -> fn') where
   callFromEdh !fn (ArgsPack [] !kwargs) !exit =
     callFromEdh (fn Nothing) (ArgsPack [] kwargs) exit
   callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
-    EdhExpr _ !expr _src ->
+    EdhExpr _ _ !expr _src ->
       callFromEdh (fn (Just expr)) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
 
 -- receive anonymous arg taking 'EdhExpr' with src
 instance EdhCallable fn' => EdhCallable ((Expr, Text) -> fn') where
   callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
-    EdhExpr _ !expr !src ->
+    EdhExpr _ _ !expr !src ->
       callFromEdh (fn (expr, src)) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
   callFromEdh _ _ _ = throwEdhTx UsageError "missing anonymous arg"
@@ -2335,7 +2335,7 @@ instance EdhCallable fn' => EdhCallable (Maybe (Expr, Text) -> fn') where
   callFromEdh !fn (ArgsPack [] !kwargs) !exit =
     callFromEdh (fn Nothing) (ArgsPack [] kwargs) exit
   callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
-    EdhExpr _ !expr !src ->
+    EdhExpr _ _ !expr !src ->
       callFromEdh (fn (Just (expr, src))) (ArgsPack args kwargs) exit
     _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
 
@@ -3496,7 +3496,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg Expr na
   callFromEdh !fn (ArgsPack !args !kwargs) !exit =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ !expr _src ->
+        EdhExpr _ _ !expr _src ->
           callFromEdh
             (fn (NamedEdhArg expr))
             (ArgsPack args kwargs')
@@ -3510,7 +3510,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg Expr na
       (Nothing, !kwargs') -> case args of
         [] -> throwEdhTx UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
-          EdhExpr _ !expr _src ->
+          EdhExpr _ _ !expr _src ->
             callFromEdh
               (fn (NamedEdhArg expr))
               (ArgsPack args' kwargs')
@@ -3529,7 +3529,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Maybe 
   callFromEdh !fn (ArgsPack !args !kwargs) !exit =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ !expr _src ->
+        EdhExpr _ _ !expr _src ->
           callFromEdh
             (fn (NamedEdhArg (Just expr)))
             (ArgsPack args kwargs')
@@ -3543,7 +3543,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Maybe 
       (Nothing, !kwargs') -> case args of
         [] -> callFromEdh (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
         val : args' -> case val of
-          EdhExpr _ !expr _src ->
+          EdhExpr _ _ !expr _src ->
             callFromEdh
               (fn (NamedEdhArg (Just expr)))
               (ArgsPack args' kwargs')
@@ -3562,7 +3562,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Expr, 
   callFromEdh !fn (ArgsPack !args !kwargs) !exit =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ !expr !src ->
+        EdhExpr _ _ !expr !src ->
           callFromEdh
             (fn (NamedEdhArg (expr, src)))
             (ArgsPack args kwargs')
@@ -3576,7 +3576,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Expr, 
       (Nothing, !kwargs') -> case args of
         [] -> throwEdhTx UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
-          EdhExpr _ !expr !src ->
+          EdhExpr _ _ !expr !src ->
             callFromEdh
               (fn (NamedEdhArg (expr, src)))
               (ArgsPack args' kwargs')
@@ -3595,7 +3595,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Maybe 
   callFromEdh !fn (ArgsPack !args !kwargs) !exit =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ !expr !src ->
+        EdhExpr _ _ !expr !src ->
           callFromEdh
             (fn (NamedEdhArg (Just (expr, src))))
             (ArgsPack args kwargs')
@@ -3609,7 +3609,7 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Maybe 
       (Nothing, !kwargs') -> case args of
         [] -> callFromEdh (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
         val : args' -> case val of
-          EdhExpr _ !expr !src ->
+          EdhExpr _ _ !expr !src ->
             callFromEdh
               (fn (NamedEdhArg (Just (expr, src))))
               (ArgsPack args' kwargs')

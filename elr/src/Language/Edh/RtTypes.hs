@@ -179,7 +179,7 @@ edhValueIdent = identityOf
     identityOf (EdhProcedure !p _) = return $ idOfProc p
     identityOf (EdhBoundProc !p !this !that _) =
       EdhPair (idOfProc p) <$> liftA2 EdhPair (idOfObj this) (idOfObj that)
-    identityOf (EdhExpr !u _ _) = return $ idFromUnique u
+    identityOf (EdhExpr !u _ _ _) = return $ idFromUnique u
     identityOf (EdhArgsPack (ArgsPack !args !kwargs)) =
       EdhArgsPack
         <$> liftA2
@@ -1111,10 +1111,7 @@ data EdhValue
   | -- | named value, a.k.a. term definition
     EdhNamedValue !AttrName !EdhValue
   | -- | reflective expr, with source (or not, if empty)
-    EdhExpr !Unique !Expr !Text
-
-edhExpr :: Unique -> ExprSrc -> Text -> EdhValue
-edhExpr !u (ExprSrc !x _) !s = EdhExpr u x s
+    EdhExpr !Unique !SrcLoc !Expr !Text
 
 instance Show EdhValue where
   show EdhNil = "nil"
@@ -1157,7 +1154,7 @@ instance Show EdhValue where
     -- Edh operators are all left-associative, parenthesis needed
     T.unpack n <> " := (" <> show v <> ")"
   show (EdhNamedValue n v) = T.unpack n <> " := " <> show v
-  show (EdhExpr _ x s) =
+  show (EdhExpr _ _ x s) =
     if T.null s
       then -- source-less form
         "<expr: " ++ show x ++ ">"
@@ -1204,8 +1201,8 @@ instance Eq EdhValue where
   EdhNamedValue x'n x'v == EdhNamedValue y'n y'v = x'n == y'n && x'v == y'v
   EdhNamedValue _ x'v == y = x'v == y
   x == EdhNamedValue _ y'v = x == y'v
-  EdhExpr _ (LitExpr x'l) _ == EdhExpr _ (LitExpr y'l) _ = x'l == y'l
-  EdhExpr x'u _ _ == EdhExpr y'u _ _ = x'u == y'u
+  EdhExpr _ _ (LitExpr x'l) _ == EdhExpr _ _ (LitExpr y'l) _ = x'l == y'l
+  EdhExpr x'u _ _ _ == EdhExpr y'u _ _ _ = x'u == y'u
   -- todo: support coercing equality ?
   --       * without this, we are a strongly typed dynamic language
   --       * with this, we'll be a weakly typed dynamic language
@@ -1242,8 +1239,8 @@ instance Hashable EdhValue where
     s `hashWithSalt` (-9 :: Int) `hashWithSalt` u
   hashWithSalt s (EdhEvs x) = hashWithSalt s x
   hashWithSalt s (EdhNamedValue _ v) = hashWithSalt s v
-  hashWithSalt s (EdhExpr _ (LitExpr l) _) = hashWithSalt s l
-  hashWithSalt s (EdhExpr u _ _) = hashWithSalt s u
+  hashWithSalt s (EdhExpr _ _ (LitExpr l) _) = hashWithSalt s l
+  hashWithSalt s (EdhExpr u _ _ _) = hashWithSalt s u
 
 edhDeReturn :: EdhValue -> EdhValue
 edhDeReturn (EdhReturn !val) = edhDeReturn val
