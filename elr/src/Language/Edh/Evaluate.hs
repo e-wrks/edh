@@ -3811,16 +3811,6 @@ defineEffect !ets !key !val =
 implantEffect :: AttrKey -> EdhValue -> DictStore -> STM ()
 implantEffect !key !val !dsEffs = edhSetValue (attrKeyValue key) val dsEffs
 
-prepareMagicDict :: AttrKey -> EntityStore -> STM DictStore
-prepareMagicDict !magicName !tgtEnt =
-  iopdLookup magicName tgtEnt >>= \case
-    Just (EdhDict (Dict _ !dsEff)) -> return dsEff
-    _ -> do
-      -- todo warn if of wrong type
-      d@(Dict _ !dsEff) <- createEdhDict []
-      iopdInsert magicName (EdhDict d) tgtEnt
-      return dsEff
-
 evalExprSrc :: ExprSrc -> EdhTxExit EdhValue -> EdhTx
 evalExprSrc (ExprSrc !expr !ss) !exit !ets =
   runEdhTx (etsMovePC ets ss) $
@@ -4156,13 +4146,44 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
       throwEdhTx
         EvalError
         "import from filesystem is prohibited from a sandboxed environment"
-evalExpr' (DefaultExpr maybeApk (ExprSrc !exprDef _)) _docCmt !exit = \ !ets ->
-  do
-    !u <- unsafeIOToSTM newUnique
-    let withApk !apk = exitEdh ets exit $ EdhDefault u apk exprDef (Just ets)
-    case maybeApk of
-      Nothing -> withApk $ ArgsPack [] odEmpty
-      Just (ArgsPacker !argsSndr _) -> packEdhArgs ets argsSndr withApk
+evalExpr' (DefaultExpr !maybeApk exprSrc@(ExprSrc !exprDef _)) _docCmt !exit =
+  \ !ets -> case edh'ctx'eff'target $ edh'context ets of
+    Nothing -> do
+      !u <- unsafeIOToSTM newUnique
+      let withApk !apk = exitEdh ets exit $ EdhDefault u apk exprDef (Just ets)
+      case maybeApk of
+        Nothing -> withApk $ ArgsPack [] odEmpty
+        Just (ArgsPacker !argsSndr _) -> packEdhArgs ets argsSndr withApk
+    Just _dsEffs -> do
+      let ctx = edh'context ets
+          withKwargs !kwargs = do
+            !dsEffDefs <-
+              prepareMagicDict (AttrByName edhEffectDefaultsMagicName) $
+                edh'scope'entity $ contextScope ctx
+            -- no nil can come from kwargs of an apk,
+            -- so no processing of delete semantics
+            iopdUpdate
+              [(attrKeyValue k, v) | (k, v) <- odToList kwargs]
+              dsEffDefs
+            runEdhTx
+              ets {edh'context = ctx {edh'ctx'eff'target = Just dsEffDefs}}
+              $ evalExprSrc (deExprSrc exprSrc) $
+                const $ edhSwitchState ets $ exitEdhTx exit nil
+      case maybeApk of
+        Nothing -> withKwargs odEmpty
+        Just (ArgsPacker !argsSndr _) ->
+          packEdhArgs ets argsSndr $ \(ArgsPack !args !kwargs) ->
+            if null args
+              then withKwargs kwargs
+              else
+                throwEdh
+                  ets
+                  UsageError
+                  "you don't pass positional args for `effect default`"
+  where
+    deExprSrc :: ExprSrc -> ExprSrc
+    deExprSrc (ExprSrc (ExprWithSrc x _) _) = deExprSrc x
+    deExprSrc x = x
 evalExpr' (InfixExpr !opSymSrc !lhExpr !rhExpr) _docCmt !exit =
   evalInfixSrc opSymSrc lhExpr rhExpr exit
 -- defining an Edh class
@@ -5361,9 +5382,10 @@ resolveEdhPerform' ::
   (Maybe EdhValue -> STM ()) ->
   STM ()
 resolveEdhPerform' !ets !effKey !exit =
-  resolveEffectfulAttr edhTargetStackForPerform (attrKeyValue effKey) >>= \case
-    Just (!effArt, _) -> exit $ Just effArt
-    Nothing -> exit Nothing
+  resolveEffectfulAttr ets (attrKeyValue effKey) edhTargetStackForPerform
+    >>= \case
+      Just (!effArt, _) -> exit $ Just effArt
+      Nothing -> exit Nothing
   where
     edhTargetStackForPerform :: [EdhCallFrame]
     edhTargetStackForPerform = case edh'effects'stack scope of
@@ -5385,9 +5407,10 @@ resolveEdhBehave' ::
   (Maybe EdhValue -> STM ()) ->
   STM ()
 resolveEdhBehave' !ets !effKey !exit =
-  resolveEffectfulAttr edhTargetStackForBehave (attrKeyValue effKey) >>= \case
-    Just (!effArt, _) -> exit $ Just effArt
-    Nothing -> exit Nothing
+  resolveEffectfulAttr ets (attrKeyValue effKey) edhTargetStackForBehave
+    >>= \case
+      Just (!effArt, _) -> exit $ Just effArt
+      Nothing -> exit Nothing
   where
     edhTargetStackForBehave :: [EdhCallFrame]
     edhTargetStackForBehave = edh'ctx'stack ctx where !ctx = edh'context ets

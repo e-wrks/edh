@@ -12,6 +12,16 @@ import Language.Edh.IOPD
 import Language.Edh.RtTypes
 import Prelude
 
+prepareMagicDict :: AttrKey -> EntityStore -> STM DictStore
+prepareMagicDict !magicName !tgtEnt =
+  iopdLookup magicName tgtEnt >>= \case
+    Just (EdhDict (Dict _ !dsEff)) -> return dsEff
+    _ -> do
+      -- todo warn if of wrong type
+      d@(Dict _ !dsEff) <- createEdhDict []
+      iopdInsert magicName (EdhDict d) tgtEnt
+      return dsEff
+
 -- * Edh lexical attribute resolution
 
 lookupEdhCtxAttr :: Scope -> AttrKey -> STM EdhValue
@@ -36,23 +46,47 @@ resolveEdhCtxAttr !fromScope !key = resolveLexicalAttr (Just fromScope)
 edhEffectsMagicName :: Text
 edhEffectsMagicName = "__effects__"
 
+edhEffectDefaultsMagicName :: Text
+edhEffectDefaultsMagicName = "__effect_defaults__"
+
 resolveEffectfulAttr ::
-  [EdhCallFrame] -> EdhValue -> STM (Maybe (EdhValue, [EdhCallFrame]))
-resolveEffectfulAttr [] _ = return Nothing
-resolveEffectfulAttr (EdhCallFrame scope _ _ : rest) !key =
-  iopdLookup (AttrByName edhEffectsMagicName) (edh'scope'entity scope) >>= \case
-    Nothing -> resolveEffectfulAttr rest key
-    Just (EdhDict (Dict _ !d)) ->
-      iopdLookup key d >>= \case
-        Just !val -> case val of
-          EdhProcedure !callable _origEffOuterStack ->
-            return $ Just (EdhProcedure callable (Just rest), rest)
-          EdhBoundProc !callable !this !that _origEffOuterStack ->
-            return $ Just (EdhBoundProc callable this that (Just rest), rest)
-          _ -> return $ Just (val, rest)
-        Nothing -> resolveEffectfulAttr rest key
-    -- todo crash in this case? warning may be more proper but in what way?
-    _ -> resolveEffectfulAttr rest key
+  EdhThreadState ->
+  EdhValue ->
+  [EdhCallFrame] ->
+  STM (Maybe (EdhValue, [EdhCallFrame]))
+resolveEffectfulAttr ets !k = resolve
+  where
+    resolve [] =
+      iopdLookup
+        (AttrByName edhEffectDefaultsMagicName)
+        (edh'scope'entity $ contextScope $ edh'context ets)
+        >>= \case
+          Nothing -> return Nothing
+          Just (EdhDict (Dict _ !dsEffDefs)) ->
+            iopdLookup k dsEffDefs >>= \case
+              Nothing -> return Nothing
+              Just !val -> return $ Just (val, [])
+          -- todo crash in this case?
+          --      warning may be more proper but in what way?
+          _ -> return Nothing
+    resolve (EdhCallFrame scope _ _ : rest) =
+      iopdLookup (AttrByName edhEffectsMagicName) (edh'scope'entity scope)
+        >>= \case
+          Nothing -> resolve rest
+          Just (EdhDict (Dict _ !d)) ->
+            iopdLookup k d >>= \case
+              Just !val -> case val of
+                EdhProcedure !callable _origEffOuterStack ->
+                  return $
+                    Just (EdhProcedure callable (Just rest), rest)
+                EdhBoundProc !callable !this !that _origEffOuterStack ->
+                  return $
+                    Just (EdhBoundProc callable this that (Just rest), rest)
+                _ -> return $ Just (val, rest)
+              Nothing -> resolve rest
+          -- todo crash in this case?
+          --      warning may be more proper but in what way?
+          _ -> resolve rest
 {-# INLINE resolveEffectfulAttr #-}
 
 -- * Edh inheritance resolution
