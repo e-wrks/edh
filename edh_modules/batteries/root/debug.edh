@@ -97,7 +97,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
     then callerScope.eval( ofThe )
     else callerScope
   ) of {
-    { { scope: ofScope } } -> join( sep= '\n',
+    { { scope: ofScope } } -> '\n'.join(
       ofScope.lexiLoc,
       *() =< for ( k, v ) from ofScope.attrs() do
       '  ' ++ k ++ '= ' ++ v
