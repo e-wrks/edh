@@ -4,21 +4,33 @@
 import * 'batteries/meta'
 
 
-export method abs( n ) n<0 and -n or n
+{## For source level compatibility with JavaScript #}
+export NaN := nan
 
-export method max( n, *rest ) {
-  for i from rest do if i > n then n = i
+
+export method abs( n ) if n is nan then nan else n<0 and -n or n
+
+
+export method max( *all ) {
+  n = nan
+  for i from all do if (
+    n is nan or ( i is not nan and i > n )
+  ) then n = i
   return n
 }
 
-export method min( n, *rest ) {
-  for i from rest do if i < n then n = i
+export method min( *all ) {
+  n = nan
+  for i from all do if (
+    n is nan or ( i is not nan and i < n )
+  ) then n = i
   return n
 }
 
 
 {## Resembles `Number.prototype.toFixed()` as in JavaScript #}
 export method __Decimal_toFixed__(n) return method toFixed(digs= 0) {
+  if n is nan then return "NaN"
   amp = 10**digs
-  return repr( (amp * n).round / amp )
+  return repr$ (amp * n).round / amp
 }
