@@ -545,6 +545,7 @@ parseWhileExpr !si = do
 parseDoForOrWhileExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseDoForOrWhileExpr !si = do
   void $ keyword "do"
+  lbStartPos <- getSourcePos
   (!bodyStmt, !si') <- parseStmt si
   choice
     [ do
@@ -552,6 +553,27 @@ parseDoForOrWhileExpr !si = do
         !scoped <- isJust <$> optional (symbol "@")
         (!ar, !iter, !si'') <- parseLoopHead si'
         return (ForExpr scoped ar iter bodyStmt, si''),
+      do
+        void $ keyword "if"
+        (!cond, !si'') <- parseExpr si'
+        EdhParserState _ lbEnd <- get
+        optional (keyword "for") >>= \case
+          Nothing -> return (IfExpr cond bodyStmt Nothing, si'')
+          Just {} -> do
+            !scoped <- isJust <$> optional (symbol "@")
+            (!ar, !iter, !si''') <- parseLoopHead si''
+            let !loopBodyStmt =
+                  StmtSrc
+                    ( ExprStmt
+                        ( IfExpr
+                            cond
+                            bodyStmt
+                            (Just $ StmtSrc ContinueStmt noSrcRange)
+                        )
+                        NoDocCmt
+                    )
+                    $ lspSrcRangeFromParsec lbStartPos lbEnd
+            return (ForExpr scoped ar iter loopBodyStmt, si'''),
       do
         void $ keyword "while"
         (!cnd, !si'') <- parseExpr si'
