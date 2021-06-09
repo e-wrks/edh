@@ -1849,7 +1849,10 @@ edhPrepareForLoop
               EdhReturn EdhReturn {} ->
                 -- this has special meaning
                 -- Edh code should not use this pattern
-                throwEdh etsLooper UsageError "double return from do-of-for?"
+                throwEdh
+                  etsLooper
+                  UsageError
+                  "you don't double return from loop body"
               EdhReturn !rtnVal ->
                 -- early return from for-from-do, the generator should
                 -- propagate the double return as yield result to it,
@@ -1931,17 +1934,34 @@ edhPrepareForLoop
                 iopdUpdate (odToList em) $
                   edh'scope'entity $ edh'frame'scope $ edh'ctx'tip ctxDo
                 runEdhTx etsDo $
-                  evalStmtSrc bodyStmt $ \ !doResult -> case doResult of
-                    EdhBreak ->
-                      -- break for loop
-                      edhSwitchState etsLooper $ exitEdhTx exit nil
-                    rtn@EdhReturn {} ->
-                      -- early return during for loop
-                      edhSwitchState etsLooper $ exitEdhTx exit rtn
-                    _ -> \_ets -> do
-                      -- continue for loop
-                      iterCollector doResult
-                      next
+                  evalStmtSrc bodyStmt $ \ !doResult _etsDone ->
+                    case doResult of
+                      EdhBreak ->
+                        -- break for loop
+                        exitEdh etsLooper exit nil
+                      EdhReturn EdhReturn {} ->
+                        -- this has special meaning
+                        -- Edh code should not use this pattern
+                        throwEdh
+                          etsLooper
+                          UsageError
+                          "you don't double return from loop body"
+                      rtn@EdhReturn {} ->
+                        -- early return during for loop
+                        exitEdh etsLooper exit rtn
+                      EdhContinue ->
+                        -- explicit continue w/o yielding
+                        next
+                      EdhCaseOther ->
+                        -- no-match, continue w/o yielding
+                        next
+                      EdhFallthrough ->
+                        -- match but no result, continue w/o yielding
+                        next
+                      _ -> do
+                        -- continue w/ yielding
+                        iterCollector doResult
+                        next
 
             -- loop over a series of args packs
             iterThem :: [ArgsPack] -> STM ()
