@@ -974,7 +974,7 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
             argsRcvr
             iterExpr
             bodyStmt
-            (\ !val -> modifyTVar' l (++ [val]))
+            (\ !val -> modifyTVar' l (++ [noneNil val]))
             ( \_iterVal !runLoop ->
                 runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal
             )
@@ -985,7 +985,7 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
             argsRcvr
             iterExpr
             bodyStmt
-            (\ !val -> insertToDict ets val d)
+            (\ !val -> insertToDict ets (noneNil val) d)
             ( \_iterVal !runLoop ->
                 runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal
             )
@@ -1002,7 +1002,7 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
                 EdhArgsPack (ArgsPack !args' !kwargs') -> do
                   modifyTVar' posArgs (++ args')
                   iopdUpdate (odToList kwargs') kwArgs
-                _ -> modifyTVar' posArgs (++ [val])
+                _ -> modifyTVar' posArgs (++ [noneNil val])
             )
             $ \_iterVal !runLoop -> runEdhTx ets $
               runLoop $ \_ _ets -> do
