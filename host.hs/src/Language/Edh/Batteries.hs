@@ -576,7 +576,9 @@ installEdhBatteries world =
                   (EdhMethod, "__Dict_keys__", wrapHostProc dictKeysProc),
                   (EdhMethod, "__Dict_values__", wrapHostProc dictValuesProc),
                   (EdhMethod, "__List_push__", wrapHostProc listPushProc),
-                  (EdhMethod, "__List_pop__", wrapHostProc listPopProc)
+                  (EdhMethod, "__List_pop__", wrapHostProc listPopProc),
+                  (EdhMethod, "__List_reverse__", wrapHostProc listReverseProc),
+                  (EdhMethod, "__List_copy__", wrapHostProc listCopyProc)
                 ]
           ]
             ++ [(AttrByName "Vector",) . EdhObject <$> createVectorClass rootScope]

@@ -820,6 +820,17 @@ listPopProc (List _ !lv) !exit !ets =
         (val : rest) -> writeTVar lv rest >> exitEdh ets' exit' val
         _ -> exitEdh ets' exit' def'val
 
+listReverseProc :: List -> EdhHostProc
+listReverseProc l@(List _ !lv) !exit !ets = do
+  modifyTVar' lv reverse
+  exitEdh ets exit $ EdhList l
+
+listCopyProc :: List -> EdhHostProc
+listCopyProc (List _ !lv) !exit !ets = do
+  !u <- unsafeIOToSTM newUnique
+  !lv' <- newTVar =<< readTVar lv
+  exitEdh ets exit $ EdhList $ List u lv'
+
 -- | operator (|*) - prefix tester
 isPrefixOfProc :: EdhIntrinsicOp
 isPrefixOfProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
