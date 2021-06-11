@@ -96,7 +96,7 @@ createEdhWorld !console = do
       nsProc =
         ProcDefi
           idNamespace
-          (AttrByName "<namespace>")
+          (AttrByName "namespace")
           rootScope
           (DocCmt ["the namespace class"])
           (HostDecl phantomHostProc)
@@ -426,52 +426,36 @@ createEdhWorld !console = do
         !clsObj = edh'scope'that $ contextScope $ edh'context ets
 
     mthNsRepr :: EdhHostProc
-    mthNsRepr !exit !ets = exitEdh ets exit . EdhString =<< nsRepr
+    mthNsRepr !exit !ets = do
+      let !nsName = objClassName this
+      exitEdh ets exit $ EdhString $ "<namespace: " <> nsName <> ">"
       where
         !scope = contextScope $ edh'context ets
-        nsRepr :: STM Text
-        nsRepr = case edh'obj'store $ edh'scope'this scope of
-          HashStore !hs ->
-            iopdLookup (AttrByName "__name__") hs >>= \case
-              Just (EdhString !nsn) -> return $ "<namespace: " <> nsn <> ">"
-              Just (EdhSymbol (Symbol _ !nssr)) ->
-                return $ "<namespace: " <> nssr <> ">"
-              Nothing -> return "<namespace>"
-              _ -> return "<bogus-namespace>"
-          _ -> return "<bogus-namespace>"
+        !this = edh'scope'this scope
 
     mthNsShow :: EdhHostProc
-    mthNsShow !exit !ets = exitEdh ets exit . EdhString =<< nsShow
+    mthNsShow !exit !ets = do
+      let !nsName = objClassName this
+      exitEdh ets exit $
+        EdhString $ "It's a namespace named `" <> nsName <> "`"
       where
         !scope = contextScope $ edh'context ets
-        nsShow :: STM Text
-        nsShow = case edh'obj'store $ edh'scope'this scope of
-          HashStore !hs ->
-            iopdLookup (AttrByName "__name__") hs >>= \case
-              Just (EdhString !nsn) ->
-                return $ "It's a namespace named `" <> nsn <> "`"
-              Just (EdhSymbol (Symbol _ !nssr)) ->
-                return $ "It's a symbolic namespace named `" <> nssr <> "`"
-              Nothing -> return "It's an anonymous namespace"
-              _ -> return "It's a bogus-namespace"
-          _ -> return "It's a bogus-namespace"
+        !this = edh'scope'this scope
 
     mthNsDesc :: EdhHostProc
-    mthNsDesc !exit !ets = exitEdh ets exit . EdhString =<< nsDesc
+    mthNsDesc !exit !ets = do
+      let !nsName = objClassName this
+      !nAttrs <- case edh'obj'store this of
+        HashStore !hs -> iopdSize hs
+        _ -> return 0
+      exitEdh ets exit $
+        EdhString $
+          "It's a namespace named `" <> nsName <> "`, with "
+            <> T.pack (show nAttrs)
+            <> " attribute(s)"
       where
         !scope = contextScope $ edh'context ets
-        nsDesc :: STM Text
-        -- TODO elaborate the informatiion
-        nsDesc = case edh'obj'store $ edh'scope'this scope of
-          HashStore !hs ->
-            iopdLookup (AttrByName "__name__") hs >>= \case
-              Just (EdhString !nsn) ->
-                return $ "It's a namespace named `" <> nsn <> "`"
-              Just (EdhSymbol (Symbol _ !nssr)) ->
-                return $ "It's a symbolic namespace named `" <> nssr <> "`"
-              Nothing -> return "It's an anonymous namespace"
-              _ -> return "It's a bogus-namespace"
-          _ -> return "It's a bogus-namespace"
+        !this = edh'scope'this scope
 
     mthValueRepr :: EdhHostProc
     mthValueRepr !exit !ets = case edh'obj'store this of

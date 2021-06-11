@@ -4333,10 +4333,7 @@ evalExpr'
                 _ -> error "bug: namespace class not bearing ClassStore"
 
           !idNs <- unsafeIOToSTM newUnique
-          !hs <-
-            iopdFromList $
-              odToList kwargs
-                ++ [(AttrByName "__name__", attrKeyValue name)]
+          !hs <- iopdFromList $ odToList kwargs
           !ss <- newTVar []
           let !nsProc =
                 ProcDefi
