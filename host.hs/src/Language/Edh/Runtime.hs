@@ -66,7 +66,7 @@ createEdhWorld !console = do
           (AttrByName "<root>")
           rootScope
           (DocCmt ["the root namespace"])
-          (HostDecl phantomHostProc)
+          phantomHostProc
       rootObj = Object idRoot (HashStore hsRoot) nsClassObj ssRoot
 
       sandboxScope = Scope hsSandbox sandboxObj sandboxObj sandboxProc []
@@ -76,7 +76,7 @@ createEdhWorld !console = do
           (AttrByName "<sandbox>")
           sandboxScope
           (DocCmt ["the sandbox namespace"])
-          (HostDecl phantomHostProc)
+          phantomHostProc
       sandboxObj =
         Object idSandbox (HashStore hsSandbox) sandboxClassObj ssSandbox
       sandboxClass = Class sandboxProc hsSandbox phantomAllocator mroSandbox
@@ -89,7 +89,7 @@ createEdhWorld !console = do
           (AttrByName "class")
           rootScope
           (DocCmt ["the meta class"])
-          (HostDecl phantomHostProc)
+          phantomHostProc
       metaClass = Class metaProc hsMeta phantomAllocator mroMeta
       metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
 
@@ -99,7 +99,7 @@ createEdhWorld !console = do
           (AttrByName "namespace")
           rootScope
           (DocCmt ["the namespace class"])
-          (HostDecl phantomHostProc)
+          phantomHostProc
       nsClass = Class nsProc hsNamespace phantomAllocator mroNamespace
       nsClassObj =
         Object idNamespace (ClassStore nsClass) metaClassObj ssNamespace
@@ -381,13 +381,6 @@ createEdhWorld !console = do
 
   return world
   where
-    phantomAllocator :: ArgsPack -> EdhObjectAllocator
-    phantomAllocator _ _ !ets =
-      throwEdh ets EvalError "bug: allocating phantom object"
-    phantomHostProc :: ArgsPack -> EdhHostProc
-    phantomHostProc _apk _exit =
-      throwEdhTx EvalError "bug: calling phantom procedure"
-
     mthClassRepr :: EdhHostProc
     mthClassRepr !exit !ets = case edh'obj'store clsObj of
       ClassStore !cls ->

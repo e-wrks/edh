@@ -583,7 +583,9 @@ installEdhBatteries world =
           ]
             ++ [(AttrByName "Vector",) . EdhObject <$> createVectorClass rootScope]
 
-      !console <- createNamespace world "console" []
+      !console <-
+        edhCreateNsObj ets NoDocCmt phantomHostProc (AttrByName "console")
+          =<< iopdEmpty
       !conScope <- objectScope console
       !conMths <-
         sequence
@@ -608,16 +610,12 @@ installEdhBatteries world =
                    (AttrByName "error", EdhDecimal 40),
                    (AttrByName "fatal", EdhDecimal 50),
                    ( AttrByName "logLevel",
-                     EdhDecimal
-                       (fromIntegral $ consoleLogLevel $ edh'world'console world)
+                     EdhDecimal $
+                       fromIntegral $ consoleLogLevel $ edh'world'console world
                    )
                  ]
-      !conExps <-
-        EdhDict
-          <$> createEdhDict [(attrKeyValue k, v) | (k, v) <- conArts]
-      flip iopdUpdate (edh'scope'entity conScope) $
-        conArts
-          ++ [(AttrByName "__exports__", conExps)]
+      iopdUpdate conArts $ edh'scope'entity conScope
+      prepareExpStore ets console $ \ !conExps -> iopdUpdate conArts conExps
 
       -- artifacts considered safe for sandboxed envs, to afford basic Edh
       -- source evaluation
@@ -634,14 +632,26 @@ installEdhBatteries world =
             (AttrByName "console", EdhObject console) : privilegedProcs
       iopdUpdate (basicArts ++ privilegedArts) rootEntity
       runEdhTx ets $
-        importEdhModule' rootEntity WildReceiver "batteries/root" endOfEdh
+        importEdhModule'
+          rootEntity
+          rootObj
+          WildReceiver
+          "batteries/root"
+          endOfEdh
 
       iopdUpdate basicArts sandboxEntity
       runEdhTx ets $
-        importEdhModule' sandboxEntity WildReceiver "batteries/sandbox" endOfEdh
+        importEdhModule'
+          sandboxEntity
+          sandboxObj
+          WildReceiver
+          "batteries/sandbox"
+          endOfEdh
   where
     !rootScope = edh'world'root world
+    !rootObj = edh'scope'this rootScope
     !rootEntity = edh'scope'entity rootScope
 
     !sandboxScope = edh'world'sandbox world
+    !sandboxObj = edh'scope'this sandboxScope
     !sandboxEntity = edh'scope'entity sandboxScope

@@ -328,9 +328,9 @@ data Context = Context
     -- context scope
     edh'ctx'pure :: !Bool,
     -- | whether running within an exporting stmt
-    edh'ctx'exp'target :: !(Maybe DictStore),
+    edh'ctx'exp'target :: !(Maybe EntityStore),
     -- | whether running within an effect stmt
-    edh'ctx'eff'target :: !(Maybe DictStore)
+    edh'ctx'eff'target :: !(Maybe EntityStore)
   }
 
 contextScope :: Context -> Scope
@@ -489,6 +489,14 @@ edhClassName !clsObj = case edh'obj'store clsObj of
 objClassName :: Object -> Text
 objClassName = edhClassName . edh'obj'class
 
+objClassProc :: Object -> ProcDefi
+objClassProc = edhClassProc . edh'obj'class
+  where
+    edhClassProc :: Object -> ProcDefi
+    edhClassProc !clsObj = case edh'obj'store clsObj of
+      ClassStore !cls -> edh'class'proc cls
+      _ -> error "bug: not a class"
+
 -- | An object views an entity, with inheritance relationship
 -- to any number of super objects.
 data Object = Object
@@ -597,17 +605,6 @@ data EdhWorld = EdhWorld
 instance Eq EdhWorld where
   x == y =
     edh'scope'this (edh'world'root x) == edh'scope'this (edh'world'root y)
-
-createNamespace :: EdhWorld -> Text -> [(AttrKey, EdhValue)] -> STM Object
-createNamespace !world !nsName !nsArts = do
-  !oidNs <- unsafeIOToSTM newUnique
-  !hs <- iopdFromList $ (AttrByName "__name__", EdhString nsName) : nsArts
-  !ss <- newTVar []
-  let !nsObj = Object oidNs (HashStore hs) nsClass ss
-  return nsObj
-  where
-    !rootScope = edh'world'root world
-    !nsClass = edh'obj'class $ edh'scope'this rootScope
 
 type ModuleId = Text
 

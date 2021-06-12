@@ -475,38 +475,28 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
       resolveEdhAttrAddr ets addr' $ \ !key -> do
         case edh'ctx'eff'target ctx of
           Nothing -> edhSetValue key rhVal esScope
-          Just !dsEffs -> implantEffect key rhVal dsEffs
+          Just !esEffs -> edhSetValue key rhVal esEffs
         exitWithChkExportTo (edh'scope'this scope) key rhVal
     -- exporting within a method procedure actually adds the artifact to
-    -- its owning object's export table, besides changing the mth proc's
+    -- its owning object's export store, besides changing the mth proc's
     -- scope, maybe confusing in some cases, need more thoughts on it
 
-    -- special case, assigning with `this.v=x` `that.v=y`, handle exports and
-    -- effect definition
+    -- special case, assigning with `this.v=x` `that.v=y`, handle exports
+    -- todo err out if in effecting context?
     IndirectRef (ExprSrc (AttrExpr ThisRef {}) _) (AttrAddrSrc !addr' _) ->
       let this = edh'scope'this scope
        in resolveEdhAttrAddr ets addr' $ \ !key ->
-            case edh'ctx'eff'target ctx of
-              Nothing -> setObjAttr ets this key rhVal $
-                \ !valSet -> exitWithChkExportTo this key valSet
-              Just _dsEffs -> do
-                defEffIntoObj this key
-                exitWithChkExportTo this key rhVal
+            setObjAttr ets this key rhVal $
+              \ !valSet -> exitWithChkExportTo this key valSet
     IndirectRef (ExprSrc (AttrExpr ThatRef {}) _) (AttrAddrSrc !addr' _) ->
       let that = edh'scope'that scope
        in resolveEdhAttrAddr ets addr' $ \ !key ->
-            case edh'ctx'eff'target ctx of
-              Nothing -> setObjAttr ets that key rhVal $
-                \ !valSet -> exitWithChkExportTo that key valSet
-              Just _dsEffs -> do
-                defEffIntoObj that key
-                exitWithChkExportTo that key rhVal
+            setObjAttr ets that key rhVal $
+              \ !valSet -> exitWithChkExportTo that key valSet
     -- assign to an addressed attribute
     IndirectRef (ExprSrc !tgtExpr _) (AttrAddrSrc !addr' _) ->
-      resolveEdhAttrAddr ets addr' $
-        \ !key ->
-          runEdhTx ets $
-            setEdhAttr tgtExpr key rhVal $ exitMaybeExpTo key
+      resolveEdhAttrAddr ets addr' $ \ !key ->
+        runEdhTx ets $ setEdhAttr tgtExpr key rhVal $ exitMaybeExpTo key
     -- god forbidden things
     ThisRef {} -> throwEdh ets EvalError "can not assign to this"
     ThatRef {} -> throwEdh ets EvalError "can not assign to that"
@@ -546,33 +536,80 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     exitWithChkExportTo :: Object -> AttrKey -> EdhValue -> STM ()
     exitWithChkExportTo !obj !artKey !artVal = do
       case edh'ctx'exp'target ctx of
-        Nothing -> pure ()
-        Just _dsExps -> case edh'obj'store obj of
-          HashStore !hs -> expInto hs artKey artVal
-          ClassStore !cls -> expInto (edh'class'store cls) artKey artVal
-          HostStore _ ->
-            throwEdh ets UsageError $
-              "no way exporting to a host object of class " <> objClassName obj
-      exitEdh ets exit artVal
-    expInto :: EntityStore -> AttrKey -> EdhValue -> STM ()
-    expInto !es !artKey !artVal =
-      edhSetValue (attrKeyValue artKey) artVal
-        =<< prepareMagicDict (AttrByName edhExportsMagicName) es
+        Nothing -> exitEdh ets exit artVal
+        Just _esExps -> prepareExpStore ets obj $ \ !esExps -> do
+          edhSetValue artKey artVal esExps
+          exitEdh ets exit artVal
 
-    defEffIntoObj :: Object -> AttrKey -> STM ()
-    defEffIntoObj !obj !key = case edh'obj'store obj of
-      HashStore !hs ->
-        implantEffect key rhVal
-          =<< prepareMagicDict (AttrByName edhEffectsMagicName) hs
-      ClassStore !cls ->
-        implantEffect key rhVal
-          =<< prepareMagicDict
-            (AttrByName edhEffectsMagicName)
-            (edh'class'store cls)
-      HostStore _ ->
-        throwEdh ets UsageError $
-          "no way defining effects into a host object of class "
-            <> objClassName obj
+prepareExpStore ::
+  EdhThreadState -> Object -> (EntityStore -> STM ()) -> STM ()
+prepareExpStore !ets !fromObj = prepareExpStore' ets fromObj $ do
+  throwEdh ets EvalError $
+    "no way exporting with a host object of class " <> objClassName fromObj
+
+prepareExpStore' ::
+  EdhThreadState -> Object -> STM () -> (EntityStore -> STM ()) -> STM ()
+prepareExpStore' !ets !fromObj !naExit !exit = case edh'obj'store fromObj of
+  HashStore !tgtEnt -> fromStore tgtEnt
+  ClassStore !cls -> fromStore $ edh'class'store cls
+  HostStore _ -> naExit
+  where
+    fromStore tgtEnt =
+      (exit =<<) $
+        prepareMagicStore (AttrByName edhExportsMagicName) tgtEnt $
+          edhCreateNsObj ets NoDocCmt phantomHostProc $ AttrByName "export"
+
+prepareEffStore :: EdhThreadState -> EntityStore -> STM EntityStore
+prepareEffStore = prepareEffStore' $ AttrByName edhEffectsMagicName
+
+prepareEffStore' :: AttrKey -> EdhThreadState -> EntityStore -> STM EntityStore
+prepareEffStore' !magicKey !ets !tgtEnt =
+  prepareMagicStore magicKey tgtEnt $
+    edhCreateNsObj ets NoDocCmt phantomHostProc $ AttrByName "effect"
+
+phantomHostProc :: ProcDecl
+phantomHostProc = HostDecl $ \_apk _exit ->
+  throwEdhTx EvalError "bug: calling phantom procedure"
+
+phantomAllocator :: ArgsPack -> EdhObjectAllocator
+phantomAllocator _ _ !ets =
+  throwEdh ets EvalError "bug: allocating phantom object"
+
+edhCreateNsObj ::
+  EdhThreadState ->
+  OptDocCmt ->
+  ProcDecl ->
+  AttrKey ->
+  EntityStore ->
+  STM Object
+edhCreateNsObj !ets !docCmt !pd !nsName !nsStore = do
+  !idNs <- unsafeIOToSTM newUnique
+  !ss <- newTVar []
+  let !nsProc =
+        ProcDefi
+          { edh'procedure'ident = idNs,
+            edh'procedure'name = nsName,
+            edh'procedure'lexi = scope,
+            edh'procedure'doc = docCmt,
+            edh'procedure'decl = pd
+          }
+      !nsObj =
+        Object
+          idNs
+          (HashStore nsStore)
+          nsClsObj
+            { edh'obj'store = ClassStore nsClass {edh'class'proc = nsProc}
+            }
+          ss
+  return nsObj
+  where
+    !ctx = edh'context ets
+    !scope = contextScope ctx
+    !rootScope = edh'world'root $ edh'prog'world $ edh'thread'prog ets
+    !nsClsObj = edh'obj'class $ edh'scope'this rootScope
+    !nsClass = case edh'obj'store nsClsObj of
+      ClassStore !cls -> cls
+      _ -> error "bug: namespace class not bearing ClassStore"
 
 -- | Create an Edh host object from the specified class and host data
 --
@@ -1191,10 +1228,13 @@ packEdhArgs !ets !argSenders !pkExit = do
             unpackObj :: EntityStore -> STM ()
             unpackObj !es =
               iopdLookup (AttrByName edhExportsMagicName) es >>= \case
-                Nothing -> pkArgs xs exit
-                Just (EdhDict (Dict _ !ds)) -> unpackDict ds
-                Just !badExplVal -> edhValueDesc ets badExplVal $ \ !badDesc ->
-                  throwEdh ets UsageError $ "bad object export list - " <> badDesc
+                Just (EdhObject !expWrapper) ->
+                  case edh'obj'store expWrapper of
+                    HashStore !esExpFrom ->
+                      flip iopdUpdate kwIOPD =<< iopdToList esExpFrom
+                    -- todo warn or err out in case of bad export wrapper
+                    _ -> pkArgs xs exit
+                _ -> pkArgs xs exit
             edhVal2Kw :: EdhValue -> STM () -> (AttrKey -> STM ()) -> STM ()
             edhVal2Kw !k !nopExit !exit' = case k of
               EdhString !name -> exit' $ AttrByName name
@@ -2616,17 +2656,17 @@ evalStmt !stmt !exit = case stmt of
           Nothing ->
             -- normal multi-assignment
             iopdUpdate (odToList um) (edh'scope'entity scope)
-          Just !dsEffs ->
+          Just !esEffs ->
             -- define effectful artifacts by multi-assignment
             -- note that nil can not appear as for arg receiving,
             -- so no processing of delete semantics
-            iopdUpdate [(attrKeyValue k, v) | (k, v) <- odToList um] dsEffs
+            iopdUpdate (odToList um) esEffs
         case edh'ctx'exp'target ctx of
           Nothing -> pure ()
-          Just !dsExps ->
+          Just !esExps ->
             -- note that nil can not appear as for arg receiving,
             -- so no processing of delete semantics
-            iopdUpdate [(attrKeyValue k, v) | (k, v) <- odToList um] dsExps
+            iopdUpdate (odToList um) esExps
         exitEdh ets exit nil -- let statement evaluates to nil always
   BreakStmt -> exitEdhTx exit EdhBreak
   ContinueStmt -> exitEdhTx exit EdhContinue
@@ -2782,12 +2822,11 @@ evalStmt !stmt !exit = case stmt of
             throwEdh ets UsageError $
               "can not extend a " <> badDesc
   EffectStmt !effs !docCmt -> \ !ets -> do
-    !dsEffs <-
-      prepareMagicDict (AttrByName edhEffectsMagicName) $
-        edh'scope'entity $ contextScope $ edh'context ets
+    !esEffs <-
+      prepareEffStore ets $ edh'scope'entity $ contextScope $ edh'context ets
     runEdhTx
       ets
-        { edh'context = (edh'context ets) {edh'ctx'eff'target = Just dsEffs}
+        { edh'context = (edh'context ets) {edh'ctx'eff'target = Just esEffs}
         }
       $ evalExprSrc' effs docCmt $
         \ !rtn -> edhSwitchState ets $ exit rtn
@@ -2803,77 +2842,82 @@ type FileSystemImportCheck = Text -> EdhTx -> EdhTx
 importInto ::
   FileSystemImportCheck ->
   EntityStore ->
+  Object ->
   ArgsReceiver ->
   ExprSrc ->
   EdhTxExit EdhValue ->
   EdhTx
-importInto !fsChk !tgtEnt !argsRcvr srcExpr@(ExprSrc x _) !exit = case x of
-  LitExpr (StringLiteral !importSpec) ->
-    -- import from specified path
-    fsChk importSpec $
-      importEdhModule'
-        tgtEnt
-        argsRcvr
-        importSpec
-        (exit . EdhObject)
-  _ -> evalExprSrc srcExpr $ \ !srcVal -> case edhDeCaseClose srcVal of
-    EdhString !importSpec ->
-      -- import from dynamic path
+importInto !fsChk !tgtEnt !reExpObj !argsRcvr srcExpr@(ExprSrc x _) !exit =
+  case x of
+    LitExpr (StringLiteral !importSpec) ->
+      -- import from specified path
       fsChk importSpec $
         importEdhModule'
           tgtEnt
+          reExpObj
           argsRcvr
           importSpec
           (exit . EdhObject)
-    EdhObject !fromObj -> \ !ets -> -- import from an object
-      runEdhTx ets $
-        importFromObject tgtEnt argsRcvr fromObj $
-          exitEdh ets exit $ EdhObject fromObj
-    EdhArgsPack !fromApk -> \ !ets -> -- import from an argument pack
-      runEdhTx ets $
-        importFromApk tgtEnt argsRcvr fromApk $
-          exitEdh ets exit $
-            EdhArgsPack fromApk
-    _ ->
-      -- todo support more sources of import ?
-      throwEdhTx EvalError $
-        "don't know how to import from a "
-          <> edhTypeNameOf srcVal
-          <> ": "
-          <> T.pack (show srcVal)
+    _ -> evalExprSrc srcExpr $ \ !srcVal -> case edhDeCaseClose srcVal of
+      EdhString !importSpec ->
+        -- import from dynamic path
+        fsChk importSpec $
+          importEdhModule'
+            tgtEnt
+            reExpObj
+            argsRcvr
+            importSpec
+            (exit . EdhObject)
+      EdhObject !fromObj -> \ !ets -> -- import from an object
+        runEdhTx ets $
+          importFromObject tgtEnt reExpObj argsRcvr fromObj $
+            exitEdh ets exit $ EdhObject fromObj
+      EdhArgsPack !fromApk -> \ !ets -> -- import from an argument pack
+        runEdhTx ets $
+          importFromApk tgtEnt reExpObj argsRcvr fromApk $
+            exitEdh ets exit $
+              EdhArgsPack fromApk
+      _ ->
+        -- todo support more sources of import ?
+        throwEdhTx EvalError $
+          "don't know how to import from a "
+            <> edhTypeNameOf srcVal
+            <> ": "
+            <> T.pack (show srcVal)
 
-importFromApk :: EntityStore -> ArgsReceiver -> ArgsPack -> STM () -> EdhTx
-importFromApk !tgtEnt !argsRcvr !fromApk !done !ets =
+importFromApk ::
+  EntityStore -> Object -> ArgsReceiver -> ArgsPack -> STM () -> EdhTx
+importFromApk !tgtEnt !reExpObj !argsRcvr !fromApk !done !ets =
   recvEdhArgs ets ctx argsRcvr fromApk $ \ !em -> do
     case edh'ctx'eff'target ctx of
       Nothing -> iopdUpdate (odToList em) tgtEnt -- normal import
-      Just _dsEffs ->
+      Just _esEffs ->
         -- importing effects
         -- note that nil can not appear as for arg receiving,
         -- so no processing of delete semantics
-        iopdUpdate [(attrKeyValue k, v) | (k, v) <- odToList em]
-          =<< prepareMagicDict (AttrByName edhEffectsMagicName) tgtEnt
+        iopdUpdate (odToList em) =<< prepareEffStore ets tgtEnt
     case edh'ctx'exp'target ctx of
       Nothing -> pure ()
-      Just _dsExps ->
-        -- do export what's imported
+      -- re-export what's imported
+      Just _esExps -> prepareExpStore ets reExpObj $ \ !esExps ->
         -- note that nil can not appear as for arg receiving,
         -- so no processing of delete semantics
-        iopdUpdate [(attrKeyValue k, v) | (k, v) <- odToList em]
-          =<< prepareMagicDict (AttrByName edhExportsMagicName) tgtEnt
+        iopdUpdate (odToList em) esExps
     done
   where
     !ctx = edh'context ets
 
-importFromObject :: EntityStore -> ArgsReceiver -> Object -> STM () -> EdhTx
-importFromObject !tgtEnt !argsRcvr !fromObj !done !ets =
+importFromObject ::
+  EntityStore -> Object -> ArgsReceiver -> Object -> STM () -> EdhTx
+importFromObject !tgtEnt !reExpObj !argsRcvr !fromObj !done !ets =
   iopdEmpty >>= \ !arts -> do
     !supers <- readTVar $ edh'obj'supers fromObj
     -- the reversed order ensures that artifacts from a nearer object overwrite
     -- those from farther objects
     sequence_ $ reverse $ collect1 arts <$> fromObj : supers
     !arts' <- iopdSnapshot arts
-    runEdhTx ets $ importFromApk tgtEnt argsRcvr (ArgsPack [] arts') done
+    runEdhTx ets $
+      importFromApk tgtEnt reExpObj argsRcvr (ArgsPack [] arts') done
   where
     moduClass = edh'module'class $ edh'prog'world $ edh'thread'prog ets
 
@@ -2920,25 +2964,27 @@ importFromObject !tgtEnt !argsRcvr !fromObj !done !ets =
         collectExp !esFrom !binder =
           iopdLookup (AttrByName edhExportsMagicName) esFrom >>= \case
             Nothing -> return ()
-            Just (EdhDict (Dict _ !dsExpFrom)) ->
-              iopdToList dsExpFrom
-                >>= \ !expl -> iopdUpdate (transEntries expl []) arts
+            Just wrapperVal@(EdhObject !expWrapper) ->
+              case edh'obj'store expWrapper of
+                HashStore !esExpFrom ->
+                  iopdToList esExpFrom
+                    >>= \ !expl -> iopdUpdate (transEntries expl []) arts
+                _ -> edhValueDesc ets wrapperVal $ \ !badDesc ->
+                  -- note this seems not preventing cps exiting,
+                  -- at least we can get an error thrown
+                  throwEdh ets UsageError $ "bad export wrapper - " <> badDesc
             Just !badExplVal -> edhValueDesc ets badExplVal $ \ !badDesc ->
               -- note this seems not preventing cps exiting,
               -- at least we can get an error thrown
-              throwEdh ets UsageError $ "bad object export list - " <> badDesc
+              throwEdh ets UsageError $ "bad export wrapper - " <> badDesc
           where
             transEntries ::
-              [(EdhValue, EdhValue)] ->
+              [(AttrKey, EdhValue)] ->
               [(AttrKey, EdhValue)] ->
               [(AttrKey, EdhValue)]
             transEntries [] result = reverse result -- maintain order as exp
-            transEntries ((!key, !val) : rest) result = case key of
-              EdhString !expKey ->
-                transEntries rest $ (AttrByName expKey, binder val) : result
-              EdhSymbol !expSym ->
-                transEntries rest $ (AttrBySym expSym, binder val) : result
-              _ -> transEntries rest result -- todo should err out here?
+            transEntries ((!key, !val) : rest) result =
+              transEntries rest $ (key, binder val) : result
 
 -- | Import some Edh module
 --
@@ -2953,18 +2999,19 @@ importEdhModule !importSpec !exit =
 -- and the receiving may be performed either synchronously or asynchronously
 importEdhModule' ::
   EntityStore ->
+  Object ->
   ArgsReceiver ->
   Text ->
   EdhTxExit Object ->
   EdhTx
-importEdhModule' !tgtEnt !argsRcvr !importSpec !exit !ets =
+importEdhModule' !tgtEnt !reExpObj !argsRcvr !importSpec !exit !ets =
   runEdhTx ets $
     importEdhModule''
       importSpec
       -- an exception handler triggered during the import in post load
       -- action may appear executed later than subsequent code of the
       -- import statement, this may be surprising
-      (\ !modu !done -> importFromObject tgtEnt argsRcvr modu done)
+      (\ !modu !done -> importFromObject tgtEnt reExpObj argsRcvr modu done)
       exit
 
 -- | Import some Edh module and perform the `loadAct` after its fully loaded
@@ -3813,23 +3860,18 @@ defineScopeAttr !ets !key !val = when (key /= AttrByName "_") $ do
     Nothing ->
       unless (edh'ctx'pure ctx) $
         edhSetValue key val (edh'scope'entity scope)
-    Just !dsEffs -> implantEffect key val dsEffs
+    Just !esEffs -> edhSetValue key val esEffs
   case edh'ctx'exp'target ctx of
     Nothing -> pure ()
-    Just !dsExps -> edhSetValue (attrKeyValue key) val dsExps
+    Just !esExps -> edhSetValue key val esExps
   where
     !ctx = edh'context ets
     !scope = contextScope ctx
 
 defineEffect :: EdhThreadState -> AttrKey -> EdhValue -> STM ()
 defineEffect !ets !key !val =
-  implantEffect key val
-    =<< prepareMagicDict
-      (AttrByName edhEffectsMagicName)
-      (edh'scope'entity $ contextScope $ edh'context ets)
-
-implantEffect :: AttrKey -> EdhValue -> DictStore -> STM ()
-implantEffect !key !val !dsEffs = edhSetValue (attrKeyValue key) val dsEffs
+  edhSetValue key val
+    =<< prepareEffStore ets (edh'scope'entity $ contextScope $ edh'context ets)
 
 evalExprSrc :: ExprSrc -> EdhTxExit EdhValue -> EdhTx
 evalExprSrc (ExprSrc !expr !ss) !exit !ets =
@@ -4099,25 +4141,18 @@ evalExpr' (IndexExpr !ixExpr !tgtExpr) _docCmt !exit =
                 <> edhTypeNameOf ixVal
                 <> ": "
                 <> T.pack (show ixVal)
-evalExpr' (ExportExpr !exps) !docCmt !exit = \ !ets -> do
-  let expTo !tgtEnt = do
-        !dsExps <- prepareMagicDict (AttrByName edhExportsMagicName) tgtEnt
-        runEdhTx
-          ets
-            { edh'context = (edh'context ets) {edh'ctx'exp'target = Just dsExps}
-            }
-          $ evalExprSrc' exps docCmt $
-            \ !rtn -> edhSwitchState ets $ exitEdhTx exit rtn
-  case edh'obj'store $ edh'scope'this $ contextScope $ edh'context ets of
-    -- always export to current this object's scope, and possibly a
-    -- class object. a method procedure's scope has no way to be
-    -- imported from, only objects (most are module objects) can be
-    -- an import source.
-    HashStore !hs -> expTo hs
-    ClassStore !cls -> expTo $ edh'class'store cls
-    -- unless this is a host object
-    -- todo warn in this case?
-    HostStore {} -> runEdhTx ets $ evalExprSrc' exps docCmt exit
+evalExpr' (ExportExpr !exps) !docCmt !exit = \ !ets ->
+  -- always export to current this object's scope, which is possibly a
+  -- class object. a method procedure's scope has no way to be imported
+  -- from. only objects (usually module or namespace objects) can be
+  -- an import source.
+  prepareExpStore ets (edh'scope'this $ contextScope $ edh'context ets) $
+    \ !esExps ->
+      runEdhTx
+        ets
+          { edh'context = (edh'context ets) {edh'ctx'exp'target = Just esExps}
+          }
+        $ evalExprSrc' exps docCmt $ edhSwitchState ets . exitEdhTx exit
 evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
   do
     let !ctx = edh'context ets
@@ -4132,20 +4167,34 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
     case maybeInto of
       Nothing ->
         runEdhTx ets $
-          importInto fsChk (edh'scope'entity scope) argsRcvr srcExpr exit
+          importInto
+            fsChk
+            (edh'scope'entity scope)
+            (edh'scope'this scope)
+            argsRcvr
+            srcExpr
+            exit
       Just !intoExpr ->
         runEdhTx ets $
           evalExprSrc' intoExpr docCmt $ \ !intoVal ->
             case edhUltimate intoVal of
               EdhObject !intoObj -> case edh'obj'store intoObj of
-                HashStore !hs -> importInto fsChk hs argsRcvr srcExpr exit
+                HashStore !hs ->
+                  importInto fsChk hs intoObj argsRcvr srcExpr exit
                 ClassStore !cls ->
-                  importInto fsChk (edh'class'store cls) argsRcvr srcExpr exit
+                  importInto
+                    fsChk
+                    (edh'class'store cls)
+                    intoObj
+                    argsRcvr
+                    srcExpr
+                    exit
                 HostStore !hsd -> case fromDynamic hsd of
                   Just (intoScope :: Scope) ->
                     importInto
                       fsChk
                       (edh'scope'entity intoScope)
+                      (edh'scope'this intoScope)
                       argsRcvr
                       srcExpr
                       exit
@@ -4174,19 +4223,17 @@ evalExpr' (DefaultExpr !maybeApk exprSrc@(ExprSrc !exprDef _)) _docCmt !exit =
       case maybeApk of
         Nothing -> withApk $ ArgsPack [] odEmpty
         Just (ArgsPacker !argsSndr _) -> packEdhArgs ets argsSndr withApk
-    Just _dsEffs -> do
+    Just _esEffs -> do
       let ctx = edh'context ets
           withKwargs !kwargs = do
-            !dsEffDefs <-
-              prepareMagicDict (AttrByName edhEffectDefaultsMagicName) $
+            !esEffDefs <-
+              prepareEffStore' (AttrByName edhEffectDefaultsMagicName) ets $
                 edh'scope'entity $ contextScope ctx
             -- no nil can come from kwargs of an apk,
             -- so no processing of delete semantics
-            iopdUpdate
-              [(attrKeyValue k, v) | (k, v) <- odToList kwargs]
-              dsEffDefs
+            iopdUpdate (odToList kwargs) esEffDefs
             runEdhTx
-              ets {edh'context = ctx {edh'ctx'eff'target = Just dsEffDefs}}
+              ets {edh'context = ctx {edh'ctx'eff'target = Just esEffDefs}}
               $ evalExprSrc (deExprSrc exprSrc) $
                 const $ edhSwitchState ets $ exitEdhTx exit nil
       case maybeApk of
@@ -4323,45 +4370,16 @@ evalExpr'
             ets
             UsageError
             "you don't pass positional args to a namespace"
-        else resolveEdhAttrAddr ets addr $ \ !name -> do
+        else resolveEdhAttrAddr ets addr $ \ !nsName -> do
+          !nsStore <- iopdFromList $ odToList kwargs
+          !nsObj <- edhCreateNsObj ets docCmt pd nsName nsStore
           let !ctx = edh'context ets
-              !scope = contextScope ctx
-              !rootScope = edh'world'root $ edh'prog'world $ edh'thread'prog ets
-              !nsClsObj = edh'obj'class $ edh'scope'this rootScope
-              !nsClass = case edh'obj'store nsClsObj of
-                ClassStore !cls -> cls
-                _ -> error "bug: namespace class not bearing ClassStore"
-
-          !idNs <- unsafeIOToSTM newUnique
-          !hs <- iopdFromList $ odToList kwargs
-          !ss <- newTVar []
-          let !nsProc =
-                ProcDefi
-                  { edh'procedure'ident = idNs,
-                    edh'procedure'name = name,
-                    edh'procedure'lexi = scope,
-                    edh'procedure'doc = docCmt,
-                    edh'procedure'decl = pd
-                  }
-              !nsObj =
-                Object
-                  idNs
-                  (HashStore hs)
-                  nsClsObj
-                    { edh'obj'store = ClassStore nsClass {edh'class'proc = nsProc}
-                    }
-                  ss
-
-              doExit _rtn _ets = do
-                defineScopeAttr ets name $ EdhObject nsObj
-                exitEdh ets exit $ EdhObject nsObj
-
-          let !nsScope =
+              !nsScope =
                 Scope
-                  { edh'scope'entity = hs,
+                  { edh'scope'entity = nsStore,
                     edh'scope'this = nsObj,
                     edh'scope'that = nsObj,
-                    edh'scope'proc = nsProc,
+                    edh'scope'proc = objClassProc nsObj,
                     edh'effects'stack = []
                   }
               !nsCtx =
@@ -4375,9 +4393,11 @@ evalExpr'
                     edh'ctx'eff'target = Nothing
                   }
               !etsNs = ets {edh'context = nsCtx}
-
           -- calling the Edh ns definition
-          runEdhTx etsNs $ evalStmt body'stmt doExit
+          runEdhTx etsNs $
+            evalStmt body'stmt $ \_rtn _ets -> do
+              defineScopeAttr ets nsName $ EdhObject nsObj
+              exitEdh ets exit $ EdhObject nsObj
 evalExpr' (MethodExpr HostDecl {}) _ _ =
   throwEdhTx EvalError "bug: eval host method decl"
 evalExpr' (MethodExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _)) !docCmt !exit =
@@ -5399,7 +5419,7 @@ resolveEdhPerform' ::
   (Maybe EdhValue -> STM ()) ->
   STM ()
 resolveEdhPerform' !ets !effKey !exit =
-  resolveEffectfulAttr ets (attrKeyValue effKey) edhTargetStackForPerform
+  resolveEffectfulAttr ets effKey edhTargetStackForPerform
     >>= \case
       Just (!effArt, _) -> exit $ Just effArt
       Nothing -> exit Nothing
@@ -5424,7 +5444,7 @@ resolveEdhBehave' ::
   (Maybe EdhValue -> STM ()) ->
   STM ()
 resolveEdhBehave' !ets !effKey !exit =
-  resolveEffectfulAttr ets (attrKeyValue effKey) edhTargetStackForBehave
+  resolveEffectfulAttr ets effKey edhTargetStackForBehave
     >>= \case
       Just (!effArt, _) -> exit $ Just effArt
       Nothing -> exit Nothing
