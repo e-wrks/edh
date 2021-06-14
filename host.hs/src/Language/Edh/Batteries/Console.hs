@@ -226,9 +226,9 @@ conReadCommandProc
       !world = edh'prog'world $ edh'thread'prog ets
       !cio = consoleIO $ edh'world'console world
 
--- | host method console.print(*args, eol= '\n', **kwargs)
-conPrintProc :: RestPosArgs -> "eol" ?: Text -> RestPackArgs -> EdhHostProc
-conPrintProc !args (defaultArg "\n" -> !eol) (ArgsPack _ !kwargs) !exit !ets =
+-- | host method console.print(*args, **kwargs)
+conPrintProc :: RestPosArgs -> RestPackArgs -> EdhHostProc
+conPrintProc !args (ArgsPack _ !kwargs) !exit !ets =
   if edh'in'tx ets
     then
       throwEdh
@@ -241,24 +241,26 @@ conPrintProc !args (defaultArg "\n" -> !eol) (ArgsPack _ !kwargs) !exit !ets =
 
     printVS :: [EdhValue] -> [(AttrKey, EdhValue)] -> IO ()
     printVS [] [] = atomically $ exitEdh ets exit nil
-    printVS [] ((k, v) : rest) = case v of
-      EdhString !s -> do
-        cio $ ConsoleOut $ "  " <> attrKeyStr k <> "= " <> s <> eol
-        printVS [] rest
-      _ -> atomically $
-        edhValueRepr ets v $ \ !s -> runEdhTx ets $
+    printVS [] ((k, v) : rest) = atomically $
+      outStr v $ \ !s ->
+        runEdhTx ets $
           edhContIO $ do
-            cio $ ConsoleOut $ "  " <> attrKeyStr k <> "= " <> s <> eol
+            cio $ ConsoleOut $ "  " <> attrKeyStr k <> "= " <> s <> "\n"
             printVS [] rest
-    printVS (v : rest) !kvs = case v of
-      EdhString !s -> do
-        cio $ ConsoleOut $ s <> eol
-        printVS rest kvs
-      _ -> atomically $
-        edhValueRepr ets v $ \ !s -> runEdhTx ets $
+    printVS (v : rest) !kvs = atomically $
+      outStr v $ \ !s ->
+        runEdhTx ets $
           edhContIO $ do
-            cio $ ConsoleOut $ s <> eol
+            cio $ ConsoleOut $ s <> "\n"
             printVS rest kvs
+
+    outStr :: EdhValue -> (Text -> STM ()) -> STM ()
+    outStr !xv !exitRepr = case xv of
+      EdhExpr _u _src'span !x _src -> runEdhTx ets $
+        evalExpr x $ \ !v _ets -> case v of
+          EdhString !s -> exitRepr s
+          _ -> edhValueRepr ets v exitRepr
+      _ -> error "bug: non-expr passed to interpreter proc"
 
 conNowProc :: EdhHostProc
 conNowProc !exit !ets = do
