@@ -474,10 +474,7 @@ reprProc (ArgsPack !args !kwargs) !exit !ets = go [] [] args (odToList kwargs)
     go [repr] kwReprs [] [] | null kwReprs = exitEdh ets exit repr
     go reprs kwReprs [] [] =
       exitEdh ets exit $
-        EdhArgsPack $
-          ArgsPack (reverse reprs) $
-            odFromList
-              kwReprs
+        EdhArgsPack $ ArgsPack (reverse reprs) $ odFromList kwReprs
     go reprs kwReprs (v : rest) kwps =
       edhValueRepr ets v $ \ !r -> go (EdhString r : reprs) kwReprs rest kwps
     go reprs kwReprs [] ((k, v) : rest) =
@@ -974,7 +971,7 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
             argsRcvr
             iterExpr
             bodyStmt
-            (\ !val -> modifyTVar' l (++ [noneNil val]))
+            (\ !val -> modifyTVar' l (++ [edhNonNil val]))
             ( \_iterVal !runLoop ->
                 runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal
             )
@@ -985,7 +982,7 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
             argsRcvr
             iterExpr
             bodyStmt
-            (\ !val -> insertToDict ets (noneNil val) d)
+            (\ !val -> insertToDict ets (edhNonNil val) d)
             ( \_iterVal !runLoop ->
                 runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal
             )
@@ -1002,7 +999,7 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
                 EdhArgsPack (ArgsPack !args' !kwargs') -> do
                   modifyTVar' posArgs (++ args')
                   iopdUpdate (odToList kwargs') kwArgs
-                _ -> modifyTVar' posArgs (++ [noneNil val])
+                _ -> modifyTVar' posArgs (++ [edhNonNil val])
             )
             $ \_iterVal !runLoop -> runEdhTx ets $
               runLoop $ \_ _ets -> do

@@ -114,7 +114,7 @@ createEdhDict !entries = do
   where
     entryMod (!k, !v) = case v of
       EdhNil -> Nothing
-      _ -> Just (noneNil k, v)
+      _ -> Just (edhNonNil k, v)
 
 -- | setting to `nil` value means deleting the item by the specified key
 setDictItem :: EdhValue -> EdhValue -> DictStore -> STM ()
@@ -1298,9 +1298,9 @@ edhNA =
 --
 -- As `nil` carries *delete* semantic in assignment, in some cases it's better
 -- avoided.
-noneNil :: EdhValue -> EdhValue
-noneNil EdhNil = edhNone
-noneNil !v = v
+edhNonNil :: EdhValue -> EdhValue
+edhNonNil EdhNil = edhNone
+edhNonNil !v = v
 
 nan :: EdhValue
 nan = EdhDecimal D.nan

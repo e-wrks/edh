@@ -417,7 +417,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
       return () -- this avoids triggering stm write
     updAttrs !ps' =
       iopdUpdate
-        [(k, noneNil v) | (k, v) <- ps', k /= AttrByName "_"]
+        [(k, edhNonNil v) | (k, v) <- ps', k /= AttrByName "_"]
         scopeEntity
 
     handlePattern ::
@@ -778,7 +778,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
             _
           ] -> case ctxMatch of
             EdhReturn !rtnVal ->
-              matchExit [(AttrByName valueName, noneNil rtnVal)]
+              matchExit [(AttrByName valueName, edhNonNil rtnVal)]
             _ -> exitEdh ets exit EdhCaseOther
         -- { return <expr> } -- match with expected return value
         [StmtSrc (ReturnStmt !expectExpr _docCmt) _] -> case ctxMatch of
@@ -978,7 +978,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                   Nothing -> arts
                 go ((!srcKey, !tgtKey) : rest) !arts =
                   lookupEdhObjAttr matchedObj srcKey >>= \case
-                    (_, !artVal) -> go rest $ (tgtKey, noneNil artVal) : arts
+                    (_, !artVal) -> go rest $ (tgtKey, edhNonNil artVal) : arts
 
             tryCoerceMatch =
               lookupEdhObjAttr clsObj (AttrByName "__match__") >>= \case

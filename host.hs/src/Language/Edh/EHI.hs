@@ -279,7 +279,7 @@ module Language.Edh.EHI
     edhNone,
     edhNothing,
     edhNA,
-    noneNil,
+    edhNonNil,
     true,
     false,
     nan,

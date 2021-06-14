@@ -1259,7 +1259,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                     pkArgs xs $ \ !posArgs' -> exit (posArgs ++ posArgs')
                   (EdhList (List _ !l)) -> pkArgs xs $ \ !posArgs -> do
                     ll <- readTVar l
-                    exit ((noneNil <$> ll) ++ posArgs)
+                    exit ((edhNonNil <$> ll) ++ posArgs)
                   _ -> edhValueDesc ets val $ \ !badValDesc ->
                     throwEdh ets EvalError $
                       "can not unpack args from a "
@@ -1278,7 +1278,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                           "invalid keyword type: " <> edhTypeNameOf k
                       )
                       $ \ !kw -> do
-                        iopdInsert kw (noneNil $ edhDeCaseWrap v) kwIOPD
+                        iopdInsert kw (edhNonNil $ edhDeCaseWrap v) kwIOPD
                         pkArgs xs exit
                   EdhDict (Dict _ !ds) -> unpackDict ds
                   EdhObject !obj -> case edh'obj'store obj of
@@ -1306,7 +1306,7 @@ packEdhArgs !ets !argSenders !pkExit = do
           SendPosArg !argExpr ->
             runEdhTx etsPacking $
               evalExprSrc argExpr $ \ !val _ets -> pkArgs xs $
-                \ !posArgs -> exit (noneNil (edhDeCaseWrap val) : posArgs)
+                \ !posArgs -> exit (edhNonNil (edhDeCaseWrap val) : posArgs)
           SendKwArg (AttrAddrSrc !kwAddr _) !argExpr ->
             runEdhTx etsPacking $
               evalExprSrc argExpr $ \ !val _ets ->
