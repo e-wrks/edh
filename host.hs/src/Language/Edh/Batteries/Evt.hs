@@ -16,11 +16,11 @@ evtPubProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
     EdhEvs !es -> evalExprSrc rhExpr $
       \ !rhVal ->
         let -- allow special values to be published, e.g. {break}
-            !val2Pub = edhDeCaseClose rhVal
+            !val2Pub = edhDeCaseWrap rhVal
             -- but shield those special values for the result of this op, or it
             -- can be interpreted the same as such a value standalone, which
             -- would implement wrong semantics.
-            !val2Rtn = edhDeCaseWrap val2Pub
+            !val2Rtn = edhDeFlowCtrl val2Pub
          in postEdhEvent es val2Pub $ \() -> exitEdhTx exit val2Rtn
     _ -> exitEdhTx exit edhNA
 

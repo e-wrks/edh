@@ -848,7 +848,7 @@ hasSuffixProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
 prpdProc :: EdhIntrinsicOp
 prpdProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   evalExprSrc rhExpr $ \ !rhVal ->
-    let !lhv = edhDeCaseWrap lhVal
+    let !lhv = edhDeFlowCtrl lhVal
      in case edhUltimate rhVal of
           EdhArgsPack (ArgsPack !vs !kwargs) ->
             exitEdhTx exit (EdhArgsPack $ ArgsPack (lhv : vs) kwargs)

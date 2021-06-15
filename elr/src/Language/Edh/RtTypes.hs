@@ -1254,9 +1254,15 @@ edhDeCaseWrap :: EdhValue -> EdhValue
 edhDeCaseWrap (EdhCaseClose !val) = edhDeCaseWrap val
 edhDeCaseWrap EdhCaseOther = nil
 edhDeCaseWrap EdhFallthrough = nil
-edhDeCaseWrap EdhBreak = nil
-edhDeCaseWrap EdhContinue = nil
 edhDeCaseWrap !val = val
+
+edhDeFlowCtrl :: EdhValue -> EdhValue
+edhDeFlowCtrl (EdhCaseClose !val) = edhDeFlowCtrl val
+edhDeFlowCtrl EdhCaseOther = nil
+edhDeFlowCtrl EdhFallthrough = nil
+edhDeFlowCtrl EdhBreak = nil
+edhDeFlowCtrl EdhContinue = nil
+edhDeFlowCtrl !val = val
 
 edhUltimate :: EdhValue -> EdhValue
 edhUltimate (EdhNamedValue _ !v) = edhUltimate v

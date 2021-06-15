@@ -274,6 +274,7 @@ module Language.Edh.EHI
     edhBoundValue,
     edhDeCaseClose,
     edhDeCaseWrap,
+    edhDeFlowCtrl,
     edhUltimate,
     nil,
     edhNone,

@@ -514,13 +514,13 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
           if null vExprs
             then exitEdh ets exit EdhCaseOther
             else runEdhTx ets $
-              evalExprs vExprs $ \ !matchVals _ets ->
-                case matchVals of
-                  EdhArgsPack (ArgsPack !l _) ->
-                    if ctxMatch `elem` l
-                      then matchExit []
-                      else exitEdh ets exit EdhCaseOther
-                  _ -> error "bug: evalExprs returned non-apk"
+              evalExprs vExprs $ \ !l _ets -> do
+                let anyOf :: [EdhValue] -> STM ()
+                    anyOf [] = exitEdh ets exit EdhCaseOther
+                    anyOf (v : rest) = edhNamelyEqual ets ctxMatch v $ \case
+                      True -> matchExit []
+                      False -> anyOf rest
+                anyOf l
         --
 
         -- { head :> tail } -- uncons pattern

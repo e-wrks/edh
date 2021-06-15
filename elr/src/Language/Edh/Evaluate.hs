@@ -973,7 +973,7 @@ callEdhOperator' !this !that !mth !prede !proc'loc (StmtSrc !body'stmt _) !args 
       runEdhTx etsMth $
         evalStmt body'stmt $ \ !bodyResult ->
           edhSwitchState ets $
-            exitEdhTx exit $ case edhDeCaseWrap bodyResult of
+            exitEdhTx exit $ case edhDeFlowCtrl bodyResult of
               -- explicit return
               EdhReturn !rtnVal -> rtnVal
               -- no explicit return
@@ -1160,7 +1160,7 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
                 Just (ExprSrc !defaultExpr _) ->
                   runEdhTx etsRecv $
                     evalExpr' defaultExpr NoDocCmt $ \ !val _ets ->
-                      exit'' (edhDeCaseWrap val, posArgs', kwArgs'')
+                      exit'' (edhDeFlowCtrl val, posArgs', kwArgs'')
                 _ ->
                   throwEdh etsCaller UsageError $
                     "missing argument: "
@@ -1278,7 +1278,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                           "invalid keyword type: " <> edhTypeNameOf k
                       )
                       $ \ !kw -> do
-                        iopdInsert kw (edhNonNil $ edhDeCaseWrap v) kwIOPD
+                        iopdInsert kw (edhNonNil $ edhDeFlowCtrl v) kwIOPD
                         pkArgs xs exit
                   EdhDict (Dict _ !ds) -> unpackDict ds
                   EdhObject !obj -> case edh'obj'store obj of
@@ -1306,7 +1306,7 @@ packEdhArgs !ets !argSenders !pkExit = do
           SendPosArg !argExpr ->
             runEdhTx etsPacking $
               evalExprSrc argExpr $ \ !val _ets -> pkArgs xs $
-                \ !posArgs -> exit (edhNonNil (edhDeCaseWrap val) : posArgs)
+                \ !posArgs -> exit (edhNonNil (edhDeFlowCtrl val) : posArgs)
           SendKwArg (AttrAddrSrc !kwAddr _) !argExpr ->
             runEdhTx etsPacking $
               evalExprSrc argExpr $ \ !val _ets ->
@@ -1316,7 +1316,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                     -- underscore, the user may just want its side-effect
                     pkArgs xs exit
                   _ -> resolveEdhAttrAddr ets kwAddr $ \ !kwKey -> do
-                    edhSetValue kwKey (edhDeCaseWrap val) kwIOPD
+                    edhSetValue kwKey (edhDeFlowCtrl val) kwIOPD
                     pkArgs xs exit
   pkArgs argSenders $ \ !posArgs -> do
     !kwArgs <- iopdSnapshot kwIOPD
@@ -1654,10 +1654,9 @@ callEdhMethod'
         runEdhTx etsMth $
           evalStmt body'stmt $ \ !bodyResult ->
             edhSwitchState etsCaller $
-              exitEdhTx exit $ case edhDeCaseWrap bodyResult of
-                -- explicit return
-                -- note it can be a wrapped double return, e.g. for generators
-                --      to propagate the return issued from loop-body
+              exitEdhTx exit $ case edhDeFlowCtrl bodyResult of
+                -- explicit return is sacred, the returner is assumed to have
+                -- full responsibility/control over appropriate semantics
                 EdhReturn !rtnVal -> rtnVal
                 -- no explicit return
                 !mthRtn -> mthRtn
@@ -2632,16 +2631,11 @@ evalBlock (ss : rest) !exit = evalStmtSrc ss $ \ !val -> case val of
   -- other vanilla result, continue this block
   _ -> evalBlock rest exit
 
--- | a left-to-right expr list eval'er, returning a tuple
-evalExprs :: [ExprSrc] -> EdhTxExit EdhValue -> EdhTx
--- here 'EdhArgsPack' is used as an intermediate container,
--- no apk intended to be returned anyway
-evalExprs [] !exit = exitEdhTx exit (EdhArgsPack $ ArgsPack [] odEmpty)
-evalExprs (x : xs) !exit = evalExprSrc x $ \ !val -> evalExprs xs $ \ !tv ->
-  case tv of
-    EdhArgsPack (ArgsPack !l _) ->
-      exitEdhTx exit (EdhArgsPack $ ArgsPack (edhDeCaseWrap val : l) odEmpty)
-    _ -> error "bug"
+-- | a left-to-right expr list eval'er
+evalExprs :: [ExprSrc] -> EdhTxExit [EdhValue] -> EdhTx
+evalExprs [] !exit = exitEdhTx exit []
+evalExprs (x : xs) !exit = evalExprSrc x $ \ !val ->
+  evalExprs xs $ exitEdhTx exit . (edhDeFlowCtrl val :)
 
 evalStmt :: Stmt -> EdhTxExit EdhValue -> EdhTx
 evalStmt !stmt !exit = case stmt of
@@ -2676,12 +2670,12 @@ evalStmt !stmt !exit = case stmt of
     -- use a pure ctx to eval the return expr
     runEdhTx ets {edh'context = (edh'context ets) {edh'ctx'pure = True}} $
       evalExprSrc' expr docCmt $
-        \ !v2r ->
-          edhSwitchState ets $
-            -- when a generator procedure checks the result of its `yield` for
-            -- the case of early return issued from the loop body, it needs to
-            -- double-return to cooperate, we must support it here
-            exitEdhTx exit $ EdhReturn $ edhDeCaseWrap v2r
+        -- we are making `return` a sacred ceremony, practical needs include:
+        -- that for a generator procedure to "double return" in cooperating
+        -- with `yield` from loop body's early return; that for a "decorator"
+        -- interpreter procedure to return `break` `continue` etc. for flow
+        -- control prupose.
+        edhSwitchState ets . exitEdhTx exit . EdhReturn . edhDeCaseClose
   GoStmt expr@(ExprSrc !x !src'span) -> case x of
     CaseExpr !tgtExpr !branchesExpr ->
       evalExprSrc tgtExpr $ \ !val !etsForker ->
@@ -3655,6 +3649,9 @@ edhValueRepr !ets !val !exitRepr = case val of
     EQ -> "EQ"
     LT -> "LT"
     GT -> "GT"
+  EdhBreak -> exitRepr "{break}"
+  EdhContinue -> exitRepr "{continue}"
+  EdhFallthrough -> exitRepr "{fallthrough}"
   -- todo specially handle return/default etc. ?
 
   -- repr of other values, fallback to its 'Show' instance
@@ -3958,13 +3955,10 @@ evalExpr' (IfExpr !cond !cseq !alt) _docCmt !exit =
       Just !elseClause -> runEdhTx ets $ evalStmtSrc elseClause exit
       _ -> exitEdh ets exit nil
 evalExpr' (DictExpr !entries) _docCmt !exit = evalDictLit entries [] exit
-evalExpr' (ListExpr !xs) _docCmt !exit = evalExprs xs $ \ !tv !ets ->
-  case tv of
-    EdhArgsPack (ArgsPack !l _) -> do
-      !ll <- newTVar l
-      !u <- unsafeIOToSTM newUnique
-      exitEdh ets exit (EdhList $ List u ll)
-    _ -> error "bug: evalExprs returned non-apk"
+evalExpr' (ListExpr !xs) _docCmt !exit = evalExprs xs $ \ !l !ets -> do
+  !ll <- newTVar l
+  !u <- unsafeIOToSTM newUnique
+  exitEdh ets exit (EdhList $ List u ll)
 evalExpr' (ArgsPackExpr (ArgsPacker !argSenders _)) _docCmt !exit = \ !ets ->
   packEdhArgs ets argSenders $ \ !apk -> exitEdh ets exit $ EdhArgsPack apk
 evalExpr' (ParenExpr !x) !docCmt !exit = \ !ets ->
