@@ -41,16 +41,12 @@ createEdhWorld !console = do
 
   -- the root object and root scope
   !idRoot <- newUnique
-  !hsRoot <-
-    atomically $
-      iopdFromList [(AttrByName "__name__", EdhString "<root>")]
+  !hsRoot <- atomically iopdEmpty
   !ssRoot <- newTVarIO []
 
   -- the sandbox object and sandbox scope
   !idSandbox <- newUnique
-  !hsSandbox <-
-    atomically $
-      iopdFromList [(AttrByName "__name__", EdhString "<sandbox>")]
+  !hsSandbox <- atomically iopdEmpty
   !ssSandbox <- newTVarIO []
   !mroSandbox <- newTVarIO [] -- no super class, and self is not stored
 
