@@ -227,8 +227,8 @@ conReadCommandProc
       !cio = consoleIO $ edh'world'console world
 
 -- | host method console.print(*args, **kwargs)
-conPrintProc :: RestPosArgs -> RestPackArgs -> EdhHostProc
-conPrintProc !args (ArgsPack _ !kwargs) !exit !ets =
+conPrintProc :: RestPosArgs -> RestKwArgs -> EdhHostProc
+conPrintProc !args !kwargs !exit !ets =
   if edh'in'tx ets
     then
       throwEdh
@@ -255,12 +255,9 @@ conPrintProc !args (ArgsPack _ !kwargs) !exit !ets =
             printVS rest kvs
 
     outStr :: EdhValue -> (Text -> STM ()) -> STM ()
-    outStr !xv !exitRepr = case xv of
-      EdhExpr _u _src'span !x _src -> runEdhTx ets $
-        evalExpr x $ \ !v _ets -> case v of
-          EdhString !s -> exitRepr s
-          _ -> edhValueRepr ets v exitRepr
-      _ -> error "bug: non-expr passed to interpreter proc"
+    outStr !v !exitRepr = case v of
+      EdhString !s -> exitRepr s
+      _ -> edhValueRepr ets v exitRepr
 
 conNowProc :: EdhHostProc
 conNowProc !exit !ets = do
