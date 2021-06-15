@@ -22,7 +22,6 @@ import Language.Edh.Evaluate
 import Language.Edh.IOPD
 import Language.Edh.InterOp
 import Language.Edh.RtTypes
-import Language.Edh.Utils
 import Prelude
 
 strStripProc :: Text -> EdhHostProc
@@ -601,86 +600,85 @@ markProc !v !newLen !kwargs !exit !ets = case edhUltimate v of
     throwEdh ets UsageError $
       "mark() not supported by a value of " <> edhTypeNameOf badVal
 
-showProc :: EdhValue -> RestKwArgs -> EdhHostProc
-showProc (EdhArgsPack (ArgsPack [!v] !kwargs')) !kwargs !exit !ets
-  | odNull kwargs = showProc v kwargs' exit ets
-showProc !v !kwargs !exit !ets = case v of
-  -- show of named value
-  EdhNamedValue !n !val -> edhValueRepr ets val $
-    \ !repr -> exitEdh ets exit $ EdhString $ n <> " := " <> repr <> ""
-  -- show of other values
-  _ -> case edhUltimate v of
+showProc :: Expr -> RestKwArgs -> EdhHostProc
+showProc !x !kwargs !exit !ets = runEdhTx ets $
+  evalExpr x $ \ !v _ets -> do
+    let showWithMagic !o = \case
+          (_, EdhNil) -> showWithNoMagic
+          (!this', EdhProcedure (EdhMethod !mth) _) ->
+            runEdhTx ets $ callEdhMethod this' o mth (ArgsPack [] kwargs) id exit
+          (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+            runEdhTx ets $ callEdhMethod this that mth (ArgsPack [] kwargs) id exit
+          (_, !badMagic) ->
+            throwEdh ets UsageError $
+              "bad magic __show__ of "
+                <> edhTypeNameOf badMagic
+                <> " on class "
+                <> objClassName o
+        showWithNoMagic = edhValueStr ets v $ \ !s ->
+          exitEdh ets exit $ EdhString $ edhTypeNameOf v <> ": " <> s
+    case v of
+      -- show of named value
+      EdhNamedValue !n !val -> edhValueRepr ets val $
+        \ !repr -> exitEdh ets exit $ EdhString $ n <> " := " <> repr <> ""
+      -- show of other values
+      _ -> case edhUltimate v of
+        EdhObject !o -> case edh'obj'store o of
+          ClassStore {} ->
+            lookupEdhObjMagic (edh'obj'class o) (AttrByName "__show__")
+              >>= showWithMagic o
+          _ -> lookupEdhObjMagic o (AttrByName "__show__") >>= showWithMagic o
+        EdhProcedure !callable Nothing ->
+          exitEdh ets exit $ EdhString $ T.pack (show callable)
+        EdhProcedure !callable Just {} ->
+          exitEdh ets exit $ EdhString $ "effectful " <> T.pack (show callable)
+        EdhBoundProc !callable _ _ Nothing ->
+          exitEdh ets exit $ EdhString $ "bound " <> T.pack (show callable)
+        EdhBoundProc !callable _ _ Just {} ->
+          exitEdh ets exit $
+            EdhString $
+              "effectful bound "
+                <> T.pack
+                  (show callable)
+        -- todo specialize more informative show for intrinsic types of values
+        _ -> showWithNoMagic
+
+descProc :: Expr -> RestKwArgs -> EdhHostProc
+descProc !x !kwargs !exit !ets = runEdhTx ets $
+  evalExpr x $ \ !v _ets -> case edhUltimate v of
     EdhObject !o -> case edh'obj'store o of
       ClassStore {} ->
-        lookupEdhObjMagic (edh'obj'class o) (AttrByName "__show__")
-          >>= showWithMagic o
-      _ -> lookupEdhObjMagic o (AttrByName "__show__") >>= showWithMagic o
+        lookupEdhObjMagic (edh'obj'class o) (AttrByName "__desc__") >>= \case
+          (_, EdhNil) -> exitEdh ets exit $ EdhString $ classDocString o
+          !magicMth -> descWithMagic o magicMth
+      _ -> lookupEdhObjMagic o (AttrByName "__desc__") >>= descWithMagic o
     EdhProcedure !callable Nothing ->
-      exitEdh ets exit $ EdhString $ T.pack (show callable)
+      exitEdh ets exit $
+        EdhString $
+          "It is a "
+            <> T.pack (show callable)
+            <> docString (callableDoc callable)
     EdhProcedure !callable Just {} ->
-      exitEdh ets exit $ EdhString $ "effectful " <> T.pack (show callable)
+      exitEdh ets exit $
+        EdhString $
+          "It is an effectful "
+            <> T.pack (show callable)
+            <> docString (callableDoc callable)
     EdhBoundProc !callable _ _ Nothing ->
-      exitEdh ets exit $ EdhString $ "bound " <> T.pack (show callable)
+      exitEdh ets exit $
+        EdhString $
+          "It is a bound "
+            <> T.pack (show callable)
+            <> docString (callableDoc callable)
     EdhBoundProc !callable _ _ Just {} ->
       exitEdh ets exit $
         EdhString $
-          "effectful bound "
-            <> T.pack
-              (show callable)
-    -- todo specialize more informative show for intrinsic types of values
-    _ -> showWithNoMagic
-  where
-    showWithMagic !o = \case
-      (_, EdhNil) -> showWithNoMagic
-      (!this', EdhProcedure (EdhMethod !mth) _) ->
-        runEdhTx ets $ callEdhMethod this' o mth (ArgsPack [] kwargs) id exit
-      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-        runEdhTx ets $ callEdhMethod this that mth (ArgsPack [] kwargs) id exit
-      (_, !badMagic) ->
-        throwEdh ets UsageError $
-          "bad magic __show__ of "
-            <> edhTypeNameOf badMagic
-            <> " on class "
-            <> objClassName o
-    showWithNoMagic = edhValueStr ets v $ \ !s ->
-      exitEdh ets exit $ EdhString $ edhTypeNameOf v <> ": " <> s
-
-descProc :: EdhValue -> RestKwArgs -> EdhHostProc
-descProc (EdhArgsPack (ArgsPack [!v] !kwargs')) !kwargs !exit !ets
-  | odNull kwargs = descProc v kwargs' exit ets
-descProc !v !kwargs !exit !ets = case edhUltimate v of
-  EdhObject !o -> case edh'obj'store o of
-    ClassStore {} ->
-      lookupEdhObjMagic (edh'obj'class o) (AttrByName "__desc__") >>= \case
-        (_, EdhNil) -> exitEdh ets exit $ EdhString $ classDocString o
-        !magicMth -> descWithMagic o magicMth
-    _ -> lookupEdhObjMagic o (AttrByName "__desc__") >>= descWithMagic o
-  EdhProcedure !callable Nothing ->
-    exitEdh ets exit $
-      EdhString $
-        "It is a "
-          <> T.pack (show callable)
-          <> docString (callableDoc callable)
-  EdhProcedure !callable Just {} ->
-    exitEdh ets exit $
-      EdhString $
-        "It is an effectful "
-          <> T.pack (show callable)
-          <> docString (callableDoc callable)
-  EdhBoundProc !callable _ _ Nothing ->
-    exitEdh ets exit $
-      EdhString $
-        "It is a bound "
-          <> T.pack (show callable)
-          <> docString (callableDoc callable)
-  EdhBoundProc !callable _ _ Just {} ->
-    exitEdh ets exit $
-      EdhString $
-        "It is an effectful bound "
-          <> T.pack (show callable)
-          <> docString (callableDoc callable)
-  _ ->
-    edhValueDesc ets v $ \ !d -> exitEdh ets exit $ EdhString $ "It is a " <> d
+          "It is an effectful bound "
+            <> T.pack (show callable)
+            <> docString (callableDoc callable)
+    _ ->
+      edhValueDesc ets v $
+        \ !d -> exitEdh ets exit $ EdhString $ "It is a " <> d
   where
     docString :: OptDocCmt -> Text
     -- todo process ReST formatting?
@@ -718,27 +716,10 @@ descProc !v !kwargs !exit !ets = case edhUltimate v of
             <> " on class "
             <> objClassName o
 
--- | utility null(*args,**kwargs) - null tester
-isNullProc :: ArgsPack -> EdhHostProc
-isNullProc (ArgsPack !args !kwargs) !exit !ets =
-  if odNull kwargs
-    then case args of
-      [v] -> edhValueNull ets v $ \ !isNull -> exitEdh ets exit $ EdhBool isNull
-      _ -> seqcontSTM (edhValueNull ets <$> args) $ \ !argsNulls ->
-        exitEdh ets exit $ EdhArgsPack $ ArgsPack (EdhBool <$> argsNulls) odEmpty
-    else seqcontSTM (edhValueNull ets <$> args) $ \ !argsNulls ->
-      seqcontSTM
-        [ \ !exit' ->
-            edhValueNull ets v (\ !isNull -> exit' (k, EdhBool isNull))
-          | (k, v) <- odToList kwargs
-        ]
-        $ \ !kwargsNulls ->
-          exitEdh
-            ets
-            exit
-            ( EdhArgsPack $
-                ArgsPack (EdhBool <$> argsNulls) (odFromList kwargsNulls)
-            )
+-- | utility null(val) - null tester
+isNullProc :: Expr -> EdhHostProc
+isNullProc !x !exit = evalExpr x $ \ !v !ets ->
+  edhValueNull ets v $ exitEdh ets exit . EdhBool
 
 -- | utility compare(v1, v2) - value comparator
 cmpProc :: EdhValue -> EdhValue -> EdhHostProc
@@ -780,6 +761,7 @@ dictProc (ArgsPack !args !kwargs) !exit !ets = do
         | (i, t) <- zip [(0 :: Int) ..] args
       ]
   flip iopdUpdate ds $
+    {- HLINT ignore "Use first" -}
     (<$> odToList kwargs) $ \(key, val) -> (attrKeyValue key, val)
   !u <- unsafeIOToSTM newUnique
   exitEdh ets exit (EdhDict (Dict u ds))
