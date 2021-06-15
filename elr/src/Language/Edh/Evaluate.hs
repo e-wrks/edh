@@ -3652,8 +3652,14 @@ edhValueRepr !ets !val !exitRepr = case val of
   EdhBreak -> exitRepr "{break}"
   EdhContinue -> exitRepr "{continue}"
   EdhFallthrough -> exitRepr "{fallthrough}"
-  -- todo specially handle return/default etc. ?
-
+  EdhReturn !rtn -> edhValueRepr ets rtn $ \ !rtnRepr ->
+    exitRepr $ "{ return " <> rtnRepr <> " }"
+  EdhDefault _ !apk !x _ -> edhValueRepr ets (EdhArgsPack apk) $
+    \ !apkRepr -> case x of
+      ExprWithSrc _ [SrcSeg src] ->
+        exitRepr $ "default " <> apkRepr <> " " <> src
+      -- TODO repr of interpolated expr
+      _ -> exitRepr $ "<default: " <> apkRepr <> " " <> T.pack (show x) <> ">"
   -- repr of other values, fallback to its 'Show' instance
   _ -> exitRepr $ T.pack $ show val
   where
