@@ -3,17 +3,18 @@
 # while an interpreter will import nothing from the meta host module
 import * 'batteries/meta'
 
+
 {##
  # Class `Command` is used to define parametric command objects
  #}
 export data Command ( cmd, ***apk ) {
 
   method __repr__ () case this.apk of {
-    { () } -> str( this.cmd )
+    {()} -> str( this.cmd )
     this.cmd ++ this.apk
   }
 
-  method __call__(*** apk ) constructor( that ) ( this.cmd, ***apk )
+  method __call__( ***apk ) constructor( that ) ( this.cmd, ***apk )
 
 }
 
