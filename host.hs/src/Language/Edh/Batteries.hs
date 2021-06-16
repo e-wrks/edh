@@ -13,10 +13,10 @@ module Language.Edh.Batteries
   )
 where
 
-import Control.Concurrent (forkIOWithUnmask)
+import Control.Concurrent
 import Control.Concurrent.STM
-import Control.Exception (bracket, finally, mask_)
-import Control.Monad (void)
+import Control.Exception
+import Control.Monad
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -36,17 +36,7 @@ import Language.Edh.IOPD
 import Language.Edh.InterOp
 import Language.Edh.RtTypes
 import Language.Edh.Runtime
-import System.Console.Haskeline
-  ( InputT,
-    Settings (..),
-    getInputLine,
-    getPassword,
-    handleInterrupt,
-    outputStr,
-    outputStrLn,
-    runInputT,
-    withInterrupt,
-  )
+import qualified System.Console.Haskeline as Haskeline
 import System.Environment (lookupEnv)
 import System.IO (hFlush, stderr, stdout)
 import Text.Megaparsec (Parsec, runParser, takeRest)
@@ -56,12 +46,12 @@ import Text.Printf (printf)
 import Text.Read (readEither)
 import Prelude
 
-defaultEdhConsoleSettings :: Settings IO
+defaultEdhConsoleSettings :: Haskeline.Settings IO
 defaultEdhConsoleSettings =
-  Settings
-    { complete = \(_left, _right) -> return ("", []),
-      historyFile = Nothing,
-      autoAddHistory = True
+  Haskeline.Settings
+    { Haskeline.complete = \(_left, _right) -> return ("", []),
+      Haskeline.historyFile = Nothing,
+      Haskeline.autoAddHistory = True
     }
 
 -- | This console serializes all out messages to 'stdout', all log messages
@@ -74,7 +64,7 @@ defaultEdhConsoleSettings =
 --  *) still can mess up with others writing directly to 'stdout/stderr'
 --  *) if all others use 'trace' only, there're minimum messups but emojis
 --     seem to be break points
-defaultEdhConsole :: Settings IO -> IO EdhConsole
+defaultEdhConsole :: Haskeline.Settings IO -> IO EdhConsole
 defaultEdhConsole !inputSettings = do
   !envLogLevel <- lookupEnv "EDH_LOG_LEVEL"
   !outputTk <- newTMVarIO ()
@@ -134,7 +124,7 @@ defaultEdhConsole !inputSettings = do
                 _ | level >= 20 -> "\x2139\xFE0F  " -- ℹ️
                 _ | level >= 10 -> "🐞 "
                 _ -> "😥 "
-      ioLoop :: InputT IO ()
+      ioLoop :: Haskeline.InputT IO ()
       ioLoop = do
         !ior <-
           liftIO $
@@ -175,15 +165,19 @@ defaultEdhConsole !inputSettings = do
                 liftIO $ atomically $ putTMVar cmdIn cmd
                 ioLoop
         where
-          readInput :: Text -> Text -> [Text] -> InputT IO (Maybe EdhInput)
+          readInput ::
+            Text -> Text -> [Text] -> Haskeline.InputT IO (Maybe EdhInput)
           readInput !ps1 !ps2 !initialLines =
-            handleInterrupt
-              ( -- start over on Ctrl^C
-                outputStrLn "" >> readLines []
-              )
-              $ withInterrupt $
-                readLines initialLines
+            Haskeline.catch (readLines initialLines) onExcReading
             where
+              onExcReading ::
+                SomeException -> Haskeline.InputT IO (Maybe EdhInput)
+              onExcReading ex = do
+                case fromException ex of
+                  Just UserInterrupt -> Haskeline.outputStrLn ""
+                  _ -> Haskeline.outputStrLn $ "Unexpected error: " <> show ex
+                -- start over on Ctrl^C, Ctrl^\, and etc.
+                Haskeline.catch (readLines []) onExcReading
               parsePasteSpec :: Parsec Void Text (Int, Int, Text)
               parsePasteSpec = do
                 space
@@ -193,7 +187,7 @@ defaultEdhConsole !inputSettings = do
                 space
                 !srcName <- takeRest
                 return (lineCnt, lineNo, srcName)
-              recvPaste :: Text -> InputT IO (Maybe EdhInput)
+              recvPaste :: Text -> Haskeline.InputT IO (Maybe EdhInput)
               recvPaste !pasteSpec =
                 case runParser parsePasteSpec "%%paste" pasteSpec of
                   Right (lineCnt, lineNo, srcName)
@@ -209,7 +203,7 @@ defaultEdhConsole !inputSettings = do
                                   edh'input'src'lines = lines_
                                 }
                   _ ->
-                    getInputLine
+                    Haskeline.getInputLine
                       "Invalid %%paste spec\nKey in a valid one or Ctrl^C to cancel: "
                       >>= \case
                         Nothing -> return Nothing
@@ -217,17 +211,17 @@ defaultEdhConsole !inputSettings = do
                           case T.stripPrefix "%%paste" (T.pack text) of
                             Nothing -> recvPaste ""
                             Just !pasteSpec' -> recvPaste pasteSpec'
-              recvLines :: Int -> [Text] -> InputT IO (Maybe [Text])
+              recvLines :: Int -> [Text] -> Haskeline.InputT IO (Maybe [Text])
               recvLines 0 !lines_ = return $ Just $ reverse lines_
               recvLines !n !lines_ =
-                getPassword Nothing "" >>= \case
+                Haskeline.getPassword Nothing "" >>= \case
                   Nothing -> return Nothing
                   Just !line -> do
-                    outputStr "\ESC[1A"
+                    Haskeline.outputStr "\ESC[1A"
                     recvLines (n - 1) (T.pack line : lines_)
-              readLines :: [Text] -> InputT IO (Maybe EdhInput)
+              readLines :: [Text] -> Haskeline.InputT IO (Maybe EdhInput)
               readLines !pendingLines =
-                liftIO flushLogs >> getInputLine prompt >>= \case
+                liftIO flushLogs >> Haskeline.getInputLine prompt >>= \case
                   Nothing -> case pendingLines of
                     [] -> return Nothing
                     _ ->
@@ -272,7 +266,10 @@ defaultEdhConsole !inputSettings = do
                   prompt :: String
                   prompt = case pendingLines of
                     [] -> T.unpack ps1
-                    _ -> T.unpack ps2 <> printf "%2d" (length pendingLines) <> ": "
+                    _ ->
+                      T.unpack ps2
+                        <> printf "%2d" (length pendingLines)
+                        <> ": "
   void $
     mask_ $
       forkIOWithUnmask $ \unmask ->
@@ -284,10 +281,13 @@ defaultEdhConsole !inputSettings = do
   return
     EdhConsole
       { consoleIO = atomically . writeTQueue ioQ,
-        consoleIOLoop = flip finally flushLogs $ runInputT inputSettings ioLoop,
+        consoleIOLoop =
+          flip finally flushLogs $
+            Haskeline.runInputT inputSettings ioLoop,
         consoleLogLevel = logLevel,
         consoleLogger = logger,
-        consoleFlush = atomically $ void (readTMVar outIdle >> readTMVar logIdle)
+        consoleFlush =
+          atomically $ void (readTMVar outIdle >> readTMVar logIdle)
       }
 
 installEdhBatteries :: EdhWorld -> IO ()
@@ -581,7 +581,9 @@ installEdhBatteries world =
                   (EdhMethod, "__List_copy__", wrapHostProc listCopyProc)
                 ]
           ]
-            ++ [(AttrByName "Vector",) . EdhObject <$> createVectorClass rootScope]
+            ++ [ (AttrByName "Vector",) . EdhObject
+                   <$> createVectorClass rootScope
+               ]
 
       !console <-
         edhCreateNsObj ets NoDocCmt phantomHostProc (AttrByName "console")

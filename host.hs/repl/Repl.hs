@@ -34,7 +34,7 @@ edhProgLoop !moduSpec !console = do
             consoleOut "🐴🐴🐯🐯\n"
             doneRightOrRebirth
           Right !phv -> case edhUltimate phv of
-            EdhNil ->  do
+            EdhNil -> do
               -- clean program halt, all done
               consoleOut "Well done, bye.\n"
               consoleShutdown
@@ -52,5 +52,5 @@ edhProgLoop !moduSpec !console = do
               doneRightOrRebirth
   doneRightOrRebirth
   where
-    !consoleOut =   (consoleIO console) . ConsoleOut
-    !consoleShutdown =   (consoleIO console) ConsoleShutdown
+    !consoleOut = consoleIO console . ConsoleOut
+    !consoleShutdown = consoleIO console ConsoleShutdown

@@ -143,6 +143,7 @@ executable edh
     , elr
     , filepath
     , ghc                   >=8.6.5
+    , ghci
     , hashable
     , haskeline
     , lossless-decimal

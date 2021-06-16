@@ -2,24 +2,23 @@ module Main where
 
 -- import           Debug.Trace
 
-import Control.Concurrent (forkFinally)
-import Control.Exception (SomeException)
+import Control.Concurrent
+import Control.Exception
 import Control.Monad (void)
 import qualified Data.Text as T
+import GHCi.Signals
 import Language.Edh.EHI
-  ( EdhConsole (consoleIO, consoleIOLoop),
-    EdhConsoleIO (ConsoleOut, ConsoleShutdown),
-    defaultEdhConsole,
-    defaultEdhConsoleSettings,
-  )
-import Repl (edhProgLoop)
+import Repl
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
 import Prelude
 
 main :: IO ()
-main =
+main = do
+  -- don't crash on double Ctrl^C or Ctrl^\, mimic what GHCi is doing
+  installSignalHandlers
+  -- run the specified module, assuming `repl` semantics
   getArgs >>= \case
     [] -> runModu "repl"
     [edhModu] -> runModu edhModu
@@ -28,7 +27,7 @@ main =
     runModu :: FilePath -> IO ()
     runModu !moduSpec = do
       !console <- defaultEdhConsole defaultEdhConsoleSettings
-      let !consoleOut =  (consoleIO console) . ConsoleOut
+      let !consoleOut = consoleIO console . ConsoleOut
 
       void $
         forkFinally (edhProgLoop moduSpec console) $ \ !result -> do
