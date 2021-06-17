@@ -51,9 +51,7 @@ getEdhErrCtx !unwind !ets =
   T.unlines $
     reverse $
       prettyFrame
-        <$> unwindStack
-          unwind
-          (edh'ctx'tip ctx : edh'ctx'stack ctx)
+        <$> unwindStack unwind (edh'ctx'tip ctx : edh'ctx'stack ctx)
   where
     !ctx = edh'context ets
 
@@ -2163,10 +2161,10 @@ throwEdh !ets !tag !msg = throwEdh' ets tag msg []
 -- of subsequent actions following it, be cautious.
 throwEdh' ::
   EdhThreadState -> EdhErrorTag -> Text -> [(AttrKey, EdhValue)] -> STM a
-throwEdh' !ets !tag !msg !details =
+throwEdh' !ets !tag !msg !details = do
   let !edhErr = EdhError tag msg errDetails $ getEdhErrCtx 0 ets
-   in edhWrapException (toException edhErr)
-        >>= \ !exo -> edhThrow ets $ EdhObject exo
+  edhWrapException (Just ets) (toException edhErr)
+    >>= \ !exo -> edhThrow ets $ EdhObject exo
   where
     !edhWrapException =
       edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
@@ -2373,7 +2371,7 @@ evalEdh' !srcName !lineNo !srcCode !exit !ets =
       let !msg = T.pack $ errorBundlePretty err
           !edhWrapException = edh'exception'wrapper world
           !edhErr = EdhError ParseError msg (toDyn nil) $ getEdhErrCtx 0 ets
-      edhWrapException (toException edhErr)
+      edhWrapException (Just ets) (toException edhErr)
         >>= \ !exo -> edhThrow ets (EdhObject exo)
     Right (!stmts, _docCmt) -> runEdhTx etsEval $ evalBlock stmts exit
   where
@@ -2774,7 +2772,9 @@ evalStmt !stmt !exit = case stmt of
                 Nothing -> pure () -- non-lingering, nothing to do
                 Just {} ->
                   -- a lingering sink, trigger an immediate nil perceiving
-                  runEdhTx ets $ edhContIO' $ drivePerceiver nil ets reactor
+                  runEdhTx ets $
+                    edhContIO' $
+                      drivePerceiver nil ets reactor id
               Just (!perceiverChan, !lingerVal) -> do
                 modifyTVar'
                   (edh'perceivers ets)
@@ -2783,7 +2783,9 @@ evalStmt !stmt !exit = case stmt of
                   Nothing -> pure ()
                   Just !mrv ->
                     -- mrv lingering, trigger an immediate perceiving
-                    runEdhTx ets $ edhContIO' $ drivePerceiver mrv ets reactor
+                    runEdhTx ets $
+                      edhContIO' $
+                        drivePerceiver mrv ets reactor id
             exitEdh ets exit nil
       _ ->
         throwEdh ets EvalError $
@@ -6007,7 +6009,7 @@ driveEdhProgram !haltResult !world !prog = do
       throwIO $
         EdhError
           UsageError
-          "Edh program should not run with async exceptions masked"
+          "You don't run an Edh program with async exceptions masked"
           (toDyn nil)
           "<edh>"
 
@@ -6042,14 +6044,14 @@ driveEdhProgram !haltResult !world !prog = do
               atomically $
                 writeTBQueue (edh'task'queue etsForkee) $
                   EdhDoSTM etsForkee $ False <$ actForkee etsForkee
-              !forkeeThId <- mask_ $
+              !forkeeThId <- uninterruptibleMask_ $
                 forkIOWithUnmask $ \ !unmask ->
                   catch
-                    ( unmask $
-                        driveEdhThread
-                          eps
-                          (edh'defers etsForkee)
-                          (edh'task'queue etsForkee)
+                    ( driveEdhThread
+                        eps
+                        (edh'defers etsForkee)
+                        (edh'task'queue etsForkee)
+                        unmask
                     )
                     onSideThreadExc
               readIORef trapReq >>= \ !trapNo ->
@@ -6137,18 +6139,21 @@ driveEdhProgram !haltResult !world !prog = do
         -- bootstrap the program on main Edh thread
         atomically $
           writeTBQueue mainQueue $
-            EdhDoSTM etsAtBoot $
-              False
-                <$ prog etsAtBoot
+            EdhDoSTM etsAtBoot $ False <$ prog etsAtBoot
         -- drive the main Edh thread
-        driveEdhThread eps defers mainQueue
+        uninterruptibleMask $ driveEdhThread eps defers mainQueue
   where
     !trapReq = edh'trap'request world
     !console = edh'world'console world
     !logger = consoleLogger console
 
-drivePerceiver :: EdhValue -> EdhThreadState -> (TVar Bool -> EdhTx) -> IO Bool
-drivePerceiver !ev !etsOrigin !reaction = do
+drivePerceiver ::
+  EdhValue ->
+  EdhThreadState ->
+  (TVar Bool -> EdhTx) ->
+  (forall a. IO a -> IO a) ->
+  IO Bool
+drivePerceiver !ev !etsOrigin !reaction !unmask = do
   !breakThread <- newTVarIO False
   !reactPerceivers <- newTVarIO []
   !reactDefers <- newTVarIO []
@@ -6173,11 +6178,16 @@ drivePerceiver !ev !etsOrigin !reaction = do
   atomically $
     writeTBQueue reactTaskQueue $
       EdhDoSTM etsPerceiver $ False <$ reaction breakThread etsPerceiver
-  driveEdhThread (edh'thread'prog etsOrigin) reactDefers reactTaskQueue
+  driveEdhThread (edh'thread'prog etsOrigin) reactDefers reactTaskQueue unmask
   readTVarIO breakThread
 
-driveEdhThread :: EdhProgState -> TVar [DeferRecord] -> TBQueue EdhTask -> IO ()
-driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
+driveEdhThread ::
+  EdhProgState ->
+  TVar [DeferRecord] ->
+  TBQueue EdhTask ->
+  (forall a. IO a -> IO a) ->
+  IO ()
+driveEdhThread !eps !defers !tq !unmask = readIORef trapReq >>= taskLoop
   where
     !mainThId = edh'prog'main eps
     !world = edh'prog'world eps
@@ -6193,7 +6203,7 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
     drivePerceivers :: [(EdhValue, PerceiveRecord)] -> IO Bool
     drivePerceivers [] = return False
     drivePerceivers ((!ev, PerceiveRecord _ !etsOrigin !reaction) : rest) =
-      drivePerceiver ev etsOrigin reaction >>= \case
+      drivePerceiver ev etsOrigin reaction unmask >>= \case
         True -> return True
         False -> drivePerceivers rest
 
@@ -6217,14 +6227,15 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
                             edh'perceivers = deferPerceivers,
                             edh'defers = deferDefers
                           }
-              try (driveEdhThread eps deferDefers deferTaskQueue) >>= \case
-                Left (err :: SomeException) -> do
-                  -- schedule it to be re-thrown after all defers executed
-                  -- todo this overwrites previous ones if multiple errors occurred,
-                  -- is it okay?
-                  writeIORef doneVar (throwIO err)
-                  driveDefers done restDefers
-                Right {} -> driveDefers done restDefers
+              try (driveEdhThread eps deferDefers deferTaskQueue unmask)
+                >>= \case
+                  Left (err :: SomeException) -> do
+                    -- schedule it to be re-thrown after all defers executed
+                    -- todo this overwrites previous ones if multiple errors
+                    -- occurred, is it okay?
+                    writeIORef doneVar (throwIO err)
+                    driveDefers done restDefers
+                  Right {} -> driveDefers done restDefers
         go records
 
     terminateThread :: IO () -> IO ()
@@ -6252,22 +6263,20 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
                         Just ThreadTerminate -> driveOut
                         -- uncaught error on cleanup, schedule it to be finally
                         -- propagated to main thread
-                        -- todo this overwrites previous errors when multiple occurred,
-                        -- is it okay?
+                        -- todo this overwrites previous errors when multiple
+                        -- occurred, is it okay?
                         Just !err -> do
                           writeIORef doneVar (throwIO err)
                           driveOut
 
-                        -- give a chance for the Edh code to handle an unknown exception
+                        -- give a chance for the Edh code to handle an unknown
+                        -- exception
                         Nothing -> do
                           atomically $
-                            edhWrapException e >>= \ !exo ->
+                            edhWrapException (Just ets) e >>= \ !exo ->
                               writeTBQueue tqTerm $
                                 EdhDoSTM ets $
-                                  False
-                                    <$ edhThrow
-                                      ets
-                                      (EdhObject exo)
+                                  False <$ edhThrow ets (EdhObject exo)
                           -- continue running rest cleanup txs
                           driveOut
               Just (EdhDoSTM !etsOrig !actSTM) ->
@@ -6291,7 +6300,7 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
                         -- give a chance for the Edh code to handle an unknown exception
                         Nothing -> do
                           atomically $
-                            edhWrapException e >>= \ !exo ->
+                            edhWrapException (Just ets) e >>= \ !exo ->
                               writeTBQueue tqTerm $
                                 EdhDoSTM ets $
                                   False
@@ -6301,7 +6310,7 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
                           -- continue running rest cleanup txs
                           driveOut
 
-      atomically (edhWrapException $ toException ThreadTerminate)
+      atomically (edhWrapException Nothing $ toException ThreadTerminate)
         >>= \ !termExObj ->
           let !termExVal = EdhObject termExObj
               throwIn :: IO ()
@@ -6340,12 +6349,12 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
           Nothing -> terminateThread (return ())
           -- note during actIO, perceivers won't fire, program termination
           -- won't stop this thread
-          Just (EdhDoIO !etsOrig !actIO) ->
+          Just (EdhDoIO !etsOrig !actIO) -> do
             let !ets = etsOrig {edh'task'queue = tq}
-             in try actIO >>= doneOne ets
-          Just (EdhDoSTM !etsOrig !actSTM) ->
+            unmask (try actIO) >>= doneOne ets
+          Just (EdhDoSTM !etsOrig !actSTM) -> do
             let !ets = etsOrig {edh'task'queue = tq}
-             in try (goSTM ets actSTM) >>= doneOne ets
+            unmask (try $ goSTM ets actSTM) >>= doneOne ets
           where
             doneOne !etsDone !result = do
               unless (trapStartNS == 0) $ do
@@ -6407,7 +6416,7 @@ driveEdhThread !eps !defers !tq = readIORef trapReq >>= taskLoop
                   -- exception
                   Nothing -> do
                     atomically $
-                      edhWrapException e
+                      edhWrapException (Just etsDone) e
                         >>= \ !exo ->
                           writeTBQueue tq $
                             EdhDoSTM etsDone $

@@ -591,7 +591,8 @@ data EdhWorld = EdhWorld
     -- wrapping a scope as object for reflective purpose
     edh'scope'wrapper :: !(Scope -> STM Object),
     -- wrapping a host exceptin as an Edh object
-    edh'exception'wrapper :: !(SomeException -> STM Object),
+    edh'exception'wrapper ::
+      !(Maybe EdhThreadState -> SomeException -> STM Object),
     -- the class of module objects
     edh'module'class :: !Object,
     -- the number of times a metric trap is requested

@@ -237,9 +237,6 @@ createEdhWorld !console = do
   !clsThreadTerminate <-
     atomically $
       mkHostClass' rootScope "ThreadTerminate" thTermAllocator hsErrCls []
-  !clsUserCancel <-
-    atomically $
-      mkHostClass' rootScope "UserCancel" usrCancelAllocator hsErrCls []
   !clsIOError <-
     atomically $
       mkHostClass' rootScope "IOError" ioErrAllocator hsErrCls []
@@ -271,9 +268,12 @@ createEdhWorld !console = do
   !clsUsageError <-
     atomically $
       mkHostClass' rootScope "UsageError" (errAllocator UsageError) hsErrCls []
+  !clsUserCancel <-
+    atomically $
+      mkHostClass' rootScope "UserCancel" (errAllocator UserCancel) hsErrCls []
 
-  let edhWrapException :: SomeException -> STM Object
-      edhWrapException !exc = do
+  let edhWrapException :: Maybe EdhThreadState -> SomeException -> STM Object
+      edhWrapException !etsMaybe !exc = do
         !uidErr <- unsafeIOToSTM newUnique
         !supersErr <- newTVar []
         case edhKnownError exc of
@@ -281,7 +281,6 @@ createEdhWorld !console = do
             let !clsErr = case err of
                   ProgramHalt {} -> clsProgramHalt
                   ThreadTerminate -> clsThreadTerminate
-                  UserCancel -> clsUserCancel
                   EdhIOError {} -> clsIOError
                   EdhPeerError {} -> clsPeerError
                   EdhError !et _ _ _ -> case et of
@@ -290,19 +289,32 @@ createEdhWorld !console = do
                     ParseError -> clsParseError
                     EvalError -> clsEvalError
                     UsageError -> clsUsageError
+                    UserCancel -> clsUserCancel
             return $
               Object
                 uidErr
                 (HostStore $ toDyn $ toException err)
                 clsErr
                 supersErr
-          Nothing ->
-            return $
-              Object
-                uidErr
-                (HostStore $ toDyn $ toException $ EdhIOError exc)
-                clsIOError
-                supersErr
+          Nothing -> case fromException exc of
+            Just UserInterrupt -> do
+              let !err = EdhError UserCancel "Ctrl^C pressed" (toDyn nil) $
+                    case etsMaybe of
+                      Just !ets -> getEdhErrCtx 0 ets
+                      Nothing -> "<RTS>"
+              return $
+                Object
+                  uidErr
+                  (HostStore $ toDyn $ toException err)
+                  clsUserCancel
+                  supersErr
+            _ ->
+              return $
+                Object
+                  uidErr
+                  (HostStore $ toDyn $ toException $ EdhIOError exc)
+                  clsIOError
+                  supersErr
 
   atomically $
     iopdUpdate
@@ -310,14 +322,14 @@ createEdhWorld !console = do
         | clsObj <-
             [ clsProgramHalt,
               clsThreadTerminate,
-              clsUserCancel,
               clsIOError,
               clsPeerError,
               clsException,
               clsPackageError,
               clsParseError,
               clsEvalError,
-              clsUsageError
+              clsUsageError,
+              clsUserCancel
             ]
       ]
       hsRoot
@@ -634,10 +646,6 @@ createEdhWorld !console = do
     thTermAllocator _ !exit _ =
       exit Nothing $ HostStore $ toDyn $ toException ThreadTerminate
 
-    -- this is called in case a UserCancel is constructed by Edh code
-    usrCancelAllocator _ !exit _ =
-      exit Nothing $ HostStore $ toDyn $ toException UserCancel
-
     -- creating an IOError from Edh code
     ioErrAllocator apk@(ArgsPack !args !kwargs) !exit !ets = case args of
       [EdhString !m] | odNull kwargs -> createErr $ T.unpack m
@@ -681,8 +689,6 @@ createEdhWorld !console = do
             Nothing -> exitEdh ets exit $ EdhString $ errClsName <> "()"
           Just ThreadTerminate ->
             exitEdh ets exit $ EdhString "ThreadTerminate()"
-          Just UserCancel ->
-            exitEdh ets exit $ EdhString "UserCancel()"
           Just (EdhIOError !exc') ->
             exitEdh ets exit $
               EdhString $
@@ -919,7 +925,7 @@ declareEdhOperators !world !declLoc !opps = do
 
 haltEdhProgram :: EdhThreadState -> EdhValue -> STM ()
 haltEdhProgram !ets !hv =
-  edhWrapException (toException $ ProgramHalt $ toDyn hv)
+  edhWrapException (Just ets) (toException $ ProgramHalt $ toDyn hv)
     >>= \ !exo -> edhThrow ets $ EdhObject exo
   where
     !edhWrapException =
@@ -927,7 +933,7 @@ haltEdhProgram !ets !hv =
 
 terminateEdhThread :: EdhThreadState -> STM ()
 terminateEdhThread !ets =
-  edhWrapException (toException ThreadTerminate)
+  edhWrapException (Just ets) (toException ThreadTerminate)
     >>= \ !exo -> edhThrow ets $ EdhObject exo
   where
     !edhWrapException =

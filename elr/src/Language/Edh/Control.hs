@@ -230,9 +230,6 @@ data EdhError
     --
     -- caveat: never make this available to a sandboxed environment
     ThreadTerminate
-  | -- | user cancel by interrupting, usually by pressing Ctrl^C, but can also
-    -- be thrown explicitly from normal Edh code
-    UserCancel
   | -- | arbitrary realworld error happened in IO, propagated into the Edh
     -- world
     EdhIOError !SomeException
@@ -256,7 +253,6 @@ instance Exception EdhError
 instance Show EdhError where
   show (ProgramHalt _) = "Edh⏹️Halt"
   show ThreadTerminate = "Edh❎Terminate"
-  show UserCancel = "UserCancel"
   show (EdhIOError !ioe) = show ioe
   show (EdhPeerError !peerSite !details) =
     T.unpack $ "🏗️ traceback: " <> peerSite <> "\n" <> details
@@ -270,6 +266,8 @@ instance Show EdhError where
     T.unpack $ "💔 traceback\n" <> ctx <> "💣 " <> msg
   show (EdhError UsageError !msg _details !ctx) =
     T.unpack $ "💔 traceback\n" <> ctx <> "🙈 " <> msg
+  show (EdhError UserCancel !msg _details !ctx) =
+    T.unpack $ "💔 traceback\n" <> ctx <> "🛑 " <> msg
 
 data EdhErrorTag
   = EdhException -- for root class of custom Edh exceptions
@@ -277,6 +275,7 @@ data EdhErrorTag
   | ParseError
   | EvalError
   | UsageError
+  | UserCancel
   deriving (Eq, Show)
 
 edhKnownError :: SomeException -> Maybe EdhError
@@ -290,6 +289,4 @@ edhKnownError exc = case fromException exc of
           (T.pack $ errorBundlePretty err)
           (toDyn ())
           "<parsing>"
-    Nothing -> case fromException exc of
-      Just UserInterrupt -> Just UserCancel
-      _ -> Nothing
+    Nothing -> Nothing

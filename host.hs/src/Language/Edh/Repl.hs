@@ -52,7 +52,7 @@ edhRepl !consoleSettings !worldInit !moduSpec = do
           -- propagated to here, the repl was not blocked by console read,
           -- let's send cancellation to the repl thread, whatever it's doing
           deRefWeak replTh >>= \case
-            Just !thRepl -> throwTo thRepl UserCancel
+            Just !thRepl -> throwTo thRepl UserInterrupt
             Nothing -> pure () -- the console IO loop should "finally"
             -- shutdown once the repl thread terminates, do nothing here
           keepIO

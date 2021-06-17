@@ -74,6 +74,7 @@ errorProc :: ArgsPack -> EdhHostProc
 errorProc !apk _ !ets =
   edh'exception'wrapper
     (edh'prog'world $ edh'thread'prog ets)
+    (Just ets)
     (toException edhErr)
     >>= \ !exo -> edhThrow ets $ EdhObject exo
   where
