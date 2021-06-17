@@ -6352,10 +6352,10 @@ driveEdhThread !eps !defers !tq !unmask = readIORef trapReq >>= taskLoop
           -- won't stop this thread
           Just (EdhDoIO !etsOrig !actIO) -> do
             let !ets = etsOrig {edh'task'queue = tq}
-            unmask (try actIO) >>= doneOne ets
+            try (unmask actIO) >>= doneOne ets
           Just (EdhDoSTM !etsOrig !actSTM) -> do
             let !ets = etsOrig {edh'task'queue = tq}
-            unmask (try $ goSTM ets actSTM) >>= doneOne ets
+            try (unmask $ goSTM ets actSTM) >>= doneOne ets
           where
             doneOne !etsDone !result = do
               unless (trapStartNS == 0) $ do
