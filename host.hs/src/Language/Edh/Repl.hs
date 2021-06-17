@@ -58,7 +58,7 @@ edhRepl !consoleSettings !worldInit !moduSpec = do
           keepIO
         ThreadKilled ->
           -- usual quit in responding to double Ctrl^C
-          hPutStrLn stderr "Quit by double Ctrl^C\n"
+          hPutStrLn stderr "Unclean quit as you double-pressed Ctrl^C, sorry.\n"
         ex -> throwIO ex
   keepIO
 
