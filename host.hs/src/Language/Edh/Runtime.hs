@@ -237,6 +237,9 @@ createEdhWorld !console = do
   !clsThreadTerminate <-
     atomically $
       mkHostClass' rootScope "ThreadTerminate" thTermAllocator hsErrCls []
+  !clsUserCancel <-
+    atomically $
+      mkHostClass' rootScope "UserCancel" usrCancelAllocator hsErrCls []
   !clsIOError <-
     atomically $
       mkHostClass' rootScope "IOError" ioErrAllocator hsErrCls []
@@ -278,6 +281,7 @@ createEdhWorld !console = do
             let !clsErr = case err of
                   ProgramHalt {} -> clsProgramHalt
                   ThreadTerminate -> clsThreadTerminate
+                  UserCancel -> clsUserCancel
                   EdhIOError {} -> clsIOError
                   EdhPeerError {} -> clsPeerError
                   EdhError !et _ _ _ -> case et of
@@ -306,6 +310,7 @@ createEdhWorld !console = do
         | clsObj <-
             [ clsProgramHalt,
               clsThreadTerminate,
+              clsUserCancel,
               clsIOError,
               clsPeerError,
               clsException,
@@ -630,6 +635,10 @@ createEdhWorld !console = do
     thTermAllocator _ !exit _ =
       exit Nothing $ HostStore $ toDyn $ toException ThreadTerminate
 
+    -- this is called in case a UserCancel is constructed by Edh code
+    usrCancelAllocator _ !exit _ =
+      exit Nothing $ HostStore $ toDyn $ toException UserCancel
+
     -- creating an IOError from Edh code
     ioErrAllocator apk@(ArgsPack !args !kwargs) !exit !ets = case args of
       [EdhString !m] | odNull kwargs -> createErr $ T.unpack m
@@ -673,6 +682,8 @@ createEdhWorld !console = do
             Nothing -> exitEdh ets exit $ EdhString $ errClsName <> "()"
           Just ThreadTerminate ->
             exitEdh ets exit $ EdhString "ThreadTerminate()"
+          Just UserCancel ->
+            exitEdh ets exit $ EdhString "UserCancel()"
           Just (EdhIOError !exc') ->
             exitEdh ets exit $
               EdhString $

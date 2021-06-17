@@ -4,7 +4,7 @@ module Main where
 
 import Control.Concurrent
 import Control.Exception
-import Control.Monad (void)
+import Control.Monad
 import qualified Data.Text as T
 import GHCi.Signals
 import Language.Edh.EHI
@@ -29,7 +29,7 @@ main = do
       !console <- defaultEdhConsole defaultEdhConsoleSettings
       let !consoleOut = consoleIO console . ConsoleOut
 
-      void $
+      !thRepl <-
         forkFinally (edhProgLoop moduSpec console) $ \ !result -> do
           case result of
             Left (e :: SomeException) ->
@@ -43,4 +43,8 @@ main = do
         "* Blank Screen Syndrome ? Take the Tour as your companion, checkout:\n"
       consoleOut "  https://github.com/e-wrks/edh/tree/master/Tour\n"
 
-      consoleIOLoop console
+      let keepLooping =
+            catch (consoleIOLoop console) $ \(ex :: SomeException) -> do
+              throwTo thRepl ex
+              keepLooping
+      keepLooping

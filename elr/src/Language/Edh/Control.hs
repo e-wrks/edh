@@ -1,9 +1,6 @@
 module Language.Edh.Control where
 
 import Control.Exception
-  ( Exception (fromException),
-    SomeException,
-  )
 import Control.Monad.State.Strict (State)
 import qualified Data.Char as Char
 import Data.Dynamic (Dynamic, toDyn)
@@ -233,6 +230,9 @@ data EdhError
     --
     -- caveat: never make this available to a sandboxed environment
     ThreadTerminate
+  | -- | user cancel by interrupting, usually by pressing Ctrl^C, but can also
+    -- be thrown explicitly from normal Edh code
+    UserCancel
   | -- | arbitrary realworld error happened in IO, propagated into the Edh
     -- world
     EdhIOError !SomeException
@@ -256,6 +256,7 @@ instance Exception EdhError
 instance Show EdhError where
   show (ProgramHalt _) = "Edh⏹️Halt"
   show ThreadTerminate = "Edh❎Terminate"
+  show UserCancel = "UserCancel"
   show (EdhIOError !ioe) = show ioe
   show (EdhPeerError !peerSite !details) =
     T.unpack $ "🏗️ traceback: " <> peerSite <> "\n" <> details
@@ -289,4 +290,6 @@ edhKnownError exc = case fromException exc of
           (T.pack $ errorBundlePretty err)
           (toDyn ())
           "<parsing>"
-    Nothing -> Nothing
+    Nothing -> case fromException exc of
+      Just UserInterrupt -> Just UserCancel
+      _ -> Nothing
