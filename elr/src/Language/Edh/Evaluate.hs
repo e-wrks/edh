@@ -1,7 +1,7 @@
 module Language.Edh.Evaluate where
 
--- import           Debug.Trace
--- import           GHC.Stack
+-- import Debug.Trace
+-- import GHC.Stack
 
 import Control.Applicative
 import Control.Concurrent.STM
@@ -6291,13 +6291,14 @@ driveEdhThread !eps !defers !tq !unmask = readIORef trapReq >>= taskLoop
                         Just ThreadTerminate -> driveOut
                         -- uncaught error on cleanup, schedule it to be finally
                         -- propagated to main thread
-                        -- todo this overwrites previous errors when multiple occurred,
-                        -- is it okay?
+                        -- todo this overwrites previous errors when multiple
+                        -- occurred, is it okay?
                         Just !err -> do
                           writeIORef doneVar (throwIO err)
                           driveOut
 
-                        -- give a chance for the Edh code to handle an unknown exception
+                        -- give a chance for the Edh code to handle an unknown
+                        -- exception
                         Nothing -> do
                           atomically $
                             edhWrapException (Just ets) e >>= \ !exo ->
