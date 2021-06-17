@@ -168,16 +168,14 @@ defaultEdhConsole !inputSettings = do
           readInput ::
             Text -> Text -> [Text] -> Haskeline.InputT IO (Maybe EdhInput)
           readInput !ps1 !ps2 !initialLines =
-            Haskeline.catch (readLines initialLines) onExcReading
+            Haskeline.catch (readLines initialLines) $ \case
+              UserInterrupt -> startOver
+              ex -> Haskeline.throwIO ex
             where
-              onExcReading ::
-                SomeException -> Haskeline.InputT IO (Maybe EdhInput)
-              onExcReading ex = do
-                case fromException ex of
-                  Just UserInterrupt -> Haskeline.outputStrLn ""
-                  _ -> Haskeline.outputStrLn $ "Unexpected error: " <> show ex
-                -- start over on Ctrl^C, Ctrl^\, and etc.
-                Haskeline.catch (readLines []) onExcReading
+              startOver = Haskeline.catch (readLines []) $ \case
+                UserInterrupt -> startOver
+                ex -> Haskeline.throwIO ex
+
               parsePasteSpec :: Parsec Void Text (Int, Int, Text)
               parsePasteSpec = do
                 space
