@@ -358,12 +358,11 @@ createEdhWorld !console = do
   !trapReq <- newIORef 0
   -- record a trap request on SIGQUIT
   lookupEnv "EDH_TRAP_SIGQUIT" >>= \case
-    Nothing -> pure ()
     Just "" -> pure ()
     Just "0" -> pure ()
+    Just "off" -> pure ()
     Just "NO" -> pure ()
-    Just {} ->
-      addSignalHandler keyboardTermination $ modifyIORef' trapReq (+ 1)
+    _ -> addSignalHandler keyboardTermination $ modifyIORef' trapReq (+ 1)
 
   -- assembly the world with pieces prepared above
   let !world =
