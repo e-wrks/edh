@@ -5,7 +5,6 @@ module Language.Edh.Runtime where
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
-import Control.Monad.IO.Class
 import qualified Data.ByteString as B
 import Data.Dynamic
 import qualified Data.HashMap.Strict as Map
@@ -947,7 +946,7 @@ runEdhProgram' :: EdhWorld -> EdhTx -> IO EdhValue
 runEdhProgram' !world !prog = do
   !haltResult <- newEmptyTMVarIO
   driveEdhProgram haltResult world prog
-  liftIO (atomically $ tryReadTMVar haltResult) >>= \case
+  atomically (tryReadTMVar haltResult) >>= \case
     Nothing -> return nil
     Just (Right v) -> return v
     Just (Left e) -> throwIO e
