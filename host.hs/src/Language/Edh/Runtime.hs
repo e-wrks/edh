@@ -922,15 +922,15 @@ declareEdhOperators !world !declLoc !opps = do
     contain'nonstd'op'char :: OpSymbol -> Bool
     contain'nonstd'op'char sym = isJust $ T.find (not . isOperatorChar) sym
 
-haltEdhProgram :: EdhThreadState -> EdhValue -> STM ()
-haltEdhProgram !ets !hv =
+haltEdhProgram :: EdhTxExit EdhValue
+haltEdhProgram !hv !ets =
   edhWrapException (Just ets) (toException $ ProgramHalt $ toDyn hv)
     >>= \ !exo -> edhThrow ets $ EdhObject exo
   where
     !edhWrapException =
       edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
 
-terminateEdhThread :: EdhThreadState -> STM ()
+terminateEdhThread :: EdhTx
 terminateEdhThread !ets =
   edhWrapException (Just ets) (toException ThreadTerminate)
     >>= \ !exo -> edhThrow ets $ EdhObject exo

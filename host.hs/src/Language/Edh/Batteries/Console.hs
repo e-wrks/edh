@@ -125,8 +125,8 @@ conOutputLog !logPos !levelVal !evalMsg !exit !ets =
 -- this is currently equivalent to @throw ProgramHalt(***apk)@
 conExitProc :: ArgsPack -> EdhHostProc
 conExitProc !apk _ !ets = case apk of
-  ArgsPack [v] !kwargs | odNull kwargs -> haltEdhProgram ets v
-  _ -> haltEdhProgram ets $ EdhArgsPack apk
+  ArgsPack [v] !kwargs | odNull kwargs -> haltEdhProgram v ets
+  _ -> haltEdhProgram (EdhArgsPack apk) ets
 
 -- | The default Edh command prompts
 -- ps1 is for single line, ps2 for multi-line
