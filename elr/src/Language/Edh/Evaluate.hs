@@ -2577,21 +2577,25 @@ adhocScopedFrame !baseOnFrame = do
           }
   return $ baseOnFrame {edh'frame'scope = adhocScope}
 
-evalScopedBlock :: [StmtSrc] -> EdhTxExit EdhValue -> EdhTx
-evalScopedBlock !stmts !exit !ets = do
-  !blockFrame <- adhocScopedFrame tip
-  let !etsBlock = ets {edh'context = ctxBlock}
-      !ctxBlock =
+pushEdhStack :: EdhTx -> EdhTx
+pushEdhStack !act !ets = do
+  !adhocFrame <- adhocScopedFrame tip
+  let !etsAdhoc = ets {edh'context = ctxAdhoc}
+      !ctxAdhoc =
         ctx
-          { edh'ctx'tip = blockFrame,
+          { edh'ctx'tip = adhocFrame,
             edh'ctx'stack = tip : edh'ctx'stack ctx
           }
-  runEdhTx etsBlock $
-    evalBlock stmts $ \ !blkResult ->
-      edhSwitchState ets $ exitEdhTx exit blkResult
+  runEdhTx etsAdhoc act
   where
     !ctx = edh'context ets
     !tip = edh'ctx'tip ctx
+
+evalScopedBlock :: [StmtSrc] -> EdhTxExit EdhValue -> EdhTx
+evalScopedBlock !stmts !exit !ets =
+  runEdhTx ets $
+    pushEdhStack $
+      evalBlock stmts $ edhSwitchState ets . exitEdhTx exit
 
 -- note a branch match should not escape out of a block, so adjacent blocks
 -- always execute sequentially

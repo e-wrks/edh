@@ -105,6 +105,7 @@ module Language.Edh.EHI
     evalInfixSrc,
     evalInfix',
     evalInfixSrc',
+    pushEdhStack,
     recvEdhArgs,
     packEdhExprs,
     packEdhArgs,
