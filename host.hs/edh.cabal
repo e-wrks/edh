@@ -28,6 +28,7 @@ library
     Language.Edh.Batteries
     Language.Edh.EHI
     Language.Edh.Repl
+    Language.Edh.Run
     Language.Edh.Runtime
 
   other-modules:
