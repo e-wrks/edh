@@ -1324,9 +1324,20 @@ packEdhArgs !ets !argSenders !pkExit = do
     -- discourage artifact definition during args packing
     !etsPacking = ets {edh'context = (edh'context ets) {edh'ctx'pure = True}}
 
--- | Make a synchronous call to a non-interpreter procedure
-edhMakeCall :: EdhValue -> ArgsPack -> EdhTxExit EdhValue -> EdhTx
-edhMakeCall !calleeVal !apk !exit !ets =
+-- | Make a synchronous call to the specified procedure
+--
+-- NOTE use @LitExpr@ with @ValueLiteral@ in case you need to pass evaluated
+--      values as arguments
+edhMakeCall :: EdhValue -> [ArgSender] -> EdhTxExit EdhValue -> EdhTx
+edhMakeCall !calleeVal !aSndrs !exit !ets =
+  edhPrepareCall ets calleeVal aSndrs $ \ !mkCall -> runEdhTx ets $ mkCall exit
+
+-- | Make a synchronous call to the specified procedure
+--
+-- NOTE mind to provide expression values as in the apk, in case the callee is
+--      an interpreter procedure
+edhMakeCall' :: EdhValue -> ArgsPack -> EdhTxExit EdhValue -> EdhTx
+edhMakeCall' !calleeVal !apk !exit !ets =
   edhPrepareCall' ets calleeVal apk $ \ !mkCall -> runEdhTx ets $ mkCall exit
 
 -- Each Edh call is carried out in 2 phases, the preparation and the actual
