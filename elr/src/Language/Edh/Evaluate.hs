@@ -5968,10 +5968,7 @@ mkObjSandbox !ets !obj !exit = case edh'obj'store obj of
 -- | make a scope a sandbox
 mkScopeSandbox :: EdhThreadState -> Scope -> (Scope -> STM ()) -> STM ()
 mkScopeSandbox !ets !origScope !exit =
-  exit
-    origScope
-      { edh'scope'proc = sbProc
-      }
+  exit origScope {edh'scope'proc = sbProc}
   where
     !world = edh'prog'world $ edh'thread'prog ets
     !origProc = edh'scope'proc origScope
@@ -6000,10 +5997,7 @@ runEdhInSandbox !ets !sandbox !act !exit =
               { edh'ctx'tip =
                   EdhCallFrame
                     sandbox
-                    ( SrcLoc
-                        (SrcDoc "<sandbox>")
-                        zeroSrcRange
-                    )
+                    (SrcLoc (SrcDoc "<sandbox>") zeroSrcRange)
                     defaultEdhExcptHndlr,
                 edh'ctx'stack =
                   edh'ctx'tip ctxPriv :
