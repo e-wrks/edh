@@ -4,7 +4,6 @@ __all__ = [
 ]
 
 from typing import *
-import asyncio
 import inspect
 
 from . import log
@@ -12,11 +11,20 @@ from . import log
 logger = log.get_logger(__name__)
 
 
+NOT_SPECIFIED = object()
+
 EFFSKEY = "__effects__"
 
 
-def effect(key2get_or_dict2put: Optional[Union[dict, object]] = None, **kws2put):
-    if isinstance(key2get_or_dict2put, dict):
+def effect(
+    key2get_or_dict2put: Optional[Union[dict, object]] = NOT_SPECIFIED,
+    def_val: Optional[object] = NOT_SPECIFIED,
+    **kws2put,
+):
+    if key2get_or_dict2put is NOT_SPECIFIED:
+        key2get = None
+        dict2put = None
+    elif isinstance(key2get_or_dict2put, dict):
         key2get = None
         dict2put = key2get_or_dict2put
     else:
@@ -51,7 +59,9 @@ def effect(key2get_or_dict2put: Optional[Union[dict, object]] = None, **kws2put)
                 return art
         frame = frame.f_back
         if frame is None:
-            raise ValueError(f"No such effect: {key2get!r}")
+            if def_val is NOT_SPECIFIED:
+                raise ValueError(f"No such effect: {key2get!r}")
+            return def_val
         scope = frame.f_locals
 
 
@@ -77,4 +87,3 @@ def effect_import(modu: Union["module", Dict[str, object]]):
     symbolic_arts = modu.get("__all_symbolic__", None)
     if symbolic_arts is not None:
         effs.update(symbolic_arts)
-
