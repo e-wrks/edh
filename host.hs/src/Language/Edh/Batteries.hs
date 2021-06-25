@@ -337,6 +337,7 @@ installEdhBatteries world =
           -- so the guard syntax in pattern matching works nicely with this
           -- flipped procedure call operator (regardless of its UNIX pipe
           -- semantics), in Haskell style
+          ("$@", InfixL, -5), -- out-laid arg sugar
           --
           -- assignments, make them lower than (++),
           -- so don't need to quote `a = b ++ c`
@@ -449,6 +450,7 @@ installEdhBatteries world =
                 [ ("@", attrDerefAddrProc),
                   ("$", fapProc),
                   ("|", ffapProc),
+                  ("$@", posLayoutProc),
                   (":=", defProc),
                   ("?:=", defMissingProc),
                   ("..", rangeCtorProc ClosedBound ClosedBound),

@@ -205,6 +205,39 @@ attrTemptProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit !ets = case rhe of
         <> T.pack
           (show rhExpr)
 
+-- | operator ($@) - out-laid argument sugar operator
+--
+-- can be used to specify a complex expr (e.g. adhoc arrow procedure) as one
+-- more positional argument, or an apk to be merged with previous args, after
+-- a procedure call expression.
+-- this operator can be chained to specified multiple such more arguments.
+-- the purpose is better layout.
+posLayoutProc :: EdhIntrinsicOp
+posLayoutProc !lhExpr !rhExpr !exit = do
+  let (calleeExpr, apkr) = collapse lhExpr
+      synthCall = CallExpr calleeExpr $ merge apkr rhExpr
+  evalExpr synthCall exit
+  where
+    collapse :: ExprSrc -> (ExprSrc, ArgsPacker)
+    collapse (ExprSrc (CallExpr calleeExpr apkr) _) = (calleeExpr, apkr)
+    collapse (ExprSrc (InfixExpr (OpSymSrc "$@" _) lhx rhx) _) =
+      let (calleeExpr, apkr) = collapse lhx
+       in (calleeExpr, merge apkr rhx)
+    collapse x@(ExprSrc _ aspan) =
+      (x, ArgsPacker [] (SrcRange (src'end aspan) (src'end aspan)))
+
+    merge :: ArgsPacker -> ExprSrc -> ArgsPacker
+    merge
+      (ArgsPacker asndrs aspan)
+      (ExprSrc (ArgsPackExpr (ArgsPacker asndrs' aspan')) _) =
+        ArgsPacker
+          (asndrs ++ asndrs')
+          (SrcRange (src'start aspan) (src'end aspan'))
+    merge (ArgsPacker asndrs aspan) x@(ExprSrc _ xspan) =
+      ArgsPacker
+        (asndrs ++ [SendPosArg x])
+        (SrcRange (src'start aspan) (src'end xspan))
+
 -- | operator ($) - low-precedence operator for procedure call
 --
 -- similar to the function application ($) operator in Haskell
@@ -223,8 +256,7 @@ fapProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit =
           exitEdh ets exit $ EdhArgsPack $ ArgsPack (args ++ args') kwargs''
         _ -> exitEdhTx exit $ EdhArgsPack $ ArgsPack (args ++ [rhVal]) kwargs
     -- normal case
-    !calleeVal -> \ !ets -> edhPrepareCall ets calleeVal argsPkr $
-      \ !mkCall -> runEdhTx ets (mkCall exit)
+    !calleeVal -> edhMakeCall calleeVal argsPkr exit
   where
     argsPkr :: [ArgSender]
     argsPkr = case rhe of
