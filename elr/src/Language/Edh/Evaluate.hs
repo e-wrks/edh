@@ -2848,21 +2848,21 @@ evalStmt !stmt !exit = case stmt of
     throwEdh ets EvalError $
       "illegal code at: " <> prettySrcPos doc err'pos <> "\n" <> err'msg
 
-type FileSystemImportCheck = Text -> EdhTx -> EdhTx
+type CheckImportExternalModule = Text -> EdhTx -> EdhTx
 
 importInto ::
-  FileSystemImportCheck ->
+  CheckImportExternalModule ->
   EntityStore ->
   Object ->
   ArgsReceiver ->
   ExprSrc ->
   EdhTxExit EdhValue ->
   EdhTx
-importInto !fsChk !tgtEnt !reExpObj !argsRcvr srcExpr@(ExprSrc x _) !exit =
+importInto !chkExtImp !tgtEnt !reExpObj !argsRcvr srcExpr@(ExprSrc x _) !exit =
   case x of
     LitExpr (StringLiteral !importSpec) ->
       -- import from specified path
-      fsChk importSpec $
+      chkExtImp importSpec $
         importEdhModule'
           tgtEnt
           reExpObj
@@ -2872,7 +2872,7 @@ importInto !fsChk !tgtEnt !reExpObj !argsRcvr srcExpr@(ExprSrc x _) !exit =
     _ -> evalExprSrc srcExpr $ \ !srcVal -> case edhDeCaseClose srcVal of
       EdhString !importSpec ->
         -- import from dynamic path
-        fsChk importSpec $
+        chkExtImp importSpec $
           importEdhModule'
             tgtEnt
             reExpObj
@@ -4171,19 +4171,32 @@ evalExpr' (ExportExpr !exps) !docCmt !exit = \ !ets ->
 evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
   do
     let !ctx = edh'context ets
-        !world = edh'prog'world $ edh'thread'prog ets
         !scope = contextScope ctx
-        !fsChk =
-          if edh'scope'proc (rootScopeOf scope)
-            == edh'scope'proc (edh'world'sandbox world)
-            then -- fs access from sandboxed scope is totally denied
-              forbidSandboxImp
-            else allowFsImp
+
+        world = edh'prog'world $ edh'thread'prog ets
+        rootProc = edh'scope'proc (edh'world'root world)
+        -- todo optimize performance of such checks
+        !chkExtImp = go $ edh'ctx'tip ctx : edh'ctx'stack ctx
+          where
+            go [] = allowExtImp
+            go (frame : rest) =
+              if (rootProc /=) $
+                edh'scope'proc $ rootScopeOf $ edh'frame'scope frame
+                then forbidExtImp -- todo finer grained control?
+                else go rest
+            allowExtImp :: CheckImportExternalModule
+            allowExtImp _impSpec doImp = doImp
+            forbidExtImp :: CheckImportExternalModule
+            forbidExtImp _impSpec _doImp =
+              throwEdhTx
+                EvalError
+                "external module import prohibited in a sandboxed environment"
+
     case maybeInto of
       Nothing ->
         runEdhTx ets $
           importInto
-            fsChk
+            chkExtImp
             (edh'scope'entity scope)
             (edh'scope'this scope)
             argsRcvr
@@ -4195,10 +4208,10 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
             case edhUltimate intoVal of
               EdhObject !intoObj -> case edh'obj'store intoObj of
                 HashStore !hs ->
-                  importInto fsChk hs intoObj argsRcvr srcExpr exit
+                  importInto chkExtImp hs intoObj argsRcvr srcExpr exit
                 ClassStore !cls ->
                   importInto
-                    fsChk
+                    chkExtImp
                     (edh'class'store cls)
                     intoObj
                     argsRcvr
@@ -4207,7 +4220,7 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
                 HostStore !hsd -> case fromDynamic hsd of
                   Just (intoScope :: Scope) ->
                     importInto
-                      fsChk
+                      chkExtImp
                       (edh'scope'entity intoScope)
                       (edh'scope'this intoScope)
                       argsRcvr
@@ -4222,14 +4235,6 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
                 throwEdhTx UsageError $
                   "can only import into an object, not a "
                     <> edhTypeNameOf intoVal
-  where
-    allowFsImp :: FileSystemImportCheck
-    allowFsImp _impSpec doImp = doImp
-    forbidSandboxImp :: FileSystemImportCheck
-    forbidSandboxImp _impSpec _doImp =
-      throwEdhTx
-        EvalError
-        "import from filesystem is prohibited from a sandboxed environment"
 evalExpr' (DefaultExpr !maybeApk exprSrc@(ExprSrc !exprDef _)) _docCmt !exit =
   \ !ets -> case edh'ctx'eff'target $ edh'context ets of
     Nothing -> do
