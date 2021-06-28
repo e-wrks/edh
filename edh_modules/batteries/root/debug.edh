@@ -41,7 +41,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
     interpreter assert( callerScope,
       assertion, msg= None, ***details
     ) case callerScope.eval( assertion ) of {
-      true -> { pass } # as it should be
+      true -> pass # as it should be
 
       # other values are unexpected
       nil -> { result = '<nil>'; fallthrough }

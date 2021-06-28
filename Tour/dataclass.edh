@@ -49,14 +49,14 @@ class D {
   method __compare__( other ) case other of {
     { { D:d' } } -> {
       case compare( this.x, d'.x ) of {
-        EQ -> { pass }
+        EQ -> pass
         { [ LT, GT ] } -> { conclusion } -> { return conclusion }
-        _ -> return NA
+        _ -> { return NA }
       }
       case compare( this.y, d'.y ) of {
-        EQ -> { pass }
+        EQ -> pass
         { [ LT, GT ] } -> { conclusion } -> { return conclusion }
-        _ -> return NA
+        _ -> { return NA }
       }
       EQ
     }

@@ -35,7 +35,7 @@ generator g() {
       }
       { return rtn } -> {
         case rtn of {
-          { return _ } -> { pass }
+          { return _ } -> pass
           error$ 'bug: plain return should never be result for yield'
         }
         console.info<| 'early returning from do block: ' ++ show(rtn)

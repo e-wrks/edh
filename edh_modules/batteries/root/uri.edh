@@ -71,8 +71,8 @@ export data URI(
     # parse fields
     case s of {
       { schema @< '://' >@ rest } -> {
-        case rest of { rest @< '#' >@ fragment } -> { pass }
-        case rest of { rest @< '?' >@ query } -> { pass }
+        case rest of { rest @< '#' >@ fragment } -> pass
+        case rest of { rest @< '?' >@ query } -> pass
         case rest of {
           { authority @< '/' >@ path } -> {
             path = '/' ++ path
