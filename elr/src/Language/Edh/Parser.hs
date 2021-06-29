@@ -927,17 +927,19 @@ parseLoopHead !si =
         return (SingleReceiver singleArg, iter, si')
     ]
 
-parsePerformExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
-parsePerformExpr !si = do
-  void $ keyword "perform"
-  !addr <- parseAttrAddrSrc
-  return (PerformExpr addr, si)
-
-parseBehaveExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
-parseBehaveExpr !si = do
-  void $ keyword "behave"
-  !addr <- parseAttrAddrSrc
-  return (BehaveExpr addr, si)
+parseEffExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseEffExpr !si =
+  choice $
+    parseEff
+      <$> [ ("perform", Perform),
+            ("behave", Behave),
+            ("fallback", Fallback)
+          ]
+  where
+    parseEff (!kw, !eff) = do
+      void $ keyword kw
+      !addr <- parseAttrAddrSrc
+      return (EffExpr $ eff addr, si)
 
 parseListExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseListExpr !si = do
@@ -1509,8 +1511,7 @@ parseExprPrec !precedingOp !prec !si =
               parseWhileExpr si,
               parseIfExpr si,
               parseCaseExpr si,
-              parsePerformExpr si,
-              parseBehaveExpr si,
+              parseEffExpr si,
               parseListExpr si,
               parseScopedBlock si,
               parseDictOrBlock si,

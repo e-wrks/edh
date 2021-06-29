@@ -1678,11 +1678,8 @@ data Expr
     WhileExpr !ExprSrc !StmtSrc
   | -- | do while loop
     DoWhileExpr !StmtSrc !ExprSrc
-  | -- | call out an effectful artifact, search only outer stack frames,
-    -- if from an effectful procedure run
-    PerformExpr !AttrAddrSrc
-  | -- | call out an effectful artifact, always search full stack frames
-    BehaveExpr !AttrAddrSrc
+  | -- | effect calling out
+    EffExpr !EffAddr
   | AttrExpr !AttrRef
   | IndexExpr
       { index'value :: !ExprSrc,
@@ -1695,6 +1692,16 @@ data Expr
   | -- to support interpolation within expressions, with source form
     ExprWithSrc !ExprSrc ![SourceSeg]
   | IntplExpr !ExprSrc
+  deriving (Eq, Show)
+
+data EffAddr
+  = -- | call out an effectful artifact, search only outer stack frames,
+    -- if from an effectful procedure run
+    Perform !AttrAddrSrc
+  | -- | call out an effectful artifact, always search full stack frames
+    Behave !AttrAddrSrc
+  | -- | call out a default effectful artifact, always search full stack frames
+    Fallback !AttrAddrSrc
   deriving (Eq, Show)
 
 data SourceSeg = SrcSeg !Text | IntplSeg !ExprSrc

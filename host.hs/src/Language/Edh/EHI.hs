@@ -74,6 +74,8 @@ module Language.Edh.EHI
     performEdhEffect',
     behaveEdhEffect,
     behaveEdhEffect',
+    fallbackEdhEffect,
+    fallbackEdhEffect',
     runEdhModule,
     runEdhModule',
     runEdhFile,

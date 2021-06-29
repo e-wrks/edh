@@ -3291,10 +3291,13 @@ intplExpr !ets !x !exit = case x of
     intplStmtSrc ets act $ \ !act' -> exit $ WhileExpr cond' act'
   DoWhileExpr !act !cond -> intplExprSrc ets cond $ \ !cond' ->
     intplStmtSrc ets act $ \ !act' -> exit $ DoWhileExpr act' cond'
-  PerformExpr !addr ->
-    intplAttrAddrSrc ets addr $ \ !addr' -> exit $ PerformExpr addr'
-  BehaveExpr !addr ->
-    intplAttrAddrSrc ets addr $ \ !addr' -> exit $ BehaveExpr addr'
+  EffExpr !effAddr -> case effAddr of
+    Perform addr ->
+      intplAttrAddrSrc ets addr $ \ !addr' -> exit $ EffExpr $ Perform addr'
+    Behave addr ->
+      intplAttrAddrSrc ets addr $ \ !addr' -> exit $ EffExpr $ Behave addr'
+    Fallback addr ->
+      intplAttrAddrSrc ets addr $ \ !addr' -> exit $ EffExpr $ Fallback addr'
   AttrExpr !addr -> intplAttrRef ets addr $ \ !addr' -> exit $ AttrExpr addr'
   IndexExpr !v !t -> intplExprSrc ets v $
     \ !v' -> intplExprSrc ets t $ \ !t' -> exit $ IndexExpr v' t'
@@ -4069,12 +4072,13 @@ evalExpr' (DoWhileExpr !bodyStmt !cndExpr) _docCmt !exit = do
               True -> exitEdh ets exit nil
               False -> runEdhTx ets doWhile
   doWhile
-evalExpr' (PerformExpr (AttrAddrSrc !effAddr _)) _docCmt !exit = \ !ets ->
-  resolveEdhAttrAddr ets effAddr $
+evalExpr' (EffExpr !effAddr) _docCmt !exit = \ !ets -> case effAddr of
+  Perform (AttrAddrSrc !addr _) -> resolveEdhAttrAddr ets addr $
     \ !effKey -> resolveEdhPerform ets effKey $ exitEdh ets exit
-evalExpr' (BehaveExpr (AttrAddrSrc !effAddr _)) _docCmt !exit = \ !ets ->
-  resolveEdhAttrAddr ets effAddr $
+  Behave (AttrAddrSrc !addr _) -> resolveEdhAttrAddr ets addr $
     \ !effKey -> resolveEdhBehave ets effKey $ exitEdh ets exit
+  Fallback (AttrAddrSrc !addr _) -> resolveEdhAttrAddr ets addr $
+    \ !effKey -> resolveEdhFallback ets effKey $ exitEdh ets exit
 evalExpr' (AttrExpr !addr) _docCmt !exit = evalAttrRef addr exit
 evalExpr' (CallExpr !calleeExpr (ArgsPacker !argsSndr _)) _docCmt !exit =
   evalExprSrc calleeExpr $ \ !calleeVal !ets ->
@@ -5463,6 +5467,27 @@ resolveEdhBehave' !ets !effKey !exit =
     edhTargetStackForBehave :: [EdhCallFrame]
     edhTargetStackForBehave = edh'ctx'stack ctx where !ctx = edh'context ets
 
+resolveEdhFallback ::
+  EdhThreadState -> AttrKey -> (EdhValue -> STM ()) -> STM ()
+resolveEdhFallback !ets !effKey !exit = resolveEdhFallback' ets effKey $ \case
+  Just !effArt -> exit effArt
+  Nothing ->
+    throwEdh ets UsageError $ "no such default effect: " <> T.pack (show effKey)
+
+resolveEdhFallback' ::
+  EdhThreadState ->
+  AttrKey ->
+  (Maybe EdhValue -> STM ()) ->
+  STM ()
+resolveEdhFallback' !ets !effKey !exit =
+  resolveEffectfulDefault ets effKey edhTargetStackForFallback
+    >>= \case
+      Just (!effArt, _) -> exit $ Just effArt
+      Nothing -> exit Nothing
+  where
+    edhTargetStackForFallback :: [EdhCallFrame]
+    edhTargetStackForFallback = edh'ctx'stack ctx where !ctx = edh'context ets
+
 parseEdhIndex ::
   EdhThreadState -> EdhValue -> (Either Text EdhIndex -> STM ()) -> STM ()
 parseEdhIndex !ets !val !exit = case val of
@@ -6488,7 +6513,7 @@ driveEdhThread !eps !defers !tq !unmask = readIORef trapReq >>= taskLoop
             Just !ev -> perceiverChk ((ev, r) : gotevl) rest
             Nothing -> perceiverChk gotevl rest
 
--- | perform an effectful call from current Edh context
+-- | make an effectful call from current Edh context
 --
 -- if performing from an effectful procedure call, use the outer stack of
 -- that call in effect resolution
@@ -6502,11 +6527,11 @@ performEdhEffect ::
   EdhTx
 performEdhEffect !effKey !args !kwargs !exit !ets =
   resolveEdhPerform ets effKey $ \ !effVal ->
-    edhPrepareCall'
-      ets
-      effVal
-      (ArgsPack args $ odFromList $ [(AttrByName k, v) | (k, v) <- kwargs])
-      $ \ !mkCall -> runEdhTx ets $ mkCall exit
+    runEdhTx ets $
+      edhMakeCall'
+        effVal
+        (ArgsPack args $ odFromList $ [(AttrByName k, v) | (k, v) <- kwargs])
+        exit
 
 -- | obtain an effectful value from current Edh context
 --
@@ -6518,7 +6543,7 @@ performEdhEffect' :: AttrKey -> (Maybe EdhValue -> EdhTx) -> EdhTx
 performEdhEffect' !effKey !exit !ets =
   resolveEdhPerform' ets effKey $ runEdhTx ets . exit
 
--- | perform an effectful call from current Edh context
+-- | make an effectful call from current Edh context
 --
 -- use full stack in effect resolution, may create infinite loops in effectful
 -- procedure calls if one effectful procedure would make unconditional
@@ -6532,11 +6557,11 @@ behaveEdhEffect ::
   EdhTx
 behaveEdhEffect !effKey !args !kwargs !exit !ets =
   resolveEdhBehave ets effKey $ \ !effVal ->
-    edhPrepareCall'
-      ets
-      effVal
-      (ArgsPack args $ odFromList $ [(AttrByName k, v) | (k, v) <- kwargs])
-      $ \ !mkCall -> runEdhTx ets $ mkCall exit
+    runEdhTx ets $
+      edhMakeCall'
+        effVal
+        (ArgsPack args $ odFromList $ [(AttrByName k, v) | (k, v) <- kwargs])
+        exit
 
 -- | obtain an effectful value from current Edh context
 --
@@ -6544,3 +6569,34 @@ behaveEdhEffect !effKey !args !kwargs !exit !ets =
 behaveEdhEffect' :: AttrKey -> (Maybe EdhValue -> EdhTx) -> EdhTx
 behaveEdhEffect' !effKey !exit !ets =
   resolveEdhBehave' ets effKey $ runEdhTx ets . exit
+
+-- | make a default effectful call from current Edh context
+--
+-- lookup effectful defaults instead of effects
+--
+-- use full stack in effect resolution, may create infinite loops in effectful
+-- procedure calls if one effectful procedure would make unconditional
+-- recursive effectful call into itself, or there is some mutually recursive
+-- pattern between multiple procedures
+fallbackEdhEffect ::
+  AttrKey ->
+  [EdhValue] ->
+  [(AttrName, EdhValue)] ->
+  (EdhValue -> EdhTx) ->
+  EdhTx
+fallbackEdhEffect !effKey !args !kwargs !exit !ets =
+  resolveEdhFallback ets effKey $ \ !effVal ->
+    runEdhTx ets $
+      edhMakeCall'
+        effVal
+        (ArgsPack args $ odFromList $ [(AttrByName k, v) | (k, v) <- kwargs])
+        exit
+
+-- | obtain an effectful value from current Edh context
+--
+-- lookup effectful defaults instead of effects
+--
+-- use full stack in effect resolution
+fallbackEdhEffect' :: AttrKey -> (Maybe EdhValue -> EdhTx) -> EdhTx
+fallbackEdhEffect' !effKey !exit !ets =
+  resolveEdhFallback' ets effKey $ runEdhTx ets . exit

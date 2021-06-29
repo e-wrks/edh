@@ -102,6 +102,38 @@ resolveEffectfulAttr ets !k = resolve
           _ -> resolve rest
 {-# INLINE resolveEffectfulAttr #-}
 
+resolveEffectfulDefault ::
+  EdhThreadState ->
+  AttrKey ->
+  [EdhCallFrame] ->
+  STM (Maybe (EdhValue, [EdhCallFrame]))
+resolveEffectfulDefault _ets !k = resolve
+  where
+    resolve [] = return Nothing
+    resolve (EdhCallFrame scope _ _ : rest) =
+      iopdLookup
+        (AttrByName edhEffectDefaultsMagicName)
+        (edh'scope'entity scope)
+        >>= \case
+          Nothing -> resolve rest
+          Just (EdhObject !effsObj) -> case edh'obj'store effsObj of
+            HashStore !esEffs ->
+              iopdLookup k esEffs >>= \case
+                Just !val -> case val of
+                  EdhProcedure !callable _origEffOuterStack ->
+                    return $
+                      Just (EdhProcedure callable (Just rest), rest)
+                  EdhBoundProc !callable !this !that _origEffOuterStack ->
+                    return $
+                      Just (EdhBoundProc callable this that (Just rest), rest)
+                  _ -> return $ Just (val, rest)
+                Nothing -> resolve rest
+            -- todo crash in these cases?
+            --      warning may be more proper but in what way?
+            _ -> resolve rest
+          _ -> resolve rest
+{-# INLINE resolveEffectfulDefault #-}
+
 -- * Edh inheritance resolution
 
 -- | Calculate the C3 linearization of the super classes and fill into the
