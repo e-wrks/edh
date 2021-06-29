@@ -4174,20 +4174,11 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
         !scope = contextScope ctx
 
         world = edh'prog'world $ edh'thread'prog ets
-        rootProc = edh'scope'proc (edh'world'root world)
-        -- todo optimize performance of such checks
-        !chkExtImp = go $ edh'ctx'tip ctx : edh'ctx'stack ctx
-          where
-            go [] = allowExtImp
-            go (frame : rest) =
-              if (rootProc /=) $
-                edh'scope'proc $ rootScopeOf $ edh'frame'scope frame
-                then forbidExtImp -- todo finer grained control?
-                else go rest
-            allowExtImp :: CheckImportExternalModule
-            allowExtImp _impSpec doImp = doImp
-            forbidExtImp :: CheckImportExternalModule
-            forbidExtImp _impSpec _doImp =
+        !chkExtImp =
+          if edh'scope'proc (edh'world'root world)
+            == edh'scope'proc (rootScopeOf scope)
+            then \_impSpec doImp -> doImp
+            else \_impSpec _doImp -> -- todo finer grained control?
               throwEdhTx
                 EvalError
                 "external module import prohibited in a sandboxed environment"
