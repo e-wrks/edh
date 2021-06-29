@@ -1402,8 +1402,11 @@ edhPrepareCall'
           flip (maybe id) effOuter $
             \ !outerStack !s -> s {edh'effects'stack = outerStack}
       EdhProcedure !callee !effOuter ->
-        callProc callee (edh'scope'this scope) (edh'scope'that scope) $
-          flip (maybe id) effOuter $
+        callProc
+          callee
+          (edh'scope'this callerScope)
+          (edh'scope'that callerScope)
+          $ flip (maybe id) effOuter $
             \ !outerStack !s -> s {edh'effects'stack = outerStack}
       (EdhObject !obj) -> case edh'obj'store obj of
         -- calling a class
@@ -1425,7 +1428,7 @@ edhPrepareCall'
         throwEdh etsCallPrep EvalError $
           "can not call a " <> edhTypeNameOf calleeVal <> ": " <> calleeRepr
     where
-      scope = contextScope $ edh'context etsCallPrep
+      callerScope = contextScope $ edh'context etsCallPrep
 
       callProc :: EdhProcDefi -> Object -> Object -> (Scope -> Scope) -> STM ()
       callProc !callee !this !that !scopeMod = case callee of
@@ -1436,15 +1439,23 @@ edhPrepareCall'
 
         -- calling an interpreter procedure
         EdhIntrpr !mth -> do
-          -- an Edh interpreter proc needs a `callerScope` as its 1st arg,
-          -- while a host interpreter proc doesn't.
-          !apk' <- case edh'procedure'decl mth of
-            HostDecl {} -> return apk
+          case edh'procedure'decl mth of
+            HostDecl {} -> do
+              -- a host interpreter proc runs in its caller's lexical context,
+              -- in addition to sharing of the scope entity with the caller,
+              -- which is implemented in `callEdhMethod`
+              let scopeMod' s =
+                    scopeMod $ s {edh'scope'proc = edh'scope'proc callerScope}
+              callMaker $ \ !exit ->
+                callEdhMethod this that mth apk scopeMod' exit
             ProcDecl {} -> do
+              -- an Edh interpreter proc needs a `callerScope` as its 1st arg
               let callerCtx = edh'context etsCallPrep
-              !argCallerScope <- mkScopeWrapper etsCallPrep $ contextScope callerCtx
-              return $ ArgsPack (EdhObject argCallerScope : args) kwargs
-          callMaker $ \ !exit -> callEdhMethod this that mth apk' scopeMod exit
+              !argCallerScope <-
+                mkScopeWrapper etsCallPrep $ contextScope callerCtx
+              let apk' = ArgsPack (EdhObject argCallerScope : args) kwargs
+              callMaker $ \ !exit ->
+                callEdhMethod this that mth apk' scopeMod exit
         --
 
         -- calling a producer procedure
