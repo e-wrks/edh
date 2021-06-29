@@ -484,7 +484,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
         [ StmtSrc
             ( ExprStmt
                 ( DictExpr
-                    [ ( AddrDictKey !clsRef,
+                    [ ( AddrDictKey !clsAddr,
                         ExprSrc
                           (AttrExpr (DirectRef (AttrAddrSrc !instAttr _)))
                           _
@@ -498,15 +498,16 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
             case ctxMatch of
               EdhObject ctxObj -> resolveEdhAttrAddr ets instAttr $
                 \ !instKey -> runEdhTx ets $
-                  evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
-                    EdhNil -> exitEdh ets exit EdhCaseOther
-                    EdhObject !clsObj ->
-                      resolveEdhInstance clsObj ctxObj >>= \case
-                        Just !instObj ->
-                          matchExit [(instKey, EdhObject instObj)]
-                        Nothing -> exitEdh ets exit EdhCaseOther
-                    !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
-                      throwEdh ets UsageError $ "invalid class: " <> badDesc
+                  evalAttrRef (DirectRef clsAddr) $ \ !clsVal _ets ->
+                    case clsVal of
+                      EdhNil -> exitEdh ets exit EdhCaseOther
+                      EdhObject !clsObj ->
+                        resolveEdhInstance clsObj ctxObj >>= \case
+                          Just !instObj ->
+                            matchExit [(instKey, EdhObject instObj)]
+                          Nothing -> exitEdh ets exit EdhCaseOther
+                      !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
+                        throwEdh ets UsageError $ "invalid class: " <> badDesc
               _ -> exitEdh ets exit EdhCaseOther
         --
 

@@ -1598,7 +1598,7 @@ data Prefix
 
 data DictKeyExpr
   = LitDictKey !Literal
-  | AddrDictKey !AttrRef
+  | AddrDictKey !AttrAddrSrc
   | ExprDictKey !ExprSrc -- this must be quoted in parenthesis
   deriving (Eq, Show)
 

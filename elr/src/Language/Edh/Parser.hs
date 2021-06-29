@@ -329,7 +329,7 @@ parseRestArgRecvs !endSymbol = parseArgRecvs [] False False
 
 parseKwRecv :: Bool -> Parser ArgReceiver
 parseKwRecv !inPack = do
-  !addr <- parseAttrAddrSrc
+  !addr <- let ?allowKwAttr = True in parseAttrAddrSrc'
   !retgt <- optional parseRetarget >>= validateTgt
   !defExpr <- if inPack then optional parseDefaultExpr else return Nothing
   return $ RecvArg addr retgt defExpr
@@ -369,7 +369,7 @@ parseAttrRef = do
             choice
               [ do
                   AttrAddrSrc !addr (SrcRange _ !addr'end) <-
-                    let ?indirect = True in parseAttrAddrSrc'
+                    let ?allowKwAttr = True in parseAttrAddrSrc'
                   moreAddr $
                     IndirectRef
                       (ExprSrc (AttrExpr p1) leading'span)
@@ -442,7 +442,7 @@ parseArgSends !si !closeSym !commaAppeared !ss = do
       return (UnpackPosArgs x, si')
     parseKwArgSend :: Parser (ArgSender, IntplSrcInfo)
     parseKwArgSend = do
-      !addr <- parseAttrAddrSrc
+      !addr <- let ?allowKwAttr = True in parseAttrAddrSrc'
       equalSign
       (!x, !si') <- parseExpr si
       return (SendKwArg addr x, si')
@@ -717,7 +717,7 @@ parseSymbolExpr = do
   void $ keyword "symbol"
   void $ char '@'
   sc
-  SymbolExpr <$> let ?indirect = False in parseAlphNumName
+  SymbolExpr <$> let ?allowKwAttr = False in parseAlphNumName
 
 parseReturnStmt ::
   OptDocCmt ->
@@ -1086,16 +1086,16 @@ parseLitExpr =
     litKw = hidden . keyword
 
 parseAttrAddrSrc :: Parser AttrAddrSrc
-parseAttrAddrSrc = let ?indirect = False in parseAttrAddrSrc'
+parseAttrAddrSrc = let ?allowKwAttr = False in parseAttrAddrSrc'
 
-parseAttrAddrSrc' :: (?indirect :: Bool) => Parser AttrAddrSrc
+parseAttrAddrSrc' :: (?allowKwAttr :: Bool) => Parser AttrAddrSrc
 parseAttrAddrSrc' = do
   !startPos <- getSourcePos
   !addr <- parseAttrAddr
   EdhParserState _ !lexeme'end <- get
   return $ AttrAddrSrc addr $ SrcRange (lspSrcPosFromParsec startPos) lexeme'end
 
-parseAttrAddr :: (?indirect :: Bool) => Parser AttrAddr
+parseAttrAddr :: (?allowKwAttr :: Bool) => Parser AttrAddr
 parseAttrAddr = parseAtNotation <|> NamedAttr <$> parseAttrName
   where
     parseAtNotation :: Parser AttrAddr
@@ -1118,7 +1118,7 @@ parseAttrAddr = parseAtNotation <|> NamedAttr <$> parseAttrName
       let !src = maybe "" (T.stripEnd . fst) $ takeN_ (o' - o) s
       return $ IntplSymAttr src x
 
-parseAttrName :: (?indirect :: Bool) => Parser Text
+parseAttrName :: (?allowKwAttr :: Bool) => Parser Text
 parseAttrName = parseMagicName <|> parseAlphNumName
   where
     -- a magic method name includes the quoting "()" pair, with inner /
@@ -1141,7 +1141,7 @@ parseAttrName = parseMagicName <|> parseAlphNumName
           -- right-hand-side operator overriding e.g. (-.) (/.)
           Just {} -> return $ opLit <> "."
 
-parseAlphNumName :: (?indirect :: Bool) => Parser AttrName
+parseAlphNumName :: (?allowKwAttr :: Bool) => Parser AttrName
 parseAlphNumName = (detectIllegalIdent >>) $
   lexeme $ do
     !anStart <- takeWhile1P (Just "attribute name") isIdentStart
@@ -1155,7 +1155,7 @@ parseAlphNumName = (detectIllegalIdent >>) $
       case illIdent of
         Just !ident -> fail $ "illegal identifier `" <> T.unpack ident <> "`"
         Nothing -> pure ()
-    illegalIdentifier :: (?indirect :: Bool) => Parser (Maybe Text)
+    illegalIdentifier :: (?allowKwAttr :: Bool) => Parser (Maybe Text)
     illegalIdentifier =
       choice
         [ Just <$> kwIdent "this",
@@ -1166,7 +1166,7 @@ parseAlphNumName = (detectIllegalIdent >>) $
           -- one occurrence willl parse as missing attr followed by another
           -- statement initiated by that very keyword, esp. when written on a
           -- single line, the error reporting can appear even more confusing.
-          if ?indirect
+          if ?allowKwAttr
             then return Nothing
             else illegalKeywrodForAttr <|> return Nothing
         ]
@@ -1290,7 +1290,7 @@ parseDictOrBlock !si0 =
           (!v, !si') <- parseExpr si
           return ((LitDictKey k, v), si')
         addrEntry = try $ do
-          !k <- parseAttrRef
+          !k <- let ?allowKwAttr = True in parseAttrAddrSrc'
           entryColon
           (!v, !si') <- parseExpr si
           return ((AddrDictKey k, v), si')
@@ -1561,7 +1561,7 @@ parseExprPrec !precedingOp !prec !si =
     parseIndirectRef !pOp !si' !tgtExpr = try $ do
       singleDot
       addr@(AttrAddrSrc _ !addr'span) <-
-        let ?indirect = True in parseAttrAddrSrc'
+        let ?allowKwAttr = True in parseAttrAddrSrc'
       parseMoreOps pOp si' $
         flip ExprSrc (SrcRange (exprSrcStart tgtExpr) (src'end addr'span)) $
           AttrExpr $ IndirectRef tgtExpr addr

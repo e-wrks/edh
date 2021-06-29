@@ -3334,7 +3334,7 @@ intplDictEntry ::
   STM ()
 intplDictEntry !ets (k@LitDictKey {}, !x) !exit =
   intplExprSrc ets x $ \ !x' -> exit (k, x')
-intplDictEntry !ets (AddrDictKey !k, !x) !exit = intplAttrRef ets k $
+intplDictEntry !ets (AddrDictKey !k, !x) !exit = intplAttrAddrSrc ets k $
   \ !k' -> intplExprSrc ets x $ \ !x' -> exit (AddrDictKey k', x')
 intplDictEntry !ets (ExprDictKey !k, !x) !exit = intplExprSrc ets k $
   \ !k' -> intplExprSrc ets x $ \ !x' -> exit (ExprDictKey k', x')
@@ -3474,7 +3474,7 @@ evalDictLit ((k, v) : entries) !dsl !exit !ets = case k of
       evalLiteral lit >>= \ !kVal ->
         runEdhTx ets $ evalDictLit entries ((kVal, vVal) : dsl) exit
   AddrDictKey !addr -> runEdhTx ets $
-    evalAttrRef addr $ \ !kVal ->
+    evalAttrRef (DirectRef addr) $ \ !kVal ->
       evalExprSrc v $ \ !vVal -> evalDictLit entries ((kVal, vVal) : dsl) exit
   ExprDictKey !kExpr -> runEdhTx ets $
     evalExprSrc kExpr $ \ !kVal ->
