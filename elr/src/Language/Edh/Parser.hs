@@ -1,11 +1,10 @@
+{-# LANGUAGE ImplicitParams #-}
+
 module Language.Edh.Parser where
 
 -- import Debug.Trace
 
-import Control.Applicative hiding
-  ( many,
-    some,
-  )
+import Control.Applicative hiding (many, some)
 import Control.Monad
 import Control.Monad.State.Strict (MonadState (get, put))
 import Data.Char
@@ -369,7 +368,8 @@ parseAttrRef = do
             missEndPos <- getSourcePos
             choice
               [ do
-                  AttrAddrSrc !addr (SrcRange _ !addr'end) <- parseAttrAddrSrc
+                  AttrAddrSrc !addr (SrcRange _ !addr'end) <-
+                    let ?indirect = True in parseAttrAddrSrc'
                   moreAddr $
                     IndirectRef
                       (ExprSrc (AttrExpr p1) leading'span)
@@ -717,7 +717,7 @@ parseSymbolExpr = do
   void $ keyword "symbol"
   void $ char '@'
   sc
-  SymbolExpr <$> parseAlphNumName
+  SymbolExpr <$> let ?indirect = False in parseAlphNumName
 
 parseReturnStmt ::
   OptDocCmt ->
@@ -760,7 +760,7 @@ parseStmt' !prec !si = do
               parseThrowStmt si,
               (,si) <$> parseVoidStmt,
               -- NOTE: statements above should probably all be detected by
-              -- `illegalExprStarting` as invalid start for an expr
+              -- `illegalKeywrodForAttr` as invalid for attribute identifier
               do
                 (ExprSrc !x _, !si') <- parseExprPrec Nothing prec si
                 return (ExprStmt x docCmt, si')
@@ -1084,13 +1084,16 @@ parseLitExpr =
     litKw = hidden . keyword
 
 parseAttrAddrSrc :: Parser AttrAddrSrc
-parseAttrAddrSrc = do
+parseAttrAddrSrc = let ?indirect = False in parseAttrAddrSrc'
+
+parseAttrAddrSrc' :: (?indirect :: Bool) => Parser AttrAddrSrc
+parseAttrAddrSrc' = do
   !startPos <- getSourcePos
   !addr <- parseAttrAddr
   EdhParserState _ !lexeme'end <- get
   return $ AttrAddrSrc addr $ SrcRange (lspSrcPosFromParsec startPos) lexeme'end
 
-parseAttrAddr :: Parser AttrAddr
+parseAttrAddr :: (?indirect :: Bool) => Parser AttrAddr
 parseAttrAddr = parseAtNotation <|> NamedAttr <$> parseAttrName
   where
     parseAtNotation :: Parser AttrAddr
@@ -1113,7 +1116,7 @@ parseAttrAddr = parseAtNotation <|> NamedAttr <$> parseAttrName
       let !src = maybe "" (T.stripEnd . fst) $ takeN_ (o' - o) s
       return $ IntplSymAttr src x
 
-parseAttrName :: Parser Text
+parseAttrName :: (?indirect :: Bool) => Parser Text
 parseAttrName = parseMagicName <|> parseAlphNumName
   where
     -- a magic method name includes the quoting "()" pair, with inner /
@@ -1136,7 +1139,7 @@ parseAttrName = parseMagicName <|> parseAlphNumName
           -- right-hand-side operator overriding e.g. (-.) (/.)
           Just {} -> return $ opLit <> "."
 
-parseAlphNumName :: Parser AttrName
+parseAlphNumName :: (?indirect :: Bool) => Parser AttrName
 parseAlphNumName = (detectIllegalIdent >>) $
   lexeme $ do
     !anStart <- takeWhile1P (Just "attribute name") isIdentStart
@@ -1145,24 +1148,58 @@ parseAlphNumName = (detectIllegalIdent >>) $
   where
     detectIllegalIdent = do
       !eps <- get -- save parsing states
-      !followedByIllegalIdent <- lookAhead illegalIdentifier
+      !illIdent <- lookAhead illegalIdentifier
       put eps -- restore parsing states (esp. lexeme end)
-      when followedByIllegalIdent $ fail "illegal identifier"
-    illegalIdentifier :: Parser Bool
+      case illIdent of
+        Just !ident -> fail $ "illegal identifier `" <> T.unpack ident <> "`"
+        Nothing -> pure ()
+    illegalIdentifier :: (?indirect :: Bool) => Parser (Maybe Text)
     illegalIdentifier =
       choice
-        [ True <$ keyword "this",
-          True <$ keyword "that",
-          True <$ keyword "super",
-          True <$ parseLitExpr,
-          {-
-          It's somewhat desirable for certain keywords e.g. `from`, to be used as method names, argument names, and etc.
-          Especially considering source level interoperation with JavaScript etc.
-          But it can also create confusions in certain circumstances, let's allow it for some time and see.
-          -}
-          -- True <$ illegalExprStarting,
-          return False
+        [ Just <$> kwIdent "this",
+          Just <$> kwIdent "that",
+          Just <$> kwIdent "super",
+          Just . T.pack . show <$> parseLitExpr,
+          -- allow dot-notation to use keywords here. disallowing such keywords,
+          -- one occurrence willl parse as missing attr followed by another
+          -- statement initiated by that very keyword, esp. when written on a
+          -- single line, the error reporting can appear even more confusing.
+          if ?indirect
+            then return Nothing
+            else illegalKeywrodForAttr <|> return Nothing
         ]
+    kwIdent :: Text -> Parser Text
+    kwIdent !kw = keyword kw >> return kw
+
+-- NOTE: keywords for statements or other constructs will parse as identifier
+--       for attribute access, if not forbidden here.
+illegalKeywrodForAttr :: Parser (Maybe Text)
+illegalKeywrodForAttr = do
+  EdhParserState (GlobalOpDict _decls !quaint'ops) _lexem'end <- get
+  Just
+    <$> choice
+      ( [ illegalWord "go",
+          illegalWord "defer",
+          illegalWord "effect",
+          illegalWord "let",
+          illegalWord "const", -- reserved for JavaScript src compatibility
+          illegalWord "as",
+          illegalWord "then",
+          illegalWord "else",
+          illegalWord "extends",
+          illegalWord "perceive",
+          illegalWord "of",
+          illegalWord "break",
+          illegalWord "continue",
+          illegalWord "fallthrough",
+          illegalWord "return",
+          illegalWord "throw"
+        ]
+          ++ (illegalWord <$> quaint'ops)
+      )
+    <|> return Nothing
+  where
+    illegalWord !wd = wd <$ keyword wd
 
 parseOpSrc :: Parser OpSymSrc
 parseOpSrc = do
@@ -1358,36 +1395,6 @@ parsePrefixExpr !si =
     prefixOp :: Text -> Parser ()
     prefixOp !opSym = string opSym >> notFollowedBy (satisfy isOperatorChar)
 
--- NOTE: keywords for statements or other constructs will parse as identifier
---       in an expr, if not forbidden here.
-illegalExprStarting :: Parser (Maybe Text)
-illegalExprStarting = do
-  EdhParserState (GlobalOpDict _decls !quaint'ops) _lexem'end <- get
-  Just
-    <$> choice
-      ( [ illegalWord "go",
-          illegalWord "defer",
-          illegalWord "effect",
-          illegalWord "let",
-          illegalWord "const", -- reserved for JavaScript src compatibility
-          illegalWord "as",
-          illegalWord "then",
-          illegalWord "else",
-          illegalWord "extends",
-          illegalWord "perceive",
-          illegalWord "of",
-          illegalWord "break",
-          illegalWord "continue",
-          illegalWord "fallthrough",
-          illegalWord "return",
-          illegalWord "throw"
-        ]
-          ++ (illegalWord <$> quaint'ops)
-      )
-    <|> return Nothing
-  where
-    illegalWord !wd = wd <$ keyword wd
-
 -- besides hardcoded prefix operators, all other operators are infix binary
 -- operators, they can be declared and further overridden everywhere
 
@@ -1464,32 +1471,28 @@ parseExprPrec ::
   IntplSrcInfo ->
   Parser (ExprSrc, IntplSrcInfo)
 parseExprPrec !precedingOp !prec !si =
-  lookAhead illegalExprStarting >>= \case
-    Just !illegalWord ->
-      fail $ "illegal start of expression: `" <> T.unpack illegalWord <> "`"
-    Nothing ->
-      (parseExpr1st >>= \(!x, !si') -> parseMoreOps precedingOp si' x) <|> do
-        EdhParserState _ !missed'start <- get
-        !missed'end <- getSourcePos
-        let !missed'span = lspSrcRangeFromParsec' missed'start missed'end
-            !missedExpr =
-              ExprSrc
-                ( AttrExpr
-                    (DirectRef (AttrAddrSrc MissedAttrName missed'span))
+  (parseExpr1st >>= \(!x, !si') -> parseMoreOps precedingOp si' x) <|> do
+    EdhParserState _ !missed'start <- get
+    !missed'end <- getSourcePos
+    let !missed'span = lspSrcRangeFromParsec' missed'start missed'end
+        !missedExpr =
+          ExprSrc
+            ( AttrExpr
+                (DirectRef (AttrAddrSrc MissedAttrName missed'span))
+            )
+            missed'span
+    case precedingOp of
+      Nothing ->
+        parseMoreInfix Nothing si missedExpr >>= \case
+          ( ExprSrc
+              ( AttrExpr
+                  (DirectRef (AttrAddrSrc MissedAttrName _))
                 )
-                missed'span
-        case precedingOp of
-          Nothing ->
-            parseMoreInfix Nothing si missedExpr >>= \case
-              ( ExprSrc
-                  ( AttrExpr
-                      (DirectRef (AttrAddrSrc MissedAttrName _))
-                    )
-                  _,
-                _
-                ) -> empty
-              !lhsMissedResult -> return lhsMissedResult
-          Just {} -> return (missedExpr, si)
+              _,
+            _
+            ) -> empty
+          !lhsMissedResult -> return lhsMissedResult
+      Just {} -> return (missedExpr, si)
   where
     parseExpr1st :: Parser (ExprSrc, IntplSrcInfo)
     parseExpr1st =
@@ -1556,7 +1559,8 @@ parseExprPrec !precedingOp !prec !si =
       Parser (ExprSrc, IntplSrcInfo)
     parseIndirectRef !pOp !si' !tgtExpr = try $ do
       singleDot
-      addr@(AttrAddrSrc _ !addr'span) <- parseAttrAddrSrc
+      addr@(AttrAddrSrc _ !addr'span) <-
+        let ?indirect = True in parseAttrAddrSrc'
       parseMoreOps pOp si' $
         flip ExprSrc (SrcRange (exprSrcStart tgtExpr) (src'end addr'span)) $
           AttrExpr $ IndirectRef tgtExpr addr
