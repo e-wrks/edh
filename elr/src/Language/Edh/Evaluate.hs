@@ -8,6 +8,7 @@ import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad.State.Strict
 import qualified Data.Aeson as A
+import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
@@ -17,7 +18,8 @@ import qualified Data.Lossless.Decimal as D
 import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Encoding (Decoding (Some), decodeUtf8With, streamDecodeUtf8With)
+import Data.Text.Encoding (Decoding (Some))
+import qualified Data.Text.Encoding as TE
 import Data.Text.Encoding.Error (lenientDecode)
 import Data.Typeable (Proxy (..), Typeable, typeRep)
 import qualified Data.UUID as UUID
@@ -3077,7 +3079,8 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
   where
     runModuleSource :: Scope -> FilePath -> EdhTxExit EdhValue -> EdhTx
     runModuleSource !scopeLoad !moduFile !exit !ets =
-      unsafeIOToSTM (streamDecodeUtf8With lenientDecode <$> B.readFile moduFile)
+      unsafeIOToSTM
+        (TE.streamDecodeUtf8With lenientDecode <$> B.readFile moduFile)
         >>= \case
           Some !moduSource _ _ ->
             let !ctxLoad =
@@ -3785,6 +3788,43 @@ edhValueStrTx :: EdhValue -> EdhTxExit Text -> EdhTx
 edhValueStrTx !v !exit !ets =
   edhValueStr ets v $ \ !s -> exitEdh ets exit s
 
+edhValueBlob' ::
+  EdhThreadState -> EdhValue -> STM () -> (ByteString -> STM ()) -> STM ()
+edhValueBlob' _ (EdhBlob !b) _ !exit = exit b
+edhValueBlob' _ (EdhString !str) _ !exit = exit $ TE.encodeUtf8 str
+edhValueBlob' !ets (EdhObject !o) naExit !exit =
+  lookupEdhObjMagic o (AttrByName "__blob__") >>= \case
+    (_, EdhNil) -> naExit
+    (!this', EdhProcedure (EdhMethod !mth) _) ->
+      runEdhTx ets $
+        callEdhMethod this' o mth (ArgsPack [] odEmpty) id chkMagicRtn
+    (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
+      runEdhTx ets $
+        callEdhMethod this that mth (ArgsPack [] odEmpty) id chkMagicRtn
+    (_, !badMagic) ->
+      throwEdh ets UsageError $
+        "bad magic __blob__ of "
+          <> edhTypeNameOf badMagic
+          <> " on class "
+          <> objClassName o
+  where
+    chkMagicRtn !rtn _ets = case edhUltimate rtn of
+      EdhBlob !b -> exit b
+      EdhDefault _ _ !exprDef !etsDef ->
+        runEdhTx (fromMaybe ets etsDef) $
+          evalExpr (deExpr' exprDef) $
+            \ !defVal _ets -> case defVal of
+              EdhNil -> naExit
+              _ -> edhValueBlob' ets defVal naExit exit
+      _ -> edhValueBlob' ets rtn naExit exit
+edhValueBlob' _ _ !naExit _ = naExit
+
+edhValueBlob :: EdhThreadState -> EdhValue -> (ByteString -> STM ()) -> STM ()
+edhValueBlob !ets !val =
+  edhValueBlob' ets val $
+    edhValueDesc ets val $ \ !badDesc ->
+      throwEdh ets UsageError $ "not convertible to blob: " <> badDesc
+
 -- | Coercing an Edh value to valid JSON in string form
 --
 -- *) nil translates to null
@@ -3855,7 +3895,7 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
           !s -> exit $ strJson s
 
     strJson :: Text -> Text
-    strJson = decodeUtf8With lenientDecode . BL.toStrict . A.encode
+    strJson = TE.decodeUtf8With lenientDecode . BL.toStrict . A.encode
 
     listJson :: [EdhValue] -> (Text -> STM ()) -> STM ()
     listJson [] !exit = exit "[]"

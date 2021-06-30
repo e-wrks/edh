@@ -270,6 +270,8 @@ module Language.Edh.EHI
     edhObjStr,
     edhValueStr,
     edhValueStrTx,
+    edhValueBlob,
+    edhValueBlob',
     edhValueDesc,
     edhValueJson,
     edhValueAsAttrKey,
