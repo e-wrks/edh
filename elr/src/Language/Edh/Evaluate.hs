@@ -1938,7 +1938,7 @@ edhPrepareForLoop
             !ctxDo <-
               if scopedLoop
                 then do
-                  !loopFrame <- adhocScopedFrame tipLooper
+                  !loopFrame <- newNestedFrame tipLooper
                   return
                     ctxLooper
                       { edh'ctx'tip = loopFrame,
@@ -1981,7 +1981,7 @@ edhPrepareForLoop
               !ctxDo <-
                 if scopedLoop
                   then do
-                    !loopFrame <- adhocScopedFrame tipLooper
+                    !loopFrame <- newNestedFrame tipLooper
                     return
                       ctxLooper
                         { edh'ctx'tip = loopFrame,
@@ -2580,40 +2580,53 @@ evalCaseBranches !tgtVal expr@(ExprSrc !x !src'span) !exit !ets = case x of
       EdhCaseOther -> nil
       !v -> v
 
-adhocScopedFrame :: EdhCallFrame -> STM EdhCallFrame
-adhocScopedFrame !baseOnFrame = do
+newNestedFrame :: EdhCallFrame -> STM EdhCallFrame
+newNestedFrame !baseOnFrame = do
+  s <- newNestedScope $ edh'frame'scope baseOnFrame
+  return
+    baseOnFrame
+      { edh'frame'scope = s,
+        edh'exc'handler = defaultEdhExcptHndlr
+      }
+
+newNestedScope :: Scope -> STM Scope
+newNestedScope !baseOnScope = do
   !esAdhoc <- iopdEmpty
   !spid <- unsafeIOToSTM newUnique
-  let !baseOnScope = edh'frame'scope baseOnFrame
-      !adhocScope =
-        baseOnScope
-          { edh'scope'entity = esAdhoc,
-            -- the base scope should be the lexical *outer* of the new nested
-            -- adhoc scope, required for correct contextual attribute
-            -- resolution, and specifically, a `scope()` obtained from within
-            -- the nested adhoc scope should have its @.outer@ point to the
-            -- base scope
-            edh'scope'proc =
-              (edh'scope'proc baseOnScope)
-                { edh'procedure'ident = spid,
-                  edh'procedure'lexi = baseOnScope
-                }
-          }
-  return $ baseOnFrame {edh'frame'scope = adhocScope}
+  return $
+    baseOnScope
+      { edh'scope'entity = esAdhoc,
+        -- the base scope should be the lexical *outer* of the new nested
+        -- adhoc scope, required for correct contextual attribute
+        -- resolution, and specifically, a `scope()` obtained from within
+        -- the nested adhoc scope should have its @.outer@ point to the
+        -- base scope
+        edh'scope'proc =
+          (edh'scope'proc baseOnScope)
+            { edh'procedure'ident = spid,
+              edh'procedure'lexi = baseOnScope
+            }
+      }
 
-pushEdhStack :: EdhTx -> EdhTx
-pushEdhStack !act !ets = do
-  !adhocFrame <- adhocScopedFrame tip
-  let !etsAdhoc = ets {edh'context = ctxAdhoc}
-      !ctxAdhoc =
-        ctx
-          { edh'ctx'tip = adhocFrame,
-            edh'ctx'stack = tip : edh'ctx'stack ctx
-          }
-  runEdhTx etsAdhoc act
+pushEdhStack' :: Scope -> EdhTx -> EdhTx
+pushEdhStack' !scope !act !ets = runEdhTx etsNew act
   where
     !ctx = edh'context ets
     !tip = edh'ctx'tip ctx
+    !srcLoc = procedureLoc' $ edh'scope'proc scope
+
+    !etsNew = ets {edh'context = ctxNew}
+    !ctxNew =
+      ctx
+        { edh'ctx'tip = tipNew,
+          edh'ctx'stack = tip : edh'ctx'stack ctx
+        }
+    !tipNew = EdhCallFrame scope srcLoc defaultEdhExcptHndlr
+
+pushEdhStack :: EdhTx -> EdhTx
+pushEdhStack !act !ets = do
+  !s <- newNestedScope $ edh'frame'scope $ edh'ctx'tip $ edh'context ets
+  pushEdhStack' s act ets
 
 evalScopedBlock :: [StmtSrc] -> EdhTxExit EdhValue -> EdhTx
 evalScopedBlock !stmts !exit !ets =
