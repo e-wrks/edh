@@ -248,6 +248,7 @@ module Language.Edh.EHI
     mkHostClass',
     mkObjSandbox,
     mkScopeSandbox,
+    newSandbox,
     runEdhInSandbox,
     runEdhTxInSandbox,
 
