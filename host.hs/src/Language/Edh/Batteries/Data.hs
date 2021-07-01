@@ -7,6 +7,7 @@ import Control.Concurrent.STM
 import Control.Monad
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
+import Data.Char
 import Data.Lossless.Decimal as D (Decimal, nan)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -34,6 +35,47 @@ strStripEndProc !str !exit = exitEdhTx exit $ EdhString $ T.stripEnd str
 
 strEncodeProc :: Text -> EdhHostProc
 strEncodeProc !str !exit = exitEdhTx exit $ EdhBlob $ TE.encodeUtf8 str
+
+exprDeBlock :: EdhValue -> EdhHostProc
+exprDeBlock (EdhExpr _u _loc _x !src) !exit =
+  exitEdhTx exit $ EdhString $ deBlk $ T.lines src
+  where
+    deBlk :: [Text] -> Text
+    deBlk [] = ""
+    deBlk (line1 : rest) = case T.stripPrefix "{" content of
+      Nothing -> dedent Just indent rest [content]
+      Just !content' -> do
+        let !content'' = T.strip content'
+        case rest of
+          [] -> maybe content'' T.stripEnd $ T.stripSuffix "}" content''
+          (line2 : rest') -> do
+            let (indent2, content2) = T.span isSpace line2
+            dedent stripRightBrace indent2 rest' $
+              T.stripEnd content2 : [content'' | not $ T.null content'']
+      where
+        (indent, content) = T.span isSpace line1
+    stripRightBrace :: Text -> Maybe Text
+    stripRightBrace line = case T.stripSuffix "}" content of
+      Nothing -> if T.null content then Nothing else Just content
+      Just !content' ->
+        let !content'' = T.stripEnd content'
+         in if T.null content'' then Nothing else Just content''
+      where
+        content = T.stripEnd line
+    dedent :: (Text -> Maybe Text) -> Text -> [Text] -> [Text] -> Text
+    dedent modLastLine !indent !tailLines !headLines = go tailLines headLines
+      where
+        go [] (lastLine : prevLines) = T.unlines $
+          reverse $ case modLastLine lastLine of
+            Nothing -> prevLines
+            Just !line -> line : prevLines
+        go (line : rest) cumLines =
+          go rest $
+            (: cumLines) $
+              maybe (T.stripEnd line) T.stripEnd $ T.stripPrefix indent line
+        go [] [] = error "bug: impossible case"
+exprDeBlock !v !exit = edhValueDescTx v $ \badDesc ->
+  exitEdhTx exit $ EdhString $ "not an expr: " <> badDesc
 
 blobDecodeProc :: ByteString -> EdhHostProc
 blobDecodeProc !blob !exit = exitEdhTx exit $ EdhString $ TE.decodeUtf8 blob

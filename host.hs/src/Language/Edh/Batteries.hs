@@ -527,6 +527,7 @@ installEdhBatteries world =
                   (EdhMethod, "__String_stripStart__", wrapHostProc strStripStartProc),
                   (EdhMethod, "__String_stripEnd__", wrapHostProc strStripEndProc),
                   (EdhMethod, "__String_bytes__", wrapHostProc strEncodeProc),
+                  (EdhMethod, "__Expr_deBlock__", wrapHostProc exprDeBlock),
                   (EdhMethod, "__Blob_utf8string__", wrapHostProc blobDecodeProc),
                   (EdhMethod, "__Range_lower__", wrapHostProc rngLowerProc),
                   (EdhMethod, "__Range_upper__", wrapHostProc rngUpperProc),
