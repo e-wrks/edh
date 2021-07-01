@@ -534,7 +534,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
       _ -> exitEdhTx exit valSet
 
     exitWithChkExportTo :: Object -> AttrKey -> EdhValue -> STM ()
-    exitWithChkExportTo !obj !artKey !artVal = do
+    exitWithChkExportTo !obj !artKey !artVal =
       case edh'ctx'exp'target ctx of
         Nothing -> exitEdh ets exit artVal
         Just _esExps -> prepareExpStore ets obj $ \ !esExps -> do
@@ -3524,6 +3524,10 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
             <> edhTypeNameOf badMagic
             <> " on class "
             <> objClassName o
+
+edhValueDescTx :: EdhValue -> EdhTxExit Text -> EdhTx
+edhValueDescTx !v !exit !ets =
+  edhValueDesc ets v $ \ !s -> exitEdh ets exit s
 
 dtcFields ::
   EdhThreadState -> Object -> Object -> ([(Text, EdhValue)] -> STM ()) -> STM ()
