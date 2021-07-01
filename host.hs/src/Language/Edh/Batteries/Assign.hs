@@ -125,8 +125,8 @@ assignWithOpProc !withOpSym lhExpr@(ExprSrc !lhe _) !rhExpr !exit !ets =
                         <> T.pack (show badIndexer)
           _ -> exitEdh ets exit edhNA
     _ -> evalExprSrc rhExpr $ \ !rhVal -> evalExprSrc lhExpr $ \ !lhVal -> do
-      let lhMagicMthName = withOpSym <> "="
-          rhMagicMthName = withOpSym <> "=@"
+      let lhMagicMthName = "(" <> withOpSym <> "=)"
+          rhMagicMthName = "(" <> withOpSym <> "=.)"
           tryRightHandMagic !rhObj =
             lookupEdhObjAttr rhObj (AttrByName rhMagicMthName) >>= \case
               (_, EdhNil) -> exitEdh ets exit edhNA
