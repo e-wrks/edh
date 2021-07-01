@@ -60,7 +60,8 @@ assignProc (ExprSrc !lhe _) !rhExpr !exit !ets =
     _ -> evalExprSrc rhExpr $ \ !rhVal ->
       assignEdhTarget lhe (edhDeCaseWrap rhVal) $
         -- restore original tx state
-        edhSwitchState ets . exitEdhTx exit
+        -- wrap with the sacred return to cease defaulting semantics
+        edhSwitchState ets . exitEdhTx exit . EdhReturn . EdhReturn
   where
     -- discourage artifact definition during assignment
     !etsAssign = ets {edh'context = (edh'context ets) {edh'ctx'pure = True}}
@@ -202,7 +203,10 @@ assignWithOpProc !withOpSym lhExpr@(ExprSrc !lhe _) !rhExpr !exit !ets =
               (LitExpr $ ValueLiteral $ edhDeCaseWrap rhVal)
               $ \ !opRtnV -> case edhUltimate opRtnV of
                 EdhDefault {} -> edhSwitchState ets $ exitEdhTx exit opRtnV
-                _ -> assignEdhTarget lhe opRtnV $ edhSwitchState ets . exit
+                _ ->
+                  assignEdhTarget lhe opRtnV $
+                    -- wrap with the sacred return to cease defaulting semantics
+                    edhSwitchState ets . exit . EdhReturn . EdhReturn
   where
     -- discourage artifact definition during assignment
     !etsAssign = ets {edh'context = (edh'context ets) {edh'ctx'pure = True}}
@@ -232,8 +236,11 @@ assignMissingProc
               let !rhv = edhDeCaseWrap rhVal
                in do
                     edhSetValue key rhv es
-                    exitEdh ets exit rhv
-        Just !preVal -> exitEdh ets exit preVal
+                    -- wrap with the sacred return to cease defaulting semantics
+                    exitEdh ets exit $ EdhReturn $ EdhReturn rhv
+        Just !preVal ->
+          -- wrap with the sacred return to cease defaulting semantics
+          exitEdh ets exit $ EdhReturn $ EdhReturn preVal
 assignMissingProc !lhExpr _ _ !ets =
   throwEdh ets EvalError $
     "invalid left-hand expression to (?=) " <> T.pack (show lhExpr)
@@ -244,7 +251,9 @@ overwriteNullProc !lhExpr !rhExpr !exit !ets =
   runEdhTx etsOverwrite $
     evalExprSrc lhExpr $ \ !lhVal _ets ->
       edhValueNull etsOverwrite lhVal $ \case
-        False -> exitEdh ets exit lhVal
+        False ->
+          -- wrap with the sacred return to cease defaulting semantics
+          exitEdh ets exit $ EdhReturn $ EdhReturn lhVal
         True ->
           runEdhTx etsOverwrite $
             assignProc assignTgtExpr rhExpr $

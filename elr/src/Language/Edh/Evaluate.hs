@@ -4286,37 +4286,41 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
                   "can only import into an object, not a "
                     <> edhTypeNameOf intoVal
 evalExpr' (DefaultExpr !maybeApk exprSrc@(ExprSrc !exprDef _)) _docCmt !exit =
-  \ !ets -> case edh'ctx'eff'target $ edh'context ets of
-    Nothing -> do
-      !u <- unsafeIOToSTM newUnique
-      let withApk !apk = exitEdh ets exit $ EdhDefault u apk exprDef (Just ets)
-      case maybeApk of
-        Nothing -> withApk $ ArgsPack [] odEmpty
-        Just (ArgsPacker !argsSndr _) -> packEdhArgs ets argsSndr withApk
-    Just _esEffs -> do
-      let ctx = edh'context ets
-          withKwargs !kwargs = do
-            !esEffDefs <-
-              prepareEffStore' (AttrByName edhEffectDefaultsMagicName) ets $
-                edh'scope'entity $ contextScope ctx
-            -- no nil can come from kwargs of an apk,
-            -- so no processing of delete semantics
-            iopdUpdate (odToList kwargs) esEffDefs
-            runEdhTx
-              ets {edh'context = ctx {edh'ctx'eff'target = Just esEffDefs}}
-              $ evalExprSrc (deExprSrc exprSrc) $
-                const $ edhSwitchState ets $ exitEdhTx exit nil
-      case maybeApk of
-        Nothing -> withKwargs odEmpty
-        Just (ArgsPacker !argsSndr _) ->
-          packEdhArgs ets argsSndr $ \(ArgsPack !args !kwargs) ->
-            if null args
-              then withKwargs kwargs
-              else
-                throwEdh
-                  ets
-                  UsageError
-                  "you don't pass positional args for `effect default`"
+  \ !ets -> do
+    let ctx = edh'context ets
+    case edh'ctx'eff'target ctx of
+      -- a default expr in non-pure context is interpreted as defaulting effects
+      -- definition, but not so within pure context (e.g. assignment or return)
+      Just _esEffs | not $ edh'ctx'pure ctx -> do
+        let withKwargs !kwargs = do
+              !esEffDefs <-
+                prepareEffStore' (AttrByName edhEffectDefaultsMagicName) ets $
+                  edh'scope'entity $ contextScope ctx
+              -- no nil can come from kwargs of an apk,
+              -- so no processing of delete semantics
+              iopdUpdate (odToList kwargs) esEffDefs
+              runEdhTx
+                ets {edh'context = ctx {edh'ctx'eff'target = Just esEffDefs}}
+                $ evalExprSrc (deExprSrc exprSrc) $
+                  const $ edhSwitchState ets $ exitEdhTx exit nil
+        case maybeApk of
+          Nothing -> withKwargs odEmpty
+          Just (ArgsPacker !argsSndr _) ->
+            packEdhArgs ets argsSndr $ \(ArgsPack !args !kwargs) ->
+              if null args
+                then withKwargs kwargs
+                else
+                  throwEdh
+                    ets
+                    UsageError
+                    "you don't pass positional args for `effect default`"
+      _ -> do
+        !u <- unsafeIOToSTM newUnique
+        let withApk !apk =
+              exitEdh ets exit $ EdhDefault u apk exprDef (Just ets)
+        case maybeApk of
+          Nothing -> withApk $ ArgsPack [] odEmpty
+          Just (ArgsPacker !argsSndr _) -> packEdhArgs ets argsSndr withApk
   where
     deExprSrc :: ExprSrc -> ExprSrc
     deExprSrc (ExprSrc (ExprWithSrc x _) _) = deExprSrc x
@@ -4804,11 +4808,17 @@ evalInfixSrc'
         EdhIntrOp _ _ (IntrinOpDefi _ _ iop'proc) ->
           runEdhTx ets $
             iop'proc lhExpr rhExpr $ \ !rtnVal _ets ->
-              case edhUltimate rtnVal of
-                EdhDefault _ !apkDef !exprDef !etsDef ->
-                  tryMagicWithDefault apkDef (deExpr' exprDef) etsDef
-                -- exit with original thread state
-                _ -> exitEdh ets exit rtnVal
+              case rtnVal of
+                EdhReturn (EdhReturn !rtnVal') ->
+                  -- cease defaulting semantics w.r.t. the sacred return
+                  -- exit with original thread state
+                  exitEdh ets exit rtnVal'
+                _ -> case edhUltimate rtnVal of
+                  EdhDefault _ !apkDef !exprDef !etsDef ->
+                    tryMagicWithDefault apkDef (deExpr' exprDef) etsDef
+                  _ ->
+                    -- exit with original thread state
+                    exitEdh ets exit rtnVal
         -- calling an operator procedure
         EdhOprtor _ _ !op'pred !op'proc ->
           case edh'procedure'args $ edh'procedure'decl op'proc of
@@ -4823,10 +4833,21 @@ evalInfixSrc'
                       op'proc
                       op'pred
                       [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
-                      $ \ !rtnVal _ets -> case edhUltimate rtnVal of
-                        EdhDefault _ _apkDef !exprDef !etsDef ->
-                          tryMagicWithDefault' (deExpr' exprDef) etsDef lhVal rhVal
-                        _ -> exitEdh ets exit rtnVal
+                      $ \ !rtnVal _ets -> case rtnVal of
+                        EdhReturn (EdhReturn !rtnVal') ->
+                          -- cease defaulting semantics w.r.t. the sacred return
+                          -- exit with original thread state
+                          exitEdh ets exit rtnVal'
+                        _ -> case edhUltimate rtnVal of
+                          EdhDefault _ _apkDef !exprDef !etsDef ->
+                            tryMagicWithDefault'
+                              (deExpr' exprDef)
+                              etsDef
+                              lhVal
+                              rhVal
+                          _ ->
+                            -- exit with original thread state
+                            exitEdh ets exit rtnVal
             -- @remind 3 pos-args - caller scope + lh/rh expr receiving operator
             (PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}]) -> do
               !lhu <- unsafeIOToSTM newUnique
@@ -4842,17 +4863,25 @@ evalInfixSrc'
                     edhExpr lhu lhExpr "",
                     edhExpr rhu rhExpr ""
                   ]
-                  $ \ !rtnVal _ets -> case edhUltimate rtnVal of
-                    EdhDefault _ !apkDef !exprDef !etsDef ->
-                      tryMagicWithDefault apkDef (deExpr' exprDef) etsDef
-                    _ -> exitEdh ets exit rtnVal
+                  $ \ !rtnVal _ets -> case rtnVal of
+                    EdhReturn (EdhReturn !rtnVal') ->
+                      -- cease defaulting semantics w.r.t. the sacred return
+                      -- exit with original thread state
+                      exitEdh ets exit rtnVal'
+                    _ -> case edhUltimate rtnVal of
+                      EdhDefault _ !apkDef !exprDef !etsDef ->
+                        tryMagicWithDefault apkDef (deExpr' exprDef) etsDef
+                      _ ->
+                        -- exit with original thread state
+                        exitEdh ets exit rtnVal
             _ ->
               throwEdh ets UsageError $
                 "invalid operator signature: "
                   <> T.pack
                     (show $ edh'procedure'args $ edh'procedure'decl op'proc)
         _ ->
-          throwEdh ets UsageError $ "invalid operator: " <> T.pack (show callable)
+          throwEdh ets UsageError $
+            "invalid operator: " <> T.pack (show callable)
 
       edhExpr !u (ExprSrc !x !x'span) !s =
         EdhExpr u curSrcLoc {src'range = x'span} x s
