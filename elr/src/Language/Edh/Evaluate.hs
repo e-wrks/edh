@@ -6089,22 +6089,25 @@ mkScopeSandbox !ets !origScope !exit =
 
 newSandbox :: EdhThreadState -> STM Scope
 newSandbox !ets = do
-  !es <- iopdEmpty
   !u <- unsafeIOToSTM newUnique
-  let sbObj =
-        (edh'scope'this sandboxScope)
+  !es <- iopdEmpty
+  let newSbObj =
+        (edh'scope'this sbScope)
           { edh'obj'ident = u,
             edh'obj'store = HashStore es
           }
-  return $
-    sandboxScope
+      newSbProc = sbProc {edh'procedure'ident = u}
+  return
+    sbScope
       { edh'scope'entity = es,
-        edh'scope'this = sbObj,
-        edh'scope'that = sbObj
+        edh'scope'this = newSbObj,
+        edh'scope'that = newSbObj,
+        edh'scope'proc = newSbProc
       }
   where
     !world = edh'prog'world $ edh'thread'prog ets
-    !sandboxScope = edh'world'sandbox world
+    !sbScope = edh'world'sandbox world
+    !sbProc = edh'scope'proc sbScope
 
 runEdhTxInSandbox :: Scope -> EdhHostProc -> EdhTxExit EdhValue -> EdhTx
 runEdhTxInSandbox !sandbox !act !exit !ets =
