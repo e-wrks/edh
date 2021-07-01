@@ -4654,20 +4654,15 @@ evalInfixSrc'
   !exit
   !ets =
     resolveEdhCtxAttr scope (AttrByName opSym) >>= \case
-      Nothing -> runEdhTx ets $
-        evalExprSrc lhExpr $ \ !lhVal ->
-          evalExprSrc rhExpr $ \ !rhVal _ets ->
-            tryMagicMethod lhVal rhVal $ runEdhTx ets $ notApplicable lhVal rhVal
+      Nothing ->
+        throwEdh ets EvalError $ "no operator (" <> opSym <> ") in scope"
       Just (!opVal, !op'lexi) -> case opVal of
         EdhProcedure !callable _ ->
           callProc (edh'scope'this op'lexi) (edh'scope'that op'lexi) callable
         EdhBoundProc !callable !this !that _ -> callProc this that callable
         _ -> edhValueDesc ets opVal $ \ !badDesc ->
           throwEdh ets EvalError $
-            "not callable as operator ("
-              <> opSym
-              <> "): "
-              <> badDesc
+            "not callable as operator (" <> opSym <> "): " <> badDesc
     where
       magicName = "(" <> opSym <> ")"
       rhMagicName = "(" <> opSym <> ".)"
