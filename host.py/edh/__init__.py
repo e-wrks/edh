@@ -23,6 +23,9 @@ __all__ = [
     # exports from .expr
     'expr',
 
+    # exports from .sig
+    'dump_stacks_on_SIGQUIT',
+
     # exports from .sym
     'Symbol',
 
@@ -34,4 +37,5 @@ from .ctrl import *
 from .eff import *
 from .evt import *
 from .expr import *
+from .sig import *
 from .sym import *
