@@ -541,7 +541,7 @@ installEdhBatteries world =
                   (EdhMethod, "id", wrapHostProc idProc),
                   (EdhMethod, "blob", wrapHostProc blobProc),
                   (EdhMethod, "str", wrapHostProc strProc),
-                  (EdhMethod, "json", (jsonProc, WildReceiver)),
+                  (EdhMethod, "json", wrapHostProc jsonProc),
                   (EdhMethod, "repr", wrapHostProc reprProc),
                   (EdhMethod, "cap", wrapHostProc capProc),
                   (EdhMethod, "grow", wrapHostProc growProc),
@@ -638,7 +638,7 @@ installEdhBatteries world =
         importEdhModule'
           rootEntity
           rootObj
-          WildReceiver
+          (WildReceiver noSrcRange)
           "batteries/root"
           endOfEdh
 
@@ -647,7 +647,7 @@ installEdhBatteries world =
         importEdhModule'
           sandboxEntity
           sandboxObj
-          WildReceiver
+          (WildReceiver noSrcRange)
           "batteries/sandbox"
           endOfEdh
   where

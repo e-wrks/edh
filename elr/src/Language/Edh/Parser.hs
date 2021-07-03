@@ -277,22 +277,34 @@ parseArgsReceiver =
   packReceiver <|> dropReceiver <|> wildReceiver <|> singleReceiver
   where
     wildReceiver = do
+      !startPos <- getSourcePos
       void $ symbol "*"
-      (<|> return WildReceiver) $ do
-        void $ keyword "as"
-        SingleReceiver . RecvRestPkArgs <$> parseAttrAddrSrc
+      choice
+        [ do
+            void $ keyword "as"
+            SingleReceiver . RecvRestPkArgs <$> parseAttrAddrSrc,
+          do
+            EdhParserState _ !lexeme'end <- get
+            return $
+              WildReceiver $ SrcRange (lspSrcPosFromParsec startPos) lexeme'end
+        ]
 
     dropReceiver =
       SingleReceiver . RecvRestPkArgs . AttrAddrSrc (NamedAttr "_")
         <$> keyword "_"
 
-    packReceiver =
-      choice
-        [ symbol "(" >> PackReceiver . reverse <$> parseRestArgRecvs ")",
-          -- following is for JavaScript src level compatibility
-          symbol "[" >> PackReceiver . reverse <$> parseRestArgRecvs "]",
-          symbol "{" >> PackReceiver . reverse <$> parseRestArgRecvs "}"
-        ]
+    packReceiver = do
+      !startPos <- getSourcePos
+      !ars <-
+        choice
+          [ symbol "(" >> reverse <$> parseRestArgRecvs ")",
+            -- following is for JavaScript src level compatibility
+            symbol "[" >> reverse <$> parseRestArgRecvs "]",
+            symbol "{" >> reverse <$> parseRestArgRecvs "}"
+          ]
+      EdhParserState _ !lexeme'end <- get
+      return $
+        PackReceiver ars $ SrcRange (lspSrcPosFromParsec startPos) lexeme'end
 
     singleReceiver = SingleReceiver <$> parseKwRecv False
 
@@ -462,7 +474,12 @@ parseNamespaceExpr !si = do
   EdhParserState _ !lexeme'end <- get
   return
     ( NamespaceExpr
-        (ProcDecl pn WildReceiver body (lspSrcLocFromParsec startPos lexeme'end))
+        ( ProcDecl
+            pn
+            NullaryReceiver
+            body
+            (lspSrcLocFromParsec startPos lexeme'end)
+        )
         argSender,
       si''
     )
@@ -476,7 +493,11 @@ parseClassExpr !si = do
   EdhParserState _ !lexeme'end <- get
   return
     ( ClassExpr $
-        ProcDecl pn WildReceiver body (lspSrcLocFromParsec startPos lexeme'end),
+        ProcDecl
+          pn
+          NullaryReceiver
+          body
+          (lspSrcLocFromParsec startPos lexeme'end),
       si'
     )
 
@@ -611,7 +632,7 @@ parseOpDeclOvrdExpr !si = do
   --  * 2 pos-args - simple lh/rh value receiving operator
   --  * 3 pos-args - caller scope + lh/rh expr receiving operator
   case argsRcvr of
-    PackReceiver ars | length ars `elem` [0, 2, 3] -> do
+    PackReceiver ars _ | length ars `elem` [0, 2, 3] -> do
       (!body, !si') <- parseProcBody si
       EdhParserState _ !lexeme'end <- get
       let !procDecl =
@@ -864,7 +885,8 @@ parseForExpr !si = do
   return (ForExpr scoped ar iter bodyStmt, si'')
 
 parseLoopHead :: IntplSrcInfo -> Parser (ArgsReceiver, ExprSrc, IntplSrcInfo)
-parseLoopHead !si =
+parseLoopHead !si = do
+  !startPos <- getSourcePos
   choice
     [ symbol "(" -- possible JavaScript syntax
         >> choice
@@ -897,9 +919,15 @@ parseLoopHead !si =
             do
               -- Edh or Python-like syntax
               ars <- parseRestArgRecvs ")"
+              EdhParserState _ !lexeme'end <- get
               void $ keyword "from" <|> keyword "in"
               (!iter, !si') <- parseExpr si
-              return (PackReceiver $ reverse $! ars, iter, si')
+              return
+                ( PackReceiver (reverse $! ars) $
+                    SrcRange (lspSrcPosFromParsec startPos) lexeme'end,
+                  iter,
+                  si'
+                )
           ],
       do
         -- drop receiver, exclusively Edh syntax
@@ -913,9 +941,17 @@ parseLoopHead !si =
       do
         -- wild arg receiver, exclusively Edh syntax
         void $ symbol "*"
-        !ar <- (<|> return WildReceiver) $ do
-          void $ keyword "as"
-          SingleReceiver . RecvRestPkArgs <$> parseAttrAddrSrc
+        !ar <-
+          choice
+            [ do
+                void $ keyword "as"
+                SingleReceiver . RecvRestPkArgs <$> parseAttrAddrSrc,
+              do
+                EdhParserState _ !lexeme'end <- get
+                return $
+                  WildReceiver $
+                    SrcRange (lspSrcPosFromParsec startPos) lexeme'end
+            ]
         void $ keyword "from"
         (!iter, !si') <- parseExpr si
         return (ar, iter, si'),

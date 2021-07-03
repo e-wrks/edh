@@ -248,11 +248,11 @@ methodArrowArgsReceiver
   !exit = case addr of
     NamedAttr "_" -> exit $ Right $ SingleReceiver $ RecvRestPkArgs argAttr
     _ -> exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing
-methodArrowArgsReceiver (ArgsPackExpr (ArgsPacker !argSndrs _)) !exit =
+methodArrowArgsReceiver (ArgsPackExpr (ArgsPacker !argSndrs !sndrsSpan)) !exit =
   cnvrt argSndrs []
   where
     cnvrt :: [ArgSender] -> [ArgReceiver] -> STM ()
-    cnvrt [] !rcvrs = exit $ Right $ PackReceiver $ reverse rcvrs
+    cnvrt [] !rcvrs = exit $ Right $ PackReceiver (reverse rcvrs) sndrsSpan
     cnvrt (sndr : rest) !rcvrs = case sndr of
       UnpackPosArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
         cnvrt rest (RecvRestPosArgs argRef : rcvrs)
@@ -317,41 +317,47 @@ producerArrowArgsReceiver ::
   STM ()
 producerArrowArgsReceiver (AttrExpr (DirectRef !argAttr)) !exit =
   exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing
-producerArrowArgsReceiver (ArgsPackExpr (ArgsPacker !argSndrs _)) !exit =
-  cnvrt False argSndrs []
-  where
-    cnvrt :: Bool -> [ArgSender] -> [ArgReceiver] -> STM ()
-    cnvrt !outletPrsnt [] !rcvrs =
-      if outletPrsnt
-        then exit $ Right $ PackReceiver $ reverse rcvrs
-        else
+producerArrowArgsReceiver
+  (ArgsPackExpr (ArgsPacker !argSndrs !sndrsSpan))
+  !exit =
+    cnvrt False argSndrs []
+    where
+      cnvrt :: Bool -> [ArgSender] -> [ArgReceiver] -> STM ()
+      cnvrt !outletPrsnt [] !rcvrs =
+        if outletPrsnt
+          then exit $ Right $ PackReceiver (reverse rcvrs) sndrsSpan
+          else
+            exit $
+              Right $
+                PackReceiver
+                  ( reverse
+                      $! RecvArg
+                        (AttrAddrSrc (NamedAttr "outlet") noSrcRange)
+                        ( Just
+                            (DirectRef (AttrAddrSrc (NamedAttr "_") noSrcRange))
+                        )
+                        (Just (ExprSrc (LitExpr SinkCtor) noSrcRange)) :
+                    rcvrs
+                  )
+                  sndrsSpan
+      cnvrt !outletPrsnt (sndr : rest) !rcvrs = case sndr of
+        UnpackPosArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+          cnvrt outletPrsnt rest (RecvRestPosArgs argRef : rcvrs)
+        UnpackKwArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+          cnvrt outletPrsnt rest (RecvRestKwArgs argRef : rcvrs)
+        UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+          cnvrt outletPrsnt rest (RecvRestPkArgs argRef : rcvrs)
+        SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+          cnvrt outletPrsnt rest (RecvArg argRef Nothing Nothing : rcvrs)
+        SendKwArg argRef@(AttrAddrSrc !argAttr _) !defExpr ->
+          cnvrt
+            (outletPrsnt || argAttr == NamedAttr "outlet")
+            rest
+            (RecvArg argRef Nothing (Just defExpr) : rcvrs)
+        !badSndr ->
           exit $
-            Right $
-              PackReceiver $
-                reverse
-                  $! RecvArg
-                    (AttrAddrSrc (NamedAttr "outlet") noSrcRange)
-                    (Just (DirectRef (AttrAddrSrc (NamedAttr "_") noSrcRange)))
-                    (Just (ExprSrc (LitExpr SinkCtor) noSrcRange)) :
-                rcvrs
-    cnvrt !outletPrsnt (sndr : rest) !rcvrs = case sndr of
-      UnpackPosArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-        cnvrt outletPrsnt rest (RecvRestPosArgs argRef : rcvrs)
-      UnpackKwArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-        cnvrt outletPrsnt rest (RecvRestKwArgs argRef : rcvrs)
-      UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-        cnvrt outletPrsnt rest (RecvRestPkArgs argRef : rcvrs)
-      SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-        cnvrt outletPrsnt rest (RecvArg argRef Nothing Nothing : rcvrs)
-      SendKwArg argRef@(AttrAddrSrc !argAttr _) !defExpr ->
-        cnvrt
-          (outletPrsnt || argAttr == NamedAttr "outlet")
-          rest
-          (RecvArg argRef Nothing (Just defExpr) : rcvrs)
-      !badSndr ->
-        exit $
-          Left $
-            "invalid argument expr for arrow: " <> T.pack (show badSndr)
+            Left $
+              "invalid argument expr for arrow: " <> T.pack (show badSndr)
 producerArrowArgsReceiver !badArgs !exit =
   exit $ Left $ "invalid argument expr for arrow: " <> T.pack (show badArgs)
 

@@ -1468,28 +1468,37 @@ attrAddrStr MissedAttrName = "<?>"
 attrAddrStr MissedAttrSymbol = "@<?>"
 
 receivesNamedArg :: Text -> ArgsReceiver -> Bool
-receivesNamedArg _ WildReceiver = True
 receivesNamedArg !name (SingleReceiver !argRcvr) = case argRcvr of
   RecvArg (AttrAddrSrc !addr _) _ _ | addr == NamedAttr name -> True
   _ -> False
-receivesNamedArg !name (PackReceiver !argRcvrs) = hasNamedArg argRcvrs
+receivesNamedArg !name (PackReceiver !argRcvrs _) = hasNamedArg argRcvrs
   where
     hasNamedArg :: [ArgReceiver] -> Bool
     hasNamedArg [] = False
     hasNamedArg (arg : rest) = case arg of
       RecvArg (AttrAddrSrc !addr _) _ _ | addr == NamedAttr name -> True
       _ -> hasNamedArg rest
+receivesNamedArg _ (WildReceiver _) = True
+receivesNamedArg _ NullaryReceiver = False
 
 data ArgsReceiver
-  = PackReceiver ![ArgReceiver]
+  = PackReceiver ![ArgReceiver] !SrcRange
   | SingleReceiver !ArgReceiver
-  | WildReceiver
+  | WildReceiver !SrcRange
+  | NullaryReceiver
   deriving (Eq)
 
+argsReceiverSpan :: ArgsReceiver -> SrcRange
+argsReceiverSpan (PackReceiver _ src'span) = src'span
+argsReceiverSpan (SingleReceiver ar) = argReceiverSpan ar
+argsReceiverSpan (WildReceiver src'span) = src'span
+argsReceiverSpan NullaryReceiver = noSrcRange
+
 instance Show ArgsReceiver where
-  show (PackReceiver rs) = "( " ++ unwords ((++ ", ") . show <$> rs) ++ ")"
+  show (PackReceiver rs _) = "( " ++ unwords ((++ ", ") . show <$> rs) ++ ")"
   show (SingleReceiver r) = "(" ++ show r ++ ")"
-  show WildReceiver = "*"
+  show (WildReceiver _) = "*"
+  show NullaryReceiver = "()"
 
 data ArgReceiver
   = -- @* <args | @args'ptr>@
@@ -1502,7 +1511,13 @@ data ArgReceiver
     RecvArg !AttrAddrSrc !(Maybe AttrRef) !(Maybe ExprSrc)
   deriving (Eq, Show)
 
-data ArgsPacker = ArgsPacker [ArgSender] SrcRange
+argReceiverSpan :: ArgReceiver -> SrcRange
+argReceiverSpan (RecvRestPosArgs (AttrAddrSrc _ src'span)) = src'span
+argReceiverSpan (RecvRestKwArgs (AttrAddrSrc _ src'span)) = src'span
+argReceiverSpan (RecvRestPkArgs (AttrAddrSrc _ src'span)) = src'span
+argReceiverSpan (RecvArg (AttrAddrSrc _ src'span) _ _) = src'span
+
+data ArgsPacker = ArgsPacker [ArgSender] !SrcRange
   deriving (Eq)
 
 instance Show ArgsPacker where
@@ -1823,7 +1838,8 @@ objectScope !obj = case edh'obj'store obj of
                   edh'scope'proc =
                     ProcDefi
                       { edh'procedure'ident = edh'obj'ident obj,
-                        edh'procedure'name = AttrByName $ "module:" <> moduName,
+                        edh'procedure'name =
+                          AttrByName $ "module:" <> moduName,
                         edh'procedure'lexi = edh'procedure'lexi ocProc,
                         edh'procedure'doc = NoDocCmt,
                         edh'procedure'decl =
@@ -1832,9 +1848,11 @@ objectScope !obj = case edh'obj'store obj of
                                 AttrAddrSrc
                                   (NamedAttr $ "module:" <> moduName)
                                   zeroSrcRange,
-                              edh'procedure'args = PackReceiver [],
-                              edh'procedure'body = StmtSrc VoidStmt zeroSrcRange,
-                              edh'procedure'loc = SrcLoc (SrcDoc moduFile) zeroSrcRange
+                              edh'procedure'args = NullaryReceiver,
+                              edh'procedure'body =
+                                StmtSrc VoidStmt zeroSrcRange,
+                              edh'procedure'loc =
+                                SrcLoc (SrcDoc moduFile) zeroSrcRange
                             }
                       },
                   edh'effects'stack = []

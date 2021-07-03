@@ -1032,7 +1032,7 @@ recvEdhArgs ::
   STM ()
 recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit =
   case argsRcvr of
-    PackReceiver argRcvrs ->
+    PackReceiver argRcvrs _ ->
       iopdEmpty >>= \ !em ->
         let go :: [ArgReceiver] -> ArgsPack -> STM ()
             go [] !apk' =
@@ -1044,7 +1044,7 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
       iopdEmpty >>= \ !em ->
         recvFromPack apk em argRcvr $ \ !apk' ->
           woResidual apk' $ iopdSnapshot em >>= edhDoSTM etsCaller . exit
-    WildReceiver ->
+    WildReceiver _ ->
       if null posArgs
         then edhDoSTM etsCaller $ exit kwArgs
         else
@@ -1052,6 +1052,14 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
             "unexpected "
               <> T.pack (show $ length posArgs)
               <> " positional argument(s) to wild receiver"
+    NullaryReceiver ->
+      if null posArgs
+        then edhDoSTM etsCaller $ exit kwArgs
+        else
+          throwEdh etsCaller EvalError $
+            "unexpected "
+              <> T.pack (show $ length posArgs)
+              <> " positional argument(s) to nullary receiver"
   where
     -- execution of the args receiving always in the callee's outer context
     !etsRecv = etsCaller {edh'context = recvCtx}
@@ -1382,7 +1390,7 @@ edhPrepareCall !etsCallPrep !calleeVal !argsSndr !callMaker =
       _ -> False
 
     is3Args = \case
-      PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}] -> True
+      PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}] _ -> True
       _ -> False
 
 -- | Prepare an Edh call
@@ -1529,17 +1537,18 @@ edhPrepareCall'
         EdhOprtor _ _ !op'pred !op'proc -> case args of
           [EdhExpr _ _ !lhx _, EdhExpr _ _ !rhx _] | odNull kwargs ->
             case edh'procedure'args $ edh'procedure'decl op'proc of
-              (PackReceiver [RecvArg {}, RecvArg {}]) -> callMaker $ \ !exit ->
-                evalExpr lhx $ \ !lhVal ->
-                  evalExpr rhx $ \ !rhVal ->
-                    callEdhOperator
-                      this
-                      that
-                      op'proc
-                      op'pred
-                      [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
-                      exit
-              (PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}]) ->
+              (PackReceiver [RecvArg {}, RecvArg {}] _) ->
+                callMaker $ \ !exit ->
+                  evalExpr lhx $ \ !lhVal ->
+                    evalExpr rhx $ \ !rhVal ->
+                      callEdhOperator
+                        this
+                        that
+                        op'proc
+                        op'pred
+                        [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
+                        exit
+              (PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}] _) ->
                 callMaker $ \ !exit !etsCaller -> do
                   !scopeWrapper <-
                     mkScopeWrapper etsCaller $
@@ -3397,11 +3406,12 @@ intplAttrAddr _ets !addr !exit' = exit' addr
 intplArgsRcvr ::
   EdhThreadState -> ArgsReceiver -> (ArgsReceiver -> STM ()) -> STM ()
 intplArgsRcvr !ets !a !exit = case a of
-  PackReceiver !rcvrs -> seqcontSTM (intplArgRcvr <$> rcvrs) $
-    \ !rcvrs' -> exit $ PackReceiver rcvrs'
+  PackReceiver !rcvrs !src'span -> seqcontSTM (intplArgRcvr <$> rcvrs) $
+    \ !rcvrs' -> exit $ PackReceiver rcvrs' src'span
   SingleReceiver !rcvr ->
     intplArgRcvr rcvr $ \ !rcvr' -> exit $ SingleReceiver rcvr'
-  WildReceiver -> exit WildReceiver
+  WildReceiver !src'span -> exit $ WildReceiver src'span
+  NullaryReceiver -> exit NullaryReceiver
   where
     intplArgRcvr :: ArgReceiver -> (ArgReceiver -> STM ()) -> STM ()
     intplArgRcvr !a' !exit' = case a' of
@@ -3586,10 +3596,12 @@ dtcFields !ets !dataCls !obj !exit = do
   case edh'obj'store dataCls of
     ClassStore !cls ->
       case edh'procedure'args $ edh'procedure'decl $ edh'class'proc cls of
-        WildReceiver ->
-          throwEdh ets EvalError "bug: not a data class for dtcFields"
-        PackReceiver !drs -> go drs []
+        PackReceiver !drs _ -> go drs []
         SingleReceiver !dr -> go [dr] []
+        WildReceiver _ ->
+          throwEdh ets UsageError "wild receiver for data class not supported"
+        NullaryReceiver ->
+          throwEdh ets EvalError "bug: not a data class for dtcFields"
     _ -> throwEdh ets EvalError "bug: data class not bearing ClassStore"
 
 dtcReprProc :: ArgsPack -> EdhHostProc
@@ -4368,7 +4380,7 @@ evalExpr'
       let allocatorProc :: ArgsPack -> EdhObjectAllocator
           allocatorProc !apkCtor !exitCtor !etsCtor = case argsRcvr of
             -- a normal class
-            WildReceiver -> exitCtor Nothing . HashStore =<< iopdEmpty
+            NullaryReceiver -> exitCtor Nothing . HashStore =<< iopdEmpty
             -- a data class
             _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
               let !diKey =
@@ -4418,17 +4430,17 @@ evalExpr'
 
       case argsRcvr of
         -- a normal class
-        WildReceiver -> pure ()
+        NullaryReceiver -> pure ()
         -- a data class
         _ -> do
           !clsArts <-
             sequence $
               [ (AttrByName nm,) <$> mkHostProc clsScope mc nm hp
                 | (mc, nm, hp) <-
-                    [ (EdhMethod, "__repr__", (dtcReprProc, WildReceiver)),
-                      (EdhMethod, "__str__", (dtcReprProc, WildReceiver)),
-                      (EdhMethod, "__eq__", (dtcEqProc, WildReceiver)),
-                      (EdhMethod, "__compare__", (dtcCmpProc, WildReceiver))
+                    [ (EdhMethod, "__repr__", (dtcReprProc, NullaryReceiver)),
+                      (EdhMethod, "__str__", (dtcReprProc, NullaryReceiver)),
+                      (EdhMethod, "__eq__", (dtcEqProc, NullaryReceiver)),
+                      (EdhMethod, "__compare__", (dtcCmpProc, NullaryReceiver))
                     ]
               ]
           iopdUpdate clsArts cs
@@ -4565,17 +4577,19 @@ evalExpr' (ProducerExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _)) !docCmt !exit
         (Just (DirectRef (AttrAddrSrc (NamedAttr "_") noSrcRange)))
         (Just (ExprSrc (LitExpr SinkCtor) noSrcRange))
     alwaysWithOutlet :: ArgsReceiver -> ArgsReceiver
-    alwaysWithOutlet asr@(PackReceiver !ars) = go ars
+    alwaysWithOutlet asr@(PackReceiver !ars !src'span) = go ars
       where
         go :: [ArgReceiver] -> ArgsReceiver
-        go [] = PackReceiver $ bypassOutlet : ars
+        go [] = PackReceiver (bypassOutlet : ars) src'span
         go (RecvArg (AttrAddrSrc (NamedAttr "outlet") _) _ _ : _) = asr
         go (_ : ars') = go ars'
     alwaysWithOutlet
       asr@(SingleReceiver (RecvArg (AttrAddrSrc (NamedAttr "outlet") _) _ _)) =
         asr
-    alwaysWithOutlet (SingleReceiver !sr) = PackReceiver [bypassOutlet, sr]
+    alwaysWithOutlet (SingleReceiver !sr) =
+      PackReceiver [bypassOutlet, sr] $ argReceiverSpan sr
     alwaysWithOutlet wr@WildReceiver {} = wr
+    alwaysWithOutlet wr@NullaryReceiver {} = wr
 evalExpr'
   (OpDefiExpr !opFixity !opPrec (OpSymSrc !opSym _opSpan) !opProc)
   !docCmt
@@ -4831,7 +4845,7 @@ evalInfixSrc'
         EdhOprtor _ _ !op'pred !op'proc ->
           case edh'procedure'args $ edh'procedure'decl op'proc of
             -- 2 pos-args - simple lh/rh value receiving operator
-            (PackReceiver [RecvArg {}, RecvArg {}]) ->
+            (PackReceiver [RecvArg {}, RecvArg {}] _) ->
               runEdhTx ets $
                 evalExprSrc lhExpr $ \ !lhVal ->
                   evalExprSrc rhExpr $ \ !rhVal ->
@@ -4857,7 +4871,7 @@ evalInfixSrc'
                             -- exit with original thread state
                             exitEdh ets exit rtnVal
             -- @remind 3 pos-args - caller scope + lh/rh expr receiving operator
-            (PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}]) -> do
+            (PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}] _) -> do
               !lhu <- unsafeIOToSTM newUnique
               !rhu <- unsafeIOToSTM newUnique
               !scopeWrapper <- mkScopeWrapper ets scope
@@ -4928,7 +4942,7 @@ defineOperator
         HostDecl {} -> throwEdh ets EvalError "bug: eval host op decl"
         ProcDecl
           _
-          (PackReceiver [])
+          (PackReceiver [] _)
           ( StmtSrc
               ( ExprStmt
                   (AttrExpr (DirectRef (AttrAddrSrc !refPreExisting _)))
@@ -5078,6 +5092,7 @@ defineOperator
               [ RecvArg _lhName Nothing Nothing,
                 RecvArg _rhName Nothing Nothing
                 ]
+              _
             ) ->
               defineEdhOp
           -- 3 pos-args - caller scope + lh/rh expr receiving operator
@@ -5086,6 +5101,7 @@ defineOperator
                 RecvArg _lhName Nothing Nothing,
                 RecvArg _rhName Nothing Nothing
                 ]
+              _
             ) ->
               defineEdhOp
           _ -> throwEdh ets EvalError "invalid operator arguments signature"

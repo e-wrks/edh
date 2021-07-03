@@ -13,10 +13,7 @@ import qualified Data.Text as T
 import qualified Data.UUID as UUID
 import Data.Unique (newUnique)
 import GHC.Conc (unsafeIOToSTM)
-import GHC.TypeLits
-  ( KnownSymbol,
-    symbolVal,
-  )
+import GHC.TypeLits (KnownSymbol, symbolVal)
 import Language.Edh.Args
 import Language.Edh.Control
 import Language.Edh.Evaluate
@@ -29,7 +26,7 @@ import Prelude
 wrapHostProc :: EdhCallable fn => fn -> (ArgsPack -> EdhHostProc, ArgsReceiver)
 wrapHostProc !fn =
   -- TODO derive arg receivers (procedure signature)
-  (callFromEdh fn, WildReceiver)
+  (callFromEdh fn, WildReceiver noSrcRange)
 
 mkHostProc' ::
   EdhCallable fn =>
