@@ -611,7 +611,7 @@ type ModuleId = Text
 
 data ModuSlot
   = ModuLoaded !Object
-  | ModuLoading !Scope !(TVar [Object -> STM ()])
+  | ModuLoading !Scope !(TVar [Either EdhValue Object -> STM ()])
   | ModuFailed !EdhValue
 
 edhCreateModule :: EdhWorld -> Text -> ModuleId -> String -> STM Object
@@ -1654,6 +1654,8 @@ data Expr
   | ListExpr ![ExprSrc]
   | ArgsPackExpr !ArgsPacker
   | ParenExpr !ExprSrc
+  | -- | include a script into current scope's evaluation
+    IncludeExpr !ExprSrc
   | -- | import with args (re)pack receiving syntax
     -- `into` a target object from specified expr, or current scope
     ImportExpr !ArgsReceiver !ExprSrc !(Maybe ExprSrc)

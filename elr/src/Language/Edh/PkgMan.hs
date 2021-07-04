@@ -1,3 +1,5 @@
+{-# LANGUAGE ImplicitParams #-}
+
 -- | Edh package management functionalities
 module Language.Edh.PkgMan where
 
@@ -39,10 +41,28 @@ locateEdhModule ::
   Text ->
   FilePath ->
   IO (Either Text (ImportName, FilePath, FilePath))
-locateEdhModule !nomSpec !relPath = case splitExtension (T.unpack nomSpec) of
+locateEdhModule = let ?masterFile = "__init__.edh" in locateEdhFile
+
+-- | returns include name, absolute script path and absolute file
+--
+-- there is a special case of `__main__.edh` for a dir script, where nominal
+-- path will point to the directory, otherwise nominal path will be actual file
+-- path without `.edh` extension
+locateEdhScript ::
+  Text ->
+  FilePath ->
+  IO (Either Text (ImportName, FilePath, FilePath))
+locateEdhScript = let ?masterFile = "__main__.edh" in locateEdhFile
+
+locateEdhFile ::
+  (?masterFile :: FilePath) =>
+  Text ->
+  FilePath ->
+  IO (Either Text (ImportName, FilePath, FilePath))
+locateEdhFile !nomSpec !relPath = case splitExtension (T.unpack nomSpec) of
   (_, ".edh") ->
     return $
-      Left "you don't include the `.edh` file extension in the import"
+      Left "you don't include the `.edh` file extension in Edh module spec"
   _ ->
     doesPathExist relPath >>= \case
       False ->
@@ -58,6 +78,7 @@ locateEdhModule !nomSpec !relPath = case splitExtension (T.unpack nomSpec) of
               <$> resolveAbsoluteImport nomSpec "."
 
 resolveRelativeImport ::
+  (?masterFile :: FilePath) =>
   Text ->
   FilePath ->
   IO (Either Text (Text, FilePath, FilePath))
@@ -67,7 +88,7 @@ resolveRelativeImport !nomSpec !relPath = do
   doesFileExist edhFilePath >>= \case
     True -> return $ Right (nomSpec, edhFilePath, edhFilePath)
     False ->
-      let !edhIdxPath = nomPath </> "__init__.edh"
+      let !edhIdxPath = nomPath </> ?masterFile
        in doesFileExist edhIdxPath >>= \case
             True -> return $ Right (nomSpec, nomPath, edhIdxPath)
             False ->
@@ -80,6 +101,7 @@ resolveRelativeImport !nomSpec !relPath = do
     !relImp = T.unpack nomSpec
 
 resolveAbsoluteImport ::
+  (?masterFile :: FilePath) =>
   Text ->
   FilePath ->
   IO (Either Text (Text, FilePath, FilePath))
@@ -97,7 +119,7 @@ resolveAbsoluteImport !nomSpec !pkgPath = canonicalizePath pkgPath >>= go
                 True ->
                   return $ Right (nomSpec, edhFilePath, edhFilePath)
                 False -> do
-                  let !edhIdxPath = moduPath </> "__init__.edh"
+                  let !edhIdxPath = moduPath </> ?masterFile
                   doesFileExist edhIdxPath >>= \case
                     True ->
                       return $ Right (nomSpec, moduPath, edhIdxPath)
