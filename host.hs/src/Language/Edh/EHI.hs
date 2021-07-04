@@ -143,10 +143,13 @@ module Language.Edh.EHI
     edhCatchTx,
     throwEdhTx,
 
-    -- ** CPS helpers
-    exitEdh,
+    -- ** Returning / Yielding
     runEdhTx,
+    exitEdh,
     exitEdhTx,
+    edhYield,
+
+    -- ** CPS helpers
     seqcontSTM,
     foldcontSTM,
     mapcontSTM,

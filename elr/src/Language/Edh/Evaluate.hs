@@ -2171,6 +2171,38 @@ resolveEdhAttrAddr !ets MissedAttrSymbol _exit =
     "incomplete syntax: missing symbolic attribute name"
 {-# INLINE resolveEdhAttrAddr #-}
 
+-- | Yield from a host generator procedure
+edhYield :: EdhValue -> EdhTxExit EdhValue -> EdhTxExit EdhValue -> EdhTx
+edhYield !val !next'iter !genr'exit !ets = case edh'ctx'genr'caller ctx of
+  Nothing ->
+    throwEdh ets EvalError "yield from a procedure not called as generator"
+  Just iter'cb -> runEdhTx ets $
+    iter'cb val $ \case
+      Left (!etsThrower, !exv) ->
+        -- note we can actually be encountering the exception
+        -- occurred from a descendant thread forked by the thread
+        -- running the enclosing generator, @etsThrower@ has the
+        -- correct task queue, and @ets@ has the correct contextual
+        -- callstack anyway
+        edhThrow etsThrower {edh'context = edh'context ets} exv
+      Right EdhBreak ->
+        -- usually `break` stmt from the calling for-loop,
+        -- return nil from the generator, so the loop ends with nil
+        exitEdh ets genr'exit nil
+      Right (EdhReturn !rtn) ->
+        -- usually `return` stmt from the calling for-loop,
+        -- propagate the value to return as however the generator returns,
+        -- it can be a sacred double-return, in which case the for-loop will
+        -- evaluate to a `return` value, thus actually early return from the
+        -- outer-loop procedure
+        exitEdh ets genr'exit rtn
+      Right !yieldGot ->
+        -- usually some value evaluated from the body of the calling for-loop,
+        -- proceed to next iteration
+        exitEdh ets next'iter yieldGot
+  where
+    !ctx = edh'context ets
+
 -- | Throw a tagged error from Edh computation
 --
 -- a bit similar to `return` in Haskell, this doesn't cease the execution

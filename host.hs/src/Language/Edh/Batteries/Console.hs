@@ -269,10 +269,9 @@ timelyNotify ::
   Int ->
   Decimal ->
   Bool ->
-  EdhGenrCaller ->
   EdhTxExit EdhValue ->
   STM ()
-timelyNotify !ets !scale !interval !wait1st !iter'cb !exit =
+timelyNotify !ets !scale !interval !wait1st !exit =
   if edh'in'tx ets
     then throwEdh ets UsageError "can not be called from within a transaction"
     else case decimalToInteger interval of
@@ -286,20 +285,9 @@ timelyNotify !ets !scale !interval !wait1st !iter'cb !exit =
         -- thread dont' get blocked by this wait
         !notif <- newEmptyTMVar
         let notifOne = do
-              !nanos <- takeTMVar notif
-              runEdhTx ets $
-                iter'cb (EdhDecimal $ fromInteger nanos) $ \case
-                  Left (!etsThrower, !exv) ->
-                    -- note we can actually be encountering the exception
-                    -- occurred from a descendant thread forked by the thread
-                    -- running the enclosing generator, @etsThrower@ has the
-                    -- correct task queue, and @ets@ has the correct contextual
-                    -- callstack anyway
-                    edhThrow etsThrower {edh'context = edh'context ets} exv
-                  Right EdhBreak -> exitEdh ets exit nil
-                  Right (EdhReturn !rtn) -> exitEdh ets exit rtn
-                  _ -> schedNext
-            schedNext = runEdhTx ets $
+              !nanos <- EdhDecimal . fromInteger <$> takeTMVar notif
+              runEdhTx ets $ edhYield nanos (const schedNext) exit
+            schedNext =
               edhContIO $ do
                 void $
                   forkIO $ do
@@ -309,7 +297,7 @@ timelyNotify !ets !scale !interval !wait1st !iter'cb !exit =
                     atomically $ void $ tryPutTMVar notif nanos
                 atomically $ edhDoSTM ets notifOne
         if wait1st
-          then schedNext
+          then runEdhTx ets schedNext
           else do
             putTMVar notif =<< unsafeIOToSTM (toNanoSecs <$> getTime Realtime)
             notifOne
@@ -317,21 +305,14 @@ timelyNotify !ets !scale !interval !wait1st !iter'cb !exit =
 -- | host generator console.everyMicros(n, wait1st=true) - with fixed interval
 conEveryMicrosProc :: Decimal -> "wait1st" ?: Bool -> EdhHostProc
 conEveryMicrosProc !interval (defaultArg True -> !wait1st) !exit !ets =
-  case edh'ctx'genr'caller $ edh'context ets of
-    Nothing -> throwEdh ets EvalError "can only be called as generator"
-    Just genr'caller -> timelyNotify ets 1 interval wait1st genr'caller exit
+  timelyNotify ets 1 interval wait1st exit
 
 -- | host generator console.everyMillis(n, wait1st=true) - with fixed interval
 conEveryMillisProc :: Decimal -> "wait1st" ?: Bool -> EdhHostProc
 conEveryMillisProc !interval (defaultArg True -> !wait1st) !exit !ets =
-  case edh'ctx'genr'caller $ edh'context ets of
-    Nothing -> throwEdh ets EvalError "can only be called as generator"
-    Just genr'caller -> timelyNotify ets 1000 interval wait1st genr'caller exit
+  timelyNotify ets 1000 interval wait1st exit
 
 -- | host generator console.everySeconds(n, wait1st=true) - with fixed interval
 conEverySecondsProc :: Decimal -> "wait1st" ?: Bool -> EdhHostProc
 conEverySecondsProc !interval (defaultArg True -> !wait1st) !exit !ets =
-  case edh'ctx'genr'caller $ edh'context ets of
-    Nothing -> throwEdh ets EvalError "can only be called as generator"
-    Just genr'caller ->
-      timelyNotify ets 1000000 interval wait1st genr'caller exit
+  timelyNotify ets 1000000 interval wait1st exit
