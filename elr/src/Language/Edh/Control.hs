@@ -166,7 +166,8 @@ data EdhParserState = EdhParserState
   { -- global dict for operator info, as the parsing state
     edh'parser'op'dict :: !GlobalOpDict,
     -- end of last lexeme
-    edh'parser'lexeme'end :: !SrcPos
+    edh'parser'lexeme'end'pos :: !SrcPos,
+    edh'parser'lexeme'end'offset :: !Int
   }
 
 data GlobalOpDict = GlobalOpDict

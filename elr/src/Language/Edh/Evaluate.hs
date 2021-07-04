@@ -2384,7 +2384,7 @@ parseEdh' ::
   STM (Either ParserError ([StmtSrc], OptDocCmt))
 parseEdh' !world !srcName !lineNo !srcCode = do
   !pd <- readTMVar wops
-  let ((_, !pr), EdhParserState !pd' _) =
+  let ((_, !pr), EdhParserState !pd' _ _) =
         runState
           ( runParserT'
               parseProgram
@@ -2411,7 +2411,7 @@ parseEdh' !world !srcName !lineNo !srcCode = do
                   stateParseErrors = []
                 }
           )
-          (EdhParserState pd (SrcPos 0 0))
+          (EdhParserState pd (SrcPos 0 0) 0)
   case pr of
     Right _ -> when (numOps pd' > numOps pd) $ do
       -- update world wide operator precedence dict, on success of parsing
