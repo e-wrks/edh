@@ -9,17 +9,7 @@ import Data.List (isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Directory
-  ( canonicalizePath,
-    doesDirectoryExist,
-    doesFileExist,
-    doesPathExist,
-  )
 import System.FilePath
-  ( equalFilePath,
-    splitExtension,
-    takeDirectory,
-    (</>),
-  )
 import Prelude
 
 data ImportName = RelativeName !Text | AbsoluteName !Text
@@ -28,9 +18,7 @@ edhRelativePathFrom :: FilePath -> FilePath
 edhRelativePathFrom !fromPath =
   if "<" `isPrefixOf` fromPath
     then "." -- intrinsic module path
-    else case splitExtension fromPath of
-      (filePath, ".edh") -> takeDirectory filePath
-      _ -> fromPath
+    else takeDirectory fromPath
 
 -- | returns import name, absolute module path and absolute file
 --
@@ -41,54 +29,55 @@ locateEdhModule ::
   Text ->
   FilePath ->
   IO (Either Text (ImportName, FilePath, FilePath))
-locateEdhModule = let ?masterFile = "__init__.edh" in locateEdhFile
+locateEdhModule =
+  let ?frontFile = "__init__.edh"
+      ?fileExt = ".edh"
+   in locateEdhFile
 
--- | returns include name, absolute script path and absolute file
+-- | returns include name, absolute fragment path and absolute file
 --
--- there is a special case of `__main__.edh` for a dir script, where nominal
+-- there is a special case of `__include__.edh` for a dir frag, where nominal
 -- path will point to the directory, otherwise nominal path will be actual file
--- path without `.edh` extension
-locateEdhScript ::
+-- path without `.iedh` extension
+locateEdhFragment ::
   Text ->
   FilePath ->
   IO (Either Text (ImportName, FilePath, FilePath))
-locateEdhScript = let ?masterFile = "__main__.edh" in locateEdhFile
+locateEdhFragment =
+  let ?frontFile = "__include__.edh"
+      ?fileExt = ".iedh"
+   in locateEdhFile
 
 locateEdhFile ::
-  (?masterFile :: FilePath) =>
+  (?frontFile :: FilePath, ?fileExt :: FilePath) =>
   Text ->
   FilePath ->
   IO (Either Text (ImportName, FilePath, FilePath))
-locateEdhFile !nomSpec !relPath = case splitExtension (T.unpack nomSpec) of
-  (_, ".edh") ->
-    return $
-      Left "you don't include the `.edh` file extension in Edh module spec"
-  _ ->
-    doesPathExist relPath >>= \case
-      False ->
-        return $
-          Left $ "path does not exist: " <> T.pack relPath
-      True ->
-        if "." `T.isPrefixOf` nomSpec
-          then
-            fmap (\(!name, !path, !file) -> (RelativeName name, path, file))
-              <$> resolveRelativeImport nomSpec relPath
-          else
-            fmap (\(!name, !path, !file) -> (AbsoluteName name, path, file))
-              <$> resolveAbsoluteImport nomSpec "."
+locateEdhFile !nomSpec !relPath =
+  doesPathExist relPath >>= \case
+    False ->
+      return $ Left $ "path does not exist: " <> T.pack relPath
+    True ->
+      if "." `T.isPrefixOf` nomSpec
+        then
+          fmap (\(!name, !path, !file) -> (RelativeName name, path, file))
+            <$> resolveRelativeImport nomSpec relPath
+        else
+          fmap (\(!name, !path, !file) -> (AbsoluteName name, path, file))
+            <$> resolveAbsoluteImport nomSpec "."
 
 resolveRelativeImport ::
-  (?masterFile :: FilePath) =>
+  (?frontFile :: FilePath, ?fileExt :: FilePath) =>
   Text ->
   FilePath ->
   IO (Either Text (Text, FilePath, FilePath))
 resolveRelativeImport !nomSpec !relPath = do
   !nomPath <- canonicalizePath $ relPath </> relImp
-  let !edhFilePath = nomPath <> ".edh"
+  let !edhFilePath = nomPath <> ?fileExt
   doesFileExist edhFilePath >>= \case
     True -> return $ Right (nomSpec, edhFilePath, edhFilePath)
     False ->
-      let !edhIdxPath = nomPath </> ?masterFile
+      let !edhIdxPath = nomPath </> ?frontFile
        in doesFileExist edhIdxPath >>= \case
             True -> return $ Right (nomSpec, nomPath, edhIdxPath)
             False ->
@@ -101,7 +90,7 @@ resolveRelativeImport !nomSpec !relPath = do
     !relImp = T.unpack nomSpec
 
 resolveAbsoluteImport ::
-  (?masterFile :: FilePath) =>
+  (?frontFile :: FilePath, ?fileExt :: FilePath) =>
   Text ->
   FilePath ->
   IO (Either Text (Text, FilePath, FilePath))
@@ -114,12 +103,12 @@ resolveAbsoluteImport !nomSpec !pkgPath = canonicalizePath pkgPath >>= go
             False -> tryParentDir
             True -> do
               !moduPath <- canonicalizePath $ emsDir </> moduSpec
-              let !edhFilePath = moduPath <> ".edh"
+              let !edhFilePath = moduPath <> ?fileExt
               doesFileExist edhFilePath >>= \case
                 True ->
                   return $ Right (nomSpec, edhFilePath, edhFilePath)
                 False -> do
-                  let !edhIdxPath = moduPath </> ?masterFile
+                  let !edhIdxPath = moduPath </> ?frontFile
                   doesFileExist edhIdxPath >>= \case
                     True ->
                       return $ Right (nomSpec, moduPath, edhIdxPath)

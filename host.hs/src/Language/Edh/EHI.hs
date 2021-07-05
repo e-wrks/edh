@@ -338,7 +338,7 @@ module Language.Edh.EHI
     edhRelativePathFrom,
     locateEdhFile,
     locateEdhModule,
-    locateEdhScript,
+    locateEdhFragment,
     resolveRelativeImport,
     resolveAbsoluteImport,
     locateEdhMainModule,

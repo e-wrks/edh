@@ -3147,60 +3147,65 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
         normalizedSpec = normalizeImportSpec importSpec
 
 runSrcFileInScope ::
-  Scope -> FilePath -> Decoding -> EdhTxExit EdhValue -> EdhTx
-runSrcFileInScope !runScope !srcFile !srcDecoded !exit !ets =
-  case srcDecoded of
-    Some !srcText _ _ ->
-      let !ctxLoad =
-            ctx
-              { edh'ctx'tip =
-                  EdhCallFrame
-                    runScope
-                    (SrcLoc (SrcDoc srcName) zeroSrcRange)
-                    defaultEdhExcptHndlr,
-                edh'ctx'stack = edh'ctx'tip ctx : edh'ctx'stack ctx,
-                edh'ctx'pure = False,
-                edh'ctx'exp'target = Nothing,
-                edh'ctx'eff'target = Nothing
-              }
-          !etsRunModu = ets {edh'context = ctxLoad}
-       in runEdhTx etsRunModu $ evalEdh srcName srcText exit
+  Scope -> FilePath -> Text -> EdhTxExit EdhValue -> EdhTx
+runSrcFileInScope !runScope !srcFile !srcText !exit !ets =
+  let !ctxLoad =
+        ctx
+          { edh'ctx'tip =
+              EdhCallFrame
+                runScope
+                (SrcLoc (SrcDoc srcName) zeroSrcRange)
+                defaultEdhExcptHndlr,
+            edh'ctx'stack = edh'ctx'tip ctx : edh'ctx'stack ctx,
+            edh'ctx'pure = False,
+            edh'ctx'exp'target = Nothing,
+            edh'ctx'eff'target = Nothing
+          }
+      !etsRunModu = ets {edh'context = ctxLoad}
+   in runEdhTx etsRunModu $ evalEdh srcName srcText exit
   where
     !ctx = edh'context ets
     !srcName = T.pack srcFile
 
-includeEdhScript :: Text -> EdhTxExit EdhValue -> EdhTx
-includeEdhScript !importSpec !exit !ets =
+readEdhSrcFile :: FilePath -> IO Text
+readEdhSrcFile !edhFile =
+  TE.streamDecodeUtf8With lenientDecode <$> B.readFile edhFile >>= \case
+    -- TODO warn about decoding problems
+    Some !srcText _ _ -> return srcText
+
+includeEdhFragment :: Text -> EdhTxExit EdhValue -> EdhTx
+includeEdhFragment !incSpec !exit !ets =
   runEdhTx ets $
     edhContIO $
-      let ?masterFile = "__main__.edh"
+      let ?frontFile = "__include__.edh"
+          ?fileExt = ".iedh"
        in locateSrcFileInFS ets normalizedSpec $
-            \(!impName, !nomPath, !moduFile) -> do
+            \(!incName, !nomPath, !fragFile) -> do
               -- TODO cache by world, with file mod time for dirty check
-              !src <-
-                TE.streamDecodeUtf8With lenientDecode <$> B.readFile moduFile
+              !src <- readEdhSrcFile fragFile
               atomically $
                 runEdhTx ets $
                   pushEdhStack $ \ !etsInc -> do
                     let incScope = contextScope $ edh'context etsInc
-                    !moduName <- deriveImporteeName scope impName
+                    !fragName <- deriveImporteeName scope incName
                     iopdUpdate
-                      [ (AttrByName "__name__", EdhString moduName),
+                      [ (AttrByName "__name__", EdhString fragName),
                         (AttrByName "__path__", EdhString $ T.pack nomPath),
-                        (AttrByName "__file__", EdhString $ T.pack moduFile)
+                        (AttrByName "__file__", EdhString $ T.pack fragFile)
                       ]
                       $ edh'scope'entity incScope
                     runEdhTx etsInc $
-                      runSrcFileInScope incScope moduFile src $
+                      runSrcFileInScope incScope fragFile src $
                         \ !incResult _ets ->
                           exitEdh ets exit $ edhDeCaseWrap incResult
   where
     scope = contextScope $ edh'context ets
-    normalizedSpec = normalizeImportSpec importSpec
+    normalizedSpec = normalizeImportSpec incSpec
 
 importFromFS :: EdhThreadState -> Text -> (ModuSlot -> STM ()) -> IO ()
 importFromFS !etsImp !normalizedSpec !exit =
-  let ?masterFile = "__init__.edh"
+  let ?frontFile = "__init__.edh"
+      ?fileExt = ".edh"
    in locateSrcFileInFS etsImp normalizedSpec $
         \(!impName, !nomPath, !moduFile) -> do
           !postLoads <- newTVarIO []
@@ -3229,8 +3234,7 @@ importFromFS !etsImp !normalizedSpec !exit =
                     putTMVar worldModules $ Map.insert moduId moduSlotVar moduMap
                     return (modu, loadingScope, moduSlotVar)
                   -- try load the module in next transaction
-                  !src <-
-                    TE.streamDecodeUtf8With lenientDecode <$> B.readFile moduFile
+                  !src <- readEdhSrcFile moduFile
                   atomically $
                     edhCatch
                       etsImp
@@ -3273,7 +3277,7 @@ importFromFS !etsImp !normalizedSpec !exit =
     scope = contextScope $ edh'context etsImp
 
 locateSrcFileInFS ::
-  (?masterFile :: FilePath) =>
+  (?frontFile :: FilePath, ?fileExt :: FilePath) =>
   EdhThreadState ->
   Text ->
   ((ImportName, FilePath, FilePath) -> IO ()) ->
@@ -4327,7 +4331,7 @@ evalExpr' (IndexExpr !ixExpr !tgtExpr) _docCmt !exit =
                 <> T.pack (show ixVal)
 evalExpr' (IncludeExpr !srcExpr) _docCmt !exit = evalExprSrc' srcExpr NoDocCmt $
   \ !srcVal -> case edhUltimate srcVal of
-    EdhString !srcSpec -> includeEdhScript srcSpec exit
+    EdhString !srcSpec -> includeEdhFragment srcSpec exit
     _ -> edhValueDescTx srcVal $ \ !badDesc ->
       throwEdhTx EvalError $ "don't know how to include it: " <> badDesc
 evalExpr' (ExportExpr !exps) !docCmt !exit = \ !ets ->
