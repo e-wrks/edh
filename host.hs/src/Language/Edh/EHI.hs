@@ -333,7 +333,6 @@ module Language.Edh.EHI
     edhRegulateIndex,
 
     -- * language harness
-    ImportName (..),
     normalizeImportSpec,
     edhRelativePathFrom,
     locateEdhFile,

@@ -24,6 +24,7 @@ import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Control
 import Language.Edh.IOPD
 import System.IO.Unsafe (unsafePerformIO)
+import System.Posix
 import Prelude
 
 -- | `nil` carries deletion semantics in Edh
@@ -579,11 +580,12 @@ data EdhWorld = EdhWorld
     edh'world'root :: !Scope,
     -- | sandbox scope of this world
     edh'world'sandbox :: !Scope,
-    -- | all operators declared in this world, this also used as the
-    -- _world lock_ in parsing source code to be executed in this world
-    edh'world'operators :: !(TMVar GlobalOpDict),
+    -- | all operators declared in this world
+    edh'world'operators :: !(TVar GlobalOpDict),
     -- | all modules loaded, being loaded, or failed loading into this world
     edh'world'modules :: !(TMVar (Map.HashMap ModuleId (TVar ModuSlot))),
+    -- | all fragments cached (after successfully parsed) in this world
+    edh'world'fragments :: !(TVar (Map.HashMap FragmentId CachedFrag)),
     -- | for console logging, input and output
     edh'world'console :: !EdhConsole,
     -- | wrapping any host value as object
@@ -613,6 +615,10 @@ data ModuSlot
   = ModuLoaded !Object
   | ModuLoading !Scope !(TVar [Either EdhValue Object -> STM ()])
   | ModuFailed !EdhValue
+
+type FragmentId = Text
+
+data CachedFrag = CachedFrag !EpochTime ![StmtSrc]
 
 edhCreateModule :: EdhWorld -> Text -> ModuleId -> String -> STM Object
 edhCreateModule !world !moduName !moduId !srcName = do

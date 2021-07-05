@@ -350,7 +350,7 @@ createEdhWorld !console = do
   atomically $ iopdUpdate [(AttrByName "module", EdhObject clsModule)] hsRoot
 
   -- operator precedence dict
-  !opPD <- newTMVarIO $ GlobalOpDict Map.empty []
+  !opPD <- newTVarIO $ GlobalOpDict Map.empty []
 
   -- the meta host module
   !metaModu <-
@@ -365,6 +365,8 @@ createEdhWorld !console = do
 
   -- the container of loaded modules
   !modus <- newTMVarIO $ Map.fromList [("batteries/meta", metaModu)]
+  -- the container of cached fragments
+  !frags <- newTVarIO Map.empty
 
   !trapReq <- newIORef 0
   -- record a trap request on SIGQUIT
@@ -382,6 +384,7 @@ createEdhWorld !console = do
             edh'world'sandbox = sandboxScope,
             edh'world'operators = opPD,
             edh'world'modules = modus,
+            edh'world'fragments = frags,
             edh'world'console = console,
             edh'value'wrapper = edhWrapValue,
             edh'scope'wrapper = edhWrapScope,
@@ -860,9 +863,9 @@ createEdhWorld !console = do
         !this = edh'scope'this $ contextScope $ edh'context ets
 
 declareEdhOperators ::
-  EdhWorld -> OpDeclLoc -> [(OpSymbol, OpFixity, Precedence)] -> STM ()
+  EdhWorld -> OpDeclLoc -> [(OpSymbol, OpFixity, Precedence)] -> IO ()
 declareEdhOperators !world !declLoc !opps = do
-  GlobalOpDict !decls !quaint'ops <- takeTMVar wops
+  baseOD@(GlobalOpDict !decls !quaint'ops) <- readTVarIO wops
   let chkCompatible :: (OpSymbol, OpFixity, Precedence) -> STM ()
       chkCompatible (!sym, !fixty, !precedence) = case Map.lookup sym decls of
         Nothing -> return ()
@@ -908,8 +911,8 @@ declareEdhOperators !world !declLoc !opps = do
       decls' = Map.fromList $
         flip fmap opps $ \(sym, fixity, precedence) ->
           (sym, (fixity, precedence, declLoc))
-  sequence_ $ chkCompatible <$> opps
-  putTMVar wops $
+  atomically $ sequence_ $ chkCompatible <$> opps
+  mergeOpDict wops baseOD $
     GlobalOpDict (Map.union decls decls') $
       L.sort $
         quaint'ops
@@ -1002,17 +1005,18 @@ runEdhModule' ::
 runEdhModule' !world !impPath !preRun =
   locateEdhMainModule impPath >>= \case
     Left !err -> throwIO $ EdhError PackageError err (toDyn nil) "<run-modu>"
-    Right (!moduName, !nomPath, !moduFile) -> do
+    Right (!nomPath, !moduFile) -> do
       !fileContent <- B.readFile moduFile
       case streamDecodeUtf8With lenientDecode fileContent of
         Some !moduSource _ _ -> runEdhProgram' world $ \ !etsMain ->
           let !moduId = T.pack nomPath
-           in edhCreateModule world moduName moduId moduFile >>= \ !modu ->
-                moduleContext world modu >>= \ !moduCtx ->
-                  let !etsModu = etsMain {edh'context = moduCtx}
-                   in preRun etsModu $
-                        runEdhTx etsModu $
-                          evalEdh (T.pack moduFile) moduSource endOfEdh
+           in edhCreateModule world (T.pack impPath) moduId moduFile
+                >>= \ !modu ->
+                  moduleContext world modu >>= \ !moduCtx ->
+                    let !etsModu = etsMain {edh'context = moduCtx}
+                     in preRun etsModu $
+                          runEdhTx etsModu $
+                            evalEdh (T.pack moduFile) moduSource endOfEdh
 
 runEdhFile :: EdhWorld -> FilePath -> IO (Either EdhError EdhValue)
 runEdhFile !world !edhFile =

@@ -289,152 +289,151 @@ defaultEdhConsole !inputSettings = do
       }
 
 installEdhBatteries :: EdhWorld -> IO ()
-installEdhBatteries world =
+installEdhBatteries world = do
+  declareEdhOperators
+    world
+    "<batteries>"
+    [ -- format: (symbol, precedence)
+
+      -- annotations
+      ("=:", Infix, -9), -- attribute prototype annotation
+      ("::", Infix, -9), -- attribute type annotation
+      (":=:", Infix, -9), -- type synonym annotation
+      ("!", InfixR, 0), -- free-form lhs annotation
+      -- arrows, make it higher than (=), so an arrow procedure can be
+      -- assigned to some attribute without quoting
+      ("=>", InfixR, 1),
+      ("=>*", InfixR, 1),
+      -- branch
+      ("->", InfixR, -1),
+      -- catch
+      ("$=>", InfixL, -2), -- idiomatic Edh catch operator
+      -- for src level compatibility with JavaScript
+      ("catch", InfixL, -2),
+      ("<=$", InfixR, -2), -- idiomatic Edh flipped-catch operator
+      -- ~handle~ is catch flipped, resembles `handle` idiom in Haskell
+      ("~handle~", InfixR, -2),
+      -- finally
+      ("@=>", InfixL, -2), -- idiomatic Edh finally operator
+      -- for src level compatibility with JavaScript
+      ("finally", InfixL, -2),
+      ("<=@", InfixR, -2), -- idiomatic Edh flipped-finally operator
+      -- ~anyway~ is finally flipped, counterpart to ~handle~
+      ("~anyway~", InfixR, -2),
+      -- the attribute key dereferencing operator
+      ("@", InfixL, 10),
+      -- attribute tempter,
+      -- address an attribute off an object if possible, nil otherwise
+      ("?", InfixL, 10),
+      ("?@", InfixL, 10),
+      -- the procedure call operators
+      ("$", InfixR, -5), -- make it lower than procedure body definition
+      -- (i.e. -3, to be cross checked with `parseProcBody`), or decorators
+      -- can go wrong with the flipped procedure call operator (|), which
+      -- is in UNIX pipe semantics
+      ("|", InfixL, 0), -- make it slightly higher than (->),
+      -- so the guard syntax in pattern matching works nicely with this
+      -- flipped procedure call operator (regardless of its UNIX pipe
+      -- semantics), in Haskell style
+      ("$@", InfixL, -5), -- out-laid arg sugar
+      --
+      -- assignments, make them lower than (++),
+      -- so don't need to quote `a = b ++ c`
+      ("=", InfixR, 0),
+      ("?=", InfixR, 0), -- tentative assignment
+      ("|=", InfixR, 0), -- null overwritting assignment
+      -- the definition operator, creates named value in Edh
+      (":=", InfixR, 1),
+      ("?:=", InfixR, 1),
+      -- syntactic sugars for (=)
+      ("++=", InfixR, 2),
+      ("+=", InfixR, 2),
+      ("-=", InfixR, 2),
+      ("*=", InfixR, 2),
+      ("/=", InfixR, 2),
+      ("//=", InfixR, 2),
+      ("%=", InfixR, 2),
+      ("**=", InfixR, 2),
+      ("&&=", InfixR, 3),
+      ("||=", InfixR, 3),
+      -- in range tests
+      ("in", Infix, 4),
+      ("not in", Infix, 4),
+      ("is in", Infix, 4),
+      ("is not in", Infix, 4),
+      -- the range constructor
+      ("..", Infix, 5),
+      ("^..", Infix, 5),
+      ("..^", Infix, 5),
+      ("^..^", Infix, 5),
+      -- prepand to list
+      --     l = [3,7,5]
+      --     2 :> l
+      --     [2,3,7,5]
+      (":>", InfixR, 5),
+      -- the pair constructor, creates pairs in Edh
+      -- note: this affects dict literal parsing,
+      --       cross check with `parseDictEntries` in parser
+      (":", InfixL, 5),
+      -- arithmetic
+      ("+", InfixL, 6),
+      ("-", InfixL, 6),
+      ("*", InfixL, 7),
+      ("/", InfixL, 7),
+      ("//", InfixL, 7),
+      ("%", InfixL, 7),
+      ("**", InfixR, 8),
+      -- identity equality tests
+      ("is not", Infix, 4),
+      ("is", Infix, 4),
+      -- instant equality comparisons, chainable
+      ("==", InfixR, 4),
+      -- C style here, not following Haskell, as (/=) has been used for
+      -- inplace division
+      ("!=", InfixR, 4),
+      -- ordering comparisons, chainable
+      (">", InfixR, 4),
+      (">=", InfixR, 4),
+      ("<", InfixR, 4),
+      ("<=", InfixR, 4),
+      -- logical/nullish boolean
+      ("&&", InfixL, 3),
+      ("||", InfixL, 3),
+      ("and", InfixL, 3),
+      ("or", InfixL, 3),
+      -- comprehension
+      --  * list comprehension:
+      --     [] =< for x from range(100) do x*x
+      --  * dict comprehension:
+      --     {} =< for x from range(100) do (x, x*x)
+      --  * args comprehension:
+      --     () =< for x from range(100) do x*x
+      ("=<", InfixL, 2),
+      -- reverse left-list and prepend to right-list
+      --     l = [3,7,5]
+      --     [9,2] >> l
+      --     [2,9,3,7,5]
+      ("/>", InfixR, 2),
+      -- prefix test
+      ("|*", Infix, 4),
+      -- suffix test
+      ("*|", Infix, 4),
+      -- prefix cut (pattern only)
+      (">@", InfixL, 3),
+      -- suffix cut (pattern only)
+      ("@<", InfixL, 3),
+      -- publish to sink
+      --     evsPub <- outEvent
+      ("<-", InfixR, 1),
+      -- string coercing concatenation
+      ("++", InfixL, 2),
+      -- for src level js compatibility, no implementation
+      ("--", InfixL, 2),
+      -- logging
+      ("<|", Infix, 1)
+    ]
   void $
     runEdhProgram' world $ \ !ets -> do
-      declareEdhOperators
-        world
-        "<batteries>"
-        [ -- format: (symbol, precedence)
-
-          -- annotations
-          ("=:", Infix, -9), -- attribute prototype annotation
-          ("::", Infix, -9), -- attribute type annotation
-          (":=:", Infix, -9), -- type synonym annotation
-          ("!", InfixR, 0), -- free-form lhs annotation
-          -- arrows, make it higher than (=), so an arrow procedure can be
-          -- assigned to some attribute without quoting
-          ("=>", InfixR, 1),
-          ("=>*", InfixR, 1),
-          -- branch
-          ("->", InfixR, -1),
-          -- catch
-          ("$=>", InfixL, -2), -- idiomatic Edh catch operator
-          -- for src level compatibility with JavaScript
-          ("catch", InfixL, -2),
-          ("<=$", InfixR, -2), -- idiomatic Edh flipped-catch operator
-          -- ~handle~ is catch flipped, resembles `handle` idiom in Haskell
-          ("~handle~", InfixR, -2),
-          -- finally
-          ("@=>", InfixL, -2), -- idiomatic Edh finally operator
-          -- for src level compatibility with JavaScript
-          ("finally", InfixL, -2),
-          ("<=@", InfixR, -2), -- idiomatic Edh flipped-finally operator
-          -- ~anyway~ is finally flipped, counterpart to ~handle~
-          ("~anyway~", InfixR, -2),
-          -- the attribute key dereferencing operator
-          ("@", InfixL, 10),
-          -- attribute tempter,
-          -- address an attribute off an object if possible, nil otherwise
-          ("?", InfixL, 10),
-          ("?@", InfixL, 10),
-          -- the procedure call operators
-          ("$", InfixR, -5), -- make it lower than procedure body definition
-          -- (i.e. -3, to be cross checked with `parseProcBody`), or decorators
-          -- can go wrong with the flipped procedure call operator (|), which
-          -- is in UNIX pipe semantics
-          ("|", InfixL, 0), -- make it slightly higher than (->),
-          -- so the guard syntax in pattern matching works nicely with this
-          -- flipped procedure call operator (regardless of its UNIX pipe
-          -- semantics), in Haskell style
-          ("$@", InfixL, -5), -- out-laid arg sugar
-          --
-          -- assignments, make them lower than (++),
-          -- so don't need to quote `a = b ++ c`
-          ("=", InfixR, 0),
-          ("?=", InfixR, 0), -- tentative assignment
-          ("|=", InfixR, 0), -- null overwritting assignment
-          -- the definition operator, creates named value in Edh
-          (":=", InfixR, 1),
-          ("?:=", InfixR, 1),
-          -- syntactic sugars for (=)
-          ("++=", InfixR, 2),
-          ("+=", InfixR, 2),
-          ("-=", InfixR, 2),
-          ("*=", InfixR, 2),
-          ("/=", InfixR, 2),
-          ("//=", InfixR, 2),
-          ("%=", InfixR, 2),
-          ("**=", InfixR, 2),
-          ("&&=", InfixR, 3),
-          ("||=", InfixR, 3),
-          -- in range tests
-          ("in", Infix, 4),
-          ("not in", Infix, 4),
-          ("is in", Infix, 4),
-          ("is not in", Infix, 4),
-          -- the range constructor
-          ("..", Infix, 5),
-          ("^..", Infix, 5),
-          ("..^", Infix, 5),
-          ("^..^", Infix, 5),
-          -- prepand to list
-          --     l = [3,7,5]
-          --     2 :> l
-          --     [2,3,7,5]
-          (":>", InfixR, 5),
-          -- the pair constructor, creates pairs in Edh
-          -- note: this affects dict literal parsing,
-          --       cross check with `parseDictEntries` in parser
-          (":", InfixL, 5),
-          -- arithmetic
-          ("+", InfixL, 6),
-          ("-", InfixL, 6),
-          ("*", InfixL, 7),
-          ("/", InfixL, 7),
-          ("//", InfixL, 7),
-          ("%", InfixL, 7),
-          ("**", InfixR, 8),
-          -- identity equality tests
-          ("is not", Infix, 4),
-          ("is", Infix, 4),
-          -- instant equality comparisons, chainable
-          ("==", InfixR, 4),
-          -- C style here, not following Haskell, as (/=) has been used for
-          -- inplace division
-          ("!=", InfixR, 4),
-          -- ordering comparisons, chainable
-          (">", InfixR, 4),
-          (">=", InfixR, 4),
-          ("<", InfixR, 4),
-          ("<=", InfixR, 4),
-          -- logical/nullish boolean
-          ("&&", InfixL, 3),
-          ("||", InfixL, 3),
-          ("and", InfixL, 3),
-          ("or", InfixL, 3),
-          -- comprehension
-          --  * list comprehension:
-          --     [] =< for x from range(100) do x*x
-          --  * dict comprehension:
-          --     {} =< for x from range(100) do (x, x*x)
-          --  * args comprehension:
-          --     () =< for x from range(100) do x*x
-          ("=<", InfixL, 2),
-          -- reverse left-list and prepend to right-list
-          --     l = [3,7,5]
-          --     [9,2] >> l
-          --     [2,9,3,7,5]
-          ("/>", InfixR, 2),
-          -- prefix test
-          ("|*", Infix, 4),
-          -- suffix test
-          ("*|", Infix, 4),
-          -- prefix cut (pattern only)
-          (">@", InfixL, 3),
-          -- suffix cut (pattern only)
-          ("@<", InfixL, 3),
-          -- publish to sink
-          --     evsPub <- outEvent
-          ("<-", InfixR, 1),
-          -- string coercing concatenation
-          ("++", InfixL, 2),
-          -- for src level js compatibility, no implementation
-          ("--", InfixL, 2),
-          -- logging
-          ("<|", Infix, 1)
-        ]
-
       -- global operators at world root scope
       let idEqTester ::
             EdhThreadState ->

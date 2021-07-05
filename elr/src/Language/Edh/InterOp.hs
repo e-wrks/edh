@@ -1953,7 +1953,7 @@ mkIntrinsicOp :: EdhWorld -> OpSymbol -> EdhIntrinsicOp -> STM EdhValue
 mkIntrinsicOp !world !opSym !iop = do
   !u <- unsafeIOToSTM newUnique
   {- HLINT ignore "Redundant <$>" -}
-  lookupOpFromDict opSym <$> readTMVar (edh'world'operators world) >>= \case
+  lookupOpFromDict opSym <$> readTVar (edh'world'operators world) >>= \case
     Nothing ->
       throwSTM $
         EdhError

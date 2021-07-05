@@ -2,13 +2,13 @@ module Language.Edh.Batteries.Reflect where
 
 -- import           Debug.Trace
 
-import Control.Concurrent.STM (STM, readTVar)
-import Control.Exception (Exception (toException))
-import Control.Monad (unless)
-import Data.Dynamic (fromDynamic, toDyn)
+import Control.Concurrent.STM
+import Control.Exception
+import Control.Monad
+import Data.Dynamic
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Unique (newUnique)
+import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
 import Language.Edh.Control
@@ -142,24 +142,28 @@ parseEdhProc
   (defaultArg 1 -> !lineNo)
   !exit
   !ets =
-    parseEdh' world srcName lineNo srcCode >>= \case
-      Left !err -> do
-        let !msg = T.pack $ errorBundlePretty err
-            !edhWrapException = edh'exception'wrapper world
-            !edhErr = EdhError ParseError msg (toDyn nil) $ getEdhErrCtx 0 ets
-        edhWrapException (Just ets) (toException edhErr)
-          >>= \ !exo -> edhThrow ets (EdhObject exo)
-      Right (!stmts, _docCmt) -> do
-        !u <- unsafeIOToSTM newUnique
-        exitEdh ets exit $
-          EdhExpr
-            u
-            ( SrcLoc
-                (SrcDoc srcName)
-                (SrcRange beginningSrcPos (endPos stmts))
-            )
-            (BlockExpr stmts)
-            srcCode
+    runEdhTx ets $
+      edhContIO $
+        parseEdh' world srcName lineNo srcCode >>= \case
+          Left !err -> do
+            let !msg = T.pack $ errorBundlePretty err
+                !edhWrapException = edh'exception'wrapper world
+                !edhErr = EdhError ParseError msg (toDyn nil) $ getEdhErrCtx 0 ets
+            atomically $
+              edhWrapException (Just ets) (toException edhErr)
+                >>= \ !exo -> edhThrow ets (EdhObject exo)
+          Right (!stmts, _docCmt) -> do
+            !u <- newUnique
+            atomically $
+              exitEdh ets exit $
+                EdhExpr
+                  u
+                  ( SrcLoc
+                      (SrcDoc srcName)
+                      (SrcRange beginningSrcPos (endPos stmts))
+                  )
+                  (BlockExpr stmts)
+                  srcCode
     where
       world = edh'prog'world $ edh'thread'prog ets
       endPos :: [StmtSrc] -> SrcPos

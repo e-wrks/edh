@@ -1,5 +1,6 @@
 module Language.Edh.Control where
 
+import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad.State.Strict (State)
 import qualified Data.Char as Char
@@ -194,6 +195,31 @@ insertOpIntoDict !sym !decl (GlobalOpDict !decls !quaint'ops) =
   where
     contain'nonstd'op'char :: Bool
     contain'nonstd'op'char = isJust $ T.find (not . isOperatorChar) sym
+
+mergeOpDict :: TVar GlobalOpDict -> GlobalOpDict -> GlobalOpDict -> IO ()
+mergeOpDict
+  godv
+  (GlobalOpDict !base'decls !base'quaint'ops)
+  (GlobalOpDict !decls !quaint'ops) =
+    if Map.null declUpds && L.null quaintUpds
+      then return () -- shortcircuit without touching the TVar
+      else atomically $
+        modifyTVar' godv $ \(GlobalOpDict !curr'decls !curr'quaint'ops) ->
+          GlobalOpDict
+            ( if Map.null declUpds
+                then curr'decls
+                else Map.union curr'decls declUpds
+            )
+            ( if L.null quaintUpds
+                then curr'quaint'ops
+                else L.sort $ curr'quaint'ops ++ quaintUpds
+            )
+    where
+      declUpds = Map.difference decls base'decls
+      quaintUpds =
+        if L.length quaint'ops <= L.length base'quaint'ops
+          then [] -- shortcircuit since we know both are sorted and no removal
+          else quaint'ops L.\\ base'quaint'ops
 
 isOperatorChar :: Char -> Bool
 isOperatorChar !c =
