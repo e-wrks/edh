@@ -81,7 +81,10 @@ resolveRelativeImport !nomSpec !relPath = do
             False ->
               return $
                 Left $
-                  "no such module: " <> T.pack (show relImp)
+                  "no such Edh "
+                    <> T.pack ?fileExt
+                    <> ": "
+                    <> T.pack (show relImp)
                     <> " relative to: "
                     <> T.pack relPath
   where
@@ -115,7 +118,13 @@ resolveAbsoluteImport !nomSpec !pkgPath = canonicalizePath pkgPath >>= go
         tryParentDir =
           let !parentPkgPath = takeDirectory absPkgPath
            in if equalFilePath parentPkgPath absPkgPath
-                then return $ Left $ "no such module: " <> T.pack (show nomSpec)
+                then
+                  return $
+                    Left $
+                      "no such Edh "
+                        <> T.pack ?fileExt
+                        <> ": "
+                        <> T.pack (show nomSpec)
                 else go parentPkgPath
 
 locateEdhMainModule :: FilePath -> IO (Either Text (FilePath, FilePath))
