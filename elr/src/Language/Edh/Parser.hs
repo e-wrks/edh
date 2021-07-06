@@ -802,12 +802,13 @@ parseStmt' !prec !si = do
               (ContinueStmt, si) <$ keyword "continue",
               -- TODO validate fallthrough must within a branch block
               (FallthroughStmt, si) <$ keyword "fallthrough",
-              (RethrowStmt, si) <$ keyword "rethrow",
               parseReturnStmt docCmt si,
               parseThrowStmt si,
+              (RethrowStmt, si) <$ keyword "rethrow",
               (,si) <$> parseVoidStmt,
-              -- NOTE: statements above should probably all be detected by
-              -- `illegalKeywrodForAttr` as invalid for attribute identifier
+              -- NOTE: keywords in statements above should either parse as
+              --       literal too, or get detected by `illegalKeywrodAsIdent`
+              --       as invalid for attribute identifier
               do
                 (ExprSrc !x _, !si') <- parseExprPrec Nothing prec si
                 return (ExprStmt x docCmt, si')
@@ -1125,28 +1126,6 @@ parseDecLit = lexeme $ do
       !c <- satisfy $ \ !c -> c >= '0' && c <= '9'
       return $ toInteger (fromEnum c - fromEnum '0')
 
-parseLitExpr :: Parser Literal
-parseLitExpr =
-  choice
-    [ NilLiteral <$ litKw "nil",
-      BoolLiteral <$> parseBoolLit,
-      StringLiteral <$> parseStringLit,
-      SinkCtor <$ litKw "sink",
-      DecLiteral D.nan <$ litKw "nan",
-      DecLiteral D.inf <$ litKw "inf",
-      ValueLiteral edhNone <$ litKw "None",
-      ValueLiteral edhNothing <$ litKw "Nothing",
-      ValueLiteral edhNA <$ litKw "NA",
-      ValueLiteral (EdhOrd EQ) <$ litKw "EQ",
-      ValueLiteral (EdhOrd LT) <$ litKw "LT",
-      ValueLiteral (EdhOrd GT) <$ litKw "GT",
-      -- allow `pass` to appear as an expr in addition to stmt
-      NilLiteral <$ litKw "pass",
-      DecLiteral <$> parseDecLit
-    ]
-  where
-    litKw = hidden . keyword
-
 parseAttrAddrSrc :: Parser AttrAddrSrc
 parseAttrAddrSrc = let ?allowKwAttr = False in parseAttrAddrSrc'
 
@@ -1210,60 +1189,100 @@ parseAlphNumName = (detectIllegalIdent >>) $
     !anRest <- takeWhileP Nothing isIdentChar
     return $ anStart <> anRest
   where
-    detectIllegalIdent = do
-      !eps <- get -- save parsing states
-      !illIdent <- lookAhead illegalIdentifier
-      put eps -- restore parsing states (esp. lexeme end)
-      case illIdent of
-        Just !ident -> fail $ "illegal identifier `" <> T.unpack ident <> "`"
-        Nothing -> pure ()
-    illegalIdentifier :: (?allowKwAttr :: Bool) => Parser (Maybe Text)
-    illegalIdentifier =
-      choice
-        [ Just <$> kwIdent "this",
-          Just <$> kwIdent "that",
-          Just <$> kwIdent "super",
-          Just . T.pack . show <$> parseLitExpr,
-          -- allow dot-notation to use keywords here. disallowing such keywords,
-          -- one occurrence willl parse as missing attr followed by another
-          -- statement initiated by that very keyword, esp. when written on a
-          -- single line, the error reporting can appear even more confusing.
-          if ?allowKwAttr
-            then return Nothing
-            else illegalKeywrodForAttr <|> return Nothing
-        ]
-    kwIdent :: Text -> Parser Text
-    kwIdent !kw = keyword kw >> return kw
+    detectIllegalIdent =
+      if ?allowKwAttr
+        then return ()
+        else do
+          !eps <- get -- save parsing states
+          !illIdent <- lookAhead $ illegalKeywrodAsIdent <|> return Nothing
+          !illLit <- lookAhead $ Just . show <$> parseLitExpr <|> return Nothing
+          put eps -- restore parsing states (esp. lexeme end)
+          case illIdent of
+            Just !ident ->
+              fail $ "illegal keyword `" <> T.unpack ident <> "` as identifier"
+            Nothing -> pure ()
+          case illLit of
+            Just !lit -> fail $ "illegal literal `" <> lit <> "` as identifier"
+            Nothing -> pure ()
 
--- NOTE: keywords for statements or other constructs will parse as identifier
---       for attribute access, if not forbidden here.
-illegalKeywrodForAttr :: Parser (Maybe Text)
-illegalKeywrodForAttr = do
+-- NOTE: keywords for statements or other constructs, unless also parse as some
+--       literal, will parse as identifier for attribute access, if not
+--       forbidden here.
+illegalKeywrodAsIdent :: Parser (Maybe Text)
+illegalKeywrodAsIdent = do
   EdhParserState (GlobalOpDict _decls !quaint'ops) _ _ <- get
   Just
     <$> choice
-      ( [ illegalWord "go",
+      ( [ illegalWord "this",
+          illegalWord "that",
+          illegalWord "super",
+          illegalWord "go",
           illegalWord "defer",
           illegalWord "effect",
           illegalWord "let",
           illegalWord "const", -- reserved for JavaScript src compatibility
-          illegalWord "as",
-          illegalWord "then",
-          illegalWord "else",
           illegalWord "extends",
           illegalWord "perceive",
+          illegalWord "void",
+          illegalWord "as",
+          illegalWord "if",
+          illegalWord "then",
+          illegalWord "else",
+          illegalWord "case",
           illegalWord "of",
-          illegalWord "break",
-          illegalWord "continue",
-          illegalWord "fallthrough",
+          illegalWord "for",
+          illegalWord "from",
+          illegalWord "do",
+          illegalWord "while",
+          illegalWord "not",
+          illegalWord "import",
+          illegalWord "export",
+          illegalWord "include",
+          illegalWord "namespace",
+          illegalWord "class",
+          illegalWord "data",
+          illegalWord "method",
+          illegalWord "generator",
+          illegalWord "interpreter",
+          illegalWord "producer",
+          illegalWord "ai",
+          illegalWord "default",
+          illegalWord "yield",
           illegalWord "return",
-          illegalWord "throw"
+          illegalWord "throw",
+          illegalWord "rethrow",
+          illegalWord "new",
+          illegalWord "try"
         ]
           ++ (illegalWord <$> quaint'ops)
       )
     <|> return Nothing
   where
     illegalWord !wd = wd <$ keyword wd
+
+parseLitExpr :: Parser Literal
+parseLitExpr =
+  choice
+    [ NilLiteral <$ litKw "nil",
+      BoolLiteral <$> parseBoolLit,
+      StringLiteral <$> parseStringLit,
+      SinkCtor <$ litKw "sink",
+      DecLiteral D.nan <$ litKw "nan",
+      DecLiteral D.inf <$ litKw "inf",
+      ValueLiteral edhNone <$ litKw "None",
+      ValueLiteral edhNothing <$ litKw "Nothing",
+      ValueLiteral edhNA <$ litKw "NA",
+      ValueLiteral (EdhOrd EQ) <$ litKw "EQ",
+      ValueLiteral (EdhOrd LT) <$ litKw "LT",
+      ValueLiteral (EdhOrd GT) <$ litKw "GT",
+      NilLiteral <$ litKw "pass",
+      ValueLiteral EdhBreak <$ litKw "break",
+      ValueLiteral EdhContinue <$ litKw "continue",
+      ValueLiteral EdhFallthrough <$ litKw "fallthrough",
+      DecLiteral <$> parseDecLit
+    ]
+  where
+    litKw = hidden . keyword
 
 parseOpSrc :: Parser OpSymSrc
 parseOpSrc = do
@@ -1448,6 +1467,9 @@ parsePrefixExpr !si =
             Just (!apkr'', !si'') -> return (Just apkr'', si'')
         !x <- parseExprWithSrc
         return (DefaultExpr apkr x, si'),
+      unaryKwStmt "extends" ExtendsStmt,
+      unaryKwStmt "return" $ flip ReturnStmt NoDocCmt,
+      unaryKwStmt "throw" ThrowStmt,
       -- technically accept the `new` and `try keyword anywhere as an expr
       -- prefix, to better inter-op with some other languages like JavaScript
       do
@@ -1458,6 +1480,16 @@ parsePrefixExpr !si =
   where
     prefixOp :: Text -> Parser ()
     prefixOp !opSym = string opSym >> notFollowedBy (satisfy isOperatorChar)
+
+    unaryKwStmt :: Text -> (ExprSrc -> Stmt) -> Parser (Expr, IntplSrcInfo)
+    unaryKwStmt !kw !xc = do
+      !kw'span <- keyword kw
+      (x@(ExprSrc _x !x'span), !si') <- parseExpr si
+      return
+        ( BlockExpr
+            [StmtSrc (xc x) (SrcRange (src'start kw'span) (src'end x'span))],
+          si'
+        )
 
 -- besides hardcoded prefix operators, all other operators are infix binary
 -- operators, they can be declared and further overridden everywhere
@@ -1560,6 +1592,7 @@ parseExprPrec !precedingOp !prec !si =
         (!x, !si') <-
           choice
             [ (,si) . LitExpr <$> parseLitExpr,
+              nullaryKwStmt "rethrow" RethrowStmt,
               (,si) <$> parseSymbolExpr,
               parsePrefixExpr si,
               parseYieldExpr si,
@@ -1588,6 +1621,11 @@ parseExprPrec !precedingOp !prec !si =
             ]
         !lexeme'end <- lexemeEndPos
         return (ExprSrc x (lspSrcRangeFromParsec startPos lexeme'end), si')
+      where
+        nullaryKwStmt :: Text -> Stmt -> Parser (Expr, IntplSrcInfo)
+        nullaryKwStmt !kw !stmt = do
+          !kw'span <- keyword kw
+          return (BlockExpr [StmtSrc stmt kw'span], si)
 
     parseMoreOps ::
       Maybe (OpSymSrc, OpFixity) ->
