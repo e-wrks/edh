@@ -819,15 +819,15 @@ createEdhWorld !console = do
         !errObj = edh'scope'this $ contextScope $ edh'context ets
 
     moduleAllocator ::
-      "__name__" !: Text ->
+      "__name__" ?: Text ->
       "__path__" ?: Text ->
       "__file__" ?: Text ->
       RestKwArgs ->
       EdhObjectAllocator
     moduleAllocator
-      (mandatoryArg -> !moduName)
-      (defaultArg "<ad-hoc>" -> !moduPath)
-      (defaultArg "<on-the-fly>" -> !moduFile)
+      (defaultArg "__anonymous__" -> !moduName)
+      (defaultArg ("<ad-hoc:" <> moduName <> ">") -> !moduPath)
+      (defaultArg ("<on-the-fly:" <> moduName <> ">") -> !moduFile)
       !extraArts
       !exit
       _ets =

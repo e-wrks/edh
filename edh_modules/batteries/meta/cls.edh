@@ -32,11 +32,7 @@ case xx of {{ namespace:ns }} -> {
    # otherwise `namespace` is a keyword, only valid to appear in the namespace
    # definition syntax
    #}
-  class @'namespace' {
-
-    __name__ :: String
-
-  }
+  class @'namespace' {}
 
 
   {##
