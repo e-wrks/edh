@@ -1,5 +1,6 @@
 import sys, signal, faulthandler
 import asyncio
+import traceback
 
 __all__ = ["dump_stacks_on_SIGQUIT"]
 
@@ -8,7 +9,7 @@ def dump_stacks_on_SIGQUIT():
     try:
         signal.signal(signal.SIGQUIT, dump_stacks)
     except AttributeError:
-        pass
+        traceback.print_exc()
 
 
 def dump_stacks(signum, frame):
