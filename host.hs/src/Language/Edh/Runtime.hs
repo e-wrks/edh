@@ -26,7 +26,9 @@ import Language.Edh.InterOp
 import Language.Edh.PkgMan
 import Language.Edh.RtTypes
 import Language.Edh.Utils
+import System.Directory
 import System.Environment
+import System.FilePath
 import System.Posix.Signals
 import Prelude
 
@@ -1024,10 +1026,13 @@ runEdhFile !world !edhFile =
 
 runEdhFile' :: EdhWorld -> FilePath -> IO EdhValue
 runEdhFile' !world !edhFile = do
-  !fileContent <- B.readFile edhFile
+  !absFile <- canonicalizePath edhFile
+  let !absPath = T.pack $ takeDirectory absFile
+  !fileContent <- B.readFile absFile
   case streamDecodeUtf8With lenientDecode fileContent of
     Some !moduSource _ _ -> runEdhProgram' world $ \ !etsMain ->
-      edhCreateModule world "__main__" "__main__" edhFile >>= \ !modu ->
-        moduleContext world modu >>= \ !moduCtx ->
-          let !etsModu = etsMain {edh'context = moduCtx}
-           in runEdhTx etsModu $ evalEdh (T.pack edhFile) moduSource endOfEdh
+      edhCreateModule world "__main__" absPath absFile
+        >>= \ !modu ->
+          moduleContext world modu >>= \ !moduCtx ->
+            let !etsModu = etsMain {edh'context = moduCtx}
+             in runEdhTx etsModu $ evalEdh (T.pack absFile) moduSource endOfEdh
