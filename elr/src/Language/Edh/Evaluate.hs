@@ -3189,7 +3189,7 @@ importFromFS !etsImp !normalizedSpec !exit =
                 Nothing -> do
                   (!modu, !loadingScope, !moduSlotVar) <- atomically $ do
                     -- we are the first importer, resolve correct module name
-                    !moduName <- deriveLoadeeName scope moduId
+                    !moduName <- deriveModuName moduId
                     -- allocate a loading slot
                     !modu <- edhCreateModule world moduName moduId moduFile
                     !loadingScope <- objectScope modu
@@ -3238,21 +3238,13 @@ importFromFS !etsImp !normalizedSpec !exit =
   where
     !world = edh'prog'world $ edh'thread'prog etsImp
     !worldModules = edh'world'modules world
-    scope = contextScope $ edh'context etsImp
 
-deriveLoadeeName :: Scope -> Text -> STM Text
-deriveLoadeeName !loaderScope !loadeePath =
-  lookupEdhCtxAttr loaderScope (AttrByName "__name__") >>= \case
-    EdhString !loaderName ->
-      lookupEdhCtxAttr loaderScope (AttrByName "__path__") >>= \case
-        EdhString !loaderPath ->
-          let !pre = case T.stripSuffix loaderName loaderPath of
-                Nothing -> loaderPath
-                Just !pre' -> pre'
-           in case T.commonPrefixes pre loadeePath of
-                Nothing -> return loadeePath
-                Just (_pre', _, !loadeeName) -> return loadeeName
-        _ -> return loadeePath
+deriveModuName :: Text -> STM Text
+deriveModuName !loadeePath =
+  case T.breakOnEnd "edh_modules/" loadeePath of
+    (_homeDir, !moduName) | not $ T.null moduName -> return moduName
+    -- TODO search a sibling `edh-universe` dir as for a home, to derive name
+    --      for non-module (i.e. script or inclusion) files
     _ -> return loadeePath
 
 locateSrcFileInFS ::
@@ -3353,7 +3345,7 @@ includeEdhFragment !incSpec !exit !ets =
             runEdhTx ets $
               pushEdhStack $ \ !etsInc -> do
                 let incScope = contextScope $ edh'context etsInc
-                !fragName <- deriveLoadeeName scope fragId
+                !fragName <- deriveModuName fragId
                 iopdUpdate
                   [ (AttrByName "__name__", EdhString fragName),
                     (AttrByName "__path__", EdhString fragId),
@@ -3367,7 +3359,6 @@ includeEdhFragment !incSpec !exit !ets =
   where
     world = edh'prog'world $ edh'thread'prog ets
     worldFrags = edh'world'fragments world
-    scope = contextScope $ edh'context ets
     normalizedSpec = normalizeImportSpec incSpec
 
     loadFrag :: ((FragmentId, Text, [StmtSrc]) -> IO ()) -> IO ()

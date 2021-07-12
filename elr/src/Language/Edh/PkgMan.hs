@@ -57,12 +57,8 @@ locateEdhFile !nomSpec !relPath =
       return $ Left $ "path does not exist: " <> T.pack relPath
     True ->
       if "." `T.isPrefixOf` nomSpec
-        then
-          fmap (\(!path, !file) -> (path, file))
-            <$> resolveRelativeImport nomSpec relPath
-        else
-          fmap (\(!path, !file) -> (path, file))
-            <$> resolveAbsoluteImport nomSpec "."
+        then resolveRelativeImport nomSpec relPath
+        else resolveAbsoluteImport nomSpec "."
 
 resolveRelativeImport ::
   (?frontFile :: FilePath, ?fileExt :: FilePath) =>
