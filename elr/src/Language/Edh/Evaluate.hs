@@ -2677,7 +2677,6 @@ pushEdhStack' !scope !act !ets = runEdhTx etsNew act
   where
     !ctx = edh'context ets
     !tip = edh'ctx'tip ctx
-    !srcLoc = procedureLoc' $ edh'scope'proc scope
 
     !etsNew = ets {edh'context = ctxNew}
     !ctxNew =
@@ -2685,7 +2684,11 @@ pushEdhStack' !scope !act !ets = runEdhTx etsNew act
         { edh'ctx'tip = tipNew,
           edh'ctx'stack = tip : edh'ctx'stack ctx
         }
-    !tipNew = EdhCallFrame scope srcLoc defaultEdhExcptHndlr
+    !tipNew =
+      tip
+        { edh'frame'scope = scope,
+          edh'exc'handler = defaultEdhExcptHndlr
+        }
 
 pushEdhStack :: EdhTx -> EdhTx
 pushEdhStack !act !ets = do
