@@ -110,13 +110,12 @@ case xx of {{ namespace:ns }} -> {
   {##
    # the module class
    #
-   # module objects are usually constructed implicitly by running Edh code from
+   # module objects are usually constructed implicitly by running Đ code from
    # command line, then then imports performed meanwhile
    #}
   class module {
 
     __name__ :: String
-    __path__ :: String
     __file__ :: String
 
   }

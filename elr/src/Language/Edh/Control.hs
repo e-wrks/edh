@@ -20,6 +20,10 @@ import Text.Megaparsec
   )
 import Prelude
 
+type ModuleName = Text
+
+type ModuleFile = Text
+
 data OpSymSrc = OpSymSrc !OpSymbol !SrcRange
   deriving (Eq)
 
@@ -126,8 +130,8 @@ prettySrcRange (SrcDoc !file) (SrcRange (SrcPos !start'line !start'char) (SrcPos
 
 -- | Source location
 data SrcLoc = SrcLoc
-  { src'doc :: {-# UNPACK #-} !SrcDoc,
-    src'range :: {-# UNPACK #-} !SrcRange
+  { src'doc :: !SrcDoc,
+    src'range :: !SrcRange
   }
   deriving (Eq, Show)
 

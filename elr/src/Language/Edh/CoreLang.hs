@@ -306,14 +306,14 @@ lookupEdhObjMagic !obj !key =
         !art -> return (o, art)
 {-# INLINE lookupEdhObjMagic #-}
 
--- * import/export
+-- * import/export/include
 
-normalizeImportSpec :: Text -> Text
-normalizeImportSpec = withoutLeadingSlash . withoutTrailingSlash
+normalizeModuRefSpec :: Text -> Text
+normalizeModuRefSpec = withoutLeadingSlash . withoutTrailingSlash
   where
     withoutLeadingSlash spec = fromMaybe spec $ T.stripPrefix "/" spec
     withoutTrailingSlash spec = fromMaybe spec $ T.stripSuffix "/" spec
-{-# INLINE normalizeImportSpec #-}
+{-# INLINE normalizeModuRefSpec #-}
 
 edhExportsMagicName :: Text
 edhExportsMagicName = "__exports__"

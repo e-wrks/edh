@@ -585,7 +585,7 @@ data EdhWorld = EdhWorld
     -- | all modules loaded, being loaded, or failed loading into this world
     edh'world'modules :: !(TMVar (Map.HashMap ModuleId (TVar ModuSlot))),
     -- | all fragments cached (after successfully parsed) in this world
-    edh'world'fragments :: !(TVar (Map.HashMap FragmentId CachedFrag)),
+    edh'world'fragments :: !(TVar (Map.HashMap ModuleFile CachedFrag)),
     -- | for console logging, input and output
     edh'world'console :: !EdhConsole,
     -- | wrapping any host value as object
@@ -609,24 +609,29 @@ instance Eq EdhWorld where
   x == y =
     edh'scope'this (edh'world'root x) == edh'scope'this (edh'world'root y)
 
-type ModuleId = Text
+data ModuleId = HostModule !ModuleName | EdhModule !ModuleFile
+  deriving (Eq)
+
+instance Hashable ModuleId where
+  hashWithSalt s (HostModule name) =
+    s `hashWithSalt` (1 :: Int) `hashWithSalt` name
+  hashWithSalt s (EdhModule file) =
+    s `hashWithSalt` (2 :: Int) `hashWithSalt` file
 
 data ModuSlot
   = ModuLoaded !Object
   | ModuLoading !Scope !(TVar [Either EdhValue Object -> STM ()])
   | ModuFailed !EdhValue
 
-type FragmentId = Text
 
 data CachedFrag = CachedFrag !EpochTime ![StmtSrc]
 
-edhCreateModule :: EdhWorld -> Text -> ModuleId -> String -> STM Object
-edhCreateModule !world !moduName !moduId !srcName = do
+edhCreateModule :: EdhWorld -> Text -> String -> STM Object
+edhCreateModule !world !moduName !srcName = do
   !idModu <- unsafeIOToSTM newUnique
   !hs <-
     iopdFromList
       [ (AttrByName "__name__", EdhString moduName),
-        (AttrByName "__path__", EdhString moduId),
         (AttrByName "__file__", EdhString $ T.pack srcName)
       ]
   !ss <- newTVar []

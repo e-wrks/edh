@@ -84,7 +84,6 @@ module Language.Edh.EHI
     edhModuleAsIs,
     createEdhModule,
     installEdhModule,
-    installedEdhModule,
     importEdhModule,
     moduleContext,
     parseEdh,
@@ -333,15 +332,9 @@ module Language.Edh.EHI
     edhRegulateIndex,
 
     -- * language harness
-    normalizeImportSpec,
-    edhRelativePathFrom,
+    normalizeModuRefSpec,
     locateEdhFile,
-    locateEdhModule,
-    locateEdhFragment,
-    resolveRelativeImport,
-    resolveAbsoluteImport,
     locateEdhMainModule,
-    edhExportsMagicName,
 
     -- * standalone modules
     module Language.Edh.IOPD,

@@ -37,6 +37,7 @@ import Language.Edh.PkgMan
 import Language.Edh.RtTypes
 import Language.Edh.Utils
 import Numeric
+import System.FilePath
 import System.Posix
 import Text.Megaparsec
   ( PosState (..),
@@ -3154,27 +3155,27 @@ importEdhModule'' !importSpec !loadAct !impExit !etsImp =
     loadEdhModule :: (ModuSlot -> STM ()) -> STM ()
     loadEdhModule !exit = do
       !moduMap <- readTMVar worldModules
-      case Map.lookup normalizedSpec moduMap of
-        -- attempt the import specification as direct module id first
+      case Map.lookup (HostModule normalizedSpec) moduMap of
+        -- attempt the import specification as host module id first
         Just !moduSlotVar -> readTVar moduSlotVar >>= exit
-        -- resolving to `.edh` source files from local filesystem
+        -- resolving Edh source files from local filesystem
         Nothing ->
           runEdhTx etsImp $ edhContIO $ importFromFS etsImp normalizedSpec exit
       where
         !world = edh'prog'world $ edh'thread'prog etsImp
         !worldModules = edh'world'modules world
 
-        normalizedSpec = normalizeImportSpec importSpec
+        normalizedSpec = normalizeModuRefSpec importSpec
 
 importFromFS :: EdhThreadState -> Text -> (ModuSlot -> STM ()) -> IO ()
 importFromFS !etsImp !normalizedSpec !exit =
   let ?frontFile = "__init__.edh"
       ?fileExt = ".edh"
    in locateSrcFileInFS etsImp normalizedSpec $
-        \(!nomPath, !moduFile) -> do
+        \(!moduName, !moduFile) -> do
           !postLoads <- newTVarIO []
           !exvImport <- newTVarIO $ EdhString "<import failed>"
-          let !moduId = T.pack nomPath
+          let !moduId = EdhModule $ T.pack moduFile
               impCleanup moduMap = atomically $ do
                 void $ tryPutTMVar worldModules moduMap
                 !exv <- readTVar exvImport
@@ -3189,9 +3190,8 @@ importFromFS !etsImp !normalizedSpec !exit =
                 Nothing -> do
                   (!modu, !loadingScope, !moduSlotVar) <- atomically $ do
                     -- we are the first importer, resolve correct module name
-                    !moduName <- deriveModuName moduId
                     -- allocate a loading slot
-                    !modu <- edhCreateModule world moduName moduId moduFile
+                    !modu <- edhCreateModule world moduName moduFile
                     !loadingScope <- objectScope modu
                     !moduSlotVar <- newTVar $ ModuLoading loadingScope postLoads
                     -- update into world wide module map
@@ -3239,54 +3239,25 @@ importFromFS !etsImp !normalizedSpec !exit =
     !world = edh'prog'world $ edh'thread'prog etsImp
     !worldModules = edh'world'modules world
 
-deriveModuName :: Text -> STM Text
-deriveModuName !loadeePath =
-  case T.breakOnEnd "edh_modules/" loadeePath of
-    (_homeDir, !moduName) | not $ T.null moduName -> return moduName
-    -- TODO search a sibling `edh-universe` dir as for a home, to derive name
-    --      for non-module (i.e. script or inclusion) files
-    _ -> return loadeePath
-
 locateSrcFileInFS ::
   (?frontFile :: FilePath, ?fileExt :: FilePath) =>
   EdhThreadState ->
   Text ->
-  ((FilePath, FilePath) -> IO ()) ->
+  ((ModuleName, FilePath) -> IO ()) ->
   IO ()
 locateSrcFileInFS !ets !normalizedSpec !exit =
-  atomically (lookupEdhCtxAttr scope (AttrByName "__name__")) >>= \case
-    EdhString !fromName
-      | not ("<" `T.isPrefixOf` fromName) ->
-        atomically (lookupEdhCtxAttr scope (AttrByName "__file__"))
-          >>= \case
-            EdhString !fromFile ->
-              -- special case for `import * '.'`, 2 use cases:
-              --
-              --  *) from an entry module (i.e. __main__.edh), to
-              --     import artifacts from its respective persistent
-              --     module
-              --
-              --  *) from a persistent module, to re-populate the
-              --     module scope with its own exports (i.e. the dict
-              --     __exports__ in its scope), in case the module
-              -- scope possibly altered after initialization
-              let !nomSpec = case normalizedSpec of
-                    "." -> fromName
-                    _ -> normalizedSpec
-               in doLocate nomSpec $ edhRelativePathFrom $ T.unpack fromFile
-            _ ->
-              atomically $
-                throwEdh ets PackageError $
-                  "bug: no valid `__file__` in module " <> fromName
-    _ ->
-      doLocate normalizedSpec "."
+  locateEdhFile normalizedSpec baseDir >>= \case
+    Left !err -> atomically $ throwEdh ets PackageError err
+    Right !result -> exit result
   where
-    scope = contextScope $ edh'context ets
-    doLocate :: Text -> FilePath -> IO ()
-    doLocate !nomSpec !relPath =
-      locateEdhFile nomSpec relPath >>= \case
-        Left !err -> atomically $ throwEdh ets PackageError err
-        Right !result -> exit result
+    baseDir :: FilePath
+    baseDir =
+      if "<" `T.isPrefixOf` fromDoc
+        then "." -- intrinsic module take pwd as import base
+        else takeDirectory $ T.unpack fromDoc
+      where
+        SrcLoc (SrcDoc fromDoc) _src'span =
+          edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
 
 readEdhSrcFile :: FilePath -> IO Text
 readEdhSrcFile !edhFile =
@@ -3340,49 +3311,46 @@ includeEdhFragment !incSpec !exit !ets =
   runEdhTx ets $
     edhContIO $
       loadFrag $
-        \(!fragId, !srcName, !stmts) ->
+        \(!moduName, !fragId, !stmts) ->
           atomically $
             runEdhTx ets $
               pushEdhStack $ \ !etsInc -> do
                 let incScope = contextScope $ edh'context etsInc
-                !fragName <- deriveModuName fragId
                 iopdUpdate
-                  [ (AttrByName "__name__", EdhString fragName),
-                    (AttrByName "__path__", EdhString fragId),
-                    (AttrByName "__file__", EdhString srcName)
+                  [ (AttrByName "__name__", EdhString moduName),
+                    (AttrByName "__file__", EdhString fragId)
                   ]
                   $ edh'scope'entity incScope
                 runEdhTx etsInc $
-                  runStmtsInScope incScope srcName stmts $
+                  runStmtsInScope incScope fragId stmts $
                     \ !incResult _ets ->
                       exitEdh ets exit $ edhDeCaseWrap incResult
   where
     world = edh'prog'world $ edh'thread'prog ets
     worldFrags = edh'world'fragments world
-    normalizedSpec = normalizeImportSpec incSpec
+    normalizedSpec = normalizeModuRefSpec incSpec
 
-    loadFrag :: ((FragmentId, Text, [StmtSrc]) -> IO ()) -> IO ()
+    loadFrag :: ((ModuleName, ModuleFile, [StmtSrc]) -> IO ()) -> IO ()
     loadFrag !exit' =
       let ?frontFile = "__include__.edh"
           ?fileExt = ".iedh"
        in locateSrcFileInFS ets normalizedSpec $
-            \(!nomPath, !fragFile) -> do
-              let srcName = T.pack fragFile
-                  fragId = T.pack nomPath
+            \(!moduName, !fragFile) -> do
+              let !fragId = T.pack fragFile
               !tsFile <- modificationTime <$> getFileStatus fragFile
               Map.lookup fragId <$> readTVarIO worldFrags >>= \case
                 Just (CachedFrag !tsCache !stmts)
                   | tsCache >= tsFile ->
-                    exit' (fragId, srcName, stmts)
+                    exit' (moduName, fragId, stmts)
                 _ -> do
                   !srcCode <- readEdhSrcFile fragFile
-                  parseEdh world srcName srcCode >>= \case
+                  parseEdh world fragId srcCode >>= \case
                     Left !err -> throwIO err
                     Right (!stmts, _docCmt) -> do
                       atomically $
                         modifyTVar' worldFrags $
                           Map.insert fragId $ CachedFrag tsFile stmts
-                      exit' (fragId, srcName, stmts)
+                      exit' (moduName, fragId, stmts)
 
 intplExprSrc :: EdhThreadState -> ExprSrc -> (ExprSrc -> STM ()) -> STM ()
 intplExprSrc !ets (ExprSrc !x !ss) !exit =
