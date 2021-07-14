@@ -594,8 +594,8 @@ installEdhBatteries world = do
           [ (AttrByName nm,) <$> mkHostProc conScope vc nm hp
             | (vc, nm, hp) <-
                 [ (EdhMethod, "exit", wrapHostProc conExitProc),
-                  (EdhIntrpr, "readSource", wrapHostProc conReadSourceProc),
-                  (EdhIntrpr, "readCommand", wrapHostProc conReadCommandProc),
+                  (EdhMethod, "readSource", wrapHostProc conReadSourceProc),
+                  (EdhMethod, "readCommand", wrapHostProc conReadCommandProc),
                   (EdhMethod, "log", wrapHostProc conLogProc),
                   (EdhMethod, "print", wrapHostProc conPrintProc),
                   (EdhMethod, "now", wrapHostProc conNowProc),
