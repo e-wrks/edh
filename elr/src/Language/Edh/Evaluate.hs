@@ -76,14 +76,14 @@ getEdhErrCtx !unwind !ets =
     unwindStack c (_ : s) = unwindStack (c - 1) s
 
 edhCreateError :: Int -> EdhThreadState -> EdhErrorTag -> ArgsPack -> EdhError
-edhCreateError !unwindDef !ets !tag apk@(ArgsPack !args !kwargs) = case args of
+edhCreateError !unwindDef !ets !tag (ArgsPack !args !kwargs) = case args of
   [EdhString !m] | odNull kwargs' -> createErr m nil
   (EdhString !m : args') -> createErr m $ case args' of
     [] | odNull kwargs' -> nil
-    _ -> EdhArgsPack $ ArgsPack args' kwargs
+    _ -> EdhArgsPack $ ArgsPack args' kwargs'
   _ -> createErr "❌" $ case args of
     [] | odNull kwargs' -> nil
-    _ -> EdhArgsPack apk
+    _ -> EdhArgsPack $ ArgsPack args kwargs'
   where
     createErr !msg !details =
       EdhError tag msg (toDyn details) $ getEdhErrCtx unwind ets

@@ -40,17 +40,17 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
      #}
     interpreter assert( callerScope,
       assertion, msg= None, ***details
-    ) case callerScope.eval( assertion ) of {
-      true -> pass # as it should be
+    ) {
+      case callerScope.eval( assertion ) of {
+        true -> return nil # as it should be
+        # other values are unexpected
+        nil -> result = '<nil>'
+        { result } -> pass
+      }
 
-      # other values are unexpected
-      nil -> { result = '<nil>'; fallthrough }
-      { result } -> { fallthrough }
-
-      detailsResult = if null $ details
+      detailsResult = if null$ details
       then () # empty apk, don't bother eval it
-      # note in below we localize artifacts (avoid polluting the outer scope),
-      # with a scoped block {@ ... @}
+      # note in below we localize artifacts (avoid polluting the outer scope), with a scoped block {@ ... @}
       else {@ case d = callerScope.eval(*** details ) | type of {
           nil -> () # a very corner case, convert to an empty apk
           "ArgsPack" -> d
@@ -59,7 +59,9 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
 
       error(
         msg and callerScope.eval( msg ) or 'assertion failed',
-        # following goes as the thrown exception's @.details@
+        # hide the `assert()` call frame as well as the `error()` frame
+        unwind= 2,
+        # following goes as the thrown exception's `.details`
         result= result, ***detailsResult
       )
     }
