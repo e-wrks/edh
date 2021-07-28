@@ -1,6 +1,6 @@
 module Language.Edh.Batteries.Console where
 
-import Control.Concurrent (forkIO, myThreadId, threadDelay)
+import Control.Concurrent (forkFinally, forkIO, myThreadId, threadDelay)
 import Control.Concurrent.STM
 import Control.Monad (void)
 import Data.Lossless.Decimal
@@ -266,7 +266,7 @@ conNowProc !exit !ets = do
 
 timelyNotify ::
   EdhThreadState ->
-  Int ->
+  Integer ->
   Decimal ->
   Bool ->
   EdhTxExit EdhValue ->
@@ -279,28 +279,42 @@ timelyNotify !ets !scale !interval !wait1st !exit =
         throwEdh ets UsageError $
           "invalid interval, expect an integer but: "
             <> T.pack (show interval)
-      Just !i -> do
-        let !delayMicros = scale * fromInteger i
-        -- use a 'TMVar' filled asynchronously, so perceivers on the same
-        -- thread dont' get blocked by this wait
-        !notif <- newEmptyTMVar
-        let notifOne = do
-              !nanos <- EdhDecimal . fromInteger <$> takeTMVar notif
-              runEdhTx ets $ edhYield nanos (const schedNext) exit
-            schedNext =
-              edhContIO $ do
-                void $
-                  forkIO $ do
-                    -- todo this is less optimal
-                    threadDelay delayMicros
-                    !nanos <- (toNanoSecs <$>) $ getTime Realtime
-                    atomically $ void $ tryPutTMVar notif nanos
-                atomically $ edhDoSTM ets notifOne
-        if wait1st
-          then runEdhTx ets schedNext
-          else do
-            putTMVar notif =<< unsafeIOToSTM (toNanoSecs <$> getTime Realtime)
-            notifOne
+      Just !i -> runEdhTx ets $
+        edhContIO $ do
+          let !delayMicros = scale * i
+          -- use a 'TMVar' filled asynchronously, so perceivers on the same
+          -- thread dont' get blocked by this wait
+          !notif <- newEmptyTMVarIO
+          !ns <- currNanos
+          let schedNext last'ns = edhContIO $ do
+                void $ -- avoid deadlock (thus process kill by RTS)
+                  forkFinally
+                    ( do
+                        !ns'now <- currNanos
+                        threadDelay $
+                          fromInteger $ max 0 $ delayMicros - (ns'now - last'ns)
+                    )
+                    ( const $ do
+                        !curr'ns <- currNanos
+                        atomically $ void $ tryPutTMVar notif curr'ns
+                    )
+                atomically notifOne
+              notifOne = do
+                !last'ns <- takeTMVar notif
+                runEdhTx ets $
+                  edhYield
+                    (EdhDecimal $ fromIntegral last'ns)
+                    (const $ schedNext last'ns)
+                    exit
+          atomically $
+            if wait1st
+              then runEdhTx ets $ schedNext ns
+              else do
+                putTMVar notif ns
+                notifOne
+  where
+    currNanos :: IO Integer
+    currNanos = fromIntegral . toNanoSecs <$> getTime Realtime
 
 -- | host generator console.everyMicros(n, wait1st=true) - with fixed interval
 conEveryMicrosProc :: Decimal -> "wait1st" ?: Bool -> EdhHostProc
