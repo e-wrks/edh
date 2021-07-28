@@ -1,6 +1,6 @@
 module Language.Edh.Batteries.Console where
 
-import Control.Concurrent (forkFinally, forkIO, myThreadId, threadDelay)
+import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad (void)
 import Data.Lossless.Decimal
@@ -142,31 +142,24 @@ conReadSourceProc
   (defaultArg defaultEdhPS2 -> ps2)
   (defaultArg False -> locInfo)
   !exit
-  !ets =
-    if edh'in'tx ets
-      then
-        throwEdh
-          ets
-          UsageError
-          "you don't read console from within a transaction"
-      else do
-        !cmdIn <- newEmptyTMVar
-        runEdhTx ets $
-          edhContIO $ do
-            cio $ ConsoleIn cmdIn ps1 ps2
-            atomically $
-              readTMVar cmdIn >>= \(EdhInput !name !lineNo !lines_) ->
-                if locInfo
-                  then
-                    exitEdh ets exit $
-                      EdhPair
-                        ( EdhPair
-                            (EdhString name)
-                            (EdhDecimal $ fromIntegral lineNo)
-                        )
-                        $ EdhString $
-                          T.unlines lines_
-                  else exitEdh ets exit $ EdhString $ T.unlines lines_
+  !ets = do
+    !cmdIn <- newEmptyTMVar
+    runEdhTx ets $
+      edhContIO $ do
+        cio $ ConsoleIn cmdIn ps1 ps2
+        atomically $
+          readTMVar cmdIn >>= \(EdhInput !name !lineNo !lines_) ->
+            if locInfo
+              then
+                exitEdh ets exit $
+                  EdhPair
+                    ( EdhPair
+                        (EdhString name)
+                        (EdhDecimal $ fromIntegral lineNo)
+                    )
+                    $ EdhString $
+                      T.unlines lines_
+              else exitEdh ets exit $ EdhString $ T.unlines lines_
     where
       !world = edh'prog'world $ edh'thread'prog ets
       !cio = consoleIO $ edh'world'console world
@@ -180,47 +173,40 @@ conReadCommandProc
   (optionalArg -> !inScopeOf)
   !exit
   !ets =
-    if edh'in'tx ets
-      then
-        throwEdh
-          ets
-          UsageError
-          "you don't read console from within a transaction"
-      else
-        let doReadCmd :: Scope -> STM ()
-            doReadCmd !cmdScope = do
-              !cmdIn <- newEmptyTMVar
-              runEdhTx ets $
-                edhContIO $ do
-                  cio $ ConsoleIn cmdIn ps1 ps2
-                  atomically $
-                    readTMVar cmdIn
-                      >>= \(EdhInput !name !lineNo !lines_) ->
-                        let !srcName = if T.null name then "<console>" else name
-                            !etsCmd =
-                              ets
-                                { edh'context =
-                                    ctx
-                                      { edh'ctx'tip =
-                                          (edh'ctx'tip ctx)
-                                            { edh'frame'scope = cmdScope
-                                            }
-                                      }
-                                }
-                         in runEdhTx etsCmd $
-                              evalEdh' srcName lineNo (T.unlines lines_) $
-                                edhSwitchState ets
-                                  . exitEdhTx exit
-         in case inScopeOf of
-              Just !so ->
-                castObjSelfStore so >>= \case
-                  -- the specified objec is a scope object, eval cmd source in
-                  -- the wrapped scope
-                  Just (inScope :: Scope) -> doReadCmd inScope
-                  -- eval cmd source in scope of the specified object
-                  Nothing -> objectScope so >>= \ !inScope -> doReadCmd inScope
-              -- eval cmd source with caller's scope
-              _ -> doReadCmd (callingScope ctx)
+    let doReadCmd :: Scope -> STM ()
+        doReadCmd !cmdScope = do
+          !cmdIn <- newEmptyTMVar
+          runEdhTx ets $
+            edhContIO $ do
+              cio $ ConsoleIn cmdIn ps1 ps2
+              atomically $
+                readTMVar cmdIn
+                  >>= \(EdhInput !name !lineNo !lines_) ->
+                    let !srcName = if T.null name then "<console>" else name
+                        !etsCmd =
+                          ets
+                            { edh'context =
+                                ctx
+                                  { edh'ctx'tip =
+                                      (edh'ctx'tip ctx)
+                                        { edh'frame'scope = cmdScope
+                                        }
+                                  }
+                            }
+                     in runEdhTx etsCmd $
+                          evalEdh' srcName lineNo (T.unlines lines_) $
+                            edhSwitchState ets
+                              . exitEdhTx exit
+     in case inScopeOf of
+          Just !so ->
+            castObjSelfStore so >>= \case
+              -- the specified objec is a scope object, eval cmd source in
+              -- the wrapped scope
+              Just (inScope :: Scope) -> doReadCmd inScope
+              -- eval cmd source in scope of the specified object
+              Nothing -> objectScope so >>= \ !inScope -> doReadCmd inScope
+          -- eval cmd source with caller's scope
+          _ -> doReadCmd (callingScope ctx)
     where
       !ctx = edh'context ets
       !world = edh'prog'world $ edh'thread'prog ets
@@ -229,13 +215,7 @@ conReadCommandProc
 -- | host method console.print(*args, **kwargs)
 conPrintProc :: RestPosArgs -> RestKwArgs -> EdhHostProc
 conPrintProc !args !kwargs !exit !ets =
-  if edh'in'tx ets
-    then
-      throwEdh
-        ets
-        UsageError
-        "you don't print to console from within a transaction"
-    else runEdhTx ets $ edhContIO $ printVS args $ odToList kwargs
+  runEdhTx ets $ edhContIO $ printVS args $ odToList kwargs
   where
     !cio = consoleIO $ edh'world'console $ edh'prog'world $ edh'thread'prog ets
 
@@ -272,46 +252,44 @@ timelyNotify ::
   EdhTxExit EdhValue ->
   STM ()
 timelyNotify !ets !scale !interval !wait1st !exit =
-  if edh'in'tx ets
-    then throwEdh ets UsageError "can not be called from within a transaction"
-    else case decimalToInteger interval of
-      Nothing ->
-        throwEdh ets UsageError $
-          "invalid interval, expect an integer but: "
-            <> T.pack (show interval)
-      Just !i -> runEdhTx ets $
-        edhContIO $ do
-          let !delayMicros = scale * i
-          -- use a 'TMVar' filled asynchronously, so perceivers on the same
-          -- thread dont' get blocked by this wait
-          !notif <- newEmptyTMVarIO
-          !ns <- currNanos
-          let schedNext last'ns = edhContIO $ do
-                void $ -- avoid deadlock (thus process kill by RTS)
-                  forkFinally
-                    ( do
-                        !ns'now <- currNanos
-                        threadDelay $
-                          fromInteger $ max 0 $ delayMicros - (ns'now - last'ns)
-                    )
-                    ( const $ do
-                        !curr'ns <- currNanos
-                        atomically $ void $ tryPutTMVar notif curr'ns
-                    )
-                atomically notifOne
-              notifOne = do
-                !last'ns <- takeTMVar notif
-                runEdhTx ets $
-                  edhYield
-                    (EdhDecimal $ fromIntegral last'ns)
-                    (const $ schedNext last'ns)
-                    exit
-          atomically $
-            if wait1st
-              then runEdhTx ets $ schedNext ns
-              else do
-                putTMVar notif ns
-                notifOne
+  case decimalToInteger interval of
+    Nothing ->
+      throwEdh ets UsageError $
+        "invalid interval, expect an integer but: "
+          <> T.pack (show interval)
+    Just !i -> runEdhTx ets $
+      edhContIO $ do
+        let !delayMicros = scale * i
+        -- use a 'TMVar' filled asynchronously, so perceivers on the same
+        -- thread dont' get blocked by this wait
+        !notif <- newEmptyTMVarIO
+        !ns <- currNanos
+        let schedNext last'ns = edhContIO $ do
+              void $ -- avoid deadlock (thus process kill by RTS)
+                forkFinally
+                  ( do
+                      !ns'now <- currNanos
+                      threadDelay $
+                        fromInteger $ max 0 $ delayMicros - (ns'now - last'ns)
+                  )
+                  ( const $ do
+                      !curr'ns <- currNanos
+                      atomically $ void $ tryPutTMVar notif curr'ns
+                  )
+              atomically notifOne
+            notifOne = do
+              !last'ns <- takeTMVar notif
+              runEdhTx ets $
+                edhYield
+                  (EdhDecimal $ fromIntegral last'ns)
+                  (const $ schedNext last'ns)
+                  exit
+        atomically $
+          if wait1st
+            then runEdhTx ets $ schedNext ns
+            else do
+              putTMVar notif ns
+              notifOne
   where
     currNanos :: IO Integer
     currNanos = fromIntegral . toNanoSecs <$> getTime Realtime

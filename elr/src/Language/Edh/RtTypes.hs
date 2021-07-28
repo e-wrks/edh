@@ -623,7 +623,6 @@ data ModuSlot
   | ModuLoading !Scope !(TVar [Either EdhValue Object -> STM ()])
   | ModuFailed !EdhValue
 
-
 data CachedFrag = CachedFrag !EpochTime ![StmtSrc]
 
 edhCreateModule :: EdhWorld -> Text -> String -> STM Object
@@ -780,61 +779,6 @@ forkEdh !bootMod !p !exit !etsForker = do
     (etsForker, p . bootMod)
   exitEdh etsForker exit ()
 {-# INLINE forkEdh #-}
-
--- | Schedule an STM action to be performed in current Edh thread, but after
--- current STM tx committed, and after some txs, those possibly already
--- scheduled
---
--- NOTE this happens as part of current STM tx, so the actual action won't be
---      scheduled if any subsequent Edh code within the tx throws without
---      recovered
--- CAVEAT pay special attention in using this, to not break the semantics of
---       `ai` keyword at scripting level
-edhContSTM :: STM () -> EdhTx
-edhContSTM !actSTM = edhContSTM' (False <$ actSTM)
-{-# INLINE edhContSTM #-}
-
-edhContSTM' :: STM Bool -> EdhTx
-edhContSTM' !actSTM !ets =
-  writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets actSTM
-{-# INLINE edhContSTM' #-}
-
-edhContSTM'' :: EdhThreadState -> STM () -> STM ()
-edhContSTM'' !ets !actSTM =
-  writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets (False <$ actSTM)
-{-# INLINE edhContSTM'' #-}
-
-edhContSTM''' :: EdhThreadState -> STM Bool -> STM ()
-edhContSTM''' !ets !actSTM =
-  writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets actSTM
-{-# INLINE edhContSTM''' #-}
-
--- | Schedule an IO action to be performed in current Edh thread, but after
--- current STM tx committed, and after some txs, those possibly already
--- scheduled.
---
--- NOTE this happens as part of current STM tx, so the actual action won't be
---      scheduled if any subsequent Edh code within the tx throws without
---      recovered
--- CAVEAT pay special attention in using this, to not break the semantics of
---       `ai` keyword at scripting level
-edhContIO :: IO () -> EdhTx
-edhContIO !actIO = edhContIO' (False <$ actIO)
-{-# INLINE edhContIO #-}
-
-edhContIO' :: IO Bool -> EdhTx
-edhContIO' !actIO !ets = writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
-{-# INLINE edhContIO' #-}
-
-edhContIO'' :: EdhThreadState -> IO () -> STM ()
-edhContIO'' !ets !actIO =
-  writeTBQueue (edh'task'queue ets) $
-    EdhDoIO ets (False <$ actIO)
-{-# INLINE edhContIO'' #-}
-
-edhContIO''' :: EdhThreadState -> IO Bool -> STM ()
-edhContIO''' !ets !actIO = writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
-{-# INLINE edhContIO''' #-}
 
 -- | Start the specified Edh computation for running in current Edh thread with
 -- the specified state.
