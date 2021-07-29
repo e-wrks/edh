@@ -7,9 +7,9 @@ method essay ( v ) case type( v ) of {
   "Decimal" | v<10 -> "no more than " ++ v ++ " cups of coffee a day"
   "Decimal" -> "every one get his/her lucky number"
 
-  "String" -> { quiz=v fallthrough }
+  "String" -> { quiz = v fallthrough }
 
-  "Symbol" -> { quiz= 'mistery attracts most people' fallthrough }
+  "Symbol" -> { quiz = 'mistery attracts most people' fallthrough }
 
   "Object" -> {
     quiz = 'I live in ' ++ v?__name__ or 'no where';

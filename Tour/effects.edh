@@ -65,7 +65,7 @@ method authenticateUser() {
       else {
         passPrompt = 'please login'
         while true case perform requestUserPassword( passPrompt ) of {
-          nil -> { throw BusinessProcessCancelled() }
+          nil -> throw BusinessProcessCancelled()
           'secret' -> {
             perform ctxGrantUserToken( 'valid' )
             return User( userId, 'World' )

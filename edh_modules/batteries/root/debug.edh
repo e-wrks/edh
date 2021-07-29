@@ -138,12 +138,12 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
     while true {
 
       case console.readCommand(*** rcArgs ) of {@
-        { continue } -> { break }
+        { continue } -> break
         { { Command: cmd } } -> case cmd.cmd of {
           # todo
           #  *) enrich custom behaviors according to `cmd.apk`
           #  *) support more commands
-          'quit' -> { break }
+          'quit' -> break
           'dir' -> case cmd.apk of {
             # bare dir command
             { () } -> {
@@ -217,12 +217,12 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
     while true {
 
       case console.readCommand(*** rcArgs ) of {@
-        { continue } -> { break }
+        { continue } -> break
         { { Command: cmd } } -> case cmd.cmd of {
           # todo
           #  *) enrich custom behaviors according to `cmd.apk`
           #  *) support more commands
-          'quit' -> { break }
+          'quit' -> break
           'dir' -> case cmd.apk of {
             # bare dir command
             { () } -> {

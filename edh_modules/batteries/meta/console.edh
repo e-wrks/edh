@@ -39,14 +39,14 @@ Controlled by os environment variable `EDH_LOG_LEVEL`
   logLevel = this.info # the default
 
 
-  exit :: ( Any ) -> { throw ProgramHalt }
+  exit :: ( Any ) -> throw ProgramHalt
   {##
    # Halt current Đ program with an optional value
 
 If the program is run by the main thread of an Đ interpreter process, this will quit the process with an exit code from `haltValue` if it is an integer number.
 
    #}
-  method exit( haltValue=None ) {
+  method exit( haltValue= None ) {
     throw ProgramHalt( haltValue )
   }
 

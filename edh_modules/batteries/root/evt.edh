@@ -21,7 +21,7 @@ import * 'batteries/meta'
  #}
 export method __Sink_latest__ ( s ) for (*** apk ) from s do
 case apk of {
-  { ( v ) } -> { return v }
+  { ( v ) } -> return v
   return apk
 }
 
@@ -35,6 +35,6 @@ case apk of {
  #}
 export method __Sink_next__ ( s ) for (*** apk ) from s.subseq do
 case apk of {
-  { ( v ) } -> { return v }
+  { ( v ) } -> return v
   return apk
 }

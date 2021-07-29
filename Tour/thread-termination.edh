@@ -6,7 +6,7 @@ msgSink = sink
 method withCleanup() {
 
   {
-    perceive termSig nil -> { break }
+    perceive termSig nil -> break
 
     for msg from msgSink do {
       console.info<| 'got msg: ' ++ msg

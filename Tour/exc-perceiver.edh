@@ -17,8 +17,8 @@ go {
     perceive ( outlet=xs ) | producer _( outlet ) {
       xsReady <- true
     } {
-      nil -> { break }
-      { x } -> { throw x }
+      nil -> break
+      { x } -> throw x
     }
     for _ from console.everySeconds( 5 ) do {
       throw Exception( 'nothing broken in 5 seconds' )

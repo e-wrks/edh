@@ -18,7 +18,7 @@ export interpreter runREPL( replScope ) void while true {
       # todo
       #  *) enrich custom behaviors according to `cmdArgs`
       #  *) support more commands
-      'quit' -> { break }
+      'quit' -> break
       'dir' -> case cmdArgs of {
         {( )} -> { # bare dir command
           printDir( ofThe= replScope )
