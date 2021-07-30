@@ -247,17 +247,15 @@ assignMissingProc !lhExpr _ _ !ets =
 
 -- | operator (|=), null overwritting assignment
 overwriteNullProc :: EdhIntrinsicOp
-overwriteNullProc !lhExpr !rhExpr !exit !ets =
-  runEdhTx etsOverwrite $
-    evalExprSrc lhExpr $ \ !lhVal _ets ->
-      edhValueNull etsOverwrite lhVal $ \case
-        False ->
-          -- wrap with the sacred return to cease defaulting semantics
-          exitEdh ets exit $ EdhReturn $ EdhReturn lhVal
-        True ->
-          runEdhTx etsOverwrite $
-            assignProc assignTgtExpr rhExpr $
-              edhSwitchState ets . exitEdhTx exit
+overwriteNullProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal !ets ->
+  edhValueNull ets lhVal $ \case
+    False ->
+      -- wrap with the sacred return to cease defaulting semantics
+      exitEdh ets exit $ EdhReturn $ EdhReturn lhVal
+    True ->
+      runEdhTx ets $
+        assignProc assignTgtExpr rhExpr $
+          edhSwitchState ets . exitEdhTx exit
   where
     assignTgtExpr = case lhExpr of
       ExprSrc
@@ -268,11 +266,3 @@ overwriteNullProc !lhExpr !rhExpr !exit !ets =
           )
         !expr'span -> ExprSrc (AttrExpr $ IndirectRef owner addr) expr'span
       _ -> lhExpr
-
-    !etsOverwrite =
-      ets
-        { -- mandate transaction for the check plus possible assign
-          edh'in'tx = True,
-          -- discourage artifact definition during assignment
-          edh'context = (edh'context ets) {edh'ctx'pure = True}
-        }
