@@ -5289,6 +5289,9 @@ edhValueNull !ets (EdhObject !o) !exit =
         "invalid value type from __null__: " <> edhTypeNameOf badVal
 edhValueNull _ _ !exit = exit False
 
+edhValueNullTx :: EdhValue -> EdhTxExit Bool -> EdhTx
+edhValueNullTx v !exit !ets = edhValueNull ets v $ runEdhTx ets . exit
+
 edhIdentEqual :: EdhValue -> EdhValue -> STM Bool
 edhIdentEqual (EdhNamedValue x'n x'v) (EdhNamedValue y'n y'v) =
   if x'n == y'n

@@ -263,6 +263,7 @@ module Language.Edh.EHI
     dictEntryList,
     edhTypeNameOf,
     edhValueNull,
+    edhValueNullTx,
     edhCompareValue,
     edhIdentEqual,
     edhNamelyEqual,
