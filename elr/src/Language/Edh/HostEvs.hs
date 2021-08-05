@@ -436,3 +436,20 @@ generateEvents !stopOnEoS !intake !deriver = do
       False -> do
         conseqIO aeq $ deriver publisher evd
         return KeepHandling
+
+stopWhenAllEventSinksAtEoS :: [SomeEventSink] -> IO (SomeEventSink -> IO Bool)
+stopWhenAllEventSinksAtEoS evss = do
+  !eosVars <- sequence $ (<$> evss) $ \ !evs -> (evs,) <$> newIORef False
+  return $ \ !evs -> do
+    -- TODO optim. perf.
+    let markAndCheck :: Bool -> [(SomeEventSink, IORef Bool)] -> IO Bool
+        markAndCheck !nonStop [] = return $ not nonStop
+        markAndCheck !nonStop ((chkEvs, eosVar) : rest)
+          | chkEvs == evs = do
+            writeIORef eosVar True
+            markAndCheck nonStop rest
+          | otherwise =
+            readIORef eosVar >>= \case
+              False -> markAndCheck True rest
+              True -> markAndCheck nonStop rest
+    markAndCheck False eosVars
