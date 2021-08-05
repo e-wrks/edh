@@ -378,11 +378,11 @@ once !evs !handler = handleEvents evs $ \ !aeq !evd -> do
 -- downstream event sink reaches EoS.
 spreadEvents ::
   forall t.
+  (SomeEventSink -> STM Bool) ->
   EventSink t ->
   ((forall t'. EventSink t' -> t' -> STM ()) -> t -> STM ()) ->
-  (SomeEventSink -> STM Bool) ->
   IO ()
-spreadEvents !intake !deriver !stopOnEoS = do
+spreadEvents !stopOnEoS !intake !deriver = do
   !stopVar <- newTVarIO False
   handleEvents intake $ \ !aeq !evd -> do
     let spreader :: forall t'. EventSink t' -> t' -> STM ()
@@ -412,11 +412,11 @@ spreadEvents !intake !deriver !stopOnEoS = do
 -- downstream event sink reaches EoS.
 generateEvents ::
   forall t.
+  (SomeEventSink -> IO Bool) ->
   EventSink t ->
   ((forall t'. EventSink t' -> t' -> IO ()) -> t -> IO ()) ->
-  (SomeEventSink -> IO Bool) ->
   IO ()
-generateEvents !intake !deriver !stopOnEoS = do
+generateEvents !stopOnEoS !intake !deriver = do
   !stopVar <- newTVarIO False
   let publisher :: forall t'. EventSink t' -> t' -> IO ()
       publisher evs' d' = do
