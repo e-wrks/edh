@@ -340,12 +340,16 @@ module Language.Edh.EHI
     -- * standalone modules
     module Language.Edh.IOPD,
     module Language.Edh.HostEvs,
+    module Language.Edh.Batteries.Args,
+    module Language.Edh.Batteries.Comput,
   )
 where
 
 import qualified Data.Lossless.Decimal as D
 import Language.Edh.Args
 import Language.Edh.Batteries
+import Language.Edh.Batteries.Args
+import Language.Edh.Batteries.Comput
 import Language.Edh.Control
 import Language.Edh.CoreLang
 import Language.Edh.EdhEvs

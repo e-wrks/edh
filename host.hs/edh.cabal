@@ -32,7 +32,9 @@ library
     Language.Edh.Runtime
 
   other-modules:
+    Language.Edh.Batteries.Args
     Language.Edh.Batteries.Assign
+    Language.Edh.Batteries.Comput
     Language.Edh.Batteries.Console
     Language.Edh.Batteries.Ctrl
     Language.Edh.Batteries.Data
