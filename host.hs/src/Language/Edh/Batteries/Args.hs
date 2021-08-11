@@ -1,5 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-
 module Language.Edh.Batteries.Args
   ( ScriptArg (..),
     Effective (..),

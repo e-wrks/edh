@@ -65,6 +65,7 @@ library
     StandaloneDeriving
     TupleSections
     TypeApplications
+    AllowAmbiguousTypes
     TypeOperators
     ViewPatterns
 
@@ -117,6 +118,7 @@ executable edh
     StandaloneDeriving
     TupleSections
     TypeApplications
+    AllowAmbiguousTypes
     TypeOperators
     ViewPatterns
 
@@ -183,6 +185,7 @@ executable runedh
     StandaloneDeriving
     TupleSections
     TypeApplications
+    AllowAmbiguousTypes
     TypeOperators
     ViewPatterns
 
@@ -237,6 +240,7 @@ executable edhm
     StandaloneDeriving
     TupleSections
     TypeApplications
+    AllowAmbiguousTypes
     TypeOperators
     ViewPatterns
 

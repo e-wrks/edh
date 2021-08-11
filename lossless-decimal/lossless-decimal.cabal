@@ -41,6 +41,7 @@ library
         ScopedTypeVariables
         TupleSections
         TypeApplications
+        AllowAmbiguousTypes
         TypeOperators
         ViewPatterns
     ghc-options: -Wall

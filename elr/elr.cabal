@@ -59,6 +59,7 @@ library
     StandaloneDeriving
     TupleSections
     TypeApplications
+    AllowAmbiguousTypes
     TypeOperators
     ViewPatterns
 
