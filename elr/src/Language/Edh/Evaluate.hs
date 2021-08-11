@@ -634,21 +634,6 @@ edhCreateHostObj' !clsObj !hsd !supers = do
   !ss <- newTVar supers
   return $ Object oid (HostStore hsd) clsObj ss
 
--- Clone `that` object with one of its super object (i.e. `this`) mutated
--- to bear the new host storage data
---
--- todo maybe check new storage data type matches the old one?
-edhCloneHostObj ::
-  Typeable h =>
-  EdhThreadState ->
-  Object ->
-  Object ->
-  h ->
-  (Object -> STM ()) ->
-  STM ()
-edhCloneHostObj !ets !fromThis !fromThat !newData !exit =
-  edhMutCloneObj ets fromThis fromThat (HostStore $ toDyn newData) exit
-
 -- | Construct an Edh object from a class.
 edhConstructObj :: Object -> ArgsPack -> (Object -> EdhTx) -> EdhTx
 edhConstructObj !clsObj !apk !exit !ets =
@@ -748,8 +733,29 @@ edhConstructObj !clsObj !apk !exit !ets =
               "bad __reform_ctor_args__ magic: "
                 <> badDesc
 
--- Clone `that` object with one of its super object (i.e. `this`) mutated
+-- Clone a composite object with one of its object instance `mutObj` mutated
+-- to bear the new host storage data
+--
+-- Other member instances are either deep-cloned as class based super, or left
+-- intact as prototype based super
+--
+-- todo maybe check new storage data type matches the old one?
+edhCloneHostObj ::
+  Typeable h =>
+  EdhThreadState ->
+  Object ->
+  Object ->
+  h ->
+  (Object -> STM ()) ->
+  STM ()
+edhCloneHostObj !ets !mutObj !endObj !newData !exit =
+  edhMutCloneObj ets mutObj endObj (HostStore $ toDyn newData) exit
+
+-- Clone a composite object with one of its object instance `mutObj` mutated
 -- to bear the new object stroage
+--
+-- Other member instances are either deep-cloned as class based super, or left
+-- intact as prototype based super
 edhMutCloneObj ::
   EdhThreadState ->
   Object ->
@@ -757,86 +763,96 @@ edhMutCloneObj ::
   ObjectStore ->
   (Object -> STM ()) ->
   STM ()
-edhMutCloneObj !ets !fromThis !fromThat !newStore !exitEnd =
+edhMutCloneObj !ets !mutObj !endObj !newStore !exitEnd =
   newTVar Map.empty >>= \ !instMap ->
-    let cloneSupers :: [Object] -> ([Object] -> STM ()) -> [Object] -> STM ()
-        cloneSupers !cloned !exitSupers [] = exitSupers $ reverse cloned
-        cloneSupers !cloned !exitSupers (super : rest) =
+    let cloneSupers ::
+          [Object] -> [Object] -> [Object] -> ([Object] -> STM ()) -> STM ()
+        cloneSupers !cloned [] _ !exitSupers =
+          exitSupers $ reverse cloned
+        cloneSupers !cloned supers [] !exitSupers =
+          -- no corresponding class from mro, the rest supers are prototype
+          -- instances extended individually, don't clone them
+          exitSupers $ reverse cloned ++ supers
+        cloneSupers !cloned (super : rest) (superCls : restCls) !exitSupers =
           {- HLINT ignore "Redundant <$>" -}
-          Map.lookup super <$> readTVar instMap >>= \case
-            Just !superClone ->
-              cloneSupers (superClone : cloned) exitSupers rest
-            Nothing -> clone1 super $ \ !superClone ->
-              cloneSupers (superClone : cloned) exitSupers rest
+          if edh'obj'class super /= superCls
+            then throwEdh ets EvalError "bug: super instance unaligned with mro"
+            else
+              Map.lookup super <$> readTVar instMap >>= \case
+                Just !superClone ->
+                  cloneSupers (superClone : cloned) rest restCls exitSupers
+                Nothing -> clone1 super $ \ !superClone ->
+                  cloneSupers (superClone : cloned) rest restCls exitSupers
         clone1 :: Object -> (Object -> STM ()) -> STM ()
-        clone1 !obj !exit1 =
-          (readTVar (edh'obj'supers obj) >>=) $
-            cloneSupers [] $
-              \ !supersClone -> do
-                !oidNew <- unsafeIOToSTM newUnique
-                !supersNew <- newTVar supersClone
-                !objClone <-
-                  if obj == fromThis
-                    then
-                      return
-                        fromThis
-                          { edh'obj'ident = oidNew,
-                            edh'obj'store = newStore,
-                            edh'obj'supers = supersNew
-                          }
-                    else case edh'obj'store obj of
-                      HashStore !es -> do
-                        !es' <- iopdClone es
-                        let !objClone =
-                              obj
-                                { edh'obj'ident = oidNew,
-                                  edh'obj'store = HashStore es',
-                                  edh'obj'supers = supersNew
-                                }
-                        return objClone
-                      ClassStore !cls -> do
-                        !cs' <- iopdClone $ edh'class'store cls
-                        let !clsClone =
-                              obj
-                                { edh'obj'ident = oidNew,
-                                  edh'obj'store =
-                                    ClassStore
-                                      cls
-                                        { edh'class'store = cs'
-                                        },
-                                  edh'obj'supers = supersNew
-                                }
-                        return clsClone
-                      HostStore !hsd -> do
-                        let !objClone =
-                              obj
-                                { edh'obj'ident = oidNew,
-                                  edh'obj'store = HostStore hsd,
-                                  edh'obj'supers = supersNew
-                                }
-                        return objClone
-                modifyTVar' instMap $ Map.insert obj objClone
-                lookupEdhSelfMagic objClone (AttrByName "__clone__") >>= \case
-                  EdhNil -> exit1 objClone
-                  EdhProcedure (EdhMethod !mth) _ ->
-                    runEdhTx ets $
-                      callEdhMethod
-                        objClone
-                        fromThat
-                        mth
-                        (ArgsPack [] odEmpty)
-                        id
-                        $ \_ _ets -> exit1 objClone
-                  EdhBoundProc (EdhMethod _mth) _this _that _ ->
-                    throwEdh
-                      ets
-                      UsageError
-                      "a bound __clone__ method, assumed wrong, discussion?"
-                  !badMth ->
-                    throwEdh ets UsageError $
-                      "invalid __clone__ method of type: "
-                        <> edhTypeNameOf badMth
-     in clone1 fromThat $ \ !thatNew -> exitEnd thatNew
+        clone1 !obj !exit1 = do
+          !mro <- readTVar $ edh'class'mro $ objClass obj
+          !supers <- readTVar (edh'obj'supers obj)
+          cloneSupers [] supers mro $
+            \ !supersClone -> do
+              !oidNew <- unsafeIOToSTM newUnique
+              !supersNew <- newTVar supersClone
+              !objClone <-
+                if obj == mutObj
+                  then
+                    return
+                      mutObj
+                        { edh'obj'ident = oidNew,
+                          edh'obj'store = newStore,
+                          edh'obj'supers = supersNew
+                        }
+                  else case edh'obj'store obj of
+                    HashStore !es -> do
+                      !es' <- iopdClone es
+                      let !objClone =
+                            obj
+                              { edh'obj'ident = oidNew,
+                                edh'obj'store = HashStore es',
+                                edh'obj'supers = supersNew
+                              }
+                      return objClone
+                    ClassStore !cls -> do
+                      !cs' <- iopdClone $ edh'class'store cls
+                      let !clsClone =
+                            obj
+                              { edh'obj'ident = oidNew,
+                                edh'obj'store =
+                                  ClassStore
+                                    cls
+                                      { edh'class'store = cs'
+                                      },
+                                edh'obj'supers = supersNew
+                              }
+                      return clsClone
+                    HostStore !hsd -> do
+                      let !objClone =
+                            obj
+                              { edh'obj'ident = oidNew,
+                                edh'obj'store = HostStore hsd,
+                                edh'obj'supers = supersNew
+                              }
+                      return objClone
+              modifyTVar' instMap $ Map.insert obj objClone
+              lookupEdhSelfMagic objClone (AttrByName "__clone__") >>= \case
+                EdhNil -> exit1 objClone
+                EdhProcedure (EdhMethod !mth) _ ->
+                  runEdhTx ets $
+                    callEdhMethod
+                      objClone
+                      endObj
+                      mth
+                      (ArgsPack [] odEmpty)
+                      id
+                      $ \_ _ets -> exit1 objClone
+                EdhBoundProc (EdhMethod _mth) _this _that _ ->
+                  throwEdh
+                    ets
+                    UsageError
+                    "a bound __clone__ method, assumed wrong, discussion?"
+                !badMth ->
+                  throwEdh ets UsageError $
+                    "invalid __clone__ method of type: "
+                      <> edhTypeNameOf badMth
+     in clone1 endObj $ \ !thatNew -> exitEnd thatNew
 
 edhObjExtends :: EdhThreadState -> Object -> Object -> STM () -> STM ()
 edhObjExtends !ets !this !superObj !exit = case edh'obj'store this of
@@ -3031,9 +3047,9 @@ importFromObject !tgtEnt !reExpObj !argsRcvr !fromObj !done !ets =
     collect1 :: EntityStore -> Object -> STM ()
     collect1 !arts !obj = case edh'obj'store obj of
       HashStore !hs ->
-        let !objClass = edh'obj'class obj
-            !binder = if objClass == moduClass then id else doBindTo obj fromObj
-         in case edh'obj'store objClass of
+        let !objCls = edh'obj'class obj
+            !binder = if objCls == moduClass then id else doBindTo obj fromObj
+         in case edh'obj'store objCls of
               ClassStore !cls -> do
                 -- ensure instance artifacts overwrite class artifacts
                 collectExp (edh'class'store cls) binder

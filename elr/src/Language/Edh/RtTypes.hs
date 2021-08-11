@@ -482,6 +482,11 @@ type EdhObjectAllocator = EdhAllocExit -> EdhTx
 
 type EdhAllocExit = Maybe Unique -> ObjectStore -> STM ()
 
+objClass :: Object -> Class
+objClass !obj = case edh'obj'store $ edh'obj'class obj of
+  ClassStore !cls -> cls
+  _ -> error "bug: class of an object not bearing ClassStore"
+
 edhClassName :: Object -> Text
 edhClassName !clsObj = case edh'obj'store clsObj of
   ClassStore !cls -> procedureName $ edh'class'proc cls

@@ -223,6 +223,7 @@ module Language.Edh.EHI
     withDerivedHostObject',
     EdhObjectAllocator,
     Class,
+    objClass,
     edhClassName,
     objClassName,
     edhCreateHostObj,
