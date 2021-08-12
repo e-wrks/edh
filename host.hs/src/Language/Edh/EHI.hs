@@ -222,7 +222,7 @@ module Language.Edh.EHI
     withDerivedHostObject,
     withDerivedHostObject',
     EdhObjectAllocator,
-    Class,
+    Class (..),
     objClass,
     edhClassName,
     objClassName,
