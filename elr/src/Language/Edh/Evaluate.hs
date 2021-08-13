@@ -3957,11 +3957,21 @@ edhValueBlob' !ets (EdhObject !o) naExit !exit =
       _ -> edhValueBlob' ets rtn naExit exit
 edhValueBlob' _ _ !naExit _ = naExit
 
+edhValueBlobTx' :: EdhValue -> EdhTx -> EdhTxExit ByteString -> EdhTx
+edhValueBlobTx' !val !naExit !exit !ets =
+  edhValueBlob' ets val (runEdhTx ets naExit) $ exitEdh ets exit
+
 edhValueBlob :: EdhThreadState -> EdhValue -> (ByteString -> STM ()) -> STM ()
 edhValueBlob !ets !val =
   edhValueBlob' ets val $
     edhValueDesc ets val $ \ !badDesc ->
       throwEdh ets UsageError $ "not convertible to blob: " <> badDesc
+
+edhValueBlobTx :: EdhValue -> EdhTxExit ByteString -> EdhTx
+edhValueBlobTx !val !exit !ets = edhValueBlob ets val $ exitEdh ets exit
+
+edhValueJsonTx :: EdhValue -> EdhTxExit Text -> EdhTx
+edhValueJsonTx !val !exit !ets = edhValueJson ets val $ exitEdh ets exit
 
 -- | Coercing an Edh value to valid JSON in string form
 --
