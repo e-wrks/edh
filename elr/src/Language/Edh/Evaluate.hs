@@ -3235,7 +3235,7 @@ importFromFS !etsImp !normalizedSpec !exit =
                           -- return the loaded slot
                           exit loadedSlot
                       )
-                      $ \_etsThrower !exv _recover !rethrow -> case exv of
+                      $ \etsThrower !exv _recover !rethrow -> case exv of
                         EdhNil -> rethrow nil -- no error occurred
                         _ -> do
                           writeTVar exvImport exv
@@ -3253,7 +3253,8 @@ importFromFS !etsImp !normalizedSpec !exit =
                                       moduId
                                       moduMap'
                                 else putTMVar worldModules moduMap'
-                          rethrow exv
+                          -- rethrow in another tx or above cleanup can cease
+                          runEdhTx etsThrower $ edhContSTM $ rethrow exv
   where
     !world = edh'prog'world $ edh'thread'prog etsImp
     !worldModules = edh'world'modules world
