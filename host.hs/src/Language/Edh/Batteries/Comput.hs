@@ -568,7 +568,7 @@ instance ScriptArgAdapter (Maybe Decimal) where
     EdhDecimal !d -> exitEdhTx exit $ Just d
     _ -> badVal
     where
-      badVal = edhValueDescTx v $ \ !badDesc ->
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
         throwEdhTx UsageError $
           "optional "
             <> adaptedArgType @Decimal
@@ -582,7 +582,7 @@ instance ScriptArgAdapter Decimal where
     EdhDecimal !d -> exitEdhTx exit d
     _ -> badVal
     where
-      badVal = edhValueDescTx v $ \ !badDesc ->
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
         throwEdhTx UsageError $
           adaptedArgType @Decimal <> " expected but given: " <> badDesc
   adaptedArgValue = EdhDecimal
@@ -593,7 +593,7 @@ instance ScriptArgAdapter (Maybe Double) where
     EdhDecimal !d -> exitEdhTx exit $ Just $ D.decimalToRealFloat d
     _ -> badVal
     where
-      badVal = edhValueDescTx v $ \ !badDesc ->
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
         throwEdhTx UsageError $
           "optional " <> adaptedArgType @Double
             <> " expected but given: "
@@ -606,7 +606,7 @@ instance ScriptArgAdapter Double where
     EdhDecimal !d -> exitEdhTx exit $ D.decimalToRealFloat d
     _ -> badVal
     where
-      badVal = edhValueDescTx v $ \ !badDesc ->
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
         throwEdhTx UsageError $
           adaptedArgType @Double <> " expected but given: " <> badDesc
   adaptedArgValue = EdhDecimal . D.decimalFromRealFloat
@@ -624,7 +624,7 @@ instance
       Nothing -> badVal
     _ -> badVal
     where
-      badVal = edhValueDescTx v $ \ !badDesc ->
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
         throwEdhTx UsageError $
           "optional " <> adaptedArgType @i
             <> " expected but given: "
@@ -644,7 +644,7 @@ instance
       Nothing -> badVal
     _ -> badVal
     where
-      badVal = edhValueDescTx v $ \ !badDesc ->
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
         throwEdhTx UsageError $
           adaptedArgType @i <> " expected but given: " <> badDesc
   adaptedArgValue !i = EdhDecimal $ fromIntegral i
@@ -660,7 +660,7 @@ instance ScriptArgAdapter (Maybe Count) where
       Nothing -> badVal
     _ -> badVal
     where
-      badVal = edhValueDescTx v $ \ !badDesc ->
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
         throwEdhTx UsageError $
           adaptedArgType @Count
             <> " (positive integer) expected but given: "
@@ -675,7 +675,7 @@ instance ScriptArgAdapter Count where
       Nothing -> badVal
     _ -> badVal
     where
-      badVal = edhValueDescTx v $ \ !badDesc ->
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
         throwEdhTx UsageError $
           adaptedArgType @Count
             <> " (positive integer) expected but given: "
@@ -703,7 +703,7 @@ instance
       _ -> badVal
     _ -> badVal
     where
-      badVal = edhValueDescTx v $ \ !badDesc ->
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
         throwEdhTx UsageError $
           adaptedArgType @(HostData tn) <> " expected but given: " <> badDesc
 
@@ -724,7 +724,7 @@ instance TypeLits.KnownSymbol tn => ScriptArgAdapter (HostData tn) where
       _ -> badVal
     _ -> badVal
     where
-      badVal = edhValueDescTx v $ \ !badDesc ->
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
         throwEdhTx UsageError $
           adaptedArgType @(HostData tn) <> " expected but given: " <> badDesc
 
@@ -753,7 +753,7 @@ instance Typeable t => ScriptArgAdapter (Maybe (HostValue t)) where
       _ -> badVal
     _ -> badVal
     where
-      badVal = edhValueDescTx v $ \ !badDesc ->
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
         throwEdhTx UsageError $
           adaptedArgType @(HostValue t) <> " expected but given: " <> badDesc
 
@@ -780,7 +780,7 @@ instance Typeable t => ScriptArgAdapter (HostValue t) where
       _ -> badVal
     _ -> badVal
     where
-      badVal = edhValueDescTx v $ \ !badDesc ->
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
         throwEdhTx UsageError $
           adaptedArgType @(HostValue t) <> " expected but given: " <> badDesc
 
@@ -798,7 +798,7 @@ instance (Typeable t, ScriptArgAdapter t) => ScriptArgAdapter (HostSeq t) where
       readTVar lv >>= \ !vs -> runEdhTx ets $ exitWith vs
     _ -> badVal
     where
-      badVal = edhValueDescTx v $ \ !badDesc ->
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
         throwEdhTx UsageError $
           adaptedArgType @(HostSeq t) <> " expected but given: " <> badDesc
       exitWith :: [EdhValue] -> EdhTx
@@ -856,7 +856,7 @@ appliedArgWithDefaultCtor''
     Nothing ->
       edhMakeCall' callee (ArgsPack args $ odFromList kwargs) $
         \ !val -> do
-          let badArg = edhValueDescTx val $ \ !badDesc ->
+          let badArg = edhSimpleDescTx val $ \ !badDesc ->
                 throwEdhTx UsageError $
                   "bug: wrong host value constructed as default for "
                     <> T.pack (show $ typeRep @t)
@@ -914,7 +914,7 @@ effectfulArgWithDefaultCtor''
     Nothing ->
       edhMakeCall' callee (ArgsPack args $ odFromList kwargs) $
         \ !val -> do
-          let badArg = edhValueDescTx val $ \ !badDesc ->
+          let badArg = edhSimpleDescTx val $ \ !badDesc ->
                 throwEdhTx UsageError $
                   "bug: wrong host value constructed as default for "
                     <> T.pack (show $ typeRep @t)

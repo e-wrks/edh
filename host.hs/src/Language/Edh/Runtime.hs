@@ -577,7 +577,7 @@ createEdhWorld !console = do
                   putAttrs rest ((AttrByName k, v) : cumu) exit'
                 EdhPair (EdhSymbol !k) !v ->
                   putAttrs rest ((AttrBySym k, v) : cumu) exit'
-                _ -> edhValueDesc ets a $ \ !badDesc ->
+                _ -> edhSimpleDesc ets a $ \ !badDesc ->
                   throwEdh ets UsageError $
                     "invalid key/value pair to put into a scope - "
                       <> badDesc
@@ -617,7 +617,7 @@ createEdhWorld !console = do
               runEdhTx etsEval $
                 evalExpr expr $ \ !val _ets ->
                   exitEdh ets exit $ edhDeCaseClose val
-            !badExpr -> edhValueDesc ets badExpr $ \ !badDesc ->
+            !badExpr -> edhSimpleDesc ets badExpr $ \ !badDesc ->
               throwEdh ets EvalError $ "not an expr: " <> badDesc
 
     mthScopeOuterGetter :: EdhHostProc

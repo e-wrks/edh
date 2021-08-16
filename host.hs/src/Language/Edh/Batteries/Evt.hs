@@ -31,7 +31,7 @@ sink'subseqProc :: "sinkValue" !: EdhValue -> EdhHostProc
 sink'subseqProc (mandatoryArg -> !sinkVal) !exit !ets =
   case edhUltimate sinkVal of
     EdhEvs !sink -> exitEdh ets exit $ EdhEvs sink {evs'mrv = Nothing}
-    _ -> edhValueDesc ets sinkVal $ \ !badDesc ->
+    _ -> edhSimpleDesc ets sinkVal $ \ !badDesc ->
       throwEdh ets UsageError $ "not an event sink but a " <> badDesc
 
 -- | virtual property <sink>.mrv
@@ -52,7 +52,7 @@ sink'mrvProc (mandatoryArg -> !sinkVal) !exit !ets =
     EdhEvs !sink -> case evs'mrv sink of
       Nothing -> exitEdh ets exit nil
       Just !mrvv -> readTVar mrvv >>= \ !mrv -> exitEdh ets exit mrv
-    _ -> edhValueDesc ets sinkVal $ \ !badDesc ->
+    _ -> edhSimpleDesc ets sinkVal $ \ !badDesc ->
       throwEdh ets UsageError $ "not an event sink but a " <> badDesc
 
 -- | virtual property <sink>.eos
@@ -64,5 +64,5 @@ sink'eosProc (mandatoryArg -> !sinkVal) !exit !ets =
     EdhEvs !sink ->
       readTVar (evs'subc sink)
         >>= \ !subc -> exitEdh ets exit $ EdhBool $ subc < 0
-    _ -> edhValueDesc ets sinkVal $ \ !badDesc ->
+    _ -> edhSimpleDesc ets sinkVal $ \ !badDesc ->
       throwEdh ets UsageError $ "not an event sink but a " <> badDesc

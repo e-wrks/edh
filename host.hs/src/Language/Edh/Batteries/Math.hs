@@ -255,7 +255,7 @@ inRangeProc inverse eqTester !lhExpr !rhExpr !exit !ets = runEdhTx ets $
   evalExprSrc lhExpr $ \ !lhVal ->
     evalExprSrc rhExpr $
       \ !rhVal _ets -> do
-        let badRHS = edhValueDesc ets rhVal $ \ !badDesc ->
+        let badRHS = edhSimpleDesc ets rhVal $ \ !badDesc ->
               throwEdh ets UsageError $ "bad range/container: " <> badDesc
         case edhUltimate rhVal of
           EdhRange !lb !ub -> do
@@ -391,8 +391,8 @@ edhOrdCmpOp !cm !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
             -- chaining ordering comparisons
             edhCompareValue ets lhVal midVal $ \case
               Nothing ->
-                edhValueDesc ets lhVal $
-                  \ !lhDesc -> edhValueDesc ets midVal $ \ !midDesc ->
+                edhSimpleDesc ets lhVal $
+                  \ !lhDesc -> edhSimpleDesc ets midVal $ \ !midDesc ->
                     throwEdh ets EvalError $
                       "chained comparison ("
                         <> opSym

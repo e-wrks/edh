@@ -320,7 +320,7 @@ setEdhAttr !tgtExpr !key !val !exit !ets = case tgtExpr of
         EdhObject !tgtObj ->
           runEdhTx ets $ setObjAttrWithMagic tgtObj key val exit
         -- no virtual attribute supported yet
-        _ -> edhValueDesc ets tgtVal $ \ !badDesc ->
+        _ -> edhSimpleDesc ets tgtVal $ \ !badDesc ->
           throwEdh ets EvalError $ "invalid assignment target, " <> badDesc
   where
     ctx = edh'context ets
@@ -700,7 +700,7 @@ edhConstructObj !clsObj !apk !exit !ets =
                               callEdhMethod this that mthInit apkCtor' id $
                                 \_initResult _ets -> initExit
                           !badInitMth ->
-                            edhValueDesc ets badInitMth $ \ !badDesc ->
+                            edhSimpleDesc ets badInitMth $ \ !badDesc ->
                               throwEdh ets UsageError $
                                 "invalid __init__ method on class "
                                   <> objClassName o
@@ -724,11 +724,11 @@ edhConstructObj !clsObj !apk !exit !ets =
               callEdhMethod co clsObj mth apkCtor id $
                 \ !magicRtn _ets -> case edhUltimate magicRtn of
                   EdhArgsPack !apkReformed -> exit' apkReformed
-                  _ -> edhValueDesc ets magicRtn $ \ !badDesc ->
+                  _ -> edhSimpleDesc ets magicRtn $ \ !badDesc ->
                     throwEdh ets UsageError $
                       "invalid return from __reform_ctor_args__ magic: "
                         <> badDesc
-          Just !badMagicVal -> edhValueDesc ets badMagicVal $ \ !badDesc ->
+          Just !badMagicVal -> edhSimpleDesc ets badMagicVal $ \ !badDesc ->
             throwEdh ets UsageError $
               "bad __reform_ctor_args__ magic: "
                 <> badDesc
@@ -2132,7 +2132,7 @@ edhPrepareForLoop
                             then exitEdh etsLooper exit nil
                             else iterRange i'
               iterRange start
-            _ -> edhValueDesc etsLooper iterVal $ \ !badDesc ->
+            _ -> edhSimpleDesc etsLooper iterVal $ \ !badDesc ->
               throwEdh etsLooper EvalError $
                 "can not do a for loop from " <> badDesc
         where
@@ -2171,7 +2171,7 @@ resolveEdhAttrAddr !ets (IntplSymAttr src !x) !exit = runEdhTx ets $
     \ !symVal _ets -> case edhUltimate symVal of
       EdhSymbol !sym -> exit $ AttrBySym sym
       EdhString !nm -> exit $ AttrByName nm
-      _ -> edhValueDesc ets symVal $ \ !badDesc ->
+      _ -> edhSimpleDesc ets symVal $ \ !badDesc ->
         throwEdh ets UsageError $
           "symbol interpolation given unexpected value: "
             <> badDesc
@@ -2938,7 +2938,7 @@ evalStmt !stmt !exit = case stmt of
                           <> ": "
                           <> superStr
                in extendSupers supers
-          _ -> edhValueDesc ets superVal $ \ !badDesc ->
+          _ -> edhSimpleDesc ets superVal $ \ !badDesc ->
             throwEdh ets UsageError $
               "can not extend a " <> badDesc
   EffectStmt !effs !docCmt -> \ !ets -> do
@@ -2998,7 +2998,7 @@ importInto !chkExtImp !tgtEnt !reExpObj !argsRcvr srcExpr@(ExprSrc x _) !exit =
             exitEdh ets exit $
               EdhArgsPack fromApk
       -- todo support more sources of import ?
-      _ -> edhValueDescTx srcVal $ \ !badDesc ->
+      _ -> edhSimpleDescTx srcVal $ \ !badDesc ->
         throwEdhTx EvalError $
           "don't know how to import it: " <> badDesc
 
@@ -3055,7 +3055,7 @@ importFromObject !tgtEnt !reExpObj !argsRcvr !fromObj !done !ets =
                 collectExp (edh'class'store cls) binder
                 collectExp hs binder
               _ ->
-                edhValueDesc ets (EdhObject $ edh'obj'class fromObj) $
+                edhSimpleDesc ets (EdhObject $ edh'obj'class fromObj) $
                   \ !badDesc ->
                     -- note this seems not preventing cps exiting,
                     -- at least we can get an error thrown
@@ -3071,7 +3071,7 @@ importFromObject !tgtEnt !reExpObj !argsRcvr !fromObj !done !ets =
           ClassStore !cls ->
             collectExp (edh'class'store cls) (doBindTo obj fromObj)
           _ ->
-            edhValueDesc ets (EdhObject $ edh'obj'class fromObj) $ \ !badDesc ->
+            edhSimpleDesc ets (EdhObject $ edh'obj'class fromObj) $ \ !badDesc ->
               -- note this seems not preventing cps exiting,
               -- at least we can get an error thrown
               throwEdh ets EvalError $
@@ -3086,11 +3086,11 @@ importFromObject !tgtEnt !reExpObj !argsRcvr !fromObj !done !ets =
                 HashStore !esExpFrom ->
                   iopdToList esExpFrom
                     >>= \ !expl -> iopdUpdate (transEntries expl []) arts
-                _ -> edhValueDesc ets wrapperVal $ \ !badDesc ->
+                _ -> edhSimpleDesc ets wrapperVal $ \ !badDesc ->
                   -- note this seems not preventing cps exiting,
                   -- at least we can get an error thrown
                   throwEdh ets UsageError $ "bad export wrapper - " <> badDesc
-            Just !badExplVal -> edhValueDesc ets badExplVal $ \ !badDesc ->
+            Just !badExplVal -> edhSimpleDesc ets badExplVal $ \ !badDesc ->
               -- note this seems not preventing cps exiting,
               -- at least we can get an error thrown
               throwEdh ets UsageError $ "bad export wrapper - " <> badDesc
@@ -3504,7 +3504,7 @@ intplAttrAddr !ets (IntplSymAttr src !x) !exit' = runEdhTx ets $
     \ !symVal _ets -> case edhUltimate symVal of
       EdhSymbol !sym -> exit' $ LitSymAttr sym
       EdhString !nm -> exit' $ QuaintAttr nm
-      _ -> edhValueDesc ets symVal $ \ !badDesc ->
+      _ -> edhSimpleDesc ets symVal $ \ !badDesc ->
         throwEdh ets UsageError $
           "symbol interpolation given unexpected value: "
             <> badDesc
@@ -3627,6 +3627,16 @@ evalDictLit ((k, v) : entries) !dsl !exit !ets = case k of
     evalExprSrc kExpr $ \ !kVal ->
       evalExprSrc v $ \ !vVal -> evalDictLit entries ((kVal, vVal) : dsl) exit
 
+edhSimpleDesc :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
+edhSimpleDesc !ets !v !exit = edhValueRepr ets v $ \ !valRepr ->
+  exit $ case v of
+    EdhObject o -> "`" <> objClassName o <> "` object `" <> valRepr <> "`"
+    _ -> "'" <> edhTypeNameOf v <> "' value `" <> valRepr <> "`"
+
+edhSimpleDescTx :: EdhValue -> EdhTxExit Text -> EdhTx
+edhSimpleDescTx !v !exit !ets =
+  edhSimpleDesc ets v $ \ !s -> exitEdh ets exit s
+
 edhValueDesc :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
 edhValueDesc !ets !val !exitDesc = case edhUltimate val of
   EdhObject !o -> case edh'obj'store o of
@@ -3637,7 +3647,7 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
         !magicMth -> descWithMagic o magicMth
     _ -> lookupEdhObjMagic o (AttrByName "__desc__") >>= descWithMagic o
   _ -> edhValueRepr ets val $ \ !valRepr ->
-    exitDesc $ "`" <> edhTypeNameOf val <> "` value `" <> valRepr <> "`"
+    exitDesc $ "'" <> edhTypeNameOf val <> "' value `" <> valRepr <> "`"
   where
     magicExit :: EdhTxExit EdhValue
     magicExit !magicRtn _ets = edhValueStr ets magicRtn $
@@ -3965,7 +3975,7 @@ edhValueBlobTx' !val !naExit !exit !ets =
 edhValueBlob :: EdhThreadState -> EdhValue -> (ByteString -> STM ()) -> STM ()
 edhValueBlob !ets !val =
   edhValueBlob' ets val $
-    edhValueDesc ets val $ \ !badDesc ->
+    edhSimpleDesc ets val $ \ !badDesc ->
       throwEdh ets UsageError $ "not convertible to blob: " <> badDesc
 
 edhValueBlobTx :: EdhValue -> EdhTxExit ByteString -> EdhTx
@@ -4770,7 +4780,7 @@ evalInfix' !opSym !notApplicable !lhExpr !rhExpr !exit =
 evalInfixSrc :: OpSymSrc -> ExprSrc -> ExprSrc -> EdhHostProc
 evalInfixSrc op@(OpSymSrc !opSym _opSpan) = evalInfixSrc' op $
   \ !lhVal !rhVal !ets ->
-    edhValueDesc ets lhVal $ \ !lhDesc -> edhValueDesc ets rhVal $ \ !rhDesc ->
+    edhValueDesc ets lhVal $ \ !lhDesc -> edhSimpleDesc ets rhVal $ \ !rhDesc ->
       throwEdh ets EvalError $
         "operator ("
           <> opSym

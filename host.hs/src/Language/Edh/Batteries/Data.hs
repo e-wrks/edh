@@ -74,7 +74,7 @@ exprDeBlock (EdhExpr _u _loc _x !src) !exit =
             (: cumLines) $
               maybe (T.stripEnd line) T.stripEnd $ T.stripPrefix indent line
         go [] [] = error "bug: impossible case"
-exprDeBlock !v !exit = edhValueDescTx v $ \badDesc ->
+exprDeBlock !v !exit = edhSimpleDescTx v $ \badDesc ->
   exitEdhTx exit $ EdhString $ "not an expr: " <> badDesc
 
 blobDecodeProc :: ByteString -> EdhHostProc
@@ -87,7 +87,7 @@ blobProc (NamedEdhArg (Just !val)) !kwargs !exit !ets =
   where
     naExit = case odLookup (AttrByName "orElse") kwargs of
       Just !altVal -> exitEdh ets exit altVal
-      Nothing -> edhValueDesc ets val $ \ !badDesc ->
+      Nothing -> edhSimpleDesc ets val $ \ !badDesc ->
         throwEdh ets UsageError $ "not convertible to blob: " <> badDesc
 
 rngLowerProc :: EdhValue -> EdhHostProc
@@ -153,7 +153,7 @@ setterProc !setterVal !exit !ets = case edh'obj'store caller'this of
     defProp !es = case setterVal of
       EdhProcedure (EdhMethod !setter) _ -> findGetter es setter
       EdhBoundProc (EdhMethod !setter) _ _ _ -> findGetter es setter
-      !badSetter -> edhValueDesc ets badSetter $
+      !badSetter -> edhSimpleDesc ets badSetter $
         \ !badDesc -> throwEdh ets UsageError $ "invalid setter: " <> badDesc
 
     findGetter :: EntityStore -> ProcDefi -> STM ()
@@ -187,7 +187,7 @@ attrDerefAddrProc !lhExpr !rhExpr !exit =
      in edhValueAsAttrKey' ets rhVal naExit $ \ !key ->
           runEdhTx ets $ getEdhAttr lhExpr key (noAttr $ attrKeyStr key) exit
   where
-    noAttr !keyRepr !lhVal !ets = edhValueDesc ets lhVal $ \ !badDesc ->
+    noAttr !keyRepr !lhVal !ets = edhSimpleDesc ets lhVal $ \ !badDesc ->
       throwEdh ets EvalError $
         "no such attribute `"
           <> keyRepr
@@ -576,7 +576,7 @@ growProc !v !newCap !kwargs !exit !ets = case edhUltimate v of
             <> edhTypeNameOf badMagic
             <> " on class "
             <> objClassName o
-  !badVal -> edhValueDesc ets badVal $ \ !badDesc ->
+  !badVal -> edhSimpleDesc ets badVal $ \ !badDesc ->
     throwEdh ets UsageError $ "grow() not supported by: " <> badDesc
 
 lenProc :: EdhValue -> RestKwArgs -> EdhHostProc
@@ -923,7 +923,7 @@ unzipProc (mandatoryArg -> !tuplesExpr) !exit !ets =
             EdhArgsPack (ArgsPack !args !kwargs)
               | odNull kwargs ->
                 modifyTVar' stripsVar $ log1 args
-            _ -> edhValueDesc ets val $
+            _ -> edhSimpleDesc ets val $
               \ !badDesc ->
                 throwEdh ets UsageError $
                   "element tuple expected from the unzip series, but given: "
@@ -946,7 +946,7 @@ unzipProc (mandatoryArg -> !tuplesExpr) !exit !ets =
             unzipSeries s $ \ !strips ->
               exitEdh ets exit $
                 EdhArgsPack $ ArgsPack (mkStrip <$> strips) odEmpty
-          _ -> edhValueDesc ets tuplesVal $ \ !badDesc ->
+          _ -> edhSimpleDesc ets tuplesVal $ \ !badDesc ->
             throwEdh ets UsageError $
               "unzip series should be a tuple or list, but given: "
                 <> badDesc
@@ -963,7 +963,7 @@ unzipProc (mandatoryArg -> !tuplesExpr) !exit !ets =
           EdhList (List _u !vsVar) -> do
             !vs <- readTVar vsVar
             go rest $ log1 vs strips
-          _ -> edhValueDesc ets v $ \ !badDesc ->
+          _ -> edhSimpleDesc ets v $ \ !badDesc ->
             throwEdh ets UsageError $
               "element tuple expected from the unzip series, but given: "
                 <> badDesc

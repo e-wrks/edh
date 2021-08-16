@@ -406,7 +406,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
           case edhUltimate guardResult of
             EdhBool True -> afterMatch
             EdhBool False -> exitEdh ets exit EdhCaseOther
-            _ -> edhValueDesc ets guardResult $ \ !badDesc ->
+            _ -> edhSimpleDesc ets guardResult $ \ !badDesc ->
               throwEdh ets UsageError $ "bad guard result: " <> badDesc
 
     -- value-wise matching against the target in context
@@ -460,7 +460,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                 evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of
                   EdhObject !clsObj ->
                     matchDataClass clsObj fieldExtractors Nothing
-                  !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
+                  !badClsVal -> edhSimpleDesc ets badClsVal $ \ !badDesc ->
                     throwEdh ets UsageError $ "invalid class: " <> badDesc
         -- { class( field1, field2, ... ) = instAddr } -- fields by class again
         -- but receive the matched object as well
@@ -484,7 +484,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                       matchDataClass clsObj fieldExtractors Nothing
                     _ -> resolveEdhAttrAddr ets instAddr $ \ !instKey ->
                       matchDataClass clsObj fieldExtractors $ Just instKey
-                  !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
+                  !badClsVal -> edhSimpleDesc ets badClsVal $ \ !badDesc ->
                     throwEdh ets UsageError $ "invalid class: " <> badDesc
         -- {{ class:inst }} -- instance resolving pattern
         [ StmtSrc
@@ -512,7 +512,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                           Just !instObj ->
                             matchExit [(instKey, EdhObject instObj)]
                           Nothing -> exitEdh ets exit EdhCaseOther
-                      !badClsVal -> edhValueRepr ets badClsVal $ \ !badDesc ->
+                      !badClsVal -> edhSimpleDesc ets badClsVal $ \ !badDesc ->
                         throwEdh ets UsageError $ "invalid class: " <> badDesc
               _ -> exitEdh ets exit EdhCaseOther
         --
@@ -844,7 +844,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
             case edhUltimate guardResult of
               EdhBool True -> matchExit []
               EdhBool False -> exitEdh ets exit EdhCaseOther
-              _ -> edhValueDesc ets guardResult $ \ !badDesc ->
+              _ -> edhSimpleDesc ets guardResult $ \ !badDesc ->
                 throwEdh ets UsageError $ "bad guard result: " <> badDesc
       --
 
@@ -1015,5 +1015,5 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                         EdhObject !obj ->
                           withObj obj $ exitEdh ets exit EdhCaseOther
                         _ -> exitEdh ets exit EdhCaseOther
-                (_, !badMagic) -> edhValueDesc ets badMagic $ \ !badDesc ->
+                (_, !badMagic) -> edhSimpleDesc ets badMagic $ \ !badDesc ->
                   throwEdh ets UsageError $ "bad __match__ magic: " <> badDesc

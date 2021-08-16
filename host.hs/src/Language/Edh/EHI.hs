@@ -282,6 +282,8 @@ module Language.Edh.EHI
     edhValueBlobTx',
     edhValueDesc,
     edhValueDescTx,
+    edhSimpleDesc,
+    edhSimpleDescTx,
     edhValueJson,
     edhValueJsonTx,
     edhValueAsAttrKey,
