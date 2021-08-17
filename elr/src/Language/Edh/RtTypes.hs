@@ -594,7 +594,7 @@ data EdhWorld = EdhWorld
     -- | for console logging, input and output
     edh'world'console :: !EdhConsole,
     -- | wrapping any host value as object
-    edh'value'wrapper :: !(Dynamic -> STM Object),
+    edh'value'wrapper :: !(Maybe Text -> Dynamic -> STM Object),
     -- wrapping a scope as object for reflective purpose
     edh'scope'wrapper :: !(Scope -> STM Object),
     -- wrapping a host exceptin as an Edh object
@@ -1836,14 +1836,21 @@ objectScope !obj = case edh'obj'store obj of
 
 -- | Wrap any host value as an object
 edhWrapHostValue :: Typeable t => EdhThreadState -> t -> STM Object
-edhWrapHostValue !ets !v = edhWrapHostValue' ets (toDyn v)
-
--- | Wrap any host value as an object
-edhWrapHostValue' :: EdhThreadState -> Dynamic -> STM Object
-edhWrapHostValue' !ets = edhWrapValue
+edhWrapHostValue !ets = edhWrapValue . toDyn
   where
     !world = edh'prog'world $ edh'thread'prog ets
-    edhWrapValue = edh'value'wrapper world
+    edhWrapValue = edh'value'wrapper world Nothing
+
+-- | Wrap any host value as an object, with custom repr
+edhWrapHostValue' :: Typeable t => EdhThreadState -> Text -> t -> STM Object
+edhWrapHostValue' !ets !repr !v = edhWrapHostValue'' ets repr (toDyn v)
+
+-- | Wrap any host value as an object, with custom repr
+edhWrapHostValue'' :: EdhThreadState -> Text -> Dynamic -> STM Object
+edhWrapHostValue'' !ets !repr = edhWrapValue
+  where
+    !world = edh'prog'world $ edh'thread'prog ets
+    edhWrapValue = edh'value'wrapper world (Just repr)
 
 -- | Create a reflective object capturing the specified scope as from the
 -- specified context

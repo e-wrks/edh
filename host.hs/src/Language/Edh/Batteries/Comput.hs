@@ -957,30 +957,37 @@ defineComputMethod !comput !mthName !outerScope =
   mkHostProc outerScope EdhMethod mthName (mthProc, argsRcvr)
   where
     mthProc :: ArgsPack -> EdhHostProc
-    mthProc !apk !exit =
-      let ?effecting = True
-       in callByScript comput apk $ \ !sr !ets -> case sr of
-            ScriptDone !done -> exitEdh ets exit done
-            ScriptDone' !done ->
-              edhWrapHostValue' ets done >>= exitEdh ets exit . EdhObject
-            PartiallyApplied c appliedArgs ->
-              tshowAppliedArgs ets appliedArgs $ \ !argsRepr ->
-                tshowArgsAhead ets (odToList $ argsScriptedAhead c) $
-                  \ !argsAheadRepr ->
-                    defineComputMethod
-                      c
-                      (mthName <> "( " <> argsRepr <> argsAheadRepr <> ")")
-                      outerScope
-                      >>= exitEdh ets exit
-            FullyApplied c appliedArgs -> tshowAppliedArgs ets appliedArgs $
-              \ !argsRepr ->
-                defineComputMethod
-                  c
-                  (mthName <> "( " <> argsRepr <> ")")
-                  outerScope
-                  >>= exitEdh ets exit
-            FullyEffected !d _extras _appliedArgs ->
-              edhWrapHostValue' ets d >>= exitEdh ets exit . EdhObject
+    mthProc !apk !exit !ets =
+      runEdhTx ets $
+        let ?effecting = True
+         in callByScript comput apk $ \ !sr _ets -> case sr of
+              ScriptDone !done -> exitEdh ets exit done
+              ScriptDone' !done -> withRepr $ \ !repr ->
+                edhWrapHostValue'' ets repr done
+                  >>= exitEdh ets exit . EdhObject
+              PartiallyApplied c appliedArgs ->
+                tshowAppliedArgs ets appliedArgs $ \ !argsRepr ->
+                  tshowArgsAhead ets (odToList $ argsScriptedAhead c) $
+                    \ !argsAheadRepr ->
+                      defineComputMethod
+                        c
+                        (mthName <> "( " <> argsRepr <> argsAheadRepr <> ")")
+                        outerScope
+                        >>= exitEdh ets exit
+              FullyApplied c appliedArgs -> tshowAppliedArgs ets appliedArgs $
+                \ !argsRepr ->
+                  defineComputMethod
+                    c
+                    (mthName <> "( " <> argsRepr <> ")")
+                    outerScope
+                    >>= exitEdh ets exit
+              FullyEffected !d _extras _appliedArgs -> withRepr $ \ !repr ->
+                edhWrapHostValue'' ets repr d
+                  >>= exitEdh ets exit . EdhObject
+      where
+        withRepr :: (Text -> STM ()) -> STM ()
+        withRepr exit' = edhValueRepr ets (EdhArgsPack apk) $ \ !apkRepr ->
+          exit' $ mthName <> apkRepr
 
     argsRcvr :: ArgsReceiver
     argsRcvr = NullaryReceiver -- TODO infer from scriptableArgs
@@ -1346,7 +1353,11 @@ defineComputClass' !effOnCtor !rootComput !clsName !clsOuterScope =
         exitWith appliedArgs sr _ets = case sr of
           ScriptDone !done -> exitEdh ets exit done
           ScriptDone' !dd ->
-            edhWrapHostValue' ets dd >>= exitEdh ets exit . EdhObject
+            edhWrapHostValue''
+              ets
+              ("<" <> clsName <> "/done:" <> T.pack (show dd) <> ">")
+              dd
+              >>= exitEdh ets exit . EdhObject
           PartiallyApplied c' appliedArgs' ->
             exitDerived $
               toDyn $ PartiallyApplied c' $! appliedArgs ++ appliedArgs'

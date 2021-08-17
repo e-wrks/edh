@@ -146,10 +146,7 @@ createEdhWorld !console = do
           ]
   let hostValueAllocator :: EdhObjectAllocator
       hostValueAllocator _exit !ets =
-        throwEdh
-          ets
-          UsageError
-          "you can not create a host value from script"
+        throwEdh ets UsageError "you can not create a host value from script"
   !clsHostValue <-
     atomically $
       mkHostClass'
@@ -158,15 +155,28 @@ createEdhWorld !console = do
         (allocEdhObj hostValueAllocator)
         hsHostValue
         []
-  let edhWrapValue :: Dynamic -> STM Object
-      edhWrapValue !dd = do
+  let edhWrapValue :: Maybe Text -> Dynamic -> STM Object
+      edhWrapValue !maybeRepr !dd = do
         !idHostValue <- unsafeIOToSTM newUnique
+        !cls <- case maybeRepr of
+          Nothing -> return clsHostValue
+          Just !repr -> do
+            !hsCustRepr <-
+              iopdFromList [(AttrByName "__repr__", EdhString repr)]
+            case edh'obj'store clsHostValue of
+              ClassStore !hsCls ->
+                return
+                  clsHostValue
+                    { edh'obj'store =
+                        ClassStore $ hsCls {edh'class'store = hsCustRepr}
+                    }
+              _ -> error "bug: class not bearing ClassStore"
         !ss <- newTVar []
         return
           Object
             { edh'obj'ident = idHostValue,
               edh'obj'store = HostStore dd,
-              edh'obj'class = clsHostValue,
+              edh'obj'class = cls,
               edh'obj'supers = ss
             }
 
@@ -470,9 +480,9 @@ createEdhWorld !console = do
 
     mthValueRepr :: EdhHostProc
     mthValueRepr !exit !ets = case edh'obj'store this of
-      HostStore (Dynamic !tr _) ->
+      HostStore dd ->
         exitEdh ets exit $
-          EdhString $ "<host-value:< " <> T.pack (show tr) <> ">>"
+          EdhString $ "<host-value:" <> T.pack (show dd) <> ">"
       _ -> exitEdh ets exit $ EdhString "<bogus host-value>"
       where
         !scope = contextScope $ edh'context ets

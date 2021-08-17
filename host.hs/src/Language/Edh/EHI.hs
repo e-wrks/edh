@@ -248,6 +248,7 @@ module Language.Edh.EHI
     mkScopeWrapper,
     edhWrapHostValue,
     edhWrapHostValue',
+    edhWrapHostValue'',
     mkHostClass,
     mkHostClass',
     mkObjSandbox,
