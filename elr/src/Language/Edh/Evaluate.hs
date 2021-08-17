@@ -1453,7 +1453,9 @@ edhPrepareCall'
               callProc callee this that $
                 flip (maybe id) effOuter $
                   \ !outerStack !s -> s {edh'effects'stack = outerStack}
-            _ -> throwEdh etsCallPrep EvalError "no __call__ method on object"
+            _ -> edhSimpleDesc etsCallPrep calleeVal $ \ !badDesc ->
+              throwEdh etsCallPrep EvalError $
+                "no __call__ method on " <> badDesc
       _ -> edhValueRepr etsCallPrep calleeVal $ \ !calleeRepr ->
         throwEdh etsCallPrep EvalError $
           "can not call a " <> edhTypeNameOf calleeVal <> ": " <> calleeRepr
