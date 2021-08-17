@@ -562,6 +562,31 @@ instance ScriptArgAdapter EdhValue where
   adaptEdhArg !v !exit = exitEdhTx exit v
   adaptedArgValue = id
 
+instance ScriptArgAdapter (Maybe Object) where
+  adaptEdhArg !v !exit = case edhUltimate v of
+    EdhNil -> exitEdhTx exit Nothing
+    EdhObject !d -> exitEdhTx exit $ Just d
+    _ -> badVal
+    where
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
+        throwEdhTx UsageError $
+          "optional "
+            <> adaptedArgType @Object
+            <> " expected but given: "
+            <> badDesc
+  adaptedArgValue (Just !d) = EdhObject d
+  adaptedArgValue Nothing = edhNothing
+
+instance ScriptArgAdapter Object where
+  adaptEdhArg !v !exit = case edhUltimate v of
+    EdhObject !d -> exitEdhTx exit d
+    _ -> badVal
+    where
+      badVal = edhSimpleDescTx v $ \ !badDesc ->
+        throwEdhTx UsageError $
+          adaptedArgType @Object <> " expected but given: " <> badDesc
+  adaptedArgValue = EdhObject
+
 instance ScriptArgAdapter (Maybe Decimal) where
   adaptEdhArg !v !exit = case edhUltimate v of
     EdhNil -> exitEdhTx exit Nothing
