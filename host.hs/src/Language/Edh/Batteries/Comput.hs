@@ -368,7 +368,7 @@ instance ScriptableComput (ComputDone a) where
       then throwEdhTx UsageError "extranous arguments"
       else exitEdhTx exit $ ScriptDone' (toDyn a)
 
--- | Wrap a pure computation result as scripted, without recording of all args
+-- | Wrap a pure computation result as scripted, without recording all args
 -- ever applied
 newtype ComputDone_ = ComputDone_ EdhValue
 
@@ -418,9 +418,8 @@ instance ScriptableComput (ComputEdh' a) where
       else runEdhTx ets $
         act $ \ !d -> exitEdhTx exit $ FullyEffected d odEmpty []
 
--- | Wrap an Edh aware computation result as scripted
---
--- Use this form in case you can give out an 'EdhValue' directly
+-- | Wrap an Edh aware computation result as scripted, without recording all
+-- args ever applied
 newtype ComputEdh_ = ComputEdh_ (EdhTxExit EdhValue -> EdhTx)
 
 instance ScriptableComput ComputEdh_ where
