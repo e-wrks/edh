@@ -150,8 +150,7 @@ module Language.Edh.EHI
 
     -- ** CPS helpers
     seqcontSTM,
-    foldcontSTM,
-    mapcontSTM,
+    seqEdhTx,
 
     -- ** Sync utilities
     edhDoSTM,

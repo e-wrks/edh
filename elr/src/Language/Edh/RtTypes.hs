@@ -771,6 +771,14 @@ endOfEdh :: EdhTxExit a
 endOfEdh _ _ = return ()
 {-# INLINE endOfEdh #-}
 
+seqEdhTx :: forall a. [EdhTxExit a -> EdhTx] -> EdhTxExit [a] -> EdhTx
+seqEdhTx !xs !exit = go xs []
+  where
+    go :: [EdhTxExit a -> EdhTx] -> [a] -> EdhTx
+    go [] ys = exit $! reverse ys
+    go (x : rest) ys = x $ \y -> go rest (y : ys)
+{-# INLINE seqEdhTx #-}
+
 -- | Schedule forking of a GHC thread to bootstrap an Edh thread to run the
 -- specified Edh computation, with the specified thread state modifer applied
 -- before the computation is stated in the descendant thread.
