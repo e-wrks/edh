@@ -86,7 +86,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
         ofScope = scope( ofObj= otherVal )
         console.print( desc( otherVal ), **ofScope.attrs() )
       }
-      console.print( '⛔ Not an object but - ' ++ desc( otherVal ) )
+      console.print( '⛔ No scope inside - ' ++ desc( otherVal ) )
     }
   }
 
@@ -113,7 +113,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
           '  ' ++ k ++ '= ' ++ v
         )
       }
-      '⛔ Not an object but - ' ++ desc( otherVal )
+      '⛔ No scope inside - ' ++ desc( otherVal )
     }
   }
 
@@ -204,10 +204,10 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
    #  *) This can terminate the process when *stdin* is already at EOF
    #}
   method replWith( obj ) {
-    if type( obj ) is not "Object"
+    if type( obj ) is not in ( "Object", "Class", "HostClass", )
     # if we don't throw here, the while-loop below will loop infinitely,
     # as it'll try recover from errors
-    then error( 'Not an object but: ' ++ desc( obj ) )
+    then error( 'No scope inside - ' ++ desc( obj ) )
 
     console.print( ' * entering a repl within ' ++ desc( obj ) )
     console.print( ' * key in `quit` or `continue` to leave the repl.' )

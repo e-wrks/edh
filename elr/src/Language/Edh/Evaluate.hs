@@ -4781,8 +4781,8 @@ evalInfix' !opSym !notApplicable !lhExpr !rhExpr !exit =
 
 evalInfixSrc :: OpSymSrc -> ExprSrc -> ExprSrc -> EdhHostProc
 evalInfixSrc op@(OpSymSrc !opSym _opSpan) = evalInfixSrc' op $
-  \ !lhVal !rhVal !ets ->
-    edhValueDesc ets lhVal $ \ !lhDesc -> edhSimpleDesc ets rhVal $ \ !rhDesc ->
+  \ !lhVal !rhVal !ets -> edhSimpleDesc ets lhVal $ \ !lhDesc ->
+    edhSimpleDesc ets rhVal $ \ !rhDesc ->
       throwEdh ets EvalError $
         "operator ("
           <> opSym
