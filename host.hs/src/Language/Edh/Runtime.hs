@@ -111,7 +111,8 @@ createEdhWorld !console = do
         [ (AttrByName nm,) <$> mkHostProc rootScope EdhMethod nm hp
           | (nm, hp) <-
               [ ("__repr__", wrapHostProc mthClassRepr),
-                ("__show__", wrapHostProc mthClassShow)
+                ("__show__", wrapHostProc mthClassShow),
+                ("__desc__", wrapHostProc mthClassDesc)
               ]
         ]
           ++ [ (AttrByName nm,) <$> mkHostProperty rootScope nm getter setter
@@ -421,13 +422,28 @@ createEdhWorld !console = do
     mthClassShow !exit !ets = case edh'obj'store clsObj of
       ClassStore !cls ->
         exitEdh ets exit $
-          EdhString $
-            "class: "
-              <> procedureName
-                (edh'class'proc cls)
+          EdhString $ "class: " <> procedureName (edh'class'proc cls)
       _ -> exitEdh ets exit $ EdhString "<bogus-class>"
       where
         !clsObj = edh'scope'that $ contextScope $ edh'context ets
+
+    mthClassDesc :: EdhHostProc
+    mthClassDesc !exit !ets = case edh'obj'store clsObj of
+      ClassStore !cls ->
+        exitEdh ets exit $
+          EdhString $
+            "class: " <> procedureName (edh'class'proc cls)
+              -- TODO show super classes it extends
+              -- TODO show member methods / properties / static attrs etc.
+              <> docString (edh'procedure'doc $ edh'class'proc cls)
+      _ -> exitEdh ets exit $ EdhString "<bogus-class>"
+      where
+        !clsObj = edh'scope'that $ contextScope $ edh'context ets
+
+        docString :: OptDocCmt -> Text
+        docString NoDocCmt = ""
+        docString (DocCmt !docCmt) =
+          (("\n * doc comments *\n" <>) . T.unlines) docCmt
 
     mthClassNameGetter :: EdhHostProc
     mthClassNameGetter !exit !ets = case edh'obj'store clsObj of

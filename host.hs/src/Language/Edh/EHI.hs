@@ -93,6 +93,8 @@ module Language.Edh.EHI
     haltEdhProgram,
     runEdhProgram,
     runEdhProgram',
+    callMagicMethod,
+    invokeMagic,
     edhMakeCall,
     edhMakeCall',
     edhPrepareCall,

@@ -869,7 +869,7 @@ edhObjExtends !ets !this !superObj !exit = case edh'obj'store this of
 
     !magicSpell = AttrByName "<-^"
 
-    callMagicMethod !mthThis !mthThat !mth =
+    callMagicMth !mthThis !mthThat !mth =
       objectScope this >>= \ !objScope ->
         do
           !scopeObj <- mkScopeWrapper ets objScope
@@ -885,11 +885,11 @@ edhObjExtends !ets !this !superObj !exit = case edh'obj'store this of
     withMagicMethod :: EdhValue -> EdhTx
     withMagicMethod !magicMth _ets = case magicMth of
       EdhNil -> exit
-      EdhProcedure (EdhMethod !mth) _ -> callMagicMethod superObj this mth
+      EdhProcedure (EdhMethod !mth) _ -> callMagicMth superObj this mth
       -- even if it's already bound, should use `this` here as
       -- contextual `that` there
       EdhBoundProc (EdhMethod !mth) !mthThis _mthThat _ ->
-        callMagicMethod mthThis this mth
+        callMagicMth mthThis this mth
       _ ->
         throwEdh ets EvalError $
           "invalid magic (<-^) method type: " <> edhTypeNameOf magicMth
@@ -1353,6 +1353,65 @@ packEdhArgs !ets !argSenders !pkExit = do
   where
     -- discourage artifact definition during args packing
     !etsPacking = ets {edh'context = (edh'context ets) {edh'ctx'pure = True}}
+
+callMagicMethod ::
+  Object ->
+  AttrKey ->
+  KwArgs ->
+  EdhTxExit EdhValue ->
+  EdhTx
+callMagicMethod !obj !magicKey !kwargs !exit =
+  invokeMagic obj magicKey kwargs exit ($)
+
+invokeMagic ::
+  Object ->
+  AttrKey ->
+  KwArgs ->
+  EdhTxExit EdhValue ->
+  (((Object, EdhValue) -> STM ()) -> (Object, EdhValue) -> STM ()) ->
+  EdhTx
+invokeMagic !obj !magicKey !kwargs !exit !checkBypassCall !ets =
+  case edh'obj'store obj of
+    ClassStore {} ->
+      lookupEdhObjMagic (edh'obj'class obj) magicKey >>= withMagicArt
+    _ ->
+      runEdhTx ets $
+        getObjAttrWithMagic'
+          obj
+          magicKey
+          (\_ets -> withMagicArt (obj, EdhNil))
+          (\ !r _ets -> withMagicArt r)
+  where
+    withMagicArt :: (Object, EdhValue) -> STM ()
+    withMagicArt !magicArt = do
+      let callAsMethod :: (Object, EdhValue) -> STM ()
+          callAsMethod = \case
+            (_, EdhBoundProc !callee !this !that !effOuter) ->
+              callProc callee this that $
+                flip (maybe id) effOuter $
+                  \ !outerStack !s -> s {edh'effects'stack = outerStack}
+            (this, EdhProcedure !callee !effOuter) -> callProc
+              callee
+              this
+              obj
+              $ flip (maybe id) effOuter $
+                \ !outerStack !s -> s {edh'effects'stack = outerStack}
+            (badInst, badMagic) -> edhSimpleDesc ets badMagic $ \ !badDesc ->
+              edhObjRepr ets obj $ \ !objRepr ->
+                throwEdh ets UsageError $
+                  "bad " <> attrKeyStr magicKey <> " magic " <> badDesc
+                    <> " on "
+                    <> objClassName obj
+                    <> "("
+                    <> objClassName badInst
+                    <> ") object: "
+                    <> objRepr
+      checkBypassCall callAsMethod magicArt
+    callProc :: EdhProcDefi -> Object -> Object -> (Scope -> Scope) -> STM ()
+    callProc !callee !this !that !scopeMod = runEdhTx ets $ case callee of
+      EdhMethod !mth ->
+        callEdhMethod this that mth (ArgsPack [] kwargs) scopeMod exit
+      _ -> throwEdhTx UsageError "non-vanilla magic method not supported yet"
 
 -- | Make a synchronous call to the specified procedure
 --
@@ -2761,6 +2820,22 @@ evalExprs [] !exit = exitEdhTx exit []
 evalExprs (x : xs) !exit = evalExprSrc x $ \ !val ->
   evalExprs xs $ exitEdhTx exit . (edhDeFlowCtrl val :)
 
+-- | Evaluate all of its kwargs in case needed
+--
+-- This is usually useful to host interpreter procedures
+evalKwExprs :: KwArgs -> EdhTxExit KwArgs -> EdhTx
+evalKwExprs !kwExprs !exit !ets = go [] $ odToList kwExprs
+  where
+    go :: [(AttrKey, EdhValue)] -> [(AttrKey, EdhValue)] -> STM ()
+    go res [] = exitEdh ets exit $ odFromList $ reverse res
+    go res ((k, EdhExpr _ _ x _) : rest) = runEdhTx ets $
+      evalExpr x $
+        \ !v _ets -> go ((k, v) : res) rest
+    go _res ((k, v) : _) =
+      throwEdh ets UsageError $
+        "non-expr into evalKwExprs: " <> T.pack (show k) <> "= "
+          <> T.pack (show v)
+
 evalStmt :: Stmt -> EdhTxExit EdhValue -> EdhTx
 evalStmt !stmt !exit = case stmt of
   ExprStmt !expr !docCmt ->
@@ -3890,64 +3965,28 @@ edhObjStrTx !obj !exit !ets =
   edhObjStr ets obj $ exitEdh ets exit
 
 edhObjRepr :: EdhThreadState -> Object -> (Text -> STM ()) -> STM ()
-edhObjRepr !ets !obj !exitRepr = case edh'obj'store obj of
-  ClassStore {} ->
-    lookupEdhObjAttr (edh'obj'class obj) (AttrByName "__repr__")
-      >>= withMagic
-  _ ->
-    runEdhTx ets $
-      getObjAttrWithMagic'
-        obj
-        (AttrByName "__repr__")
-        (const $ exitRepr $ T.pack (show obj))
-        (\ !r _ets -> withMagic r)
-  where
-    withMagic = \case
+edhObjRepr !ets !obj !exitRepr = runEdhTx ets $
+  invokeMagic obj (AttrByName "__repr__") odEmpty magicExit $
+    \callAsMethod -> \case
       (_, EdhNil) -> exitRepr $ T.pack (show obj)
       (_, EdhString !repr) -> exitRepr repr
-      (!this, EdhProcedure (EdhMethod !mth) _) ->
-        runEdhTx ets $
-          callEdhMethod this obj mth (ArgsPack [] odEmpty) id $
-            \ !mthRtn _ets -> case mthRtn of
-              EdhString !repr -> exitRepr repr
-              _ -> edhValueRepr ets mthRtn exitRepr
-      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-        runEdhTx ets $
-          callEdhMethod this that mth (ArgsPack [] odEmpty) id $
-            \ !mthRtn _ets -> case mthRtn of
-              EdhString !repr -> exitRepr repr
-              _ -> edhValueRepr ets mthRtn exitRepr
-      (_, !reprVal) -> edhValueRepr ets reprVal exitRepr
+      !magicArt -> callAsMethod magicArt
+  where
+    magicExit :: EdhTxExit EdhValue
+    magicExit (EdhString r) _ets = exitRepr r
+    magicExit v _ets = edhValueRepr ets v exitRepr
 
 edhObjStr :: EdhThreadState -> Object -> (Text -> STM ()) -> STM ()
-edhObjStr !ets !obj !exitStr = case edh'obj'store obj of
-  ClassStore {} ->
-    lookupEdhObjAttr (edh'obj'class obj) (AttrByName "__str__")
-      >>= withMagic
-  _ ->
-    runEdhTx ets $
-      getObjAttrWithMagic'
-        obj
-        (AttrByName "__str__")
-        (const $ edhObjRepr ets obj exitStr) -- try use repr
-        (\ !r _ets -> withMagic r)
-  where
-    withMagic = \case
+edhObjStr !ets !obj !exitStr = runEdhTx ets $
+  invokeMagic obj (AttrByName "__str__") odEmpty magicExit $
+    \callAsMethod -> \case
       (_, EdhNil) -> edhObjRepr ets obj exitStr -- try use repr
-      (_, EdhString !str) -> exitStr str
-      (!this, EdhProcedure (EdhMethod !mth) _) ->
-        runEdhTx ets $
-          callEdhMethod this obj mth (ArgsPack [] odEmpty) id $
-            \ !mthRtn _ets -> case mthRtn of
-              EdhString !str -> exitStr str
-              _ -> edhValueRepr ets mthRtn exitStr
-      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-        runEdhTx ets $
-          callEdhMethod this that mth (ArgsPack [] odEmpty) id $
-            \ !mthRtn _ets -> case mthRtn of
-              EdhString !str -> exitStr str
-              _ -> edhValueRepr ets mthRtn exitStr
-      (_, !strVal) -> edhValueRepr ets strVal exitStr
+      (_, EdhString !s) -> exitStr s
+      !magicArt -> callAsMethod magicArt
+  where
+    magicExit :: EdhTxExit EdhValue
+    magicExit (EdhString s) _ets = exitStr s
+    magicExit v _ets = edhValueStr ets v exitStr
 
 edhValueStr :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
 edhValueStr _ (EdhString !s) !exit = exit s
@@ -5329,25 +5368,16 @@ edhValueNull _ (EdhExpr _ _ (LitExpr (DecLiteral d)) _) !exit =
 edhValueNull _ (EdhExpr _ _ (LitExpr (BoolLiteral b)) _) !exit = exit b
 edhValueNull _ (EdhExpr _ _ (LitExpr (StringLiteral s)) _) !exit =
   exit $ T.null s
-edhValueNull !ets (EdhObject !o) !exit =
-  lookupEdhObjAttr o (AttrByName "__null__") >>= \case
-    (_, EdhNil) -> exit False
-    (!this', EdhProcedure (EdhMethod !nulMth) _) ->
-      runEdhTx ets $
-        callEdhMethod this' o nulMth (ArgsPack [] odEmpty) id $
-          \ !nulVal _ets -> case nulVal of
-            EdhBool isNull -> exit isNull
-            _ -> edhValueNull ets nulVal exit
-    (_, EdhBoundProc (EdhMethod !nulMth) !this !that _) ->
-      runEdhTx ets $
-        callEdhMethod this that nulMth (ArgsPack [] odEmpty) id $
-          \ !nulVal _ets -> case nulVal of
-            EdhBool isNull -> exit isNull
-            _ -> edhValueNull ets nulVal exit
-    (_, EdhBool !b) -> exit b
-    (_, !badVal) ->
-      throwEdh ets UsageError $
-        "invalid value type from __null__: " <> edhTypeNameOf badVal
+edhValueNull !ets (EdhObject !o) !exit = runEdhTx ets $
+  invokeMagic o (AttrByName "__null__") odEmpty magicExit $
+    \callAsMethod -> \case
+      (_, EdhNil) -> exit False
+      (_, EdhBool !b) -> exit b
+      !magicArt -> callAsMethod magicArt
+  where
+    magicExit :: EdhTxExit EdhValue
+    magicExit (EdhBool b) _ets = exit b
+    magicExit v _ets = edhValueNull ets v $ exit . not
 edhValueNull _ _ !exit = exit False
 
 edhValueNullTx :: EdhValue -> EdhTxExit Bool -> EdhTx

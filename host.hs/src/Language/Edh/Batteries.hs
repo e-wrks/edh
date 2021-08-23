@@ -335,7 +335,8 @@ installEdhBatteries world = do
       -- so the guard syntax in pattern matching works nicely with this
       -- flipped procedure call operator (regardless of its UNIX pipe
       -- semantics), in Haskell style
-      ("$@", InfixL, -5), -- out-laid arg sugar
+      ("$@", InfixL, -5), -- out-laid arg sugar, callee at left
+      ("@|", InfixR, -5), -- out-laid arg sugar, callee at right
       --
       -- assignments, make them lower than (++),
       -- so don't need to quote `a = b ++ c`
@@ -449,7 +450,8 @@ installEdhBatteries world = do
                 [ ("@", attrDerefAddrProc),
                   ("$", fapProc),
                   ("|", ffapProc),
-                  ("$@", posLayoutProc),
+                  ("$@", leftPosCallProc),
+                  ("@|", rightPosCallProc),
                   (":=", defProc),
                   ("?:=", defMissingProc),
                   ("..", rangeCtorProc ClosedBound ClosedBound),
@@ -539,9 +541,9 @@ installEdhBatteries world = do
                   (EdhMethod, "error", wrapHostProc errorProc),
                   (EdhMethod, "id", wrapHostProc idProc),
                   (EdhMethod, "blob", wrapHostProc blobProc),
-                  (EdhMethod, "str", wrapHostProc strProc),
+                  (EdhIntrpr, "str", wrapHostProc strProc),
                   (EdhMethod, "json", wrapHostProc jsonProc),
-                  (EdhMethod, "repr", wrapHostProc reprProc),
+                  (EdhIntrpr, "repr", wrapHostProc reprProc),
                   (EdhMethod, "cap", wrapHostProc capProc),
                   (EdhMethod, "grow", wrapHostProc growProc),
                   (EdhMethod, "len", wrapHostProc lenProc),
