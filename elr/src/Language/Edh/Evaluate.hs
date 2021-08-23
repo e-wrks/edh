@@ -3637,32 +3637,32 @@ edhSimpleDesc !ets !v !exit = edhValueRepr ets v $ \ !valRepr ->
 
 edhSimpleDescTx :: EdhValue -> EdhTxExit Text -> EdhTx
 edhSimpleDescTx !v !exit !ets =
-  edhSimpleDesc ets v $ \ !s -> exitEdh ets exit s
+  edhSimpleDesc ets v $ exitEdh ets exit
 
-edhValueDesc :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
-edhValueDesc !ets !val !exitDesc = case edhUltimate val of
-  EdhObject !o -> case edh'obj'store o of
-    ClassStore cls ->
-      lookupEdhObjMagic (edh'obj'class o) (AttrByName "__desc__") >>= \case
-        (_, EdhNil) ->
-          exitDesc $ "class `" <> procedureName (edh'class'proc cls) <> "`"
-        !magicMth -> descWithMagic o magicMth
-    _ -> lookupEdhObjMagic o (AttrByName "__desc__") >>= descWithMagic o
-  _ -> edhValueRepr ets val $ \ !valRepr ->
-    exitDesc $ "'" <> edhTypeNameOf val <> "' value `" <> valRepr <> "`"
+edhObjDesc :: EdhThreadState -> Object -> (Text -> STM ()) -> STM ()
+edhObjDesc !ets !o = edhObjDesc' ets o odEmpty
+
+edhObjDesc' :: EdhThreadState -> Object -> KwArgs -> (Text -> STM ()) -> STM ()
+edhObjDesc' !ets !o !kwargs !exitDesc = case edh'obj'store o of
+  ClassStore cls ->
+    lookupEdhObjMagic (edh'obj'class o) (AttrByName "__desc__") >>= \case
+      (_, EdhNil) ->
+        exitDesc $ "class `" <> procedureName (edh'class'proc cls) <> "`"
+      !magicMth -> descWithMagic magicMth
+  _ -> lookupEdhObjMagic o (AttrByName "__desc__") >>= descWithMagic
   where
     magicExit :: EdhTxExit EdhValue
     magicExit !magicRtn _ets = edhValueStr ets magicRtn $
       \ !magicStr -> exitDesc magicStr
-    descWithMagic !o = \case
-      (_, EdhNil) -> edhValueRepr ets val $ \ !valRepr ->
+    descWithMagic = \case
+      (_, EdhNil) -> edhValueRepr ets (EdhObject o) $ \ !valRepr ->
         exitDesc $ "`" <> objClassName o <> "` object `" <> valRepr <> "`"
       (!this', EdhProcedure (EdhMethod !mth) _) ->
         runEdhTx ets $
-          callEdhMethod this' o mth (ArgsPack [] odEmpty) id magicExit
+          callEdhMethod this' o mth (ArgsPack [] kwargs) id magicExit
       (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
         runEdhTx ets $
-          callEdhMethod this that mth (ArgsPack [] odEmpty) id magicExit
+          callEdhMethod this that mth (ArgsPack [] kwargs) id magicExit
       (_, !badMagic) ->
         throwEdh ets UsageError $
           "bad magic __desc__ of "
@@ -3670,9 +3670,23 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
             <> " on class "
             <> objClassName o
 
+edhObjDescTx :: Object -> EdhTxExit Text -> EdhTx
+edhObjDescTx !o !exitDesc !ets =
+  edhObjDesc ets o $ exitEdh ets exitDesc
+
+edhObjDescTx' :: Object -> KwArgs -> EdhTxExit Text -> EdhTx
+edhObjDescTx' !o !kwargs !exitDesc !ets =
+  edhObjDesc' ets o kwargs $ exitEdh ets exitDesc
+
+edhValueDesc :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
+edhValueDesc !ets !val !exitDesc = case edhUltimate val of
+  EdhObject !o -> edhObjDesc ets o exitDesc
+  _ -> edhValueRepr ets val $ \ !valRepr ->
+    exitDesc $ "'" <> edhTypeNameOf val <> "' value `" <> valRepr <> "`"
+
 edhValueDescTx :: EdhValue -> EdhTxExit Text -> EdhTx
 edhValueDescTx !v !exit !ets =
-  edhValueDesc ets v $ \ !s -> exitEdh ets exit s
+  edhValueDesc ets v $ exitEdh ets exit
 
 dtcFields ::
   EdhThreadState -> Object -> Object -> ([(Text, EdhValue)] -> STM ()) -> STM ()
@@ -3865,7 +3879,15 @@ edhValueRepr !ets !val !exitRepr = case val of
 
 edhValueReprTx :: EdhValue -> EdhTxExit Text -> EdhTx
 edhValueReprTx !val !exit !ets =
-  edhValueRepr ets val $ \ !repr -> exitEdh ets exit repr
+  edhValueRepr ets val $ exitEdh ets exit
+
+edhObjReprTx :: Object -> EdhTxExit Text -> EdhTx
+edhObjReprTx !obj !exit !ets =
+  edhObjRepr ets obj $ exitEdh ets exit
+
+edhObjStrTx :: Object -> EdhTxExit Text -> EdhTx
+edhObjStrTx !obj !exit !ets =
+  edhObjStr ets obj $ exitEdh ets exit
 
 edhObjRepr :: EdhThreadState -> Object -> (Text -> STM ()) -> STM ()
 edhObjRepr !ets !obj !exitRepr = case edh'obj'store obj of
@@ -3937,7 +3959,7 @@ edhValueStr !ets !v !exit = edhValueRepr ets v exit
 
 edhValueStrTx :: EdhValue -> EdhTxExit Text -> EdhTx
 edhValueStrTx !v !exit !ets =
-  edhValueStr ets v $ \ !s -> exitEdh ets exit s
+  edhValueStr ets v $ exitEdh ets exit
 
 edhValueBlob' ::
   EdhThreadState -> EdhValue -> STM () -> (ByteString -> STM ()) -> STM ()
