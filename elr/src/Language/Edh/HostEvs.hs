@@ -25,7 +25,8 @@ type EndOfStream = Bool
 -- finally forming a whole hierarchy of events.
 data AtomEvq = AtomEvq
   { aeq'conseqs :: !(TVar [IO ()]),
-    aeq'subseqs :: !(TVar [IO ()])
+    aeq'subseqs :: !(TVar [IO ()]),
+    aeq'conts :: !(TVar [IO () -> IO ()])
   }
 
 -- | Schedule an IO computation as a consequence of the underlying event
@@ -40,7 +41,7 @@ data AtomEvq = AtomEvq
 --
 -- Especially note that any failure during any consequence is ignored.
 conseqIO :: AtomEvq -> IO () -> STM ()
-conseqIO (AtomEvq !conseqs _) !act = modifyTVar' conseqs (act :)
+conseqIO (AtomEvq !conseqs _ _) !act = modifyTVar' conseqs (act :)
 
 -- | Schedule an IO computation as a subsequence of the underlying event
 -- spreading / propagation
@@ -55,7 +56,15 @@ conseqIO (AtomEvq !conseqs _) !act = modifyTVar' conseqs (act :)
 -- Especially note that any failure during any consequence or subsequence is
 -- ignored.
 subseqIO :: AtomEvq -> IO () -> STM ()
-subseqIO (AtomEvq _ !subseqs) !act = modifyTVar' subseqs (act :)
+subseqIO (AtomEvq _ !subseqs _) !act = modifyTVar' subseqs (act :)
+
+-- | Schedule an IO continuation to be triggered, after all consequences and
+-- subsequences of an event has been realized.
+--
+-- Warning: the program will be broken if the continuation ceases to resume its
+--          given exit.
+contsIO :: AtomEvq -> (IO () -> IO ()) -> STM ()
+contsIO (AtomEvq _ _ !conts) !act = modifyTVar' conts (act :)
 
 -- | An event handler reacts to a particular event with an STM computation,
 -- returns whether it is still interested in the subsequent events in the same
@@ -122,7 +131,7 @@ data EventSink t = EventSink
     --
     -- Note that any failure during the spreading phase will be thrown to here,
     -- with all effects of the event cancelled (as far as STM rollback did it).
-    publishEvent :: t -> IO EndOfStream,
+    publishEvent :: t -> (EndOfStream -> IO ()) -> IO (),
     -- | Subscribe an event listener to the event sink
     listenEvents :: EventListener t -> IO (),
     -- | Check whether the event sink is at end-of-stream
@@ -165,7 +174,7 @@ newEventSink = do
       recentEvt :: STM (Maybe t)
       recentEvt = readTVar rcntRef
 
-      publishEvt :: t -> IO EndOfStream
+      publishEvt :: t -> (EndOfStream -> IO ()) -> IO ()
       publishEvt = _publish'event eosRef rcntRef subsRef
 
       listenEvs :: EventListener t -> IO ()
@@ -214,8 +223,8 @@ instance Functor EventSink where
             recentEvt' :: STM (Maybe b)
             recentEvt' = fmap f <$> recentEvt
 
-            publishEvt' :: b -> IO EndOfStream
-            publishEvt' _ =
+            publishEvt' :: b -> (EndOfStream -> IO ()) -> IO ()
+            publishEvt' _ _exit =
               throwIO $
                 userError
                   "prohibited against a decorated event sink"
@@ -285,25 +294,27 @@ _publish'event ::
   TVar (Maybe t) ->
   IORef [EventListener t] ->
   t ->
-  IO EndOfStream
-_publish'event !eosRef !rcntRef !subsRef !evd =
+  (EndOfStream -> IO ()) ->
+  IO ()
+_publish'event !eosRef !rcntRef !subsRef !evd !exit =
   readTVarIO eosRef >>= \case
-    True -> return True
+    True -> exit True
     False ->
       readIORef subsRef >>= \case
         -- short-circuit when there are no subscribers
         [] -> do
           atomically $ writeTVar rcntRef $ Just evd
-          return False
+          exit False
         -- drive subscribers to spread an event hierarchy
         !subs -> do
           !conseqs <- newTVarIO []
           !subseqs <- newTVarIO []
+          !conts <- newTVarIO []
 
           (writeIORef subsRef =<<) $
             atomically $ do
               writeTVar rcntRef $ Just evd
-              _spread'to'subscribers (AtomEvq conseqs subseqs) evd subs
+              _spread'to'subscribers (AtomEvq conseqs subseqs conts) evd subs
 
           -- execute the consequences
           readTVarIO conseqs >>= propagate
@@ -311,16 +322,19 @@ _publish'event !eosRef !rcntRef !subsRef !evd =
           -- execute the subsequences
           readTVarIO subseqs >>= propagate
 
-          -- now let's check if it has lost all its subscribers after even
-          -- subsequences realized, and if that's the case, mark it EoS
-          readTVarIO eosRef >>= \case
-            True -> return True
-            False ->
-              readIORef subsRef >>= \case
-                [] -> do
-                  atomically $ writeTVar eosRef True
-                  return True
-                _ -> return False
+          -- trigger continuations
+          (readTVarIO conts >>=) $
+            triggerConts $
+              -- now let's check if it has lost all its subscribers after even
+              -- subsequences realized, and if that's the case, mark it EoS
+              readTVarIO eosRef >>= \case
+                True -> exit True
+                False ->
+                  readIORef subsRef >>= \case
+                    [] -> do
+                      atomically $ writeTVar eosRef True
+                      exit True
+                    _ -> exit False
   where
     propagate :: [IO ()] -> IO ()
     propagate [] = return ()
@@ -329,6 +343,10 @@ _publish'event !eosRef !rcntRef !subsRef !evd =
         hPutStrLn stderr $
           "Unexpected exception in event propagation: " <> show exc
       propagate rest
+
+    triggerConts :: IO () -> [IO () -> IO ()] -> IO ()
+    triggerConts done [] = done
+    triggerConts done (act : rest) = act $ triggerConts done rest
 
 _listen'events ::
   forall t.
@@ -425,7 +443,7 @@ generateEvents !stopOnEoS !intake !deriver = do
   let publisher :: forall t'. Typeable t' => EventSink t' -> t' -> IO ()
       publisher evs' d' = do
         atomically (atEndOfStream evs') >>= markStop
-        publishEvent evs' d' >>= markStop
+        publishEvent evs' d' markStop
         where
           markStop = \case
             True ->
