@@ -140,9 +140,14 @@ module Language.Edh.EHI
     edhThrow,
     edhCatch,
     throwEdh,
+    throwEdh',
     edhThrowTx,
     edhCatchTx,
     throwEdhTx,
+    throwHostSTM,
+    throwHostSTM',
+    throwHostIO,
+    throwHostIO',
 
     -- ** Returning / Yielding
     runEdhTx,

@@ -2319,6 +2319,38 @@ throwEdh' !ets !tag !msg !details = do
       _ -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
 {-# INLINE throwEdh' #-}
 
+-- | Throw a tagged error from STM monad, while Edh thread context not available
+throwHostSTM :: EdhErrorTag -> Text -> STM a
+throwHostSTM !tag !msg = throwHostSTM' tag msg []
+{-# INLINE throwHostSTM #-}
+
+-- | Throw a tagged error with some detailed data, from STM monad, while Edh
+-- thread context not available
+throwHostSTM' ::
+  EdhErrorTag -> Text -> [(AttrKey, EdhValue)] -> STM a
+throwHostSTM' !tag !msg !details = throwSTM $ EdhHostError tag msg errDetails
+  where
+    !errDetails = case details of
+      [] -> toDyn nil
+      _ -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
+{-# INLINE throwHostSTM' #-}
+
+-- | Throw a tagged error from IO monad, while Edh thread context not available
+throwHostIO :: EdhErrorTag -> Text -> IO a
+throwHostIO !tag !msg = throwHostIO' tag msg []
+{-# INLINE throwHostIO #-}
+
+-- | Throw a tagged error with some detailed data, from IO monad, while Edh
+-- thread context not available
+throwHostIO' ::
+  EdhErrorTag -> Text -> [(AttrKey, EdhValue)] -> IO a
+throwHostIO' !tag !msg !details = throwIO $ EdhHostError tag msg errDetails
+  where
+    !errDetails = case details of
+      [] -> toDyn nil
+      _ -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
+{-# INLINE throwHostIO' #-}
+
 edhThrowTx :: EdhValue -> EdhTx
 edhThrowTx = flip edhThrow
 {-# INLINE edhThrowTx #-}

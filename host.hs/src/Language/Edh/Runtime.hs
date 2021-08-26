@@ -311,8 +311,8 @@ createEdhWorld !console = do
                 clsErr
                 supersErr
           Nothing -> case fromException exc of
-            Just UserInterrupt -> do
-              let !err = EdhError UserCancel "Ctrl^C pressed" (toDyn nil) $
+            Just (EdhHostError tag msg details) -> do
+              let !err = EdhError tag msg details $
                     case etsMaybe of
                       Just !ets -> getEdhErrCtx 0 ets
                       Nothing -> "<RTS>"
@@ -322,13 +322,25 @@ createEdhWorld !console = do
                   (HostStore $ toDyn $ toException err)
                   clsUserCancel
                   supersErr
-            _ ->
-              return $
-                Object
-                  uidErr
-                  (HostStore $ toDyn $ toException $ EdhIOError exc)
-                  clsIOError
-                  supersErr
+            Nothing -> case fromException exc of
+              Just UserInterrupt -> do
+                let !err = EdhError UserCancel "Ctrl^C pressed" (toDyn nil) $
+                      case etsMaybe of
+                        Just !ets -> getEdhErrCtx 0 ets
+                        Nothing -> "<RTS>"
+                return $
+                  Object
+                    uidErr
+                    (HostStore $ toDyn $ toException err)
+                    clsUserCancel
+                    supersErr
+              _ ->
+                return $
+                  Object
+                    uidErr
+                    (HostStore $ toDyn $ toException $ EdhIOError exc)
+                    clsIOError
+                    supersErr
 
   atomically $
     iopdUpdate

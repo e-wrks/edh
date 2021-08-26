@@ -321,3 +321,13 @@ edhKnownError exc = case fromException exc of
           (toDyn ())
           "<parsing>"
     Nothing -> Nothing
+
+-- | Usually thrown from `IO` or `STM` monad without access to Edh scripting
+-- context, will be re-wrapped into `EdhError` with Edh context added, by Edh
+-- thread driver
+data EdhHostError = EdhHostError !EdhErrorTag !ErrMessage !Dynamic
+
+instance Exception EdhHostError
+
+instance Show EdhHostError where
+  show (EdhHostError tag msg _details) = show tag <> ": " <> T.unpack msg
