@@ -6,6 +6,7 @@ import Control.Applicative
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
+import Data.Dynamic
 import Data.IORef
 import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
@@ -83,7 +84,7 @@ newtype EventListener t = EventListener
   }
 
 -- | The polymorphic event sink wrapper
-data SomeEventSink = forall t. SomeEventSink (EventSink t)
+data SomeEventSink = forall t. Typeable t => SomeEventSink (EventSink t)
 
 instance Eq SomeEventSink where
   SomeEventSink x == SomeEventSink y = isSameEventSink x y
@@ -125,19 +126,20 @@ data EventSink t = EventSink
     -- | Subscribe an event listener to the event sink
     listenEvents :: EventListener t -> IO (),
     -- | Check whether the event sink is at end-of-stream
-    atEndOfStream :: IO EndOfStream,
+    atEndOfStream :: STM EndOfStream,
     -- | Mark the event sink to be at end-of-strem
-    doneEventStream :: IO ()
+    doneEventStream :: STM ()
   }
 
 -- | Subscribe an event handler to the event sink
 handleEvents ::
   forall t.
+  Typeable t =>
   EventSink t ->
   EventHandler t ->
   IO ()
 handleEvents !evs !handler =
-  atEndOfStream evs >>= \case
+  atomically (atEndOfStream evs) >>= \case
     True -> return ()
     False -> listenEvents evs keepTriggering
   where
@@ -152,7 +154,7 @@ handleEvents !evs !handler =
 newEventSink :: forall t. IO (EventSink t)
 newEventSink = do
   !esid <- newUnique
-  !eosRef <- newIORef False
+  !eosRef <- newTVarIO False
   !rcntRef <- newTVarIO Nothing
   !subsRef <- newIORef []
 
@@ -169,11 +171,11 @@ newEventSink = do
       listenEvs :: EventListener t -> IO ()
       listenEvs = _listen'events atEoS subsRef
 
-      atEoS :: IO EndOfStream
-      atEoS = readIORef eosRef
+      atEoS :: STM EndOfStream
+      atEoS = readTVar eosRef
 
-      doneEvs :: IO ()
-      doneEvs = writeIORef eosRef True
+      doneEvs :: STM ()
+      doneEvs = writeTVar eosRef True
 
   return $ EventSink esid spreadEvt recentEvt publishEvt listenEvs atEoS doneEvs
 
@@ -240,14 +242,14 @@ instance Functor EventSink where
 
 _spread'event ::
   forall t.
-  IO EndOfStream ->
+  STM EndOfStream ->
   TVar (Maybe t) ->
   IORef [EventListener t] ->
   AtomEvq ->
   t ->
   STM ()
 _spread'event !eos !rcntRef !subsRef !aeq !evd =
-  unsafeIOToSTM eos >>= \case
+  eos >>= \case
     True -> return ()
     False -> do
       writeTVar rcntRef $ Just evd
@@ -279,13 +281,13 @@ _spread'to'subscribers !aeq !evd !subs = spread [] subs
 
 _publish'event ::
   forall t.
-  IORef EndOfStream ->
+  TVar EndOfStream ->
   TVar (Maybe t) ->
   IORef [EventListener t] ->
   t ->
   IO EndOfStream
 _publish'event !eosRef !rcntRef !subsRef !evd =
-  readIORef eosRef >>= \case
+  readTVarIO eosRef >>= \case
     True -> return True
     False ->
       readIORef subsRef >>= \case
@@ -311,12 +313,12 @@ _publish'event !eosRef !rcntRef !subsRef !evd =
 
           -- now let's check if it has lost all its subscribers after even
           -- subsequences realized, and if that's the case, mark it EoS
-          readIORef eosRef >>= \case
+          readTVarIO eosRef >>= \case
             True -> return True
             False ->
               readIORef subsRef >>= \case
                 [] -> do
-                  writeIORef eosRef True
+                  atomically $ writeTVar eosRef True
                   return True
                 _ -> return False
   where
@@ -330,12 +332,12 @@ _publish'event !eosRef !rcntRef !subsRef !evd =
 
 _listen'events ::
   forall t.
-  IO EndOfStream ->
+  STM EndOfStream ->
   IORef [EventListener t] ->
   EventListener t ->
   IO ()
 _listen'events !eos !subsRef !listener =
-  eos >>= \case
+  atomically eos >>= \case
     True -> return ()
     False -> modifyIORef' subsRef (listener :)
 
@@ -348,7 +350,7 @@ _listen'events !eos !subsRef !listener =
 -- subsequences of the original event. All subsequent IO computations will be
 -- tried regardless of other's failures, so long as the publishing of the
 -- original event succeeded.
-on :: forall t. EventSink t -> (AtomEvq -> t -> STM ()) -> IO ()
+on :: forall t. Typeable t => EventSink t -> (AtomEvq -> t -> STM ()) -> IO ()
 on !evs !handler = handleEvents evs $ \ !aeq !evd -> do
   handler aeq evd
   return KeepHandling
@@ -362,7 +364,7 @@ on !evs !handler = handleEvents evs $ \ !aeq !evd -> do
 -- subsequences of the original event. All subsequent IO computations will be
 -- tried regardless of other's failures, so long as the publishing of the
 -- original event succeeded.
-once :: forall t. EventSink t -> (AtomEvq -> t -> STM ()) -> IO ()
+once :: forall t. Typeable t => EventSink t -> (AtomEvq -> t -> STM ()) -> IO ()
 once !evs !handler = handleEvents evs $ \ !aeq !evd -> do
   handler aeq evd
   return StopHandling
@@ -378,16 +380,17 @@ once !evs !handler = handleEvents evs $ \ !aeq !evd -> do
 -- downstream event sink reaches EoS.
 spreadEvents ::
   forall t.
+  Typeable t =>
   (SomeEventSink -> STM Bool) ->
   EventSink t ->
-  ((forall t'. EventSink t' -> t' -> STM ()) -> t -> STM ()) ->
+  ((forall t'. Typeable t' => EventSink t' -> t' -> STM ()) -> t -> STM ()) ->
   IO ()
 spreadEvents !stopOnEoS !intake !deriver = do
   !stopVar <- newTVarIO False
   handleEvents intake $ \ !aeq !evd -> do
-    let spreader :: forall t'. EventSink t' -> t' -> STM ()
+    let spreader :: forall t'. Typeable t' => EventSink t' -> t' -> STM ()
         spreader evs' d' =
-          unsafeIOToSTM (atEndOfStream evs') >>= \case
+          atEndOfStream evs' >>= \case
             True ->
               stopOnEoS (SomeEventSink evs') >>= \case
                 True -> writeTVar stopVar True
@@ -412,15 +415,16 @@ spreadEvents !stopOnEoS !intake !deriver = do
 -- downstream event sink reaches EoS.
 generateEvents ::
   forall t.
+  Typeable t =>
   (SomeEventSink -> IO Bool) ->
   EventSink t ->
-  ((forall t'. EventSink t' -> t' -> IO ()) -> t -> IO ()) ->
+  ((forall t'. Typeable t' => EventSink t' -> t' -> IO ()) -> t -> IO ()) ->
   IO ()
 generateEvents !stopOnEoS !intake !deriver = do
   !stopVar <- newTVarIO False
-  let publisher :: forall t'. EventSink t' -> t' -> IO ()
+  let publisher :: forall t'. Typeable t' => EventSink t' -> t' -> IO ()
       publisher evs' d' = do
-        atEndOfStream evs' >>= markStop
+        atomically (atEndOfStream evs') >>= markStop
         publishEvent evs' d' >>= markStop
         where
           markStop = \case
