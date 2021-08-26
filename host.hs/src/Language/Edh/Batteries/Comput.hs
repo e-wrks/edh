@@ -510,6 +510,54 @@ instance ScriptableComput ComputIO_ where
           !v <- act
           atomically $ exitEdh ets exit $ ScriptDone v
 
+-- | Wrap a general effectful computation as an 'IO' continuation
+data ComputContIO a = Typeable a => ComputContIO ((a -> IO ()) -> IO ())
+
+instance ScriptableComput (ComputContIO a) where
+  scriptableArgs _ = []
+
+  callByScript (ComputContIO !act) (ArgsPack !args !kwargs) !exit !ets =
+    if not (null args) || not (odNull kwargs)
+      then throwEdh ets UsageError "extranous arguments"
+      else runEdhTx ets $
+        edhContIO $
+          act $ \ !d ->
+            atomically $ exitEdh ets exit $ FullyEffected (toDyn d) odEmpty []
+
+-- | Wrap a general effectful computation as an 'IO' continuation
+--
+-- Use this form in case you construct a 'Dynamic' result yourself
+--
+-- Note the type @a@ is for information purpose only, no way get asserted
+data ComputContIO' a = Typeable a => ComputContIO' ((Dynamic -> IO ()) -> IO ())
+
+instance ScriptableComput (ComputContIO' a) where
+  scriptableArgs _ = []
+
+  callByScript (ComputContIO' !act) (ArgsPack !args !kwargs) !exit !ets =
+    if not (null args) || not (odNull kwargs)
+      then throwEdh ets UsageError "extranous arguments"
+      else runEdhTx ets $
+        edhContIO $
+          act $ \ !dd ->
+            atomically $ exitEdh ets exit $ FullyEffected dd odEmpty []
+
+-- | Wrap a general effectful computation as an 'IO' continuation
+--
+-- Use this form in case you can give out an 'EdhValue' directly
+newtype ComputContIO_ = ComputContIO_ ((EdhValue -> IO ()) -> IO ())
+
+instance ScriptableComput ComputContIO_ where
+  scriptableArgs _ = []
+
+  callByScript (ComputContIO_ !act) (ArgsPack !args !kwargs) !exit !ets =
+    if not (null args) || not (odNull kwargs)
+      then throwEdh ets UsageError "extranous arguments"
+      else runEdhTx ets $
+        edhContIO $
+          act $ \ !v ->
+            atomically $ exitEdh ets exit $ ScriptDone v
+
 -- | Wrap a general effectful computation in the 'STM' monad
 data ComputSTM a = Typeable a => ComputSTM (STM a)
 
@@ -554,6 +602,56 @@ instance ScriptableComput ComputSTM_ where
     if not (null args) || not (odNull kwargs)
       then throwEdh ets UsageError "extranous arguments"
       else runEdhTx ets $ edhContSTM $ act >>= exitEdh ets exit . ScriptDone
+
+-- | Wrap a general effectful computation as an 'STM' continuation
+data ComputContSTM a = Typeable a => ComputContSTM ((a -> STM ()) -> STM ())
+
+instance ScriptableComput (ComputContSTM a) where
+  scriptableArgs _ = []
+
+  callByScript (ComputContSTM !act) (ArgsPack !args !kwargs) !exit !ets =
+    if not (null args) || not (odNull kwargs)
+      then throwEdh ets UsageError "extranous arguments"
+      else runEdhTx ets $
+        edhContSTM $
+          act $ \ !d ->
+            exitEdh ets exit $ FullyEffected (toDyn d) odEmpty []
+
+-- | Wrap a general effectful computation as an 'STM' continuation
+--
+-- Use this form in case you construct a 'Dynamic' result yourself
+--
+-- Note the type @a@ is for information purpose only, no way get asserted
+data ComputContSTM' a
+  = Typeable a =>
+    ComputContSTM' ((Dynamic -> STM ()) -> STM ())
+
+instance ScriptableComput (ComputContSTM' a) where
+  scriptableArgs _ = []
+
+  callByScript (ComputContSTM' !act) (ArgsPack !args !kwargs) !exit !ets =
+    if not (null args) || not (odNull kwargs)
+      then throwEdh ets UsageError "extranous arguments"
+      else runEdhTx ets $
+        edhContSTM $
+          act $ \ !dd ->
+            exitEdh ets exit $ FullyEffected dd odEmpty []
+
+-- | Wrap a general effectful computation as an 'STM' continuation
+--
+-- Use this form in case you can give out an 'EdhValue' directly
+newtype ComputContSTM_ = ComputContSTM_ ((EdhValue -> STM ()) -> STM ())
+
+instance ScriptableComput ComputContSTM_ where
+  scriptableArgs _ = []
+
+  callByScript (ComputContSTM_ !act) (ArgsPack !args !kwargs) !exit !ets =
+    if not (null args) || not (odNull kwargs)
+      then throwEdh ets UsageError "extranous arguments"
+      else runEdhTx ets $
+        edhContSTM $
+          act $ \ !v ->
+            exitEdh ets exit $ ScriptDone v
 
 -- * Script Argument Adapters
 
