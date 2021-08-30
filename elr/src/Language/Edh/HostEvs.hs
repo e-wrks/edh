@@ -7,9 +7,10 @@ import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
 import Data.Dynamic
-import Data.IORef
 import Data.Unique
-import GHC.Conc (unsafeIOToSTM)
+import Language.Edh.Control
+import Language.Edh.Evaluate
+import Language.Edh.RtTypes
 import System.IO
 import Prelude
 
@@ -26,7 +27,7 @@ type EndOfStream = Bool
 data AtomEvq = AtomEvq
   { aeq'conseqs :: !(TVar [IO ()]),
     aeq'subseqs :: !(TVar [IO ()]),
-    aeq'conts :: !(TVar [IO () -> IO ()])
+    aeq'conts :: !(TVar [Edh ()])
   }
 
 -- | Schedule an IO computation as a consequence of the underlying event
@@ -58,13 +59,17 @@ conseqIO (AtomEvq !conseqs _ _) !act = modifyTVar' conseqs (act :)
 subseqIO :: AtomEvq -> IO () -> STM ()
 subseqIO (AtomEvq _ !subseqs _) !act = modifyTVar' subseqs (act :)
 
--- | Schedule an IO continuation to be triggered, after all consequences and
--- subsequences of an event has been realized.
+-- | Schedule an Edh computation (which is continuation per se) to be triggered,
+-- after all consequences and subsequences of an event has been realized.
 --
--- Warning: the program will be broken if the continuation ceases to resume its
---          given exit.
-contsIO :: AtomEvq -> (IO () -> IO ()) -> STM ()
-contsIO (AtomEvq _ _ !conts) !act = modifyTVar' conts (act :)
+-- Note: Only in such computations Edh scripting artifacts can be called in a
+-- monadic way, with 'IO' or 'STM' monad, that's possible only in CPS and if
+-- you have an 'EdhThreadState' available
+--
+-- Note: Scripting computations are generally much slower than 'IO' or 'STM'
+-- computations.
+contsEdh :: AtomEvq -> Edh () -> STM ()
+contsEdh (AtomEvq _ _ !conts) !act = modifyTVar' conts (act :)
 
 -- | An event handler reacts to a particular event with an STM computation,
 -- returns whether it is still interested in the subsequent events in the same
@@ -108,7 +113,7 @@ data EventSink t = EventSink
     -- spreading event hierarchy underlying
     --
     -- The atomic event queue should remain the same for event hierarchy
-    -- spreading, is is passed around through 'EventListener's, 'EventHandler's,
+    -- spreading, it is passed around through 'EventListener's, 'EventHandler's,
     -- and @spreadEvent@ here.
     --
     -- A spreaded event will be published atomically with the upstream event
@@ -131,9 +136,9 @@ data EventSink t = EventSink
     --
     -- Note that any failure during the spreading phase will be thrown to here,
     -- with all effects of the event cancelled (as far as STM rollback did it).
-    publishEvent :: t -> (EndOfStream -> IO ()) -> IO (),
+    publishEvent :: t -> Edh EndOfStream,
     -- | Subscribe an event listener to the event sink
-    listenEvents :: EventListener t -> IO (),
+    listenEvents :: EventListener t -> STM (),
     -- | Check whether the event sink is at end-of-stream
     atEndOfStream :: STM EndOfStream,
     -- | Mark the event sink to be at end-of-strem
@@ -146,9 +151,9 @@ handleEvents ::
   Typeable t =>
   EventSink t ->
   EventHandler t ->
-  IO ()
+  STM ()
 handleEvents !evs !handler =
-  atomically (atEndOfStream evs) >>= \case
+  atEndOfStream evs >>= \case
     True -> return ()
     False -> listenEvents evs keepTriggering
   where
@@ -165,20 +170,20 @@ newEventSink = do
   !esid <- newUnique
   !eosRef <- newTVarIO False
   !rcntRef <- newTVarIO Nothing
-  !subsRef <- newIORef []
+  !subsRef <- newTVarIO []
 
   let --
       spreadEvt :: AtomEvq -> t -> STM ()
-      spreadEvt = _spread'event atEoS rcntRef subsRef
+      spreadEvt = _spread'event eosRef rcntRef subsRef
 
       recentEvt :: STM (Maybe t)
       recentEvt = readTVar rcntRef
 
-      publishEvt :: t -> (EndOfStream -> IO ()) -> IO ()
+      publishEvt :: t -> Edh EndOfStream
       publishEvt = _publish'event eosRef rcntRef subsRef
 
-      listenEvs :: EventListener t -> IO ()
-      listenEvs = _listen'events atEoS subsRef
+      listenEvs :: EventListener t -> STM ()
+      listenEvs = _listen'events eosRef subsRef
 
       atEoS :: STM EndOfStream
       atEoS = readTVar eosRef
@@ -223,13 +228,13 @@ instance Functor EventSink where
             recentEvt' :: STM (Maybe b)
             recentEvt' = fmap f <$> recentEvt
 
-            publishEvt' :: b -> (EndOfStream -> IO ()) -> IO ()
-            publishEvt' _ _exit =
-              throwIO $
-                userError
-                  "prohibited against a decorated event sink"
+            publishEvt' :: b -> Edh EndOfStream
+            publishEvt' _ =
+              throwEdhM
+                UsageError
+                "prohibited against a decorated event sink"
 
-            listenEvs' :: EventListener b -> IO ()
+            listenEvs' :: EventListener b -> STM ()
             listenEvs' !listener = listenEvs $ deleListener listener
               where
                 deleListener :: EventListener b -> EventListener a
@@ -251,24 +256,24 @@ instance Functor EventSink where
 
 _spread'event ::
   forall t.
-  STM EndOfStream ->
+  TVar EndOfStream ->
   TVar (Maybe t) ->
-  IORef [EventListener t] ->
+  TVar [EventListener t] ->
   AtomEvq ->
   t ->
   STM ()
-_spread'event !eos !rcntRef !subsRef !aeq !evd =
-  eos >>= \case
+_spread'event !eosRef !rcntRef !subsRef !aeq !evd =
+  readTVar eosRef >>= \case
     True -> return ()
     False -> do
       writeTVar rcntRef $ Just evd
-      unsafeIOToSTM (readIORef subsRef) >>= \case
+      readTVar subsRef >>= \case
         -- short-circuit when there are no subscribers
         [] -> return ()
         -- drive subscribers to spread the current event hierarchy
         !subs -> do
           !subs' <- _spread'to'subscribers aeq evd subs
-          conseqIO aeq $ writeIORef subsRef subs'
+          conseqIO aeq $ atomically $ writeTVar subsRef subs'
 
 _spread'to'subscribers ::
   forall t.
@@ -292,49 +297,46 @@ _publish'event ::
   forall t.
   TVar EndOfStream ->
   TVar (Maybe t) ->
-  IORef [EventListener t] ->
+  TVar [EventListener t] ->
   t ->
-  (EndOfStream -> IO ()) ->
-  IO ()
-_publish'event !eosRef !rcntRef !subsRef !evd !exit =
-  readTVarIO eosRef >>= \case
-    True -> exit True
-    False ->
-      readIORef subsRef >>= \case
-        -- short-circuit when there are no subscribers
-        [] -> do
-          atomically $ writeTVar rcntRef $ Just evd
-          exit False
-        -- drive subscribers to spread an event hierarchy
-        !subs -> do
-          !conseqs <- newTVarIO []
-          !subseqs <- newTVarIO []
-          !conts <- newTVarIO []
-
-          (writeIORef subsRef =<<) $
-            atomically $ do
+  Edh EndOfStream
+_publish'event !eosRef !rcntRef !subsRef !evd = Edh $ \ !exit !ets ->
+  runEdhTx ets $
+    edhContIO $
+      readTVarIO eosRef >>= \case
+        True -> atomically $ exitEdh ets exit True
+        False ->
+          readTVarIO subsRef >>= \case
+            -- short-circuit when there are no subscribers
+            [] -> atomically $ do
               writeTVar rcntRef $ Just evd
-              _spread'to'subscribers (AtomEvq conseqs subseqs conts) evd subs
+              exitEdh ets exit False
+            -- drive subscribers to spread an event hierarchy
+            !subs -> do
+              !conseqs <- newTVarIO []
+              !subseqs <- newTVarIO []
+              !conts <- newTVarIO []
 
-          -- execute the consequences
-          readTVarIO conseqs >>= propagate
+              (atomically . writeTVar subsRef =<<) $
+                atomically $ do
+                  writeTVar rcntRef $ Just evd
+                  _spread'to'subscribers
+                    (AtomEvq conseqs subseqs conts)
+                    evd
+                    subs
 
-          -- execute the subsequences
-          readTVarIO subseqs >>= propagate
+              -- execute the consequences
+              readTVarIO conseqs >>= propagate
 
-          -- trigger continuations
-          (readTVarIO conts >>=) $
-            triggerConts $
-              -- now let's check if it has lost all its subscribers after even
-              -- subsequences realized, and if that's the case, mark it EoS
-              readTVarIO eosRef >>= \case
-                True -> exit True
-                False ->
-                  readIORef subsRef >>= \case
-                    [] -> do
-                      atomically $ writeTVar eosRef True
-                      exit True
-                    _ -> exit False
+              -- execute the subsequences
+              readTVarIO subseqs >>= propagate
+
+              -- trigger continuation actions
+              !cas <- readTVarIO conts
+              atomically $
+                runEdhTx ets $
+                  unEdh (sequence_ cas) $ \() _ets ->
+                    readTVar eosRef >>= exitEdh ets exit
   where
     propagate :: [IO ()] -> IO ()
     propagate [] = return ()
@@ -344,20 +346,16 @@ _publish'event !eosRef !rcntRef !subsRef !evd !exit =
           "Unexpected exception in event propagation: " <> show exc
       propagate rest
 
-    triggerConts :: IO () -> [IO () -> IO ()] -> IO ()
-    triggerConts done [] = done
-    triggerConts done (act : rest) = act $ triggerConts done rest
-
 _listen'events ::
   forall t.
-  STM EndOfStream ->
-  IORef [EventListener t] ->
+  TVar EndOfStream ->
+  TVar [EventListener t] ->
   EventListener t ->
-  IO ()
-_listen'events !eos !subsRef !listener =
-  atomically eos >>= \case
+  STM ()
+_listen'events !eosRef !subsRef !listener =
+  readTVar eosRef >>= \case
     True -> return ()
-    False -> modifyIORef' subsRef (listener :)
+    False -> modifyTVar' subsRef (listener :)
 
 -- | Subscribe to the event stream through the specified event sink
 --
@@ -368,7 +366,8 @@ _listen'events !eos !subsRef !listener =
 -- subsequences of the original event. All subsequent IO computations will be
 -- tried regardless of other's failures, so long as the publishing of the
 -- original event succeeded.
-on :: forall t. Typeable t => EventSink t -> (AtomEvq -> t -> STM ()) -> IO ()
+on ::
+  forall t. Typeable t => EventSink t -> (AtomEvq -> t -> STM ()) -> STM ()
 on !evs !handler = handleEvents evs $ \ !aeq !evd -> do
   handler aeq evd
   return KeepHandling
@@ -382,7 +381,8 @@ on !evs !handler = handleEvents evs $ \ !aeq !evd -> do
 -- subsequences of the original event. All subsequent IO computations will be
 -- tried regardless of other's failures, so long as the publishing of the
 -- original event succeeded.
-once :: forall t. Typeable t => EventSink t -> (AtomEvq -> t -> STM ()) -> IO ()
+once ::
+  forall t. Typeable t => EventSink t -> (AtomEvq -> t -> STM ()) -> STM ()
 once !evs !handler = handleEvents evs $ \ !aeq !evd -> do
   handler aeq evd
   return StopHandling
@@ -402,9 +402,9 @@ spreadEvents ::
   (SomeEventSink -> STM Bool) ->
   EventSink t ->
   ((forall t'. Typeable t' => EventSink t' -> t' -> STM ()) -> t -> STM ()) ->
-  IO ()
+  STM ()
 spreadEvents !stopOnEoS !intake !deriver = do
-  !stopVar <- newTVarIO False
+  !stopVar <- newTVar False
   handleEvents intake $ \ !aeq !evd -> do
     let spreader :: forall t'. Typeable t' => EventSink t' -> t' -> STM ()
         spreader evs' d' =
@@ -412,7 +412,8 @@ spreadEvents !stopOnEoS !intake !deriver = do
             True ->
               stopOnEoS (SomeEventSink evs') >>= \case
                 True -> writeTVar stopVar True
-                False -> spreadEvent evs' aeq d'
+                False ->
+                  throwHostSTM UsageError "spreading to an EventSink at eos"
             False -> spreadEvent evs' aeq d'
     readTVar stopVar >>= \case
       True -> return StopHandling
@@ -434,44 +435,54 @@ spreadEvents !stopOnEoS !intake !deriver = do
 generateEvents ::
   forall t.
   Typeable t =>
-  (SomeEventSink -> IO Bool) ->
+  (SomeEventSink -> STM Bool) ->
   EventSink t ->
-  ((forall t'. Typeable t' => EventSink t' -> t' -> IO ()) -> t -> IO ()) ->
-  IO ()
-generateEvents !stopOnEoS !intake !deriver = do
-  !stopVar <- newTVarIO False
-  let publisher :: forall t'. Typeable t' => EventSink t' -> t' -> IO ()
-      publisher evs' d' = do
-        atomically (atEndOfStream evs') >>= markStop
-        publishEvent evs' d' markStop
-        where
-          markStop = \case
-            True ->
-              stopOnEoS (SomeEventSink evs') >>= \case
-                True -> atomically $ writeTVar stopVar True
+  ((forall t'. Typeable t' => EventSink t' -> t' -> Edh ()) -> t -> IO ()) ->
+  Edh ()
+generateEvents !stopOnEoS !intake !deriver = Edh $ \ !exit !ets ->
+  runEdhTx ets $
+    edhContIO $ do
+      !stopVar <- newTVarIO False
+      let publisher :: forall t'. Typeable t' => EventSink t' -> t' -> Edh ()
+          publisher evs' d' = do
+            edhInlineSTM (atEndOfStream evs') >>= markStop
+            publishEvent evs' d' >>= markStop
+            where
+              markStop :: Bool -> Edh ()
+              markStop = \case
+                True ->
+                  edhInlineSTM $
+                    stopOnEoS (SomeEventSink evs') >>= \case
+                      True -> writeTVar stopVar True
+                      False ->
+                        throwHostSTM
+                          UsageError
+                          "publishing to an EventSink at eos"
                 False -> pure ()
-            False -> pure ()
 
-  handleEvents intake $ \ !aeq !evd ->
-    readTVar stopVar >>= \case
-      True -> return StopHandling
-      False -> do
-        conseqIO aeq $ deriver publisher evd
-        return KeepHandling
+      atomically $ do
+        handleEvents intake $ \ !aeq !evd ->
+          readTVar stopVar >>= \case
+            True -> return StopHandling
+            False -> do
+              conseqIO aeq $ deriver publisher evd
+              return KeepHandling
+        exitEdh ets exit ()
 
-stopWhenAllEventSinksAtEoS :: [SomeEventSink] -> IO (SomeEventSink -> IO Bool)
+stopWhenAllEventSinksAtEoS ::
+  [SomeEventSink] -> STM (SomeEventSink -> STM Bool)
 stopWhenAllEventSinksAtEoS evss = do
-  !eosVars <- sequence $ (<$> evss) $ \ !evs -> (evs,) <$> newIORef False
+  !eosVars <- sequence $ (<$> evss) $ \ !evs -> (evs,) <$> newTVar False
   return $ \ !evs -> do
     -- TODO optim. perf.
-    let markAndCheck :: Bool -> [(SomeEventSink, IORef Bool)] -> IO Bool
+    let markAndCheck :: Bool -> [(SomeEventSink, TVar Bool)] -> STM Bool
         markAndCheck !nonStop [] = return $ not nonStop
         markAndCheck !nonStop ((chkEvs, eosVar) : rest)
           | chkEvs == evs = do
-            writeIORef eosVar True
+            writeTVar eosVar True
             markAndCheck nonStop rest
           | otherwise =
-            readIORef eosVar >>= \case
+            readTVar eosVar >>= \case
               False -> markAndCheck True rest
               True -> markAndCheck nonStop rest
     markAndCheck False eosVars
