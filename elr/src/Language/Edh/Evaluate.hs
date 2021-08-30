@@ -7022,3 +7022,92 @@ fallbackEdhEffect !effKey !args !kwargs !exit !ets =
 fallbackEdhEffect' :: AttrKey -> (Maybe EdhValue -> EdhTx) -> EdhTx
 fallbackEdhEffect' !effKey !exit !ets =
   resolveEdhFallback' ets effKey $ runEdhTx ets . exit
+
+-- * Monadic Interface
+
+newtype Edh a = Edh {unEdh :: EdhTxExit a -> EdhTx}
+
+instance Functor Edh where
+  fmap f edh = Edh $ \exit -> unEdh edh $ \a -> exit $ f a
+  {-# INLINE fmap #-}
+
+instance Applicative Edh where
+  pure a = Edh ($ a)
+  {-# INLINE pure #-}
+  (<*>) = ap
+  {-# INLINE (<*>) #-}
+
+instance Monad Edh where
+  return x = Edh ($ x)
+  {-# INLINE return #-}
+  m >>= k = Edh $ \c -> unEdh m (\x -> unEdh (k x) c)
+  {-# INLINE (>>=) #-}
+
+edhInlineSTM :: STM a -> Edh a
+edhInlineSTM act = Edh $ \exit ets -> act >>= (`exit` ets)
+{-# INLINE edhInlineSTM #-}
+
+edhLiftSTM :: STM a -> Edh a
+edhLiftSTM act = Edh $ \exit ets ->
+  runEdhTx ets $
+    edhContSTM $
+      act >>= exitEdh ets exit
+{-# INLINE edhLiftSTM #-}
+
+instance MonadIO Edh where
+  liftIO act = Edh $ \exit ets ->
+    runEdhTx ets $
+      edhContIO $
+        act >>= atomically . exitEdh ets exit
+  {-# INLINE liftIO #-}
+
+-- ** Utilities
+
+edhThreadState :: Edh EdhThreadState
+edhThreadState = Edh $ \exit ets -> exit ets ets
+{-# INLINE edhThreadState #-}
+
+edhProgramState :: Edh EdhProgState
+edhProgramState = Edh $ \exit ets -> exit (edh'thread'prog ets) ets
+{-# INLINE edhProgramState #-}
+
+readTVarEdh :: forall a. TVar a -> Edh a
+readTVarEdh = edhInlineSTM . readTVar
+{-# INLINE readTVarEdh #-}
+
+writeTVarEdh :: forall a. TVar a -> a -> Edh ()
+writeTVarEdh ref v = edhInlineSTM $ writeTVar ref v
+{-# INLINE writeTVarEdh #-}
+
+readIORefEdh :: forall a. IORef a -> Edh a
+readIORefEdh = liftIO . readIORef
+{-# INLINE readIORefEdh #-}
+
+writeIORefEdh :: forall a. IORef a -> a -> Edh ()
+writeIORefEdh ref v = liftIO $ writeIORef ref v
+{-# INLINE writeIORefEdh #-}
+
+-- ** Call Making
+
+edhCall :: EdhValue -> [ArgSender] -> Edh EdhValue
+edhCall callee args = Edh $ edhMakeCall callee args
+
+edhCall' :: EdhValue -> ArgsPack -> Edh EdhValue
+edhCall' callee args = Edh $ edhMakeCall' callee args
+
+-- ** Exception Handling
+
+throwEdhM :: EdhErrorTag -> Text -> Edh a
+throwEdhM tag msg = throwEdhM' tag msg []
+
+throwEdhM' :: EdhErrorTag -> Text -> [(AttrKey, EdhValue)] -> Edh a
+throwEdhM' tag msg details = Edh $ \_exit ets -> do
+  let !edhErr = EdhError tag msg errDetails $ getEdhErrCtx 0 ets
+      !edhWrapException =
+        edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
+      !errDetails = case details of
+        [] -> toDyn nil
+        _ -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
+  edhWrapException (Just ets) (toException edhErr)
+    >>= \ !exo -> edhThrow ets $ EdhObject exo
+{-# INLINE throwEdhM' #-}
