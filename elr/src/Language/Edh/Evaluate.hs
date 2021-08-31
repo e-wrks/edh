@@ -5938,13 +5938,13 @@ edhContIO''' !ets !actIO =
     else writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
 {-# INLINE edhContIO''' #-}
 
-edhRegulateSlice ::
+regulateEdhSlice ::
   EdhThreadState ->
   Int ->
   (Maybe Int, Maybe Int, Maybe Int) ->
   ((Int, Int, Int) -> STM ()) ->
   STM ()
-edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
+regulateEdhSlice !ets !len (!start, !stop, !step) !exit = case step of
   Nothing -> case start of
     Nothing -> case stop of
       Nothing -> exit (0, len, 1)
@@ -6161,21 +6161,6 @@ edhRegulateSlice !ets !len (!start, !stop, !step) !exit = case step of
                                     <> T.pack (show iStop)
                               else exit (iStart', iStop', iStep)
             )
-
-edhRegulateIndex :: EdhThreadState -> Int -> Int -> (Int -> STM ()) -> STM ()
-edhRegulateIndex !ets !len !idx !exit =
-  let !posIdx =
-        if idx < 0 -- Python style negative index
-          then idx + len
-          else idx
-   in if posIdx < 0 || posIdx >= len
-        then
-          throwEdh ets EvalError $
-            "index out of bounds: "
-              <> T.pack (show idx)
-              <> " vs "
-              <> T.pack (show len)
-        else exit posIdx
 
 postEdhEvent :: EdhSink -> EdhValue -> EdhTxExit () -> EdhTx
 postEdhEvent !sink !val !exit !ets =
@@ -7014,6 +6999,32 @@ instance MonadIO Edh where
         act >>= atomically . exitEdh ets exit
   {-# INLINE liftIO #-}
 
+-- ** Effect Resolution
+
+performM :: AttrKey -> Edh EdhValue
+performM !effKey = Edh $ \ !exit !ets ->
+  resolveEdhPerform ets effKey $ exitEdh ets exit
+
+performM' :: AttrKey -> Edh (Maybe EdhValue)
+performM' !effKey = Edh $ \ !exit !ets ->
+  resolveEdhPerform' ets effKey $ exitEdh ets exit
+
+behaveM :: AttrKey -> Edh EdhValue
+behaveM !effKey = Edh $ \ !exit !ets ->
+  resolveEdhBehave ets effKey $ exitEdh ets exit
+
+behaveM' :: AttrKey -> Edh (Maybe EdhValue)
+behaveM' !effKey = Edh $ \ !exit !ets ->
+  resolveEdhBehave' ets effKey $ exitEdh ets exit
+
+fallbackM :: AttrKey -> Edh EdhValue
+fallbackM !effKey = Edh $ \ !exit !ets ->
+  resolveEdhFallback ets effKey $ exitEdh ets exit
+
+fallbackM' :: AttrKey -> Edh (Maybe EdhValue)
+fallbackM' !effKey = Edh $ \ !exit !ets ->
+  resolveEdhFallback' ets effKey $ exitEdh ets exit
+
 -- ** Utilities
 
 edhThreadState :: Edh EdhThreadState
@@ -7093,6 +7104,31 @@ edhValueBlobM !v = Edh $ \ !exit !ets ->
 edhValueBlobM' :: EdhValue -> Edh (Maybe B.ByteString)
 edhValueBlobM' !v = Edh $ \ !exit !ets ->
   edhValueBlob' ets v (exitEdh ets exit Nothing) $ exitEdh ets exit . Just
+
+parseEdhIndexM :: EdhValue -> Edh (Either Text EdhIndex)
+parseEdhIndexM !val = Edh $ \ !exit !ets ->
+  parseEdhIndex ets val $ exitEdh ets exit
+
+regulateEdhIndexM :: Int -> Int -> Edh Int
+regulateEdhIndexM !len !idx =
+  if posIdx < 0 || posIdx >= len
+    then
+      throwEdhM EvalError $
+        "index out of bounds: "
+          <> T.pack (show idx)
+          <> " vs "
+          <> T.pack (show len)
+    else return posIdx
+  where
+    !posIdx =
+      if idx < 0 -- Python style negative index
+        then idx + len
+        else idx
+
+regulateEdhSliceM ::
+  Int -> (Maybe Int, Maybe Int, Maybe Int) -> Edh (Int, Int, Int)
+regulateEdhSliceM !len !slice = Edh $ \ !exit !ets ->
+  regulateEdhSlice ets len slice $ exitEdh ets exit
 
 -- ** Exception Handling
 

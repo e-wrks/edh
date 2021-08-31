@@ -190,7 +190,7 @@ createVectorClass !clsOuterScope =
                 Right EdhAny -> exitEdh ets exit $ EdhObject thisVecObj
                 Right EdhAll -> exitEdh ets exit $ EdhObject thisVecObj
                 Right (EdhSlice !start !stop !step) ->
-                  edhRegulateSlice ets (MV.length mvec) (start, stop, step) $
+                  regulateEdhSlice ets (MV.length mvec) (start, stop, step) $
                     \(!iStart, !iStop, !iStep) ->
                       if iStep == 1
                         then exitWith $ MV.unsafeSlice iStart (iStop - iStart) mvec
@@ -289,7 +289,7 @@ createVectorClass !clsOuterScope =
                   exitEdh ets exit other
                 Right EdhAll -> exitWithRangeAssign 0 (MV.length mvec) 1
                 Right (EdhSlice !start !stop !step) ->
-                  edhRegulateSlice ets (MV.length mvec) (start, stop, step) $
+                  regulateEdhSlice ets (MV.length mvec) (start, stop, step) $
                     \(!iStart, !iStop, !iStep) ->
                       exitWithRangeAssign iStart iStop iStep
 
@@ -527,7 +527,7 @@ createVectorClass !clsOuterScope =
                 Right EdhAll ->
                   opAssignRange ets opSym other mvec 0 (MV.length mvec) 1 exit
                 Right (EdhSlice !start !stop !step) ->
-                  edhRegulateSlice ets (MV.length mvec) (start, stop, step) $
+                  regulateEdhSlice ets (MV.length mvec) (start, stop, step) $
                     \(!iStart, !iStop, !iStep) ->
                       opAssignRange ets opSym other mvec iStart iStop iStep exit
 

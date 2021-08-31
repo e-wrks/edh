@@ -140,6 +140,12 @@ module Language.Edh.EHI
     edhInlineSTM,
     edhLiftSTM,
     liftEdhTx,
+    performM,
+    performM',
+    behaveM,
+    behaveM',
+    fallbackM,
+    fallbackM',
     edhThreadState,
     edhProgramState,
     readTVarEdh,
@@ -159,6 +165,9 @@ module Language.Edh.EHI
     edhValueJsonM,
     edhValueBlobM,
     edhValueBlobM',
+    parseEdhIndexM,
+    regulateEdhIndexM,
+    regulateEdhSliceM,
     throwEdhM,
     throwEdhM',
 
@@ -376,8 +385,7 @@ module Language.Edh.EHI
     -- * indexing and slicing support
     EdhIndex (..),
     parseEdhIndex,
-    edhRegulateSlice,
-    edhRegulateIndex,
+    regulateEdhSlice,
 
     -- * language harness
     normalizeModuRefSpec,
