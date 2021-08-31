@@ -136,6 +136,9 @@ module Language.Edh.EHI
 
     -- ** Monadic Interface
     Edh (..),
+    mEdh,
+    mEdh',
+    naM,
     runEdh,
     edhInlineSTM,
     edhLiftSTM,

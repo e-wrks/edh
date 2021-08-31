@@ -300,7 +300,7 @@ _publish'event ::
   TVar [EventListener t] ->
   t ->
   Edh EndOfStream
-_publish'event !eosRef !rcntRef !subsRef !evd = Edh $ \ !exit !ets ->
+_publish'event !eosRef !rcntRef !subsRef !evd = mEdh $ \ !exit !ets ->
   runEdhTx ets $
     edhContIO $
       readTVarIO eosRef >>= \case
@@ -334,9 +334,8 @@ _publish'event !eosRef !rcntRef !subsRef !evd = Edh $ \ !exit !ets ->
               -- trigger continuation actions
               !cas <- readTVarIO conts
               atomically $
-                runEdhTx ets $
-                  unEdh (sequence_ cas) $ \() _ets ->
-                    readTVar eosRef >>= exitEdh ets exit
+                runEdh ets (sequence_ cas) $ \() _ets ->
+                  readTVar eosRef >>= exitEdh ets exit
   where
     propagate :: [IO ()] -> IO ()
     propagate [] = return ()
@@ -439,7 +438,7 @@ generateEvents ::
   EventSink t ->
   ((forall t'. Typeable t' => EventSink t' -> t' -> Edh ()) -> t -> IO ()) ->
   Edh ()
-generateEvents !stopOnEoS !intake !deriver = Edh $ \ !exit !ets ->
+generateEvents !stopOnEoS !intake !deriver = mEdh $ \ !exit !ets ->
   runEdhTx ets $
     edhContIO $ do
       !stopVar <- newTVarIO False
