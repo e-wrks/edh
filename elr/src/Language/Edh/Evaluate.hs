@@ -6975,7 +6975,7 @@ fallbackEdhEffect' !effKey !exit !ets =
 newtype Edh a = Edh {unEdh :: EdhTxExit a -> EdhTx}
 
 runEdh :: EdhThreadState -> Edh a -> EdhTxExit a -> STM ()
-runEdh !ets !ma !exit = runEdhTx ets $ unEdh ma exit
+runEdh ets ma exit = runEdhTx ets $ unEdh ma exit
 
 instance Functor Edh where
   fmap f edh = Edh $ \exit -> unEdh edh $ \a -> exit $ f a
@@ -7005,7 +7005,7 @@ edhLiftSTM act = Edh $ \exit ets ->
 {-# INLINE edhLiftSTM #-}
 
 liftEdhTx :: EdhTx -> Edh ()
-liftEdhTx tx = Edh $ \ !exit !ets -> tx ets >> exit () ets
+liftEdhTx tx = Edh $ \exit ets -> tx ets >> exit () ets
 
 instance MonadIO Edh where
   liftIO act = Edh $ \exit ets ->
