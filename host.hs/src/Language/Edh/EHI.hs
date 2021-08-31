@@ -136,8 +136,10 @@ module Language.Edh.EHI
 
     -- ** Monadic Interface
     Edh (..),
+    runEdh,
     edhInlineSTM,
     edhLiftSTM,
+    liftEdhTx,
     edhThreadState,
     edhProgramState,
     readTVarEdh,
@@ -146,6 +148,17 @@ module Language.Edh.EHI
     writeIORefEdh,
     edhCall,
     edhCall',
+    edhObjStrM,
+    edhValueStrM,
+    edhObjReprM,
+    edhValueReprM,
+    edhObjDescM,
+    edhValueDescM,
+    edhSimpleDescM,
+    edhValueNullM,
+    edhValueJsonM,
+    edhValueBlobM,
+    edhValueBlobM',
     throwEdhM,
     throwEdhM',
 

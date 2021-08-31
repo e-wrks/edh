@@ -7027,6 +7027,9 @@ fallbackEdhEffect' !effKey !exit !ets =
 
 newtype Edh a = Edh {unEdh :: EdhTxExit a -> EdhTx}
 
+runEdh :: EdhThreadState -> Edh a -> EdhTxExit a -> STM ()
+runEdh !ets !ma !exit = runEdhTx ets $ unEdh ma exit
+
 instance Functor Edh where
   fmap f edh = Edh $ \exit -> unEdh edh $ \a -> exit $ f a
   {-# INLINE fmap #-}
@@ -7053,6 +7056,9 @@ edhLiftSTM act = Edh $ \exit ets ->
     edhContSTM $
       act >>= exitEdh ets exit
 {-# INLINE edhLiftSTM #-}
+
+liftEdhTx :: EdhTx -> Edh ()
+liftEdhTx tx = Edh $ \ !exit !ets -> tx ets >> exit () ets
 
 instance MonadIO Edh where
   liftIO act = Edh $ \exit ets ->
@@ -7094,6 +7100,52 @@ edhCall callee args = Edh $ edhMakeCall callee args
 
 edhCall' :: EdhValue -> ArgsPack -> Edh EdhValue
 edhCall' callee args = Edh $ edhMakeCall' callee args
+
+-- ** Value Manipulations
+
+edhObjStrM :: Object -> Edh Text
+edhObjStrM !o = Edh $ \ !exit !ets ->
+  edhObjStr ets o $ exitEdh ets exit
+
+edhValueStrM :: EdhValue -> Edh Text
+edhValueStrM !v = Edh $ \ !exit !ets ->
+  edhValueStr ets v $ exitEdh ets exit
+
+edhObjReprM :: Object -> Edh Text
+edhObjReprM !o = Edh $ \ !exit !ets ->
+  edhObjRepr ets o $ exitEdh ets exit
+
+edhValueReprM :: EdhValue -> Edh Text
+edhValueReprM !v = Edh $ \ !exit !ets ->
+  edhValueRepr ets v $ exitEdh ets exit
+
+edhObjDescM :: Object -> Edh Text
+edhObjDescM !o = Edh $ \ !exit !ets ->
+  edhObjDesc ets o $ exitEdh ets exit
+
+edhValueDescM :: EdhValue -> Edh Text
+edhValueDescM !v = Edh $ \ !exit !ets ->
+  edhValueDesc ets v $ exitEdh ets exit
+
+edhSimpleDescM :: EdhValue -> Edh Text
+edhSimpleDescM !v = Edh $ \ !exit !ets ->
+  edhSimpleDesc ets v $ exitEdh ets exit
+
+edhValueNullM :: EdhValue -> Edh Bool
+edhValueNullM !v = Edh $ \ !exit !ets ->
+  edhValueNull ets v $ exitEdh ets exit
+
+edhValueJsonM :: EdhValue -> Edh Text
+edhValueJsonM !v = Edh $ \ !exit !ets ->
+  edhValueJson ets v $ exitEdh ets exit
+
+edhValueBlobM :: EdhValue -> Edh B.ByteString
+edhValueBlobM !v = Edh $ \ !exit !ets ->
+  edhValueBlob ets v $ exitEdh ets exit
+
+edhValueBlobM' :: EdhValue -> Edh (Maybe B.ByteString)
+edhValueBlobM' !v = Edh $ \ !exit !ets ->
+  edhValueBlob' ets v (exitEdh ets exit Nothing) $ exitEdh ets exit . Just
 
 -- ** Exception Handling
 
