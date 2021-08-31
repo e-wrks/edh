@@ -18,7 +18,6 @@ import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
 import Language.Edh.Control
-import Language.Edh.CoreLang
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
 import Language.Edh.InterOp
@@ -535,72 +534,27 @@ strProc :: Expr -> EdhHostProc
 strProc !x !exit = evalExpr x $ \ !v -> edhValueStrTx v $ exit . EdhString
 
 capProc :: EdhValue -> RestKwArgs -> EdhHostProc
-capProc !v !kwargs !exit !ets = case edhUltimate v of
+capProc !v !kwargs !exit = case edhUltimate v of
   EdhObject !o ->
-    lookupEdhObjMagic o (AttrByName "__cap__") >>= \case
-      (_, EdhNil) -> exitEdh ets exit $ EdhDecimal D.nan
-      (!this', EdhProcedure (EdhMethod !mth) _) ->
-        runEdhTx ets $ callEdhMethod this' o mth (ArgsPack [] kwargs) id exit
-      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-        runEdhTx ets $ callEdhMethod this that mth (ArgsPack [] kwargs) id exit
-      (_, !badMagic) ->
-        throwEdh ets UsageError $
-          "bad magic __cap__ of "
-            <> edhTypeNameOf badMagic
-            <> " on class "
-            <> objClassName o
-  _ -> exitEdh ets exit $ EdhDecimal D.nan
+    callMagicMethod o (AttrByName "__cap__") (ArgsPack [] kwargs) exit
+  _ -> exitEdhTx exit $ EdhDecimal D.nan
 
 growProc :: EdhValue -> Decimal -> RestKwArgs -> EdhHostProc
-growProc !v !newCap !kwargs !exit !ets = case edhUltimate v of
+growProc !v !newCap !kwargs !exit = case edhUltimate v of
   EdhObject !o ->
-    lookupEdhObjMagic o (AttrByName "__grow__") >>= \case
-      (_, EdhNil) ->
-        throwEdh ets UsageError $
-          "grow() not supported by the object of class "
-            <> objClassName o
-      (!this', EdhProcedure (EdhMethod !mth) _) ->
-        runEdhTx ets $
-          callEdhMethod
-            this'
-            o
-            mth
-            (ArgsPack [EdhDecimal newCap] kwargs)
-            id
-            exit
-      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-        runEdhTx ets $
-          callEdhMethod
-            this
-            that
-            mth
-            (ArgsPack [EdhDecimal newCap] kwargs)
-            id
-            exit
-      (_, !badMagic) ->
-        throwEdh ets UsageError $
-          "bad magic __grow__ of "
-            <> edhTypeNameOf badMagic
-            <> " on class "
-            <> objClassName o
-  !badVal -> edhSimpleDesc ets badVal $ \ !badDesc ->
-    throwEdh ets UsageError $ "grow() not supported by: " <> badDesc
+    callMagicMethod
+      o
+      (AttrByName "__grow__")
+      (ArgsPack [EdhDecimal newCap] kwargs)
+      exit
+  !badVal -> edhSimpleDescTx badVal $ \ !badDesc ->
+    throwEdhTx UsageError $ "grow() not supported by: " <> badDesc
 
 lenProc :: EdhValue -> RestKwArgs -> EdhHostProc
 lenProc !v !kwargs !exit !ets = case edhUltimate v of
   EdhObject !o ->
-    lookupEdhObjMagic o (AttrByName "__len__") >>= \case
-      (_, EdhNil) -> exitEdh ets exit $ EdhDecimal D.nan
-      (!this', EdhProcedure (EdhMethod !mth) _) ->
-        runEdhTx ets $ callEdhMethod this' o mth (ArgsPack [] kwargs) id exit
-      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-        runEdhTx ets $ callEdhMethod this that mth (ArgsPack [] kwargs) id exit
-      (_, !badMagic) ->
-        throwEdh ets UsageError $
-          "bad magic __len__ of "
-            <> edhTypeNameOf badMagic
-            <> " on class "
-            <> objClassName o
+    runEdhTx ets $
+      callMagicMethod o (AttrByName "__len__") (ArgsPack [] kwargs) exit
   EdhList (List _ !lv) ->
     {- HLINT ignore "Redundant <$>" -}
     length <$> readTVar lv >>= \ !llen ->
@@ -620,39 +574,15 @@ lenProc !v !kwargs !exit !ets = case edhUltimate v of
   _ -> exitEdh ets exit $ EdhDecimal D.nan
 
 markProc :: EdhValue -> Decimal -> RestKwArgs -> EdhHostProc
-markProc !v !newLen !kwargs !exit !ets = case edhUltimate v of
+markProc !v !newLen !kwargs !exit = case edhUltimate v of
   EdhObject !o ->
-    lookupEdhObjMagic o (AttrByName "__mark__") >>= \case
-      (_, EdhNil) ->
-        throwEdh ets UsageError $
-          "mark() not supported by the object of class "
-            <> objClassName o
-      (!this', EdhProcedure (EdhMethod !mth) _) ->
-        runEdhTx ets $
-          callEdhMethod
-            this'
-            o
-            mth
-            (ArgsPack [EdhDecimal newLen] kwargs)
-            id
-            exit
-      (_, EdhBoundProc (EdhMethod !mth) !this !that _) ->
-        runEdhTx ets $
-          callEdhMethod
-            this
-            that
-            mth
-            (ArgsPack [EdhDecimal newLen] kwargs)
-            id
-            exit
-      (_, !badMagic) ->
-        throwEdh ets UsageError $
-          "bad magic __mark__ of "
-            <> edhTypeNameOf badMagic
-            <> " on class "
-            <> objClassName o
+    callMagicMethod
+      o
+      (AttrByName "__mark__")
+      (ArgsPack [EdhDecimal newLen] kwargs)
+      exit
   !badVal ->
-    throwEdh ets UsageError $
+    throwEdhTx UsageError $
       "mark() not supported by a value of " <> edhTypeNameOf badVal
 
 showProc :: Expr -> RestKwArgs -> EdhHostProc
@@ -662,7 +592,7 @@ showProc !x !kwExprs !exit !ets = runEdhTx ets $
       \ !repr -> exitEdhTx exit $ EdhString $ n <> " := " <> repr
     _ -> case edhUltimate v of
       EdhObject !o -> evalKwExprs kwExprs $ \ !kwargs ->
-        invokeMagic o (AttrByName "__show__") kwargs exit $
+        invokeMagic o (AttrByName "__show__") (ArgsPack [] kwargs) exit $
           \callAsMethod -> \case
             (_, EdhNil) -> runEdhTx ets $ showWithNoMagic v
             (_, s@EdhString {}) -> exitEdh ets exit s
@@ -689,7 +619,7 @@ descProc :: Expr -> RestKwArgs -> EdhHostProc
 descProc !x !kwExprs !exit !ets = runEdhTx ets $
   evalExpr x $ \ !v -> case edhUltimate v of
     EdhObject !o -> evalKwExprs kwExprs $ \ !kwargs ->
-      invokeMagic o (AttrByName "__desc__") kwargs exit $
+      invokeMagic o (AttrByName "__desc__") (ArgsPack [] kwargs) exit $
         \callAsMethod -> \case
           (_, EdhNil) -> runEdhTx ets $ descWithNoMagic v
           (_, s@EdhString {}) -> exitEdh ets exit s
