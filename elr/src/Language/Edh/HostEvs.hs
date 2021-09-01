@@ -445,13 +445,13 @@ generateEvents !stopOnEoS !intake !deriver = mEdh $ \ !exit !ets ->
       !stopVar <- newTVarIO False
       let publisher :: forall t'. Typeable t' => EventSink t' -> t' -> Edh ()
           publisher evs' d' = do
-            edhInlineSTM (atEndOfStream evs') >>= markStop
+            inlineSTM (atEndOfStream evs') >>= markStop
             publishEvent evs' d' >>= markStop
             where
               markStop :: Bool -> Edh ()
               markStop = \case
                 True ->
-                  edhInlineSTM $
+                  inlineSTM $
                     stopOnEoS (SomeEventSink evs') >>= \case
                       True -> writeTVar stopVar True
                       False ->

@@ -1,7 +1,5 @@
 module Language.Edh.InterOp where
 
--- import           System.IO.Unsafe               ( unsafePerformIO )
-
 import Control.Concurrent.STM
 import Data.ByteString (ByteString)
 import Data.Dynamic (Typeable, fromDynamic, toDyn)
@@ -26,7 +24,7 @@ import Prelude
 wrapHostProc :: EdhCallable fn => fn -> (ArgsPack -> EdhHostProc, ArgsReceiver)
 wrapHostProc !fn =
   -- TODO derive arg receivers (procedure signature)
-  (callFromEdh fn, WildReceiver noSrcRange)
+  (callFromEdh fn, NullaryReceiver)
 
 mkHostProc' ::
   EdhCallable fn =>

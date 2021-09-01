@@ -355,6 +355,11 @@ module Language.Edh.EHI
     locateEdhFile,
     locateEdhMainModule,
 
+    -- * monadic inter-operation helpers
+    wrapEdhProc,
+    mkEdhProc',
+    mkEdhProperty,
+
     -- * standalone modules
     module Language.Edh.IOPD,
     module Language.Edh.Monad,
@@ -376,6 +381,7 @@ import Language.Edh.Evaluate
 import Language.Edh.HostEvs
 import Language.Edh.IOPD
 import Language.Edh.InterOp
+import Language.Edh.InterOpM
 import Language.Edh.Monad
 import Language.Edh.PkgMan
 import Language.Edh.RtTypes
