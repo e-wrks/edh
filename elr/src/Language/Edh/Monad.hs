@@ -212,6 +212,34 @@ writeTVarEdh :: forall a. TVar a -> a -> Edh ()
 writeTVarEdh ref v = inlineSTM $ writeTVar ref v
 {-# INLINE writeTVarEdh #-}
 
+newTMVarEdh :: forall a. a -> Edh (TMVar a)
+newTMVarEdh = inlineSTM . newTMVar
+{-# INLINE newTMVarEdh #-}
+
+readTMVarEdh :: forall a. TMVar a -> Edh a
+readTMVarEdh = inlineSTM . readTMVar
+{-# INLINE readTMVarEdh #-}
+
+takeTMVarEdh :: forall a. TMVar a -> Edh a
+takeTMVarEdh = inlineSTM . takeTMVar
+{-# INLINE takeTMVarEdh #-}
+
+putTMVarEdh :: forall a. TMVar a -> a -> Edh ()
+putTMVarEdh ref v = inlineSTM $ putTMVar ref v
+{-# INLINE putTMVarEdh #-}
+
+tryReadTMVarEdh :: forall a. TMVar a -> Edh (Maybe a)
+tryReadTMVarEdh = inlineSTM . tryReadTMVar
+{-# INLINE tryReadTMVarEdh #-}
+
+tryTakeTMVarEdh :: forall a. TMVar a -> Edh (Maybe a)
+tryTakeTMVarEdh = inlineSTM . tryTakeTMVar
+{-# INLINE tryTakeTMVarEdh #-}
+
+tryPutTMVarEdh :: forall a. TMVar a -> a -> Edh Bool
+tryPutTMVarEdh ref v = inlineSTM $ tryPutTMVar ref v
+{-# INLINE tryPutTMVarEdh #-}
+
 newIORefEdh :: forall a. a -> Edh (IORef a)
 newIORefEdh = liftIO . newIORef
 {-# INLINE newIORefEdh #-}
