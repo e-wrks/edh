@@ -134,46 +134,6 @@ module Language.Edh.EHI
     EdhIntrinsicOp,
     edhFlipOp,
 
-    -- ** Monadic Interface
-    Edh (..),
-    mEdh,
-    mEdh',
-    naM,
-    runEdh,
-    edhInlineSTM,
-    edhLiftSTM,
-    liftEdhTx,
-    performM,
-    performM',
-    behaveM,
-    behaveM',
-    fallbackM,
-    fallbackM',
-    edhThreadState,
-    edhProgramState,
-    readTVarEdh,
-    writeTVarEdh,
-    readIORefEdh,
-    writeIORefEdh,
-    edhCall,
-    edhCall',
-    edhObjStrM,
-    edhValueStrM,
-    edhObjReprM,
-    edhValueReprM,
-    edhObjDescM,
-    edhValueDescM,
-    edhSimpleDescM,
-    edhValueNullM,
-    edhValueJsonM,
-    edhValueBlobM,
-    edhValueBlobM',
-    parseEdhIndexM,
-    regulateEdhIndexM,
-    regulateEdhSliceM,
-    throwEdhM,
-    throwEdhM',
-
     -- ** Edh Runtime error
     getEdhErrCtx,
     edhCreateError,
@@ -397,6 +357,7 @@ module Language.Edh.EHI
 
     -- * standalone modules
     module Language.Edh.IOPD,
+    module Language.Edh.Monad,
     module Language.Edh.HostEvs,
     module Language.Edh.Batteries.Args,
     module Language.Edh.Batteries.Comput,
@@ -415,6 +376,7 @@ import Language.Edh.Evaluate
 import Language.Edh.HostEvs
 import Language.Edh.IOPD
 import Language.Edh.InterOp
+import Language.Edh.Monad
 import Language.Edh.PkgMan
 import Language.Edh.RtTypes
 import Language.Edh.Runtime

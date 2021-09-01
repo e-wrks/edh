@@ -35,6 +35,7 @@ library
     Language.Edh.EdhEvs
     Language.Edh.HostEvs
     Language.Edh.InterOp
+    Language.Edh.Monad
     Language.Edh.Parser
 
   hs-source-dirs:     src

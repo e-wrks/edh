@@ -10,6 +10,7 @@ import Data.Dynamic
 import Data.Unique
 import Language.Edh.Control
 import Language.Edh.Evaluate
+import Language.Edh.Monad
 import Language.Edh.RtTypes
 import System.IO
 import Prelude
