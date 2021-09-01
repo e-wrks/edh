@@ -234,11 +234,15 @@ newUniqueEdh = inlineSTM $ unsafeIOToSTM newUnique
 
 -- ** Call Making & Context Manipulation
 
-edhCall :: EdhValue -> [ArgSender] -> Edh EdhValue
-edhCall callee args = Edh $ \_naExit -> edhMakeCall callee args
+callM :: EdhValue -> [ArgSender] -> Edh EdhValue
+callM callee apkr = Edh $ \_naExit -> edhMakeCall callee apkr
 
-edhCall' :: EdhValue -> ArgsPack -> Edh EdhValue
-edhCall' callee args = Edh $ \_naExit -> edhMakeCall' callee args
+callM' :: EdhValue -> ArgsPack -> Edh EdhValue
+callM' callee apk = Edh $ \_naExit -> edhMakeCall' callee apk
+
+callMagicM :: Object -> AttrKey -> ArgsPack -> Edh EdhValue
+callMagicM obj magicKey apk =
+  Edh $ \_naExit -> callMagicMethod obj magicKey apk
 
 pushStackM :: Edh a -> Edh a
 pushStackM !act = do

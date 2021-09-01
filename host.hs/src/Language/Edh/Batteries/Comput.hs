@@ -971,7 +971,7 @@ appliedArgWithDefaultCtor''
     case maybeHostVal of
       Just (HostValue (t :: t) _obj) -> return t
       Nothing -> do
-        !val <- edhCall' callee (ArgsPack args $ odFromList kwargs)
+        !val <- callM' callee (ArgsPack args $ odFromList kwargs)
         let badArg =
               edhSimpleDescM val >>= \ !badDesc ->
                 throwEdhM UsageError $
@@ -1026,7 +1026,7 @@ effectfulArgWithDefaultCtor''
     case maybeVal of
       Just (HostValue (t :: t) o) -> return (t, o)
       Nothing -> do
-        !val <- edhCall' callee (ArgsPack args $ odFromList kwargs)
+        !val <- callM' callee (ArgsPack args $ odFromList kwargs)
         let badArg =
               edhSimpleDescM val >>= \ !badDesc ->
                 throwEdhM UsageError $
