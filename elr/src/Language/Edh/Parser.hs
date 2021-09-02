@@ -148,6 +148,9 @@ keyword !kw = try $ do
   !lexeme'end <- lexemeEndPos
   return $ lspSrcRangeFromParsec startPos lexeme'end
 
+litKeyword :: Text -> Parser Text
+litKeyword !kw = kw <$ keyword kw
+
 optionalComma :: Parser Bool
 optionalComma = fromMaybe False <$> optional (True <$ symbol ",")
 
@@ -591,11 +594,6 @@ parseDoForOrWhileExpr !si = do
   (!bodyStmt, !si') <- parseStmt si
   choice
     [ do
-        void $ keyword "for"
-        !scoped <- isJust <$> optional (symbol "@")
-        (!ar, !iter, !si'') <- parseLoopHead si'
-        return (ForExpr scoped ar iter bodyStmt, si''),
-      do
         void $ keyword "if"
         (!cond, !si'') <- parseExpr si'
         lbEnd <- lexemeEndPos
@@ -603,7 +601,7 @@ parseDoForOrWhileExpr !si = do
           Nothing -> return (IfExpr cond bodyStmt Nothing, si'')
           Just {} -> do
             !scoped <- isJust <$> optional (symbol "@")
-            (!ar, !iter, !si''') <- parseLoopHead si''
+            (!ar, !iter, !si''') <- parseEdhLoopHead si''
             let !loopBodyStmt =
                   StmtSrc
                     ( ExprStmt
@@ -619,7 +617,15 @@ parseDoForOrWhileExpr !si = do
       do
         void $ keyword "while"
         (!cnd, !si'') <- parseExpr si'
-        return (DoWhileExpr bodyStmt cnd, si'')
+        return (DoWhileExpr bodyStmt cnd, si''),
+      do
+        void $ keyword "for"
+        !scoped <- isJust <$> optional (symbol "@")
+        (!ar, !iter, !si'') <- parseEdhLoopHead si'
+        return (ForExpr scoped ar iter bodyStmt, si''),
+      -- todo probly `do-if;for` mistaken as `do-if-for`, the disambiguating
+      --      semicolon is needed in that case, phrase a friendly hint here
+      fail "missing if/while/for"
     ]
 
 parseProcDecl :: SourcePos -> IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)
@@ -906,12 +912,24 @@ parseForExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseForExpr !si = do
   void $ keyword "for"
   !scoped <- isJust <$> optional (symbol "@")
-  (!ar, !iter, !si') <- parseLoopHead si
-  void $ optional $ keyword "do"
+  (!prepos, !ar, !iter, !si') <- parseLoopHead si
+  -- mandate the "do" keyword in Edh syntax
+  if prepos == "from"
+    then void $ keyword "do"
+    else void $ optional $ keyword "do"
   (!bodyStmt, !si'') <- parseStmt si'
   return (ForExpr scoped ar iter bodyStmt, si'')
 
-parseLoopHead :: IntplSrcInfo -> Parser (ArgsReceiver, ExprSrc, IntplSrcInfo)
+parseEdhLoopHead ::
+  IntplSrcInfo -> Parser (ArgsReceiver, ExprSrc, IntplSrcInfo)
+parseEdhLoopHead !si = do
+  !ar <- parseArgsReceiver
+  void $ keyword "from"
+  (!iter, !si') <- parseExpr si
+  return (ar, iter, si')
+
+parseLoopHead ::
+  IntplSrcInfo -> Parser (Text, ArgsReceiver, ExprSrc, IntplSrcInfo)
 parseLoopHead !si = do
   !startPos <- getSourcePos
   choice
@@ -923,10 +941,10 @@ parseLoopHead !si = do
               !ar <- parseArgsReceiver
               choice
                 [ do
-                    void $ keyword "of" <|> keyword "in"
+                    !prepos <- litKeyword "of" <|> litKeyword "in"
                     (!iter, !si') <- parseExpr si
                     void $ symbol ")"
-                    return (ar, iter, si'),
+                    return (prepos, ar, iter, si'),
                   do
                     void equalSign
                     (!iter, !si') <- parseExpr si
@@ -941,16 +959,17 @@ parseLoopHead !si = do
                             False -> return si''
                     !si'' <- dropRest si'
                     void $ symbol ")"
-                    return (ar, iter, si'')
+                    return ("", ar, iter, si'')
                 ],
             do
               -- Edh or Python-like syntax
               ars <- parseRestArgRecvs ")"
               !lexeme'end <- lexemeEndPos
-              void $ keyword "from" <|> keyword "in"
+              !prepos <- litKeyword "from" <|> litKeyword "in"
               (!iter, !si') <- parseExpr si
               return
-                ( PackReceiver (reverse $! ars) $
+                ( prepos,
+                  PackReceiver (reverse $! ars) $
                     SrcRange (lspSrcPosFromParsec startPos) lexeme'end,
                   iter,
                   si'
@@ -962,9 +981,9 @@ parseLoopHead !si = do
         let !ar =
               SingleReceiver $
                 RecvRestPkArgs $ AttrAddrSrc (NamedAttr "_") src'span
-        void $ keyword "from"
+        !prepos <- litKeyword "from"
         (!iter, !si') <- parseExpr si
-        return (ar, iter, si'),
+        return (prepos, ar, iter, si'),
       do
         -- wild arg receiver, exclusively Edh syntax
         void $ symbol "*"
@@ -979,15 +998,15 @@ parseLoopHead !si = do
                   WildReceiver $
                     SrcRange (lspSrcPosFromParsec startPos) lexeme'end
             ]
-        void $ keyword "from"
+        !prepos <- litKeyword "from"
         (!iter, !si') <- parseExpr si
-        return (ar, iter, si'),
+        return (prepos, ar, iter, si'),
       do
         -- single arg receiver, Edh or Python-like syntax
         !singleArg <- parseKwRecv False
-        void $ keyword "from" <|> keyword "in"
+        !prepos <- litKeyword "from" <|> litKeyword "in"
         (!iter, !si') <- parseExpr si
-        return (SingleReceiver singleArg, iter, si')
+        return (prepos, SingleReceiver singleArg, iter, si')
     ]
 
 parseEffExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -1213,52 +1232,50 @@ illegalKeywrodAsIdent = do
   EdhParserState (GlobalOpDict _decls !quaint'ops) _ _ <- get
   Just
     <$> choice
-      ( [ illegalWord "this",
-          illegalWord "that",
-          illegalWord "super",
-          illegalWord "go",
-          illegalWord "defer",
-          illegalWord "effect",
-          illegalWord "let",
-          illegalWord "const", -- reserved for JavaScript src compatibility
-          illegalWord "extends",
-          illegalWord "perceive",
-          illegalWord "void",
-          illegalWord "as",
-          illegalWord "if",
-          illegalWord "then",
-          illegalWord "else",
-          illegalWord "case",
-          illegalWord "of",
-          illegalWord "for",
-          illegalWord "from",
-          illegalWord "do",
-          illegalWord "while",
-          illegalWord "not",
-          illegalWord "import",
-          illegalWord "export",
-          illegalWord "include",
-          illegalWord "namespace",
-          illegalWord "class",
-          illegalWord "data",
-          illegalWord "method",
-          illegalWord "generator",
-          illegalWord "interpreter",
-          illegalWord "producer",
-          illegalWord "ai",
-          illegalWord "default",
-          illegalWord "yield",
-          illegalWord "return",
-          illegalWord "throw",
-          illegalWord "rethrow",
-          illegalWord "new",
-          illegalWord "try"
+      ( [ litKeyword "this",
+          litKeyword "that",
+          litKeyword "super",
+          litKeyword "go",
+          litKeyword "defer",
+          litKeyword "effect",
+          litKeyword "let",
+          litKeyword "const", -- reserved for JavaScript src compatibility
+          litKeyword "extends",
+          litKeyword "perceive",
+          litKeyword "void",
+          litKeyword "as",
+          litKeyword "if",
+          litKeyword "then",
+          litKeyword "else",
+          litKeyword "case",
+          litKeyword "of",
+          litKeyword "for",
+          litKeyword "from",
+          litKeyword "do",
+          litKeyword "while",
+          litKeyword "not",
+          litKeyword "import",
+          litKeyword "export",
+          litKeyword "include",
+          litKeyword "namespace",
+          litKeyword "class",
+          litKeyword "data",
+          litKeyword "method",
+          litKeyword "generator",
+          litKeyword "interpreter",
+          litKeyword "producer",
+          litKeyword "ai",
+          litKeyword "default",
+          litKeyword "yield",
+          litKeyword "return",
+          litKeyword "throw",
+          litKeyword "rethrow",
+          litKeyword "new",
+          litKeyword "try"
         ]
-          ++ (illegalWord <$> quaint'ops)
+          ++ (litKeyword <$> quaint'ops)
       )
     <|> return Nothing
-  where
-    illegalWord !wd = wd <$ keyword wd
 
 parseLitExpr :: Parser Literal
 parseLitExpr =
