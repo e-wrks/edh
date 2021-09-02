@@ -429,6 +429,25 @@ wrapM'' !repr !dd = do
       edhWrapValue = edh'value'wrapper world (Just repr)
   inlineSTM $ edhWrapValue dd
 
+-- | Create an Edh host object from the specified class and host data
+--
+-- note the caller is responsible to make sure the supplied host data
+-- is compatible with the class
+createHostObjectM :: forall t. Typeable t => Object -> t -> Edh Object
+createHostObjectM !clsObj !d = createHostObjectM' clsObj (toDyn d) []
+
+-- | Create an Edh host object from the specified class, host storage data and
+-- list of super objects.
+--
+-- note the caller is responsible to make sure the supplied host storage data
+-- is compatible with the class, the super objects are compatible with the
+-- class' mro.
+createHostObjectM' :: Object -> Dynamic -> [Object] -> Edh Object
+createHostObjectM' !clsObj !hsd !supers = do
+  !oid <- newUniqueEdh
+  !ss <- newTVarEdh supers
+  return $ Object oid (HostStore hsd) clsObj ss
+
 mkEdhProc ::
   (ProcDefi -> EdhProcDefi) ->
   AttrName ->
