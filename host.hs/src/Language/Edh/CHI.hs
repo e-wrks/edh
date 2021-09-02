@@ -1,4 +1,4 @@
--- | Edh Host Interface
+-- | Continuation based Host Interface of Edh
 --
 -- With Haskell as the host language, Edh as the surface language,
 -- this defines the interface for host code in Haskell to create
@@ -7,7 +7,7 @@
 -- functions, wrapped as host procedures, with procedures written
 -- in Edh, those do arbitrary manipulations on arbitrary objects
 -- in the world, but, less speedy as with interpreted execution.
-module Language.Edh.EHI
+module Language.Edh.CHI
   ( -- * Exceptions
     EdhError (..),
     EdhErrorTag (..),
@@ -355,25 +355,15 @@ module Language.Edh.EHI
     locateEdhFile,
     locateEdhMainModule,
 
-    -- * monadic inter-operation helpers
-    wrapEdhProc,
-    mkEdhProc',
-    mkEdhProperty,
-
     -- * standalone modules
     module Language.Edh.IOPD,
-    module Language.Edh.Monad,
     module Language.Edh.HostEvs,
-    module Language.Edh.Batteries.Args,
-    module Language.Edh.Batteries.Comput,
   )
 where
 
 import qualified Data.Lossless.Decimal as D
 import Language.Edh.Args
 import Language.Edh.Batteries
-import Language.Edh.Batteries.Args
-import Language.Edh.Batteries.Comput
 import Language.Edh.Control
 import Language.Edh.CoreLang
 import Language.Edh.EdhEvs
@@ -381,8 +371,6 @@ import Language.Edh.Evaluate
 import Language.Edh.HostEvs
 import Language.Edh.IOPD
 import Language.Edh.InterOp
-import Language.Edh.InterOpM
-import Language.Edh.Monad
 import Language.Edh.PkgMan
 import Language.Edh.RtTypes
 import Language.Edh.Runtime
