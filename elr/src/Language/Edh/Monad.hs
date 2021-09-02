@@ -343,7 +343,27 @@ edhValueBlobM' :: EdhValue -> Edh (Maybe B.ByteString)
 edhValueBlobM' !v = Edh $ \_naExit !exit !ets ->
   edhValueBlob' ets v (exitEdh ets exit Nothing) $ exitEdh ets exit . Just
 
-parseEdhIndexM :: EdhValue -> Edh (Either Text EdhIndex)
+-- Clone a composite object with one of its object instance `mutObj` mutated
+-- to bear the new object stroage
+--
+-- Other member instances are either deep-cloned as class based super, or left
+-- intact as prototype based super
+mutCloneObjectM :: Object -> Object -> ObjectStore -> Edh Object
+mutCloneObjectM !endObj !mutObj !newStore = Edh $ \_naExit !exit !ets ->
+  edhMutCloneObj ets endObj mutObj newStore $ exitEdh ets exit
+
+-- Clone a composite object with one of its object instance `mutObj` mutated
+-- to bear the new host storage data
+--
+-- Other member instances are either deep-cloned as class based super, or left
+-- intact as prototype based super
+--
+-- todo maybe check new storage data type matches the old one?
+mutCloneHostObjectM :: (Typeable h) => Object -> Object -> h -> Edh Object
+mutCloneHostObjectM !endObj !mutObj =
+  mutCloneObjectM endObj mutObj . HostStore . toDyn
+
+parseEdhIndexM :: EdhValue -> Edh (Either ErrMessage EdhIndex)
 parseEdhIndexM !val = Edh $ \_naExit !exit !ets ->
   parseEdhIndex ets val $ exitEdh ets exit
 
@@ -370,11 +390,11 @@ regulateEdhSliceM !len !slice = Edh $ \_naExit !exit !ets ->
 
 -- ** Exception Throwing & Handling
 
-throwEdhM :: EdhErrorTag -> Text -> Edh a
+throwEdhM :: EdhErrorTag -> ErrMessage -> Edh a
 throwEdhM tag msg = throwEdhM' tag msg []
 {-# INLINE throwEdhM #-}
 
-throwEdhM' :: EdhErrorTag -> Text -> [(AttrKey, EdhValue)] -> Edh a
+throwEdhM' :: EdhErrorTag -> ErrMessage -> [(AttrKey, EdhValue)] -> Edh a
 throwEdhM' tag msg details = Edh $ \_naExit _exit ets -> do
   let !edhErr = EdhError tag msg errDetails $ getEdhErrCtx 0 ets
       !edhWrapException =

@@ -748,7 +748,7 @@ edhCloneHostObj ::
   h ->
   (Object -> STM ()) ->
   STM ()
-edhCloneHostObj !ets !mutObj !endObj !newData !exit =
+edhCloneHostObj !ets !endObj !mutObj !newData !exit =
   edhMutCloneObj ets mutObj endObj (HostStore $ toDyn newData) exit
 
 -- Clone a composite object with one of its object instance `mutObj` mutated
@@ -763,7 +763,7 @@ edhMutCloneObj ::
   ObjectStore ->
   (Object -> STM ()) ->
   STM ()
-edhMutCloneObj !ets !mutObj !endObj !newStore !exitEnd =
+edhMutCloneObj !ets !endObj !mutObj !newStore !exitEnd =
   newTVar Map.empty >>= \ !instMap ->
     let cloneSupers ::
           [Object] -> [Object] -> [Object] -> ([Object] -> STM ()) -> STM ()
@@ -5768,7 +5768,7 @@ resolveEdhFallback' !ets !effKey !exit =
     edhTargetStackForFallback = edh'ctx'stack ctx where !ctx = edh'context ets
 
 parseEdhIndex ::
-  EdhThreadState -> EdhValue -> (Either Text EdhIndex -> STM ()) -> STM ()
+  EdhThreadState -> EdhValue -> (Either ErrMessage EdhIndex -> STM ()) -> STM ()
 parseEdhIndex !ets !val !exit = case val of
   -- empty
   EdhArgsPack (ArgsPack [] !kwargs') | odNull kwargs' -> exit $ Right EdhAll

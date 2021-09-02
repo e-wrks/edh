@@ -164,7 +164,7 @@ createVectorClass !clsOuterScope =
               exitWith !newVec = do
                 !newVV <- newTVar newVec
                 let !newStore = HostStore (toDyn newVV)
-                edhMutCloneObj ets thisVecObj (edh'scope'that scope) newStore $
+                edhMutCloneObj ets (edh'scope'that scope) thisVecObj newStore $
                   \ !thatObjClone -> exitEdh ets exit $ EdhObject thatObjClone
               exitWithRange :: Int -> Int -> Int -> STM ()
               exitWithRange !start !stop !step = do
@@ -215,8 +215,8 @@ createVectorClass !clsOuterScope =
                               let !newStore = HostStore (toDyn newVV)
                               edhMutCloneObj
                                 ets
-                                thisVecObj
                                 (edh'scope'that scope)
+                                thisVecObj
                                 newStore
                                 $ \ !thatObjClone ->
                                   exitEdh ets exit $
@@ -357,8 +357,8 @@ createVectorClass !clsOuterScope =
                   let !newStore = HostStore (toDyn newVV)
                   edhMutCloneObj
                     ets
-                    thisVecObj
                     (edh'scope'that scope)
+                    thisVecObj
                     newStore
                     $ \ !thatObjClone ->
                       exitEdh ets exit $

@@ -667,8 +667,8 @@ createEdhWorld !console = do
           Just !outerScope ->
             edhMutCloneObj
               ets
-              this
               (edh'scope'that procScope)
+              this
               (HostStore $ toDyn outerScope)
               $ \ !outerScopeObj -> exitEdh ets exit $ EdhObject outerScopeObj
       _ -> exitEdh ets exit $ EdhString "bogus scope object"
