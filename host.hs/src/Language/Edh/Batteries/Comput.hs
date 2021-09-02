@@ -361,6 +361,15 @@ applyEffectfulArg !f = do
 
 -- * Computation result as base cases
 
+-- | Pure computation result as scripted, without recording all args ever
+-- applied
+instance ScriptableComput EdhValue where
+  scriptableArgs _ = []
+  callByScript v (ArgsPack !args !kwargs) =
+    if not (null args) || not (odNull kwargs)
+      then throwEdhM UsageError "extranous arguments"
+      else return $ ScriptDone v
+
 -- | Wrap a pure computation result as scripted, without recording of all args
 -- ever applied
 data ComputDone a = (Typeable a) => ComputDone !a
@@ -372,17 +381,6 @@ instance ScriptableComput (ComputDone a) where
       then throwEdhM UsageError "extranous arguments"
       else return $ ScriptDone' (toDyn a)
 
--- | Wrap a pure computation result as scripted, without recording all args
--- ever applied
-newtype ComputDone_ = ComputDone_ EdhValue
-
-instance ScriptableComput ComputDone_ where
-  scriptableArgs _ = []
-  callByScript (ComputDone_ v) (ArgsPack !args !kwargs) =
-    if not (null args) || not (odNull kwargs)
-      then throwEdhM UsageError "extranous arguments"
-      else return $ ScriptDone v
-
 -- | Wrap a pure computation result as scripted
 data ComputPure a = (Typeable a) => ComputPure !a
 
@@ -393,40 +391,30 @@ instance ScriptableComput (ComputPure a) where
       then throwEdhM UsageError "extranous arguments"
       else return $ FullyEffected (toDyn a) odEmpty []
 
--- | Wrap an Edh aware computation result as scripted
-data ComputEdh a = Typeable a => ComputEdh (Edh a)
-
-instance ScriptableComput (ComputEdh a) where
+-- | Edh aware computation result as scripted
+instance ScriptableComput (Edh Dynamic) where
   scriptableArgs _ = []
 
-  callByScript (ComputEdh !act) (ArgsPack !args !kwargs) =
-    if not (null args) || not (odNull kwargs)
-      then throwEdhM UsageError "extranous arguments"
-      else (<$> act) $ \ !a -> FullyEffected (toDyn a) odEmpty []
-
--- | Wrap an Edh aware computation result as scripted
---
--- Use this form in case you construct a 'Dynamic' result yourself
---
--- Note the type @a@ is for information purpose only, no way get asserted
-newtype ComputEdh' a = ComputEdh' (Edh Dynamic)
-
-instance ScriptableComput (ComputEdh' a) where
-  scriptableArgs _ = []
-
-  callByScript (ComputEdh' !act) (ArgsPack !args !kwargs) =
+  callByScript !act (ArgsPack !args !kwargs) =
     if not (null args) || not (odNull kwargs)
       then throwEdhM UsageError "extranous arguments"
       else (<$> act) $ \ !d -> FullyEffected d odEmpty []
 
--- | Wrap an Edh aware computation result as scripted, without recording all
--- args ever applied
-newtype ComputEdh_ = ComputEdh_ (Edh EdhValue)
-
-instance ScriptableComput ComputEdh_ where
+-- | Edh aware computation result as scripted
+instance {-# OVERLAPPABLE #-} Typeable a => ScriptableComput (Edh a) where
   scriptableArgs _ = []
 
-  callByScript (ComputEdh_ !act) (ArgsPack !args !kwargs) =
+  callByScript !act (ArgsPack !args !kwargs) =
+    if not (null args) || not (odNull kwargs)
+      then throwEdhM UsageError "extranous arguments"
+      else (<$> act) $ \ !a -> FullyEffected (toDyn a) odEmpty []
+
+-- | Edh aware computation result as scripted, without recording all args ever
+-- applied
+instance ScriptableComput (Edh EdhValue) where
+  scriptableArgs _ = []
+
+  callByScript !act (ArgsPack !args !kwargs) =
     if not (null args) || not (odNull kwargs)
       then throwEdhM UsageError "extranous arguments"
       else ScriptDone <$> act
