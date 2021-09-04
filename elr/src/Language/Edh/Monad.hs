@@ -297,6 +297,14 @@ pushStackM' !scope !act = Edh $ \naExit exit ets -> do
           }
   unEdh act naExit (edhSwitchState ets . exit) etsNew
 
+evalInfixM :: OpSymbol -> Expr -> Expr -> Edh EdhValue
+evalInfixM !opSym !lhExpr !rhExpr =
+  Edh $ \_naExit -> evalInfix opSym lhExpr rhExpr
+
+evalInfixSrcM :: OpSymSrc -> ExprSrc -> ExprSrc -> Edh EdhValue
+evalInfixSrcM !opSym !lhExpr !rhExpr =
+  Edh $ \_naExit -> evalInfixSrc opSym lhExpr rhExpr
+
 -- ** Value Manipulations
 
 edhObjStrM :: Object -> Edh Text
