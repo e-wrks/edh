@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 module Language.Edh.Args
@@ -8,10 +9,11 @@ module Language.Edh.Args
     mandatoryArg,
     optionalArg,
     defaultArg,
+    Some (..),
   )
 where
 
-import Data.Kind (Type)
+import Data.Kind (Constraint, Type)
 import Data.Maybe (Maybe, fromMaybe)
 import GHC.TypeLits (Symbol)
 
@@ -34,3 +36,6 @@ optionalArg (NamedEdhArg !ma) = ma
 
 defaultArg :: t -> name ?: t -> t
 defaultArg !a (NamedEdhArg !ma) = fromMaybe a ma
+
+data Some (k :: * -> Constraint) where
+  Some :: forall k t. (k t) => t -> Some k
