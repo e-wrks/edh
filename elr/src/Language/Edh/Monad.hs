@@ -9,6 +9,7 @@ import Control.Exception
 import Control.Monad.State.Strict
 import qualified Data.ByteString as B
 import Data.Dynamic
+import Data.Hashable
 import Data.IORef
 import Data.Maybe
 import Data.Text (Text)
@@ -164,6 +165,23 @@ edhValueAsAttrKeyM !keyVal = case edhUltimate keyVal of
     !badDesc <- edhSimpleDescM keyVal
     throwEdhM EvalError $ "not a valid attribute key: " <> badDesc
 
+prepareExpStoreM :: Object -> Edh EntityStore
+prepareExpStoreM !fromObj = case edh'obj'store fromObj of
+  HashStore !tgtEnt -> fromStore tgtEnt
+  ClassStore !cls -> fromStore $ edh'class'store cls
+  HostStore _ ->
+    naM $
+      "no way exporting with a host object of class " <> objClassName fromObj
+  where
+    fromStore tgtEnt = mEdh $ \exit ets ->
+      (exitEdh ets exit =<<) $
+        prepareMagicStore (AttrByName edhExportsMagicName) tgtEnt $
+          edhCreateNsObj ets NoDocCmt phantomHostProc $ AttrByName "export"
+
+importModuleM :: Text -> Edh Object
+importModuleM !importSpec = mEdh $ \ !exit ->
+  importEdhModule importSpec $ exitEdhTx exit
+
 -- ** Effect Resolution
 
 performM :: AttrKey -> Edh EdhValue
@@ -189,6 +207,17 @@ fallbackM !effKey = Edh $ \_naExit !exit !ets ->
 fallbackM' :: AttrKey -> Edh (Maybe EdhValue)
 fallbackM' !effKey = Edh $ \_naExit !exit !ets ->
   resolveEdhFallback' ets effKey $ exitEdh ets exit
+
+prepareEffStoreM :: Edh EntityStore
+prepareEffStoreM = prepareEffStoreM' $ AttrByName edhEffectsMagicName
+
+prepareEffStoreM' :: AttrKey -> Edh EntityStore
+prepareEffStoreM' !magicKey = mEdh $ \ !exit !ets ->
+  exitEdh ets exit
+    =<< prepareEffStore'
+      magicKey
+      ets
+      (edh'scope'entity $ contextScope $ edh'context ets)
 
 -- ** Utilities
 
@@ -264,6 +293,112 @@ newUniqueEdh :: Edh Unique
 newUniqueEdh = inlineSTM $ unsafeIOToSTM newUnique
 {-# INLINE newUniqueEdh #-}
 
+iopdCloneEdh :: forall k v. (Eq k, Hashable k) => IOPD k v -> Edh (IOPD k v)
+iopdCloneEdh = inlineSTM . iopdClone
+{-# INLINE iopdCloneEdh #-}
+
+iopdTransformEdh ::
+  forall k v v'.
+  (Eq k, Hashable k) =>
+  (v -> v') ->
+  IOPD k v ->
+  Edh (IOPD k v')
+iopdTransformEdh trans = inlineSTM . iopdTransform trans
+{-# INLINE iopdTransformEdh #-}
+
+iopdEmptyEdh :: forall k v. (Eq k, Hashable k) => Edh (IOPD k v)
+iopdEmptyEdh = inlineSTM iopdEmpty
+{-# INLINE iopdEmptyEdh #-}
+
+iopdNullEdh :: forall k v. (Eq k, Hashable k) => IOPD k v -> Edh Bool
+iopdNullEdh = inlineSTM . iopdNull
+{-# INLINE iopdNullEdh #-}
+
+iopdSizeEdh :: forall k v. (Eq k, Hashable k) => IOPD k v -> Edh Int
+iopdSizeEdh = inlineSTM . iopdSize
+{-# INLINE iopdSizeEdh #-}
+
+iopdInsertEdh ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  k ->
+  v ->
+  IOPD k v ->
+  Edh ()
+iopdInsertEdh k v = inlineSTM . iopdInsert k v
+{-# INLINE iopdInsertEdh #-}
+
+iopdReserveEdh :: forall k v. (Eq k, Hashable k) => Int -> IOPD k v -> Edh ()
+iopdReserveEdh moreCap = inlineSTM . iopdReserve moreCap
+{-# INLINE iopdReserveEdh #-}
+
+iopdUpdateEdh ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  [(k, v)] ->
+  IOPD k v ->
+  Edh ()
+iopdUpdateEdh ps = inlineSTM . iopdUpdate ps
+{-# INLINE iopdUpdateEdh #-}
+
+iopdLookupEdh ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  k ->
+  IOPD k v ->
+  Edh (Maybe v)
+iopdLookupEdh key = inlineSTM . iopdLookup key
+{-# INLINE iopdLookupEdh #-}
+
+iopdLookupDefaultEdh ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  v ->
+  k ->
+  IOPD k v ->
+  Edh v
+iopdLookupDefaultEdh v k = inlineSTM . iopdLookupDefault v k
+{-# INLINE iopdLookupDefaultEdh #-}
+
+iopdDeleteEdh ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  k ->
+  IOPD k v ->
+  Edh ()
+iopdDeleteEdh k = inlineSTM . iopdDelete k
+{-# INLINE iopdDeleteEdh #-}
+
+iopdKeysEdh :: forall k v. (Eq k, Hashable k) => IOPD k v -> Edh [k]
+iopdKeysEdh = inlineSTM . iopdKeys
+{-# INLINE iopdKeysEdh #-}
+
+iopdValuesEdh :: forall k v. (Eq k, Hashable k) => IOPD k v -> Edh [v]
+iopdValuesEdh = inlineSTM . iopdValues
+{-# INLINE iopdValuesEdh #-}
+
+iopdToListEdh :: forall k v. (Eq k, Hashable k) => IOPD k v -> Edh [(k, v)]
+iopdToListEdh = inlineSTM . iopdToList
+{-# INLINE iopdToListEdh #-}
+
+iopdToReverseListEdh ::
+  forall k v. (Eq k, Hashable k) => IOPD k v -> Edh [(k, v)]
+iopdToReverseListEdh = inlineSTM . iopdToReverseList
+{-# INLINE iopdToReverseListEdh #-}
+
+iopdFromListEdh ::
+  forall k v.
+  (Eq k, Hashable k) =>
+  [(k, v)] ->
+  Edh (IOPD k v)
+iopdFromListEdh = inlineSTM . iopdFromList
+{-# INLINE iopdFromListEdh #-}
+
+iopdSnapshotEdh ::
+  forall k v. (Eq k, Hashable k) => IOPD k v -> Edh (OrderedDict k v)
+iopdSnapshotEdh = inlineSTM . iopdSnapshot
+{-# INLINE iopdSnapshotEdh #-}
+
 -- ** Call Making & Context Manipulation
 
 callM :: EdhValue -> [ArgSender] -> Edh EdhValue
@@ -330,6 +465,10 @@ edhValueReprM !v = Edh $ \_naExit !exit !ets ->
 edhObjDescM :: Object -> Edh Text
 edhObjDescM !o = Edh $ \_naExit !exit !ets ->
   edhObjDesc ets o $ exitEdh ets exit
+
+edhObjDescM' :: Object -> KwArgs -> Edh Text
+edhObjDescM' !o !kwargs = Edh $ \_naExit !exit !ets ->
+  edhObjDesc' ets o kwargs $ exitEdh ets exit
 
 edhValueDescM :: EdhValue -> Edh Text
 edhValueDescM !v = Edh $ \_naExit !exit !ets ->
@@ -417,6 +556,10 @@ throwEdhM' tag msg details = Edh $ \_naExit _exit ets -> do
   edhWrapException (Just ets) (toException edhErr)
     >>= \ !exo -> edhThrow ets $ EdhObject exo
 {-# INLINE throwEdhM' #-}
+
+throwHostM :: Exception e => e -> Edh a
+throwHostM = inlineSTM . throwSTM
+{-# INLINE throwHostM #-}
 
 -- ** Artifacts Making
 

@@ -31,6 +31,7 @@ library
     Language.Edh.Repl
     Language.Edh.Run
     Language.Edh.Runtime
+    Language.Edh.RuntimeM
 
   other-modules:
     Language.Edh.Batteries.Args

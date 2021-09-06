@@ -1003,8 +1003,7 @@ type EdhModulePreparation = EdhThreadState -> STM () -> STM ()
 edhModuleAsIs :: EdhModulePreparation
 edhModuleAsIs _ets !exit = exit
 
-installEdhModule ::
-  EdhWorld -> Text -> EdhModulePreparation -> IO Object
+installEdhModule :: EdhWorld -> Text -> EdhModulePreparation -> IO Object
 installEdhModule !world !moduName !preInstall = do
   !modu <-
     createEdhModule world moduName $ T.unpack $ "<host:" <> moduName <> ">"
