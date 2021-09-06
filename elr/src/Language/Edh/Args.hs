@@ -9,7 +9,7 @@ module Language.Edh.Args
     mandatoryArg,
     optionalArg,
     defaultArg,
-    Some (..),
+    Being (..),
   )
 where
 
@@ -37,5 +37,5 @@ optionalArg (NamedEdhArg !ma) = ma
 defaultArg :: t -> name ?: t -> t
 defaultArg !a (NamedEdhArg !ma) = fromMaybe a ma
 
-data Some (k :: * -> Constraint) where
-  Some :: forall k t. (k t) => t -> Some k
+data Being (k :: * -> Constraint) where
+  Being :: forall k t. (k t) => t -> Being k
