@@ -212,6 +212,10 @@ writeTVarEdh :: forall a. TVar a -> a -> Edh ()
 writeTVarEdh ref v = inlineSTM $ writeTVar ref v
 {-# INLINE writeTVarEdh #-}
 
+modifyTVarEdh' :: forall a. TVar a -> (a -> a) -> Edh ()
+modifyTVarEdh' ref f = inlineSTM $ modifyTVar' ref f
+{-# INLINE modifyTVarEdh' #-}
+
 newTMVarEdh :: forall a. a -> Edh (TMVar a)
 newTMVarEdh = inlineSTM . newTMVar
 {-# INLINE newTMVarEdh #-}
