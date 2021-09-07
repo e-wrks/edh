@@ -219,7 +219,7 @@ prepareEffStoreM' !magicKey = mEdh $ \ !exit !ets ->
       ets
       (edh'scope'entity $ contextScope $ edh'context ets)
 
--- ** Utilities
+-- ** Edh Monad Utilities
 
 edhThreadState :: Edh EdhThreadState
 edhThreadState = Edh $ \_naExit exit ets -> exit ets ets
@@ -672,3 +672,129 @@ mkEdhClass !clsName !allocator !superClasses !clsBody = do
         rptEdhNotApplicable
         (\(maybeIdent, oStore) _ets -> ctorExit maybeIdent oStore)
         ets
+
+-- * Edh aware (or scriptability Enhanced) IO Monad
+
+-- high density of 'liftIO's from within 'Edh' monad means terrible performance,
+-- machine-wise, so we need this continuation based @EIO@ monad in which the
+-- machine performance can be much better, 'liftIO' from within 'EIO' should be
+-- fairly cheaper.
+
+newtype EIO a = EIO {runEIO :: EdhThreadState -> (a -> IO ()) -> IO ()}
+
+liftEdh :: Edh a -> EIO a
+liftEdh act = EIO $ \ets exit ->
+  atomically $ runEdh ets act $ edhContIO . exit
+
+liftEIO :: EIO a -> Edh a
+liftEIO act = Edh $ \_naExit exit ets ->
+  runEdhTx ets $ edhContIO $ runEIO act ets $ atomically . exitEdh ets exit
+
+instance Functor EIO where
+  fmap f c = EIO $ \ets exit -> runEIO c ets $ exit . f
+  {-# INLINE fmap #-}
+
+instance Applicative EIO where
+  pure a = EIO $ \_ets exit -> exit a
+  {-# INLINE pure #-}
+  (<*>) = ap
+  {-# INLINE (<*>) #-}
+
+instance Monad EIO where
+  return = pure
+  {-# INLINE return #-}
+  m >>= k = EIO $ \ets exit -> runEIO m ets $ \a -> runEIO (k a) ets exit
+  {-# INLINE (>>=) #-}
+
+instance MonadIO EIO where
+  liftIO act = EIO $ \_ets exit -> act >>= exit
+  {-# INLINE liftIO #-}
+
+-- ** EIO Monad Utilities
+
+atomicallyEIO :: STM a -> EIO a
+atomicallyEIO = liftIO . atomically
+{-# INLINE atomicallyEIO #-}
+
+newTVarEIO :: forall a. a -> EIO (TVar a)
+newTVarEIO = liftIO . newTVarIO
+{-# INLINE newTVarEIO #-}
+
+readTVarEIO :: forall a. TVar a -> EIO a
+readTVarEIO = liftIO . readTVarIO
+{-# INLINE readTVarEIO #-}
+
+writeTVarEIO :: forall a. TVar a -> a -> EIO ()
+writeTVarEIO ref v = atomicallyEIO $ writeTVar ref v
+{-# INLINE writeTVarEIO #-}
+
+modifyTVarEIO' :: forall a. TVar a -> (a -> a) -> EIO ()
+modifyTVarEIO' ref f = atomicallyEIO $ modifyTVar' ref f
+{-# INLINE modifyTVarEIO' #-}
+
+newTMVarEIO :: forall a. a -> EIO (TMVar a)
+newTMVarEIO = liftIO . newTMVarIO
+{-# INLINE newTMVarEIO #-}
+
+readTMVarEIO :: forall a. TMVar a -> EIO a
+readTMVarEIO = atomicallyEIO . readTMVar
+{-# INLINE readTMVarEIO #-}
+
+takeTMVarEIO :: forall a. TMVar a -> EIO a
+takeTMVarEIO = atomicallyEIO . takeTMVar
+{-# INLINE takeTMVarEIO #-}
+
+putTMVarEIO :: forall a. TMVar a -> a -> EIO ()
+putTMVarEIO ref v = atomicallyEIO $ putTMVar ref v
+{-# INLINE putTMVarEIO #-}
+
+tryReadTMVarEIO :: forall a. TMVar a -> EIO (Maybe a)
+tryReadTMVarEIO = atomicallyEIO . tryReadTMVar
+{-# INLINE tryReadTMVarEIO #-}
+
+tryTakeTMVarEIO :: forall a. TMVar a -> EIO (Maybe a)
+tryTakeTMVarEIO = atomicallyEIO . tryTakeTMVar
+{-# INLINE tryTakeTMVarEIO #-}
+
+tryPutTMVarEIO :: forall a. TMVar a -> a -> EIO Bool
+tryPutTMVarEIO ref v = atomicallyEIO $ tryPutTMVar ref v
+{-# INLINE tryPutTMVarEIO #-}
+
+newIORefEIO :: forall a. a -> EIO (IORef a)
+newIORefEIO = liftIO . newIORef
+{-# INLINE newIORefEIO #-}
+
+readIORefEIO :: forall a. IORef a -> EIO a
+readIORefEIO = liftIO . readIORef
+{-# INLINE readIORefEIO #-}
+
+writeIORefEIO :: forall a. IORef a -> a -> EIO ()
+writeIORefEIO ref v = liftIO $ writeIORef ref v
+{-# INLINE writeIORefEIO #-}
+
+newUniqueEIO :: EIO Unique
+newUniqueEIO = liftIO newUnique
+{-# INLINE newUniqueEIO #-}
+
+-- ** Exceptions with EIO
+
+throwEIO :: EdhErrorTag -> ErrMessage -> EIO a
+throwEIO tag msg = throwEIO' tag msg []
+{-# INLINE throwEIO #-}
+
+throwEIO' :: EdhErrorTag -> ErrMessage -> [(AttrKey, EdhValue)] -> EIO a
+throwEIO' tag msg details = EIO $ \ets _exit -> do
+  let !edhErr = EdhError tag msg errDetails $ getEdhErrCtx 0 ets
+      !edhWrapException =
+        edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
+      !errDetails = case details of
+        [] -> toDyn nil
+        _ -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
+  atomically $
+    edhWrapException (Just ets) (toException edhErr)
+      >>= \ !exo -> edhThrow ets $ EdhObject exo
+{-# INLINE throwEIO' #-}
+
+throwHostEIO :: Exception e => e -> EIO a
+throwHostEIO = liftIO . throwIO
+{-# INLINE throwHostEIO #-}
