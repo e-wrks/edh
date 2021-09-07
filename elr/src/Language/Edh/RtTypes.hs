@@ -1923,3 +1923,52 @@ mkSymbolicHostProc !scope !vc !sym (!p, _args) = do
             }
       )
       Nothing
+
+mkHostProperty ::
+  Scope ->
+  AttrName ->
+  EdhHostProc ->
+  Maybe (Maybe EdhValue -> EdhHostProc) ->
+  STM EdhValue
+mkHostProperty !scope !nm !getterProc !maybeSetterProc =
+  mkHostProperty' scope (AttrByName nm) getterProc maybeSetterProc
+
+mkHostProperty' ::
+  Scope ->
+  AttrKey ->
+  EdhHostProc ->
+  Maybe (Maybe EdhValue -> EdhHostProc) ->
+  STM EdhValue
+mkHostProperty' !scope !pk !getterProc !maybeSetterProc = do
+  getter <- do
+    u <- unsafeIOToSTM newUnique
+    return $
+      ProcDefi
+        { edh'procedure'ident = u,
+          edh'procedure'name = pk,
+          edh'procedure'lexi = scope,
+          edh'procedure'doc = NoDocCmt,
+          edh'procedure'decl = HostDecl $ const getterProc
+        }
+  setter <- case maybeSetterProc of
+    Nothing -> return Nothing
+    Just !setterProc -> do
+      u <- unsafeIOToSTM newUnique
+      return $
+        Just $
+          ProcDefi
+            { edh'procedure'ident = u,
+              edh'procedure'name = pk,
+              edh'procedure'lexi = scope,
+              edh'procedure'doc = NoDocCmt,
+              edh'procedure'decl = HostDecl $ \case
+                ArgsPack [] _kwargs -> setterProc Nothing
+                ArgsPack [tgtVal] _kwargs -> setterProc $ Just tgtVal
+                _ -> \_exit _ets ->
+                  throwSTM $
+                    EdhHostError
+                      EvalError
+                      "bug: malformed call to getter"
+                      (toDyn nil)
+            }
+  return $ EdhProcedure (EdhDescriptor getter setter) Nothing

@@ -984,9 +984,10 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                 go [] !arts = matchExit $ case maybeInstKey of
                   Just !instKey -> arts ++ [(instKey, EdhObject matchedObj)]
                   Nothing -> arts
-                go ((!srcKey, !tgtKey) : rest) !arts =
-                  lookupEdhObjAttr matchedObj srcKey >>= \case
-                    (_, !artVal) -> go rest $ (tgtKey, edhNonNil artVal) : arts
+                go ((!srcKey, !tgtKey) : rest) !arts = runEdhTx ets $
+                  getObjProperty matchedObj srcKey $
+                    \ !artVal _ets ->
+                      go rest $ (tgtKey, edhNonNil artVal) : arts
 
             tryCoerceMatch =
               lookupEdhObjAttr clsObj (AttrByName "__match__") >>= \case

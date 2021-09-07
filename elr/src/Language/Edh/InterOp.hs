@@ -45,38 +45,6 @@ mkSymbolicHostProc' ::
 mkSymbolicHostProc' !scope !vc !sym !fn =
   mkSymbolicHostProc scope vc sym $ wrapHostProc fn
 
-mkHostProperty ::
-  Scope ->
-  AttrName ->
-  EdhHostProc ->
-  Maybe (Maybe EdhValue -> EdhHostProc) ->
-  STM EdhValue
-mkHostProperty !scope !nm !getterProc !maybeSetterProc = do
-  getter <- do
-    u <- unsafeIOToSTM newUnique
-    return $
-      ProcDefi
-        { edh'procedure'ident = u,
-          edh'procedure'name = AttrByName nm,
-          edh'procedure'lexi = scope,
-          edh'procedure'doc = NoDocCmt,
-          edh'procedure'decl = HostDecl $ callFromEdh getterProc
-        }
-  setter <- case maybeSetterProc of
-    Nothing -> return Nothing
-    Just !setterProc -> do
-      u <- unsafeIOToSTM newUnique
-      return $
-        Just $
-          ProcDefi
-            { edh'procedure'ident = u,
-              edh'procedure'name = AttrByName nm,
-              edh'procedure'lexi = scope,
-              edh'procedure'doc = NoDocCmt,
-              edh'procedure'decl = HostDecl $ callFromEdh setterProc
-            }
-  return $ EdhProcedure (EdhDescriptor getter setter) Nothing
-
 -- * type level helper classes & instances
 
 -- | Class for an object allocator implemented in the host language (which is

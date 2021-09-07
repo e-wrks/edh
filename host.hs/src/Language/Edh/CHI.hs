@@ -241,6 +241,8 @@ module Language.Edh.CHI
     AttrKey (..),
     attrKeyStr,
     attrKeyValue,
+    getObjProperty,
+    getObjProperty',
     getObjAttrWithMagic,
     getObjAttrWithMagic',
     setObjAttrWithMagic,
@@ -328,6 +330,8 @@ module Language.Edh.CHI
     mkUUID,
     mkDefault,
     mkHostProc,
+    mkHostProperty,
+    mkHostProperty',
     mkSymbolicHostProc,
     EdhVector,
 

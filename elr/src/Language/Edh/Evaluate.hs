@@ -124,29 +124,21 @@ getEdhAttr ::
 getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
   -- no magic layer laid over access via `this` ref
   AttrExpr ThisRef {} ->
-    let !this = edh'scope'this scope
-     in lookupEdhObjAttr this key >>= \case
-          (_, EdhNil) -> exitEdh ets exitNoAttr $ EdhObject this
-          (this', !val) -> chkVanillaExit this' this val
-  -- no magic layer laid over access via `that` ref
+    runEdhTx ets $
+      getObjProperty' (edh'scope'this scope) key (exitNoAttr . EdhObject) exit
   AttrExpr ThatRef {} ->
-    let !that = edh'scope'that scope
-     in lookupEdhObjAttr that key >>= \case
-          (_, EdhNil) -> exitEdh ets exitNoAttr $ EdhObject that
-          (this, !val) -> chkVanillaExit this that val
-  -- no magic layer laid over access via `super` ref
+    runEdhTx ets $
+      getObjProperty' (edh'scope'that scope) key (exitNoAttr . EdhObject) exit
   AttrExpr SuperRef {} ->
     let !this = edh'scope'this scope
      in lookupEdhSuperAttr this key >>= \case
           (_, EdhNil) -> exitEdh ets exitNoAttr $ EdhObject this
-          (this', !val) -> chkVanillaExit this' this' val
+          result -> runEdhTx ets $ realizeObjProperty this exit result
   _ -> runEdhTx ets $
     evalExprSrc fromExpr $ \ !fromVal _ets ->
       case edhUltimate fromVal of
         EdhObject !obj ->
-          runEdhTx ets $
-            getObjAttrWithMagic' obj key (exitNoAttr $ EdhObject obj) $
-              \(!ownerObj, !val) _ets -> chkVanillaExit ownerObj obj val
+          runEdhTx ets $ getObjProperty' obj key (exitNoAttr . EdhObject) exit
         -- getting attr from an apk
         EdhArgsPack (ArgsPack _ !kwargs) ->
           exitEdh ets exit $ odLookupDefault EdhNil key kwargs
@@ -173,21 +165,36 @@ getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
     ctx = edh'context ets
     scope = contextScope ctx
 
-    chkVanillaExit :: Object -> Object -> EdhValue -> STM ()
-    chkVanillaExit !rtnThis !rtnThat !rtnVal = case rtnVal of
-      EdhBoundProc (EdhDescriptor !getter _) !this !that _ ->
-        runEdhTx ets $
-          callEdhMethod this that getter (ArgsPack [] odEmpty) id exit
-      EdhProcedure (EdhDescriptor !getter _) _ ->
-        runEdhTx ets $
-          callEdhMethod rtnThis rtnThat getter (ArgsPack [] odEmpty) id exit
-      EdhProcedure !callable !effOuter ->
-        -- bind an unbound procedure to inferred `this` and `that`
-        exitEdh ets exit $ EdhBoundProc callable rtnThis rtnThat effOuter
-      -- return a bound procedure intact
-      EdhBoundProc {} -> exitEdh ets exit rtnVal
-      -- not a callable, return as is
-      _ -> exitEdh ets exit rtnVal
+getObjProperty :: Object -> AttrKey -> EdhTxExit EdhValue -> EdhTx
+getObjProperty !obj !key !exit = getObjProperty' obj key exitNoAttr exit
+  where
+    exitNoAttr obj' =
+      throwEdhTx EvalError $
+        "no such property `" <> attrKeyStr key <> "` from a `"
+          <> objClassName obj'
+          <> "` object"
+
+getObjProperty' ::
+  Object -> AttrKey -> EdhTxExit Object -> EdhTxExit EdhValue -> EdhTx
+getObjProperty' !obj !key exitNoAttr !exit !ets =
+  runEdhTx ets $
+    getObjAttrWithMagic' obj key (exitNoAttr obj) $
+      realizeObjProperty obj exit
+
+realizeObjProperty ::
+  Object -> EdhTxExit EdhValue -> (Object, EdhValue) -> EdhTx
+realizeObjProperty obj exit (ownerInst, val) = case val of
+  EdhBoundProc (EdhDescriptor !getter _) !this !that _ ->
+    callEdhMethod this that getter (ArgsPack [] odEmpty) id exit
+  EdhProcedure (EdhDescriptor !getter _) _ ->
+    callEdhMethod ownerInst obj getter (ArgsPack [] odEmpty) id exit
+  EdhProcedure !callable !effOuter ->
+    -- bind an unbound procedure to inferred `this` and `that`
+    exitEdhTx exit $ EdhBoundProc callable ownerInst obj effOuter
+  -- return a bound procedure intact
+  EdhBoundProc {} -> exitEdhTx exit val
+  -- not a callable, return as is
+  _ -> exitEdhTx exit val
 
 -- | Try get an attribute from an object, with magic from either a super or self
 getObjAttrWithMagic ::
@@ -196,10 +203,11 @@ getObjAttrWithMagic ::
   EdhTxExit (Object, EdhValue) ->
   EdhTx
 getObjAttrWithMagic !obj !key =
-  getObjAttrWithMagic' obj key $ \ !ets -> edhValueDesc ets (EdhObject obj) $
-    \ !objDesc ->
-      throwEdh ets EvalError $
-        "no such attribute `" <> attrKeyStr key <> "` from object: " <> objDesc
+  getObjAttrWithMagic' obj key $
+    throwEdhTx EvalError $
+      "no such attribute `" <> attrKeyStr key <> "` from a `"
+        <> objClassName obj
+        <> "` object"
 
 -- | Try get an attribute from an object, with magic from either a super or self
 getObjAttrWithMagic' ::
@@ -3791,77 +3799,49 @@ edhValueDescTx :: EdhValue -> EdhTxExit Text -> EdhTx
 edhValueDescTx !v !exit !ets =
   edhValueDesc ets v $ exitEdh ets exit
 
-dtcFields ::
-  EdhThreadState -> Object -> Object -> ([(Text, EdhValue)] -> STM ()) -> STM ()
-dtcFields !ets !dataCls !obj !exit = do
-  let go :: [ArgReceiver] -> [(Text, EdhValue)] -> STM ()
-      go [] !fs = exit $ reverse fs
-      go (dr : rest) !fs = case dr of
-        RecvArg _ Just {} _ ->
-          throwEdh
-            ets
-            UsageError
-            "rename of data class field not supported yet"
-        RecvArg (AttrAddrSrc SymbolicAttr {} _) _ _ ->
-          throwEdh
-            ets
-            UsageError
-            "symbolic data class field not supported yet"
-        RecvArg (AttrAddrSrc (NamedAttr !fn) _) Nothing _ ->
-          lookupEdhObjAttr obj (AttrByName fn) >>= \case
-            (_owner, EdhNil) ->
-              throwEdh ets EvalError $ "missing data field: " <> fn
-            (_owner, !fv) -> go rest ((fn <> "= ", fv) : fs)
-        RecvRestPosArgs (AttrAddrSrc (NamedAttr !fn) _) ->
-          lookupEdhObjAttr obj (AttrByName fn) >>= \case
-            (_owner, EdhNil) ->
-              throwEdh ets EvalError $ "missing data field: " <> fn
-            (_owner, !fv) -> go rest (("*", fv) : fs)
-        RecvRestKwArgs (AttrAddrSrc (NamedAttr !fn) _) ->
-          lookupEdhObjAttr obj (AttrByName fn) >>= \case
-            (_owner, EdhNil) ->
-              throwEdh ets EvalError $ "missing data field: " <> fn
-            (_owner, !fv) -> go rest (("**", fv) : fs)
-        RecvRestPkArgs (AttrAddrSrc (NamedAttr !fn) _) ->
-          lookupEdhObjAttr obj (AttrByName fn) >>= \case
-            (_owner, EdhNil) ->
-              throwEdh ets EvalError $ "missing data field: " <> fn
-            (_owner, !fv) -> go rest (("***", fv) : fs)
-        _ ->
-          throwEdh
-            ets
-            UsageError
-            "symbolic repacked data class field not supported yet"
-  case edh'obj'store dataCls of
-    ClassStore !cls ->
-      case edh'procedure'args $ edh'procedure'decl $ edh'class'proc cls of
-        PackReceiver !drs _ -> go drs []
-        SingleReceiver !dr -> go [dr] []
-        WildReceiver _ ->
-          throwEdh ets UsageError "wild receiver for data class not supported"
-        NullaryReceiver ->
-          throwEdh ets EvalError "bug: not a data class for dtcFields"
-    _ -> throwEdh ets EvalError "bug: data class not bearing ClassStore"
+dtcFieldKeys ::
+  EdhThreadState -> Object -> ([(AttrKey, Text)] -> STM ()) -> STM ()
+dtcFieldKeys !ets !dataCls !exit = case edh'obj'store dataCls of
+  ClassStore !cls ->
+    dtcFieldKeys'
+      ets
+      (edh'procedure'args $ edh'procedure'decl $ edh'class'proc cls)
+      exit
+  _ -> throwEdh ets EvalError "bug: data class not bearing ClassStore"
 
-dtcReprProc :: ArgsPack -> EdhHostProc
-dtcReprProc _ !exit !ets = dtcFields ets (edh'obj'class thisObj) thatObj $
-  \ !dfs ->
-    let rp = if length dfs < 3 then unnamed else named
-     in edhProcessReprs ets (rp <$> dfs) $ \ !dfTokens ->
-          exitEdh ets exit $
-            EdhString $
-              objClassName thisObj
-                <> "("
-                <> T.intercalate ", " dfTokens
-                <> ")"
+dtcFieldKeys' ::
+  EdhThreadState ->
+  ArgsReceiver ->
+  ([(AttrKey, Text)] -> STM ()) ->
+  STM ()
+dtcFieldKeys' !ets !dtcArgRcvrs !exit = case dtcArgRcvrs of
+  PackReceiver !drs _ -> go drs []
+  SingleReceiver !dr -> go [dr] []
+  WildReceiver _ ->
+    throwEdh ets UsageError "wild receiver for data class not supported"
+  NullaryReceiver ->
+    throwEdh ets EvalError "bug: not a data class for dtcFieldKeys"
   where
-    !scope = contextScope $ edh'context ets
-    !thisObj = edh'scope'this scope
-    !thatObj = edh'scope'that scope
-    unnamed :: (Text, EdhValue) -> (EdhValue, Text -> Text)
-    unnamed (!k, !v) = if "*" `T.isPrefixOf` k then (v, (k <>)) else (v, id)
-    named :: (Text, EdhValue) -> (EdhValue, Text -> Text)
-    named (!k, !v) = (v, (k <>))
+    go :: [ArgReceiver] -> [(AttrKey, Text)] -> STM ()
+    go [] !fs = exit $! reverse fs
+    go (dr : rest) !fs = case dr of
+      RecvArg _ Just {} _ ->
+        throwEdh
+          ets
+          UsageError
+          "rename of data class field not supported yet"
+      RecvArg (AttrAddrSrc addr _) Nothing _ ->
+        resolveEdhAttrAddr ets addr $ \ !fk ->
+          go rest ((fk, attrKeyStr fk <> "=") : fs)
+      RecvRestPkArgs (AttrAddrSrc addr _) ->
+        resolveEdhAttrAddr ets addr $ \ !fk ->
+          go rest ((fk, "***") : fs)
+      RecvRestKwArgs (AttrAddrSrc addr _) ->
+        resolveEdhAttrAddr ets addr $ \ !fk ->
+          go rest ((fk, "**") : fs)
+      RecvRestPosArgs (AttrAddrSrc addr _) ->
+        resolveEdhAttrAddr ets addr $ \ !fk ->
+          go rest ((fk, "*") : fs)
 
 edhProcessReprs ::
   forall a.
@@ -4582,12 +4562,16 @@ evalExpr'
             NullaryReceiver -> exitCtor Nothing . HashStore =<< iopdEmpty
             -- a data class
             _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
-              let !diKey =
-                    ( AttrByName "__id__",
-                      EdhArgsPack $ ArgsPack [EdhObject clsObj] dataAttrs
-                    )
-               in iopdFromList (diKey : odToList dataAttrs)
-                    >>= exitCtor Nothing . HashStore
+              dtcFieldKeys' ets argsRcvr $ \ !fks -> do
+                let dataFields = odFromList $
+                      (<$> fks) $ \(fk, _prefix) ->
+                        (fk, odLookupDefault edhNA fk dataAttrs)
+                exitCtor Nothing . HashStore
+                  =<< iopdFromList
+                    [ ( AttrByName "__id__",
+                        EdhArgsPack $ ArgsPack [EdhObject clsObj] dataFields
+                      )
+                    ]
 
           !clsProc =
             ProcDefi
@@ -4631,20 +4615,135 @@ evalExpr'
         -- a normal class
         NullaryReceiver -> pure ()
         -- a data class
-        _ -> do
+        _ -> dtcFieldKeys' ets argsRcvr $ \ !fks -> do
+          !fldGetters <-
+            sequence
+              [ (fk,)
+                  <$> mkHostProperty' clsScope fk (dtcFieldGetter fk) Nothing
+                | (fk, _reprPrefix) <- fks
+              ]
           !clsArts <-
-            sequence $
+            sequence
               [ (AttrByName nm,) <$> mkHostProc clsScope mc nm hp
                 | (mc, nm, hp) <-
                     [ (EdhMethod, "__repr__", (dtcReprProc, NullaryReceiver)),
-                      (EdhMethod, "__str__", (dtcReprProc, NullaryReceiver)),
                       (EdhMethod, "__eq__", (dtcEqProc, NullaryReceiver)),
                       (EdhMethod, "__compare__", (dtcCmpProc, NullaryReceiver))
                     ]
               ]
-          iopdUpdate clsArts cs
+          iopdUpdate (fldGetters ++ clsArts) cs
       -- calling the Edh class definition
       runEdhTx etsCls $ evalStmt body'stmt doExit
+    where
+      dtcFieldGetter :: AttrKey -> EdhHostProc
+      dtcFieldGetter !attrKey !mthExit !ets =
+        lookupEdhObjAttr thisObj (AttrByName "__id__") >>= \case
+          (_, EdhArgsPack (ArgsPack [_cls] !dataFields)) ->
+            case odLookup attrKey dataFields of
+              Just !fv -> exitEdh ets mthExit fv
+              Nothing ->
+                throwEdh ets UsageError $
+                  "no such field `" <> attrKeyStr attrKey <> "` on data object"
+          (_, badVal) -> edhSimpleDesc ets badVal $ \ !badDesc ->
+            throwEdh ets EvalError $
+              "bug: bad __id__ value on data instance: " <> badDesc
+        where
+          !scope = contextScope $ edh'context ets
+          !thisObj = edh'scope'this scope
+
+      dtcReprProc :: ArgsPack -> EdhHostProc
+      dtcReprProc _ !mthExit !ets =
+        lookupEdhObjAttr thisObj (AttrByName "__id__") >>= \case
+          (_, EdhArgsPack (ArgsPack [_cls] !dataFields)) ->
+            dtcFieldKeys ets (edh'obj'class thisObj) $ \ !fks -> do
+              let unnamed :: (AttrKey, Text) -> (EdhValue, Text -> Text)
+                  unnamed (!k, !p) =
+                    if "*" `T.isPrefixOf` p
+                      then (v, (p <>))
+                      else (v, id)
+                    where
+                      !v = odLookupDefault edhNA k dataFields
+                  named :: (AttrKey, Text) -> (EdhValue, Text -> Text)
+                  named (!k, !p) =
+                    if "*" `T.isPrefixOf` p
+                      then (v, (p <>))
+                      else (v, ((attrKeyStr k <> "=") <>))
+                    where
+                      !v = odLookupDefault edhNA k dataFields
+                  rp = if length fks < 3 then unnamed else named
+              edhProcessReprs ets (rp <$> fks) $ \ !dfTokens ->
+                exitEdh ets mthExit $
+                  EdhString $
+                    objClassName thisObj
+                      <> "("
+                      <> T.intercalate ", " dfTokens
+                      <> ")"
+          (_, badVal) -> edhSimpleDesc ets badVal $ \ !badDesc ->
+            throwEdh ets EvalError $
+              "bug: bad __id__ value on data instance: " <> badDesc
+        where
+          !scope = contextScope $ edh'context ets
+          !thisObj = edh'scope'this scope
+
+      dtcEqProc :: ArgsPack -> EdhHostProc
+      dtcEqProc !apk !mthExit !ets = case apk of
+        ArgsPack [EdhObject !objOther] !kwargs
+          | odNull kwargs ->
+            lookupEdhObjAttr thisObj (AttrByName "__id__") >>= \case
+              (_, EdhArgsPack (ArgsPack [!cls] !dataFields)) ->
+                resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
+                  Nothing -> exitEdh ets mthExit $ EdhBool False
+                  Just !instOther ->
+                    lookupEdhObjAttr instOther (AttrByName "__id__") >>= \case
+                      (_, EdhArgsPack (ArgsPack [!clsOther] !dataFieldsOther)) ->
+                        if clsOther /= cls
+                          then exitEdh ets mthExit $ EdhBool False
+                          else edhKeyedListEq
+                            ets
+                            (odToList dataFields)
+                            (odToList dataFieldsOther)
+                            $ \case
+                              Nothing -> exitEdh ets mthExit $ EdhBool False
+                              Just !conclusion ->
+                                exitEdh ets mthExit $ EdhBool conclusion
+                      _ -> exitEdh ets mthExit $ EdhBool False
+              (_, badVal) -> edhSimpleDesc ets badVal $ \ !badDesc ->
+                throwEdh ets EvalError $
+                  "bug: bad __id__ value on data instance: " <> badDesc
+        _ -> exitEdh ets mthExit edhNA -- todo interpret kwargs or throw?
+        where
+          !scope = contextScope $ edh'context ets
+          !thisObj = edh'scope'this scope
+
+      dtcCmpProc :: ArgsPack -> EdhHostProc
+      dtcCmpProc !apk !mthExit !ets = case apk of
+        ArgsPack [EdhObject !objOther] !kwargs
+          | odNull kwargs ->
+            lookupEdhObjAttr thisObj (AttrByName "__id__") >>= \case
+              (_, EdhArgsPack (ArgsPack [!cls] !dataFields)) ->
+                resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
+                  Nothing -> exitEdh ets mthExit edhNA
+                  Just !instOther ->
+                    lookupEdhObjAttr instOther (AttrByName "__id__") >>= \case
+                      (_, EdhArgsPack (ArgsPack [!clsOther] !dataFieldsOther)) ->
+                        if clsOther /= cls
+                          then exitEdh ets mthExit edhNA
+                          else edhCmpKeyedList
+                            ets
+                            (odToList dataFields)
+                            (odToList dataFieldsOther)
+                            $ \case
+                              Nothing -> exitEdh ets mthExit edhNA
+                              Just !conclusion ->
+                                exitEdh ets mthExit $ EdhOrd conclusion
+                      _ -> exitEdh ets mthExit edhNA
+              (_, badVal) -> edhSimpleDesc ets badVal $ \ !badDesc ->
+                throwEdh ets EvalError $
+                  "bug: bad __id__ value on data instance: " <> badDesc
+        _ -> exitEdh ets mthExit edhNA -- todo interpret kwargs or throw?
+        where
+          !scope = contextScope $ edh'context ets
+          !thisObj = edh'scope'this scope
 
 -- defining an Edh namespace
 evalExpr' (NamespaceExpr HostDecl {} _) _ _ =
@@ -5527,40 +5626,6 @@ edhKeyedListEq !ets !l1 !l2 !exit = go l1 l2
         else edhValueEqual ets lhVal' rhVal' $ \case
           Just True -> go lhRest rhRest
           !maybeConclusion -> exit maybeConclusion
-
-dtcEqProc :: ArgsPack -> EdhHostProc
-dtcEqProc !apk !exit !ets = case apk of
-  ArgsPack [EdhObject !objOther] !kwargs | odNull kwargs ->
-    dtcFields ets (edh'obj'class thisObj) thatObj $ \ !thatFields ->
-      resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
-        Nothing -> exitEdh ets exit $ EdhBool False
-        Just {} -> dtcFields ets (edh'obj'class thisObj) objOther $
-          \ !otherFields ->
-            edhKeyedListEq ets thatFields otherFields $ \case
-              Nothing -> exitEdh ets exit $ EdhBool False
-              Just !conclusion -> exitEdh ets exit $ EdhBool conclusion
-  _ -> exitEdh ets exit edhNA -- todo interpret kwargs or throw?
-  where
-    !scope = contextScope $ edh'context ets
-    !thisObj = edh'scope'this scope
-    !thatObj = edh'scope'that scope
-
-dtcCmpProc :: ArgsPack -> EdhHostProc
-dtcCmpProc !apk !exit !ets = case apk of
-  ArgsPack [EdhObject !objOther] !kwargs | odNull kwargs ->
-    dtcFields ets (edh'obj'class thisObj) thatObj $ \ !thatFields ->
-      resolveEdhInstance (edh'obj'class thisObj) objOther >>= \case
-        Nothing -> exitEdh ets exit edhNA
-        Just {} -> dtcFields ets (edh'obj'class thisObj) objOther $
-          \ !otherFields ->
-            edhCmpKeyedList ets thatFields otherFields $ \case
-              Nothing -> exitEdh ets exit edhNA
-              Just !conclusion -> exitEdh ets exit $ EdhOrd conclusion
-  _ -> exitEdh ets exit edhNA -- todo interpret kwargs or throw?
-  where
-    !scope = contextScope $ edh'context ets
-    !thisObj = edh'scope'this scope
-    !thatObj = edh'scope'that scope
 
 edhCmpList ::
   EdhThreadState ->
