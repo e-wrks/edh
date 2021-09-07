@@ -3703,12 +3703,20 @@ evalAttrRef !addr !exit !ets = case addr of
         getEdhAttr
           tgtExpr
           key
-          ( \ !tgtVal _ets -> edhValueDesc ets tgtVal $ \ !tgtDesc ->
-              throwEdh ets EvalError $
-                "no such attribute `"
-                  <> attrKeyStr key
-                  <> "` from a "
-                  <> tgtDesc
+          ( \ !tgtVal -> case edhUltimate tgtVal of
+              EdhObject o ->
+                throwEdhTx EvalError $
+                  "no such attribute `"
+                    <> attrKeyStr key
+                    <> "` from a "
+                    <> objClassName o
+                    <> " object"
+              _ -> edhSimpleDescTx tgtVal $ \ !tgtDesc ->
+                throwEdhTx EvalError $
+                  "no such attribute `"
+                    <> attrKeyStr key
+                    <> "` from a "
+                    <> tgtDesc
           )
           exit
   where
