@@ -18,7 +18,6 @@ import Data.Unique
 import qualified GHC.TypeLits as TypeLits
 import Language.Edh.Batteries.Args
 import Language.Edh.Control
-import Language.Edh.Evaluate
 import Language.Edh.IOPD
 import Language.Edh.InterOpM
 import Language.Edh.Monad
@@ -449,7 +448,47 @@ instance ScriptableComput (InflateEdh' a) where
       else (<$> act) $ \(!d, !extras) ->
         FullyEffected d extras []
 
--- | Wrap a general effectful computation in the 'IO' monad
+-- | Wrap a scripted general computation in the 'EIO' monad
+data ComputEIO a = Typeable a => ComputEIO (EIO a)
+
+instance ScriptableComput (ComputEIO a) where
+  scriptableArgs _ = []
+
+  callByScript (ComputEIO !act) (ArgsPack !args !kwargs) =
+    if not (null args) || not (odNull kwargs)
+      then throwEdhM UsageError "extranous arguments"
+      else (<$> liftEIO act) $ \ !d -> FullyEffected (toDyn d) odEmpty []
+
+-- | Wrap a scripted general computation in the 'EIO' monad
+--
+-- Use this form in case you construct a 'Dynamic' result yourself
+--
+-- Note the type @a@ is for information purpose only, no way get asserted
+data ComputEIO' a = Typeable a => ComputEIO' (EIO Dynamic)
+
+instance ScriptableComput (ComputEIO' a) where
+  scriptableArgs _ = []
+
+  callByScript (ComputEIO' !act) (ArgsPack !args !kwargs) =
+    if not (null args) || not (odNull kwargs)
+      then throwEdhM UsageError "extranous arguments"
+      else (<$> liftEIO act) $ \ !d -> FullyEffected d odEmpty []
+
+-- | Wrap a scripted general computation in the 'EIO' monad, without recording
+-- all args ever applied
+--
+-- Use this form in case you can give out an 'EdhValue' directly
+newtype ComputEIO_ = ComputEIO_ (EIO EdhValue)
+
+instance ScriptableComput ComputEIO_ where
+  scriptableArgs _ = []
+
+  callByScript (ComputEIO_ !act) (ArgsPack !args !kwargs) =
+    if not (null args) || not (odNull kwargs)
+      then throwEdhM UsageError "extranous arguments"
+      else ScriptDone <$> liftEIO act
+
+-- | Wrap a scripted general computation in the 'IO' monad
 data ComputIO a = Typeable a => ComputIO (IO a)
 
 instance ScriptableComput (ComputIO a) where
@@ -460,7 +499,7 @@ instance ScriptableComput (ComputIO a) where
       then throwEdhM UsageError "extranous arguments"
       else (<$> liftIO act) $ \ !d -> FullyEffected (toDyn d) odEmpty []
 
--- | Wrap a general effectful computation in the 'IO' monad
+-- | Wrap a scripted general computation in the 'IO' monad
 --
 -- Use this form in case you construct a 'Dynamic' result yourself
 --
@@ -475,7 +514,8 @@ instance ScriptableComput (ComputIO' a) where
       then throwEdhM UsageError "extranous arguments"
       else (<$> liftIO act) $ \ !d -> FullyEffected d odEmpty []
 
--- | Wrap a general effectful computation in the 'IO' monad
+-- | Wrap a scripted general computation in the 'IO' monad, without recording
+-- all args ever applied
 --
 -- Use this form in case you can give out an 'EdhValue' directly
 newtype ComputIO_ = ComputIO_ (IO EdhValue)
@@ -488,55 +528,7 @@ instance ScriptableComput ComputIO_ where
       then throwEdhM UsageError "extranous arguments"
       else ScriptDone <$> liftIO act
 
--- | Wrap a general effectful computation as an 'IO' continuation
-data ComputContIO a = Typeable a => ComputContIO ((a -> IO ()) -> IO ())
-
-instance ScriptableComput (ComputContIO a) where
-  scriptableArgs _ = []
-
-  callByScript (ComputContIO !act) (ArgsPack !args !kwargs) =
-    if not (null args) || not (odNull kwargs)
-      then throwEdhM UsageError "extranous arguments"
-      else mEdh $ \ !exit !ets -> runEdhTx ets $
-        edhContIO $
-          act $ \ !d ->
-            atomically $ exitEdh ets exit $ FullyEffected (toDyn d) odEmpty []
-
--- | Wrap a general effectful computation as an 'IO' continuation
---
--- Use this form in case you construct a 'Dynamic' result yourself
---
--- Note the type @a@ is for information purpose only, no way get asserted
-data ComputContIO' a = Typeable a => ComputContIO' ((Dynamic -> IO ()) -> IO ())
-
-instance ScriptableComput (ComputContIO' a) where
-  scriptableArgs _ = []
-
-  callByScript (ComputContIO' !act) (ArgsPack !args !kwargs) =
-    if not (null args) || not (odNull kwargs)
-      then throwEdhM UsageError "extranous arguments"
-      else mEdh $ \ !exit !ets -> runEdhTx ets $
-        edhContIO $
-          act $ \ !dd ->
-            atomically $ exitEdh ets exit $ FullyEffected dd odEmpty []
-
--- | Wrap a general effectful computation as an 'IO' continuation
---
--- Use this form in case you can give out an 'EdhValue' directly
-newtype ComputContIO_ = ComputContIO_ ((EdhValue -> IO ()) -> IO ())
-
-instance ScriptableComput ComputContIO_ where
-  scriptableArgs _ = []
-
-  callByScript (ComputContIO_ !act) (ArgsPack !args !kwargs) =
-    if not (null args) || not (odNull kwargs)
-      then throwEdhM UsageError "extranous arguments"
-      else mEdh $ \ !exit !ets -> runEdhTx ets $
-        edhContIO $
-          act $ \ !v ->
-            atomically $ exitEdh ets exit $ ScriptDone v
-
--- | Wrap a general effectful computation in the 'STM' monad
+-- | Wrap a scripted general computation in the 'STM' monad
 data ComputSTM a = Typeable a => ComputSTM (STM a)
 
 instance ScriptableComput (ComputSTM a) where
@@ -547,7 +539,7 @@ instance ScriptableComput (ComputSTM a) where
       then throwEdhM UsageError "extranous arguments"
       else (<$> liftSTM act) $ \ !d -> FullyEffected (toDyn d) odEmpty []
 
--- | Wrap a general effectful computation in the 'STM' monad
+-- | Wrap a scripted general computation in the 'STM' monad
 --
 -- Use this form in case you construct a 'Dynamic' result yourself
 --
@@ -562,7 +554,8 @@ instance ScriptableComput (ComputSTM' a) where
       then throwEdhM UsageError "extranous arguments"
       else (<$> liftSTM act) $ \ !d -> FullyEffected d odEmpty []
 
--- | Wrap a general effectful computation in the 'STM' monad
+-- | Wrap a scripted general computation in the 'STM' monad, without recording
+-- all args ever applied
 --
 -- Use this form in case you can give out an 'EdhValue' directly
 newtype ComputSTM_ = ComputSTM_ (STM EdhValue)
@@ -574,56 +567,6 @@ instance ScriptableComput ComputSTM_ where
     if not (null args) || not (odNull kwargs)
       then throwEdhM UsageError "extranous arguments"
       else ScriptDone <$> liftSTM act
-
--- | Wrap a general effectful computation as an 'STM' continuation
-data ComputContSTM a = Typeable a => ComputContSTM ((a -> STM ()) -> STM ())
-
-instance ScriptableComput (ComputContSTM a) where
-  scriptableArgs _ = []
-
-  callByScript (ComputContSTM !act) (ArgsPack !args !kwargs) =
-    if not (null args) || not (odNull kwargs)
-      then throwEdhM UsageError "extranous arguments"
-      else mEdh $ \ !exit !ets -> runEdhTx ets $
-        edhContSTM $
-          act $ \ !d ->
-            exitEdh ets exit $ FullyEffected (toDyn d) odEmpty []
-
--- | Wrap a general effectful computation as an 'STM' continuation
---
--- Use this form in case you construct a 'Dynamic' result yourself
---
--- Note the type @a@ is for information purpose only, no way get asserted
-data ComputContSTM' a
-  = Typeable a =>
-    ComputContSTM' ((Dynamic -> STM ()) -> STM ())
-
-instance ScriptableComput (ComputContSTM' a) where
-  scriptableArgs _ = []
-
-  callByScript (ComputContSTM' !act) (ArgsPack !args !kwargs) =
-    if not (null args) || not (odNull kwargs)
-      then throwEdhM UsageError "extranous arguments"
-      else mEdh $ \ !exit !ets -> runEdhTx ets $
-        edhContSTM $
-          act $ \ !dd ->
-            exitEdh ets exit $ FullyEffected dd odEmpty []
-
--- | Wrap a general effectful computation as an 'STM' continuation
---
--- Use this form in case you can give out an 'EdhValue' directly
-newtype ComputContSTM_ = ComputContSTM_ ((EdhValue -> STM ()) -> STM ())
-
-instance ScriptableComput ComputContSTM_ where
-  scriptableArgs _ = []
-
-  callByScript (ComputContSTM_ !act) (ArgsPack !args !kwargs) =
-    if not (null args) || not (odNull kwargs)
-      then throwEdhM UsageError "extranous arguments"
-      else mEdh $ \ !exit !ets -> runEdhTx ets $
-        edhContSTM $
-          act $ \ !v ->
-            exitEdh ets exit $ ScriptDone v
 
 -- * Script Argument Adapters
 
