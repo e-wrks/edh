@@ -25,9 +25,11 @@ import Prelude
 
 -- * Monadic Edh Interface
 
+-- TODO implement exception catching, then async exception masking,
+--      then 'bracket'; for 'EIO' at least, possibly for 'Edh' too.
+
 newtype Edh a = Edh
-  { unEdh :: ([(ErrMessage, ErrContext)] -> STM ()) -> EdhTxExit a -> EdhTx
-  }
+  {unEdh :: ([(ErrMessage, ErrContext)] -> STM ()) -> EdhTxExit a -> EdhTx}
 
 -- | Wrap a CPS procedure as 'Edh' computation
 --

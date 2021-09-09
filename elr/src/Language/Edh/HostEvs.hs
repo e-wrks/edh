@@ -4,14 +4,12 @@ module Language.Edh.HostEvs where
 
 import Control.Applicative
 import Control.Concurrent.STM
-import Control.Exception
 import Control.Monad
 import Data.Dynamic
 import Data.Unique
 import Language.Edh.Control
 import Language.Edh.Evaluate
 import Language.Edh.Monad
-import Language.Edh.RtTypes
 import System.IO
 import Prelude
 
@@ -20,18 +18,17 @@ type EndOfStream = Bool
 
 -- | Atomic Event Queue to foster the propagation of an event hierarchy
 --
--- IO computations can be scheduled into such a queue as either consequences or
+-- EIO computations can be scheduled into such a queue as either consequences or
 -- subsequences of, the realization of a whole event hierarchy, which is rooted
 -- from a single root event (published by 'publishEvent'), then to have more
 -- events derived (by 'spreadEvent') from it, either directly or indirectly,
 -- finally forming a whole hierarchy of events.
 data AtomEvq = AtomEvq
-  { aeq'conseqs :: !(TVar [IO ()]),
-    aeq'subseqs :: !(TVar [IO ()]),
-    aeq'conts :: !(TVar [Edh ()])
+  { aeq'conseqs :: !(TVar [EIO ()]),
+    aeq'subseqs :: !(TVar [EIO ()])
   }
 
--- | Schedule an IO computation as a consequence of the underlying event
+-- | Schedule an EIO computation as a consequence of the underlying event
 -- spreading
 --
 -- All consequences will be executed after spreading of the event hierarchy
@@ -41,11 +38,13 @@ data AtomEvq = AtomEvq
 --
 -- No consequence will be executed if the spreading phase fails somehow.
 --
--- Especially note that any failure during any consequence is ignored.
-conseqIO :: AtomEvq -> IO () -> STM ()
-conseqIO (AtomEvq !conseqs _ _) !act = modifyTVar' conseqs (act :)
+-- Currently all consequent/subsequent actions are required to be exception
+-- free, or the entire program / scription may terminate unexpectedly.
+-- Such exceptions may get caught & ignored in the future.
+conseqDo :: EIO () -> AtomEvq -> STM ()
+conseqDo !act (AtomEvq !conseqs _) = modifyTVar' conseqs (act :)
 
--- | Schedule an IO computation as a subsequence of the underlying event
+-- | Schedule an EIO computation as a subsequence of the underlying event
 -- spreading / propagation
 --
 -- All subsequences will be executed after spreading of the event hierarchy
@@ -55,28 +54,17 @@ conseqIO (AtomEvq !conseqs _ _) !act = modifyTVar' conseqs (act :)
 --
 -- No subsequence will be executed if the spreading phase fails somehow.
 --
--- Especially note that any failure during any consequence or subsequence is
--- ignored.
-subseqIO :: AtomEvq -> IO () -> STM ()
-subseqIO (AtomEvq _ !subseqs _) !act = modifyTVar' subseqs (act :)
-
--- | Schedule an Edh computation (which is continuation per se) to be triggered,
--- after all consequences and subsequences of an event has been realized.
---
--- Note: Only in such computations Edh scripting artifacts can be called in a
--- monadic way, with 'IO' or 'STM' monad, that's possible only in CPS and if
--- you have an 'EdhThreadState' available
---
--- Note: Scripting computations are generally much slower than 'IO' or 'STM'
--- computations.
-contsEdh :: AtomEvq -> Edh () -> STM ()
-contsEdh (AtomEvq _ _ !conts) !act = modifyTVar' conts (act :)
+-- Currently all consequent/subsequent actions are required to be exception
+-- free, or the entire program / scription may terminate unexpectedly.
+-- Such exceptions may get caught & ignored in the future.
+subseqDo :: EIO () -> AtomEvq -> STM ()
+subseqDo !act (AtomEvq _ !subseqs) = modifyTVar' subseqs (act :)
 
 -- | An event handler reacts to a particular event with an STM computation,
 -- returns whether it is still interested in the subsequent events in the same
 -- stream
 --
--- Further IO computations can be scheduled into the provided atomic event
+-- Further EIO computations can be scheduled into the provided atomic event
 -- queue. Any failure in any event handler will prevent the publishing of the
 -- current event hierarchy at all, the failure will be thrown to the publisher
 -- of the root event.
@@ -87,7 +75,7 @@ data HandleSubsequentEvents = KeepHandling | StopHandling
 -- | An event listener reacts to a particular event with an STM computation,
 -- returns a possible event listener for the next event in the stream
 --
--- Further IO computations can be scheduled into the provided atomic event
+-- Further EIO computations can be scheduled into the provided atomic event
 -- queue. Any failure in any event listener will prevent the publishing of the
 -- current event hierarchy at all, the failure will be thrown to the publisher
 -- of the root event.
@@ -119,7 +107,7 @@ data EventSink t = EventSink
     --
     -- A spreaded event will be published atomically with the upstream event
     -- hierarchy, so all events published within the same spreaded hierarchy
-    -- are, guaranteed to be seen via 'recentEvent', by any IO computation
+    -- are, guaranteed to be seen via 'recentEvent', by any EIO computation
     -- scheduled as consequence or subsequence of the underlying event
     -- hierarchy.
     spreadEvent :: AtomEvq -> t -> STM (),
@@ -137,7 +125,7 @@ data EventSink t = EventSink
     --
     -- Note that any failure during the spreading phase will be thrown to here,
     -- with all effects of the event cancelled (as far as STM rollback did it).
-    publishEvent :: t -> Edh EndOfStream,
+    publishEvent :: t -> EIO EndOfStream,
     -- | Subscribe an event listener to the event sink
     listenEvents :: EventListener t -> STM (),
     -- | Check whether the event sink is at end-of-stream
@@ -180,7 +168,7 @@ newEventSink = do
       recentEvt :: STM (Maybe t)
       recentEvt = readTVar rcntRef
 
-      publishEvt :: t -> Edh EndOfStream
+      publishEvt :: t -> EIO EndOfStream
       publishEvt = _publish'event eosRef rcntRef subsRef
 
       listenEvs :: EventListener t -> STM ()
@@ -229,9 +217,9 @@ instance Functor EventSink where
             recentEvt' :: STM (Maybe b)
             recentEvt' = fmap f <$> recentEvt
 
-            publishEvt' :: b -> Edh EndOfStream
+            publishEvt' :: b -> EIO EndOfStream
             publishEvt' _ =
-              throwEdhM
+              throwEIO
                 UsageError
                 "prohibited against a decorated event sink"
 
@@ -274,7 +262,7 @@ _spread'event !eosRef !rcntRef !subsRef !aeq !evd =
         -- drive subscribers to spread the current event hierarchy
         !subs -> do
           !subs' <- _spread'to'subscribers aeq evd subs
-          conseqIO aeq $ atomically $ writeTVar subsRef subs'
+          conseqDo (atomicallyEIO $ writeTVar subsRef subs') aeq
 
 _spread'to'subscribers ::
   forall t.
@@ -300,50 +288,41 @@ _publish'event ::
   TVar (Maybe t) ->
   TVar [EventListener t] ->
   t ->
-  Edh EndOfStream
-_publish'event !eosRef !rcntRef !subsRef !evd = mEdh $ \ !exit !ets ->
-  runEdhTx ets $
-    edhContIO $
-      readTVarIO eosRef >>= \case
-        True -> atomically $ exitEdh ets exit True
-        False ->
-          readTVarIO subsRef >>= \case
-            -- short-circuit when there are no subscribers
-            [] -> atomically $ do
+  EIO EndOfStream
+_publish'event !eosRef !rcntRef !subsRef !evd =
+  readTVarEIO eosRef >>= \case
+    True -> atomicallyEIO $ return True
+    False ->
+      readTVarEIO subsRef >>= \case
+        -- short-circuit when there are no subscribers
+        [] -> atomicallyEIO $ do
+          writeTVar rcntRef $ Just evd
+          return False
+        -- drive subscribers to spread an event hierarchy
+        !subs -> do
+          !conseqs <- newTVarEIO []
+          !subseqs <- newTVarEIO []
+
+          (atomicallyEIO . writeTVar subsRef =<<) $
+            atomicallyEIO $ do
               writeTVar rcntRef $ Just evd
-              exitEdh ets exit False
-            -- drive subscribers to spread an event hierarchy
-            !subs -> do
-              !conseqs <- newTVarIO []
-              !subseqs <- newTVarIO []
-              !conts <- newTVarIO []
+              _spread'to'subscribers
+                (AtomEvq conseqs subseqs)
+                evd
+                subs
 
-              (atomically . writeTVar subsRef =<<) $
-                atomically $ do
-                  writeTVar rcntRef $ Just evd
-                  _spread'to'subscribers
-                    (AtomEvq conseqs subseqs conts)
-                    evd
-                    subs
+          -- execute the consequences
+          readTVarEIO conseqs >>= propagate
 
-              -- execute the consequences
-              readTVarIO conseqs >>= propagate
+          -- execute the subsequences
+          readTVarEIO subseqs >>= propagate
 
-              -- execute the subsequences
-              readTVarIO subseqs >>= propagate
-
-              -- trigger continuation actions
-              !cas <- readTVarIO conts
-              atomically $
-                runEdh ets (sequence_ cas) $ \() _ets ->
-                  readTVar eosRef >>= exitEdh ets exit
+          readTVarEIO eosRef
   where
-    propagate :: [IO ()] -> IO ()
+    propagate :: [EIO ()] -> EIO ()
     propagate [] = return ()
     propagate (act : rest) = do
-      catch act $ \(SomeException exc) ->
-        hPutStrLn stderr $
-          "Unexpected exception in event propagation: " <> show exc
+      act -- TODO should catch any tolerable exception, and keep going in case
       propagate rest
 
 _listen'events ::
@@ -362,14 +341,14 @@ _listen'events !eosRef !subsRef !listener =
 -- Any failure in the handler will prevent publishing of the original event at
 -- all, such a failure will be thrown at the publisher of the original event.
 --
--- The atomic event queue can be used to schedule IO computations as
--- subsequences of the original event. All subsequent IO computations will be
+-- The atomic event queue can be used to schedule EIO computations as
+-- subsequences of the original event. All subsequent EIO computations will be
 -- tried regardless of other's failures, so long as the publishing of the
 -- original event succeeded.
 on ::
-  forall t. Typeable t => EventSink t -> (AtomEvq -> t -> STM ()) -> STM ()
+  forall t. Typeable t => EventSink t -> (t -> AtomEvq -> STM ()) -> STM ()
 on !evs !handler = handleEvents evs $ \ !aeq !evd -> do
-  handler aeq evd
+  handler evd aeq
   return KeepHandling
 
 -- | Subscribe to the next event through the specified event sink
@@ -377,14 +356,14 @@ on !evs !handler = handleEvents evs $ \ !aeq !evd -> do
 -- Any failure in the handler will prevent publishing of the original event at
 -- all, such a failure will be thrown at the publisher of the original event.
 --
--- The atomic event queue can be used to schedule IO computations as
--- subsequences of the original event. All subsequent IO computations will be
+-- The atomic event queue can be used to schedule EIO computations as
+-- subsequences of the original event. All subsequent EIO computations will be
 -- tried regardless of other's failures, so long as the publishing of the
 -- original event succeeded.
 once ::
-  forall t. Typeable t => EventSink t -> (AtomEvq -> t -> STM ()) -> STM ()
+  forall t. Typeable t => EventSink t -> (t -> AtomEvq -> STM ()) -> STM ()
 once !evs !handler = handleEvents evs $ \ !aeq !evd -> do
-  handler aeq evd
+  handler evd aeq
   return StopHandling
 
 -- | Spread new event stream(s), as part of the spreading of an upstream event
@@ -437,37 +416,34 @@ generateEvents ::
   Typeable t =>
   (SomeEventSink -> STM Bool) ->
   EventSink t ->
-  ((forall t'. Typeable t' => EventSink t' -> t' -> Edh ()) -> t -> IO ()) ->
-  Edh ()
-generateEvents !stopOnEoS !intake !deriver = mEdh $ \ !exit !ets ->
-  runEdhTx ets $
-    edhContIO $ do
-      !stopVar <- newTVarIO False
-      let publisher :: forall t'. Typeable t' => EventSink t' -> t' -> Edh ()
-          publisher evs' d' = do
-            inlineSTM (atEndOfStream evs') >>= markStop
-            publishEvent evs' d' >>= markStop
-            where
-              markStop :: Bool -> Edh ()
-              markStop = \case
-                True ->
-                  inlineSTM $
-                    stopOnEoS (SomeEventSink evs') >>= \case
-                      True -> writeTVar stopVar True
-                      False ->
-                        throwHostSTM
-                          UsageError
-                          "publishing to an EventSink at eos"
-                False -> pure ()
+  ((forall t'. Typeable t' => EventSink t' -> t' -> EIO ()) -> t -> EIO ()) ->
+  EIO ()
+generateEvents !stopOnEoS !intake !deriver = do
+  !stopVar <- newTVarEIO False
+  let publisher :: forall t'. Typeable t' => EventSink t' -> t' -> EIO ()
+      publisher evs' d' = do
+        atomicallyEIO (atEndOfStream evs') >>= markStop
+        publishEvent evs' d' >>= markStop
+        where
+          markStop :: Bool -> EIO ()
+          markStop = \case
+            True ->
+              atomicallyEIO $
+                stopOnEoS (SomeEventSink evs') >>= \case
+                  True -> writeTVar stopVar True
+                  False ->
+                    throwHostSTM
+                      UsageError
+                      "publishing to an EventSink at eos"
+            False -> pure ()
 
-      atomically $ do
-        handleEvents intake $ \ !aeq !evd ->
-          readTVar stopVar >>= \case
-            True -> return StopHandling
-            False -> do
-              conseqIO aeq $ deriver publisher evd
-              return KeepHandling
-        exitEdh ets exit ()
+  atomicallyEIO $
+    handleEvents intake $ \ !aeq !evd ->
+      readTVar stopVar >>= \case
+        True -> return StopHandling
+        False -> do
+          conseqDo (deriver publisher evd) aeq
+          return KeepHandling
 
 stopWhenAllEventSinksAtEoS ::
   [SomeEventSink] -> STM (SomeEventSink -> STM Bool)
