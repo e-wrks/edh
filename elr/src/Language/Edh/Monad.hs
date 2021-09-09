@@ -712,6 +712,14 @@ instance MonadIO EIO where
 
 -- ** EIO Monad Utilities
 
+eioThreadState :: EIO EdhThreadState
+eioThreadState = EIO $ \ets exit -> exit ets
+{-# INLINE eioThreadState #-}
+
+eioProgramState :: EIO EdhProgState
+eioProgramState = EIO $ \ets exit -> exit (edh'thread'prog ets)
+{-# INLINE eioProgramState #-}
+
 atomicallyEIO :: STM a -> EIO a
 atomicallyEIO = liftIO . atomically
 {-# INLINE atomicallyEIO #-}
