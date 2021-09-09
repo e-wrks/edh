@@ -23,7 +23,7 @@ import qualified Data.Text as T
 import Data.Text.Encoding (Decoding (Some))
 import qualified Data.Text.Encoding as TE
 import Data.Text.Encoding.Error (lenientDecode)
-import Data.Typeable (Proxy (..), Typeable, typeRep)
+import Data.Typeable hiding (TypeRep, typeOf, typeRep)
 import qualified Data.UUID as UUID
 import Data.Unique
 import GHC.Clock
@@ -49,6 +49,7 @@ import Text.Megaparsec.Pos
   ( SourcePos (SourcePos, sourceColumn, sourceLine, sourceName),
     mkPos,
   )
+import Type.Reflection
 import Prelude
 
 -- | Construct an error context from thread state
@@ -2620,7 +2621,7 @@ withHostObject !ets !obj !exit = withHostObject' obj naExit exit
     naExit =
       throwEdh ets UsageError $
         "not a host object of expected storage type <<"
-          <> T.pack (show $ typeRep (Proxy :: Proxy a))
+          <> T.pack (show $ typeRep @a)
           <> ">> but bearing a: "
           <> T.pack (show $ edh'obj'store obj)
 
@@ -2648,7 +2649,7 @@ withDerivedHostObject !ets !endObj !exit =
     naExit =
       throwEdh ets UsageError $
         "not derived from a host object of expected storage type: "
-          <> T.pack (show $ typeRep (Proxy :: Proxy a))
+          <> T.pack (show $ typeRep @a)
 
 withDerivedHostObject' ::
   forall a.
