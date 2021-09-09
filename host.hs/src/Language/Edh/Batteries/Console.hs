@@ -277,13 +277,14 @@ timelyNotify !ets !scale !interval !wait1st !exit =
                       atomically $ void $ tryPutTMVar notif curr'ns
                   )
               atomically notifOne
-            notifOne = do
-              !last'ns <- takeTMVar notif
-              runEdhTx ets $
-                edhYield
-                  (EdhDecimal $ fromIntegral last'ns)
-                  (const $ schedNext last'ns)
-                  exit
+            notifOne = runEdhTx ets $
+              edhContSTM $ do
+                !last'ns <- takeTMVar notif
+                runEdhTx ets $
+                  edhYield
+                    (EdhDecimal $ fromIntegral last'ns)
+                    (const $ schedNext last'ns)
+                    exit
         atomically $
           if wait1st
             then runEdhTx ets $ schedNext ns
