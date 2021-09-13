@@ -15,6 +15,7 @@ import Language.Edh.Control
 import Language.Edh.IOPD
 import Language.Edh.Monad
 import Language.Edh.RtTypes
+import Type.Reflection
 import Prelude
 
 -- * utilities
@@ -1941,7 +1942,8 @@ instance
           (obj :) <$> readTVarEdh (edh'obj'supers obj) >>= goSearch args kwargs'
         _ ->
           throwEdhM UsageError $
-            "arg type mismatch: expect host object for "
+            "arg type mismatch: expect host " <> T.pack (show $ typeRep @h)
+              <> " value for "
               <> argName
               <> " but given "
               <> edhTypeNameOf val
@@ -1952,7 +1954,8 @@ instance
             (obj :) <$> readTVarEdh (edh'obj'supers obj) >>= goSearch args' kwargs'
           _ ->
             throwEdhM UsageError $
-              "arg type mismatch: expect host object for "
+              "arg type mismatch: expect host " <> T.pack (show $ typeRep @h)
+                <> " value for "
                 <> argName
                 <> " but given "
                 <> edhTypeNameOf val
@@ -1984,7 +1987,8 @@ instance
           (obj :) <$> readTVarEdh (edh'obj'supers obj) >>= goSearch args kwargs'
         _ ->
           throwEdhM UsageError $
-            "arg type mismatch: expect host object for "
+            "arg type mismatch: expect host " <> T.pack (show $ typeRep @h)
+              <> " value for "
               <> argName
               <> " but given "
               <> edhTypeNameOf val
@@ -1996,7 +2000,8 @@ instance
             (obj :) <$> readTVarEdh (edh'obj'supers obj) >>= goSearch args' kwargs'
           _ ->
             throwEdhM UsageError $
-              "arg type mismatch: expect host object for "
+              "arg type mismatch: expect host " <> T.pack (show $ typeRep @h)
+                <> " value for "
                 <> argName
                 <> " but given "
                 <> edhTypeNameOf val
@@ -3886,7 +3891,8 @@ instance
           (obj :) <$> readTVarEdh (edh'obj'supers obj) >>= goSearch args kwargs'
         _ ->
           throwEdhM UsageError $
-            "arg type mismatch: expect host object for "
+            "arg type mismatch: expect host " <> T.pack (show $ typeRep @h)
+              <> " value for "
               <> argName
               <> " but given "
               <> edhTypeNameOf val
@@ -3897,7 +3903,8 @@ instance
             (obj :) <$> readTVarEdh (edh'obj'supers obj) >>= goSearch args' kwargs'
           _ ->
             throwEdhM UsageError $
-              "arg type mismatch: expect host object for "
+              "arg type mismatch: expect host " <> T.pack (show $ typeRep @h)
+                <> " value for "
                 <> argName
                 <> " but given "
                 <> edhTypeNameOf val
@@ -3929,7 +3936,8 @@ instance
           (obj :) <$> readTVarEdh (edh'obj'supers obj) >>= goSearch args kwargs'
         _ ->
           throwEdhM UsageError $
-            "arg type mismatch: expect host object for "
+            "arg type mismatch: expect host " <> T.pack (show $ typeRep @h)
+              <> " value for "
               <> argName
               <> " but given "
               <> edhTypeNameOf val
@@ -3941,7 +3949,8 @@ instance
             (obj :) <$> readTVarEdh (edh'obj'supers obj) >>= goSearch args' kwargs'
           _ ->
             throwEdhM UsageError $
-              "arg type mismatch: expect host object for "
+              "arg type mismatch: expect host " <> T.pack (show $ typeRep @h)
+                <> " value for "
                 <> argName
                 <> " but given "
                 <> edhTypeNameOf val
