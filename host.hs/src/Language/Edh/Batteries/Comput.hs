@@ -1426,10 +1426,20 @@ withHostValueOf !obj = (obj :) <$> readTVarEdh (edh'obj'supers obj) >>= go
     go [] = do
       !badDesc <- edhObjDescM obj
       naM $
-        badDesc <> " does not have an expected host value of type: "
+        "object " <> badDesc
+          <> " does not wrap an expected host value of type: "
           <> T.pack (show $ typeRep @t)
     go (inst : rest) = case dynamicHostData inst of
       Nothing -> go rest
       Just !dd -> case fromDynamic dd of
         Nothing -> go rest
         Just (d :: t) -> return (inst, d)
+
+withHostValueOf' :: forall t. (Typeable t) => EdhValue -> Edh (Object, t)
+withHostValueOf' !val = case edhUltimate val of
+  EdhObject !obj -> withHostValueOf obj
+  _ -> do
+    !badDesc <- edhValueDescM val
+    naM $
+      badDesc <> " is not an expected host object of type: "
+        <> T.pack (show $ typeRep @t)

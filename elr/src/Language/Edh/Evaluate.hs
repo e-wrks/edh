@@ -124,12 +124,15 @@ getEdhAttr ::
   EdhTx
 getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
   -- no magic layer laid over access via `this` ref
-  AttrExpr ThisRef {} ->
+  AttrExpr ThisRef {} -> do
+    let this = edh'scope'this scope
     runEdhTx ets $
-      getObjProperty' (edh'scope'this scope) key (exitNoAttr . EdhObject) exit
-  AttrExpr ThatRef {} ->
+      getObjProperty' this key (exitNoAttr $ EdhObject this) exit
+  AttrExpr ThatRef {} -> do
+    let that = edh'scope'that scope
+
     runEdhTx ets $
-      getObjProperty' (edh'scope'that scope) key (exitNoAttr . EdhObject) exit
+      getObjProperty' that key (exitNoAttr $ EdhObject that) exit
   AttrExpr SuperRef {} ->
     let !this = edh'scope'this scope
      in lookupEdhSuperAttr this key >>= \case
@@ -139,7 +142,8 @@ getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
     evalExprSrc fromExpr $ \ !fromVal _ets ->
       case edhUltimate fromVal of
         EdhObject !obj ->
-          runEdhTx ets $ getObjProperty' obj key (exitNoAttr . EdhObject) exit
+          runEdhTx ets $
+            getObjProperty' obj key (exitNoAttr $ EdhObject obj) exit
         -- getting attr from an apk
         EdhArgsPack (ArgsPack _ !kwargs) ->
           exitEdh ets exit $ odLookupDefault EdhNil key kwargs
@@ -169,17 +173,17 @@ getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
 getObjProperty :: Object -> AttrKey -> EdhTxExit EdhValue -> EdhTx
 getObjProperty !obj !key !exit = getObjProperty' obj key exitNoAttr exit
   where
-    exitNoAttr obj' =
+    exitNoAttr =
       throwEdhTx EvalError $
         "no such property `" <> attrKeyStr key <> "` from a `"
-          <> objClassName obj'
+          <> objClassName obj
           <> "` object"
 
 getObjProperty' ::
-  Object -> AttrKey -> EdhTxExit Object -> EdhTxExit EdhValue -> EdhTx
+  Object -> AttrKey -> EdhTx -> EdhTxExit EdhValue -> EdhTx
 getObjProperty' !obj !key exitNoAttr !exit !ets =
   runEdhTx ets $
-    getObjAttrWithMagic' obj key (exitNoAttr obj) $
+    getObjAttrWithMagic' obj key exitNoAttr $
       realizeObjProperty obj exit
 
 realizeObjProperty ::

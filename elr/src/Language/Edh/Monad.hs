@@ -112,6 +112,13 @@ instance MonadIO Edh where
 
 -- ** Attribute Resolution
 
+getObjPropertyM :: Object -> AttrKey -> Edh EdhValue
+getObjPropertyM !obj !key = mEdh' $ \naExit !exit -> do
+  let exitNoAttr = edhObjDescTx obj $ \ !objDesc ->
+        naExit $
+          "no such property `" <> attrKeyStr key <> "` on object - " <> objDesc
+  getObjProperty' obj key exitNoAttr exit
+
 resolveEdhAttrAddrM :: AttrAddr -> Edh AttrKey
 resolveEdhAttrAddrM (NamedAttr !attrName) = return (AttrByName attrName)
 resolveEdhAttrAddrM (QuaintAttr !attrName) = return (AttrByName attrName)
