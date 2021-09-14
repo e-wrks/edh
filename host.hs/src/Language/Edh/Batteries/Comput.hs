@@ -1406,8 +1406,8 @@ dynamicHostData !obj = case edh'obj'store obj of
     _ -> Just dhs
   _ -> Nothing
 
-asHostValueOf :: forall t. (Typeable t) => Object -> Edh t
-asHostValueOf !inst = case dynamicHostData inst of
+hostInstanceOf :: forall t. (Typeable t) => Object -> Edh t
+hostInstanceOf !inst = case dynamicHostData inst of
   Nothing ->
     naM $
       "not a host object with expected type: " <> T.pack (show $ typeRep @t)
@@ -1421,19 +1421,19 @@ asHostValueOf !inst = case dynamicHostData inst of
           <> T.pack (show $ typeRep @t)
     Just (d :: t) -> return d
 
-thisHostValueOf :: forall t. (Typeable t) => Edh t
-thisHostValueOf = do
+thisHostObjectOf :: forall t. (Typeable t) => Edh t
+thisHostObjectOf = do
   !ets <- edhThreadState
   let !this = edh'scope'this $ contextScope $ edh'context ets
-  (asHostValueOf @t this <|>) $
+  (hostInstanceOf @t this <|>) $
     naM $
       "bug: this object is not wrapping a host value of type: "
         <> T.pack (show $ typeRep @t)
 
 {- HLINT ignore "Redundant <$>" -}
 
-withHostValueOf :: forall t. (Typeable t) => Object -> Edh (Object, t)
-withHostValueOf !obj = (obj :) <$> readTVarEdh (edh'obj'supers obj) >>= go
+hostObjectOf :: forall t. (Typeable t) => Object -> Edh (Object, t)
+hostObjectOf !obj = (obj :) <$> readTVarEdh (edh'obj'supers obj) >>= go
   where
     go :: [Object] -> Edh (Object, t)
     go [] = do
@@ -1448,9 +1448,9 @@ withHostValueOf !obj = (obj :) <$> readTVarEdh (edh'obj'supers obj) >>= go
         Nothing -> go rest
         Just (d :: t) -> return (inst, d)
 
-withHostValueOf' :: forall t. (Typeable t) => EdhValue -> Edh (Object, t)
-withHostValueOf' !val = case edhUltimate val of
-  EdhObject !obj -> withHostValueOf obj
+hostObjectOf' :: forall t. (Typeable t) => EdhValue -> Edh (Object, t)
+hostObjectOf' !val = case edhUltimate val of
+  EdhObject !obj -> hostObjectOf obj
   _ -> do
     !badDesc <- edhValueDescM val
     naM $

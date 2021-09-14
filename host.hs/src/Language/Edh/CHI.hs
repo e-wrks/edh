@@ -361,7 +361,7 @@ module Language.Edh.CHI
 
     -- * standalone modules
     module Language.Edh.IOPD,
-    module Language.Edh.HostEvs,
+    module Language.Edh.Batteries.HostEvs,
   )
 where
 
@@ -372,7 +372,7 @@ import Language.Edh.Control
 import Language.Edh.CoreLang
 import Language.Edh.EdhEvs
 import Language.Edh.Evaluate
-import Language.Edh.HostEvs
+import Language.Edh.Batteries.HostEvs
 import Language.Edh.IOPD
 import Language.Edh.InterOp
 import Language.Edh.PkgMan

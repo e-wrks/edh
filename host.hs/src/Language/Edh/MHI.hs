@@ -7,7 +7,7 @@ module Language.Edh.MHI
     module Language.Edh.Control,
     module Language.Edh.IOPD,
     module Language.Edh.CoreLang,
-    module Language.Edh.HostEvs,
+    module Language.Edh.Batteries.HostEvs,
     module Language.Edh.InterOpM,
     module Language.Edh.Batteries,
     module Language.Edh.Batteries.Args,
@@ -32,7 +32,7 @@ import Language.Edh.Batteries.Comput
 import Language.Edh.Control
 import Language.Edh.CoreLang
 import Language.Edh.Evaluate
-import Language.Edh.HostEvs
+import Language.Edh.Batteries.HostEvs
 import Language.Edh.IOPD
 import Language.Edh.InterOpM
 import Language.Edh.Monad

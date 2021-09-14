@@ -1,6 +1,6 @@
 {-# LANGUAGE InstanceSigs #-}
 
-module Language.Edh.HostEvs where
+module Language.Edh.Batteries.HostEvs where
 
 import Control.Applicative
 import Control.Concurrent.STM
@@ -8,9 +8,12 @@ import Control.Monad
 import Data.Dynamic
 import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
+import Language.Edh.Batteries.Comput
 import Language.Edh.Control
 import Language.Edh.Evaluate
 import Language.Edh.Monad
+import Language.Edh.RtTypes
+import Type.Reflection
 import Prelude
 
 -- | Indicates whether the relevant event sink is at end-of-stream
@@ -83,14 +86,37 @@ data HandleSubsequentEvents = KeepHandling | StopHandling
 -- When subsequent events should be processed by the same event listener or not
 -- at all, it should be more proper to implement an 'EventHandler'.
 newtype EventListener t = EventListener
-  { on'event :: AtomEvq -> t -> STM (Maybe (EventListener t))
-  }
+  {on'event :: AtomEvq -> t -> STM (Maybe (EventListener t))}
 
--- | The polymorphic event sink wrapper
+-- | Polymorphic event sink value wrapper
 data SomeEventSink = forall t. Typeable t => SomeEventSink (EventSink t)
 
 instance Eq SomeEventSink where
   SomeEventSink x == SomeEventSink y = isSameEventSink x y
+
+-- | Polymorphic event sink argument adapter
+data AnyEventSink = forall t. Typeable t => AnyEventSink (EventSink t) Object
+
+instance Eq AnyEventSink where
+  AnyEventSink x _ == AnyEventSink y _ = isSameEventSink x y
+
+instance ScriptArgAdapter AnyEventSink where
+  adaptEdhArg !v = (<|> badVal) $ case edhUltimate v of
+    EdhObject o -> case dynamicHostData o of
+      Nothing -> mzero
+      Just (Dynamic tr evs) -> case tr of
+        App trEvs trE -> case eqTypeRep trEvs (typeRep @EventSink) of
+          Just HRefl -> withTypeable trE $ return $ AnyEventSink evs o
+          _ -> mzero
+        _ -> mzero
+    _ -> mzero
+    where
+      badVal = do
+        !badDesc <- edhValueDescM v
+        throwEdhM UsageError $
+          "any EventSink expected but given: " <> badDesc
+
+  adaptedArgValue (AnyEventSink _evs !obj) = EdhObject obj
 
 -- | An event sink conveys an event stream, with possibly multiple event
 -- producers and / or multiple event consumers (i.e. listeners and handlers

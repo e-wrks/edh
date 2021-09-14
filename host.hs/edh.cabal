@@ -41,6 +41,7 @@ library
     Language.Edh.Batteries.Ctrl
     Language.Edh.Batteries.Data
     Language.Edh.Batteries.Evt
+    Language.Edh.Batteries.HostEvs
     Language.Edh.Batteries.Math
     Language.Edh.Batteries.Reflect
     Language.Edh.Batteries.Vector

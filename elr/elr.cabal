@@ -33,7 +33,6 @@ library
     Language.Edh.RtTypes
     Language.Edh.Utils
     Language.Edh.EdhEvs
-    Language.Edh.HostEvs
     Language.Edh.InterOp
     Language.Edh.InterOpM
     Language.Edh.Monad
