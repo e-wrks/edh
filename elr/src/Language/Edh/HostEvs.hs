@@ -7,10 +7,10 @@ import Control.Concurrent.STM
 import Control.Monad
 import Data.Dynamic
 import Data.Unique
+import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Control
 import Language.Edh.Evaluate
 import Language.Edh.Monad
-import System.IO
 import Prelude
 
 -- | Indicates whether the relevant event sink is at end-of-stream
@@ -154,12 +154,20 @@ handleEvents !evs !handler =
           StopHandling -> return Nothing
 
 -- | Create a new event sink
-newEventSink :: forall t. IO (EventSink t)
+newEventSinkEdh :: forall t. Edh (EventSink t)
+newEventSinkEdh = inlineSTM newEventSink
+
+-- | Create a new event sink
+newEventSinkEIO :: forall t. EIO (EventSink t)
+newEventSinkEIO = atomicallyEIO newEventSink
+
+-- | Create a new event sink
+newEventSink :: forall t. STM (EventSink t)
 newEventSink = do
-  !esid <- newUnique
-  !eosRef <- newTVarIO False
-  !rcntRef <- newTVarIO Nothing
-  !subsRef <- newTVarIO []
+  !esid <- unsafeIOToSTM newUnique
+  !eosRef <- newTVar False
+  !rcntRef <- newTVar Nothing
+  !subsRef <- newTVar []
 
   let --
       spreadEvt :: AtomEvq -> t -> STM ()
