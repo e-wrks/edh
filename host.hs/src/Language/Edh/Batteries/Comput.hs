@@ -3,6 +3,8 @@
 
 module Language.Edh.Batteries.Comput where
 
+-- import Debug.Trace
+
 import Control.Applicative
 import Control.Concurrent.STM
 import Control.Monad
@@ -1079,7 +1081,7 @@ defineComputClass' !effOnCtor !rootComput !clsName =
     attrReadProc !keyVal = do
       !argKey <- edhValueAsAttrKeyM keyVal
       (<|> rawValue) $
-        thisHostValueOf >>= \case
+        thisScripted >>= \case
           ScriptDone {} -> return nil
           ScriptDone' {} -> return nil
           PartiallyApplied _c appliedArgs ->
@@ -1100,7 +1102,7 @@ defineComputClass' !effOnCtor !rootComput !clsName =
     reprProc :: ArgsPack -> Edh EdhValue
     reprProc _ =
       (<|> rawValue) $
-        thisHostValueOf >>= \case
+        thisScripted >>= \case
           ScriptDone !done ->
             edhValueReprM done >>= \ !doneRepr ->
               return $ EdhString $ "{# " <> clsName <> " #} " <> doneRepr
@@ -1139,10 +1141,10 @@ defineComputClass' !effOnCtor !rootComput !clsName =
           !this <-
             edh'scope'this . contextScope . edh'context <$> edhThreadState
           case edh'obj'store this of
-            HostStore !dd ->
+            HostStore (Dynamic tr _) ->
               return $
                 EdhString $
-                  "{# " <> clsName <> ": <raw>" <> T.pack (show dd) <> " #} "
+                  "{# " <> clsName <> ": <raw:" <> T.pack (show tr) <> "> #} "
             _ -> throwEdhM EvalError "bug: Comput not a host object"
 
         tshowAppliedArgs ::
@@ -1196,7 +1198,7 @@ defineComputClass' !effOnCtor !rootComput !clsName =
     showProc :: ArgsPack -> Edh EdhValue
     showProc _ =
       (<|> rawValue) $
-        thisHostValueOf >>= \case
+        thisScripted >>= \case
           ScriptDone !done ->
             edhValueReprM done >>= \ !doneRepr ->
               return $
@@ -1236,9 +1238,8 @@ defineComputClass' !effOnCtor !rootComput !clsName =
           !this <-
             edh'scope'this . contextScope . edh'context <$> edhThreadState
           case edh'obj'store this of
-            HostStore !dd ->
-              return $
-                EdhString $ clsName <> ": <raw> " <> T.pack (show dd)
+            HostStore (Dynamic tr _) ->
+              return $ EdhString $ clsName <> ": <raw:" <> T.pack (show tr)
             _ -> throwEdhM EvalError "bug: Comput not a host object"
 
         tshowAppliedArgs ::
@@ -1285,7 +1286,7 @@ defineComputClass' !effOnCtor !rootComput !clsName =
 
     callProc :: ArgsPack -> Edh EdhValue
     callProc apk@(ArgsPack args kwargs) =
-      thisHostValueOf >>= \case
+      thisScripted >>= \case
         ScriptDone !done ->
           if null args && odNull kwargs
             then return done
@@ -1342,6 +1343,16 @@ defineComputClass' !effOnCtor !rootComput !clsName =
                       edh'obj'store = HostStore dd
                     }
 
+    thisScripted :: Edh ScriptedResult
+    thisScripted = do
+      !ets <- edhThreadState
+      let !this = edh'scope'this $ contextScope $ edh'context ets
+      case edh'obj'store this of
+        HostStore !dhs -> case fromDynamic dhs of
+          Just (sr :: ScriptedResult) -> return sr
+          Nothing -> naM "bug: this is not a scripted Comput"
+        _ -> naM "bug: Comput not a host object"
+
 appliedArgByKey :: AttrKey -> [(ScriptArgDecl, EdhValue)] -> EdhValue
 appliedArgByKey k = go
   where
@@ -1397,16 +1408,18 @@ dynamicHostData !obj = case edh'obj'store obj of
 
 asHostValueOf :: forall t. (Typeable t) => Object -> Edh t
 asHostValueOf !inst = case dynamicHostData inst of
-  Nothing -> naAct
-  Just !dd -> case fromDynamic dd of
-    Nothing -> naAct
-    Just (d :: t) -> return d
-  where
-    naAct = do
-      !badDesc <- edhObjDescM inst
+  Nothing ->
+    naM $
+      "not a host object with expected type: " <> T.pack (show $ typeRep @t)
+  Just dd@(Dynamic tr _) -> case fromDynamic dd of
+    Nothing ->
       naM $
-        badDesc <> " does not wrap an expected host value of type: "
+        "a " <> edhClassName inst
+          <> " object wraps a host value of type '"
+          <> T.pack (show tr)
+          <> "' instead of expected: "
           <> T.pack (show $ typeRep @t)
+    Just (d :: t) -> return d
 
 thisHostValueOf :: forall t. (Typeable t) => Edh t
 thisHostValueOf = do
