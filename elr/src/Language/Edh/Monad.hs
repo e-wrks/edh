@@ -548,7 +548,7 @@ regulateEdhSliceM ::
 regulateEdhSliceM !len !slice = Edh $ \_naExit !exit !ets ->
   regulateEdhSlice ets len slice $ exitEdh ets exit
 
--- ** Exception Throwing & Handling
+-- ** Exceptions
 
 throwEdhM :: EdhErrorTag -> ErrMessage -> Edh a
 throwEdhM tag msg = throwEdhM' tag msg []
