@@ -1728,7 +1728,7 @@ edhTypeNameOf (EdhObject o) = case edh'obj'store o of
   ClassStore !cls -> case edh'procedure'decl $ edh'class'proc cls of
     ProcDecl {} -> "Class"
     HostDecl {} -> "HostClass"
-  HostStore {} -> "HostValue"
+  HostStore (Dynamic tr _) -> "HostValue:" <> T.pack (show tr)
 edhTypeNameOf (EdhProcedure pc _) = edhProcTypeNameOf pc
 edhTypeNameOf (EdhBoundProc pc _ _ _) = edhProcTypeNameOf pc
 edhTypeNameOf EdhBreak = "Break"
