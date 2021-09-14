@@ -325,25 +325,21 @@ _publish'event ::
   EIO EndOfStream
 _publish'event !eosRef !rcntRef !subsRef !evd =
   readTVarEIO eosRef >>= \case
-    True -> atomicallyEIO $ return True
-    False ->
+    True -> return True
+    False -> do
+      writeTVarEIO rcntRef $ Just evd
+
       readTVarEIO subsRef >>= \case
         -- short-circuit when there are no subscribers
-        [] -> atomicallyEIO $ do
-          writeTVar rcntRef $ Just evd
-          return False
+        [] -> return False
         -- drive subscribers to spread an event hierarchy
         !subs -> do
           !conseqs <- newTVarEIO []
           !subseqs <- newTVarEIO []
 
-          (atomicallyEIO . writeTVar subsRef =<<) $
-            atomicallyEIO $ do
-              writeTVar rcntRef $ Just evd
-              _spread'to'subscribers
-                (AtomEvq conseqs subseqs)
-                evd
-                subs
+          atomicallyEIO $
+            _spread'to'subscribers (AtomEvq conseqs subseqs) evd subs
+              >>= writeTVar subsRef
 
           -- execute the consequences
           readTVarEIO conseqs >>= propagate
