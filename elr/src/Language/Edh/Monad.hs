@@ -71,6 +71,7 @@ naM msg = mEdh' $ \naExit _exit -> naExit msg
 -- | Run an 'Edh' action from within an @'STM' ()@ action
 --
 -- CAVEAT:
+--
 -- * You would better make sure the calling Haskell thread owns the
 --   'EdhThreadState', or the 1st transaction will be carried out in
 --   current thread, and following transactions will be carried out in
@@ -840,7 +841,7 @@ mkEdhClass !clsName !allocator !superClasses !clsBody = do
         (\(maybeIdent, oStore) _ets -> ctorExit maybeIdent oStore)
         ets
 
--- * EIO Monad
+-- ** The EIO Monad
 
 -- | Edh aware (or scriptability Enhanced) IO Monad
 --
