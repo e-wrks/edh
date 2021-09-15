@@ -1038,7 +1038,7 @@ defineComputMethod !comput !mthName =
 
 defineComputClass ::
   forall c.
-  (Typeable c, ScriptableComput c) =>
+  (ScriptableComput c, Typeable c) =>
   c ->
   AttrName ->
   Edh Object
@@ -1048,7 +1048,7 @@ type EffectOnCtor = Bool
 
 defineComputClass' ::
   forall c.
-  (Typeable c, ScriptableComput c) =>
+  (ScriptableComput c, Typeable c) =>
   EffectOnCtor ->
   c ->
   AttrName ->
