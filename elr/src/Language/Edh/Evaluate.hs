@@ -1364,8 +1364,20 @@ packEdhArgs !ets !argSenders !pkExit = do
     -- restore original tx state after args packed
     pkExit $ ArgsPack posArgs kwArgs
   where
-    -- discourage artifact definition during args packing
-    !etsPacking = ets {edh'context = (edh'context ets) {edh'ctx'pure = True}}
+    !ctx = edh'context ets
+    !tip = edh'ctx'tip ctx
+    !etsPacking =
+      ets
+        { edh'context =
+            ctx
+              { -- stack the tip frame one more time up, so effectful artifacts
+                -- directly in caller's scope are available during args packing
+                edh'ctx'tip = tip,
+                edh'ctx'stack = tip : edh'ctx'stack ctx,
+                -- discourage artifact definition during args packing
+                edh'ctx'pure = True
+              }
+        }
 
 callMagicMethod ::
   Object ->
