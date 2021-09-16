@@ -2125,7 +2125,7 @@ edhPrepareForLoop
                   edh'scope'entity $ edh'frame'scope $ edh'ctx'tip ctxDo
                 runEdhTx etsDo $
                   evalStmtSrc bodyStmt $ \ !doResult _etsDone ->
-                    case doResult of
+                    case edhDeCaseClose doResult of
                       EdhBreak ->
                         -- break for loop
                         exitEdh etsLooper exit nil
