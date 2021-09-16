@@ -75,15 +75,19 @@ naM msg = mEdh' $ \naExit _exit -> naExit msg
 -- * You would better make sure the calling Haskell thread owns the
 --   'EdhThreadState', or the 1st transaction will be carried out in
 --   current thread, and following transactions will be carried out in
---   the 'EdhThreadState''s owner thread, which is ridiculous.
+--   the 'EdhThreadState''s owner thread, which is ridiculous. Even worse
+--   when that @Edh@ thread has already been terminated, all subsequent
+--   'STM' transactions will cease to happen, and your continuation never
+--   executed too.
 -- * Don't follow such a call with subsequent 'STM' actions, that's usually
---   wrong. Unless interleaved scripting /threads/ sharing the Haskell thread
---   are really intended.
+--   wrong. Unless interleaved "scripting threads" sharing the Haskell
+--   thread are really intended.
 --
--- Note: This call finishes as soon with the 1st 'STM' transaction within the
---       specified 'Edh' action, the continuation can be resumed rather later
---       after many subsequent 'STM' transactions performed, so 'catchSTM' or
---       similar exception handling around such calls is usually wrong.
+-- Note: This call finishes as soon with the 1st 'STM' transaction within
+--       the specified 'Edh' action, the continuation can be resumed rather
+--       later after many subsequent 'STM' transactions performed, so
+--       'catchSTM' or similar exception handling around such calls is usually
+--        wrong.
 runEdh :: EdhThreadState -> Edh a -> EdhTxExit a -> STM ()
 runEdh ets ma exit = runEdhTx ets $ unEdh ma rptEdhNotApplicable exit
 
@@ -857,7 +861,29 @@ mkEdhClass !clsName !allocator !superClasses !clsBody = do
 --         monad, event perceivers if any armed by the script will be suspended
 --         thus unable to preempt the trunk execution, which is a desirable
 --         behavior with the 'Edh' monad or 'STM' monad by 'liftSTM'.
-newtype EIO a = EIO {runEIO :: EdhThreadState -> (a -> IO ()) -> IO ()}
+newtype EIO a = EIO
+  { -- | Run an 'EIO' action from within an @'IO' ()@ action
+    --
+    -- CAVEAT:
+    --
+    -- * You would better make sure the calling Haskell thread owns the
+    --   'EdhThreadState', or the 1st transaction will be carried out in
+    --   current thread, and following transactions will be carried out in
+    --   the 'EdhThreadState''s owner thread, which is ridiculous. Even worse
+    --   when that @Edh@ thread has already been terminated, all subsequent
+    --   'STM' transactions will cease to happen, and your continuation never
+    --   executed too.
+    -- * Don't follow such a call with subsequent 'IO' actions, that's usually
+    --   wrong. Unless interleaved "scripting threads" sharing the Haskell
+    --   thread are really intended.
+    --
+    -- Note: This call finishes as soon with the 1st 'STM' transaction within
+    --       the specified 'Edh' action, the continuation can be resumed rather
+    --       later after many subsequent 'STM' transactions performed, so
+    --       'catch' or similar exception handling around such calls is usually
+    --        wrong.
+    runEIO :: EdhThreadState -> (a -> IO ()) -> IO ()
+  }
 
 -- | Lift an 'Edh' action from an 'EIO' action
 --
