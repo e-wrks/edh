@@ -6,6 +6,15 @@ import * 'batteries/meta'
 
 {##
  # Class `Command` is used to define parametric command objects
+
+A `Command` object doesn't define how it should be executed, it merely conveys some identifier (i.e. the `.cmd` attribute) and optionally more detailed arguments in a pack (i.e. the `.apk` attribute), leaving the interpretation per the context it get evaluated.
+
+An REPL usually interprets the resulting command object, in case it's obtained so as being last statement of the "code cell" submitted, per a single "E(valuate)" action. This facilitates a nice feature/behavior, that:
+
+* In case you submit multiple (a block of) code cells as a whole for a single evaluation, commands in the middle will have neither side-effects of their respective interpretation, nor "P(rint)" action.
+
+* You can safely leave intermediate data-revealing commands in your production code, like they are nop at production run, while still do their jobs when interactively run cell-by-cell.
+
  #}
 export data Command ( cmd, ***apk ) {
 
@@ -21,25 +30,22 @@ export data Command ( cmd, ***apk ) {
 export {
 
   {##
-   # The `quit` command is usually interpreted by a REPL to stop running
+   # The `quit` command is usually interpreted by a REPL to stop current session
    #}
   quit = Command( 'quit' )
 
   {##
-   # The `dir` command is usually interpreted by a REPL to show you what's
-   # inside some scope
-   #
-   # The target scope(s) can usually be specified as arguments to this command,
-   # while current scope is implied when no one is specified
+   # The `dir` command is usually interpreted by a REPL to show you what's inside some scope
+
+The target scope(s) can usually be specified as arguments to this command, while current scope is implied when no one is specified
    #}
   dir = Command( 'dir' )
 
   {##
-   # A bookmark usually lead you to some location of interest,
-   # via code navigation
-   #
-   # Being a command per se, arbitrary detailed data can be associated with a
-   # bookmark attribute, by _calling_ it, e.g.
+   # A bookmark usually lead you to some location of interest, via code navigation
+
+Being a command per se, arbitrary detailed data can be associated with a bookmark attribute, by _calling_ it, e.g.
+
 ```edh
 amazing'algorithm'21 = bookmark(
   type= 'algo', category= 'sort', complexity= 'O(log N)',
