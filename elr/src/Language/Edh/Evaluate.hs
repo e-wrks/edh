@@ -1446,11 +1446,34 @@ invokeMagic !obj !magicKey !apk !exit !checkBypassCall !ets =
                     <> ") object: "
                     <> objRepr
       checkBypassCall callAsMethod magicArt
+
+    callerScope = contextScope $ edh'context ets
+
     callProc :: EdhProcDefi -> Object -> Object -> (Scope -> Scope) -> STM ()
-    callProc !callee !this !that !scopeMod = runEdhTx ets $ case callee of
+    callProc !callee !this !that !scopeMod = case callee of
+      -- calling a method procedure
       EdhMethod !mth ->
-        callEdhMethod this that mth apk scopeMod exit
-      _ -> throwEdhTx UsageError "non-vanilla magic method not supported yet"
+        runEdhTx ets $ callEdhMethod this that mth apk scopeMod exit
+      -- calling an interpreter procedure
+      EdhIntrpr !mth -> case edh'procedure'decl mth of
+        HostDecl {} -> do
+          -- a host interpreter proc runs in its caller's lexical context,
+          -- in addition to sharing of the scope entity with the caller,
+          -- which is implemented in `callEdhMethod`
+          let scopeMod' s =
+                scopeMod $ s {edh'scope'proc = edh'scope'proc callerScope}
+          runEdhTx ets $ callEdhMethod this that mth apk scopeMod' exit
+        ProcDecl {} -> do
+          -- an Edh interpreter proc needs a `callerScope` as its 1st arg
+          let callerCtx = edh'context ets
+              ArgsPack args kwargs = apk
+          !argCallerScope <- mkScopeWrapper ets $ contextScope callerCtx
+          let apk' = ArgsPack (EdhObject argCallerScope : args) kwargs
+          runEdhTx ets $ callEdhMethod this that mth apk' scopeMod exit
+      --
+      _ ->
+        throwEdh ets UsageError $
+          "such magic method not supported yet: " <> T.pack (show callee)
 
 -- | Make a synchronous call to the specified procedure
 --
@@ -3021,7 +3044,7 @@ evalStmt !stmt !exit = case stmt of
             schedDefered etsSched id (runLoop endOfEdh)
       _ -> \ !etsSched ->
         schedDefered etsSched id $ evalExpr' expr NoDocCmt endOfEdh
-  PerceiveStmt !sinkExpr !bodyStmt ->
+  PerceiveStmt !sinkExpr bodyStmt@(StmtSrc _stmt body'rng) ->
     evalExprSrc sinkExpr $ \ !sinkVal !ets -> case edhUltimate sinkVal of
       EdhEvs !sink ->
         if edh'in'tx ets
@@ -3036,8 +3059,8 @@ evalStmt !stmt !exit = case stmt of
                   evalStmtSrc bodyStmt $ \ !reactResult _etsReactor ->
                     case edhDeCaseClose reactResult of
                       EdhBreak -> writeTVar breakThread True
-                      -- todo warn or even err out in case return/continue/default
-                      --      etc. are returned to here?
+                      -- todo warn or even err out in case
+                      -- return/continue/default etc. are returned to here?
                       _ -> return ()
             subscribeEvents sink >>= \case
               Nothing -> case evs'mrv sink of -- already at eos
@@ -3059,12 +3082,21 @@ evalStmt !stmt !exit = case stmt of
                       edhContIO' $
                         drivePerceiver mrv ets reactor id
             exitEdh ets exit nil
-      _ ->
-        throwEdh ets EvalError $
-          "can only perceive from an event sink, not a "
-            <> edhTypeNameOf sinkVal
-            <> ": "
-            <> T.pack (show sinkVal)
+      EdhObject !sinkLikeObj -> do
+        let SrcLoc !doc _pos = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
+        !u <- unsafeIOToSTM newUnique
+        runEdhTx ets $
+          invokeMagic
+            sinkLikeObj
+            (AttrByName "__perceive__")
+            ( ArgsPack
+                [EdhExpr u (SrcLoc doc body'rng) (BlockExpr [bodyStmt]) ""]
+                odEmpty
+            )
+            (exitEdhTx exit)
+            ($)
+      _ -> edhSimpleDesc ets sinkVal $ \ !badDesc ->
+        throwEdh ets EvalError $ "not perceivable: " <> badDesc
   ThrowStmt !excExpr ->
     evalExprSrc excExpr $ \ !exv -> edhThrowTx $ edhDeCaseClose exv
   ExtendsStmt !superExpr -> evalExprSrc superExpr $ \ !superVal !ets ->
