@@ -104,11 +104,14 @@ instance ComputArgAdapter AnyEventSink where
   adaptEdhArg !v = (<|> badVal) $ case edhUltimate v of
     EdhObject o -> case dynamicHostData o of
       Nothing -> mzero
-      Just (Dynamic tr evs) -> case tr of
-        App trEvs trE -> case eqTypeRep trEvs (typeRep @EventSink) of
-          Just HRefl -> withTypeable trE $ return $ AnyEventSink evs o
+      Just (Dynamic tr evs) -> case eqTypeRep tr (typeRep @SomeEventSink) of
+        Just HRefl -> case evs of
+          SomeEventSink evs' -> withTypeable tr $ return $ AnyEventSink evs' o
+        _ -> case tr of
+          App trEvs trE -> case eqTypeRep trEvs (typeRep @EventSink) of
+            Just HRefl -> withTypeable trE $ return $ AnyEventSink evs o
+            _ -> mzero
           _ -> mzero
-        _ -> mzero
     _ -> mzero
     where
       badVal = do
