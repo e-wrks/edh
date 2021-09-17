@@ -1,6 +1,6 @@
 {-# LANGUAGE InstanceSigs #-}
 
-module Language.Edh.Batteries.HostEvs where
+module Language.Edh.HostEvs where
 
 import Control.Applicative
 import Control.Concurrent.STM
@@ -8,7 +8,7 @@ import Control.Monad
 import Data.Dynamic
 import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
-import Language.Edh.Batteries.Comput
+import Language.Edh.Comput
 import Language.Edh.Control
 import Language.Edh.Evaluate
 import Language.Edh.Monad

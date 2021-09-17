@@ -1,7 +1,7 @@
 {-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Language.Edh.Batteries.Comput where
+module Language.Edh.Comput where
 
 -- import Debug.Trace
 
@@ -18,7 +18,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Unique
 import qualified GHC.TypeLits as TypeLits
-import Language.Edh.Batteries.Args
+import Language.Edh.Args
 import Language.Edh.Control
 import Language.Edh.IOPD
 import Language.Edh.InterOpM

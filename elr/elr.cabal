@@ -25,9 +25,11 @@ source-repository head
 library
   exposed-modules:
     Language.Edh.Args
+    Language.Edh.Comput
     Language.Edh.Control
     Language.Edh.CoreLang
     Language.Edh.Evaluate
+    Language.Edh.HostEvs
     Language.Edh.IOPD
     Language.Edh.PkgMan
     Language.Edh.RtTypes
