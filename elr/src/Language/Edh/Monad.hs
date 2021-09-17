@@ -572,6 +572,11 @@ pushStackM' !scope !act = Edh $ \naExit exit ets -> do
           }
   unEdh act naExit (edhSwitchState ets . exit) etsNew
 
+-- | Evaluate an expression
+evalExprM :: Expr -> Edh EdhValue
+evalExprM !x =
+  Edh $ \_naExit -> evalExpr x
+
 -- | Evaluate an infix operator with specified lhs/rhs expression
 evalInfixM :: OpSymbol -> Expr -> Expr -> Edh EdhValue
 evalInfixM !opSym !lhExpr !rhExpr =
