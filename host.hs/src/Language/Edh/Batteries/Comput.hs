@@ -29,7 +29,7 @@ import Prelude
 
 -- | Scriptable Computation
 class ScriptableComput c where
-  scriptableArgs :: c -> [ScriptArgDecl]
+  scriptableArgs :: c -> [ComputArgDecl]
 
   callByScript :: (?effecting :: Bool) => c -> ArgsPack -> Edh ScriptedResult
 
@@ -38,7 +38,7 @@ class ScriptableComput c where
 
 -- | Arg declaration, auto generated intermediate details, to provide meta
 -- information to scripting environment
-data ScriptArgDecl = ScriptArgDecl !IfEffectful !AttrKey !TypeName
+data ComputArgDecl = ComputArgDecl !IfEffectful !AttrKey !TypeName
 
 type IfEffectful = Bool
 
@@ -55,7 +55,7 @@ data ScriptedResult
   | -- | Partially applied host computation, with all args ever applied
     forall c.
     (ScriptableComput c, Typeable c) =>
-    PartiallyApplied !c ![(ScriptArgDecl, EdhValue)]
+    PartiallyApplied !c ![(ComputArgDecl, EdhValue)]
   | -- | Fully applied host computation, with all args ever applied
     --
     -- It's pending effected yet, thus has to be called again with niladic apk
@@ -63,13 +63,13 @@ data ScriptedResult
     -- arguments from that call site.
     forall c.
     (ScriptableComput c, Typeable c) =>
-    FullyApplied !c ![(ScriptArgDecl, EdhValue)]
+    FullyApplied !c ![(ComputArgDecl, EdhValue)]
   | -- | The computation is finally done, with the result as a host value plus
     -- extra named result values, and with all args ever applied
-    FullyEffected !Dynamic !KwArgs ![(ScriptArgDecl, EdhValue)]
+    FullyEffected !Dynamic !KwArgs ![(ComputArgDecl, EdhValue)]
 
 -- | Argument Type that can be adapted from script values
-class Typeable a => ScriptArgAdapter a where
+class Typeable a => ComputArgAdapter a where
   adaptedArgType :: Text
   adaptedArgType = T.pack $ show $ typeRep @a
 
@@ -81,13 +81,13 @@ class Typeable a => ScriptArgAdapter a where
 -- this enables currying, by representing partially applied computation as
 -- 1st class value
 data PendingApplied name a c
-  = (TypeLits.KnownSymbol name, ScriptArgAdapter a, ScriptableComput c) =>
-    PendingApplied !KwArgs !(ScriptArg a name -> c)
+  = (TypeLits.KnownSymbol name, ComputArgAdapter a, ScriptableComput c) =>
+    PendingApplied !KwArgs !(ComputArg a name -> c)
 
 -- | apply one more arg to a previously saved, partially applied computation
 instance
   ( TypeLits.KnownSymbol name,
-    ScriptArgAdapter a,
+    ComputArgAdapter a,
     ScriptableComput c,
     Typeable (PendingApplied name a c)
   ) =>
@@ -102,7 +102,7 @@ instance
       (Just !av, !kwargs') -> do
         !ad <- adaptEdhArg av
         callByScript
-          (f $ ScriptArg ad)
+          (f $ ComputArg ad)
           (ArgsPack args $ odUnion pargs kwargs')
           >>= \case
             ScriptDone !done -> return $ ScriptDone done
@@ -122,7 +122,7 @@ instance
         av : args' -> do
           !ad <- adaptEdhArg av
           callByScript
-            (f $ ScriptArg ad)
+            (f $ ComputArg ad)
             (ArgsPack args' $ odUnion pargs kwargs')
             >>= \case
               ScriptDone !done -> return $ ScriptDone done
@@ -142,20 +142,20 @@ instance
           return $ PartiallyApplied (PendingApplied kwargs' f) []
     where
       argName = AttrByName $ T.pack $ TypeLits.symbolVal (Proxy :: Proxy name)
-      argDecl = ScriptArgDecl False argName (adaptedArgType @a)
+      argDecl = ComputArgDecl False argName (adaptedArgType @a)
 
 -- | apply one more arg to a scriptable computation
 instance
   {-# OVERLAPPABLE #-}
   ( TypeLits.KnownSymbol name,
-    ScriptArgAdapter a,
+    ComputArgAdapter a,
     ScriptableComput c,
     Typeable (PendingApplied name a c)
   ) =>
-  ScriptableComput (ScriptArg a name -> c)
+  ScriptableComput (ComputArg a name -> c)
   where
   scriptableArgs f =
-    ScriptArgDecl False argName (adaptedArgType @a) :
+    ComputArgDecl False argName (adaptedArgType @a) :
     scriptableArgs (f undefined)
     where
       argName = AttrByName $ T.pack $ TypeLits.symbolVal (Proxy :: Proxy name)
@@ -164,7 +164,7 @@ instance
     case odTakeOut argName kwargs of
       (Just !av, !kwargs') -> do
         !ad <- adaptEdhArg av
-        callByScript (f $ ScriptArg ad) (ArgsPack args kwargs') >>= \case
+        callByScript (f $ ComputArg ad) (ArgsPack args kwargs') >>= \case
           ScriptDone !done -> return $ ScriptDone done
           ScriptDone' !done -> return $ ScriptDone' done
           PartiallyApplied c !appliedArgs ->
@@ -180,7 +180,7 @@ instance
       (Nothing, !kwargs') -> case args of
         av : args' -> do
           !ad <- adaptEdhArg av
-          callByScript (f $ ScriptArg ad) (ArgsPack args' kwargs') >>= \case
+          callByScript (f $ ComputArg ad) (ArgsPack args' kwargs') >>= \case
             ScriptDone !done -> return $ ScriptDone done
             ScriptDone' !done -> return $ ScriptDone' done
             PartiallyApplied c !appliedArgs ->
@@ -198,22 +198,22 @@ instance
           return $ PartiallyApplied (PendingApplied kwargs' f) []
     where
       argName = AttrByName $ T.pack $ TypeLits.symbolVal (Proxy :: Proxy name)
-      argDecl = ScriptArgDecl False argName (adaptedArgType @a)
+      argDecl = ComputArgDecl False argName (adaptedArgType @a)
 
 -- | Scriptable Computation that waiting to take effect
 data PendingMaybeEffected name a c
   = ( TypeLits.KnownSymbol name,
-      ScriptArgAdapter a,
+      ComputArgAdapter a,
       ScriptableComput c,
       Typeable (PendingMaybeEffected name a c)
     ) =>
-    PendingMaybeEffected !(ScriptArg (Effective (Maybe a)) name -> c)
+    PendingMaybeEffected !(ComputArg (Effective (Maybe a)) name -> c)
 
 -- | resolve then apply one more effectful arg to previously saved, now
 -- effecting computation
 instance
   ( TypeLits.KnownSymbol name,
-    ScriptArgAdapter a,
+    ComputArgAdapter a,
     ScriptableComput c,
     Typeable (PendingMaybeEffected name a c)
   ) =>
@@ -230,14 +230,14 @@ instance
 -- | resolve then apply one more effectful arg to the effecting computation
 instance
   ( TypeLits.KnownSymbol name,
-    ScriptArgAdapter a,
+    ComputArgAdapter a,
     ScriptableComput c,
     Typeable (PendingMaybeEffected name a c)
   ) =>
-  ScriptableComput (ScriptArg (Effective (Maybe a)) name -> c)
+  ScriptableComput (ComputArg (Effective (Maybe a)) name -> c)
   where
   scriptableArgs f =
-    ScriptArgDecl True argName (T.pack (show $ typeRep @(Maybe a))) :
+    ComputArgDecl True argName (T.pack (show $ typeRep @(Maybe a))) :
     scriptableArgs (f undefined)
     where
       argName = AttrByName $ T.pack $ TypeLits.symbolVal (Proxy :: Proxy name)
@@ -251,8 +251,8 @@ instance
 -- | resolve then apply one more effectful arg to the effecting computation
 applyMaybeEffectfulArg ::
   forall name a c.
-  (TypeLits.KnownSymbol name, ScriptArgAdapter a, ScriptableComput c) =>
-  (ScriptArg (Effective (Maybe a)) name -> c) ->
+  (TypeLits.KnownSymbol name, ComputArgAdapter a, ScriptableComput c) =>
+  (ComputArg (Effective (Maybe a)) name -> c) ->
   Edh ScriptedResult
 applyMaybeEffectfulArg !f = do
   !maybeVal <- performM' argName
@@ -260,7 +260,7 @@ applyMaybeEffectfulArg !f = do
    in case maybeVal of
         Nothing ->
           callByScript
-            (f $ ScriptArg $ Effective Nothing)
+            (f $ ComputArg $ Effective Nothing)
             (ArgsPack [] odEmpty)
             >>= \case
               ScriptDone !done -> return $ ScriptDone done
@@ -271,7 +271,7 @@ applyMaybeEffectfulArg !f = do
         Just !av -> do
           !ad <- adaptEdhArg av
           callByScript
-            (f $ ScriptArg $ Effective $ Just ad)
+            (f $ ComputArg $ Effective $ Just ad)
             (ArgsPack [] odEmpty)
             >>= \case
               ScriptDone !done -> return $ ScriptDone done
@@ -283,18 +283,18 @@ applyMaybeEffectfulArg !f = do
               _ -> throwEdhM EvalError "bug: not fully effected"
   where
     argName = AttrByName $ T.pack $ TypeLits.symbolVal (Proxy :: Proxy name)
-    argDecl = ScriptArgDecl True argName (T.pack $ show $ typeRep @(Maybe a))
+    argDecl = ComputArgDecl True argName (T.pack $ show $ typeRep @(Maybe a))
 
 -- | Scriptable Computation that waiting to take effect
 data PendingEffected name a c
-  = (TypeLits.KnownSymbol name, ScriptArgAdapter a, ScriptableComput c) =>
-    PendingEffected !(ScriptArg (Effective a) name -> c)
+  = (TypeLits.KnownSymbol name, ComputArgAdapter a, ScriptableComput c) =>
+    PendingEffected !(ComputArg (Effective a) name -> c)
 
 -- | resolve then apply one more effectful arg to previously saved, now
 -- effecting computation
 instance
   ( TypeLits.KnownSymbol name,
-    ScriptArgAdapter a,
+    ComputArgAdapter a,
     ScriptableComput c,
     Typeable (PendingEffected name a c)
   ) =>
@@ -312,14 +312,14 @@ instance
 instance
   {-# OVERLAPPABLE #-}
   ( TypeLits.KnownSymbol name,
-    ScriptArgAdapter a,
+    ComputArgAdapter a,
     ScriptableComput c,
     Typeable (PendingEffected name a c)
   ) =>
-  ScriptableComput (ScriptArg (Effective a) name -> c)
+  ScriptableComput (ComputArg (Effective a) name -> c)
   where
   scriptableArgs f =
-    ScriptArgDecl True argName (T.pack $ show $ typeRep @a) :
+    ComputArgDecl True argName (T.pack $ show $ typeRep @a) :
     scriptableArgs (f undefined)
     where
       argName = AttrByName $ T.pack $ TypeLits.symbolVal (Proxy :: Proxy name)
@@ -333,8 +333,8 @@ instance
 -- | resolve then apply one more effectful arg to the effecting computation
 applyEffectfulArg ::
   forall name a c.
-  (TypeLits.KnownSymbol name, ScriptArgAdapter a, ScriptableComput c) =>
-  (ScriptArg (Effective a) name -> c) ->
+  (TypeLits.KnownSymbol name, ComputArgAdapter a, ScriptableComput c) =>
+  (ComputArg (Effective a) name -> c) ->
   Edh ScriptedResult
 applyEffectfulArg !f = do
   !maybeVal <- performM' argName
@@ -346,7 +346,7 @@ applyEffectfulArg !f = do
         Just !av -> do
           !ad <- adaptEdhArg av
           callByScript
-            (f $ ScriptArg $ Effective ad)
+            (f $ ComputArg $ Effective ad)
             (ArgsPack [] odEmpty)
             >>= \case
               ScriptDone !done -> return $ ScriptDone done
@@ -358,7 +358,7 @@ applyEffectfulArg !f = do
               _ -> error "bug: not fully effected"
   where
     argName = AttrByName $ T.pack $ TypeLits.symbolVal (Proxy :: Proxy name)
-    argDecl = ScriptArgDecl True argName (T.pack $ show $ typeRep @a)
+    argDecl = ComputArgDecl True argName (T.pack $ show $ typeRep @a)
 
 -- * Computation result as base cases
 
@@ -572,11 +572,11 @@ instance ScriptableComput ComputSTM_ where
 
 -- * Script Argument Adapters
 
-instance ScriptArgAdapter EdhValue where
+instance ComputArgAdapter EdhValue where
   adaptEdhArg !v = return v
   adaptedArgValue = id
 
-instance ScriptArgAdapter (Maybe Object) where
+instance ComputArgAdapter (Maybe Object) where
   adaptEdhArg !v = case edhUltimate v of
     EdhNil -> return Nothing
     EdhObject !d -> return $ Just d
@@ -592,7 +592,7 @@ instance ScriptArgAdapter (Maybe Object) where
   adaptedArgValue (Just !d) = EdhObject d
   adaptedArgValue Nothing = edhNothing
 
-instance ScriptArgAdapter Object where
+instance ComputArgAdapter Object where
   adaptEdhArg !v = case edhUltimate v of
     EdhObject !d -> return d
     _ -> badVal
@@ -603,7 +603,7 @@ instance ScriptArgAdapter Object where
             adaptedArgType @Object <> " expected but given: " <> badDesc
   adaptedArgValue = EdhObject
 
-instance ScriptArgAdapter (Maybe Decimal) where
+instance ComputArgAdapter (Maybe Decimal) where
   adaptEdhArg !v = case edhUltimate v of
     EdhNil -> return Nothing
     EdhDecimal !d -> return $ Just d
@@ -619,7 +619,7 @@ instance ScriptArgAdapter (Maybe Decimal) where
   adaptedArgValue (Just !d) = EdhDecimal d
   adaptedArgValue Nothing = edhNothing
 
-instance ScriptArgAdapter Decimal where
+instance ComputArgAdapter Decimal where
   adaptEdhArg !v = case edhUltimate v of
     EdhDecimal !d -> return d
     _ -> badVal
@@ -630,7 +630,7 @@ instance ScriptArgAdapter Decimal where
             adaptedArgType @Decimal <> " expected but given: " <> badDesc
   adaptedArgValue = EdhDecimal
 
-instance ScriptArgAdapter (Maybe Double) where
+instance ComputArgAdapter (Maybe Double) where
   adaptEdhArg !v = case edhUltimate v of
     EdhNil -> return Nothing
     EdhDecimal !d -> return $ Just $ D.decimalToRealFloat d
@@ -645,7 +645,7 @@ instance ScriptArgAdapter (Maybe Double) where
   adaptedArgValue (Just !d) = EdhDecimal $ D.decimalFromRealFloat d
   adaptedArgValue Nothing = edhNothing
 
-instance ScriptArgAdapter Double where
+instance ComputArgAdapter Double where
   adaptEdhArg !v = case edhUltimate v of
     EdhDecimal !d -> return $ D.decimalToRealFloat d
     _ -> badVal
@@ -660,7 +660,7 @@ instance
   {-# OVERLAPPABLE #-}
   forall i.
   (Typeable i, Integral i) =>
-  ScriptArgAdapter (Maybe i)
+  ComputArgAdapter (Maybe i)
   where
   adaptEdhArg !v = case edhUltimate v of
     EdhNil -> return Nothing
@@ -682,7 +682,7 @@ instance
   {-# OVERLAPPABLE #-}
   forall i.
   (Typeable i, Integral i) =>
-  ScriptArgAdapter i
+  ComputArgAdapter i
   where
   adaptEdhArg !v = case edhUltimate v of
     EdhDecimal !d -> case D.decimalToInteger d of
@@ -699,7 +699,7 @@ instance
 newtype Count = Count Int
   deriving (Eq, Ord, Enum, Num, Real, Integral, Show)
 
-instance ScriptArgAdapter (Maybe Count) where
+instance ComputArgAdapter (Maybe Count) where
   adaptEdhArg !v = case edhUltimate v of
     EdhNil -> return Nothing
     EdhDecimal !d | d >= 1 -> case D.decimalToInteger d of
@@ -716,7 +716,7 @@ instance ScriptArgAdapter (Maybe Count) where
   adaptedArgValue (Just (Count !i)) = EdhDecimal $ fromIntegral i
   adaptedArgValue Nothing = edhNothing
 
-instance ScriptArgAdapter Count where
+instance ComputArgAdapter Count where
   adaptEdhArg !v = case edhUltimate v of
     EdhDecimal !d | d >= 1 -> case D.decimalToInteger d of
       Just !i -> return $ Count $ fromInteger i
@@ -735,7 +735,7 @@ data HostData (tn :: TypeLits.Symbol) = HostData !Dynamic !Object
 
 instance
   TypeLits.KnownSymbol tn =>
-  ScriptArgAdapter (Maybe (HostData tn))
+  ComputArgAdapter (Maybe (HostData tn))
   where
   adaptedArgType = T.pack $ "Maybe " <> TypeLits.symbolVal (Proxy :: Proxy tn)
 
@@ -760,7 +760,7 @@ instance
   adaptedArgValue (Just (HostData _dd !obj)) = EdhObject obj
   adaptedArgValue Nothing = edhNothing
 
-instance TypeLits.KnownSymbol tn => ScriptArgAdapter (HostData tn) where
+instance TypeLits.KnownSymbol tn => ComputArgAdapter (HostData tn) where
   adaptedArgType = T.pack $ TypeLits.symbolVal (Proxy :: Proxy tn)
 
   adaptEdhArg !v = case edhUltimate v of
@@ -783,7 +783,7 @@ instance TypeLits.KnownSymbol tn => ScriptArgAdapter (HostData tn) where
 
 data HostValue t = Typeable t => HostValue !t !Object
 
-instance Typeable t => ScriptArgAdapter (Maybe (HostValue t)) where
+instance Typeable t => ComputArgAdapter (Maybe (HostValue t)) where
   adaptedArgType = T.pack $ "Maybe " <> show (typeRep @t)
 
   adaptEdhArg !v = case edhUltimate v of
@@ -812,7 +812,7 @@ instance Typeable t => ScriptArgAdapter (Maybe (HostValue t)) where
   adaptedArgValue (Just (HostValue _val !obj)) = EdhObject obj
   adaptedArgValue Nothing = edhNothing
 
-instance Typeable t => ScriptArgAdapter (HostValue t) where
+instance Typeable t => ComputArgAdapter (HostValue t) where
   adaptedArgType = T.pack $ show $ typeRep @t
 
   adaptEdhArg !v = case edhUltimate v of
@@ -839,9 +839,9 @@ instance Typeable t => ScriptArgAdapter (HostValue t) where
 
   adaptedArgValue (HostValue _val !obj) = EdhObject obj
 
-data HostSeq t = ScriptArgAdapter t => HostSeq ![t] ![EdhValue]
+data HostSeq t = ComputArgAdapter t => HostSeq ![t] ![EdhValue]
 
-instance (Typeable t, ScriptArgAdapter t) => ScriptArgAdapter (HostSeq t) where
+instance (Typeable t, ComputArgAdapter t) => ComputArgAdapter (HostSeq t) where
   adaptedArgType = T.pack $ "[" <> show (typeRep @t) <> "]"
 
   adaptEdhArg !v = case edhUltimate v of
@@ -875,7 +875,7 @@ appliedArgWithDefaultCtor ::
   forall t name.
   Typeable t =>
   EdhValue ->
-  ScriptArg (Maybe (HostValue t)) name ->
+  ComputArg (Maybe (HostValue t)) name ->
   Edh t
 appliedArgWithDefaultCtor = appliedArgWithDefaultCtor' []
 
@@ -884,7 +884,7 @@ appliedArgWithDefaultCtor' ::
   Typeable t =>
   [EdhValue] ->
   EdhValue ->
-  ScriptArg (Maybe (HostValue t)) name ->
+  ComputArg (Maybe (HostValue t)) name ->
   Edh t
 appliedArgWithDefaultCtor' = flip appliedArgWithDefaultCtor'' []
 
@@ -894,7 +894,7 @@ appliedArgWithDefaultCtor'' ::
   [EdhValue] ->
   [(AttrKey, EdhValue)] ->
   EdhValue ->
-  ScriptArg (Maybe (HostValue t)) name ->
+  ComputArg (Maybe (HostValue t)) name ->
   Edh t
 appliedArgWithDefaultCtor''
   !args
@@ -930,7 +930,7 @@ effectfulArgWithDefaultCtor ::
   forall t name.
   Typeable t =>
   EdhValue ->
-  ScriptArg (Effective (Maybe (HostValue t))) name ->
+  ComputArg (Effective (Maybe (HostValue t))) name ->
   Edh (t, Object)
 effectfulArgWithDefaultCtor = effectfulArgWithDefaultCtor' []
 
@@ -939,7 +939,7 @@ effectfulArgWithDefaultCtor' ::
   Typeable t =>
   [EdhValue] ->
   EdhValue ->
-  ScriptArg (Effective (Maybe (HostValue t))) name ->
+  ComputArg (Effective (Maybe (HostValue t))) name ->
   Edh (t, Object)
 effectfulArgWithDefaultCtor' = flip effectfulArgWithDefaultCtor'' []
 
@@ -949,7 +949,7 @@ effectfulArgWithDefaultCtor'' ::
   [EdhValue] ->
   [(AttrKey, EdhValue)] ->
   EdhValue ->
-  ScriptArg (Effective (Maybe (HostValue t))) name ->
+  ComputArg (Effective (Maybe (HostValue t))) name ->
   Edh (t, Object)
 effectfulArgWithDefaultCtor''
   !args
@@ -1019,9 +1019,9 @@ defineComputMethod !comput !mthName =
     argsRcvr = NullaryReceiver -- TODO infer from scriptableArgs
 
     --
-    tshowAppliedArgs :: [(ScriptArgDecl, EdhValue)] -> Edh Text
+    tshowAppliedArgs :: [(ComputArgDecl, EdhValue)] -> Edh Text
     tshowAppliedArgs [] = return ""
-    tshowAppliedArgs ((ScriptArgDecl !eff !k _type, !v) : rest) = do
+    tshowAppliedArgs ((ComputArgDecl !eff !k _type, !v) : rest) = do
       !restRepr <- tshowAppliedArgs rest
       !repr <- edhValueReprM v
       return $
@@ -1148,9 +1148,9 @@ defineComputClass' !effOnCtor !rootComput !clsName =
             _ -> throwEdhM EvalError "bug: Comput not a host object"
 
         tshowAppliedArgs ::
-          [(ScriptArgDecl, EdhValue)] -> Edh Text
+          [(ComputArgDecl, EdhValue)] -> Edh Text
         tshowAppliedArgs [] = return ""
-        tshowAppliedArgs ((ScriptArgDecl !eff !k _type, !v) : rest) = do
+        tshowAppliedArgs ((ComputArgDecl !eff !k _type, !v) : rest) = do
           !restRepr <- tshowAppliedArgs rest
           !repr <- edhValueReprM v
           return $
@@ -1170,9 +1170,9 @@ defineComputClass' !effOnCtor !rootComput !clsName =
           return $
             attrKeyStr k <> "= " <> repr <> ", " <> restRepr
 
-        tshowMoreArgs :: [ScriptArgDecl] -> Edh Text
+        tshowMoreArgs :: [ComputArgDecl] -> Edh Text
         tshowMoreArgs [] = return ""
-        tshowMoreArgs (ScriptArgDecl !eff !k !typeName : rest) = do
+        tshowMoreArgs (ComputArgDecl !eff !k !typeName : rest) = do
           !restRepr <- tshowMoreArgs rest
           return $
             (if eff then "effect " else "")
@@ -1243,9 +1243,9 @@ defineComputClass' !effOnCtor !rootComput !clsName =
             _ -> throwEdhM EvalError "bug: Comput not a host object"
 
         tshowAppliedArgs ::
-          [(ScriptArgDecl, EdhValue)] -> Edh Text
+          [(ComputArgDecl, EdhValue)] -> Edh Text
         tshowAppliedArgs [] = return ""
-        tshowAppliedArgs ((ScriptArgDecl !eff !k _type, !v) : rest) = do
+        tshowAppliedArgs ((ComputArgDecl !eff !k _type, !v) : rest) = do
           !restRepr <- tshowAppliedArgs rest
           !repr <- edhValueReprM v
           return $
@@ -1264,9 +1264,9 @@ defineComputClass' !effOnCtor !rootComput !clsName =
           !repr <- edhValueReprM v
           return $ "  " <> attrKeyStr k <> "= " <> repr <> ",\n" <> restRepr
 
-        tshowMoreArgs :: [ScriptArgDecl] -> Edh Text
+        tshowMoreArgs :: [ComputArgDecl] -> Edh Text
         tshowMoreArgs [] = return ""
-        tshowMoreArgs (ScriptArgDecl !eff !k !typeName : rest) = do
+        tshowMoreArgs (ComputArgDecl !eff !k !typeName : rest) = do
           !restRepr <- tshowMoreArgs rest
           return $
             (if eff then "  effect " else "  ")
@@ -1311,7 +1311,7 @@ defineComputClass' !effOnCtor !rootComput !clsName =
             else throwEdhM UsageError "extranous arguments"
       where
         exitWith ::
-          [(ScriptArgDecl, EdhValue)] -> ScriptedResult -> Edh EdhValue
+          [(ComputArgDecl, EdhValue)] -> ScriptedResult -> Edh EdhValue
         exitWith appliedArgs sr = case sr of
           ScriptDone !done -> return done
           ScriptDone' !dd ->
@@ -1353,11 +1353,11 @@ defineComputClass' !effOnCtor !rootComput !clsName =
           Nothing -> naM "bug: this is not a scripted Comput"
         _ -> naM "bug: Comput not a host object"
 
-appliedArgByKey :: AttrKey -> [(ScriptArgDecl, EdhValue)] -> EdhValue
+appliedArgByKey :: AttrKey -> [(ComputArgDecl, EdhValue)] -> EdhValue
 appliedArgByKey k = go
   where
     go [] = nil
-    go ((ScriptArgDecl _eff !ak _type, val) : rest)
+    go ((ComputArgDecl _eff !ak _type, val) : rest)
       | ak == k = val
       | otherwise = go rest
 

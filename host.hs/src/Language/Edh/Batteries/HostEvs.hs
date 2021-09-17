@@ -100,7 +100,7 @@ data AnyEventSink = forall t. Typeable t => AnyEventSink (EventSink t) Object
 instance Eq AnyEventSink where
   AnyEventSink x _ == AnyEventSink y _ = isSameEventSink x y
 
-instance ScriptArgAdapter AnyEventSink where
+instance ComputArgAdapter AnyEventSink where
   adaptEdhArg !v = (<|> badVal) $ case edhUltimate v of
     EdhObject o -> case dynamicHostData o of
       Nothing -> mzero

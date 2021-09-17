@@ -1,7 +1,7 @@
 module Language.Edh.Batteries.Args
-  ( ScriptArg (..),
+  ( ComputArg (..),
     Effective (..),
-    scriptArgName,
+    computArgName,
     type (@:),
     type ($:),
     appliedArg,
@@ -16,19 +16,19 @@ import qualified Data.Text as T
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 import Prelude
 
-newtype ScriptArg (a :: Type) (name :: Symbol) = ScriptArg a
+newtype ComputArg (a :: Type) (name :: Symbol) = ComputArg a
 
-scriptArgName :: forall (name :: Symbol). KnownSymbol name => Text
-scriptArgName = T.pack $ symbolVal (Proxy :: Proxy name)
+computArgName :: forall (name :: Symbol). KnownSymbol name => Text
+computArgName = T.pack $ symbolVal (Proxy :: Proxy name)
 
 newtype Effective a = Effective a
 
-type name @: a = ScriptArg a name
+type name @: a = ComputArg a name
 
-type name $: a = ScriptArg (Effective a) name
+type name $: a = ComputArg (Effective a) name
 
 appliedArg :: name @: a -> a
-appliedArg (ScriptArg a) = a
+appliedArg (ComputArg a) = a
 
 effectfulArg :: name $: a -> a
-effectfulArg (ScriptArg (Effective a)) = a
+effectfulArg (ComputArg (Effective a)) = a
