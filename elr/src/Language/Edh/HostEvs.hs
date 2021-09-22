@@ -1,4 +1,4 @@
-{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 module Language.Edh.HostEvs where
 
@@ -63,30 +63,73 @@ conseqDo !act (AtomEvq !conseqs _) = modifyTVar' conseqs (act :)
 subseqDo :: EIO () -> AtomEvq -> STM ()
 subseqDo !act (AtomEvq _ !subseqs) = modifyTVar' subseqs (act :)
 
--- | An event handler reacts to a particular event with an STM computation,
--- returns whether it is still interested in the subsequent events in the same
--- stream
---
--- Further EIO computations can be scheduled into the provided atomic event
--- queue. Any failure in any event handler will prevent the publishing of the
--- current event hierarchy at all, the failure will be thrown to the publisher
--- of the root event.
-type EventHandler t = AtomEvq -> t -> STM HandleSubsequentEvents
+class EventSource s t where
+  -- | Subscribe to the event stream through the specified event source
+  --
+  -- Any failure in the handler will prevent publishing of the original event at
+  -- all, such a failure will be thrown at the publisher of the original event.
+  --
+  -- The atomic event queue can be used to schedule EIO computations as
+  -- subsequences of the original event. All subsequent EIO computations will be
+  -- tried regardless of other's failures, so long as the publishing of the
+  -- original event succeeded.
+  on :: s t -> (t -> AtomEvq -> STM ()) -> STM ()
 
-data HandleSubsequentEvents = KeepHandling | StopHandling
+  -- | Subscribe to the next event through the specified event source
+  --
+  -- Any failure in the handler will prevent publishing of the original event at
+  -- all, such a failure will be thrown at the publisher of the original event.
+  --
+  -- The atomic event queue can be used to schedule EIO computations as
+  -- subsequences of the original event. All subsequent EIO computations will be
+  -- tried regardless of other's failures, so long as the publishing of the
+  -- original event succeeded.
+  once :: s t -> (t -> AtomEvq -> STM ()) -> STM ()
 
--- | An event listener reacts to a particular event with an STM computation,
--- returns a possible event listener for the next event in the stream
---
--- Further EIO computations can be scheduled into the provided atomic event
--- queue. Any failure in any event listener will prevent the publishing of the
--- current event hierarchy at all, the failure will be thrown to the publisher
--- of the root event.
---
--- When subsequent events should be processed by the same event listener or not
--- at all, it should be more proper to implement an 'EventHandler'.
-newtype EventListener t = EventListener
-  {on'event :: AtomEvq -> t -> STM (Maybe (EventListener t))}
+data MappedEvs s a b = (EventSource s a) => MappedEvs (a -> b) (s a)
+
+instance (EventSource s a) => EventSource (MappedEvs s a) b where
+  on (MappedEvs f sa) handler = on sa $ \a aeq -> handler (f a) aeq
+  once (MappedEvs f sa) handler = once sa $ \a aeq -> handler (f a) aeq
+
+-- | Polymorphic event source value wrapper
+data SomeEventSource t = forall s. (EventSource s t) => SomeEventSource (s t)
+
+instance Functor SomeEventSource where
+  fmap f (SomeEventSource evs) = SomeEventSource $ MappedEvs f evs
+
+-- | Polymorphic event source argument adapter
+data AnyEventSource
+  = forall s t. (EventSource s t, Typeable t) => AnyEventSource (s t) Object
+
+instance Eq AnyEventSource where
+  AnyEventSource _ xo == AnyEventSource _ yo = xo == yo
+
+instance ComputArgAdapter AnyEventSource where
+  adaptEdhArg !v = (<|> badVal) $ case edhUltimate v of
+    EdhObject o -> case dynamicHostData o of
+      Nothing -> mzero
+      Just (Dynamic tr evs) -> case eqTypeRep tr (typeRep @SomeEventSink) of
+        Just HRefl -> case evs of
+          SomeEventSink evs' ->
+            withTypeable tr $ return $ AnyEventSource evs' o
+        _ -> case tr of
+          App trEvs trE -> case eqTypeRep trEvs (typeRep @SomeEventSource) of
+            Just HRefl -> case evs of
+              SomeEventSource evs' ->
+                withTypeable trE $ return $ AnyEventSource evs' o
+            _ -> case eqTypeRep trEvs (typeRep @EventSink) of
+              Just HRefl -> withTypeable trE $ return $ AnyEventSource evs o
+              _ -> mzero
+          _ -> mzero
+    _ -> mzero
+    where
+      badVal = do
+        !badDesc <- edhValueDescM v
+        throwEdhM UsageError $
+          "any EventSource expected but given: " <> badDesc
+
+  adaptedArgValue (AnyEventSource _evs !obj) = EdhObject obj
 
 -- | Polymorphic event sink value wrapper
 data SomeEventSink = forall t. Typeable t => SomeEventSink (EventSink t)
@@ -163,6 +206,31 @@ data EventSink t = EventSink
     doneEventStream :: STM ()
   }
 
+-- | An event handler reacts to a particular event with an STM computation,
+-- returns whether it is still interested in the subsequent events in the same
+-- stream
+--
+-- Further EIO computations can be scheduled into the provided atomic event
+-- queue. Any failure in any event handler will prevent the publishing of the
+-- current event hierarchy at all, the failure will be thrown to the publisher
+-- of the root event.
+type EventHandler t = AtomEvq -> t -> STM HandleSubsequentEvents
+
+data HandleSubsequentEvents = KeepHandling | StopHandling
+
+-- | An event listener reacts to a particular event with an STM computation,
+-- returns a possible event listener for the next event in the stream
+--
+-- Further EIO computations can be scheduled into the provided atomic event
+-- queue. Any failure in any event listener will prevent the publishing of the
+-- current event hierarchy at all, the failure will be thrown to the publisher
+-- of the root event.
+--
+-- When subsequent events should be processed by the same event listener or not
+-- at all, it should be more proper to implement an 'EventHandler'.
+newtype EventListener t = EventListener
+  {on'event :: AtomEvq -> t -> STM (Maybe (EventListener t))}
+
 -- | Subscribe an event handler to the event sink
 handleEvents ::
   forall t.
@@ -176,11 +244,10 @@ handleEvents !evs !handler =
     False -> listenEvents evs keepTriggering
   where
     keepTriggering :: EventListener t
-    keepTriggering = EventListener $
-      \aeq !evd ->
-        handler aeq evd >>= \case
-          KeepHandling -> return (Just keepTriggering)
-          StopHandling -> return Nothing
+    keepTriggering = EventListener $ \aeq !evd ->
+      handler aeq evd >>= \case
+        KeepHandling -> return (Just keepTriggering)
+        StopHandling -> return Nothing
 
 -- | Create a new event sink
 newEventSinkEdh :: forall t. Edh (EventSink t)
@@ -225,60 +292,6 @@ isSameEventSink a b = event'sink'ident a == event'sink'ident b
 -- | Note identity of event sinks won't change after fmap'ped
 instance Eq (EventSink a) where
   (==) = isSameEventSink
-
--- | Note that this 'Functor' instance is lawless w.r.t. event
--- spreading/publishing, i.e. 'spreadEvent' and 'publishEvent' are prohibited
--- against a decorated event sink, even 'fmap'ped with `id`.
---
--- Though it is lawful otherwise, i.e. w.r.t. event consuming and EoS semantics.
-instance Functor EventSink where
-  fmap :: forall a b. (a -> b) -> EventSink a -> EventSink b
-  fmap
-    f
-    ( EventSink
-        !esid
-        _spreadEvt
-        recentEvt
-        _publishEvt
-        listenEvs
-        atEoS
-        doneEvs
-      ) =
-      do
-        let spreadEvt' :: AtomEvq -> b -> STM ()
-            spreadEvt' _ _ =
-              throwSTM $
-                userError
-                  "prohibited against a decorated event sink"
-
-            recentEvt' :: STM (Maybe b)
-            recentEvt' = fmap f <$> recentEvt
-
-            publishEvt' :: b -> EIO EndOfStream
-            publishEvt' _ =
-              throwEIO
-                UsageError
-                "prohibited against a decorated event sink"
-
-            listenEvs' :: EventListener b -> STM ()
-            listenEvs' !listener = listenEvs $ deleListener listener
-              where
-                deleListener :: EventListener b -> EventListener a
-                deleListener (EventListener listener') =
-                  EventListener $ \aeq evd ->
-                    listener' aeq (f evd) >>= \case
-                      Nothing -> return Nothing
-                      Just !nextListener ->
-                        return $ Just $ deleListener nextListener
-
-        EventSink
-          esid
-          spreadEvt'
-          recentEvt'
-          publishEvt'
-          listenEvs'
-          atEoS
-          doneEvs
 
 _spread'event ::
   forall t.
@@ -369,35 +382,14 @@ _listen'events !eosRef !subsRef !listener =
     True -> return ()
     False -> modifyTVar' subsRef (listener :)
 
--- | Subscribe to the event stream through the specified event sink
---
--- Any failure in the handler will prevent publishing of the original event at
--- all, such a failure will be thrown at the publisher of the original event.
---
--- The atomic event queue can be used to schedule EIO computations as
--- subsequences of the original event. All subsequent EIO computations will be
--- tried regardless of other's failures, so long as the publishing of the
--- original event succeeded.
-on ::
-  forall t. Typeable t => EventSink t -> (t -> AtomEvq -> STM ()) -> STM ()
-on !evs !handler = handleEvents evs $ \ !aeq !evd -> do
-  handler evd aeq
-  return KeepHandling
+instance (Typeable t) => EventSource EventSink t where
+  on !evs !handler = handleEvents evs $ \ !aeq !evd -> do
+    handler evd aeq
+    return KeepHandling
 
--- | Subscribe to the next event through the specified event sink
---
--- Any failure in the handler will prevent publishing of the original event at
--- all, such a failure will be thrown at the publisher of the original event.
---
--- The atomic event queue can be used to schedule EIO computations as
--- subsequences of the original event. All subsequent EIO computations will be
--- tried regardless of other's failures, so long as the publishing of the
--- original event succeeded.
-once ::
-  forall t. Typeable t => EventSink t -> (t -> AtomEvq -> STM ()) -> STM ()
-once !evs !handler = handleEvents evs $ \ !aeq !evd -> do
-  handler evd aeq
-  return StopHandling
+  once !evs !handler = handleEvents evs $ \ !aeq !evd -> do
+    handler evd aeq
+    return StopHandling
 
 -- | Spread new event stream(s), as part of the spreading of an upstream event
 -- stream
@@ -460,6 +452,7 @@ generateEvents !stopOnEoS !intake !deriver = do
         where
           markStop :: Bool -> EIO ()
           markStop = \case
+            False -> pure ()
             True ->
               atomicallyEIO $
                 stopOnEoS (SomeEventSink evs') >>= \case
@@ -468,7 +461,6 @@ generateEvents !stopOnEoS !intake !deriver = do
                     throwHostSTM
                       UsageError
                       "publishing to an EventSink at eos"
-            False -> pure ()
 
   atomicallyEIO $
     handleEvents intake $ \ !aeq !evd ->
