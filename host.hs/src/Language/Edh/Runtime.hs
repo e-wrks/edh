@@ -591,7 +591,7 @@ createEdhWorld !console = do
       where
         attrKeyFrom :: EdhValue -> (AttrKey -> STM ()) -> STM ()
         attrKeyFrom
-          (EdhExpr _ _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _)
+          (EdhExpr (ExprDefi _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _) _)
           exit' = resolveEdhAttrAddr ets addr $ \ !key -> exit' key
         attrKeyFrom (EdhString attrName) !exit' = exit' $ AttrByName attrName
         attrKeyFrom (EdhSymbol sym) !exit' = exit' $ AttrBySym sym
@@ -623,40 +623,37 @@ createEdhWorld !console = do
             iopdUpdate (attrs ++ odToList kwargs) es
             exitEdh ets exit nil
 
-    mthScopeEval :: "expression" !: EdhValue -> EdhHostProc
+    mthScopeEval :: "expression" !: ExprDefi -> EdhHostProc
     mthScopeEval
-      (mandatoryArg -> !exprVal)
+      (mandatoryArg -> ExprDefi _ !expr !src'loc)
       !exit
       !ets =
         withThisHostObj' ets (throwEdh ets EvalError "bogus scope object") $
-          \(scope :: Scope) -> case exprVal of
+          \(scope :: Scope) -> do
             -- eval specified expr with the original scope on top of current
             -- call stack
-            EdhExpr _ !src'loc !expr _ -> do
-              let !ctx = edh'context ets
-                  !etsEval =
-                    ets
-                      { edh'context =
-                          ctx
-                            { edh'ctx'tip =
-                                EdhCallFrame
-                                  scope
-                                  src'loc
-                                  defaultEdhExcptHndlr,
-                              edh'ctx'stack =
-                                edh'ctx'tip ctx : edh'ctx'stack ctx,
-                              edh'ctx'genr'caller = Nothing,
-                              edh'ctx'match = true,
-                              edh'ctx'pure = False,
-                              edh'ctx'exp'target = Nothing,
-                              edh'ctx'eff'target = Nothing
-                            }
-                      }
-              runEdhTx etsEval $
-                evalExpr expr $ \ !val _ets ->
-                  exitEdh ets exit $ edhDeCaseClose val
-            !badExpr -> edhSimpleDesc ets badExpr $ \ !badDesc ->
-              throwEdh ets EvalError $ "not an expr: " <> badDesc
+            let !ctx = edh'context ets
+                !etsEval =
+                  ets
+                    { edh'context =
+                        ctx
+                          { edh'ctx'tip =
+                              EdhCallFrame
+                                scope
+                                src'loc
+                                defaultEdhExcptHndlr,
+                            edh'ctx'stack =
+                              edh'ctx'tip ctx : edh'ctx'stack ctx,
+                            edh'ctx'genr'caller = Nothing,
+                            edh'ctx'match = true,
+                            edh'ctx'pure = False,
+                            edh'ctx'exp'target = Nothing,
+                            edh'ctx'eff'target = Nothing
+                          }
+                    }
+            runEdhTx etsEval $
+              evalExpr expr $ \ !val _ets ->
+                exitEdh ets exit $ edhDeCaseClose val
 
     mthScopeOuterGetter :: EdhHostProc
     mthScopeOuterGetter !exit !ets = case edh'obj'store this of

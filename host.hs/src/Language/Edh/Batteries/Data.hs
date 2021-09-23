@@ -37,7 +37,7 @@ strEncodeProc :: Text -> EdhHostProc
 strEncodeProc !str !exit = exitEdhTx exit $ EdhBlob $ TE.encodeUtf8 str
 
 exprDeBlock :: EdhValue -> EdhHostProc
-exprDeBlock (EdhExpr _u _loc _x !src) !exit =
+exprDeBlock (EdhExpr _ !src) !exit =
   exitEdhTx exit $ EdhString $ deBlk $ T.lines src
   where
     deBlk :: [Text] -> Text

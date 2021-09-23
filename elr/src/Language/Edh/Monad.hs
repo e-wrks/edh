@@ -220,7 +220,7 @@ edhValueAsAttrKeyM :: EdhValue -> Edh AttrKey
 edhValueAsAttrKeyM !keyVal = case edhUltimate keyVal of
   EdhString !attrName -> return $ AttrByName attrName
   EdhSymbol !sym -> return $ AttrBySym sym
-  EdhExpr _ _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _ ->
+  EdhExpr (ExprDefi _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _) _ ->
     resolveEdhAttrAddrM addr
   _ -> do
     !badDesc <- edhSimpleDescM keyVal

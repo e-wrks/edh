@@ -117,19 +117,24 @@ sandboxProc (mandatoryArg -> !origObj) !exit !ets =
 -- | utility makeOp(lhExpr, opSym, rhExpr)
 makeOpProc :: [EdhValue] -> EdhHostProc
 makeOpProc !args !exit = case args of
-  [EdhExpr _ !lh'span !lhe _, EdhString !op, EdhExpr _ _rh'span !rhe _] ->
-    \ !ets -> do
-      !xu <- unsafeIOToSTM newUnique
-      exitEdh ets exit $
-        EdhExpr
-          xu
-          lh'span -- TODO use a better src span
-          ( InfixExpr
-              (OpSymSrc op noSrcRange)
-              (ExprSrc lhe noSrcRange)
-              (ExprSrc rhe noSrcRange)
-          )
-          ""
+  [ EdhExpr (ExprDefi _ !lhe !lh'span) _,
+    EdhString !op,
+    EdhExpr (ExprDefi _ !rhe _rh'span) _
+    ] ->
+      \ !ets -> do
+        !xu <- unsafeIOToSTM newUnique
+        exitEdh ets exit $
+          EdhExpr
+            ( ExprDefi
+                xu
+                ( InfixExpr
+                    (OpSymSrc op noSrcRange)
+                    (ExprSrc lhe noSrcRange)
+                    (ExprSrc rhe noSrcRange)
+                )
+                lh'span -- TODO use a better src span
+            )
+            ""
   _ ->
     throwEdhTx EvalError $ "invalid arguments to makeOp: " <> T.pack (show args)
 
@@ -157,12 +162,14 @@ parseEdhProc
             atomically $
               exitEdh ets exit $
                 EdhExpr
-                  u
-                  ( SrcLoc
-                      (SrcDoc srcName)
-                      (SrcRange beginningSrcPos (endPos stmts))
+                  ( ExprDefi
+                      u
+                      (BlockExpr stmts)
+                      ( SrcLoc
+                          (SrcDoc srcName)
+                          (SrcRange beginningSrcPos (endPos stmts))
+                      )
                   )
-                  (BlockExpr stmts)
                   srcCode
     where
       world = edh'prog'world $ edh'thread'prog ets

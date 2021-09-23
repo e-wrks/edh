@@ -180,7 +180,7 @@ edhValueIdent = identityOf
     identityOf (EdhProcedure !p _) = return $ idOfProc p
     identityOf (EdhBoundProc !p !this !that _) =
       EdhPair (idOfProc p) <$> liftA2 EdhPair (idOfObj this) (idOfObj that)
-    identityOf (EdhExpr !u _ _ _) = return $ idFromUnique u
+    identityOf (EdhExpr (ExprDefi !u _ _) _) = return $ idFromUnique u
     identityOf (EdhArgsPack (ArgsPack !args !kwargs)) =
       EdhArgsPack
         <$> liftA2
@@ -1076,8 +1076,8 @@ data EdhValue
     EdhEvs !EdhSink
   | -- | named value, a.k.a. term definition
     EdhNamedValue !AttrName !EdhValue
-  | -- | reflective expr, with source (or not, if empty)
-    EdhExpr !Unique !SrcLoc !Expr !Text
+  | -- | 1st class expression value, with source (or not, if empty)
+    EdhExpr !ExprDefi !Text
 
 instance Show EdhValue where
   show EdhNil = "nil"
@@ -1120,7 +1120,7 @@ instance Show EdhValue where
     -- Edh operators are all left-associative, parenthesis needed
     T.unpack n <> " := (" <> show v <> ")"
   show (EdhNamedValue n v) = T.unpack n <> " := " <> show v
-  show (EdhExpr _ _ x s) =
+  show (EdhExpr (ExprDefi _ x _) s) =
     if T.null s
       then -- source-less form
         "<expr: " ++ show x ++ ">"
@@ -1167,8 +1167,10 @@ instance Eq EdhValue where
   EdhNamedValue x'n x'v == EdhNamedValue y'n y'v = x'n == y'n && x'v == y'v
   EdhNamedValue _ x'v == y = x'v == y
   x == EdhNamedValue _ y'v = x == y'v
-  EdhExpr _ _ (LitExpr x'l) _ == EdhExpr _ _ (LitExpr y'l) _ = x'l == y'l
-  EdhExpr x'u _ _ _ == EdhExpr y'u _ _ _ = x'u == y'u
+  EdhExpr (ExprDefi _ (LitExpr x'l) _) _
+    == EdhExpr (ExprDefi _ (LitExpr y'l) _) _ =
+      x'l == y'l
+  EdhExpr (ExprDefi x'u _ _) _ == EdhExpr (ExprDefi y'u _ _) _ = x'u == y'u
   -- todo: support coercing equality ?
   --       * without this, we are a strongly typed dynamic language
   --       * with this, we'll be a weakly typed dynamic language
@@ -1205,8 +1207,8 @@ instance Hashable EdhValue where
     s `hashWithSalt` (-9 :: Int) `hashWithSalt` u
   hashWithSalt s (EdhEvs x) = hashWithSalt s x
   hashWithSalt s (EdhNamedValue _ v) = hashWithSalt s v
-  hashWithSalt s (EdhExpr _ _ (LitExpr l) _) = hashWithSalt s l
-  hashWithSalt s (EdhExpr u _ _ _) = hashWithSalt s u
+  hashWithSalt s (EdhExpr (ExprDefi _ (LitExpr l) _) _) = hashWithSalt s l
+  hashWithSalt s (EdhExpr (ExprDefi u _ _) _) = hashWithSalt s u
 
 edhDeReturn :: EdhValue -> EdhValue
 edhDeReturn (EdhReturn !val) = edhDeReturn val
@@ -1573,6 +1575,25 @@ procedureName :: ProcDefi -> Text
 procedureName !pd = case edh'procedure'name pd of
   AttrByName !n -> n
   AttrBySym (Symbol _ !r) -> r
+
+-- | Expression definition
+data ExprDefi = ExprDefi
+  { edh'expr'ident :: !Unique,
+    edh'expr'body :: !Expr,
+    edh'expr'loc :: !SrcLoc
+  }
+
+instance Eq ExprDefi where
+  ExprDefi x'u _ _ == ExprDefi y'u _ _ = x'u == y'u
+
+instance Ord ExprDefi where
+  compare (ExprDefi x'u _ _) (ExprDefi y'u _ _) = compare x'u y'u
+
+instance Hashable ExprDefi where
+  hashWithSalt s (ExprDefi !u _ _) = s `hashWithSalt` u
+
+instance Show ExprDefi where
+  show (ExprDefi _ _ loc) = "<expr @ " <> show loc <> ">"
 
 data Prefix
   = PrefixPlus

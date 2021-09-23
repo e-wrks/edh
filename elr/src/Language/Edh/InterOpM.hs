@@ -405,37 +405,37 @@ instance EdhCallableM fn' => EdhCallableM (Maybe (AttrName, EdhValue) -> fn') wh
       callFromEdhM (fn (Just (name, value))) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
 
--- receive anonymous arg taking 'EdhExpr'
-instance EdhCallableM fn' => EdhCallableM (Expr -> fn') where
+-- receive anonymous arg taking 'ExprDefi'
+instance EdhCallableM fn' => EdhCallableM (ExprDefi -> fn') where
   callFromEdhM !fn (ArgsPack (val : args) !kwargs) = case val of
-    EdhExpr _ _ !expr _src ->
+    EdhExpr !expr _src ->
       callFromEdhM (fn expr) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
   callFromEdhM _ _ = throwEdhM UsageError "missing anonymous arg"
 
--- receive optional anonymous arg taking 'EdhExpr'
-instance EdhCallableM fn' => EdhCallableM (Maybe Expr -> fn') where
+-- receive optional anonymous arg taking 'ExprDefi'
+instance EdhCallableM fn' => EdhCallableM (Maybe ExprDefi -> fn') where
   callFromEdhM !fn (ArgsPack [] !kwargs) =
     callFromEdhM (fn Nothing) (ArgsPack [] kwargs)
   callFromEdhM !fn (ArgsPack (val : args) !kwargs) = case val of
-    EdhExpr _ _ !expr _src ->
+    EdhExpr !expr _src ->
       callFromEdhM (fn (Just expr)) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
 
--- receive anonymous arg taking 'EdhExpr' with src
-instance EdhCallableM fn' => EdhCallableM ((Expr, Text) -> fn') where
+-- receive anonymous arg taking 'ExprDefi' with src
+instance EdhCallableM fn' => EdhCallableM ((ExprDefi, Text) -> fn') where
   callFromEdhM !fn (ArgsPack (val : args) !kwargs) = case val of
-    EdhExpr _ _ !expr !src ->
+    EdhExpr !expr !src ->
       callFromEdhM (fn (expr, src)) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
   callFromEdhM _ _ = throwEdhM UsageError "missing anonymous arg"
 
--- receive optional anonymous arg taking 'EdhExpr' with src
-instance EdhCallableM fn' => EdhCallableM (Maybe (Expr, Text) -> fn') where
+-- receive optional anonymous arg taking 'ExprDefi' with src
+instance EdhCallableM fn' => EdhCallableM (Maybe (ExprDefi, Text) -> fn') where
   callFromEdhM !fn (ArgsPack [] !kwargs) =
     callFromEdhM (fn Nothing) (ArgsPack [] kwargs)
   callFromEdhM !fn (ArgsPack (val : args) !kwargs) = case val of
-    EdhExpr _ _ !expr !src ->
+    EdhExpr !expr !src ->
       callFromEdhM (fn (Just (expr, src))) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
 
@@ -1550,12 +1550,12 @@ instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Mayb
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
--- receive named arg taking 'EdhExpr'
-instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg Expr name -> fn') where
+-- receive named arg taking 'ExprDefi'
+instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg ExprDefi name -> fn') where
   callFromEdhM !fn (ArgsPack !args !kwargs) =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ _ !expr _src ->
+        EdhExpr !expr _src ->
           callFromEdhM
             (fn (NamedEdhArg expr))
             (ArgsPack args kwargs')
@@ -1568,7 +1568,7 @@ instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg Expr 
       (Nothing, !kwargs') -> case args of
         [] -> throwEdhM UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
-          EdhExpr _ _ !expr _src ->
+          EdhExpr !expr _src ->
             callFromEdhM
               (fn (NamedEdhArg expr))
               (ArgsPack args' kwargs')
@@ -1581,12 +1581,12 @@ instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg Expr 
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
--- receive named, optional arg taking 'EdhExpr'
-instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Maybe Expr) name -> fn') where
+-- receive named, optional arg taking 'ExprDefi'
+instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Maybe ExprDefi) name -> fn') where
   callFromEdhM !fn (ArgsPack !args !kwargs) =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ _ !expr _src ->
+        EdhExpr !expr _src ->
           callFromEdhM
             (fn (NamedEdhArg (Just expr)))
             (ArgsPack args kwargs')
@@ -1599,7 +1599,7 @@ instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Mayb
       (Nothing, !kwargs') -> case args of
         [] -> callFromEdhM (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs')
         val : args' -> case val of
-          EdhExpr _ _ !expr _src ->
+          EdhExpr !expr _src ->
             callFromEdhM
               (fn (NamedEdhArg (Just expr)))
               (ArgsPack args' kwargs')
@@ -1612,12 +1612,12 @@ instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Mayb
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
--- receive named arg taking 'EdhExpr' with src
-instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Expr, Text) name -> fn') where
+-- receive named arg taking 'ExprDefi' with src
+instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (ExprDefi, Text) name -> fn') where
   callFromEdhM !fn (ArgsPack !args !kwargs) =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ _ !expr !src ->
+        EdhExpr !expr !src ->
           callFromEdhM
             (fn (NamedEdhArg (expr, src)))
             (ArgsPack args kwargs')
@@ -1630,7 +1630,7 @@ instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Expr
       (Nothing, !kwargs') -> case args of
         [] -> throwEdhM UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
-          EdhExpr _ _ !expr !src ->
+          EdhExpr !expr !src ->
             callFromEdhM
               (fn (NamedEdhArg (expr, src)))
               (ArgsPack args' kwargs')
@@ -1643,12 +1643,12 @@ instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Expr
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
--- receive named, optional arg taking 'EdhExpr' with src
-instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Maybe (Expr, Text)) name -> fn') where
+-- receive named, optional arg taking 'ExprDefi' with src
+instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Maybe (ExprDefi, Text)) name -> fn') where
   callFromEdhM !fn (ArgsPack !args !kwargs) =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ _ !expr !src ->
+        EdhExpr !expr !src ->
           callFromEdhM
             (fn (NamedEdhArg (Just (expr, src))))
             (ArgsPack args kwargs')
@@ -1661,7 +1661,7 @@ instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Mayb
       (Nothing, !kwargs') -> case args of
         [] -> callFromEdhM (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs')
         val : args' -> case val of
-          EdhExpr _ _ !expr !src ->
+          EdhExpr !expr !src ->
             callFromEdhM
               (fn (NamedEdhArg (Just (expr, src))))
               (ArgsPack args' kwargs')
@@ -2354,37 +2354,37 @@ instance EdhAllocatorM fn' => EdhAllocatorM (Maybe (AttrName, EdhValue) -> fn') 
       allocObjM (fn (Just (name, value))) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
 
--- receive anonymous arg taking 'EdhExpr'
-instance EdhAllocatorM fn' => EdhAllocatorM (Expr -> fn') where
+-- receive anonymous arg taking 'ExprDefi'
+instance EdhAllocatorM fn' => EdhAllocatorM (ExprDefi -> fn') where
   allocObjM !fn (ArgsPack (val : args) !kwargs) = case val of
-    EdhExpr _ _ !expr _src ->
+    EdhExpr !expr _src ->
       allocObjM (fn expr) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
   allocObjM _ _ = throwEdhM UsageError "missing anonymous arg"
 
--- receive optional anonymous arg taking 'EdhExpr'
-instance EdhAllocatorM fn' => EdhAllocatorM (Maybe Expr -> fn') where
+-- receive optional anonymous arg taking 'ExprDefi'
+instance EdhAllocatorM fn' => EdhAllocatorM (Maybe ExprDefi -> fn') where
   allocObjM !fn (ArgsPack [] !kwargs) =
     allocObjM (fn Nothing) (ArgsPack [] kwargs)
   allocObjM !fn (ArgsPack (val : args) !kwargs) = case val of
-    EdhExpr _ _ !expr _src ->
+    EdhExpr !expr _src ->
       allocObjM (fn (Just expr)) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
 
--- receive anonymous arg taking 'EdhExpr' with src
-instance EdhAllocatorM fn' => EdhAllocatorM ((Expr, Text) -> fn') where
+-- receive anonymous arg taking 'ExprDefi' with src
+instance EdhAllocatorM fn' => EdhAllocatorM ((ExprDefi, Text) -> fn') where
   allocObjM !fn (ArgsPack (val : args) !kwargs) = case val of
-    EdhExpr _ _ !expr !src ->
+    EdhExpr !expr !src ->
       allocObjM (fn (expr, src)) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
   allocObjM _ _ = throwEdhM UsageError "missing anonymous arg"
 
--- receive optional anonymous arg taking 'EdhExpr' with src
-instance EdhAllocatorM fn' => EdhAllocatorM (Maybe (Expr, Text) -> fn') where
+-- receive optional anonymous arg taking 'ExprDefi' with src
+instance EdhAllocatorM fn' => EdhAllocatorM (Maybe (ExprDefi, Text) -> fn') where
   allocObjM !fn (ArgsPack [] !kwargs) =
     allocObjM (fn Nothing) (ArgsPack [] kwargs)
   allocObjM !fn (ArgsPack (val : args) !kwargs) = case val of
-    EdhExpr _ _ !expr !src ->
+    EdhExpr !expr !src ->
       allocObjM (fn (Just (expr, src))) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
 
@@ -3499,12 +3499,12 @@ instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Ma
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
--- receive named arg taking 'EdhExpr'
-instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg Expr name -> fn') where
+-- receive named arg taking 'ExprDefi'
+instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg ExprDefi name -> fn') where
   allocObjM !fn (ArgsPack !args !kwargs) =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ _ !expr _src ->
+        EdhExpr !expr _src ->
           allocObjM
             (fn (NamedEdhArg expr))
             (ArgsPack args kwargs')
@@ -3517,7 +3517,7 @@ instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg Exp
       (Nothing, !kwargs') -> case args of
         [] -> throwEdhM UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
-          EdhExpr _ _ !expr _src ->
+          EdhExpr !expr _src ->
             allocObjM
               (fn (NamedEdhArg expr))
               (ArgsPack args' kwargs')
@@ -3530,12 +3530,12 @@ instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg Exp
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
--- receive named, optional arg taking 'EdhExpr'
-instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Maybe Expr) name -> fn') where
+-- receive named, optional arg taking 'ExprDefi'
+instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Maybe ExprDefi) name -> fn') where
   allocObjM !fn (ArgsPack !args !kwargs) =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ _ !expr _src ->
+        EdhExpr !expr _src ->
           allocObjM
             (fn (NamedEdhArg (Just expr)))
             (ArgsPack args kwargs')
@@ -3548,7 +3548,7 @@ instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Ma
       (Nothing, !kwargs') -> case args of
         [] -> allocObjM (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs')
         val : args' -> case val of
-          EdhExpr _ _ !expr _src ->
+          EdhExpr !expr _src ->
             allocObjM
               (fn (NamedEdhArg (Just expr)))
               (ArgsPack args' kwargs')
@@ -3561,12 +3561,12 @@ instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Ma
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
--- receive named arg taking 'EdhExpr' with src
-instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Expr, Text) name -> fn') where
+-- receive named arg taking 'ExprDefi' with src
+instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (ExprDefi, Text) name -> fn') where
   allocObjM !fn (ArgsPack !args !kwargs) =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ _ !expr !src ->
+        EdhExpr !expr !src ->
           allocObjM
             (fn (NamedEdhArg (expr, src)))
             (ArgsPack args kwargs')
@@ -3579,7 +3579,7 @@ instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Ex
       (Nothing, !kwargs') -> case args of
         [] -> throwEdhM UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
-          EdhExpr _ _ !expr !src ->
+          EdhExpr !expr !src ->
             allocObjM
               (fn (NamedEdhArg (expr, src)))
               (ArgsPack args' kwargs')
@@ -3592,12 +3592,12 @@ instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Ex
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
--- receive named, optional arg taking 'EdhExpr' with src
-instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Maybe (Expr, Text)) name -> fn') where
+-- receive named, optional arg taking 'ExprDefi' with src
+instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Maybe (ExprDefi, Text)) name -> fn') where
   allocObjM !fn (ArgsPack !args !kwargs) =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhExpr _ _ !expr !src ->
+        EdhExpr !expr !src ->
           allocObjM
             (fn (NamedEdhArg (Just (expr, src))))
             (ArgsPack args kwargs')
@@ -3610,7 +3610,7 @@ instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Ma
       (Nothing, !kwargs') -> case args of
         [] -> allocObjM (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs')
         val : args' -> case val of
-          EdhExpr _ _ !expr !src ->
+          EdhExpr !expr !src ->
             allocObjM
               (fn (NamedEdhArg (Just (expr, src))))
               (ArgsPack args' kwargs')

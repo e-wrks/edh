@@ -106,7 +106,7 @@ edhValueAsAttrKey' ::
 edhValueAsAttrKey' !ets !keyVal !naExit !exit = case edhUltimate keyVal of
   EdhString !attrName -> exit $ AttrByName attrName
   EdhSymbol !sym -> exit $ AttrBySym sym
-  EdhExpr _ _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _ ->
+  EdhExpr (ExprDefi _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _) _ ->
     resolveEdhAttrAddr ets addr exit
   _ -> naExit
 
@@ -523,16 +523,16 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     runEdhTx ets $
       evalExpr' addrRef NoDocCmt $ \ !addrVal _ets ->
         case edhUltimate addrVal of
-          EdhExpr _ _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _ ->
-            resolveEdhAttrAddr ets addr $
-              \ !key ->
-                runEdhTx ets $ setEdhAttr tgtExpr key rhVal $ exitMaybeExpTo key
-          EdhString !attrName ->
+          EdhExpr
+            (ExprDefi _ (AttrExpr (DirectRef (AttrAddrSrc !addr _))) _)
+            _ -> resolveEdhAttrAddr ets addr $ \ !key ->
+              runEdhTx ets $ setEdhAttr tgtExpr key rhVal $ exitMaybeExpTo key
+          EdhString !attrName -> do
             let !key = AttrByName attrName
-             in runEdhTx ets $ setEdhAttr tgtExpr key rhVal $ exitMaybeExpTo key
-          EdhSymbol !sym ->
+            runEdhTx ets $ setEdhAttr tgtExpr key rhVal $ exitMaybeExpTo key
+          EdhSymbol !sym -> do
             let !key = AttrBySym sym
-             in runEdhTx ets $ setEdhAttr tgtExpr key rhVal $ exitMaybeExpTo key
+            runEdhTx ets $ setEdhAttr tgtExpr key rhVal $ exitMaybeExpTo key
           _ ->
             throwEdh ets EvalError $
               "invalid attribute reference type - " <> edhTypeNameOf addrVal
@@ -1253,13 +1253,17 @@ packEdhExprs !ets !pkrs !pkExit = do
           \ !posArgs -> do
             !xu <- unsafeIOToSTM newUnique
             exit $
-              EdhExpr xu curSrcLoc {src'range = arg'span} argExpr "" : posArgs
+              EdhExpr (ExprDefi xu argExpr curSrcLoc {src'range = arg'span}) "" :
+              posArgs
         SendKwArg (AttrAddrSrc !kwAddr _) (ExprSrc !argExpr !arg'span) ->
           resolveEdhAttrAddr ets kwAddr $ \ !kwKey -> do
             !xu <- unsafeIOToSTM newUnique
             iopdInsert
               kwKey
-              (EdhExpr xu curSrcLoc {src'range = arg'span} argExpr "")
+              ( EdhExpr
+                  (ExprDefi xu argExpr curSrcLoc {src'range = arg'span})
+                  ""
+              )
               kwIOPD
             pkExprs xs $ \ !posArgs' -> exit posArgs'
   pkExprs pkrs $ \ !args ->
@@ -1663,14 +1667,13 @@ edhPrepareCall'
 
         -- calling an operator
         EdhIntrOp _fixity _op'prec !opDef -> case args of
-          [EdhExpr _ _ !lhx _, EdhExpr _ _ !rhx _]
-            | odNull kwargs ->
-              callMaker $ \ !exit ->
-                intrinsic'op
-                  opDef
-                  (ExprSrc lhx noSrcRange)
-                  (ExprSrc rhx noSrcRange)
-                  exit
+          [EdhExpr (ExprDefi _ !lhx _) _, EdhExpr (ExprDefi _ !rhx _) _]
+            | odNull kwargs -> callMaker $ \ !exit ->
+              intrinsic'op
+                opDef
+                (ExprSrc lhx noSrcRange)
+                (ExprSrc rhx noSrcRange)
+                exit
           -- todo support kwargs?
           _ ->
             throwEdh
@@ -1678,37 +1681,38 @@ edhPrepareCall'
               UsageError
               "an intrinsic operator can only be called with 2 positional args"
         EdhOprtor _ _ !op'pred !op'proc -> case args of
-          [EdhExpr _ _ !lhx _, EdhExpr _ _ !rhx _] | odNull kwargs ->
-            case edh'procedure'args $ edh'procedure'decl op'proc of
-              (PackReceiver [RecvArg {}, RecvArg {}] _) ->
-                callMaker $ \ !exit ->
-                  evalExpr lhx $ \ !lhVal ->
-                    evalExpr rhx $ \ !rhVal ->
+          [EdhExpr (ExprDefi _ !lhx _) _, EdhExpr (ExprDefi _ !rhx _) _]
+            | odNull kwargs ->
+              case edh'procedure'args $ edh'procedure'decl op'proc of
+                (PackReceiver [RecvArg {}, RecvArg {}] _) ->
+                  callMaker $ \ !exit ->
+                    evalExpr lhx $ \ !lhVal ->
+                      evalExpr rhx $ \ !rhVal ->
+                        callEdhOperator
+                          this
+                          that
+                          op'proc
+                          op'pred
+                          [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
+                          exit
+                (PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}] _) ->
+                  callMaker $ \ !exit !etsCaller -> do
+                    !scopeWrapper <-
+                      mkScopeWrapper etsCaller $
+                        contextScope $ edh'context etsCaller
+                    runEdhTx etsCaller $
                       callEdhOperator
                         this
                         that
                         op'proc
                         op'pred
-                        [edhDeCaseClose lhVal, edhDeCaseClose rhVal]
+                        (EdhObject scopeWrapper : args)
                         exit
-              (PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}] _) ->
-                callMaker $ \ !exit !etsCaller -> do
-                  !scopeWrapper <-
-                    mkScopeWrapper etsCaller $
-                      contextScope $ edh'context etsCaller
-                  runEdhTx etsCaller $
-                    callEdhOperator
-                      this
-                      that
-                      op'proc
-                      op'pred
-                      (EdhObject scopeWrapper : args)
-                      exit
-              _ ->
-                throwEdh etsCallPrep UsageError $
-                  "invalid operator signature: "
-                    <> T.pack
-                      (show $ edh'procedure'args $ edh'procedure'decl op'proc)
+                _ ->
+                  throwEdh etsCallPrep UsageError $
+                    "invalid operator signature: "
+                      <> T.pack
+                        (show $ edh'procedure'args $ edh'procedure'decl op'proc)
           -- todo support kwargs?
           _ ->
             throwEdh
@@ -2922,7 +2926,7 @@ evalKwExprs !kwExprs !exit !ets = go [] $ odToList kwExprs
   where
     go :: [(AttrKey, EdhValue)] -> [(AttrKey, EdhValue)] -> STM ()
     go res [] = exitEdh ets exit $ odFromList $ reverse res
-    go res ((k, EdhExpr _ _ x _) : rest) = runEdhTx ets $
+    go res ((k, EdhExpr (ExprDefi _ x _) _) : rest) = runEdhTx ets $
       evalExpr x $
         \ !v _ets -> go ((k, v) : res) rest
     go _res ((k, v) : _) =
@@ -3090,7 +3094,7 @@ evalStmt !stmt !exit = case stmt of
             sinkLikeObj
             (AttrByName "__perceive__")
             ( ArgsPack
-                [EdhExpr u (SrcLoc doc body'rng) body'x ""]
+                [EdhExpr (ExprDefi u body'x (SrcLoc doc body'rng)) ""]
                 odEmpty
             )
             (exitEdhTx exit)
@@ -4245,7 +4249,7 @@ evalExpr' (ExprWithSrc (ExprSrc !x !x'span) !sss) !docCmt !exit = \ !ets ->
     seqcontSTM (intplSrc <$> sss) $ \ !ssl -> do
       !u <- unsafeIOToSTM newUnique
       exitEdh ets exit $
-        EdhExpr u curSrcLoc {src'range = x'span} x' $ T.concat ssl
+        EdhExpr (ExprDefi u x' curSrcLoc {src'range = x'span}) $ T.concat ssl
 evalExpr' (LitExpr !lit) _docCmt !exit =
   \ !ets -> evalLiteral lit >>= exitEdh ets exit
 evalExpr' (PrefixExpr PrefixPlus !expr') !docCmt !exit =
@@ -5267,7 +5271,7 @@ evalInfixSrc'
             "invalid operator: " <> T.pack (show callable)
 
       edhExpr !u (ExprSrc !x !x'span) !s =
-        EdhExpr u curSrcLoc {src'range = x'span} x s
+        EdhExpr (ExprDefi u x curSrcLoc {src'range = x'span}) s
       curSrcLoc = edh'exe'src'loc $ edh'ctx'tip ctx
 
       !ctx = edh'context ets
@@ -5525,11 +5529,13 @@ edhValueNull _ (EdhDict (Dict _ ds)) !exit = iopdNull ds >>= exit
 edhValueNull _ (EdhList (List _ l)) !exit = readTVar l >>= exit . null
 edhValueNull _ (EdhArgsPack (ArgsPack args kwargs)) !exit =
   exit $ null args && odNull kwargs
-edhValueNull _ (EdhExpr _ _ (LitExpr NilLiteral) _) !exit = exit True
-edhValueNull _ (EdhExpr _ _ (LitExpr (DecLiteral d)) _) !exit =
+edhValueNull _ (EdhExpr (ExprDefi _ (LitExpr NilLiteral) _) _) !exit =
+  exit True
+edhValueNull _ (EdhExpr (ExprDefi _ (LitExpr (DecLiteral d)) _) _) !exit =
   exit $ D.decimalIsNaN d || d == 0
-edhValueNull _ (EdhExpr _ _ (LitExpr (BoolLiteral b)) _) !exit = exit b
-edhValueNull _ (EdhExpr _ _ (LitExpr (StringLiteral s)) _) !exit =
+edhValueNull _ (EdhExpr (ExprDefi _ (LitExpr (BoolLiteral b)) _) _) !exit =
+  exit b
+edhValueNull _ (EdhExpr (ExprDefi _ (LitExpr (StringLiteral s)) _) _) !exit =
   exit $ T.null s
 edhValueNull !ets (EdhObject !o) !exit = runEdhTx ets $
   invokeMagic o (AttrByName "__null__") (ArgsPack [] odEmpty) magicExit $
