@@ -42,8 +42,10 @@ data AtomEvq = AtomEvq
 -- No consequence will be executed if the spreading phase fails somehow.
 --
 -- Currently all consequent/subsequent actions are required to be exception
--- free, or the entire program / scription may terminate unexpectedly.
--- Such exceptions may get caught & ignored in the future.
+-- free, any noncomplying exception will be thrown at the nearest scripting
+-- exception handler, with the overall event propagation done halfway (i.e.
+-- data consistency issues prone). Such exceptions may get caught & ignored in
+-- the future, for consequences / subsequences ever armed uncancellable.
 conseqDo :: EIO () -> AtomEvq -> STM ()
 conseqDo !act (AtomEvq !conseqs _) = modifyTVar' conseqs (act :)
 
@@ -58,8 +60,10 @@ conseqDo !act (AtomEvq !conseqs _) = modifyTVar' conseqs (act :)
 -- No subsequence will be executed if the spreading phase fails somehow.
 --
 -- Currently all consequent/subsequent actions are required to be exception
--- free, or the entire program / scription may terminate unexpectedly.
--- Such exceptions may get caught & ignored in the future.
+-- free, any noncomplying exception will be thrown at the nearest scripting
+-- exception handler, with the overall event propagation done halfway (i.e.
+-- data consistency issues prone). Such exceptions may get caught & ignored in
+-- the future, for consequences / subsequences ever armed uncancellable.
 subseqDo :: EIO () -> AtomEvq -> STM ()
 subseqDo !act (AtomEvq _ !subseqs) = modifyTVar' subseqs (act :)
 
@@ -430,9 +434,11 @@ spreadEvents !stopOnEoS !intake !deriver = do
 -- | Generate new event stream(s), as the consequence of the specified upstream
 -- event stream
 --
--- Failures in the generation won't prevent publishing of the original event,
--- other consequences / subsequences of the original event hierarchy will
--- propagate anyway.
+-- Currently all consequent/subsequent actions are required to be exception
+-- free, any noncomplying exception will be thrown at the nearest scripting
+-- exception handler, with the overall event propagation done halfway (i.e.
+-- data consistency issues prone). Such exceptions may get caught & ignored in
+-- the future, for consequences / subsequences ever armed uncancellable.
 --
 -- The generation stops after the 'stopOnEoS' callback indicates so, per any
 -- downstream event sink reaches EoS.
