@@ -572,6 +572,11 @@ pushStackM' !scope !act = Edh $ \naExit exit ets -> do
           }
   unEdh act naExit (edhSwitchState ets . exit) etsNew
 
+-- | Evaluate an expression definition
+evalExprDefiM :: ExprDefi -> Edh EdhValue
+evalExprDefiM !x =
+  Edh $ \_naExit -> evalExprDefi x
+
 -- | Evaluate an expression
 evalExprM :: Expr -> Edh EdhValue
 evalExprM !x =
@@ -586,6 +591,11 @@ evalInfixM !opSym !lhExpr !rhExpr =
 evalInfixSrcM :: OpSymSrc -> ExprSrc -> ExprSrc -> Edh EdhValue
 evalInfixSrcM !opSym !lhExpr !rhExpr =
   Edh $ \_naExit -> evalInfixSrc opSym lhExpr rhExpr
+
+-- | Evaluate an expression definition
+caseValueOfM :: EdhValue -> ExprDefi -> Edh EdhValue
+caseValueOfM !matchTgtVal !x =
+  Edh $ \_naExit -> edhCaseValueOf matchTgtVal x
 
 -- ** Value Manipulations
 

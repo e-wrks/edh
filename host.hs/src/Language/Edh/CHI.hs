@@ -102,6 +102,8 @@ module Language.Edh.CHI
     callEdhMethod,
     evalStmt,
     evalStmtSrc,
+    edhCaseValueOf,
+    evalExprDefi,
     evalExpr,
     evalExprSrc,
     evalExprs,

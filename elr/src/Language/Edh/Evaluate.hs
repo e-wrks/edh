@@ -2782,34 +2782,52 @@ evalStmtSrc (StmtSrc !stmt !ss) !exit !ets =
     !ctx = edh'context ets
     !tip = edh'ctx'tip ctx
 
-evalCaseBranches :: EdhValue -> ExprSrc -> EdhTxExit EdhValue -> EdhTx
-evalCaseBranches !tgtVal expr@(ExprSrc !x !src'span) !exit !ets = case x of
+edhCaseValueOf :: EdhValue -> ExprDefi -> EdhTxExit EdhValue -> EdhTx
+edhCaseValueOf !matchTgtVal (ExprDefi _ !x !src'loc) !exit !ets =
+  runEdhTx etsCase $ _evalCaseBranches x $ edhSwitchState ets . exit
+  where
+    !ctx = edh'context ets
+    !tip = edh'ctx'tip ctx
+    !etsCase =
+      ets
+        { edh'context =
+            ctx
+              { edh'ctx'tip = tip {edh'exe'src'loc = src'loc},
+                edh'ctx'match = tv
+              }
+        }
+    !tv = case edhDeCaseClose matchTgtVal of
+      EdhCaseOther -> nil
+      !v -> v
+
+_evalCaseBranches :: Expr -> EdhTxExit EdhValue -> EdhTx
+_evalCaseBranches !x !exit = case x of
   -- case-of with a block is normal
-  BlockExpr !stmts ->
-    runEdhTx (etsMovePC etsCase src'span) $
-      evalBlock stmts $ edhSwitchState ets . exit
-  ScopedBlockExpr !stmts ->
-    runEdhTx (etsMovePC etsCase src'span) $
-      evalScopedBlock stmts $ edhSwitchState ets . exit
+  BlockExpr !stmts -> evalBlock stmts exit
+  ScopedBlockExpr !stmts -> evalScopedBlock stmts exit
   -- single branch case is some special
-  _ -> runEdhTx etsCase $
-    evalExprSrc expr $ \ !val -> edhSwitchState ets $ case val of
-      -- the only branch did match, let not the branch match escape
-      (EdhCaseClose !v) -> exitEdhTx exit $ edhDeCaseClose v
-      -- the only branch didn't match. non-exhaustive case is bad smell in FP,
-      -- but kinda norm in imperative style, some equvilant to if-then without an
-      -- else clause. anyway the nonmatch should not escape here
-      EdhCaseOther -> exitEdhTx exit nil
-      -- yield should have been handled by 'evalExpr''
-      (EdhYield _) -> throwEdhTx EvalError "bug yield reached block"
-      -- ctrl to be propagated outwards, as this is the only stmt, no need to
-      -- be specifically written out
-      -- EdhFallthrough    -> exitEdhTx exit EdhFallthrough
-      -- EdhBreak          -> exitEdhTx exit EdhBreak
-      -- EdhContinue       -> exitEdhTx exit EdhContinue
-      -- (EdhReturn !v)    -> exitEdhTx exit (EdhReturn v)
-      -- other vanilla result, propagate as is
-      _ -> exitEdhTx exit val
+  _ -> evalExpr x $ \ !val -> case val of
+    -- the only branch did match, let not the branch match escape
+    (EdhCaseClose !v) -> exitEdhTx exit $ edhDeCaseClose v
+    -- the only branch didn't match. non-exhaustive case is bad smell in FP,
+    -- but kinda norm in imperative style, some equvilant to if-then without an
+    -- else clause. anyway the nonmatch should not escape here
+    EdhCaseOther -> exitEdhTx exit nil
+    -- yield should have been handled by 'evalExpr''
+    (EdhYield _) -> throwEdhTx EvalError "bug yield reached block"
+    -- ctrl to be propagated outwards, as this is the only stmt, no need to
+    -- be specifically written out
+    -- EdhFallthrough    -> exitEdhTx exit EdhFallthrough
+    -- EdhBreak          -> exitEdhTx exit EdhBreak
+    -- EdhContinue       -> exitEdhTx exit EdhContinue
+    -- (EdhReturn !v)    -> exitEdhTx exit (EdhReturn v)
+    -- other vanilla result, propagate as is
+    _ -> exitEdhTx exit val
+
+evalCaseBranches :: EdhValue -> ExprSrc -> EdhTxExit EdhValue -> EdhTx
+evalCaseBranches !tgtVal (ExprSrc !x !src'span) !exit !ets =
+  runEdhTx (etsMovePC etsCase src'span) $
+    _evalCaseBranches x $ edhSwitchState ets . exit
   where
     !etsCase =
       ets
@@ -4217,11 +4235,22 @@ defineEffect !ets !key !val =
   edhSetValue key val
     =<< prepareEffStore ets (edh'scope'entity $ contextScope $ edh'context ets)
 
+-- | Evaluate an Edh expression definition
+evalExprDefi :: ExprDefi -> EdhTxExit EdhValue -> EdhTx
+evalExprDefi (ExprDefi _ !x !src'loc) !exit !ets =
+  runEdhTx etsEval $ evalExpr' x NoDocCmt $ edhSwitchState ets . exit
+  where
+    !ctx = edh'context ets
+    !tip = edh'ctx'tip ctx
+    !etsEval =
+      ets
+        { edh'context = ctx {edh'ctx'tip = tip {edh'exe'src'loc = src'loc}}
+        }
+
 evalExprSrc :: ExprSrc -> EdhTxExit EdhValue -> EdhTx
 evalExprSrc (ExprSrc !expr !ss) !exit !ets =
   runEdhTx (etsMovePC ets ss) $
-    evalExpr expr $ \ !rtn ->
-      edhSwitchState ets $ exit rtn
+    evalExpr expr $ edhSwitchState ets . exit
 
 -- | Evaluate an Edh expression
 evalExpr :: Expr -> EdhTxExit EdhValue -> EdhTx
@@ -4230,8 +4259,7 @@ evalExpr !x !exit = evalExpr' x NoDocCmt exit
 evalExprSrc' :: ExprSrc -> OptDocCmt -> EdhTxExit EdhValue -> EdhTx
 evalExprSrc' (ExprSrc !expr !ss) !docCmt !exit !ets =
   runEdhTx (etsMovePC ets ss) $
-    evalExpr' expr docCmt $ \ !rtn ->
-      edhSwitchState ets $ exit rtn
+    evalExpr' expr docCmt $ edhSwitchState ets . exit
 
 evalExpr' :: Expr -> OptDocCmt -> EdhTxExit EdhValue -> EdhTx
 evalExpr' IntplExpr {} _docCmt _exit =
