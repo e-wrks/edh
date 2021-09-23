@@ -181,6 +181,7 @@ module Language.Edh.CHI
     exprSrcSpan,
     Expr (..),
     SourceSeg (..),
+    enExpr,
     deExpr,
     deExpr',
     deExpr1,

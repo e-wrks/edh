@@ -563,7 +563,7 @@ parsePerceiveStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parsePerceiveStmt !si = do
   void $ keyword "perceive"
   (!sink, !si') <- parseExpr si
-  (!body, !si'') <- parseStmt si'
+  (!body, !si'') <- parseExpr si'
   return (PerceiveStmt sink body, si'')
 
 parseInterpreterExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)

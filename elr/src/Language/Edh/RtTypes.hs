@@ -1339,12 +1339,11 @@ data Stmt
     -- is carried on as normally.
     --
     -- the perceiver body uses a value/pattern matching branch, or a
-    -- group of branches (as a block expr) to handle the happened event
+    -- group of branches (in a block expr) to handle the happened event
     -- data, including `nil` as end-of-stream indicator.
     --
-    -- the perceiption construct is somewhat similar to traditional signal
-    -- handling mechanism in OS process management
-    PerceiveStmt !ExprSrc !StmtSrc
+    -- the perceiption construct is somewhat similar to unix signal handling
+    PerceiveStmt !ExprSrc !ExprSrc
   | -- | break from a while/for loop, or terminate the Edh thread if given
     -- from a perceiver
     BreakStmt
@@ -1362,6 +1361,11 @@ data Stmt
   | -- | expression with precedence
     ExprStmt !Expr !OptDocCmt
   deriving (Eq, Show)
+
+enExpr :: StmtSrc -> ExprSrc
+enExpr (StmtSrc (ExprStmt x _) src'span) = ExprSrc x src'span
+enExpr (StmtSrc stmt src'span) =
+  ExprSrc (BlockExpr [StmtSrc stmt src'span]) src'span
 
 -- Attribute reference
 data AttrRef

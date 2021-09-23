@@ -3044,7 +3044,7 @@ evalStmt !stmt !exit = case stmt of
             schedDefered etsSched id (runLoop endOfEdh)
       _ -> \ !etsSched ->
         schedDefered etsSched id $ evalExpr' expr NoDocCmt endOfEdh
-  PerceiveStmt !sinkExpr bodyStmt@(StmtSrc _stmt body'rng) ->
+  PerceiveStmt !sinkExpr bodyExpr@(ExprSrc body'x body'rng) ->
     evalExprSrc sinkExpr $ \ !sinkVal !ets -> case edhUltimate sinkVal of
       EdhEvs !sink ->
         if edh'in'tx ets
@@ -3052,11 +3052,11 @@ evalStmt !stmt !exit = case stmt of
             modifyTVar' (evs'atoms sink) $ \ !prev'atoms !ev ->
               runEdhTx
                 ets {edh'context = (edh'context ets) {edh'ctx'match = ev}}
-                $ evalStmtSrc bodyStmt $ \_ _ets -> prev'atoms ev
+                $ evalExprSrc bodyExpr $ \_ _ets -> prev'atoms ev
             exitEdh ets exit nil
           else do
             let reactor !breakThread =
-                  evalStmtSrc bodyStmt $ \ !reactResult _etsReactor ->
+                  evalExprSrc bodyExpr $ \ !reactResult _etsReactor ->
                     case edhDeCaseClose reactResult of
                       EdhBreak -> writeTVar breakThread True
                       -- todo warn or even err out in case
@@ -3090,7 +3090,7 @@ evalStmt !stmt !exit = case stmt of
             sinkLikeObj
             (AttrByName "__perceive__")
             ( ArgsPack
-                [EdhExpr u (SrcLoc doc body'rng) (BlockExpr [bodyStmt]) ""]
+                [EdhExpr u (SrcLoc doc body'rng) body'x ""]
                 odEmpty
             )
             (exitEdhTx exit)
@@ -3742,7 +3742,7 @@ intplStmt !ets !stmt !exit = case stmt of
         \ !sndrs' -> exit $ LetStmt rcvrs' $ ArgsPacker sndrs' sndrsSpan
   ExtendsStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ ExtendsStmt x'
   PerceiveStmt !sink !body -> intplExprSrc ets sink $ \ !sink' ->
-    intplStmtSrc ets body $ \ !body' -> exit $ PerceiveStmt sink' body'
+    intplExprSrc ets body $ \ !body' -> exit $ PerceiveStmt sink' body'
   ThrowStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ ThrowStmt x'
   ReturnStmt !x !docCmt -> intplExprSrc ets x $ \ !x' ->
     exit $ ReturnStmt x' docCmt
