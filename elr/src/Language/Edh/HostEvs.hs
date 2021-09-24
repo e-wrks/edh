@@ -143,7 +143,7 @@ instance Eq AnyEventSource where
   AnyEventSource _ xo == AnyEventSource _ yo = xo == yo
 
 instance ComputArgAdapter AnyEventSource where
-  adaptEdhArg !v = (<|> badVal) $ case edhUltimate v of
+  adaptEdhArg !v = case edhUltimate v of
     EdhObject o -> case dynamicHostData o of
       Nothing -> mzero
       Just (Dynamic tr evs) -> case eqTypeRep tr (typeRep @SomeEventSink) of
@@ -160,11 +160,6 @@ instance ComputArgAdapter AnyEventSource where
               _ -> mzero
           _ -> mzero
     _ -> mzero
-    where
-      badVal = do
-        !badDesc <- edhValueDescM v
-        throwEdhM UsageError $
-          "any EventSource expected but given: " <> badDesc
 
   adaptedArgValue (AnyEventSource _evs !obj) = EdhObject obj
 
@@ -260,7 +255,7 @@ instance Eq AnyEventSink where
   AnyEventSink x _ == AnyEventSink y _ = isSameEventSink x y
 
 instance ComputArgAdapter AnyEventSink where
-  adaptEdhArg !v = (<|> badVal) $ case edhUltimate v of
+  adaptEdhArg !v = case edhUltimate v of
     EdhObject o -> case dynamicHostData o of
       Nothing -> mzero
       Just (Dynamic tr evs) -> case eqTypeRep tr (typeRep @SomeEventSink) of
@@ -272,11 +267,6 @@ instance ComputArgAdapter AnyEventSink where
             _ -> mzero
           _ -> mzero
     _ -> mzero
-    where
-      badVal = do
-        !badDesc <- edhValueDescM v
-        throwEdhM UsageError $
-          "any EventSink expected but given: " <> badDesc
 
   adaptedArgValue (AnyEventSink _evs !obj) = EdhObject obj
 

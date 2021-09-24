@@ -73,6 +73,13 @@ class Typeable a => ComputArgAdapter a where
   adaptedArgType :: Text
   adaptedArgType = T.pack $ show $ typeRep @a
 
+  mustAdaptEdhArg :: EdhValue -> Edh a
+  mustAdaptEdhArg v =
+    (adaptEdhArg v <|>) $
+      edhSimpleDescM v >>= \ !badDesc ->
+        throwEdhM UsageError $
+          adaptedArgType @a <> " expected but given: " <> badDesc
+
   adaptEdhArg :: EdhValue -> Edh a
   adaptedArgValue :: a -> EdhValue
 
@@ -100,7 +107,7 @@ instance
   callByScript (PendingApplied !pargs !f) (ArgsPack !args !kwargs) =
     case odTakeOut argName kwargs of
       (Just !av, !kwargs') -> do
-        !ad <- adaptEdhArg av
+        !ad <- mustAdaptEdhArg av
         callByScript
           (f $ ComputArg ad)
           (ArgsPack args $ odUnion pargs kwargs')
@@ -120,7 +127,7 @@ instance
                   (argDecl, adaptedArgValue ad) : appliedArgs
       (Nothing, !kwargs') -> case args of
         av : args' -> do
-          !ad <- adaptEdhArg av
+          !ad <- mustAdaptEdhArg av
           callByScript
             (f $ ComputArg ad)
             (ArgsPack args' $ odUnion pargs kwargs')
@@ -163,7 +170,7 @@ instance
   callByScript f (ArgsPack !args !kwargs) =
     case odTakeOut argName kwargs of
       (Just !av, !kwargs') -> do
-        !ad <- adaptEdhArg av
+        !ad <- mustAdaptEdhArg av
         callByScript (f $ ComputArg ad) (ArgsPack args kwargs') >>= \case
           ScriptDone !done -> return $ ScriptDone done
           ScriptDone' !done -> return $ ScriptDone' done
@@ -179,7 +186,7 @@ instance
                 (argDecl, adaptedArgValue ad) : appliedArgs
       (Nothing, !kwargs') -> case args of
         av : args' -> do
-          !ad <- adaptEdhArg av
+          !ad <- mustAdaptEdhArg av
           callByScript (f $ ComputArg ad) (ArgsPack args' kwargs') >>= \case
             ScriptDone !done -> return $ ScriptDone done
             ScriptDone' !done -> return $ ScriptDone' done
@@ -269,7 +276,7 @@ applyMaybeEffectfulArg !f = do
                 return $ FullyEffected d extras appliedArgs
               _ -> throwEdhM EvalError "bug: not fully effected"
         Just !av -> do
-          !ad <- adaptEdhArg av
+          !ad <- mustAdaptEdhArg av
           callByScript
             (f $ ComputArg $ Effective $ Just ad)
             (ArgsPack [] odEmpty)
@@ -344,7 +351,7 @@ applyEffectfulArg !f = do
           throwEdhM UsageError $
             "missing effectful arg: " <> attrKeyStr argName
         Just !av -> do
-          !ad <- adaptEdhArg av
+          !ad <- mustAdaptEdhArg av
           callByScript
             (f $ ComputArg $ Effective ad)
             (ArgsPack [] odEmpty)
@@ -580,80 +587,42 @@ instance ComputArgAdapter (Maybe Object) where
   adaptEdhArg !v = case edhUltimate v of
     EdhNil -> return Nothing
     EdhObject !d -> return $ Just d
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            "optional "
-              <> adaptedArgType @Object
-              <> " expected but given: "
-              <> badDesc
+    _ -> mzero
   adaptedArgValue (Just !d) = EdhObject d
   adaptedArgValue Nothing = edhNothing
 
 instance ComputArgAdapter Object where
   adaptEdhArg !v = case edhUltimate v of
     EdhObject !d -> return d
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            adaptedArgType @Object <> " expected but given: " <> badDesc
+    _ -> mzero
   adaptedArgValue = EdhObject
 
 instance ComputArgAdapter (Maybe Decimal) where
   adaptEdhArg !v = case edhUltimate v of
     EdhNil -> return Nothing
     EdhDecimal !d -> return $ Just d
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            "optional "
-              <> adaptedArgType @Decimal
-              <> " expected but given: "
-              <> badDesc
+    _ -> mzero
   adaptedArgValue (Just !d) = EdhDecimal d
   adaptedArgValue Nothing = edhNothing
 
 instance ComputArgAdapter Decimal where
   adaptEdhArg !v = case edhUltimate v of
     EdhDecimal !d -> return d
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            adaptedArgType @Decimal <> " expected but given: " <> badDesc
+    _ -> mzero
   adaptedArgValue = EdhDecimal
 
 instance ComputArgAdapter (Maybe Double) where
   adaptEdhArg !v = case edhUltimate v of
     EdhNil -> return Nothing
     EdhDecimal !d -> return $ Just $ D.decimalToRealFloat d
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            "optional " <> adaptedArgType @Double
-              <> " expected but given: "
-              <> badDesc
+    _ -> mzero
   adaptedArgValue (Just !d) = EdhDecimal $ D.decimalFromRealFloat d
   adaptedArgValue Nothing = edhNothing
 
 instance ComputArgAdapter Double where
   adaptEdhArg !v = case edhUltimate v of
     EdhDecimal !d -> return $ D.decimalToRealFloat d
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            adaptedArgType @Double <> " expected but given: " <> badDesc
+    _ -> mzero
   adaptedArgValue = EdhDecimal . D.decimalFromRealFloat
 
 instance
@@ -666,15 +635,8 @@ instance
     EdhNil -> return Nothing
     EdhDecimal !d -> case D.decimalToInteger d of
       Just !i -> return $ Just $ fromInteger i
-      Nothing -> badVal
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            "optional " <> adaptedArgType @i
-              <> " expected but given: "
-              <> badDesc
+      Nothing -> mzero
+    _ -> mzero
   adaptedArgValue (Just !i) = EdhDecimal $ fromIntegral i
   adaptedArgValue Nothing = edhNothing
 
@@ -687,13 +649,8 @@ instance
   adaptEdhArg !v = case edhUltimate v of
     EdhDecimal !d -> case D.decimalToInteger d of
       Just !i -> return $ fromInteger i
-      Nothing -> badVal
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            adaptedArgType @i <> " expected but given: " <> badDesc
+      Nothing -> mzero
+    _ -> mzero
   adaptedArgValue !i = EdhDecimal $ fromIntegral i
 
 newtype Count = Count Int
@@ -704,15 +661,8 @@ instance ComputArgAdapter (Maybe Count) where
     EdhNil -> return Nothing
     EdhDecimal !d | d >= 1 -> case D.decimalToInteger d of
       Just !i -> return $ Just $ Count $ fromInteger i
-      Nothing -> badVal
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            adaptedArgType @Count
-              <> " (positive integer) expected but given: "
-              <> badDesc
+      Nothing -> mzero
+    _ -> mzero
   adaptedArgValue (Just (Count !i)) = EdhDecimal $ fromIntegral i
   adaptedArgValue Nothing = edhNothing
 
@@ -720,15 +670,8 @@ instance ComputArgAdapter Count where
   adaptEdhArg !v = case edhUltimate v of
     EdhDecimal !d | d >= 1 -> case D.decimalToInteger d of
       Just !i -> return $ Count $ fromInteger i
-      Nothing -> badVal
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            adaptedArgType @Count
-              <> " (positive integer) expected but given: "
-              <> badDesc
+      Nothing -> mzero
+    _ -> mzero
   adaptedArgValue (Count !i) = EdhDecimal $ fromIntegral i
 
 data HostData (tn :: TypeLits.Symbol) = HostData !Dynamic !Object
@@ -749,13 +692,8 @@ instance
             return $ Just $ HostData d o
           _ -> return $ Just $ HostData dd o
         Nothing -> return $ Just $ HostData dd o
-      _ -> badVal
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            adaptedArgType @(HostData tn) <> " expected but given: " <> badDesc
+      _ -> mzero
+    _ -> mzero
 
   adaptedArgValue (Just (HostData _dd !obj)) = EdhObject obj
   adaptedArgValue Nothing = edhNothing
@@ -771,13 +709,8 @@ instance TypeLits.KnownSymbol tn => ComputArgAdapter (HostData tn) where
           FullyEffected d _extras _applied -> return $ HostData d o
           _ -> return $ HostData dd o
         Nothing -> return $ HostData dd o
-      _ -> badVal
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            adaptedArgType @(HostData tn) <> " expected but given: " <> badDesc
+      _ -> mzero
+    _ -> mzero
 
   adaptedArgValue (HostData _dd !obj) = EdhObject obj
 
@@ -793,21 +726,16 @@ instance Typeable t => ComputArgAdapter (Maybe (HostValue t)) where
         Just (sr :: ScriptedResult) -> case sr of
           ScriptDone' d -> case fromDynamic d of
             Just (t :: t) -> return $ Just $ HostValue t o
-            Nothing -> badVal
+            Nothing -> mzero
           FullyEffected d _extras _applied -> case fromDynamic d of
             Just (t :: t) -> return $ Just $ HostValue t o
-            Nothing -> badVal
-          _ -> badVal
+            Nothing -> mzero
+          _ -> mzero
         Nothing -> case fromDynamic dd of
           Just (t :: t) -> return $ Just $ HostValue t o
-          Nothing -> badVal
-      _ -> badVal
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            adaptedArgType @(HostValue t) <> " expected but given: " <> badDesc
+          Nothing -> mzero
+      _ -> mzero
+    _ -> mzero
 
   adaptedArgValue (Just (HostValue _val !obj)) = EdhObject obj
   adaptedArgValue Nothing = edhNothing
@@ -821,21 +749,16 @@ instance Typeable t => ComputArgAdapter (HostValue t) where
         Just (sr :: ScriptedResult) -> case sr of
           ScriptDone' d -> case fromDynamic d of
             Just (t :: t) -> return $ HostValue t o
-            Nothing -> badVal
+            Nothing -> mzero
           FullyEffected d _extras _applied -> case fromDynamic d of
             Just (t :: t) -> return $ HostValue t o
-            Nothing -> badVal
-          _ -> badVal
+            Nothing -> mzero
+          _ -> mzero
         Nothing -> case fromDynamic dd of
           Just (t :: t) -> return $ HostValue t o
-          Nothing -> badVal
-      _ -> badVal
-    _ -> badVal
-    where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            adaptedArgType @(HostValue t) <> " expected but given: " <> badDesc
+          Nothing -> mzero
+      _ -> mzero
+    _ -> mzero
 
   adaptedArgValue (HostValue _val !obj) = EdhObject obj
 
@@ -848,12 +771,8 @@ instance (Typeable t, ComputArgAdapter t) => ComputArgAdapter (HostSeq t) where
     EdhArgsPack (ArgsPack !args !kwargs)
       | odNull kwargs -> exitWith args
     EdhList (List _u !lv) -> exitWith =<< readTVarEdh lv
-    _ -> badVal
+    _ -> mzero
     where
-      badVal =
-        edhSimpleDescM v >>= \ !badDesc ->
-          throwEdhM UsageError $
-            adaptedArgType @(HostSeq t) <> " expected but given: " <> badDesc
       exitWith :: [EdhValue] -> Edh (HostSeq t)
       exitWith [] = return $ HostSeq [] []
       exitWith !vs = go vs []
