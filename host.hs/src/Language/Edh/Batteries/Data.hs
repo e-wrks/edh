@@ -526,12 +526,14 @@ concatProc !lhExpr !rhExpr !exit !ets =
               )
 
 -- | utility repr(val) - repr extractor
-reprProc :: Expr -> EdhHostProc
-reprProc !x !exit = evalExpr x $ \ !v -> edhValueReprTx v $ exit . EdhString
+reprProc :: ExprDefi -> EdhHostProc
+reprProc (ExprDefi _ !x _) !exit =
+  evalExpr x $ \ !v -> edhValueReprTx v $ exit . EdhString
 
 -- | utility str(val) - str extractor
-strProc :: Expr -> EdhHostProc
-strProc !x !exit = evalExpr x $ \ !v -> edhValueStrTx v $ exit . EdhString
+strProc :: ExprDefi -> EdhHostProc
+strProc (ExprDefi _ !x _) !exit =
+  evalExpr x $ \ !v -> edhValueStrTx v $ exit . EdhString
 
 capProc :: EdhValue -> RestKwArgs -> EdhHostProc
 capProc !v !kwargs !exit = case edhUltimate v of
@@ -585,8 +587,8 @@ markProc !v !newLen !kwargs !exit = case edhUltimate v of
     throwEdhTx UsageError $
       "mark() not supported by a value of " <> edhTypeNameOf badVal
 
-showProc :: Expr -> RestKwArgs -> EdhHostProc
-showProc !x !kwExprs !exit !ets = runEdhTx ets $
+showProc :: ExprDefi -> RestKwArgs -> EdhHostProc
+showProc (ExprDefi _ !x _) !kwExprs !exit !ets = runEdhTx ets $
   evalExpr x $ \ !v -> case v of
     EdhNamedValue !n !val -> edhValueReprTx val $
       \ !repr -> exitEdhTx exit $ EdhString $ n <> " := " <> repr
@@ -615,8 +617,8 @@ showProc !x !kwExprs !exit !ets = runEdhTx ets $
     showWithNoMagic v = edhValueReprTx v $ \ !s ->
       exitEdhTx exit $ EdhString $ edhTypeNameOf v <> ": " <> s
 
-descProc :: Expr -> RestKwArgs -> EdhHostProc
-descProc !x !kwExprs !exit !ets = runEdhTx ets $
+descProc :: ExprDefi -> RestKwArgs -> EdhHostProc
+descProc (ExprDefi _ !x _) !kwExprs !exit !ets = runEdhTx ets $
   evalExpr x $ \ !v -> case edhUltimate v of
     EdhObject !o -> evalKwExprs kwExprs $ \ !kwargs ->
       invokeMagic o (AttrByName "__desc__") (ArgsPack [] kwargs) exit $
@@ -661,8 +663,8 @@ descProc !x !kwExprs !exit !ets = runEdhTx ets $
       (("\n * doc comments *\n" <>) . T.unlines) docCmt
 
 -- | utility null(val) - null tester
-isNullProc :: Expr -> EdhHostProc
-isNullProc !x !exit = evalExpr x $ \ !v !ets ->
+isNullProc :: ExprDefi -> EdhHostProc
+isNullProc (ExprDefi _ !x _) !exit = evalExpr x $ \ !v !ets ->
   edhValueNull ets v $ exitEdh ets exit . EdhBool
 
 -- | utility compare(v1, v2) - value comparator
@@ -672,8 +674,8 @@ cmpProc !v1 !v2 !exit !ets = edhCompareValue ets v1 v2 $ \case
   Just !conclusion -> exitEdh ets exit $ EdhOrd conclusion
 
 -- | utility type(value) - value type introspector
-typeProc :: Expr -> EdhHostProc
-typeProc !valExpr !exit =
+typeProc :: ExprDefi -> EdhHostProc
+typeProc (ExprDefi _ !valExpr _) !exit =
   evalExpr valExpr $ exitEdhTx exit . EdhString . edhTypeNameOf
 
 procNameProc :: EdhValue -> EdhHostProc
@@ -803,8 +805,8 @@ lstrvrsPrpdProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
 
 -- | unzip utility - unzip a series of tuples from either a tuple, a list or
 -- enumeration with a for-loop, into a tuple of tuples
-unzipProc :: "tuples" !: Expr -> EdhHostProc
-unzipProc (mandatoryArg -> !tuplesExpr) !exit !ets =
+unzipProc :: "tuples" !: ExprDefi -> EdhHostProc
+unzipProc (mandatoryArg -> ExprDefi _ !tuplesExpr _) !exit !ets =
   case deParen' tuplesExpr of
     ForExpr !scoped !argsRcvr !iterExpr !bodyStmt -> do
       !stripsVar <- newTVar []
