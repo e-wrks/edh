@@ -16,6 +16,8 @@ import Language.Edh.RtTypes
 import Type.Reflection
 import Prelude
 
+-- * Generic Event Source & Event Handling
+
 -- | Indicates whether the relevant event sink is at end-of-stream
 type EndOfStream = Bool
 
@@ -67,7 +69,28 @@ conseqDo !act (AtomEvq !conseqs _) = modifyTVar' conseqs (act :)
 subseqDo :: EIO () -> AtomEvq -> STM ()
 subseqDo !act (AtomEvq _ !subseqs) = modifyTVar' subseqs (act :)
 
+-- | An event handler reacts to a particular event with an STM computation,
+-- returns whether it is still interested in the subsequent events in the same
+-- stream
+--
+-- Further EIO computations can be scheduled into the provided atomic event
+-- queue. Any failure in any event handler will prevent the publishing of the
+-- current event hierarchy at all, the failure will be thrown to the publisher
+-- of the root event.
+type EventHandler t = AtomEvq -> t -> STM HandleSubsequentEvents
+
+data HandleSubsequentEvents = KeepHandling | StopHandling
+
 class EventSource s t where
+  -- | Obtain the lingering event data if any
+  --
+  -- Some event source can always have the latest event data lingering, some
+  -- never, some per specific criteria.
+  lingering :: s t -> STM (Maybe t)
+
+  -- | Handle each event data as it arrives
+  perceive :: s t -> EventHandler t -> STM ()
+
   -- | Subscribe to the event stream through the specified event source
   --
   -- Any failure in the handler will prevent publishing of the original event at
@@ -78,6 +101,9 @@ class EventSource s t where
   -- tried regardless of other's failures, so long as the publishing of the
   -- original event succeeded.
   on :: s t -> (t -> AtomEvq -> STM ()) -> STM ()
+  on !evs !handler = perceive evs $ \ !aeq !evd -> do
+    handler evd aeq
+    return KeepHandling
 
   -- | Subscribe to the next event through the specified event source
   --
@@ -89,18 +115,25 @@ class EventSource s t where
   -- tried regardless of other's failures, so long as the publishing of the
   -- original event succeeded.
   once :: s t -> (t -> AtomEvq -> STM ()) -> STM ()
+  once !evs !handler = perceive evs $ \ !aeq !evd -> do
+    handler evd aeq
+    return StopHandling
+
+-- ** SomeEventSource the Functor
 
 data MappedEvs s a b = (EventSource s a) => MappedEvs (a -> b) (s a)
 
 instance (EventSource s a) => EventSource (MappedEvs s a) b where
-  on (MappedEvs f sa) handler = on sa $ \a aeq -> handler (f a) aeq
-  once (MappedEvs f sa) handler = once sa $ \a aeq -> handler (f a) aeq
+  lingering (MappedEvs f sa) = fmap f <$> lingering sa
+  perceive (MappedEvs f sa) handler = perceive sa $ \aeq a -> handler aeq (f a)
 
 -- | Polymorphic event source value wrapper
 data SomeEventSource t = forall s. (EventSource s t) => SomeEventSource (s t)
 
 instance Functor SomeEventSource where
   fmap f (SomeEventSource evs) = SomeEventSource $ MappedEvs f evs
+
+-- ** AnyEventSource the Argument Adapter
 
 -- | Polymorphic event source argument adapter
 data AnyEventSource
@@ -135,38 +168,7 @@ instance ComputArgAdapter AnyEventSource where
 
   adaptedArgValue (AnyEventSource _evs !obj) = EdhObject obj
 
--- | Polymorphic event sink value wrapper
-data SomeEventSink = forall t. Typeable t => SomeEventSink (EventSink t)
-
-instance Eq SomeEventSink where
-  SomeEventSink x == SomeEventSink y = isSameEventSink x y
-
--- | Polymorphic event sink argument adapter
-data AnyEventSink = forall t. Typeable t => AnyEventSink (EventSink t) Object
-
-instance Eq AnyEventSink where
-  AnyEventSink x _ == AnyEventSink y _ = isSameEventSink x y
-
-instance ComputArgAdapter AnyEventSink where
-  adaptEdhArg !v = (<|> badVal) $ case edhUltimate v of
-    EdhObject o -> case dynamicHostData o of
-      Nothing -> mzero
-      Just (Dynamic tr evs) -> case eqTypeRep tr (typeRep @SomeEventSink) of
-        Just HRefl -> case evs of
-          SomeEventSink evs' -> withTypeable tr $ return $ AnyEventSink evs' o
-        _ -> case tr of
-          App trEvs trE -> case eqTypeRep trEvs (typeRep @EventSink) of
-            Just HRefl -> withTypeable trE $ return $ AnyEventSink evs o
-            _ -> mzero
-          _ -> mzero
-    _ -> mzero
-    where
-      badVal = do
-        !badDesc <- edhValueDescM v
-        throwEdhM UsageError $
-          "any EventSink expected but given: " <> badDesc
-
-  adaptedArgValue (AnyEventSink _evs !obj) = EdhObject obj
+-- * Event Sink - Event Target as well as Event Source
 
 -- | An event sink conveys an event stream, with possibly multiple event
 -- producers and / or multiple event consumers (i.e. listeners and handlers
@@ -210,18 +212,6 @@ data EventSink t = EventSink
     doneEventStream :: STM ()
   }
 
--- | An event handler reacts to a particular event with an STM computation,
--- returns whether it is still interested in the subsequent events in the same
--- stream
---
--- Further EIO computations can be scheduled into the provided atomic event
--- queue. Any failure in any event handler will prevent the publishing of the
--- current event hierarchy at all, the failure will be thrown to the publisher
--- of the root event.
-type EventHandler t = AtomEvq -> t -> STM HandleSubsequentEvents
-
-data HandleSubsequentEvents = KeepHandling | StopHandling
-
 -- | An event listener reacts to a particular event with an STM computation,
 -- returns a possible event listener for the next event in the stream
 --
@@ -252,6 +242,45 @@ handleEvents !evs !handler =
       handler aeq evd >>= \case
         KeepHandling -> return (Just keepTriggering)
         StopHandling -> return Nothing
+
+-- ** SomeEventSink the Polymorphic Wrapper
+
+-- | Polymorphic event sink value wrapper
+data SomeEventSink = forall t. Typeable t => SomeEventSink (EventSink t)
+
+instance Eq SomeEventSink where
+  SomeEventSink x == SomeEventSink y = isSameEventSink x y
+
+-- ** AnyEventSink the Argument Adapter
+
+-- | Polymorphic event sink argument adapter
+data AnyEventSink = forall t. Typeable t => AnyEventSink (EventSink t) Object
+
+instance Eq AnyEventSink where
+  AnyEventSink x _ == AnyEventSink y _ = isSameEventSink x y
+
+instance ComputArgAdapter AnyEventSink where
+  adaptEdhArg !v = (<|> badVal) $ case edhUltimate v of
+    EdhObject o -> case dynamicHostData o of
+      Nothing -> mzero
+      Just (Dynamic tr evs) -> case eqTypeRep tr (typeRep @SomeEventSink) of
+        Just HRefl -> case evs of
+          SomeEventSink evs' -> withTypeable tr $ return $ AnyEventSink evs' o
+        _ -> case tr of
+          App trEvs trE -> case eqTypeRep trEvs (typeRep @EventSink) of
+            Just HRefl -> withTypeable trE $ return $ AnyEventSink evs o
+            _ -> mzero
+          _ -> mzero
+    _ -> mzero
+    where
+      badVal = do
+        !badDesc <- edhValueDescM v
+        throwEdhM UsageError $
+          "any EventSink expected but given: " <> badDesc
+
+  adaptedArgValue (AnyEventSink _evs !obj) = EdhObject obj
+
+-- ** Utilities & Implementation Details
 
 -- | Create a new event sink
 newEventSinkEdh :: forall t. Edh (EventSink t)
@@ -387,13 +416,10 @@ _listen'events !eosRef !subsRef !listener =
     False -> modifyTVar' subsRef (listener :)
 
 instance (Typeable t) => EventSource EventSink t where
-  on !evs !handler = handleEvents evs $ \ !aeq !evd -> do
-    handler evd aeq
-    return KeepHandling
+  lingering = recentEvent
+  perceive = handleEvents
 
-  once !evs !handler = handleEvents evs $ \ !aeq !evd -> do
-    handler evd aeq
-    return StopHandling
+-- * Event Propagation
 
 -- | Spread new event stream(s), as part of the spreading of an upstream event
 -- stream
@@ -405,15 +431,15 @@ instance (Typeable t) => EventSource EventSink t where
 -- The spreading stops after the 'stopOnEoS' callback indicates so, per any
 -- downstream event sink reaches EoS.
 spreadEvents ::
-  forall t.
-  Typeable t =>
+  forall t s.
+  (EventSource s t, Typeable t) =>
   (SomeEventSink -> STM Bool) ->
-  EventSink t ->
+  s t ->
   ((forall t'. Typeable t' => EventSink t' -> t' -> STM ()) -> t -> STM ()) ->
   STM ()
 spreadEvents !stopOnEoS !intake !deriver = do
   !stopVar <- newTVar False
-  handleEvents intake $ \ !aeq !evd -> do
+  perceive intake $ \ !aeq !evd -> do
     let spreader :: forall t'. Typeable t' => EventSink t' -> t' -> STM ()
         spreader evs' d' =
           atEndOfStream evs' >>= \case
@@ -443,10 +469,10 @@ spreadEvents !stopOnEoS !intake !deriver = do
 -- The generation stops after the 'stopOnEoS' callback indicates so, per any
 -- downstream event sink reaches EoS.
 generateEvents ::
-  forall t.
-  Typeable t =>
+  forall t s.
+  (EventSource s t, Typeable t) =>
   (SomeEventSink -> STM Bool) ->
-  EventSink t ->
+  s t ->
   ((forall t'. Typeable t' => EventSink t' -> t' -> EIO ()) -> t -> EIO ()) ->
   EIO ()
 generateEvents !stopOnEoS !intake !deriver = do
@@ -469,7 +495,7 @@ generateEvents !stopOnEoS !intake !deriver = do
                       "publishing to an EventSink at eos"
 
   atomicallyEIO $
-    handleEvents intake $ \ !aeq !evd ->
+    perceive intake $ \ !aeq !evd ->
       readTVar stopVar >>= \case
         True -> return StopHandling
         False -> do
