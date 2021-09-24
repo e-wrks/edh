@@ -977,6 +977,11 @@ modifyTVarEIO' :: forall a. TVar a -> (a -> a) -> EIO ()
 modifyTVarEIO' ref f = atomicallyEIO $ modifyTVar' ref f
 {-# INLINE modifyTVarEIO' #-}
 
+-- | The 'STM' action lifted into 'EIO' monad
+swapTVarEIO :: forall a. TVar a -> a -> EIO a
+swapTVarEIO ref a = atomicallyEIO $ swapTVar ref a
+{-# INLINE swapTVarEIO #-}
+
 -- | The 'IO' action lifted into 'EIO' monad
 newTMVarEIO :: forall a. a -> EIO (TMVar a)
 newTMVarEIO = liftIO . newTMVarIO
