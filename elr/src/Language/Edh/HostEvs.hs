@@ -275,66 +275,56 @@ instance (Typeable t) => EventSource EventSink t where
 
 -- * Event Propagation
 
-driveEvents ::
-  forall r.
-  ( (forall t. Typeable t => EventSink t -> t -> EIO ()) ->
-    (forall t. Typeable t => EventSink t -> t -> STM ()) ->
-    Edh r
-  ) ->
-  Edh r
-driveEvents !evtDriver = do
-  !conseqs <- newTVarEdh []
-  !subseqs <- newTVarEdh []
+-- | Run a publisher action, with given event queue and frame driver
+--
+-- The frame driver is used to realize all effects by consequences/subsequences
+-- of all events spreaded before its run, i.e. to drive an event frame
+publishEvents :: forall r. (AtomEvq -> EIO () -> EIO r) -> EIO r
+publishEvents !publisher = do
+  !conseqs <- newTVarEIO []
+  !subseqs <- newTVarEIO []
   let aeq = AtomEvq conseqs subseqs
 
-      publisher :: forall t. Typeable t => EventSink t -> t -> EIO ()
-      publisher evs evd = do
-        atomicallyEIO (readTVar eosRef) >>= \case
-          True -> return ()
-          False -> do
-            atomicallyEIO $ spreader evs evd
-
-            -- execute the consequences
-            swapTVarEIO conseqs [] >>= propagate
-
-            -- execute the subsequences
-            swapTVarEIO subseqs [] >>= propagate
+      frameDriver :: EIO ()
+      frameDriver = do
+        -- execute the consequences
+        swapTVarEIO conseqs [] >>= propagate
+        -- execute the subsequences
+        swapTVarEIO subseqs [] >>= propagate
         where
-          eosRef = event'sink'eos evs
-
           propagate :: [EIO ()] -> EIO ()
           propagate [] = return ()
           propagate (act : rest) = do
-            act -- TODO should catch any tolerable exception, and keep going in case
+            act -- TODO catch any tolerable exception, and keep going
             propagate rest
 
-      spreader :: forall t. Typeable t => EventSink t -> t -> STM ()
-      spreader evs evd =
-        readTVar eosRef >>= \case
-          True -> return ()
-          False -> do
-            writeTVar rcntRef $ Just evd
-            readTVar subsRef >>= \case
-              -- short-circuit when there are no subscribers
-              [] -> return ()
-              -- drive subscribers to spread the current event hierarchy
-              !subs -> do
-                !subs' <- spread [] subs
-                writeTVar subsRef subs'
-        where
-          eosRef = event'sink'eos evs
-          rcntRef = event'sink'recent evs
-          subsRef = event'sink'subscribers evs
+  publisher aeq frameDriver
 
-          spread ::
-            [EventListener t] ->
-            [EventListener t] ->
-            STM [EventListener t]
-          spread subsRemain [] =
-            return $! reverse subsRemain -- keep original order
-          spread subsRemain (listener : rest) =
-            on'event listener aeq evd >>= \case
-              Nothing -> spread subsRemain rest
-              Just listener' -> spread (listener' : subsRemain) rest
+-- | Spread one event data into the specified sink, as within current event
+-- frame
+--
+-- Consequent actions will see all event sinks updated with recent event data
+-- in the frame. While subsequent actions will see all effects applied by
+-- consequent actions in the frame.
+spreadEvent :: forall t. Typeable t => AtomEvq -> EventSink t -> t -> STM ()
+spreadEvent !aeq !evs !evd =
+  readTVar eosRef >>= \case
+    True -> return ()
+    False -> do
+      writeTVar rcntRef $ Just evd
+      readTVar subsRef >>= spread [] >>= writeTVar subsRef
+  where
+    eosRef = event'sink'eos evs
+    rcntRef = event'sink'recent evs
+    subsRef = event'sink'subscribers evs
 
-  evtDriver publisher spreader
+    spread ::
+      [EventListener t] ->
+      [EventListener t] ->
+      STM [EventListener t]
+    spread subsRemain [] =
+      return $! reverse subsRemain -- keep original order
+    spread subsRemain (listener : rest) =
+      on'event listener aeq evd >>= \case
+        Nothing -> spread subsRemain rest
+        Just listener' -> spread (listener' : subsRemain) rest
