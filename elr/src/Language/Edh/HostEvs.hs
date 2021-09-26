@@ -19,13 +19,12 @@ import Prelude
 -- | Indicates whether the relevant event sink is at end-of-stream
 type EndOfStream = Bool
 
--- | Atomic Event Queue to foster the propagation of an event hierarchy
+-- | Atomic Event Queue to foster the propagation of an event hierarchy, in a
+-- frame by frame basis
 --
 -- EIO computations can be scheduled into such a queue as either consequences or
--- subsequences of, the realization of a whole event hierarchy, which is rooted
--- from a single root event (published by 'publishEvent'), then to have more
--- events derived (by 'spreadEvent') from it, either directly or indirectly,
--- finally forming a whole hierarchy of events.
+-- subsequences, of the realization of a frame of whole event hierarchy, by
+-- multiple events spread within such a frame, either directly or indirectly.
 data AtomEvq = AtomEvq
   { aeq'conseqs :: !(TVar [EIO ()]),
     aeq'subseqs :: !(TVar [EIO ()])
@@ -34,12 +33,10 @@ data AtomEvq = AtomEvq
 -- | Schedule an EIO computation as a consequence of the underlying event
 -- spreading
 --
--- All consequences will be executed after spreading of the event hierarchy
--- succeeds at all, and before any subsequence is executed. So state changes
--- made by consequent computations are guaranteed to be observed by any
--- subsequent computation.
---
--- No consequence will be executed if the spreading phase fails somehow.
+-- All consequences will be executed after the 'STM' transaction done, which
+-- gets some events spread as in current event frame, and before any
+-- subsequence is executed. So state changes made by consequent computations
+-- are guaranteed to be observed by any subsequent computation.
 --
 -- Currently all consequent/subsequent actions are required to be exception
 -- free, any noncomplying exception will be thrown at the nearest scripting
@@ -52,12 +49,9 @@ conseqDo !act (AtomEvq !conseqs _) = modifyTVar' conseqs (act :)
 -- | Schedule an EIO computation as a subsequence of the underlying event
 -- spreading / propagation
 --
--- All subsequences will be executed after spreading of the event hierarchy
--- succeeds at all, and all consequences have been executed. So state changes
--- made by consequent computations are guaranteed to be observed by any
--- subsequent computation.
---
--- No subsequence will be executed if the spreading phase fails somehow.
+-- All subsequences will be executed after all consequences have been executed.
+-- So state changes made by consequent computations are guaranteed to be
+-- observed by any subsequent computation.
 --
 -- Currently all consequent/subsequent actions are required to be exception
 -- free, any noncomplying exception will be thrown at the nearest scripting
@@ -95,9 +89,7 @@ class EventSource s t where
   -- all, such a failure will be thrown at the publisher of the original event.
   --
   -- The atomic event queue can be used to schedule EIO computations as
-  -- subsequences of the original event. All subsequent EIO computations will be
-  -- tried regardless of other's failures, so long as the publishing of the
-  -- original event succeeded.
+  -- consequences or subsequences of the original event.
   on :: s t -> (t -> AtomEvq -> STM ()) -> STM ()
   on !evs !handler = perceive evs $ \ !aeq !evd -> do
     handler evd aeq
@@ -109,20 +101,21 @@ class EventSource s t where
   -- all, such a failure will be thrown at the publisher of the original event.
   --
   -- The atomic event queue can be used to schedule EIO computations as
-  -- subsequences of the original event. All subsequent EIO computations will be
-  -- tried regardless of other's failures, so long as the publishing of the
-  -- original event succeeded.
+  -- consequences or subsequences of the original event.
   once :: s t -> (t -> AtomEvq -> STM ()) -> STM ()
   once !evs !handler = perceive evs $ \ !aeq !evd -> do
     handler evd aeq
     return StopHandling
 
+-- | Do 'perceive' in the 'Edh' monad
 perceiveM :: (EventSource s t) => s t -> EventHandler t -> Edh ()
 perceiveM evs handler = inlineSTM $ perceive evs handler
 
+-- | Do 'on' in the 'Edh' monad
 onM :: (EventSource s t) => s t -> (t -> AtomEvq -> STM ()) -> Edh ()
 onM evs handler = inlineSTM $ on evs handler
 
+-- | Do 'once' in the 'Edh' monad
 onceM :: (EventSource s t) => s t -> (t -> AtomEvq -> STM ()) -> Edh ()
 onceM evs handler = inlineSTM $ on evs handler
 
@@ -173,29 +166,24 @@ instance ComputArgAdapter AnyEventSource where
 -- * Event Sink - Event Target as well as Event Source
 
 -- | An event sink conveys an event stream, with possibly multiple event
--- producers and / or multiple event consumers (i.e. listeners and handlers
--- subscribed to the event sink via 'listenEvents' and 'handleEvents')
+-- producers and / or multiple event consumers
 data EventSink t = EventSink
-  { -- | Unique identifier of the event sink, fmap won't change this identity
+  { -- | Unique identifier of the event sink
     event'sink'ident :: Unique,
     -- | Subscribed event listeners to this sink
     event'sink'subscribers :: TVar [EventListener t],
     -- | The most recent event data lingering in this sink
     event'sink'recent :: TVar (Maybe t),
-    -- | State of end-of-stream
+    -- | Whether this sink is at end-of-stream
     event'sink'eos :: TVar EndOfStream
   }
 
 -- | An event listener reacts to a particular event with an STM computation,
 -- returns a possible event listener for the next event in the stream
 --
--- Further EIO computations can be scheduled into the provided atomic event
--- queue. Any failure in any event listener will prevent the publishing of the
--- current event hierarchy at all, the failure will be thrown to the publisher
--- of the root event.
---
--- When subsequent events should be processed by the same event listener or not
--- at all, it should be more proper to implement an 'EventHandler'.
+-- Further 'EIO' computations can be scheduled into the provided atomic event
+-- queue. Any failure in any event listener will fail all events spread in
+-- current 'STM' transaction, as within an event frame
 newtype EventListener t = EventListener
   {on'event :: AtomEvq -> t -> STM (Maybe (EventListener t))}
 
@@ -317,12 +305,21 @@ publishEvents !publisher = do
 
   publisher aeq frameDriver
 
+-- | Shorthand of 'publishEvents' in 'Edh' monad
+publishEventsM :: forall r. (AtomEvq -> EIO () -> EIO r) -> Edh r
+publishEventsM = liftEIO . publishEvents
+
 -- | Spread one event data into the specified sink, as within current event
 -- frame
 --
--- Consequent actions will see all event sinks updated with recent event data
--- in the frame. While subsequent actions will see all effects applied by
--- consequent actions in the frame.
+-- Consequent actions will see all event sinks so updated (including but not
+-- limited to, lingering recent event data), by events spread in the previous
+-- 'STM' transaction, presumbly in the same event frame.
+--
+-- Subsequent actions will see all effects applied by consequent actions, and
+-- events spread in subsequent actions have no similar ordering guarantees,
+-- except they'll all be visible to event listeners/handlers,
+-- consequent/subsequent actions, ever since the next event frame.
 spreadEvent :: forall t. Typeable t => AtomEvq -> EventSink t -> t -> STM ()
 spreadEvent !aeq !evs !evd =
   readTVar eosRef >>= \case
