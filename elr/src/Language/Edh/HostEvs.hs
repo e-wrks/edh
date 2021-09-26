@@ -117,6 +117,15 @@ class EventSource s t where
     handler evd aeq
     return StopHandling
 
+perceiveM :: (EventSource s t) => s t -> EventHandler t -> Edh ()
+perceiveM evs handler = inlineSTM $ perceive evs handler
+
+onM :: (EventSource s t) => s t -> (t -> AtomEvq -> STM ()) -> Edh ()
+onM evs handler = inlineSTM $ on evs handler
+
+onceM :: (EventSource s t) => s t -> (t -> AtomEvq -> STM ()) -> Edh ()
+onceM evs handler = inlineSTM $ on evs handler
+
 -- ** SomeEventSource the Functor
 
 data MappedEvs s a b = (EventSource s a) => MappedEvs (a -> b) (s a)
@@ -287,11 +296,19 @@ publishEvents !publisher = do
 
       frameDriver :: EIO ()
       frameDriver = do
-        -- execute the consequences
-        swapTVarEIO conseqs [] >>= propagate
-        -- execute the subsequences
-        swapTVarEIO subseqs [] >>= propagate
+        -- realize all consequences
+        drain conseqs
+        -- realize all subsequences
+        drain subseqs
         where
+          drain :: TVar [EIO ()] -> EIO ()
+          drain q =
+            readTVarEIO q >>= \case
+              [] -> return ()
+              acts -> do
+                writeTVarEIO q []
+                propagate acts
+                drain q
           propagate :: [EIO ()] -> EIO ()
           propagate [] = return ()
           propagate (act : rest) = do
@@ -328,3 +345,7 @@ spreadEvent !aeq !evs !evd =
       on'event listener aeq evd >>= \case
         Nothing -> spread subsRemain rest
         Just listener' -> spread (listener' : subsRemain) rest
+
+-- | Shorthand of 'spreadEvent' in 'EIO' monad
+spreadEventEIO :: forall t. Typeable t => AtomEvq -> EventSink t -> t -> EIO ()
+spreadEventEIO !aeq !evs !evd = atomicallyEIO $ spreadEvent aeq evs evd
