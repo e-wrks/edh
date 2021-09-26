@@ -8,6 +8,7 @@ import Control.Applicative
 import Control.Concurrent.STM
 import Control.Monad
 import Data.Dynamic
+import Data.Typeable hiding (TypeRep, typeOf, typeRep)
 import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Comput
@@ -139,7 +140,28 @@ data SomeEventSource t = forall s. (EventSource s t) => SomeEventSource (s t)
 instance Functor SomeEventSource where
   fmap f (SomeEventSource evs) = SomeEventSource $ MappedEvs evs $ return . f
 
--- ** AnyEventSource the Argument Adapter
+-- ** EventSource Argument Adapters
+
+-- | Monomorphic event source argument adapter
+data EventSourceOf t
+  = forall s. (EventSource s t, Typeable t) => EventSourceOf (s t) Object
+
+instance Eq (EventSourceOf t) where
+  EventSourceOf _ xo == EventSourceOf _ yo = xo == yo
+
+instance Typeable t => ComputArgAdapter (EventSourceOf t) where
+  adaptEdhArg !v = case edhUltimate v of
+    EdhObject o -> do
+      let go :: [Object] -> Edh (EventSourceOf t)
+          go [] = mzero
+          go (inst : rest) = (<|> go rest) $
+            asEventSource inst $ \(evs :: s t') -> case eqT of
+              Just (Refl :: t' :~: t) -> return $ EventSourceOf evs o
+              Nothing -> go rest
+      go . (o :) =<< readTVarEdh (edh'obj'supers o)
+    _ -> mzero
+
+  adaptedArgValue (EventSourceOf _evs !obj) = EdhObject obj
 
 -- | Polymorphic event source argument adapter
 data AnyEventSource
@@ -150,7 +172,12 @@ instance Eq AnyEventSource where
 
 instance ComputArgAdapter AnyEventSource where
   adaptEdhArg !v = case edhUltimate v of
-    EdhObject o -> asEventSource o $ \evs -> return $ AnyEventSource evs o
+    EdhObject o -> do
+      let go :: [Object] -> Edh AnyEventSource
+          go [] = mzero
+          go (inst : rest) = (<|> go rest) $
+            asEventSource inst $ \evs -> return $ AnyEventSource evs o
+      go . (o :) =<< readTVarEdh (edh'obj'supers o)
     _ -> mzero
 
   adaptedArgValue (AnyEventSource _evs !obj) = EdhObject obj
@@ -229,7 +256,27 @@ data SomeEventSink = forall t. Typeable t => SomeEventSink (EventSink t)
 instance Eq SomeEventSink where
   SomeEventSink x == SomeEventSink y = isSameEventSink x y
 
--- ** AnyEventSink the Argument Adapter
+-- ** EventSink Argument Adapters
+
+-- | Monomorphic event sink argument adapter
+data EventSinkOf t = (Typeable t) => EventSinkOf (EventSink t) Object
+
+instance Eq (EventSinkOf t) where
+  EventSinkOf _ xo == EventSinkOf _ yo = xo == yo
+
+instance Typeable t => ComputArgAdapter (EventSinkOf t) where
+  adaptEdhArg !v = case edhUltimate v of
+    EdhObject o -> do
+      let go :: [Object] -> Edh (EventSinkOf t)
+          go [] = mzero
+          go (inst : rest) = (<|> go rest) $
+            asEventSink inst $ \(evs :: EventSink t') -> case eqT of
+              Just (Refl :: t' :~: t) -> return $ EventSinkOf evs o
+              Nothing -> go rest
+      go . (o :) =<< readTVarEdh (edh'obj'supers o)
+    _ -> mzero
+
+  adaptedArgValue (EventSinkOf _evs !obj) = EdhObject obj
 
 -- | Polymorphic event sink argument adapter
 data AnyEventSink = forall t. Typeable t => AnyEventSink (EventSink t) Object
@@ -239,19 +286,31 @@ instance Eq AnyEventSink where
 
 instance ComputArgAdapter AnyEventSink where
   adaptEdhArg !v = case edhUltimate v of
-    EdhObject o -> case dynamicHostData o of
-      Nothing -> mzero
-      Just (Dynamic tr evs) -> case tr `eqTypeRep` typeRep @SomeEventSink of
-        Just HRefl -> case evs of
-          SomeEventSink evs' -> withTypeable tr $ return $ AnyEventSink evs' o
-        _ -> case tr of
-          App trEvs trE -> case trEvs `eqTypeRep` typeRep @EventSink of
-            Just HRefl -> withTypeable trE $ return $ AnyEventSink evs o
-            _ -> mzero
-          _ -> mzero
+    EdhObject o -> do
+      let go :: [Object] -> Edh AnyEventSink
+          go [] = mzero
+          go (inst : rest) = (<|> go rest) $
+            asEventSink inst $ \evs -> return $ AnyEventSink evs o
+      go . (o :) =<< readTVarEdh (edh'obj'supers o)
     _ -> mzero
 
   adaptedArgValue (AnyEventSink _evs !obj) = EdhObject obj
+
+asEventSink ::
+  forall r.
+  Object ->
+  (forall t. (Typeable t) => EventSink t -> Edh r) ->
+  Edh r
+asEventSink o withEvs = case dynamicHostData o of
+  Nothing -> mzero
+  Just (Dynamic tr evs) -> case tr `eqTypeRep` typeRep @SomeEventSink of
+    Just HRefl -> case evs of
+      SomeEventSink evs' -> withTypeable tr $ withEvs evs'
+    _ -> case tr of
+      App trEvs trE -> case trEvs `eqTypeRep` typeRep @EventSink of
+        Just HRefl -> withTypeable trE $ withEvs evs
+        _ -> mzero
+      _ -> mzero
 
 -- ** Utilities & Implementation Details
 
