@@ -2,6 +2,8 @@
 
 module Language.Edh.HostEvs where
 
+-- import Debug.Trace
+
 import Control.Applicative
 import Control.Concurrent.STM
 import Control.Monad
@@ -121,17 +123,21 @@ onceM evs handler = inlineSTM $ on evs handler
 
 -- ** SomeEventSource the Functor
 
-data MappedEvs s a b = (EventSource s a) => MappedEvs (a -> b) (s a)
+data MappedEvs s a b = (EventSource s a) => MappedEvs (s a) (a -> STM b)
 
 instance (EventSource s a) => EventSource (MappedEvs s a) b where
-  lingering (MappedEvs f sa) = fmap f <$> lingering sa
-  perceive (MappedEvs f sa) handler = perceive sa $ \aeq a -> handler aeq (f a)
+  lingering (MappedEvs sa f) =
+    lingering sa >>= \case
+      Nothing -> return Nothing
+      Just a -> Just <$> f a
+  perceive (MappedEvs sa f) handler = perceive sa $ \aeq a ->
+    handler aeq =<< f a
 
 -- | Polymorphic event source value wrapper
 data SomeEventSource t = forall s. (EventSource s t) => SomeEventSource (s t)
 
 instance Functor SomeEventSource where
-  fmap f (SomeEventSource evs) = SomeEventSource $ MappedEvs f evs
+  fmap f (SomeEventSource evs) = SomeEventSource $ MappedEvs evs $ return . f
 
 -- ** AnyEventSource the Argument Adapter
 
@@ -144,24 +150,31 @@ instance Eq AnyEventSource where
 
 instance ComputArgAdapter AnyEventSource where
   adaptEdhArg !v = case edhUltimate v of
-    EdhObject o -> case dynamicHostData o of
-      Nothing -> mzero
-      Just (Dynamic tr evs) -> case eqTypeRep tr (typeRep @SomeEventSink) of
-        Just HRefl -> case evs of
-          SomeEventSink evs' ->
-            withTypeable tr $ return $ AnyEventSource evs' o
-        _ -> case tr of
-          App trEvs trE -> case eqTypeRep trEvs (typeRep @SomeEventSource) of
-            Just HRefl -> case evs of
-              SomeEventSource evs' ->
-                withTypeable trE $ return $ AnyEventSource evs' o
-            _ -> case eqTypeRep trEvs (typeRep @EventSink) of
-              Just HRefl -> withTypeable trE $ return $ AnyEventSource evs o
-              _ -> mzero
-          _ -> mzero
+    EdhObject o -> asEventSource o $ \evs -> return $ AnyEventSource evs o
     _ -> mzero
 
   adaptedArgValue (AnyEventSource _evs !obj) = EdhObject obj
+
+asEventSource ::
+  forall r.
+  Object ->
+  (forall s t. (EventSource s t, Typeable t) => s t -> Edh r) ->
+  Edh r
+asEventSource o withEvs = case dynamicHostData o of
+  Nothing -> mzero
+  Just (Dynamic tr evs) -> case tr `eqTypeRep` typeRep @SomeEventSink of
+    Just HRefl -> case evs of
+      SomeEventSink evs' ->
+        withTypeable tr $ withEvs evs'
+    _ -> case tr of
+      App trEvs trE -> case trEvs `eqTypeRep` typeRep @SomeEventSource of
+        Just HRefl -> case evs of
+          SomeEventSource evs' ->
+            withTypeable trE $ withEvs evs'
+        _ -> case trEvs `eqTypeRep` typeRep @EventSink of
+          Just HRefl -> withTypeable trE $ withEvs evs
+          _ -> mzero
+      _ -> mzero
 
 -- * Event Sink - Event Target as well as Event Source
 
@@ -228,11 +241,11 @@ instance ComputArgAdapter AnyEventSink where
   adaptEdhArg !v = case edhUltimate v of
     EdhObject o -> case dynamicHostData o of
       Nothing -> mzero
-      Just (Dynamic tr evs) -> case eqTypeRep tr (typeRep @SomeEventSink) of
+      Just (Dynamic tr evs) -> case tr `eqTypeRep` typeRep @SomeEventSink of
         Just HRefl -> case evs of
           SomeEventSink evs' -> withTypeable tr $ return $ AnyEventSink evs' o
         _ -> case tr of
-          App trEvs trE -> case eqTypeRep trEvs (typeRep @EventSink) of
+          App trEvs trE -> case trEvs `eqTypeRep` typeRep @EventSink of
             Just HRefl -> withTypeable trE $ return $ AnyEventSink evs o
             _ -> mzero
           _ -> mzero
