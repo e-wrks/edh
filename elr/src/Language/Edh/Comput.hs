@@ -787,118 +787,27 @@ instance (Typeable t, ComputArgAdapter t) => ComputArgAdapter (HostSeq t) where
 
 -- * Utilities
 
--- providing argument default value, by constructing object of the designated
--- comput class
+-- providing argument default value, by constructing a value when not given
 
-appliedArgWithDefaultCtor ::
-  forall t name.
-  Typeable t =>
+defaultCtorArg ::
+  forall a. (ComputArgAdapter a) => Maybe a -> EdhValue -> Edh a
+defaultCtorArg got ctor = defaultCtorArg' got ctor []
+
+defaultCtorArg' ::
+  forall a. (ComputArgAdapter a) => Maybe a -> EdhValue -> [EdhValue] -> Edh a
+defaultCtorArg' got ctor args = defaultCtorArg'' got ctor args []
+
+defaultCtorArg'' ::
+  forall a.
+  (ComputArgAdapter a) =>
+  Maybe a ->
   EdhValue ->
-  ComputArg (Maybe (HostValue t)) name ->
-  Edh t
-appliedArgWithDefaultCtor = appliedArgWithDefaultCtor' []
-
-appliedArgWithDefaultCtor' ::
-  forall t name.
-  Typeable t =>
-  [EdhValue] ->
-  EdhValue ->
-  ComputArg (Maybe (HostValue t)) name ->
-  Edh t
-appliedArgWithDefaultCtor' = flip appliedArgWithDefaultCtor'' []
-
-appliedArgWithDefaultCtor'' ::
-  forall t name.
-  Typeable t =>
   [EdhValue] ->
   [(AttrKey, EdhValue)] ->
-  EdhValue ->
-  ComputArg (Maybe (HostValue t)) name ->
-  Edh t
-appliedArgWithDefaultCtor''
-  !args
-  !kwargs
-  !callee
-  (appliedArg -> !maybeHostVal) =
-    case maybeHostVal of
-      Just (HostValue (t :: t) _obj) -> return t
-      Nothing -> do
-        !val <- callM' callee (ArgsPack args $ odFromList kwargs)
-        let badArg =
-              edhSimpleDescM val >>= \ !badDesc ->
-                throwEdhM UsageError $
-                  "bug: wrong host value constructed as default for "
-                    <> T.pack (show $ typeRep @t)
-                    <> ": "
-                    <> badDesc
-        case edhUltimate val of
-          EdhObject !o -> case edh'obj'store o of
-            HostStore dd -> case fromDynamic dd of
-              Just (sr :: ScriptedResult) -> case sr of
-                FullyEffected d _extras _applied -> case fromDynamic d of
-                  Just (t :: t) -> return t
-                  Nothing -> badArg
-                _ -> badArg
-              Nothing -> case fromDynamic dd of
-                Just (t :: t) -> return t
-                Nothing -> badArg
-            _ -> badArg
-          _ -> badArg
-
-effectfulArgWithDefaultCtor ::
-  forall t name.
-  Typeable t =>
-  EdhValue ->
-  ComputArg (Effective (Maybe (HostValue t))) name ->
-  Edh (t, Object)
-effectfulArgWithDefaultCtor = effectfulArgWithDefaultCtor' []
-
-effectfulArgWithDefaultCtor' ::
-  forall t name.
-  Typeable t =>
-  [EdhValue] ->
-  EdhValue ->
-  ComputArg (Effective (Maybe (HostValue t))) name ->
-  Edh (t, Object)
-effectfulArgWithDefaultCtor' = flip effectfulArgWithDefaultCtor'' []
-
-effectfulArgWithDefaultCtor'' ::
-  forall t name.
-  Typeable t =>
-  [EdhValue] ->
-  [(AttrKey, EdhValue)] ->
-  EdhValue ->
-  ComputArg (Effective (Maybe (HostValue t))) name ->
-  Edh (t, Object)
-effectfulArgWithDefaultCtor''
-  !args
-  !kwargs
-  !callee
-  (effectfulArg -> !maybeVal) =
-    case maybeVal of
-      Just (HostValue (t :: t) o) -> return (t, o)
-      Nothing -> do
-        !val <- callM' callee (ArgsPack args $ odFromList kwargs)
-        let badArg =
-              edhSimpleDescM val >>= \ !badDesc ->
-                throwEdhM UsageError $
-                  "bug: wrong host value constructed as default for "
-                    <> T.pack (show $ typeRep @t)
-                    <> ": "
-                    <> badDesc
-        case edhUltimate val of
-          EdhObject !o -> case edh'obj'store o of
-            HostStore dd -> case fromDynamic dd of
-              Just (sr :: ScriptedResult) -> case sr of
-                FullyEffected d _extras _applied -> case fromDynamic d of
-                  Just (t :: t) -> return (t, o)
-                  Nothing -> badArg
-                _ -> badArg
-              Nothing -> case fromDynamic dd of
-                Just (t :: t) -> return (t, o)
-                Nothing -> badArg
-            _ -> badArg
-          _ -> badArg
+  Edh a
+defaultCtorArg'' (Just a) _ctor _args _kwargs = return a
+defaultCtorArg'' Nothing ctor args kwargs =
+  mustAdaptEdhArg =<< callM' ctor (ArgsPack args $ odFromList kwargs)
 
 -- * Defining Methods/Classes for Curried Host Computation
 
@@ -974,8 +883,7 @@ defineComputClass' ::
   Edh Object
 defineComputClass' !effOnCtor !rootComput !clsName =
   mkEdhClass clsName computAllocator [] $ do
-    !ets <- edhThreadState
-    let !clsScope = contextScope $ edh'context ets
+    !clsScope <- contextScope . edh'context <$> edhThreadState
     !mths <-
       sequence $
         [ (AttrByName nm,) <$> mkEdhProc vc nm hp
@@ -987,7 +895,7 @@ defineComputClass' !effOnCtor !rootComput !clsName =
                 ("__call__", EdhMethod, wrapEdhProc callProc)
               ]
         ]
-    inlineSTM $ iopdUpdate mths $ edh'scope'entity clsScope
+    iopdUpdateEdh mths $ edh'scope'entity clsScope
   where
     computAllocator :: ArgsPack -> Edh (Maybe Unique, ObjectStore)
     computAllocator !apk =
