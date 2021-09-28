@@ -30,7 +30,7 @@ import GHC.Clock
 import GHC.Conc (forkIOWithUnmask, myThreadId, unsafeIOToSTM)
 import Language.Edh.Control
 import Language.Edh.CoreLang
-import Language.Edh.EdhEvs
+import Language.Edh.Sink
 import Language.Edh.IOPD
 import Language.Edh.Parser
 import Language.Edh.PkgMan
@@ -1622,9 +1622,9 @@ edhPrepareCall'
           ProcDecl _ _ !pb !pl ->
             case edhUltimate <$> odLookup (AttrByName "outlet") kwargs of
               Nothing -> do
-                outlet <- newEdhSink
+                outlet <- newSink
                 callMaker $ \ !exit ->
-                  launchEventProducer (exit . EdhEvs) outlet $
+                  launchEventProducer (exit . EdhSink) outlet $
                     callEdhMethod'
                       Nothing
                       this
@@ -1635,12 +1635,12 @@ edhPrepareCall'
                       ( ArgsPack args $
                           odFromList $
                             odToList kwargs
-                              ++ [(AttrByName "outlet", EdhEvs outlet)]
+                              ++ [(AttrByName "outlet", EdhSink outlet)]
                       )
                       scopeMod
                       endOfEdh
-              Just (EdhEvs !outlet) -> callMaker $ \exit ->
-                launchEventProducer (exit . EdhEvs) outlet $
+              Just (EdhSink !outlet) -> callMaker $ \exit ->
+                launchEventProducer (exit . EdhSink) outlet $
                   callEdhMethod'
                     Nothing
                     this
@@ -2198,7 +2198,7 @@ edhPrepareForLoop
 
         case ultIterVal of
           -- loop from an event sink
-          (EdhEvs !sink) ->
+          (EdhSink !sink) ->
             subscribeEvents sink >>= \case
               Nothing -> exitEdh etsLooper exit nil -- already at eos
               Just (!subChan, !mrv) -> case mrv of
@@ -3015,11 +3015,11 @@ evalStmt !stmt !exit = case stmt of
         bodyStmt
         (const $ return ())
         $ \ !iterVal !runLoop -> case iterVal of
-          EdhEvs !sink -> do
+          EdhSink !sink -> do
             -- @remind assuming sync-producing semantics, the for-loop to
             -- be forked is assumed the consumer, here we wait the sink
             -- get subscribed by it, before continuing current thread
-            let !subc = evs'subc sink
+            let !subc = sink'subc sink
             !subcBefore <- readTVar subc
             if subcBefore < 0
               then exitEdh etsForking exit nil -- the sink alread at eos
@@ -3068,10 +3068,10 @@ evalStmt !stmt !exit = case stmt of
         schedDefered etsSched id $ evalExpr' expr NoDocCmt endOfEdh
   PerceiveStmt !sinkExpr bodyExpr@(ExprSrc body'x body'rng) ->
     evalExprSrc sinkExpr $ \ !sinkVal !ets -> case edhUltimate sinkVal of
-      EdhEvs !sink ->
+      EdhSink !sink ->
         if edh'in'tx ets
           then do
-            modifyTVar' (evs'atoms sink) $ \ !prev'atoms !ev ->
+            modifyTVar' (sink'atoms sink) $ \ !prev'atoms !ev ->
               runEdhTx
                 ets {edh'context = (edh'context ets) {edh'ctx'match = ev}}
                 $ evalExprSrc bodyExpr $ \_ _ets -> prev'atoms ev
@@ -3085,7 +3085,7 @@ evalStmt !stmt !exit = case stmt of
                       -- return/continue/default etc. are returned to here?
                       _ -> return ()
             subscribeEvents sink >>= \case
-              Nothing -> case evs'mrv sink of -- already at eos
+              Nothing -> case sink'mrv sink of -- already at eos
                 Nothing -> pure () -- non-lingering, nothing to do
                 Just {} ->
                   -- a lingering sink, trigger an immediate nil perceiving
@@ -3777,7 +3777,7 @@ evalLiteral = \case
   StringLiteral !v -> return (EdhString v)
   BoolLiteral !v -> return (EdhBool v)
   NilLiteral -> return nil
-  SinkCtor -> EdhEvs <$> newEdhSink
+  SinkCtor -> EdhSink <$> newSink
   ValueLiteral !v -> return v
 
 evalAttrRef :: AttrRef -> EdhTxExit EdhValue -> EdhTx
@@ -6332,7 +6332,7 @@ regulateEdhSlice !ets !len (!start, !stop, !step) !exit = case step of
                               else exit (iStart', iStop', iStep)
             )
 
-postEdhEvent :: EdhSink -> EdhValue -> EdhTxExit () -> EdhTx
+postEdhEvent :: Sink -> EdhValue -> EdhTxExit () -> EdhTx
 postEdhEvent !sink !val !exit !ets =
   postEvent sink val >>= \case
     True -> exitEdh ets exit ()
@@ -6344,10 +6344,10 @@ postEdhEvent !sink !val !exit !ets =
 -- | Fork a new Edh thread to run the specified event producer, but hold the
 -- production until current thread has later started consuming events from the
 -- sink returned here.
-launchEventProducer :: EdhTxExit EdhSink -> EdhSink -> EdhTx -> EdhTx
+launchEventProducer :: EdhTxExit Sink -> Sink -> EdhTx -> EdhTx
 launchEventProducer
   !exit
-  sink@(EdhSink _ _ _ _ !subc)
+  sink@(Sink _ _ _ _ !subc)
   !producerTx
   !etsConsumer =
     readTVar subc >>= \ !subcBefore ->

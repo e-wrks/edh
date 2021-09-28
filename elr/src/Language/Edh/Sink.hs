@@ -1,4 +1,4 @@
-module Language.Edh.EdhEvs where
+module Language.Edh.Sink where
 
 -- import           Debug.Trace
 
@@ -14,12 +14,12 @@ import Language.Edh.RtTypes
 import Prelude
 
 -- | Create a new lingering event sink
-newEdhSink :: STM EdhSink
-newEdhSink = newEdhSink' True
+newSink :: STM Sink
+newSink = newSink' True
 
 -- | Create a new event sink with lingering or not specified
-newEdhSink' :: Bool -> STM EdhSink
-newEdhSink' !lingering = do
+newSink' :: Bool -> STM Sink
+newSink' !lingering = do
   !u <- unsafeIOToSTM newUnique
   !mrv <-
     if lingering
@@ -29,12 +29,12 @@ newEdhSink' !lingering = do
   !atomsVar <- newTVar $ const $ return ()
   !subc <- newTVar 0
   return
-    EdhSink
-      { evs'uniq = u,
-        evs'mrv = mrv,
-        evs'chan = chan,
-        evs'atoms = atomsVar,
-        evs'subc = subc
+    Sink
+      { sink'uniq = u,
+        sink'mrv = mrv,
+        sink'chan = chan,
+        sink'atoms = atomsVar,
+        sink'subc = subc
       }
 
 -- | Subscribe to an event sink
@@ -44,8 +44,8 @@ newEdhSink' !lingering = do
 --
 -- CAVEAT: should not by other means be dup'ing the broadcast channel,
 --         to obtain a subscriber's channel.
-subscribeEvents :: EdhSink -> STM (Maybe (TChan EdhValue, Maybe EdhValue))
-subscribeEvents (EdhSink _ !mrv !bcc _ !subc) =
+subscribeEvents :: Sink -> STM (Maybe (TChan EdhValue, Maybe EdhValue))
+subscribeEvents (Sink _ !mrv !bcc _ !subc) =
   readTVar subc >>= \ !oldSubc ->
     if oldSubc < 0
       then return Nothing
@@ -61,8 +61,8 @@ subscribeEvents (EdhSink _ !mrv !bcc _ !subc) =
               !ev -> return $ Just (subChan, Just ev)
 
 -- | Post an event into a sink
-postEvent :: EdhSink -> EdhValue -> STM Bool
-postEvent (EdhSink _ !mrv !chan !atomsVar !subc) !val =
+postEvent :: Sink -> EdhValue -> STM Bool
+postEvent (Sink _ !mrv !chan !atomsVar !subc) !val =
   readTVar subc >>= \ !oldSubc ->
     if oldSubc < 0
       then return False
@@ -88,17 +88,17 @@ postEvent (EdhSink _ !mrv !chan !atomsVar !subc) !val =
 -- CAVEAT: if the returned sink is never subscribed before current thread
 --         exits, it'll be detected as stm deadlock and your process may
 --         get killed.
-forkEventProducer :: Maybe EdhSink -> (EdhSink -> IO ()) -> IO EdhSink
-forkEventProducer !reuseSink !producingAct = do
+forkEventProducer :: Maybe Sink -> (Sink -> IO ()) -> IO Sink
+forkEventProducer !reuseEdhSink !producingAct = do
   (!sink, !subcBefore) <- atomically $ do
-    !sink <- maybe newEdhSink return reuseSink
-    (sink,) <$> readTVar (evs'subc sink)
+    !sink <- maybe newSink return reuseEdhSink
+    (sink,) <$> readTVar (sink'subc sink)
   !consumerThId <- myThreadId
   _producerThId <- forkIOWithUnmask $ \unmask ->
     handle (\(e :: SomeException) -> throwTo consumerThId e) $
       unmask $ do
         atomically $ do
-          !subcNow <- readTVar $ evs'subc sink
+          !subcNow <- readTVar $ sink'subc sink
           when (subcNow == subcBefore) retry
         producingAct sink
   return sink
@@ -111,11 +111,11 @@ forkEventProducer !reuseSink !producingAct = do
 --
 -- Any exception occurs in the consuming action will be propagated to
 -- current thread as an asynchronous exception.
-forkEventConsumer :: Maybe EdhSink -> (EdhSink -> IO ()) -> IO EdhSink
-forkEventConsumer !reuseSink !consumingAct = do
+forkEventConsumer :: Maybe Sink -> (Sink -> IO ()) -> IO Sink
+forkEventConsumer !reuseEdhSink !consumingAct = do
   (!sink, !subcBefore) <- atomically $ do
-    !sink <- maybe newEdhSink return reuseSink
-    (sink,) <$> readTVar (evs'subc sink)
+    !sink <- maybe newSink return reuseEdhSink
+    (sink,) <$> readTVar (sink'subc sink)
   !consumerDone <- newEmptyTMVarIO
   !producerThId <- myThreadId
   _consumerThId <- forkIOWithUnmask $ \unmask ->
@@ -134,7 +134,7 @@ forkEventConsumer !reuseSink !consumingAct = do
           )
     )
       `orElse` do
-        !subcNow <- readTVar $ evs'subc sink
+        !subcNow <- readTVar $ sink'subc sink
         when (subcNow == subcBefore) retry
   return sink
 
@@ -150,17 +150,17 @@ forkEventConsumer !reuseSink !consumingAct = do
 -- CAVEAT: if the returned sink is never subscribed by any thread seen it,
 --         it'll be detected as stm deadlock and your process may
 --         get killed.
-waitEventConsumer :: Maybe EdhSink -> (EdhSink -> IO ()) -> IO EdhSink
-waitEventConsumer !reuseSink !consumingAct = do
+waitEventConsumer :: Maybe Sink -> (Sink -> IO ()) -> IO Sink
+waitEventConsumer !reuseEdhSink !consumingAct = do
   (!sink, !subcBefore) <- atomically $ do
-    !sink <- maybe newEdhSink return reuseSink
-    (sink,) <$> readTVar (evs'subc sink)
+    !sink <- maybe newSink return reuseEdhSink
+    (sink,) <$> readTVar (sink'subc sink)
   !producerThId <- myThreadId
   _consumerThId <- forkIOWithUnmask $ \unmask ->
     handle (\(e :: SomeException) -> throwTo producerThId e) $
       unmask $
         consumingAct sink
   atomically $ do
-    !subcNow <- readTVar $ evs'subc sink
+    !subcNow <- readTVar $ sink'subc sink
     when (subcNow == subcBefore) retry
   return sink

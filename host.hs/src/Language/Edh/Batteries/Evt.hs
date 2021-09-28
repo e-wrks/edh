@@ -13,7 +13,7 @@ import Prelude
 evtPubProc :: EdhIntrinsicOp
 evtPubProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
-    EdhEvs !es -> evalExprSrc rhExpr $
+    EdhSink !es -> evalExprSrc rhExpr $
       \ !rhVal ->
         let -- allow special values to be published, e.g. {break}
             !val2Pub = edhDeCaseWrap rhVal
@@ -30,7 +30,7 @@ evtPubProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
 sink'subseqProc :: "sinkValue" !: EdhValue -> EdhHostProc
 sink'subseqProc (mandatoryArg -> !sinkVal) !exit !ets =
   case edhUltimate sinkVal of
-    EdhEvs !sink -> exitEdh ets exit $ EdhEvs sink {evs'mrv = Nothing}
+    EdhSink !sink -> exitEdh ets exit $ EdhSink sink {sink'mrv = Nothing}
     _ -> edhSimpleDesc ets sinkVal $ \ !badDesc ->
       throwEdh ets UsageError $ "not an event sink but a " <> badDesc
 
@@ -49,7 +49,7 @@ sink'subseqProc (mandatoryArg -> !sinkVal) !exit !ets =
 sink'mrvProc :: "sinkValue" !: EdhValue -> EdhHostProc
 sink'mrvProc (mandatoryArg -> !sinkVal) !exit !ets =
   case edhUltimate sinkVal of
-    EdhEvs !sink -> case evs'mrv sink of
+    EdhSink !sink -> case sink'mrv sink of
       Nothing -> exitEdh ets exit nil
       Just !mrvv -> readTVar mrvv >>= \ !mrv -> exitEdh ets exit mrv
     _ -> edhSimpleDesc ets sinkVal $ \ !badDesc ->
@@ -61,8 +61,8 @@ sink'mrvProc (mandatoryArg -> !sinkVal) !exit !ets =
 sink'eosProc :: "sinkValue" !: EdhValue -> EdhHostProc
 sink'eosProc (mandatoryArg -> !sinkVal) !exit !ets =
   case edhUltimate sinkVal of
-    EdhEvs !sink ->
-      readTVar (evs'subc sink)
+    EdhSink !sink ->
+      readTVar (sink'subc sink)
         >>= \ !subc -> exitEdh ets exit $ EdhBool $ subc < 0
     _ -> edhSimpleDesc ets sinkVal $ \ !badDesc ->
       throwEdh ets UsageError $ "not an event sink but a " <> badDesc

@@ -42,9 +42,9 @@ module Language.Edh.CHI
     callingFrame,
 
     -- * Event processing
-    EdhSink (..),
-    newEdhSink,
-    newEdhSink',
+    Sink (..),
+    newSink,
+    newSink',
     subscribeEvents,
     postEvent,
     postEdhEvent,
@@ -372,7 +372,7 @@ import Language.Edh.Args
 import Language.Edh.Batteries
 import Language.Edh.Control
 import Language.Edh.CoreLang
-import Language.Edh.EdhEvs
+import Language.Edh.Sink
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
 import Language.Edh.InterOp

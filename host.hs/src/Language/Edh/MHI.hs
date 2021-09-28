@@ -6,7 +6,6 @@ module Language.Edh.MHI
     module Language.Edh.Comput,
     module Language.Edh.RtTypes,
     module Language.Edh.IOPD,
-    module Language.Edh.HostEvs,
     module Language.Edh.Control,
     module Language.Edh.CoreLang,
     module Language.Edh.InterOpM,
@@ -30,7 +29,6 @@ import Language.Edh.Comput
 import Language.Edh.Control
 import Language.Edh.CoreLang
 import Language.Edh.Evaluate
-import Language.Edh.HostEvs
 import Language.Edh.IOPD
 import Language.Edh.InterOpM
 import Language.Edh.Monad

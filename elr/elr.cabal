@@ -29,12 +29,11 @@ library
     Language.Edh.Control
     Language.Edh.CoreLang
     Language.Edh.Evaluate
-    Language.Edh.HostEvs
     Language.Edh.IOPD
     Language.Edh.PkgMan
     Language.Edh.RtTypes
     Language.Edh.Utils
-    Language.Edh.EdhEvs
+    Language.Edh.Sink
     Language.Edh.InterOp
     Language.Edh.InterOpM
     Language.Edh.Monad
