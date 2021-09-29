@@ -127,34 +127,40 @@ instance Alternative Edh where
 
 instance MonadPlus Edh
 
+instance MonadIO Edh where
+  liftIO act = Edh $ \_naExit exit ets ->
+    runEdhTx ets $ edhContIO $ act >>= atomically . exitEdh ets exit
+  {-# INLINE liftIO #-}
+
+instance MonadEdh Edh where
+  liftEdh = id
+
+  edhThreadState = Edh $ \_naExit exit ets -> exit ets ets
+
+  throwEdhM' tag msg details = Edh $ \_naExit _exit ets -> do
+    let !edhErr = EdhError tag msg errDetails $ getEdhErrCtx 0 ets
+        !edhWrapException =
+          edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
+        !errDetails = case details of
+          [] -> toDyn nil
+          _ -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
+    edhWrapException (Just ets) (toException edhErr)
+      >>= \ !exo -> edhThrow ets $ EdhObject exo
+
+  -- CAVEAT: An @ai@ block as by the scripting code will be broken, thus an
+  --         exception thrown, wherever any 'liftSTM' 'liftEIO' or 'liftIO' is
+  --         issued in execution of that block.
+  liftSTM act = Edh $ \_naExit exit ets ->
+    runEdhTx ets $ edhContSTM $ act >>= exitEdh ets exit
+
 -- | Perform the specified 'STM' action within current 'Edh' transaction
 inlineSTM :: STM a -> Edh a
 inlineSTM act = Edh $ \_naExit exit ets -> act >>= (`exit` ets)
 {-# INLINE inlineSTM #-}
 
--- | Finish current 'Edh' transaction, perform the specified 'STM' action
--- in a new 'atomically' transaction, bind the result to the next 'Edh' action
---
--- CAVEAT: An @ai@ block as by the scripting code will be broken, thus an
---         exception thrown, wherever any 'liftSTM' 'liftEIO' or 'liftIO' is
---         issued in execution of that block.
-liftSTM :: STM a -> Edh a
-liftSTM act = Edh $ \_naExit exit ets ->
-  runEdhTx ets $
-    edhContSTM $
-      act >>= exitEdh ets exit
-{-# INLINE liftSTM #-}
-
 -- | Lift an 'EdhTx' action as an 'Edh' action
 liftEdhTx :: EdhTx -> Edh ()
 liftEdhTx tx = Edh $ \_naExit exit ets -> tx ets >> exit () ets
-
-instance MonadIO Edh where
-  liftIO act = Edh $ \_naExit exit ets ->
-    runEdhTx ets $
-      edhContIO $
-        act >>= atomically . exitEdh ets exit
-  {-# INLINE liftIO #-}
 
 -- ** Attribute Resolution
 
@@ -311,16 +317,6 @@ prepareEffStoreM' !magicKey = mEdh $ \ !exit !ets ->
       (edh'scope'entity $ contextScope $ edh'context ets)
 
 -- ** Edh Monad Utilities
-
--- | Extract the 'EdhThreadState' from current @Edh@ thread
-edhThreadState :: Edh EdhThreadState
-edhThreadState = Edh $ \_naExit exit ets -> exit ets ets
-{-# INLINE edhThreadState #-}
-
--- | Extract the 'EdhProgState' from current @Edh@ thread
-edhProgramState :: Edh EdhProgState
-edhProgramState = Edh $ \_naExit exit ets -> exit (edh'thread'prog ets) ets
-{-# INLINE edhProgramState #-}
 
 -- | The 'STM' action lifted into 'Edh' monad
 newTVarEdh :: forall a. a -> Edh (TVar a)
@@ -713,25 +709,6 @@ regulateEdhSliceM !len !slice = Edh $ \_naExit !exit !ets ->
 
 -- ** Exceptions
 
--- | Throw a tagged exception with specified error message from an 'Edh' action
-throwEdhM :: EdhErrorTag -> ErrMessage -> Edh a
-throwEdhM tag msg = throwEdhM' tag msg []
-{-# INLINE throwEdhM #-}
-
--- | Throw a tagged exception with specified error message, and details, from
--- an 'Edh' action
-throwEdhM' :: EdhErrorTag -> ErrMessage -> [(AttrKey, EdhValue)] -> Edh a
-throwEdhM' tag msg details = Edh $ \_naExit _exit ets -> do
-  let !edhErr = EdhError tag msg errDetails $ getEdhErrCtx 0 ets
-      !edhWrapException =
-        edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
-      !errDetails = case details of
-        [] -> toDyn nil
-        _ -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
-  edhWrapException (Just ets) (toException edhErr)
-    >>= \ !exo -> edhThrow ets $ EdhObject exo
-{-# INLINE throwEdhM' #-}
-
 -- | Throw a general exception from an 'Edh' action
 throwHostM :: Exception e => e -> Edh a
 throwHostM = inlineSTM . throwSTM
@@ -860,6 +837,32 @@ mkEdhClass !clsName !allocator !superClasses !clsBody = do
         (\(maybeIdent, oStore) _ets -> ctorExit maybeIdent oStore)
         ets
 
+-- ** The type class for Edh scriptability enabled monads
+
+class (MonadIO m, Monad m) => MonadEdh m where
+  -- | Lift an 'Edh' action
+  --
+  -- This is some similar to what @unliftio@ library does, yet better all known
+  -- instances can mutually lift eachother with 'Edh'
+  liftEdh :: Edh a -> m a
+
+  -- | Extract the 'EdhThreadState' from current @Edh@ thread
+  edhThreadState :: m EdhThreadState
+
+  -- | Extract the 'EdhProgState' from current @Edh@ thread
+  edhProgramState :: m EdhProgState
+  edhProgramState = edh'thread'prog <$> edhThreadState
+
+  -- | Throw a tagged exception with specified error message
+  throwEdhM :: EdhErrorTag -> ErrMessage -> m a
+  throwEdhM tag msg = throwEdhM' tag msg []
+
+  -- | Throw a tagged exception with specified error message, and details
+  throwEdhM' :: EdhErrorTag -> ErrMessage -> [(AttrKey, EdhValue)] -> m a
+
+  -- | Perform the specified 'STM' action in a new 'atomically' transaction
+  liftSTM :: STM a -> m a
+
 -- ** The EIO Monad
 
 -- | Edh aware (or scriptability Enhanced) IO Monad
@@ -900,13 +903,24 @@ newtype EIO a = EIO
     runEIO :: EdhThreadState -> (a -> IO ()) -> IO ()
   }
 
--- | Lift an 'Edh' action from an 'EIO' action
---
--- This is some similar to what @unliftio@ library does, yet better here 'Edh'
--- and 'EIO' can mutually lift eachother,
-liftEdh :: Edh a -> EIO a
-liftEdh act = EIO $ \ets exit ->
-  atomically $ runEdh ets act $ edhContIO . exit
+instance MonadEdh EIO where
+  liftEdh act = EIO $ \ets exit ->
+    atomically $ runEdh ets act $ edhContIO . exit
+
+  edhThreadState = EIO $ \ets exit -> exit ets
+
+  throwEdhM' tag msg details = EIO $ \ets _exit -> do
+    let !edhErr = EdhError tag msg errDetails $ getEdhErrCtx 0 ets
+        !edhWrapException =
+          edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
+        !errDetails = case details of
+          [] -> toDyn nil
+          _ -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
+    atomically $
+      edhWrapException (Just ets) (toException edhErr)
+        >>= \ !exo -> edhThrow ets $ EdhObject exo
+
+  liftSTM = liftIO . atomically
 
 -- | Lift an 'EIO' action from an 'Edh' action
 --
@@ -1038,26 +1052,6 @@ newUniqueEIO = liftIO newUnique
 {-# INLINE newUniqueEIO #-}
 
 -- ** Exceptions with EIO
-
--- | Throw a tagged exception with specified error message from an 'EIO' action
-throwEIO :: EdhErrorTag -> ErrMessage -> EIO a
-throwEIO tag msg = throwEIO' tag msg []
-{-# INLINE throwEIO #-}
-
--- | Throw a tagged exception with specified error message, and details, from
--- an 'EIO' action
-throwEIO' :: EdhErrorTag -> ErrMessage -> [(AttrKey, EdhValue)] -> EIO a
-throwEIO' tag msg details = EIO $ \ets _exit -> do
-  let !edhErr = EdhError tag msg errDetails $ getEdhErrCtx 0 ets
-      !edhWrapException =
-        edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
-      !errDetails = case details of
-        [] -> toDyn nil
-        _ -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
-  atomically $
-    edhWrapException (Just ets) (toException edhErr)
-      >>= \ !exo -> edhThrow ets $ EdhObject exo
-{-# INLINE throwEIO' #-}
 
 -- | Throw a general exception from an 'EIO' action
 throwHostEIO :: Exception e => e -> EIO a
