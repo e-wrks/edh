@@ -1312,17 +1312,27 @@ packEdhArgs !ets !argSenders !pkExit = do
         case x of
           UnpackPosArgs !posExpr ->
             runEdhTx etsPacking $
-              evalExprSrc posExpr $ \ !val _ets ->
+              evalExprSrc posExpr $ \ !val _ets -> do
+                let na = edhValueDesc ets val $ \ !badValDesc ->
+                      throwEdh ets EvalError $
+                        "can not unpack args from a " <> badValDesc
                 case edhUltimate val of
                   (EdhArgsPack (ArgsPack !posArgs _kwArgs)) ->
                     pkArgs xs $ \ !posArgs' -> exit (posArgs ++ posArgs')
                   (EdhList (List _ !l)) -> pkArgs xs $ \ !posArgs -> do
                     ll <- readTVar l
                     exit ((edhNonNil <$> ll) ++ posArgs)
-                  _ -> edhValueDesc ets val $ \ !badValDesc ->
-                    throwEdh ets EvalError $
-                      "can not unpack args from a "
-                        <> badValDesc
+                  EdhObject !obj -> case edh'obj'store obj of
+                    HashStore !hs ->
+                      iopdLookup (AttrByName "__id__") hs >>= \case
+                        -- syntactic sugar - 1 star unpacking of data instance
+                        -- data fields to be unpacked as kwargs
+                        Just (EdhArgsPack (ArgsPack [_cls] !dataFields)) -> do
+                          iopdUpdate (odToList dataFields) kwIOPD
+                          pkArgs xs $ \ !posArgs' -> exit posArgs'
+                        _ -> na
+                    _ -> na
+                  _ -> na
           UnpackKwArgs !kwExpr ->
             runEdhTx etsPacking $
               evalExprSrc kwExpr $ \ !val _ets ->
