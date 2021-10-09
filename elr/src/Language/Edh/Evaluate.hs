@@ -30,11 +30,11 @@ import GHC.Clock
 import GHC.Conc (forkIOWithUnmask, myThreadId, unsafeIOToSTM)
 import Language.Edh.Control
 import Language.Edh.CoreLang
-import Language.Edh.Sink
 import Language.Edh.IOPD
 import Language.Edh.Parser
 import Language.Edh.PkgMan
 import Language.Edh.RtTypes
+import Language.Edh.Sink
 import Language.Edh.Utils
 import Numeric
 import System.FilePath
@@ -3528,32 +3528,17 @@ runStmtsInScope !runScope !srcName !stmts !exit !ets =
   where
     !ctx = edh'context ets
 
-includeEdhFragment :: Text -> EdhTxExit EdhValue -> EdhTx
-includeEdhFragment !incSpec !exit !ets =
-  runEdhTx ets $
-    edhContIO $
-      loadFrag $
-        \(!moduName, !fragId, !stmts) ->
-          atomically $
-            runEdhTx ets $
-              pushEdhStack $ \ !etsInc -> do
-                let incScope = contextScope $ edh'context etsInc
-                iopdUpdate
-                  [ (AttrByName "__name__", EdhString moduName),
-                    (AttrByName "__file__", EdhString fragId)
-                  ]
-                  $ edh'scope'entity incScope
-                runEdhTx etsInc $
-                  runStmtsInScope incScope fragId stmts $
-                    \ !incResult _ets ->
-                      exitEdh ets exit $ edhDeCaseWrap incResult
+loadEdhFragment ::
+  Text -> EdhTxExit (ModuleName, ModuleFile, Text, [StmtSrc]) -> EdhTx
+loadEdhFragment !incSpec !exit !ets =
+  runEdhTx ets $ edhContIO loadFrag
   where
     world = edh'prog'world $ edh'thread'prog ets
     worldFrags = edh'world'fragments world
     normalizedSpec = normalizeModuRefSpec incSpec
 
-    loadFrag :: ((ModuleName, ModuleFile, [StmtSrc]) -> IO ()) -> IO ()
-    loadFrag !exit' =
+    loadFrag :: IO ()
+    loadFrag =
       let ?frontFile = "__include__.edh"
           ?fileExt = ".iedh"
        in locateSrcFileInFS ets normalizedSpec $
@@ -3561,9 +3546,10 @@ includeEdhFragment !incSpec !exit !ets =
               let !fragId = T.pack fragFile
               !tsFile <- modificationTime <$> getFileStatus fragFile
               Map.lookup fragId <$> readTVarIO worldFrags >>= \case
-                Just (CachedFrag !tsCache !stmts)
+                Just (CachedFrag !tsCache !srcCode !stmts)
                   | tsCache >= tsFile ->
-                    exit' (moduName, fragId, stmts)
+                    atomically $
+                      exitEdh ets exit (moduName, fragId, srcCode, stmts)
                 _ -> do
                   !srcCode <- readEdhSrcFile fragFile
                   parseEdh world fragId srcCode >>= \case
@@ -3571,8 +3557,34 @@ includeEdhFragment !incSpec !exit !ets =
                     Right (!stmts, _docCmt) -> do
                       atomically $
                         modifyTVar' worldFrags $
-                          Map.insert fragId $ CachedFrag tsFile stmts
-                      exit' (moduName, fragId, stmts)
+                          Map.insert fragId $ CachedFrag tsFile srcCode stmts
+                      atomically $
+                        exitEdh ets exit (moduName, fragId, srcCode, stmts)
+
+includeEdhFragment :: Text -> EdhTxExit EdhValue -> EdhTx
+includeEdhFragment !incSpec !exit !ets = runEdhTx ets $
+  loadEdhFragment incSpec $ \(!moduName, !fragId, _srcCode, !stmts) ->
+    pushEdhStack $ \ !etsInc -> do
+      let incScope = contextScope $ edh'context etsInc
+      iopdUpdate
+        [ (AttrByName "__name__", EdhString moduName),
+          (AttrByName "__file__", EdhString fragId)
+        ]
+        $ edh'scope'entity incScope
+      runEdhTx etsInc $
+        runStmtsInScope incScope fragId stmts $
+          \ !incResult _ets ->
+            exitEdh ets exit $ edhDeCaseWrap incResult
+
+obtainEdhFragment :: Text -> EdhTxExit EdhValue -> EdhTx
+obtainEdhFragment !incSpec !exit =
+  loadEdhFragment incSpec $ \(_moduName, !fragId, !srcCode, !stmts) !ets -> do
+    let ExprSrc src'expr src'span = stmtsExpr stmts
+    u <- unsafeIOToSTM newUnique
+    exitEdh ets exit $
+      EdhExpr
+        (ExprDefi u src'expr (SrcLoc (SrcDoc fragId) src'span))
+        srcCode
 
 intplExprSrc :: EdhThreadState -> ExprSrc -> (ExprSrc -> STM ()) -> STM ()
 intplExprSrc !ets (ExprSrc !x !ss) !exit =
@@ -3606,6 +3618,8 @@ intplExpr !ets !x !exit = case x of
   ParenExpr !x' -> intplExprSrc ets x' $ \ !x'' -> exit $ ParenExpr x''
   IncludeExpr !xFrom ->
     intplExprSrc ets xFrom $ \ !xFrom' -> exit $ IncludeExpr xFrom'
+  IncExprExpr !xFrom ->
+    intplExprSrc ets xFrom $ \ !xFrom' -> exit $ IncExprExpr xFrom'
   ImportExpr !rcvr !xFrom !maybeInto -> intplArgsRcvr ets rcvr $ \ !rcvr' ->
     intplExprSrc ets xFrom $ \ !xFrom' -> case maybeInto of
       Nothing -> exit $ ImportExpr rcvr' xFrom' Nothing
@@ -4512,6 +4526,11 @@ evalExpr' (IndexExpr !ixExpr !tgtExpr) _docCmt !exit =
 evalExpr' (IncludeExpr !srcExpr) _docCmt !exit = evalExprSrc' srcExpr NoDocCmt $
   \ !srcVal -> case edhUltimate srcVal of
     EdhString !srcSpec -> includeEdhFragment srcSpec exit
+    _ -> edhValueDescTx srcVal $ \ !badDesc ->
+      throwEdhTx EvalError $ "don't know how to include it: " <> badDesc
+evalExpr' (IncExprExpr !srcExpr) _docCmt !exit = evalExprSrc' srcExpr NoDocCmt $
+  \ !srcVal -> case edhUltimate srcVal of
+    EdhString !srcSpec -> obtainEdhFragment srcSpec exit
     _ -> edhValueDescTx srcVal $ \ !badDesc ->
       throwEdhTx EvalError $ "don't know how to include it: " <> badDesc
 evalExpr' (ExportExpr !exps) !docCmt !exit = \ !ets ->

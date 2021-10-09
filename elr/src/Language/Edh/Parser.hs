@@ -220,6 +220,12 @@ parseIncludeExpr !si = do
   (!se, !si') <- parseExpr si
   return (IncludeExpr se, si')
 
+parseIncExprExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseIncExprExpr !si = do
+  void $ keyword "iexpr"
+  (!se, !si') <- parseExpr si
+  return (IncExprExpr se, si')
+
 parseImportExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseImportExpr !si = do
   (!ar, !se, !si') <- pyStyle <|> jsStyle
@@ -1625,6 +1631,7 @@ parseExprPrec !precedingOp !prec !si =
               parseOpAddrOrApkOrParen si,
               parseExportExpr si,
               parseIncludeExpr si,
+              parseIncExprExpr si,
               parseImportExpr si,
               parseNamespaceExpr si,
               parseClassExpr si,

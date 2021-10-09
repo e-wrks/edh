@@ -628,7 +628,7 @@ data ModuSlot
   | ModuLoading !Scope !(TVar [Either EdhValue Object -> STM ()])
   | ModuFailed !EdhValue
 
-data CachedFrag = CachedFrag !EpochTime ![StmtSrc]
+data CachedFrag = CachedFrag !EpochTime !Text ![StmtSrc]
 
 edhCreateModule :: EdhWorld -> Text -> String -> STM Object
 edhCreateModule !world !moduName !srcName = do
@@ -1369,6 +1369,17 @@ enExpr (StmtSrc (ExprStmt x _) src'span) = ExprSrc x src'span
 enExpr (StmtSrc stmt src'span) =
   ExprSrc (BlockExpr [StmtSrc stmt src'span]) src'span
 
+stmtsExpr :: [StmtSrc] -> ExprSrc
+stmtsExpr [] = ExprSrc (BlockExpr []) noSrcRange
+stmtsExpr [s] = enExpr s
+stmtsExpr stmts@(StmtSrc _stmt1 rng1 : rest) =
+  ExprSrc (BlockExpr stmts) $ fullSpan rng1 rest
+  where
+    fullSpan :: SrcRange -> [StmtSrc] -> SrcRange
+    fullSpan rng [] = rng
+    fullSpan rng [StmtSrc _ (SrcRange _ final'end)] = rng {src'end = final'end}
+    fullSpan rng (_ : more'stmts) = fullSpan rng more'stmts
+
 -- Attribute reference
 data AttrRef
   = ThisRef !SrcRange
@@ -1649,6 +1660,8 @@ data Expr
   | ParenExpr !ExprSrc
   | -- | include a script into current scope's evaluation
     IncludeExpr !ExprSrc
+  | -- | obtain the contents of a script as an expression value
+    IncExprExpr !ExprSrc
   | -- | import with args (re)pack receiving syntax
     -- `into` a target object from specified expr, or current scope
     ImportExpr !ArgsReceiver !ExprSrc !(Maybe ExprSrc)
