@@ -1208,7 +1208,8 @@ parseAttrName = parseMagicName <|> parseAlphNumName
           Just {} -> return $ opLit <> "."
 
 parseAlphNumName :: (?allowKwAttr :: Bool) => Parser AttrName
-parseAlphNumName = (detectIllegalIdent >>) $
+parseAlphNumName = do
+  detectIllegalIdent
   lexeme $ do
     !anStart <- takeWhile1P (Just "attribute name") isIdentStart
     !anRest <- takeWhileP Nothing isIdentChar
@@ -1218,17 +1219,14 @@ parseAlphNumName = (detectIllegalIdent >>) $
       if ?allowKwAttr
         then return ()
         else do
-          !eps <- get -- save parsing states
-          !illIdent <- lookAhead $ illegalKeywrodAsIdent <|> return Nothing
-          !illLit <- lookAhead $ Just . show <$> parseLitExpr <|> return Nothing
-          put eps -- restore parsing states (esp. lexeme end)
-          case illIdent of
-            Just !ident ->
+          illegalKeywrodAsIdent >>= \case
+            Nothing -> return ()
+            Just ident ->
               fail $ "illegal keyword `" <> T.unpack ident <> "` as identifier"
-            Nothing -> pure ()
-          case illLit of
-            Just !lit -> fail $ "illegal literal `" <> lit <> "` as identifier"
-            Nothing -> pure ()
+          optional parseLitExpr >>= \case
+            Nothing -> return ()
+            Just lit ->
+              fail $ "illegal literal `" <> show lit <> "` as identifier"
 
 -- NOTE: keywords for statements or other constructs, unless also parse as some
 --       literal, will parse as identifier for attribute access, if not
