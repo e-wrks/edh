@@ -1,0 +1,8 @@
+
+vscode:
+  extensions:
+    - justusadam.language-haskell
+    - haskell.haskell
+    - complyue.edh-vscode-syntax
+    - complyue.edh-vscode-formatter
+    - complyue.edh-vscode-pack
