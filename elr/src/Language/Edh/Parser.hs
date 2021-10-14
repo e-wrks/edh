@@ -372,10 +372,19 @@ parseRestArgRecvs !endSymbol = parseArgRecvs [] False False
 parseKwRecv :: Bool -> Parser ArgReceiver
 parseKwRecv !inPack = do
   !addr <- let ?allowKwAttr = True in parseAttrAddrSrc'
+  !anno <- parseArgAnno
   !retgt <- optional parseRetarget >>= validateTgt
   !defExpr <- if inPack then optional parseDefaultExpr else return Nothing
-  return $ RecvArg addr retgt defExpr
+  return $ RecvArg addr anno retgt defExpr
   where
+    parseArgAnno :: Parser (Maybe AnnoExpr)
+    parseArgAnno = do
+      -- TODO carry on 'IntplSrcInfo' in the full call chain to here,
+      --      so the annotation expr can be interpolated.
+      !s <- getInput
+      !o <- getOffset
+      (!anno, _si') <- parseAnno (s, o, [])
+      return anno
     parseRetarget :: Parser AttrRef
     parseRetarget = do
       void $ keyword "as"
@@ -507,6 +516,7 @@ parseNamespaceExpr !si = do
         ( ProcDecl
             pn
             NullaryReceiver
+            Nothing
             body
             (lspSrcLocFromParsec startPos lexeme'end)
         )
@@ -526,6 +536,7 @@ parseClassExpr !si = do
         ProcDecl
           pn
           NullaryReceiver
+          Nothing
           body
           (lspSrcLocFromParsec startPos lexeme'end),
       si'
@@ -541,7 +552,8 @@ parseDataExpr !si = do
   (!body, !si') <- parseProcBody si
   !lexeme'end <- lexemeEndPos
   return
-    ( ClassExpr $ ProcDecl pn ar body (lspSrcLocFromParsec startPos lexeme'end),
+    ( ClassExpr $
+        ProcDecl pn ar Nothing body (lspSrcLocFromParsec startPos lexeme'end),
       si'
     )
 
@@ -634,13 +646,50 @@ parseDoForOrWhileExpr !si = do
       fail "missing if/while/for"
     ]
 
+parseAnno :: IntplSrcInfo -> Parser (Maybe AnnoExpr, IntplSrcInfo)
+parseAnno !si =
+  optional (try $ string ":" >> notFollowedBy (satisfy isOperatorChar))
+    >>= \case
+      Nothing -> return (Nothing, si)
+      Just {} -> do
+        sc
+        !startPos <- getSourcePos
+        (!ctorExpr, si') <- -- the ctor spec in any form of:
+          choice
+            [ parseBlockCtor, --- * a curly bracket quoted block
+              parseQuaintCtor, --- * a literal string - i.e. quaint ctor
+              parseAttrCtor --- * a direct/indirect attribute addressor
+            ]
+        !ctorEnd <- lexemeEndPos
+        let !ctorExprSrc =
+              ExprSrc ctorExpr $
+                SrcRange (lspSrcPosFromParsec startPos) ctorEnd
+        optional (parseArgsPacker si') >>= \case
+          Nothing ->
+            return
+              ( Just $
+                  AnnoExpr ctorExprSrc $
+                    ArgsPacker [] (SrcRange ctorEnd ctorEnd),
+                si'
+              )
+          Just (ctorArgs, si'') ->
+            return (Just $ AnnoExpr ctorExprSrc ctorArgs, si'')
+  where
+    parseBlockCtor = symbol "{" *> parseBlockRest si
+    parseQuaintCtor = (,si) . LitExpr . StringLiteral <$> parseStringLit
+    parseAttrCtor = (,si) . AttrExpr <$> parseAttrRef
+
 parseProcDecl :: SourcePos -> IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)
 parseProcDecl !startPos !si = do
   !pn <- parseAttrAddrSrc
   !ar <- parseArgsReceiver
-  (!body, !si') <- parseProcBody si
+  (!anno, !si') <- parseAnno si
+  (!body, !si'') <- parseProcBody si'
   !lexeme'end <- lexemeEndPos
-  return (ProcDecl pn ar body (lspSrcLocFromParsec startPos lexeme'end), si')
+  return
+    ( ProcDecl pn ar anno body (lspSrcLocFromParsec startPos lexeme'end),
+      si''
+    )
 
 parseOpDeclOvrdExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseOpDeclOvrdExpr !si = do
@@ -660,18 +709,20 @@ parseOpDeclOvrdExpr !si = do
   -- TODO check opSym can not be certain "reserved" keywords
   !argsErrRptPos <- getOffset
   !argsRcvr <- parseArgsReceiver
+  (!anno, !si') <- parseAnno si
   -- valid forms of args receiver for operators:
   --  * nullary - redeclare a pre-existing procedure as operator
   --  * 2 pos-args - simple lh/rh value receiving operator
   --  * 3 pos-args - caller scope + lh/rh expr receiving operator
   case argsRcvr of
     PackReceiver ars _ | length ars `elem` [0, 2, 3] -> do
-      (!body, !si') <- parseProcBody si
+      (!body, !si'') <- parseProcBody si'
       !lexeme'end <- lexemeEndPos
       let !procDecl =
             ProcDecl
               (AttrAddrSrc (NamedAttr opSym) opSpan)
               argsRcvr
+              anno
               body
               (lspSrcLocFromParsec startPos lexeme'end)
       ps@(EdhParserState !opPD _ _) <- get
@@ -684,7 +735,7 @@ parseOpDeclOvrdExpr !si = do
                 <> T.unpack opSym
                 <> ") ?"
           Just (origFixity, origPrec, _) ->
-            return (OpOvrdExpr origFixity origPrec opSymSrc procDecl, si')
+            return (OpOvrdExpr origFixity origPrec opSymSrc procDecl, si'')
         Just opPrec -> case lookupOpFromDict opSym opPD of
           Nothing -> do
             put
@@ -702,7 +753,7 @@ parseOpDeclOvrdExpr !si = do
                       )
                       opPD
                 }
-            return (OpDefiExpr fixity opPrec opSymSrc procDecl, si')
+            return (OpDefiExpr fixity opPrec opSymSrc procDecl, si'')
           Just (origFixity, origPrec, odl) ->
             if origPrec /= opPrec
               then do
@@ -719,7 +770,7 @@ parseOpDeclOvrdExpr !si = do
               else case fixity of
                 Infix ->
                   -- follow whatever fixity orignally declared
-                  return (OpOvrdExpr origFixity opPrec opSymSrc procDecl, si')
+                  return (OpOvrdExpr origFixity opPrec opSymSrc procDecl, si'')
                 _ ->
                   if fixity /= origFixity
                     then do
@@ -735,7 +786,7 @@ parseOpDeclOvrdExpr !si = do
                           <> T.unpack odl
                     else
                       return
-                        (OpOvrdExpr fixity opPrec opSymSrc procDecl, si')
+                        (OpOvrdExpr fixity opPrec opSymSrc procDecl, si'')
     _ -> do
       setOffset argsErrRptPos
       fail "invalid operator arguments receiver"
@@ -1351,23 +1402,27 @@ parseScopedBlock !si0 = void (symbol "{@") >> parseRest [] si0
               parseRest (ss : t) si'
           ]
 
+parseBlockRest :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseBlockRest = parseBlockRest' []
+
+parseBlockRest' :: [StmtSrc] -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseBlockRest' !t !si =
+  optionalSemicolon
+    *> choice
+      [ (void (symbol "}") <|> eof) >> return (BlockExpr $ reverse t, si),
+        do
+          (!ss, !si') <- parseStmt si
+          parseBlockRest' (ss : t) si'
+      ]
+
 parseDictOrBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseDictOrBlock !si0 =
   symbol "{"
-    *> choice [try $ parseDictEntries si0 [], parseBlockRest [] si0]
+    *> choice [try $ parseDictEntries si0 [], parseBlockRest' [] si0]
   where
     entryColon :: Parser ()
     entryColon = char ':' >> notFollowedBy (satisfy isOperatorChar) >> sc
 
-    parseBlockRest :: [StmtSrc] -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
-    parseBlockRest !t !si =
-      optionalSemicolon
-        *> choice
-          [ (void (symbol "}") <|> eof) >> return (BlockExpr $ reverse t, si),
-            do
-              (!ss, !si') <- parseStmt si
-              parseBlockRest (ss : t) si'
-          ]
     parseDictEntries ::
       IntplSrcInfo -> [(DictKeyExpr, ExprSrc)] -> Parser (Expr, IntplSrcInfo)
     parseDictEntries !si !es =

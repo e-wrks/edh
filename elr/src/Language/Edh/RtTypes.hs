@@ -452,7 +452,7 @@ rootScopeOf !scope =
 edhScopeSrcLoc :: Scope -> SrcLoc
 edhScopeSrcLoc !scope = case edh'procedure'decl $ edh'scope'proc scope of
   HostDecl {} -> SrcLoc (SrcDoc "<host-code>") noSrcRange
-  ProcDecl _ _ (StmtSrc _ !body'span) !loc -> loc {src'range = body'span}
+  ProcDecl _ _ _ (StmtSrc _ !body'span) !loc -> loc {src'range = body'span}
 
 -- | A class is wrapped as an object per se, the object's storage structure is
 -- here:
@@ -1454,14 +1454,14 @@ attrAddrStr MissedAttrSymbol = "@<?>"
 
 receivesNamedArg :: Text -> ArgsReceiver -> Bool
 receivesNamedArg !name (SingleReceiver !argRcvr) = case argRcvr of
-  RecvArg (AttrAddrSrc !addr _) _ _ | addr == NamedAttr name -> True
+  RecvArg (AttrAddrSrc !addr _) _ _ _ | addr == NamedAttr name -> True
   _ -> False
 receivesNamedArg !name (PackReceiver !argRcvrs _) = hasNamedArg argRcvrs
   where
     hasNamedArg :: [ArgReceiver] -> Bool
     hasNamedArg [] = False
     hasNamedArg (arg : rest) = case arg of
-      RecvArg (AttrAddrSrc !addr _) _ _ | addr == NamedAttr name -> True
+      RecvArg (AttrAddrSrc !addr _) _ _ _ | addr == NamedAttr name -> True
       _ -> hasNamedArg rest
 receivesNamedArg _ (WildReceiver _) = True
 receivesNamedArg _ NullaryReceiver = False
@@ -1486,21 +1486,21 @@ instance Show ArgsReceiver where
   show NullaryReceiver = "()"
 
 data ArgReceiver
-  = -- @* <args | @args'ptr>@
+  = -- @* <ident>@
     RecvRestPosArgs !AttrAddrSrc
-  | -- @** <kwargs | @kwargs'ptr>@
+  | -- @** <ident>@
     RecvRestKwArgs !AttrAddrSrc
-  | -- @*** <apk | @apk'ptr>@
+  | -- @*** <ident>@
     RecvRestPkArgs !AttrAddrSrc
-  | -- @<attr | @attr'ptr> [as some.other.attr] [= default'expr]@
-    RecvArg !AttrAddrSrc !(Maybe AttrRef) !(Maybe ExprSrc)
+  | -- @<ident> [: anno] [as some.other.attr] [= default'expr]@
+    RecvArg !AttrAddrSrc !(Maybe AnnoExpr) !(Maybe AttrRef) !(Maybe ExprSrc)
   deriving (Eq, Show)
 
 argReceiverSpan :: ArgReceiver -> SrcRange
 argReceiverSpan (RecvRestPosArgs (AttrAddrSrc _ src'span)) = src'span
 argReceiverSpan (RecvRestKwArgs (AttrAddrSrc _ src'span)) = src'span
 argReceiverSpan (RecvRestPkArgs (AttrAddrSrc _ src'span)) = src'span
-argReceiverSpan (RecvArg (AttrAddrSrc _ src'span) _ _) = src'span
+argReceiverSpan (RecvArg (AttrAddrSrc _ src'span) _ _ _) = src'span
 
 data ArgsPacker = ArgsPacker [ArgSender] !SrcRange
   deriving (Eq)
@@ -1528,12 +1528,19 @@ argSenderSpan !sndr = src'span
   where
     (ExprSrc _ !src'span) = sentArgExprSrc sndr
 
+data AnnoExpr
+  = AnnoExpr
+      !ExprSrc -- usually an attribute addressing expression
+      !ArgsPacker -- optionally prototype a ctor call
+  deriving (Eq, Show)
+
 -- | Procedure declaration, result of parsing
 data ProcDecl
   = HostDecl (ArgsPack -> EdhHostProc)
   | ProcDecl
       { edh'procedure'addr :: !AttrAddrSrc,
         edh'procedure'args :: !ArgsReceiver,
+        edh'procedure'anno :: !(Maybe AnnoExpr),
         edh'procedure'body :: !StmtSrc,
         edh'procedure'loc :: !SrcLoc
       }
@@ -1543,7 +1550,7 @@ instance Eq ProcDecl where
 
 instance Show ProcDecl where
   show (HostDecl _) = "<host-proc>"
-  show (ProcDecl (AttrAddrSrc !addr _) _ _ _) =
+  show (ProcDecl (AttrAddrSrc !addr _) _ _ _ _) =
     "<edh-proc " <> T.unpack (attrAddrStr addr) <> ">"
 
 procedureLoc :: ProcDecl -> SrcLoc
@@ -1574,7 +1581,7 @@ instance Hashable ProcDefi where
 instance Show ProcDefi where
   show (ProcDefi _ !name _ _ (HostDecl _)) =
     T.unpack $ "<host-proc " <> attrKeyStr name <> ">"
-  show (ProcDefi _ !name _ _ (ProcDecl (AttrAddrSrc !addr _) _ _ _)) =
+  show (ProcDefi _ !name _ _ (ProcDecl (AttrAddrSrc !addr _) _ _ _ _)) =
     T.unpack $
       "<edh-proc "
         <> attrKeyStr name
@@ -1857,6 +1864,7 @@ objectScope !obj = case edh'obj'store obj of
                                   (NamedAttr $ "module:" <> moduName)
                                   zeroSrcRange,
                               edh'procedure'args = NullaryReceiver,
+                              edh'procedure'anno = Nothing,
                               edh'procedure'body =
                                 StmtSrc VoidStmt zeroSrcRange,
                               edh'procedure'loc =

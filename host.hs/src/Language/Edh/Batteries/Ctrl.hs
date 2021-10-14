@@ -176,6 +176,7 @@ arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
                   (SrcRange (src'end lhSpan) (src'start rhSpan))
               )
               argsRcvr
+              Nothing
               (StmtSrc (ExprStmt rhExpr NoDocCmt) rhSpan)
               (edh'exe'src'loc tip)
                 { src'range = SrcRange (src'start lhSpan) (src'end rhSpan)
@@ -247,7 +248,7 @@ methodArrowArgsReceiver
   (AttrExpr (DirectRef argAttr@(AttrAddrSrc !addr _)))
   !exit = case addr of
     NamedAttr "_" -> exit $ Right $ SingleReceiver $ RecvRestPkArgs argAttr
-    _ -> exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing
+    _ -> exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing Nothing
 methodArrowArgsReceiver (ArgsPackExpr (ArgsPacker !argSndrs !sndrsSpan)) !exit =
   cnvrt argSndrs []
   where
@@ -261,9 +262,9 @@ methodArrowArgsReceiver (ArgsPackExpr (ArgsPacker !argSndrs !sndrsSpan)) !exit =
       UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
         cnvrt rest (RecvRestPkArgs argRef : rcvrs)
       SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-        cnvrt rest (RecvArg argRef Nothing Nothing : rcvrs)
+        cnvrt rest (RecvArg argRef Nothing Nothing Nothing : rcvrs)
       SendKwArg !argRef !defExpr ->
-        cnvrt rest (RecvArg argRef Nothing (Just defExpr) : rcvrs)
+        cnvrt rest (RecvArg argRef Nothing Nothing (Just defExpr) : rcvrs)
       !badSndr ->
         exit $
           Left $
@@ -285,6 +286,7 @@ prodArrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
                   (SrcRange (src'end lhSpan) (src'start rhSpan))
               )
               argsRcvr
+              Nothing
               (StmtSrc (ExprStmt rhExpr NoDocCmt) rhSpan)
               (edh'exe'src'loc tip)
                 { src'range = SrcRange (src'start lhSpan) (src'end rhSpan)
@@ -316,7 +318,7 @@ producerArrowArgsReceiver ::
   (Either Text ArgsReceiver -> STM ()) ->
   STM ()
 producerArrowArgsReceiver (AttrExpr (DirectRef !argAttr)) !exit =
-  exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing
+  exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing Nothing
 producerArrowArgsReceiver
   (ArgsPackExpr (ArgsPacker !argSndrs !sndrsSpan))
   !exit =
@@ -333,6 +335,7 @@ producerArrowArgsReceiver
                   ( reverse
                       $! RecvArg
                         (AttrAddrSrc (NamedAttr "outlet") noSrcRange)
+                        Nothing
                         ( Just
                             (DirectRef (AttrAddrSrc (NamedAttr "_") noSrcRange))
                         )
@@ -348,12 +351,15 @@ producerArrowArgsReceiver
         UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
           cnvrt outletPrsnt rest (RecvRestPkArgs argRef : rcvrs)
         SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-          cnvrt outletPrsnt rest (RecvArg argRef Nothing Nothing : rcvrs)
+          cnvrt
+            outletPrsnt
+            rest
+            (RecvArg argRef Nothing Nothing Nothing : rcvrs)
         SendKwArg argRef@(AttrAddrSrc !argAttr _) !defExpr ->
           cnvrt
             (outletPrsnt || argAttr == NamedAttr "outlet")
             rest
-            (RecvArg argRef Nothing (Just defExpr) : rcvrs)
+            (RecvArg argRef Nothing Nothing (Just defExpr) : rcvrs)
         !badSndr ->
           exit $
             Left $

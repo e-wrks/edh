@@ -968,7 +968,7 @@ callEdhOperator !this !that !mth !prede !args !exit =
           edhSwitchState ets $ exitEdhTx exit hpRtn
 
     -- calling an Edh operator procedure
-    ProcDecl _ _ !pb !pl ->
+    ProcDecl _ _ _ !pb !pl ->
       callEdhOperator' this that mth prede pl pb args exit
 
 callEdhOperator' ::
@@ -1143,12 +1143,12 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
           resolveEdhAttrAddr etsRecv argAddr $ \ !argKey -> do
             iopdInsert argKey (EdhArgsPack pk) em
             exit' (ArgsPack [] odEmpty)
-        RecvArg (AttrAddrSrc (NamedAttr "_") _) _ _ ->
+        RecvArg (AttrAddrSrc (NamedAttr "_") _) _ _ _ ->
           -- silently drop the value to single underscore, while consume the arg
           -- from incoming pack
           resolveArgValue (AttrByName "_") Nothing $
             \(_, posArgs'', kwArgs'') -> exit' (ArgsPack posArgs'' kwArgs'')
-        RecvArg (AttrAddrSrc !argAddr _) !argTgtAddr !argDefault ->
+        RecvArg (AttrAddrSrc !argAddr _) _anno !argTgtAddr !argDefault ->
           resolveEdhAttrAddr etsRecv argAddr $ \ !argKey ->
             resolveArgValue argKey argDefault $
               \(!argVal, !posArgs'', !kwArgs'') -> case argTgtAddr of
@@ -1629,7 +1629,7 @@ edhPrepareCall'
         EdhPrducr !mth -> case edh'procedure'decl mth of
           HostDecl {} ->
             throwEdh etsCallPrep EvalError "bug: host producer procedure"
-          ProcDecl _ _ !pb !pl ->
+          ProcDecl _ _ _ !pb !pl ->
             case edhUltimate <$> odLookup (AttrByName "outlet") kwargs of
               Nothing -> do
                 outlet <- newSink
@@ -1783,7 +1783,7 @@ callEdhMethod !this !that !mth !apk !scopeMod !exit =
               -- result anyway
               edhSwitchState etsCaller $ exit val
     -- calling an Edh method procedure
-    ProcDecl _ _ !pb !pl ->
+    ProcDecl _ _ _ !pb !pl ->
       callEdhMethod' Nothing this that mth pl pb apk scopeMod exit
 
 callEdhMethod' ::
@@ -2006,7 +2006,7 @@ edhPrepareForLoop
                     edhSwitchState etsLooper $ exitEdhTx exit val
 
               -- calling an Edh generator
-              ProcDecl _ _ !pb !pl ->
+              ProcDecl _ _ _ !pb !pl ->
                 forLooper loopTgt $ \ !exit !etsLooper -> do
                   let !looperCtx = edh'context etsLooper
                       !looperFrame = edh'ctx'tip looperCtx
@@ -3695,9 +3695,10 @@ intplArgsPacker !ets (ArgsPacker !argSenders !apkrSpan) !exit =
 
 intplProcDecl :: EdhThreadState -> ProcDecl -> (ProcDecl -> STM ()) -> STM ()
 intplProcDecl _ets pd@HostDecl {} !exit = exit pd
-intplProcDecl !ets (ProcDecl !addr !args !body !loc) !exit =
+intplProcDecl !ets (ProcDecl !addr !args !anno !body !loc) !exit =
   intplAttrAddrSrc ets addr $ \ !addr' -> intplArgsRcvr ets args $ \ !args' ->
-    intplStmtSrc ets body $ \ !body' -> exit $ ProcDecl addr' args' body' loc
+    intplStmtSrc ets body $ \ !body' ->
+      exit $ ProcDecl addr' args' anno body' loc
 
 intplDictEntry ::
   EdhThreadState ->
@@ -3751,18 +3752,18 @@ intplArgsRcvr !ets !a !exit = case a of
   where
     intplArgRcvr :: ArgReceiver -> (ArgReceiver -> STM ()) -> STM ()
     intplArgRcvr !a' !exit' = case a' of
-      RecvArg !attrAddr !maybeAddr !maybeDefault ->
+      RecvArg !attrAddr !anno !maybeAddr !maybeDefault ->
         intplAttrAddrSrc ets attrAddr $ \ !attrAddr' ->
           case maybeAddr of
             Nothing -> case maybeDefault of
-              Nothing -> exit' $ RecvArg attrAddr' Nothing Nothing
+              Nothing -> exit' $ RecvArg attrAddr' anno Nothing Nothing
               Just !x -> intplExprSrc ets x $
-                \ !x' -> exit' $ RecvArg attrAddr' Nothing $ Just x'
+                \ !x' -> exit' $ RecvArg attrAddr' anno Nothing $ Just x'
             Just !addr -> intplAttrRef ets addr $ \ !addr' ->
               case maybeDefault of
-                Nothing -> exit' $ RecvArg attrAddr' (Just addr') Nothing
+                Nothing -> exit' $ RecvArg attrAddr' anno (Just addr') Nothing
                 Just !x -> intplExprSrc ets x $
-                  \ !x' -> exit' $ RecvArg attrAddr' (Just addr') $ Just x'
+                  \ !x' -> exit' $ RecvArg attrAddr' anno (Just addr') $ Just x'
       _ -> exit' a'
 
 intplArgSender :: EdhThreadState -> ArgSender -> (ArgSender -> STM ()) -> STM ()
@@ -3934,12 +3935,12 @@ dtcFieldKeys' !ets !dtcArgRcvrs !exit = case dtcArgRcvrs of
     go :: [ArgReceiver] -> [(AttrKey, Text)] -> STM ()
     go [] !fs = exit $! reverse fs
     go (dr : rest) !fs = case dr of
-      RecvArg _ Just {} _ ->
+      RecvArg _ _ Just {} _ ->
         throwEdh
           ets
           UsageError
           "rename of data class field not supported yet"
-      RecvArg (AttrAddrSrc addr _) Nothing _ ->
+      RecvArg (AttrAddrSrc addr _) _ Nothing _ ->
         resolveEdhAttrAddr ets addr $ \ !fk ->
           go rest ((fk, attrKeyStr fk <> "=") : fs)
       RecvRestPkArgs (AttrAddrSrc addr _) ->
@@ -4663,6 +4664,7 @@ evalExpr'
       pd@( ProcDecl
              (AttrAddrSrc !addr _)
              !argsRcvr
+             _anno
              (StmtSrc !body'stmt _)
              !proc'loc
            )
@@ -4876,7 +4878,8 @@ evalExpr'
   ( NamespaceExpr
       pd@( ProcDecl
              (AttrAddrSrc !addr _)
-             _
+             _args
+             _anno
              (StmtSrc !body'stmt _)
              !proc'loc
            )
@@ -4921,7 +4924,7 @@ evalExpr'
               exitEdh ets exit $ EdhObject nsObj
 evalExpr' (MethodExpr HostDecl {}) _ _ =
   throwEdhTx EvalError "bug: eval host method decl"
-evalExpr' (MethodExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _)) !docCmt !exit =
+evalExpr' (MethodExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _ _)) !docCmt !exit =
   \ !ets -> resolveEdhAttrAddr ets addr $ \ !name -> do
     !idProc <- unsafeIOToSTM newUnique
     let !mth =
@@ -4938,7 +4941,7 @@ evalExpr' (MethodExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _)) !docCmt !exit =
     exitEdh ets exit mthVal
 evalExpr' (GeneratorExpr HostDecl {}) _ _ =
   throwEdhTx EvalError "bug: eval host method decl"
-evalExpr' (GeneratorExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _)) !docCmt !exit =
+evalExpr' (GeneratorExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _ _)) !docCmt !exit =
   \ !ets -> resolveEdhAttrAddr ets addr $ \ !name -> do
     !idProc <- unsafeIOToSTM newUnique
     let !mth =
@@ -4955,7 +4958,7 @@ evalExpr' (GeneratorExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _)) !docCmt !exi
     exitEdh ets exit mthVal
 evalExpr' (InterpreterExpr HostDecl {}) _ _ =
   throwEdhTx EvalError "bug: eval host method decl"
-evalExpr' (InterpreterExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _)) !docCmt !exit =
+evalExpr' (InterpreterExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _ _)) !docCmt !exit =
   \ !ets -> resolveEdhAttrAddr ets addr $ \ !name -> do
     !idProc <- unsafeIOToSTM newUnique
     let !mth =
@@ -4972,7 +4975,7 @@ evalExpr' (InterpreterExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _)) !docCmt !e
     exitEdh ets exit mthVal
 evalExpr' (ProducerExpr HostDecl {}) _ _ =
   throwEdhTx EvalError "bug: eval host method decl"
-evalExpr' (ProducerExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _)) !docCmt !exit =
+evalExpr' (ProducerExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _ _)) !docCmt !exit =
   \ !ets -> resolveEdhAttrAddr ets addr $ \ !name -> do
     !idProc <- unsafeIOToSTM newUnique
     let !mth =
@@ -4996,6 +4999,7 @@ evalExpr' (ProducerExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _)) !docCmt !exit
     bypassOutlet =
       RecvArg
         (AttrAddrSrc (NamedAttr "outlet") noSrcRange)
+        Nothing
         (Just (DirectRef (AttrAddrSrc (NamedAttr "_") noSrcRange)))
         (Just (ExprSrc (LitExpr SinkCtor) noSrcRange))
     alwaysWithOutlet :: ArgsReceiver -> ArgsReceiver
@@ -5003,10 +5007,10 @@ evalExpr' (ProducerExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _)) !docCmt !exit
       where
         go :: [ArgReceiver] -> ArgsReceiver
         go [] = PackReceiver (bypassOutlet : ars) src'span
-        go (RecvArg (AttrAddrSrc (NamedAttr "outlet") _) _ _ : _) = asr
+        go (RecvArg (AttrAddrSrc (NamedAttr "outlet") _) _ _ _ : _) = asr
         go (_ : ars') = go ars'
     alwaysWithOutlet
-      asr@(SingleReceiver (RecvArg (AttrAddrSrc (NamedAttr "outlet") _) _ _)) =
+      asr@(SingleReceiver (RecvArg (AttrAddrSrc (NamedAttr "outlet") _) _ _ _)) =
         asr
     alwaysWithOutlet (SingleReceiver !sr) =
       PackReceiver [bypassOutlet, sr] $ argReceiverSpan sr
@@ -5365,6 +5369,7 @@ defineOperator
         ProcDecl
           _
           (PackReceiver [] _)
+          _anno
           ( StmtSrc
               ( ExprStmt
                   (AttrExpr (DirectRef (AttrAddrSrc !refPreExisting _)))
@@ -5511,17 +5516,17 @@ defineOperator
         ProcDecl {} -> case edh'procedure'args opProc of
           -- 2 pos-args - simple lh/rh value receiving operator
           ( PackReceiver
-              [ RecvArg _lhName Nothing Nothing,
-                RecvArg _rhName Nothing Nothing
+              [ RecvArg _lhName _ Nothing Nothing,
+                RecvArg _rhName _ Nothing Nothing
                 ]
               _
             ) ->
               defineEdhOp
           -- 3 pos-args - caller scope + lh/rh expr receiving operator
           ( PackReceiver
-              [ RecvArg _scopeName Nothing Nothing,
-                RecvArg _lhName Nothing Nothing,
-                RecvArg _rhName Nothing Nothing
+              [ RecvArg _scopeName _ Nothing Nothing,
+                RecvArg _lhName _ Nothing Nothing,
+                RecvArg _rhName _ Nothing Nothing
                 ]
               _
             ) ->
