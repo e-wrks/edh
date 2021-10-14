@@ -625,6 +625,20 @@ instance ComputArgAdapter Double where
     _ -> mzero
   adaptedArgValue = EdhDecimal . D.decimalFromRealFloat
 
+instance ComputArgAdapter (Maybe Bool) where
+  adaptEdhArg !v = case edhUltimate v of
+    EdhNil -> return Nothing
+    EdhBool !d -> return $ Just d
+    _ -> mzero
+  adaptedArgValue (Just !d) = EdhBool d
+  adaptedArgValue Nothing = edhNothing
+
+instance ComputArgAdapter Bool where
+  adaptEdhArg !v = case edhUltimate v of
+    EdhBool !d -> return d
+    _ -> mzero
+  adaptedArgValue = EdhBool
+
 instance
   {-# OVERLAPPABLE #-}
   forall i.
