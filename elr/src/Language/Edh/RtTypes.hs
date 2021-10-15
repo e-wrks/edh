@@ -1493,7 +1493,7 @@ data ArgReceiver
   | -- @*** <ident>@
     RecvRestPkArgs !AttrAddrSrc
   | -- @<ident> [: anno] [as some.other.attr] [= default'expr]@
-    RecvArg !AttrAddrSrc !(Maybe AnnoExpr) !(Maybe AttrRef) !(Maybe ExprSrc)
+    RecvArg !AttrAddrSrc !(Maybe InpAnno) !(Maybe AttrRef) !(Maybe ExprSrc)
   deriving (Eq, Show)
 
 argReceiverSpan :: ArgReceiver -> SrcRange
@@ -1528,23 +1528,53 @@ argSenderSpan !sndr = src'span
   where
     (ExprSrc _ !src'span) = sentArgExprSrc sndr
 
--- | In-place annotation for an argument's type or a procedure's return type
+-- | In-place annotation
 --
--- Formal type annotation has to be a single class or procedure, that being a
--- callable constructor.
+-- Possibly for:
+-- - a received argument's type
+-- - a procedure's return type
+-- - available effects expected by a class or procedure
+data InpAnno
+  = -- | A constructor annotation
+    --
+    -- It can be a 'CallExpr' with explicit args for construction prototyping,
+    -- or is treated as an constructor (class or procedure)
+    CtorProtoAnno !ExprSrc
+  | -- | An arguments pack annotation
+    --
+    -- Each argument can optionally have its own respective annotation,
+    -- positional-only arguments are designated with the underscore @_@ name.
+    ApkProtoAnno !ArgsReceiver
+  | -- | Procedure signature annotation
+    --
+    -- The procedure's arguments (each possibly annotated respectively) and
+    -- return type annotation, positional-only arguments are designated with
+    -- the underscore @_@ name.
+    ProcSigAnno !ArgsReceiver !InpAnno
+  | -- | Freeform annotation
+    --
+    -- Quoted in a pair of curly brackets, so must be a 'BlockExpr'.
+    --
+    -- Maybe sum-type annotation can be valid in this form in the future,
+    -- but currently not so designed & supported.
+    --
+    -- References in the block are diagnosed and code navigation is possible
+    -- at least.
+    FreeformAnno !ExprSrc
+  | -- | Literal string annotation
+    --
+    -- The content is not interpreted anyway for now.
+    QuaintAnno !Text
+  | -- | Effects expectations, with or without result type annotation
+    EffsExpAnno ![EffArgAnno] !(Maybe InpAnno)
+  deriving (Eq, Show)
+
+-- | Specify an argument expected from dynamic scoping (i.e. effectful)
 --
--- Informally, a literal string can be used to express arbitrary information
--- about the type.
---
--- A block expression can be used too, maybe sum-type annotation can be valid
--- in this form in the future, but currently not so designed & supported.
---
--- References in the block are diagnosed and code navigation is possible with
--- a block annotation so far, at least.
-data AnnoExpr
-  = AnnoExpr
-      !ExprSrc -- usually an attribute addressing expression
-      !ArgsPacker -- optionally prototype a ctor call
+-- A default value can be specified, to state that it's not mandatory
+data EffArgAnno
+  = -- @<ident> [:anno] [= default'expr]@
+    EffArgAnno !AttrAddrSrc !(Maybe InpAnno) !(Maybe ExprSrc)
   deriving (Eq, Show)
 
 -- | Procedure declaration, result of parsing
@@ -1553,7 +1583,7 @@ data ProcDecl
   | ProcDecl
       { edh'procedure'addr :: !AttrAddrSrc,
         edh'procedure'args :: !ArgsReceiver,
-        edh'procedure'anno :: !(Maybe AnnoExpr),
+        edh'procedure'anno :: !(Maybe InpAnno),
         edh'procedure'body :: !StmtSrc,
         edh'procedure'loc :: !SrcLoc
       }

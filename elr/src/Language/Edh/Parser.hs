@@ -327,10 +327,11 @@ parseArgsReceiver =
       !startPos <- getSourcePos
       !ars <-
         choice
-          [ symbol "(" >> reverse <$> parseRestArgRecvs ")",
-            -- following is for JavaScript src level compatibility
-            symbol "[" >> reverse <$> parseRestArgRecvs "]",
-            symbol "{" >> reverse <$> parseRestArgRecvs "}"
+          [ symbol "(" >> parseRestArgRecvs ")",
+            -- following is for JavaScript src level compatibility, for lhs
+            -- destructuring assignment that `let` and `const` allow
+            symbol "[" >> parseRestArgRecvs "]",
+            symbol "{" >> parseRestArgRecvs "}"
           ]
       !lexeme'end <- lexemeEndPos
       return $
@@ -338,13 +339,21 @@ parseArgsReceiver =
 
     singleReceiver = SingleReceiver <$> parseKwRecv False
 
+parseApkReceiver :: Parser ArgsReceiver
+parseApkReceiver = do
+  !startPos <- getSourcePos
+  !ars <- symbol "(" >> parseRestArgRecvs ")"
+  !lexeme'end <- lexemeEndPos
+  return $
+    PackReceiver ars $ SrcRange (lspSrcPosFromParsec startPos) lexeme'end
+
 parseRestArgRecvs :: Text -> Parser [ArgReceiver]
 parseRestArgRecvs !endSymbol = parseArgRecvs [] False False
   where
     parseArgRecvs :: [ArgReceiver] -> Bool -> Bool -> Parser [ArgReceiver]
     parseArgRecvs !rs !kwConsumed !posConsumed = do
       void optionalComma
-      (symbol endSymbol $> rs) <|> do
+      (symbol endSymbol $> (reverse $! rs)) <|> do
         !nextArg <-
           (<* optionalComma) $
             if posConsumed
@@ -377,13 +386,13 @@ parseKwRecv !inPack = do
   !defExpr <- if inPack then optional parseDefaultExpr else return Nothing
   return $ RecvArg addr anno retgt defExpr
   where
-    parseArgAnno :: Parser (Maybe AnnoExpr)
+    parseArgAnno :: Parser (Maybe InpAnno)
     parseArgAnno = do
       -- TODO carry on 'IntplSrcInfo' in the full call chain to here,
       --      so the annotation expr can be interpolated.
       !s <- getInput
       !o <- getOffset
-      (!anno, _si') <- parseAnno (s, o, [])
+      (!anno, _si') <- parseInpAnno (s, o, [])
       return anno
     parseRetarget :: Parser AttrRef
     parseRetarget = do
@@ -529,17 +538,18 @@ parseClassExpr !si = do
   !startPos <- getSourcePos
   void $ keyword "class"
   !pn <- parseAttrAddrSrc
-  (!body, !si') <- parseProcBody si
+  (!anno, si') <- parseInpAnno si
+  (!body, !si'') <- parseProcBody si'
   !lexeme'end <- lexemeEndPos
   return
     ( ClassExpr $
         ProcDecl
           pn
           NullaryReceiver
-          Nothing
+          anno
           body
           (lspSrcLocFromParsec startPos lexeme'end),
-      si'
+      si''
     )
 
 parseDataExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -549,12 +559,13 @@ parseDataExpr !si = do
   {- HLINT ignore "Reduce duplication" -}
   !pn <- parseAttrAddrSrc
   !ar <- parseArgsReceiver
-  (!body, !si') <- parseProcBody si
+  (!anno, si') <- parseInpAnno si
+  (!body, !si'') <- parseProcBody si'
   !lexeme'end <- lexemeEndPos
   return
     ( ClassExpr $
-        ProcDecl pn ar Nothing body (lspSrcLocFromParsec startPos lexeme'end),
-      si'
+        ProcDecl pn ar anno body (lspSrcLocFromParsec startPos lexeme'end),
+      si''
     )
 
 parseExtendsStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
@@ -648,47 +659,114 @@ parseDoForOrWhileExpr !si = do
 
 -- | Parse an in-place annotation
 --
--- It can't be artitrary expression unless curly-bracket quoted, or an equal
--- sign there will be parsed as infix operator, while we probably would like
--- the equal sign be part of the default value spec for an argument.
-parseAnno :: IntplSrcInfo -> Parser (Maybe AnnoExpr, IntplSrcInfo)
-parseAnno !si =
-  optional (try $ string ":" >> notFollowedBy (satisfy isOperatorChar))
+-- It can't be artitrary expression, or an equal sign there will be parsed as
+-- infix operator, while we probably would like the equal sign be part of the
+-- default value spec for an argument.
+parseInpAnno :: IntplSrcInfo -> Parser (Maybe InpAnno, IntplSrcInfo)
+parseInpAnno !si0 =
+  optional (try $ string ":" >> notFollowedBy (satisfy isOperatorChar) >> sc)
     >>= \case
-      Nothing -> return (Nothing, si)
+      Nothing -> return (Nothing, si0)
       Just {} -> do
-        sc
-        !startPos <- getSourcePos
-        (!ctorExpr, si') <- -- so far such an anno can be:
-          choice
-            [ parseFreeformSpec, --- * a curly bracket quoted freeform exprs
-              parseQuaintSpec, --- * a literal string - i.e. quaint spec
-              parseAttrCtor --- * a direct/indirect attribute addressor
-            ]
-        !ctorEnd <- lexemeEndPos
-        let !ctorExprSrc =
-              ExprSrc ctorExpr $
-                SrcRange (lspSrcPosFromParsec startPos) ctorEnd
-        optional (parseArgsPacker si') >>= \case
-          Nothing ->
-            return
-              ( Just $
-                  AnnoExpr ctorExprSrc $
-                    ArgsPacker [] (SrcRange ctorEnd ctorEnd),
-                si'
-              )
-          Just (ctorArgs, si'') ->
-            return (Just $ AnnoExpr ctorExprSrc ctorArgs, si'')
+        (body, si') <- parseAnnoBody si0
+        return (Just body, si')
   where
-    parseFreeformSpec = parseBlock si
-    parseQuaintSpec = (,si) . LitExpr . StringLiteral <$> parseStringLit
-    parseAttrCtor = (,si) . AttrExpr <$> parseAttrRef
+    parseAnnoBody si =
+      choice
+        [ parseFreeform si, -- a curly bracket quoted freeform exprs
+          parseApkOrProcSig si, -- an apk result or procedure signature
+          parseEffExps si, -- effects expections
+          parseQuaintSpec si, -- a literal string - i.e. quaint spec
+          parseCtorProto si -- a direct/indirect attribute addressor,
+          -- optionally called with args for prototyping
+        ]
+
+    parseEffExps si = do
+      effs <- parseEffsAnno
+      optional
+        (try $ string "=>" >> notFollowedBy (satisfy isOperatorChar) >> sc)
+        >>= \case
+          Nothing -> return (EffsExpAnno effs Nothing, si)
+          Just {} -> do
+            (rtnAnno, si') <- parseAnnoBody si
+            return (EffsExpAnno effs $ Just rtnAnno, si')
+
+    parseApkOrProcSig si = do
+      arcvr <- parseApkReceiver
+      optional
+        (try $ string "->" >> notFollowedBy (satisfy isOperatorChar) >> sc)
+        >>= \case
+          Nothing -> return (ApkProtoAnno arcvr, si)
+          Just {} -> do
+            (rtnAnno, si') <- parseAnnoBody si
+            return (ProcSigAnno arcvr rtnAnno, si')
+
+    parseFreeform si = do
+      ((blk, si'), src'rng) <- parseWithRng $ parseBlock si
+      return (FreeformAnno $ ExprSrc blk src'rng, si')
+
+    parseQuaintSpec si = (,si) . QuaintAnno <$> parseStringLit
+
+    parseCtorProto si = do
+      ctorAddr <- parseAttrRef
+      let ctorSpan = attrRefSpan ctorAddr
+          ctorExpr = ExprSrc (AttrExpr ctorAddr) ctorSpan
+      optional (parseArgsPacker si) >>= \case
+        Nothing ->
+          return
+            ( CtorProtoAnno $
+                ExprSrc
+                  (CallExpr ctorExpr $ ArgsPacker [] noSrcRange)
+                  ctorSpan,
+              si
+            )
+        Just (apkr@(ArgsPacker _ apkr'span), si') ->
+          return
+            ( CtorProtoAnno $
+                ExprSrc
+                  (CallExpr ctorExpr apkr)
+                  (SrcRange (src'start ctorSpan) (src'end apkr'span)),
+              si'
+            )
+
+parseEffsAnno :: Parser [EffArgAnno]
+parseEffsAnno = symbol "[" *> go []
+  where
+    go :: [EffArgAnno] -> Parser [EffArgAnno]
+    go rs = do
+      void optionalSemicolon
+      (symbol "]" $> (reverse $! rs)) <|> do
+        oneMore <- parseOne <* optionalSemicolon
+        go (oneMore : rs)
+
+    parseOne = do
+      !addr <- let ?allowKwAttr = True in parseAttrAddrSrc'
+      !anno <- parseArgAnno
+      !defExpr <- optional parseDefaultExpr
+      return $ EffArgAnno addr anno defExpr
+    parseArgAnno :: Parser (Maybe InpAnno)
+    parseArgAnno = do
+      -- TODO carry on 'IntplSrcInfo' in the full call chain to here,
+      --      so the annotation expr can be interpolated.
+      !s <- getInput
+      !o <- getOffset
+      (!anno, _si') <- parseInpAnno (s, o, [])
+      return anno
+    parseDefaultExpr :: Parser ExprSrc
+    parseDefaultExpr = do
+      equalSign
+      -- TODO carry on 'IntplSrcInfo' in the full call chain to here,
+      --      so the default value expr can be interpolated.
+      !s <- getInput
+      !o <- getOffset
+      (!x, _si') <- parseExpr (s, o, [])
+      return x
 
 parseProcDecl :: SourcePos -> IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)
 parseProcDecl !startPos !si = do
   !pn <- parseAttrAddrSrc
   !ar <- parseArgsReceiver
-  (!anno, !si') <- parseAnno si
+  (!anno, !si') <- parseInpAnno si
   (!body, !si'') <- parseProcBody si'
   !lexeme'end <- lexemeEndPos
   return
@@ -713,8 +791,8 @@ parseOpDeclOvrdExpr !si = do
   opSymSrc@(OpSymSrc !opSym !opSpan) <- parseOpDeclSymSrc
   -- TODO check opSym can not be certain "reserved" keywords
   !argsErrRptPos <- getOffset
-  !argsRcvr <- parseArgsReceiver
-  (!anno, !si') <- parseAnno si
+  !argsRcvr <- parseApkReceiver
+  (!anno, !si') <- parseInpAnno si
   -- valid forms of args receiver for operators:
   --  * nullary - redeclare a pre-existing procedure as operator
   --  * 2 pos-args - simple lh/rh value receiving operator
@@ -1025,13 +1103,13 @@ parseLoopHead !si = do
                 ],
             do
               -- Edh or Python-like syntax
-              ars <- parseRestArgRecvs ")"
+              !ars <- parseRestArgRecvs ")"
               !lexeme'end <- lexemeEndPos
               !prepos <- litKeyword "from" <|> litKeyword "in"
               (!iter, !si') <- parseExpr si
               return
                 ( prepos,
-                  PackReceiver (reverse $! ars) $
+                  PackReceiver ars $
                     SrcRange (lspSrcPosFromParsec startPos) lexeme'end,
                   iter,
                   si'
@@ -1485,6 +1563,12 @@ parseOpAddrOrApkOrParen !si = do
           si
         )
 
+parseApk :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseApk !si = do
+  !startPos <- getSourcePos
+  void $ symbol "("
+  parseApkRest startPos si ")" True
+
 parseApkRest ::
   SourcePos -> IntplSrcInfo -> Text -> Bool -> Parser (Expr, IntplSrcInfo)
 parseApkRest !startPos !si !closeSym !mustApk = do
@@ -1820,3 +1904,10 @@ parseInfixOp = do
 
 parseExpr :: IntplSrcInfo -> Parser (ExprSrc, IntplSrcInfo)
 parseExpr = parseExprPrec Nothing (-10)
+
+parseWithRng :: forall a. Parser a -> Parser (a, SrcRange)
+parseWithRng p = do
+  startPos <- getSourcePos
+  a <- p
+  lexeme'end <- lexemeEndPos
+  return (a, SrcRange (lspSrcPosFromParsec startPos) lexeme'end)
