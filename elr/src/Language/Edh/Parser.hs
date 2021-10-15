@@ -646,6 +646,11 @@ parseDoForOrWhileExpr !si = do
       fail "missing if/while/for"
     ]
 
+-- | Parse an in-place annotation
+--
+-- It can't be artitrary expression unless curly-bracket quoted, or an equal
+-- sign there will be parsed as infix operator, while we probably would like
+-- the equal sign be part of the default value spec for an argument.
 parseAnno :: IntplSrcInfo -> Parser (Maybe AnnoExpr, IntplSrcInfo)
 parseAnno !si =
   optional (try $ string ":" >> notFollowedBy (satisfy isOperatorChar))
@@ -654,10 +659,10 @@ parseAnno !si =
       Just {} -> do
         sc
         !startPos <- getSourcePos
-        (!ctorExpr, si') <- -- the ctor spec in any form of:
+        (!ctorExpr, si') <- -- so far such an anno can be:
           choice
-            [ parseBlockCtor, --- * a curly bracket quoted block
-              parseQuaintCtor, --- * a literal string - i.e. quaint ctor
+            [ parseFreeformSpec, --- * a curly bracket quoted freeform exprs
+              parseQuaintSpec, --- * a literal string - i.e. quaint spec
               parseAttrCtor --- * a direct/indirect attribute addressor
             ]
         !ctorEnd <- lexemeEndPos
@@ -675,8 +680,8 @@ parseAnno !si =
           Just (ctorArgs, si'') ->
             return (Just $ AnnoExpr ctorExprSrc ctorArgs, si'')
   where
-    parseBlockCtor = symbol "{" *> parseBlockRest si
-    parseQuaintCtor = (,si) . LitExpr . StringLiteral <$> parseStringLit
+    parseFreeformSpec = parseBlock si
+    parseQuaintSpec = (,si) . LitExpr . StringLiteral <$> parseStringLit
     parseAttrCtor = (,si) . AttrExpr <$> parseAttrRef
 
 parseProcDecl :: SourcePos -> IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)
@@ -1402,23 +1407,23 @@ parseScopedBlock !si0 = void (symbol "{@") >> parseRest [] si0
               parseRest (ss : t) si'
           ]
 
-parseBlockRest :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
-parseBlockRest = parseBlockRest' []
+parseBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseBlock si = symbol "{" *> parseBlockRest [] si
 
-parseBlockRest' :: [StmtSrc] -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
-parseBlockRest' !t !si =
+parseBlockRest :: [StmtSrc] -> IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseBlockRest !t !si =
   optionalSemicolon
     *> choice
       [ (void (symbol "}") <|> eof) >> return (BlockExpr $ reverse t, si),
         do
           (!ss, !si') <- parseStmt si
-          parseBlockRest' (ss : t) si'
+          parseBlockRest (ss : t) si'
       ]
 
 parseDictOrBlock :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseDictOrBlock !si0 =
   symbol "{"
-    *> choice [try $ parseDictEntries si0 [], parseBlockRest' [] si0]
+    *> choice [try $ parseDictEntries si0 [], parseBlockRest [] si0]
   where
     entryColon :: Parser ()
     entryColon = char ':' >> notFollowedBy (satisfy isOperatorChar) >> sc

@@ -1528,6 +1528,19 @@ argSenderSpan !sndr = src'span
   where
     (ExprSrc _ !src'span) = sentArgExprSrc sndr
 
+-- | In-place annotation for an argument's type or a procedure's return type
+--
+-- Formal type annotation has to be a single class or procedure, that being a
+-- callable constructor.
+--
+-- Informally, a literal string can be used to express arbitrary information
+-- about the type.
+--
+-- A block expression can be used too, maybe sum-type annotation can be valid
+-- in this form in the future, but currently not so designed & supported.
+--
+-- References in the block are diagnosed and code navigation is possible with
+-- a block annotation so far, at least.
 data AnnoExpr
   = AnnoExpr
       !ExprSrc -- usually an attribute addressing expression
