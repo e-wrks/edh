@@ -50,7 +50,7 @@ Relatable to the list cons operator (:) in Haskell, the cons operator (:) in Đ 
 And there is neither *empty-pair* nor *unary-pair* in Đ, so technically speaking, pair in Đ can be said to be a non-empty, appending-cons list type mandating arity >= 2
 
    #}
-  infixl 2 (:) ( callerScope, lhx, rhx ) pass
+  infixl 5 (:) ( callerScope, lhx, rhx ) pass
 
 
   {##
