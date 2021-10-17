@@ -19,6 +19,11 @@ class Deletable a where
   -- assignment
   impliesDeletionAtRHS :: a -> Bool
 
+-- | All types contain no deletion triggering value by default,
+-- but have an instance
+instance {-# OVERLAPPABLE #-} Deletable t where
+  impliesDeletionAtRHS _ = False
+
 -- | Mutable dict with insertion order preserved
 -- (Insertion Order Preserving Dict)
 --
