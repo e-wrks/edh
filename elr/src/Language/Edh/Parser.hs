@@ -684,13 +684,26 @@ parseInpAnno !si0 =
   where
     parseAnnoBody si =
       choice
-        [ parseFreeform si, -- a curly bracket quoted freeform exprs
+        [ parseSinkCtor si, -- an event sink
+          parseFreeform si, -- a curly bracket quoted freeform exprs
           parseApkOrProcSig si, -- an apk result or procedure signature
           parseEffExps si, -- effects expections
           parseQuaintSpec si, -- a literal string - i.e. quaint spec
           parseCtorProto si -- a direct/indirect attribute addressor,
           -- optionally called with args for prototyping
         ]
+
+    parseSinkCtor si = do
+      !startPos <- getSourcePos
+      void $ keyword "sink"
+      !lexeme'end <- lexemeEndPos
+      return
+        ( CtorProtoAnno $
+            ExprSrc
+              (LitExpr SinkCtor)
+              (lspSrcRangeFromParsec startPos lexeme'end),
+          si
+        )
 
     parseEffExps si = do
       effs <- parseEffsAnno

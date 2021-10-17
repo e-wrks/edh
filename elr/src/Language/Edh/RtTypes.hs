@@ -1526,8 +1526,10 @@ argSenderSpan !sndr = src'span
 data InpAnno
   = -- | A constructor annotation
     --
-    -- It can be a 'CallExpr' with explicit args for construction prototyping,
-    -- or is treated as an constructor (class or procedure)
+    -- It's often a 'CallExpr' with ctor(***args) for construction prototyping,
+    -- the call operation will be added by parser if omitted.
+    --
+    -- There are less cases for literal constructions, e.g. event `sink`.
     CtorProtoAnno !ExprSrc
   | -- | An arguments pack annotation
     --
