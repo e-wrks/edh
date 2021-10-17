@@ -27,18 +27,6 @@ import System.IO.Unsafe (unsafePerformIO)
 import System.Posix
 import Prelude
 
--- | `nil` carries deletion semantics in Edh
-edhSetValue ::
-  forall k.
-  (Eq k, Hashable k) =>
-  k ->
-  EdhValue ->
-  IOPD k EdhValue ->
-  STM ()
-edhSetValue !key !val !d = case val of
-  EdhNil -> iopdDelete key d
-  _ -> iopdInsert key val d
-
 -- | A pack of evaluated argument values with positional/keyword origin,
 -- this works in places of tuples in other languages, apk in Edh can be
 -- considered a tuple if only positional arguments inside.
@@ -107,21 +95,17 @@ type DictStore = IOPD EdhValue EdhValue
 
 -- | Create a new Edh dict from a list of entries
 --
--- Note nil key will be treated as None, nil value triggers deletion semantics
+-- Note nil allowed as valid key, nil value triggers deletion semantics
 createEdhDict :: [(EdhValue, EdhValue)] -> STM Dict
 createEdhDict !entries = do
   !u <- unsafeIOToSTM newUnique
-  Dict u <$> iopdFromList' edhValueIdent entryMod entries
-  where
-    entryMod (!k, !v) = case v of
-      EdhNil -> Nothing
-      _ -> Just (edhNonNil k, v)
+  Dict u <$> iopdFromList' edhValueIdent entries
 
--- | setting to `nil` value means deleting the item by the specified key
+-- | Set one dict item value by key
+--
+-- Note nil allowed as valid key, nil value triggers deletion semantics
 setDictItem :: EdhValue -> EdhValue -> DictStore -> STM ()
-setDictItem !k !v !d = case v of
-  EdhNil -> iopdDelete' edhValueIdent k d
-  _ -> iopdInsert' edhValueIdent k v d
+setDictItem = iopdInsert' edhValueIdent
 
 lookupDictItem :: EdhValue -> DictStore -> STM (Maybe EdhValue)
 lookupDictItem = iopdLookup' edhValueIdent
@@ -1078,6 +1062,11 @@ data EdhValue
     EdhNamedValue !AttrName !EdhValue
   | -- | 1st class expression value, with source (or not, if empty)
     EdhExpr !ExprDefi !Text
+
+instance Deletable EdhValue where
+  -- `nil` carries deletion semantics
+  impliesDeletionAtRHS EdhNil = True
+  impliesDeletionAtRHS _ = False
 
 instance Show EdhValue where
   show EdhNil = "nil"

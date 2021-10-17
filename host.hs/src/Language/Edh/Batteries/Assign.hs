@@ -235,7 +235,7 @@ assignMissingProc
             evalExprSrc rhExpr $ \ !rhVal _ets ->
               let !rhv = edhDeCaseWrap rhVal
                in do
-                    edhSetValue key rhv es
+                    iopdInsert key rhv es
                     -- wrap with the sacred return to cease defaulting semantics
                     exitEdh ets exit $ EdhReturn $ EdhReturn rhv
         Just !preVal ->

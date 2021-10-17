@@ -398,14 +398,15 @@ newUniqueEdh = inlineSTM $ unsafeIOToSTM newUnique
 {-# INLINE newUniqueEdh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
-iopdCloneEdh :: forall k v. (Eq k, Hashable k) => IOPD k v -> Edh (IOPD k v)
+iopdCloneEdh ::
+  forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> Edh (IOPD k v)
 iopdCloneEdh = inlineSTM . iopdClone
 {-# INLINE iopdCloneEdh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
 iopdTransformEdh ::
   forall k v v'.
-  (Eq k, Hashable k) =>
+  (Eq k, Hashable k, Deletable v, Deletable v') =>
   (v -> v') ->
   IOPD k v ->
   Edh (IOPD k v')
@@ -413,24 +414,26 @@ iopdTransformEdh trans = inlineSTM . iopdTransform trans
 {-# INLINE iopdTransformEdh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
-iopdEmptyEdh :: forall k v. (Eq k, Hashable k) => Edh (IOPD k v)
+iopdEmptyEdh :: forall k v. (Eq k, Hashable k, Deletable v) => Edh (IOPD k v)
 iopdEmptyEdh = inlineSTM iopdEmpty
 {-# INLINE iopdEmptyEdh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
-iopdNullEdh :: forall k v. (Eq k, Hashable k) => IOPD k v -> Edh Bool
+iopdNullEdh ::
+  forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> Edh Bool
 iopdNullEdh = inlineSTM . iopdNull
 {-# INLINE iopdNullEdh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
-iopdSizeEdh :: forall k v. (Eq k, Hashable k) => IOPD k v -> Edh Int
+iopdSizeEdh ::
+  forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> Edh Int
 iopdSizeEdh = inlineSTM . iopdSize
 {-# INLINE iopdSizeEdh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
 iopdInsertEdh ::
   forall k v.
-  (Eq k, Hashable k) =>
+  (Eq k, Hashable k, Deletable v) =>
   k ->
   v ->
   IOPD k v ->
@@ -439,14 +442,15 @@ iopdInsertEdh k v = inlineSTM . iopdInsert k v
 {-# INLINE iopdInsertEdh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
-iopdReserveEdh :: forall k v. (Eq k, Hashable k) => Int -> IOPD k v -> Edh ()
+iopdReserveEdh ::
+  forall k v. (Eq k, Hashable k, Deletable v) => Int -> IOPD k v -> Edh ()
 iopdReserveEdh moreCap = inlineSTM . iopdReserve moreCap
 {-# INLINE iopdReserveEdh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
 iopdUpdateEdh ::
   forall k v.
-  (Eq k, Hashable k) =>
+  (Eq k, Hashable k, Deletable v) =>
   [(k, v)] ->
   IOPD k v ->
   Edh ()
@@ -456,7 +460,7 @@ iopdUpdateEdh ps = inlineSTM . iopdUpdate ps
 -- | The 'IOPD' action lifted into 'Edh' monad
 iopdLookupEdh ::
   forall k v.
-  (Eq k, Hashable k) =>
+  (Eq k, Hashable k, Deletable v) =>
   k ->
   IOPD k v ->
   Edh (Maybe v)
@@ -466,7 +470,7 @@ iopdLookupEdh key = inlineSTM . iopdLookup key
 -- | The 'IOPD' action lifted into 'Edh' monad
 iopdLookupDefaultEdh ::
   forall k v.
-  (Eq k, Hashable k) =>
+  (Eq k, Hashable k, Deletable v) =>
   v ->
   k ->
   IOPD k v ->
@@ -477,7 +481,7 @@ iopdLookupDefaultEdh v k = inlineSTM . iopdLookupDefault v k
 -- | The 'IOPD' action lifted into 'Edh' monad
 iopdDeleteEdh ::
   forall k v.
-  (Eq k, Hashable k) =>
+  (Eq k, Hashable k, Deletable v) =>
   k ->
   IOPD k v ->
   Edh ()
@@ -485,30 +489,33 @@ iopdDeleteEdh k = inlineSTM . iopdDelete k
 {-# INLINE iopdDeleteEdh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
-iopdKeysEdh :: forall k v. (Eq k, Hashable k) => IOPD k v -> Edh [k]
+iopdKeysEdh ::
+  forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> Edh [k]
 iopdKeysEdh = inlineSTM . iopdKeys
 {-# INLINE iopdKeysEdh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
-iopdValuesEdh :: forall k v. (Eq k, Hashable k) => IOPD k v -> Edh [v]
+iopdValuesEdh ::
+  forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> Edh [v]
 iopdValuesEdh = inlineSTM . iopdValues
 {-# INLINE iopdValuesEdh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
-iopdToListEdh :: forall k v. (Eq k, Hashable k) => IOPD k v -> Edh [(k, v)]
+iopdToListEdh ::
+  forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> Edh [(k, v)]
 iopdToListEdh = inlineSTM . iopdToList
 {-# INLINE iopdToListEdh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
 iopdToReverseListEdh ::
-  forall k v. (Eq k, Hashable k) => IOPD k v -> Edh [(k, v)]
+  forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> Edh [(k, v)]
 iopdToReverseListEdh = inlineSTM . iopdToReverseList
 {-# INLINE iopdToReverseListEdh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
 iopdFromListEdh ::
   forall k v.
-  (Eq k, Hashable k) =>
+  (Eq k, Hashable k, Deletable v) =>
   [(k, v)] ->
   Edh (IOPD k v)
 iopdFromListEdh = inlineSTM . iopdFromList
@@ -516,7 +523,10 @@ iopdFromListEdh = inlineSTM . iopdFromList
 
 -- | The 'IOPD' action lifted into 'Edh' monad
 iopdSnapshotEdh ::
-  forall k v. (Eq k, Hashable k) => IOPD k v -> Edh (OrderedDict k v)
+  forall k v.
+  (Eq k, Hashable k, Deletable v) =>
+  IOPD k v ->
+  Edh (OrderedDict k v)
 iopdSnapshotEdh = inlineSTM . iopdSnapshot
 {-# INLINE iopdSnapshotEdh #-}
 

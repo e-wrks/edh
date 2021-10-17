@@ -269,7 +269,6 @@ module Language.Edh.CHI
     runEdhTxInSandbox,
 
     -- ** Value system
-    edhSetValue,
     createEdhDict,
     setDictItem,
     lookupDictItem,
@@ -372,12 +371,12 @@ import Language.Edh.Args
 import Language.Edh.Batteries
 import Language.Edh.Control
 import Language.Edh.CoreLang
-import Language.Edh.Sink
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
 import Language.Edh.InterOp
 import Language.Edh.PkgMan
 import Language.Edh.RtTypes
 import Language.Edh.Runtime
+import Language.Edh.Sink
 import Language.Edh.Utils
 import Text.Megaparsec

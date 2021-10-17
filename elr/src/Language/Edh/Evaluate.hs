@@ -425,8 +425,8 @@ writeObjAttr ::
   (EdhValue -> STM ()) ->
   STM ()
 writeObjAttr !ets !obj !key !val !exit = case edh'obj'store obj of
-  HashStore !hs -> edhSetValue key val hs >> exit val
-  ClassStore !cls -> edhSetValue key val (edh'class'store cls) >> exit val
+  HashStore !hs -> iopdInsert key val hs >> exit val
+  ClassStore !cls -> iopdInsert key val (edh'class'store cls) >> exit val
   HostStore _ ->
     throwEdh ets UsageError $
       "no such property `"
@@ -491,8 +491,8 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
     DirectRef (AttrAddrSrc !addr' _) ->
       resolveEdhAttrAddr ets addr' $ \ !key -> do
         case edh'ctx'eff'target ctx of
-          Nothing -> edhSetValue key rhVal esScope
-          Just !esEffs -> edhSetValue key rhVal esEffs
+          Nothing -> iopdInsert key rhVal esScope
+          Just !esEffs -> iopdInsert key rhVal esEffs
         exitWithChkExportTo (edh'scope'this scope) key rhVal
     -- exporting within a method procedure actually adds the artifact to
     -- its owning object's export store, besides changing the mth proc's
@@ -555,7 +555,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
       case edh'ctx'exp'target ctx of
         Nothing -> exitEdh ets exit artVal
         Just _esExps -> prepareExpStore ets obj $ \ !esExps -> do
-          edhSetValue artKey artVal esExps
+          iopdInsert artKey artVal esExps
           exitEdh ets exit artVal
 
 prepareExpStore ::
@@ -1153,7 +1153,7 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
             resolveArgValue argKey argDefault $
               \(!argVal, !posArgs'', !kwArgs'') -> case argTgtAddr of
                 Nothing -> do
-                  edhSetValue argKey argVal em
+                  iopdInsert argKey argVal em
                   exit' (ArgsPack posArgs'' kwArgs'')
                 Just (DirectRef (AttrAddrSrc !addr _)) -> case addr of
                   NamedAttr "_" ->
@@ -1161,11 +1161,11 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
                     exit' (ArgsPack posArgs'' kwArgs'')
                   NamedAttr !attrName -> do
                     -- simple rename
-                    edhSetValue (AttrByName attrName) argVal em
+                    iopdInsert (AttrByName attrName) argVal em
                     exit' (ArgsPack posArgs'' kwArgs'')
                   QuaintAttr !attrName -> do
                     -- odd rename
-                    edhSetValue (AttrByName attrName) argVal em
+                    iopdInsert (AttrByName attrName) argVal em
                     exit' (ArgsPack posArgs'' kwArgs'')
                   SymbolicAttr !symName ->
                     -- todo support this ?
@@ -1176,7 +1176,7 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
                     throwEdh etsCaller UsageError $
                       "do you mean `this.@( " <> src <> " )` instead ?"
                   LitSymAttr !sym -> do
-                    edhSetValue (AttrBySym sym) argVal em
+                    iopdInsert (AttrBySym sym) argVal em
                     exit' (ArgsPack posArgs'' kwArgs'')
                   MissedAttrName ->
                     throwEdh
@@ -1385,7 +1385,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                     -- underscore, the user may just want its side-effect
                     pkArgs xs exit
                   _ -> resolveEdhAttrAddr ets kwAddr $ \ !kwKey -> do
-                    edhSetValue kwKey (edhDeFlowCtrl val) kwIOPD
+                    iopdInsert kwKey (edhDeFlowCtrl val) kwIOPD
                     pkArgs xs exit
   pkArgs argSenders $ \ !posArgs -> do
     !kwArgs <- iopdSnapshot kwIOPD
@@ -4246,18 +4246,18 @@ defineScopeAttr !ets !key !val = when (key /= AttrByName "_") $ do
   case edh'ctx'eff'target ctx of
     Nothing ->
       unless (edh'ctx'pure ctx) $
-        edhSetValue key val (edh'scope'entity scope)
-    Just !esEffs -> edhSetValue key val esEffs
+        iopdInsert key val (edh'scope'entity scope)
+    Just !esEffs -> iopdInsert key val esEffs
   case edh'ctx'exp'target ctx of
     Nothing -> pure ()
-    Just !esExps -> edhSetValue key val esExps
+    Just !esExps -> iopdInsert key val esExps
   where
     !ctx = edh'context ets
     !scope = contextScope ctx
 
 defineEffect :: EdhThreadState -> AttrKey -> EdhValue -> STM ()
 defineEffect !ets !key !val =
-  edhSetValue key val
+  iopdInsert key val
     =<< prepareEffStore ets (edh'scope'entity $ contextScope $ edh'context ets)
 
 -- | Evaluate an Edh expression definition
@@ -5568,7 +5568,7 @@ pvlToDict !ets !pvl !exit = do
   !ds <- iopdEmpty
   let go [] = exit ds
       go (p : rest) = val2DictEntry ets p $ \(!key, !val) -> do
-        edhSetValue key val ds
+        iopdInsert key val ds
         go rest
   go pvl
 
