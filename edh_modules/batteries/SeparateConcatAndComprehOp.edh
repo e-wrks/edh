@@ -13,7 +13,7 @@ export infixr 1 (<=<) () (=<)
 {##
  # Override operator (=<) to comprehend into empty ones only
  #}
-export infixr (=<) ( callerScope, lhe, rhe ) {
+export infixr (=<) ( callerScope: scope, lhe, rhe ) {
   lhv = callerScope.eval( lhe )
 
   not null( lhv )

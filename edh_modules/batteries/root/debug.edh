@@ -38,7 +38,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
      # The advantage of being an interpreter procedure here, is no eval of rest
      # exprs as long as the assertion stands.
      #}
-    interpreter assert( callerScope,
+    interpreter assert( callerScope: scope,
       assertion, msg= None, ***details
     ) {
       case callerScope.eval( assertion ) of {
@@ -74,7 +74,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
    # CAVEAT:
    #  This output to the stdout by `console.print()`
    #}
-  interpreter printDir( callerScope, ofThe= None, ) case (
+  interpreter printDir( callerScope: scope, ofThe= None, ) case (
     if ofThe is not None
     then callerScope.eval( ofThe )
     else callerScope
@@ -94,7 +94,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
    # Basic implementation of a string form for `dir` command to
    # output to a remote console
    #}
-  interpreter sprintDir( callerScope, ofThe= None, ) case (
+  interpreter sprintDir( callerScope: scope, ofThe= None, ) case (
     if ofThe is not None
     then callerScope.eval( ofThe )
     else callerScope
@@ -126,7 +126,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
    #
    #  *) This can terminate the process when *stdin* is already at EOF
    #}
-  interpreter replHere( callerScope, prompt=None ) {
+  interpreter replHere( callerScope: scope, prompt=None ) {
     prompt = prompt and callerScope.eval( prompt ) or repr( callerScope )
 
     console.print(
