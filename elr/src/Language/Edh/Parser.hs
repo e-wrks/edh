@@ -164,7 +164,18 @@ isIdentChar :: Char -> Bool
 isIdentChar c = c == '_' || c == '\'' || Char.isAlphaNum c
 
 singleDot :: Parser ()
-singleDot = char '.' >> notFollowedBy (char '.') >> sc
+singleDot = do
+  void $ char '.'
+  notFollowedBy (char '.')
+  !sp <- getSourcePos
+  !o <- getOffset
+  !s <- get
+  put
+    s
+      { edh'parser'lexeme'end'pos = lspSrcPosFromParsec sp,
+        edh'parser'lexeme'end'offset = o
+      }
+  sc
 
 equalSign :: Parser ()
 equalSign = char '=' >> notFollowedBy (satisfy isOperatorChar) >> sc
