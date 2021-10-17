@@ -83,7 +83,7 @@ export {
    # the virtual property of an event sink, to check whether it is already at
    # end-of-stream
    #}
-  method __Sink_eos__ ( _: sink ) : 'bool' pass
+  method __Sink_eos__ ( _: sink ) : 'Bool' pass
   {##
    # the virtual property of a dict, to obtain number of entries in it
    #}
