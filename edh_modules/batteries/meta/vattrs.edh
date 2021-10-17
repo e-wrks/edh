@@ -70,7 +70,7 @@ export {
    # the virtual property of an event sink, to obtain a non-lingering copy of
    # the event sink
    #}
-  method __Sink_subseq__ ( sink_ ) pass
+  method __Sink_subseq__ ( _: sink ) : sink pass
   {##
    # the virtual property of an event sink, to obtain the most recent value
    # from the event sink
@@ -78,12 +78,12 @@ export {
    # note this only works for a lingering event sink, `nil` is always returned
    # for non-lingering event sinks
    #}
-  method __Sink_mrv__ ( sink_ ) pass
+  method __Sink_mrv__ ( _: sink ) pass
   {##
    # the virtual property of an event sink, to check whether it is already at
    # end-of-stream
    #}
-  method __Sink_eos__ ( sink_ ) pass
+  method __Sink_eos__ ( _: sink ) : 'bool' pass
   {##
    # the virtual property of a dict, to obtain number of entries in it
    #}

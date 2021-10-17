@@ -6,7 +6,8 @@ import * 'batteries/meta'
 
 export {
 
-  method __String_join__(sep) return method join( *all ) case all of {
+  method __String_join__(sep) : (*segs) -> 'String'
+  method join( *all ) case all of {
     { fst :> rest } -> {
       s = str(fst) # do coerce to string now, in case only one arg passed
       for one from rest do s = s ++ sep ++ one
@@ -15,12 +16,14 @@ export {
     return ''
   }
 
-  method __String_startsWith__(s) return method startsWith(prefix) case s of {
+  method __String_startsWith__(s) : (prefix: 'String') -> 'Bool'
+  method startsWith(prefix) case s of {
     { prefix >@ _ } -> true
     false
   }
 
-  method __String_endsWith__(s) return method startsWith(suffix) case s of {
+  method __String_endsWith__(s) : (suffix: 'String') -> 'Bool'
+  method startsWith(suffix) case s of {
     { _ @< suffix } -> true
     false
   }
