@@ -1524,7 +1524,15 @@ argSenderSpan !sndr = src'span
 -- - a procedure's return type
 -- - available effects expected by a class or procedure
 data InpAnno
-  = -- | A constructor annotation
+  = -- | Homogeneous collection annotation
+    --
+    -- The annotated artifact meant to be a postional-only apk (i.e. tuple) or
+    -- list, containing hogeneous elements of the spoke type.
+    --
+    -- todo: represent the arity information? e.g.
+    -- `*` for any number of elements, `+` for at least one element
+    PluralAnno !InpAnno
+  | -- | A constructor annotation
     --
     -- It's often a 'CallExpr' with ctor(***args) for construction prototyping,
     -- the call operation will be added by parser if omitted.

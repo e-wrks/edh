@@ -675,13 +675,21 @@ parseDoForOrWhileExpr !si = do
 -- default value spec for an argument.
 parseInpAnno :: IntplSrcInfo -> Parser (Maybe InpAnno, IntplSrcInfo)
 parseInpAnno !si0 =
-  optional (try $ string ":" >> notFollowedBy (satisfy isOperatorChar) >> sc)
+  -- seems no operator can stand in this place, or else we should do:
+  -- optional (try $ string ":" >> notFollowedBy (satisfy isOperatorChar) >> sc)
+  optional (try $ symbol ":")
     >>= \case
       Nothing -> return (Nothing, si0)
       Just {} -> do
-        (body, si') <- parseAnnoBody si0
+        (body, si') <- parsePlural si0 <|> parseAnnoBody si0
         return (Just body, si')
   where
+    parsePlural si = do
+      void $ string "*" <|> string "+"
+      sc
+      (body, si') <- parseAnnoBody si
+      return (PluralAnno body, si')
+
     parseAnnoBody si =
       choice
         [ parseSinkCtor si, -- an event sink
