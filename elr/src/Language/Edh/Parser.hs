@@ -758,9 +758,9 @@ parseEffsAnno = symbol "[" *> go []
   where
     go :: [EffArgAnno] -> Parser [EffArgAnno]
     go rs = do
-      void optionalSemicolon
+      void optionalComma
       (symbol "]" $> (reverse $! rs)) <|> do
-        oneMore <- parseOne <* optionalSemicolon
+        oneMore <- parseOne <* optionalComma
         go (oneMore : rs)
 
     parseOne = do
