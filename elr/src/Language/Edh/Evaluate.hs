@@ -1749,6 +1749,7 @@ callEdhMethod !this !that !mth !apk !scopeMod !exit =
     -- calling a host method procedure
     HostDecl !hp -> \ !etsCaller ->
       let !callerCtx = edh'context etsCaller
+          !callerFrame = edh'ctx'tip callerCtx
           !callerScope = contextScope callerCtx
           -- a host procedure views the same scope entity as of the caller's
           -- call frame
@@ -1764,10 +1765,10 @@ callEdhMethod !this !that !mth !apk !scopeMod !exit =
           !mthCtx =
             callerCtx
               { edh'ctx'tip =
-                  EdhCallFrame
-                    mthScope
-                    (SrcLoc (SrcDoc "<host-code>") noSrcRange)
-                    defaultEdhExcptHndlr,
+                  callerFrame
+                    { edh'frame'scope = mthScope,
+                      edh'exc'handler = defaultEdhExcptHndlr
+                    },
                 edh'ctx'stack = edh'ctx'tip callerCtx : edh'ctx'stack callerCtx,
                 edh'ctx'genr'caller = Nothing,
                 edh'ctx'match = true,
@@ -1987,10 +1988,10 @@ edhPrepareForLoop
                     !calleeCtx =
                       looperCtx
                         { edh'ctx'tip =
-                            EdhCallFrame
-                              calleeScope
-                              (SrcLoc (SrcDoc "<host-code>") noSrcRange)
-                              defaultEdhExcptHndlr,
+                            looperFrame
+                              { edh'frame'scope = calleeScope,
+                                edh'exc'handler = defaultEdhExcptHndlr
+                              },
                           edh'ctx'stack = callerFrame : edh'ctx'stack looperCtx,
                           edh'ctx'genr'caller = Just $ recvYield etsLooper exit,
                           edh'ctx'match = true,
@@ -3902,6 +3903,15 @@ edhObjDescTx' !o !kwargs !exitDesc !ets =
 edhValueDesc :: EdhThreadState -> EdhValue -> (Text -> STM ()) -> STM ()
 edhValueDesc !ets !val !exitDesc = case edhUltimate val of
   EdhObject !o -> edhObjDesc ets o exitDesc
+  EdhExpr (ExprDefi _u body loc) src -> do
+    let descStr =
+          "'Expr' value with AST:\n" <> T.pack (show body)
+            <> "\n---expr-defined-at:\n"
+            <> prettySrcLoc loc
+            <> "\n---expr-source-form:\n"
+            <> src
+            <> "\n---end-of-expr-desc---"
+    exitDesc descStr
   _ -> edhValueRepr ets val $ \ !valRepr ->
     exitDesc $ "'" <> edhTypeNameOf val <> "' value `" <> valRepr <> "`"
 
