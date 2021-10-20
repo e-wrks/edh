@@ -120,6 +120,10 @@ instance Monad Edh where
   m >>= k = Edh $ \naExit c -> unEdh m naExit (\x -> unEdh (k x) naExit c)
   {-# INLINE (>>=) #-}
 
+instance MonadFail Edh where
+  fail reason = naM $ T.pack reason
+  {-# INLINE fail #-}
+
 instance Alternative Edh where
   empty = Edh $ \naExit _exit _ets -> naExit []
   x <|> y = Edh $ \naExit exit ets ->
@@ -959,6 +963,10 @@ instance Monad EIO where
   {-# INLINE return #-}
   m >>= k = EIO $ \ets exit -> runEIO m ets $ \a -> runEIO (k a) ets exit
   {-# INLINE (>>=) #-}
+
+instance MonadFail EIO where
+  fail reason = throwEdhM EvalError $ T.pack reason
+  {-# INLINE fail #-}
 
 instance MonadIO EIO where
   liftIO act = EIO $ \_ets exit -> act >>= exit
