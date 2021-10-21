@@ -1550,20 +1550,18 @@ data InpAnno
     -- return type annotation, positional-only arguments are designated with
     -- the underscore @_@ name.
     ProcSigAnno !ArgsReceiver !InpAnno
-  | -- | Freeform annotation
+  | -- | Type string annotation
     --
-    -- Quoted in a pair of curly brackets, so must be a 'BlockExpr'.
+    -- Single delimiter quoted literal string, interpreted as type name
+    TypeStrAnno !Text
+  | -- | Quaint annotation
     --
-    -- Maybe sum-type annotation can be valid in this form in the future,
-    -- but currently not so designed & supported.
-    --
-    -- References in the block are diagnosed and code navigation is possible
-    -- at least.
-    FreeformAnno !ExprSrc
-  | -- | Literal string annotation
-    --
-    -- The content is not interpreted anyway for now.
+    -- Wide delimiter quoted literal string, content is not interpreted anyway.
     QuaintAnno !Text
+  | -- | Alternate annotation
+    --
+    -- To express sum types
+    AltAnno !InpAnno !InpAnno
   | -- | Effects expectations, with or without result type annotation
     EffsExpAnno ![EffArgAnno] !(Maybe InpAnno)
   deriving (Eq, Show)

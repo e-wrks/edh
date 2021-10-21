@@ -680,10 +680,17 @@ parseInpAnno !si0 =
   optional (try $ symbol ":")
     >>= \case
       Nothing -> return (Nothing, si0)
-      Just {} -> do
-        (body, si') <- parsePlural si0 <|> parseAnnoBody si0
-        return (Just body, si')
+      Just {} -> go si0
   where
+    go si = do
+      (gotAnno, si') <- parseOne si
+      (<|> return (Just gotAnno, si')) $ do
+        void $ symbol "|"
+        (gotMore, si'') <- parseOne si'
+        return (Just $ AltAnno gotAnno gotMore, si'')
+
+    parseOne si = parsePlural si <|> parseAnnoBody si
+
     parsePlural si = do
       void $ string "*" <|> string "+"
       sc
@@ -693,11 +700,10 @@ parseInpAnno !si0 =
     parseAnnoBody si =
       choice
         [ parseSinkCtor si, -- an event sink
-          parseFreeform si, -- a curly bracket quoted freeform exprs
           parseApkOrProcSig si, -- an apk result or procedure signature
           parseEffExps si, -- effects expections
-          parseQuaintSpec si, -- a literal string - i.e. quaint spec
-          parseCtorProto si -- a direct/indirect attribute addressor,
+          parseStrSpec si, -- literal string - narrow for type, wide for quaint
+          parseCtorProto si -- direct/indirect attribute addressor,
           -- optionally called with args for prototyping
         ]
 
@@ -733,11 +739,11 @@ parseInpAnno !si0 =
             (rtnAnno, si') <- parseAnnoBody si
             return (ProcSigAnno arcvr rtnAnno, si')
 
-    parseFreeform si = do
-      ((blk, si'), src'rng) <- parseWithRng $ parseBlock si
-      return (FreeformAnno $ ExprSrc blk src'rng, si')
-
-    parseQuaintSpec si = (,si) . QuaintAnno <$> parseStringLit
+    parseStrSpec si = do
+      (str, wide) <- parseStringLit'
+      if wide
+        then return (QuaintAnno str, si)
+        else return (TypeStrAnno str, si)
 
     parseCtorProto si = do
       ctorAddr <- parseAttrRef
@@ -762,12 +768,12 @@ parseInpAnno !si0 =
             )
 
 parseEffsAnno :: Parser [EffArgAnno]
-parseEffsAnno = symbol "[" *> go []
+parseEffsAnno = symbol "{" *> go []
   where
     go :: [EffArgAnno] -> Parser [EffArgAnno]
     go rs = do
       void optionalComma
-      (symbol "]" $> (reverse $! rs)) <|> do
+      (symbol "}" $> (reverse $! rs)) <|> do
         oneMore <- parseOne <* optionalComma
         go (oneMore : rs)
 
@@ -1210,7 +1216,10 @@ parseListExpr !si = do
         parseElem si'' (x : es)
 
 parseStringLit :: Parser Text
-parseStringLit = lexeme $ do
+parseStringLit = fst <$> parseStringLit'
+
+parseStringLit' :: Parser (Text, Bool)
+parseStringLit' = lexeme $ do
   !delim <-
     choice
       [ string "'''",
@@ -1220,7 +1229,8 @@ parseStringLit = lexeme $ do
         string "\"\"\"",
         string "\""
       ]
-  T.pack <$> manyTill charLiteral (string delim)
+  !str <- T.pack <$> manyTill charLiteral (string delim)
+  return (str, T.length delim > 1)
   where
     charLiteral :: Parser Char
     charLiteral =
