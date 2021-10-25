@@ -155,9 +155,29 @@ inlineSTM :: STM a -> Edh a
 inlineSTM act = Edh $ \_naExit exit ets -> act >>= (`exit` ets)
 {-# INLINE inlineSTM #-}
 
--- | Lift an 'EdhTx' action as an 'Edh' action
-liftEdhTx :: EdhTx -> Edh ()
-liftEdhTx tx = Edh $ \_naExit exit ets -> tx ets >> exit () ets
+-- | Schedule an STM action to happen after current transaction committed
+afterTxSTM :: STM () -> Edh ()
+afterTxSTM !actSTM = afterTxSTM' (False <$ actSTM)
+
+-- | Schedule an STM action to happen after current transaction committed
+--
+-- Current Edh thread will be terminated if that action returns 'False'
+afterTxSTM' :: STM Bool -> Edh ()
+afterTxSTM' !actSTM = Edh $ \_naExit !exit !ets -> do
+  writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets actSTM
+  exitEdh ets exit ()
+
+-- | Schedule an IO action to happen after current transaction committed
+afterTxIO :: IO () -> Edh ()
+afterTxIO !actIO = afterTxIO' (False <$ actIO)
+
+-- | Schedule an IO action to happen after current transaction committed
+--
+-- Current Edh thread will be terminated if that action returns 'False'
+afterTxIO' :: IO Bool -> Edh ()
+afterTxIO' !actIO = Edh $ \_naExit !exit !ets -> do
+  writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
+  exitEdh ets exit ()
 
 -- ** Attribute Resolution
 

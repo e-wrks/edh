@@ -6152,6 +6152,24 @@ edhContIO''' !ets !actIO =
     else writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
 {-# INLINE edhContIO''' #-}
 
+edhAfterTxSTM :: STM Bool -> EdhTx
+edhAfterTxSTM !actSTM = edhAfterTxSTM' (False <$ actSTM)
+{-# INLINE edhAfterTxSTM #-}
+
+edhAfterTxSTM' :: STM Bool -> EdhTx
+edhAfterTxSTM' !actSTM !ets =
+  writeTBQueue (edh'task'queue ets) $ EdhDoSTM ets actSTM
+{-# INLINE edhAfterTxSTM' #-}
+
+edhAfterTxIO :: IO Bool -> EdhTx
+edhAfterTxIO !actIO = edhAfterTxIO' (False <$ actIO)
+{-# INLINE edhAfterTxIO #-}
+
+edhAfterTxIO' :: IO Bool -> EdhTx
+edhAfterTxIO' !actIO !ets =
+  writeTBQueue (edh'task'queue ets) $ EdhDoIO ets actIO
+{-# INLINE edhAfterTxIO' #-}
+
 regulateEdhSlice ::
   EdhThreadState ->
   Int ->
