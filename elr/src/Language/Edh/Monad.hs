@@ -91,6 +91,22 @@ naM msg = mEdh' $ \naExit _exit -> naExit msg
 runEdh :: EdhThreadState -> Edh a -> EdhTxExit a -> STM ()
 runEdh ets ma exit = runEdhTx ets $ unEdh ma rptEdhNotApplicable exit
 
+runProgramM :: EdhWorld -> Edh EdhValue -> IO (Either EdhError EdhValue)
+runProgramM !world !prog =
+  tryJust edhKnownError $ runProgramM' world prog
+
+runProgramM' :: EdhWorld -> Edh EdhValue -> IO EdhValue
+runProgramM' !world !prog = do
+  !haltResult <- newEmptyTMVarIO
+  let exit :: EdhTxExit EdhValue
+      exit val _ets = void $ tryPutTMVar haltResult (Right val)
+  driveEdhProgram haltResult world $ \ !ets ->
+    unEdh prog rptEdhNotApplicable exit ets
+  atomically (tryReadTMVar haltResult) >>= \case
+    Nothing -> return nil
+    Just (Right v) -> return v
+    Just (Left e) -> throwIO e
+
 -- | Internal utility, you usually don't use this
 rptEdhNotApplicable :: [(ErrMessage, ErrContext)] -> STM ()
 rptEdhNotApplicable errs =
@@ -149,6 +165,11 @@ instance MonadEdh Edh where
   --         issued in execution of that block.
   liftSTM act = Edh $ \_naExit exit ets ->
     runEdhTx ets $ edhContSTM $ act >>= exitEdh ets exit
+
+-- todo: define monad 'ESTM' and 'inlineESTM', maybe with a 'MonadEdhMini'
+--       class that 'naM', 'edhThreadState', 'throwEdhM' and etc. refactored
+--       to live there, then fast 'STM' sequences can run without multiple
+--       txs going through the task queue
 
 -- | Perform the specified 'STM' action within current 'Edh' transaction
 inlineSTM :: STM a -> Edh a
@@ -332,6 +353,12 @@ prepareEffStoreM' !magicKey = mEdh $ \ !exit !ets ->
       magicKey
       ets
       (edh'scope'entity $ contextScope $ edh'context ets)
+
+defineEffectM :: AttrKey -> EdhValue -> Edh ()
+defineEffectM !key !val = Edh $ \_naExit !exit !ets -> do
+  iopdInsert key val
+    =<< prepareEffStore ets (edh'scope'entity $ contextScope $ edh'context ets)
+  exitEdh ets exit ()
 
 -- ** Edh Monad Utilities
 
@@ -634,8 +661,8 @@ newSandboxM :: Edh Scope
 newSandboxM = Edh $ \_naExit !exit !ets ->
   newSandbox ets >>= exitEdh ets exit
 
-mkScopeSandboxM :: Scope -> Edh Scope
-mkScopeSandboxM !origScope = Edh $ \_naExit !exit !ets -> do
+mkSandboxM :: Scope -> Edh Scope
+mkSandboxM !origScope = Edh $ \_naExit !exit !ets -> do
   let !world = edh'prog'world $ edh'thread'prog ets
       !origProc = edh'scope'proc origScope
       !sbProc = origProc {edh'procedure'lexi = edh'world'sandbox world}
@@ -807,6 +834,12 @@ wrapM'' !repr !dd = do
   let world = edh'prog'world $ edh'thread'prog ets
       edhWrapValue = edh'value'wrapper world (Just repr)
   inlineSTM $ edhWrapValue dd
+
+-- | Wrap the specified scope as an Edh object
+wrapScopeM :: Scope -> Edh Object
+wrapScopeM s = Edh $ \_naExit !exit !ets -> do
+  let !world = edh'prog'world $ edh'thread'prog ets
+  edh'scope'wrapper world s >>= exitEdh ets exit
 
 -- | Create an Edh host object from the specified class and host data
 --
