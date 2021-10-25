@@ -141,15 +141,8 @@ instance MonadEdh Edh where
 
   edhThreadState = Edh $ \_naExit exit ets -> exit ets ets
 
-  throwEdhM' tag msg details = Edh $ \_naExit _exit ets -> do
-    let !edhErr = EdhError tag msg errDetails $ getEdhErrCtx 0 ets
-        !edhWrapException =
-          edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
-        !errDetails = case details of
-          [] -> toDyn nil
-          _ -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
-    edhWrapException (Just ets) (toException edhErr)
-      >>= \ !exo -> edhThrow ets $ EdhObject exo
+  throwEdhM' tag msg details = Edh $ \_naExit _exit ets ->
+    throwEdhSTM' ets tag msg details
 
   -- CAVEAT: An @ai@ block as by the scripting code will be broken, thus an
   --         exception thrown, wherever any 'liftSTM' 'liftEIO' or 'liftIO' is
@@ -851,6 +844,27 @@ mkEdhClass !clsName !allocator !superClasses !clsBody = do
         (\(maybeIdent, oStore) _ets -> ctorExit maybeIdent oStore)
         ets
 
+-- ** Edh Error from STM
+
+throwEdhSTM :: EdhThreadState -> EdhErrorTag -> ErrMessage -> STM a
+throwEdhSTM ets tag msg = throwEdhSTM' ets tag msg []
+
+throwEdhSTM' ::
+  EdhThreadState ->
+  EdhErrorTag ->
+  ErrMessage ->
+  [(AttrKey, EdhValue)] ->
+  STM a
+throwEdhSTM' ets tag msg details = do
+  let !edhErr = EdhError tag msg errDetails $ getEdhErrCtx 0 ets
+      !edhWrapException =
+        edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
+      !errDetails = case details of
+        [] -> toDyn nil
+        _ -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
+  edhWrapException (Just ets) (toException edhErr)
+    >>= \ !exo -> edhThrow ets $ EdhObject exo
+
 -- ** The type class for Edh scriptability enabled monads
 
 class (MonadIO m, Monad m) => MonadEdh m where
@@ -923,16 +937,8 @@ instance MonadEdh EIO where
 
   edhThreadState = EIO $ \ets exit -> exit ets
 
-  throwEdhM' tag msg details = EIO $ \ets _exit -> do
-    let !edhErr = EdhError tag msg errDetails $ getEdhErrCtx 0 ets
-        !edhWrapException =
-          edh'exception'wrapper (edh'prog'world $ edh'thread'prog ets)
-        !errDetails = case details of
-          [] -> toDyn nil
-          _ -> toDyn $ EdhArgsPack $ ArgsPack [] $ odFromList details
-    atomically $
-      edhWrapException (Just ets) (toException edhErr)
-        >>= \ !exo -> edhThrow ets $ EdhObject exo
+  throwEdhM' tag msg details = EIO $ \ets _exit ->
+    atomically $ throwEdhSTM' ets tag msg details
 
   liftSTM = liftIO . atomically
 

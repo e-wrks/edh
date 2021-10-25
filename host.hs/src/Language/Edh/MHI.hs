@@ -19,10 +19,14 @@ module Language.Edh.MHI
     throwHostSTM',
     throwHostIO,
     throwHostIO',
+
+    -- ** Re-Exports
+    Unique,
   )
 where
 
 import qualified Data.Lossless.Decimal as D
+import Data.Unique
 import Language.Edh.Args
 import Language.Edh.Batteries
 import Language.Edh.Comput
