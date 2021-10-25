@@ -383,6 +383,11 @@ modifyTVarEdh' ref f = inlineSTM $ modifyTVar' ref f
 {-# INLINE modifyTVarEdh' #-}
 
 -- | The 'STM' action lifted into 'Edh' monad
+newEmptyTMVarEdh :: forall a. Edh (TMVar a)
+newEmptyTMVarEdh = inlineSTM newEmptyTMVar
+{-# INLINE newEmptyTMVarEdh #-}
+
+-- | The 'STM' action lifted into 'Edh' monad
 newTMVarEdh :: forall a. a -> Edh (TMVar a)
 newTMVarEdh = inlineSTM . newTMVar
 {-# INLINE newTMVarEdh #-}
@@ -667,6 +672,10 @@ mkSandboxM !origScope = Edh $ \_naExit !exit !ets -> do
       !origProc = edh'scope'proc origScope
       !sbProc = origProc {edh'procedure'lexi = edh'world'sandbox world}
   exitEdh ets exit origScope {edh'scope'proc = sbProc}
+
+mkObjSandboxM :: Object -> Edh Scope
+mkObjSandboxM !obj = Edh $ \_naExit !exit !ets -> do
+  mkObjSandbox ets obj $ exitEdh ets exit
 
 runInSandboxM :: forall r. Scope -> Edh r -> Edh r
 runInSandboxM !sandbox !act = Edh $ \_naExit !exit !ets -> do
@@ -1113,6 +1122,11 @@ modifyTVarEIO' ref f = atomicallyEIO $ modifyTVar' ref f
 swapTVarEIO :: forall a. TVar a -> a -> EIO a
 swapTVarEIO ref a = atomicallyEIO $ swapTVar ref a
 {-# INLINE swapTVarEIO #-}
+
+-- | The 'IO' action lifted into 'EIO' monad
+newEmptyTMVarEIO :: forall a. EIO (TMVar a)
+newEmptyTMVarEIO = liftIO newEmptyTMVarIO
+{-# INLINE newEmptyTMVarEIO #-}
 
 -- | The 'IO' action lifted into 'EIO' monad
 newTMVarEIO :: forall a. a -> EIO (TMVar a)
