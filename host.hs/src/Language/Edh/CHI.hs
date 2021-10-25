@@ -335,7 +335,6 @@ module Language.Edh.CHI
     mkHostProperty,
     mkHostProperty',
     mkSymbolicHostProc,
-    EdhVector,
 
     -- * argument exchanging
     ArgsPack (..),
@@ -348,8 +347,6 @@ module Language.Edh.CHI
     PackedArgs (..),
     module Language.Edh.Args,
     module Language.Edh.InterOp,
-    methodArrowArgsReceiver,
-    producerArrowArgsReceiver,
 
     -- * indexing and slicing support
     EdhIndex (..),

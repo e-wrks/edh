@@ -2,14 +2,6 @@ module Language.Edh.Batteries
   ( defaultEdhConsoleSettings,
     defaultEdhConsole,
     installEdhBatteries,
-    module Language.Edh.Batteries.Data,
-    module Language.Edh.Batteries.Math,
-    module Language.Edh.Batteries.Assign,
-    module Language.Edh.Batteries.Reflect,
-    module Language.Edh.Batteries.Ctrl,
-    module Language.Edh.Batteries.Console,
-    module Language.Edh.Batteries.Evt,
-    module Language.Edh.Batteries.Vector,
   )
 where
 
