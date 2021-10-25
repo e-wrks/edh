@@ -20,52 +20,52 @@ export {
    # virtual property of a string value, encoding the string into utf-8 bytes
    # as a blob value
    #}
-  method __String_bytes__ ( s ) pass
+  method __String_bytes__ ( s: 'String' ) pass
   {##
    # virtual property of a blob value, decoding (assuming utf-8 bytes) into a
    # string
    #}
-  method __Blob_utf8string__( b ) pass
+  method __Blob_utf8string__( b: 'Blob' ) pass
   {##
    # the virtual name property of an intrinsic operator
    #}
-  method __Intrinsic_name__ ( op ) pass
+  method __IntrinsicOperator_name__ ( op: 'IntrinsicOperator' ) pass
   {##
    # the virtual name property of a method procedure
    #}
-  method __Method_name__ ( mth ) pass
+  method __Method_name__ ( mth: 'Method' ) pass
   {##
    # the virtual name property of a method procedure
    #}
-  method __HostMethod_name__ ( mth ) pass
+  method __HostMethod_name__ ( mth: 'HostMethod' ) pass
   {##
    # the virtual name property of an operator
    #}
-  method __Operator_name__ ( mth ) pass
+  method __Operator_name__ ( mth: 'Operator' ) pass
   {##
    # the virtual name property of an operator
    #}
-  method __HostOperator_name__ ( mth ) pass
+  method __HostOperator_name__ ( mth: 'HostOperator' ) pass
   {##
    # the virtual name property of a generator procedure
    #}
-  method __Generator_name__ ( mth ) pass
+  method __Generator_name__ ( mth: 'Generator' ) pass
   {##
    # the virtual name property of a generator procedure
    #}
-  method __HostGenerator_name__ ( mth ) pass
+  method __HostGenerator_name__ ( mth: 'HostGenerator' ) pass
   {##
    # the virtual name property of a iterpreter procedure
    #}
-  method __Interpreter_name__ ( mth ) pass
+  method __Interpreter_name__ ( mth: 'Interpreter' ) pass
   {##
    # the virtual name property of a producer procedure
    #}
-  method __Producer_name__ ( mth ) pass
+  method __Producer_name__ ( mth: 'Producer' ) pass
   {##
    # the virtual name property of a property descriptor
    #}
-  method __Descriptor_name__ ( mth ) pass
+  method __Descriptor_name__ ( mth: 'Descriptor' ) pass
   {##
    # the virtual property of an event sink, to obtain a non-lingering copy of
    # the event sink
@@ -87,21 +87,21 @@ export {
   {##
    # the virtual property of a dict, to obtain number of entries in it
    #}
-  method __Dict_size__ ( d ) pass
+  method __Dict_size__ ( d: 'Dict' ) pass
   {##
    # the virtual property of a dict, to obtain all keys in it
    #}
-  method __Dict_keys__ ( d ) pass
+  method __Dict_keys__ ( d: 'Dict' ) pass
   {##
    # the virtual property of a dict, to obtain all values in it
    #}
-  method __Dict_values__ ( d ) pass
+  method __Dict_values__ ( d: 'Dict' ) pass
   {##
    # the virtual method of a list, to prepand an element into it
    #}
-  method __List_push__ ( d ) pass
+  method __List_push__ ( l: 'List' ) pass
   {##
    # the virtual method of a list, to pop out the first element from it
    #}
-  method __List_pop__ ( d ) pass
+  method __List_pop__ ( l: 'List' ) pass
 }
