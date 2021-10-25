@@ -6,6 +6,7 @@ module Language.Edh.MHI
     module Language.Edh.Comput,
     module Language.Edh.RtTypes,
     module Language.Edh.IOPD,
+    module Language.Edh.Sink,
     module Language.Edh.Control,
     module Language.Edh.CoreLang,
     module Language.Edh.InterOpM,
@@ -38,3 +39,4 @@ import Language.Edh.InterOpM
 import Language.Edh.Monad
 import Language.Edh.RtTypes
 import Language.Edh.RuntimeM
+import Language.Edh.Sink

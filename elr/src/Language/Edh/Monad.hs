@@ -575,6 +575,16 @@ pushStackM' !scope !act = Edh $ \naExit exit ets -> do
           }
   unEdh act naExit (edhSwitchState ets . exit) etsNew
 
+-- ** Evaluation & Sandboxing
+
+evalSrcM :: Text -> Text -> Edh EdhValue
+evalSrcM !srcName !srcCode = Edh $ \_naExit ->
+  evalEdh srcName srcCode
+
+evalSrcM' :: Text -> Int -> Text -> Edh EdhValue
+evalSrcM' !srcName !lineNo !srcCode = Edh $ \_naExit ->
+  evalEdh' srcName lineNo srcCode
+
 -- | Evaluate an expression definition
 evalExprDefiM :: ExprDefi -> Edh EdhValue
 evalExprDefiM !x =
@@ -599,6 +609,37 @@ evalInfixSrcM !opSym !lhExpr !rhExpr =
 caseValueOfM :: EdhValue -> ExprDefi -> Edh EdhValue
 caseValueOfM !matchTgtVal !x =
   Edh $ \_naExit -> edhCaseValueOf matchTgtVal x
+
+newSandboxM :: Edh Scope
+newSandboxM = Edh $ \_naExit !exit !ets ->
+  newSandbox ets >>= exitEdh ets exit
+
+mkScopeSandboxM :: Scope -> Edh Scope
+mkScopeSandboxM !origScope = Edh $ \_naExit !exit !ets -> do
+  let !world = edh'prog'world $ edh'thread'prog ets
+      !origProc = edh'scope'proc origScope
+      !sbProc = origProc {edh'procedure'lexi = edh'world'sandbox world}
+  exitEdh ets exit origScope {edh'scope'proc = sbProc}
+
+runInSandboxM :: forall r. Scope -> Edh r -> Edh r
+runInSandboxM !sandbox !act = Edh $ \_naExit !exit !ets -> do
+  let !ctxPriv = edh'context ets
+      !etsSandbox =
+        ets
+          { edh'context =
+              ctxPriv
+                { edh'ctx'tip =
+                    EdhCallFrame
+                      sandbox
+                      (SrcLoc (SrcDoc "<sandbox>") zeroSrcRange)
+                      defaultEdhExcptHndlr,
+                  edh'ctx'stack =
+                    edh'ctx'tip ctxPriv :
+                    edh'ctx'stack ctxPriv
+                }
+          }
+  runEdh etsSandbox act $ \ !result _ets ->
+    exitEdh ets exit result
 
 -- ** Value Manipulations
 
