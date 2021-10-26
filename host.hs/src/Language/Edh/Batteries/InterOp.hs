@@ -1,4 +1,4 @@
-module Language.Edh.InterOp where
+module Language.Edh.Batteries.InterOp where
 
 import Control.Concurrent.STM
 import Data.ByteString (ByteString)

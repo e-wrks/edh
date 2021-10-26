@@ -12,10 +12,10 @@ import qualified Data.Vector as V
 import Data.Vector.Mutable (IOVector)
 import qualified Data.Vector.Mutable as MV
 import GHC.Conc (unsafeIOToSTM)
+import Language.Edh.Batteries.InterOp (wrapHostProc)
 import Language.Edh.Control (EdhErrorTag (UsageError), OpSymbol)
 import Language.Edh.Evaluate
 import Language.Edh.IOPD (iopdUpdate, odLookup)
-import Language.Edh.InterOp (wrapHostProc)
 import Language.Edh.RtTypes
 import Prelude
 

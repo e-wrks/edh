@@ -20,11 +20,11 @@ import Data.Text.Encoding.Error
 import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
+import Language.Edh.Batteries.InterOp
 import Language.Edh.Control
 import Language.Edh.CoreLang
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
-import Language.Edh.InterOp
 import Language.Edh.PkgMan
 import Language.Edh.RtTypes
 import Language.Edh.Utils

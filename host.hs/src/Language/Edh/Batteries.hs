@@ -19,13 +19,13 @@ import Language.Edh.Batteries.Console
 import Language.Edh.Batteries.Ctrl
 import Language.Edh.Batteries.Data
 import Language.Edh.Batteries.Evt
+import Language.Edh.Batteries.InterOp
 import Language.Edh.Batteries.Math
 import Language.Edh.Batteries.Reflect
 import Language.Edh.Batteries.Vector
 import Language.Edh.Control
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
-import Language.Edh.InterOp
 import Language.Edh.RtTypes
 import Language.Edh.Runtime
 import qualified System.Console.Haskeline as Haskeline

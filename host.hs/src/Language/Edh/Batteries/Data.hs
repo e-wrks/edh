@@ -17,10 +17,10 @@ import qualified Data.UUID as UUID
 import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
+import Language.Edh.Batteries.InterOp
 import Language.Edh.Control
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
-import Language.Edh.InterOp
 import Language.Edh.RtTypes
 import Prelude
 

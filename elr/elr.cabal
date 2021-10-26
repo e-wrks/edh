@@ -34,7 +34,6 @@ library
     Language.Edh.RtTypes
     Language.Edh.Utils
     Language.Edh.Sink
-    Language.Edh.InterOp
     Language.Edh.InterOpM
     Language.Edh.Monad
     Language.Edh.Parser
