@@ -166,6 +166,43 @@ instance MonadEdh Edh where
   liftSTM act = Edh $ \_naExit exit ets ->
     runEdhTx ets $ edhContSTM $ act >>= exitEdh ets exit
 
+-- | Yield from a (host) generator procedure
+--
+-- The driving for-loop may issue @break@ or early @return@ to cease subsequent
+-- iterations, or the do-body result value will be passed to the @next'iter@
+-- continuation.
+yieldM :: EdhValue -> (EdhValue -> Edh EdhValue) -> Edh EdhValue
+yieldM !val !next'iter = do
+  !ctx <- edh'context <$> edhThreadState
+  case edh'ctx'genr'caller ctx of
+    Nothing ->
+      throwEdhM EvalError "yield from a procedure not called as generator"
+    Just iter'cb -> mEdh $ \ !genr'exit !ets ->
+      runEdhTx ets $
+        iter'cb val $ \case
+          Left (!etsThrower, !exv) ->
+            -- note we can actually be encountering the exception
+            -- occurred from a descendant thread forked by the thread
+            -- running the enclosing generator, @etsThrower@ has the
+            -- correct task queue, and @ets@ has the correct contextual
+            -- callstack anyway
+            edhThrow etsThrower {edh'context = edh'context ets} exv
+          Right EdhBreak ->
+            -- usually `break` stmt from the calling for-loop,
+            -- return nil from the generator, so the loop ends with nil
+            exitEdh ets genr'exit nil
+          Right (EdhReturn !rtn) ->
+            -- usually `return` stmt from the calling for-loop,
+            -- propagate the value to return as however the generator returns,
+            -- it can be a sacred double-return, in which case the for-loop will
+            -- evaluate to a `return` value, thus actually early return from the
+            -- outer-loop procedure
+            exitEdh ets genr'exit rtn
+          Right !yieldGot ->
+            -- usually some value evaluated from the body of the calling for-loop,
+            -- proceed to next iteration
+            runEdh ets (next'iter yieldGot) genr'exit
+
 -- todo: define monad 'ESTM' and 'inlineESTM', maybe with a 'MonadEdhMini'
 --       class that 'naM', 'edhThreadState', 'throwEdhM' and etc. refactored
 --       to live there, then fast 'STM' sequences can run without multiple
