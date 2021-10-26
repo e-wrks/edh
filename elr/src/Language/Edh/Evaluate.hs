@@ -3420,15 +3420,16 @@ importFromFS !etsImp !normalizedSpec !exit =
               case Map.lookup moduId moduMap of
                 Just !moduSlotVar -> atomically $ readTVar moduSlotVar >>= exit
                 Nothing -> do
-                  (!modu, !loadingScope, !moduSlotVar) <- atomically $ do
+                  (!modu, !loadingScope, !moduSlotVar) <- do
                     -- we are the first importer, resolve correct module name
                     -- allocate a loading slot
-                    !modu <- edhCreateModule world moduName moduFile
-                    !loadingScope <- objectScope modu
-                    !moduSlotVar <- newTVar $ ModuLoading loadingScope postLoads
-                    -- update into world wide module map
-                    putTMVar worldModules $ Map.insert moduId moduSlotVar moduMap
-                    return (modu, loadingScope, moduSlotVar)
+                    !modu <- createEdhModule world moduName moduFile
+                    atomically $ do
+                      !loadingScope <- objectScope modu
+                      !moduSlotVar <- newTVar $ ModuLoading loadingScope postLoads
+                      -- update into world wide module map
+                      putTMVar worldModules $ Map.insert moduId moduSlotVar moduMap
+                      return (modu, loadingScope, moduSlotVar)
                   -- try load the module in next transaction
                   !src <- readEdhSrcFile moduFile
                   atomically $

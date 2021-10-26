@@ -26,7 +26,6 @@ source-repository head
 library
   exposed-modules:
     Language.Edh.Batteries
-    Language.Edh.CHI
     Language.Edh.MHI
     Language.Edh.Repl
     Language.Edh.Run

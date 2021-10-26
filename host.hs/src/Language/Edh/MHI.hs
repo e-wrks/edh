@@ -1,4 +1,10 @@
--- | Monadic Host Interface of Edh
+-- | Edh Host Interface
+--
+-- With Haskell as the host language, Edh as the surface language,
+-- this defines the interface for host code in Haskell to create &
+-- control embedded Edh worlds, so as to splice host codebases
+-- (featuring immutability, purity, and fast-in-machine-speed)
+-- wrapped as various host procedures.
 module Language.Edh.MHI
   ( D.Decimal (..),
     module Language.Edh.Args,

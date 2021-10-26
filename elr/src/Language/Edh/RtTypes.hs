@@ -614,15 +614,16 @@ data ModuSlot
 
 data CachedFrag = CachedFrag !EpochTime !Text ![StmtSrc]
 
-edhCreateModule :: EdhWorld -> Text -> String -> STM Object
-edhCreateModule !world !moduName !srcName = do
-  !idModu <- unsafeIOToSTM newUnique
+createEdhModule :: EdhWorld -> Text -> String -> IO Object
+createEdhModule !world !moduName !srcName = do
+  !idModu <- newUnique
   !hs <-
-    iopdFromList
-      [ (AttrByName "__name__", EdhString moduName),
-        (AttrByName "__file__", EdhString $ T.pack srcName)
-      ]
-  !ss <- newTVar []
+    atomically $
+      iopdFromList
+        [ (AttrByName "__name__", EdhString moduName),
+          (AttrByName "__file__", EdhString $ T.pack srcName)
+        ]
+  !ss <- newTVarIO []
   return
     Object
       { edh'obj'ident = idModu,

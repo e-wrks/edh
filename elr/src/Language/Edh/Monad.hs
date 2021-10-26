@@ -89,23 +89,7 @@ naM msg = mEdh' $ \naExit _exit -> naExit msg
 --       'catchSTM' or similar exception handling around such calls is usually
 --        wrong.
 runEdh :: EdhThreadState -> Edh a -> EdhTxExit a -> STM ()
-runEdh ets ma exit = runEdhTx ets $ unEdh ma rptEdhNotApplicable exit
-
-runProgramM :: EdhWorld -> Edh EdhValue -> IO (Either EdhError EdhValue)
-runProgramM !world !prog =
-  tryJust edhKnownError $ runProgramM' world prog
-
-runProgramM' :: EdhWorld -> Edh EdhValue -> IO EdhValue
-runProgramM' !world !prog = do
-  !haltResult <- newEmptyTMVarIO
-  let exit :: EdhTxExit EdhValue
-      exit val _ets = void $ tryPutTMVar haltResult (Right val)
-  driveEdhProgram haltResult world $ \ !ets ->
-    unEdh prog rptEdhNotApplicable exit ets
-  atomically (tryReadTMVar haltResult) >>= \case
-    Nothing -> return nil
-    Just (Right v) -> return v
-    Just (Left e) -> throwIO e
+runEdh ets act exit = runEdhTx ets $ unEdh act rptEdhNotApplicable exit
 
 -- | Internal utility, you usually don't use this
 rptEdhNotApplicable :: [(ErrMessage, ErrContext)] -> STM ()
@@ -663,6 +647,13 @@ pushStackM' !scope !act = Edh $ \naExit exit ets -> do
             edh'exc'handler = defaultEdhExcptHndlr
           }
   unEdh act naExit (edhSwitchState ets . exit) etsNew
+
+-- | Switch to a custom context to run the specified 'Edh' action
+inContext :: Context -> Edh a -> Edh a
+inContext !ctx !act = Edh $ \naExit exit !ets ->
+  runEdhTx ets {edh'context = ctx} $
+    unEdh act naExit $ \result _ets ->
+      exitEdh ets exit result
 
 -- ** Evaluation & Sandboxing
 

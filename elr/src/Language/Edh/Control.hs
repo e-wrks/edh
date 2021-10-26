@@ -322,6 +322,9 @@ edhKnownError exc = case fromException exc of
           "<parsing>"
     Nothing -> Nothing
 
+prettyParserError :: ParserError -> ErrMessage
+prettyParserError = T.pack . errorBundlePretty
+
 -- | Usually thrown from `IO` or `STM` monad without access to Edh scripting
 -- context, will be re-wrapped into `EdhError` with Edh context added, by Edh
 -- thread driver

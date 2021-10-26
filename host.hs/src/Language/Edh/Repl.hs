@@ -7,7 +7,7 @@ import Control.Exception
 import Control.Monad
 import Data.IORef
 import qualified Data.Text as T
-import Language.Edh.CHI
+import Language.Edh.MHI
 import System.Clock
 import qualified System.Console.Haskeline as Haskeline
 import System.IO (hPutStrLn, stderr)
@@ -73,7 +73,7 @@ edhRepl' !console !worldInit !moduSpec = do
   -- here being the host interpreter, we loop infinite runs of the Edh
   -- console REPL program, unless cleanly shutdown, for resilience
   let doneRightOrRebirth =
-        runEdhModule world moduSpec edhModuleAsIs >>= \case
+        runModuleM world moduSpec (pure ()) >>= \case
           -- to run a module is to seek its `__main__.edh` and execute the
           -- code there in a volatile module context, it can import itself
           -- (i.e. `__init__.edh`) during the run. all imported modules can

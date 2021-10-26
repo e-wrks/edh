@@ -990,11 +990,6 @@ runEdhProgram' !world !prog = do
     Just (Right v) -> return v
     Just (Left e) -> throwIO e
 
-createEdhModule ::
-  EdhWorld -> Text -> String -> IO Object
-createEdhModule !world !moduName !srcName =
-  atomically $ edhCreateModule world moduName srcName
-
 type EdhModulePreparation = EdhThreadState -> STM () -> STM ()
 
 edhModuleAsIs :: EdhModulePreparation
@@ -1022,8 +1017,7 @@ runEdhModule ::
 runEdhModule !world !impPath !preRun =
   tryJust edhKnownError $ runEdhModule' world impPath preRun
 
-runEdhModule' ::
-  EdhWorld -> FilePath -> EdhModulePreparation -> IO EdhValue
+runEdhModule' :: EdhWorld -> FilePath -> EdhModulePreparation -> IO EdhValue
 runEdhModule' !world !impPath !preRun =
   let ?fileExt = ".edh"
    in locateEdhMainModule impPath >>= \case
@@ -1032,14 +1026,14 @@ runEdhModule' !world !impPath !preRun =
         Right !moduFile -> do
           !fileContent <- B.readFile moduFile
           case streamDecodeUtf8With lenientDecode fileContent of
-            Some !moduSource _ _ -> runEdhProgram' world $ \ !etsMain ->
-              edhCreateModule world (T.pack impPath) moduFile
-                >>= \ !modu ->
-                  moduleContext world modu >>= \ !moduCtx ->
-                    let !etsModu = etsMain {edh'context = moduCtx}
-                     in preRun etsModu $
-                          runEdhTx etsModu $
-                            evalEdh (T.pack moduFile) moduSource endOfEdh
+            Some !moduSource _ _ -> do
+              !modu <- createEdhModule world (T.pack impPath) moduFile
+              runEdhProgram' world $ \ !etsMain ->
+                moduleContext world modu >>= \ !moduCtx ->
+                  let !etsModu = etsMain {edh'context = moduCtx}
+                   in preRun etsModu $
+                        runEdhTx etsModu $
+                          evalEdh (T.pack moduFile) moduSource endOfEdh
 
 runEdhFile :: EdhWorld -> FilePath -> IO (Either EdhError EdhValue)
 runEdhFile !world !edhFile =
@@ -1050,9 +1044,9 @@ runEdhFile' !world !edhFile = do
   !absFile <- canonicalizePath edhFile
   !fileContent <- B.readFile absFile
   case streamDecodeUtf8With lenientDecode fileContent of
-    Some !moduSource _ _ -> runEdhProgram' world $ \ !etsMain ->
-      edhCreateModule world "__main__" absFile
-        >>= \ !modu ->
-          moduleContext world modu >>= \ !moduCtx ->
-            let !etsModu = etsMain {edh'context = moduCtx}
-             in runEdhTx etsModu $ evalEdh (T.pack absFile) moduSource endOfEdh
+    Some !moduSource _ _ -> do
+      !modu <- createEdhModule world "__main__" absFile
+      runEdhProgram' world $ \ !etsMain ->
+        moduleContext world modu >>= \ !moduCtx ->
+          let !etsModu = etsMain {edh'context = moduCtx}
+           in runEdhTx etsModu $ evalEdh (T.pack absFile) moduSource endOfEdh
