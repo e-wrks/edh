@@ -5,7 +5,7 @@
 -- control embedded Edh worlds, so as to splice host codebases
 -- (featuring immutability, purity, and fast-in-machine-speed)
 -- wrapped as various host procedures.
-module Language.Edh.MHI
+module Language.Edh.EHI
   ( D.Decimal (..),
     module Language.Edh.Args,
     module Language.Edh.Monad,

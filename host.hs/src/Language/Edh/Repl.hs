@@ -7,7 +7,7 @@ import Control.Exception
 import Control.Monad
 import Data.IORef
 import qualified Data.Text as T
-import Language.Edh.MHI
+import Language.Edh.EHI
 import System.Clock
 import qualified System.Console.Haskeline as Haskeline
 import System.IO (hPutStrLn, stderr)

@@ -2,7 +2,7 @@ module Main where
 
 -- import           Debug.Trace
 
-import Language.Edh.MHI
+import Language.Edh.EHI
 import Language.Edh.Run
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
