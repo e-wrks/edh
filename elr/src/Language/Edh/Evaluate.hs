@@ -171,19 +171,18 @@ getEdhAttr fromExpr@(ExprSrc !x _) !key !exitNoAttr !exit !ets = case x of
     scope = contextScope ctx
 
 getObjProperty :: Object -> AttrKey -> EdhTxExit EdhValue -> EdhTx
-getObjProperty !obj !key !exit = getObjProperty' obj key exitNoAttr exit
+getObjProperty !obj !key !exit = getObjProperty' obj key naExit exit
   where
-    exitNoAttr =
+    naExit =
       throwEdhTx EvalError $
         "no such property `" <> attrKeyStr key <> "` from a `"
           <> objClassName obj
           <> "` object"
 
-getObjProperty' ::
-  Object -> AttrKey -> EdhTx -> EdhTxExit EdhValue -> EdhTx
-getObjProperty' !obj !key exitNoAttr !exit !ets =
+getObjProperty' :: Object -> AttrKey -> EdhTx -> EdhTxExit EdhValue -> EdhTx
+getObjProperty' !obj !key naExit !exit !ets =
   runEdhTx ets $
-    getObjAttrWithMagic' obj key exitNoAttr $
+    getObjAttrWithMagic' obj key naExit $
       realizeObjProperty obj exit
 
 realizeObjProperty ::
@@ -385,7 +384,7 @@ setObjAttrWithMagic !obj !key !val !exit !ets =
                 _ -> exitEdh ets exit (Just obj, magicRtn)
 
     trySelfMagic :: STM ()
-    trySelfMagic = setObjAttr' ets obj key val tryMagic $
+    trySelfMagic = setObjProperty ets obj key val tryMagic $
       \ !valSet -> exitEdh ets exit (Just obj, valSet)
       where
         tryMagic :: STM ()
@@ -417,6 +416,11 @@ setObjAttrWithMagic !obj !key !val !exit !ets =
                       \ !valSet -> exitEdh ets exit (Just that, valSet)
                     _ -> exitEdh ets exit (Just that, magicRtn)
 
+-- | Overwrite an attribute value of an object
+--
+-- A property with the same identifier will be overwritten
+--
+-- A new attribute will be created if not present previously
 writeObjAttr ::
   EdhThreadState ->
   Object ->
@@ -434,6 +438,12 @@ writeObjAttr !ets !obj !key !val !exit = case edh'obj'store obj of
         <> "` on host object of class "
         <> objClassName obj
 
+-- | Set an attribute value of an object
+--
+-- A property setter will be invoked if present, if only a property getter is
+-- present, an 'UsageError' will be thrown due to the property being readonly
+--
+-- A new attribute will be created if not present previously
 setObjAttr ::
   EdhThreadState ->
   Object ->
@@ -442,9 +452,15 @@ setObjAttr ::
   (EdhValue -> STM ()) ->
   STM ()
 setObjAttr !ets !obj !key !val !exit =
-  setObjAttr' ets obj key val (writeObjAttr ets obj key val exit) exit
+  setObjProperty ets obj key val (writeObjAttr ets obj key val exit) exit
 
-setObjAttr' ::
+-- | Set a property value of an object
+--
+-- A property setter will be invoked if present, if only a property getter is
+-- present, an 'UsageError' will be thrown due to the property being readonly
+--
+-- The 'naExit' continuation will be taken if no property descriptor present
+setObjProperty ::
   EdhThreadState ->
   Object ->
   AttrKey ->
@@ -452,7 +468,7 @@ setObjAttr' ::
   STM () ->
   (EdhValue -> STM ()) ->
   STM ()
-setObjAttr' !ets !obj !key !val !naExit !exit =
+setObjProperty !ets !obj !key !val !naExit !exit =
   lookupEdhObjAttr obj key >>= \case
     (_, EdhNil) -> naExit
     (!this', EdhProcedure (EdhDescriptor _getter (Just !setter)) _) ->
