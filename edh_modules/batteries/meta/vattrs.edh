@@ -104,4 +104,8 @@ export {
    # the virtual method of a list, to pop out the first element from it
    #}
   method __List_pop__ ( l: 'List' ) pass
+  {##
+   # the virtual method of a list, to reverse its contents
+   #}
+  method __List_reverse__ ( l: 'List' ) pass
 }
