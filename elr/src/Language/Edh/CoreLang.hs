@@ -64,7 +64,10 @@ resolveEffectfulAttr ::
   AttrKey ->
   [EdhCallFrame] ->
   STM (Maybe (EdhValue, [EdhCallFrame]))
-resolveEffectfulAttr ets !k = resolve
+resolveEffectfulAttr ets !k !effsStack =
+  resolve effsStack >>= \case
+    Just art -> return $ Just art
+    Nothing -> fallback
   where
     fallback = resolveEffectfulDefault ets k $ tip : stack
       where
@@ -72,16 +75,24 @@ resolveEffectfulAttr ets !k = resolve
         tip = edh'ctx'tip ctx
         stack = edh'ctx'stack ctx
 
-    resolve [] = fallback
-    resolve (frm : rest) = do
+    resolve [] = return Nothing
+    resolve (frm : rest) =
       Map.lookup k <$> readTVar cache >>= \case
         Just art -> return $ Just art
         Nothing ->
+          doResolve >>= \case
+            Nothing -> return Nothing
+            Just art -> do
+              modifyTVar' cache $ Map.insert k art
+              return $ Just art
+      where
+        cache = edh'effects'cache frm
+        doResolve =
           iopdLookup
             (AttrByName edhEffectsMagicName)
             (edh'scope'entity $ edh'frame'scope frm)
             >>= \case
-              Nothing -> upSearch
+              Nothing -> resolve rest
               Just (EdhObject !effsObj) -> case edh'obj'store effsObj of
                 HashStore !esEffs ->
                   iopdLookup k esEffs >>= \case
@@ -91,23 +102,16 @@ resolveEffectfulAttr ets !k = resolve
                           Just (EdhProcedure callable (Just rest), rest)
                       EdhBoundProc !callable !this !that _origEffOuterStack ->
                         return $
-                          Just (EdhBoundProc callable this that (Just rest), rest)
+                          Just
+                            ( EdhBoundProc callable this that (Just rest),
+                              rest
+                            )
                       _ -> return $ Just (val, rest)
-                    Nothing -> upSearch
+                    Nothing -> resolve rest
                 -- todo crash in these cases?
                 --      warning may be more proper but in what way?
-                _ -> upSearch
-              _ -> upSearch
-      where
-        cache = edh'effects'cache frm
-        upSearch
-          | null rest = fallback -- avoid attempting twice when no fallback
-          | otherwise =
-            resolve rest >>= \case
-              Nothing -> fallback
-              Just art -> do
-                modifyTVar' cache $ Map.insert k art
-                return $ Just art
+                _ -> resolve rest
+              _ -> resolve rest
 {-# INLINE resolveEffectfulAttr #-}
 
 resolveEffectfulDefault ::
@@ -118,18 +122,18 @@ resolveEffectfulDefault ::
 resolveEffectfulDefault _ets !k = resolve
   where
     resolve [] = return Nothing
-    resolve (frm : rest) = do
-      let cache = edh'effs'fb'cache frm
+    resolve (frm : rest) =
       Map.lookup k <$> readTVar cache >>= \case
         Just art -> return $ Just art
         Nothing ->
-          go >>= \case
+          doResolve >>= \case
             Nothing -> return Nothing
             Just art -> do
               modifyTVar' cache $ Map.insert k art
               return $ Just art
       where
-        go =
+        cache = edh'effs'fb'cache frm
+        doResolve =
           iopdLookup
             (AttrByName edhEffectDefaultsMagicName)
             (edh'scope'entity $ edh'frame'scope frm)
@@ -144,7 +148,10 @@ resolveEffectfulDefault _ets !k = resolve
                           Just (EdhProcedure callable (Just rest), rest)
                       EdhBoundProc !callable !this !that _origEffOuterStack ->
                         return $
-                          Just (EdhBoundProc callable this that (Just rest), rest)
+                          Just
+                            ( EdhBoundProc callable this that (Just rest),
+                              rest
+                            )
                       _ -> return $ Just (val, rest)
                     Nothing -> resolve rest
                 -- todo crash in these cases?
