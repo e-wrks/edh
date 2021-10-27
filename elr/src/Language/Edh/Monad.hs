@@ -634,17 +634,12 @@ pushStackM' :: Scope -> Edh a -> Edh a
 pushStackM' !scope !act = Edh $ \naExit exit ets -> do
   let !ctx = edh'context ets
       !tip = edh'ctx'tip ctx
-
-      !etsNew = ets {edh'context = ctxNew}
+  !tipNew <- newCallFrame scope $ edh'exe'src'loc tip
+  let !etsNew = ets {edh'context = ctxNew}
       !ctxNew =
         ctx
           { edh'ctx'tip = tipNew,
             edh'ctx'stack = tip : edh'ctx'stack ctx
-          }
-      !tipNew =
-        tip
-          { edh'frame'scope = scope,
-            edh'exc'handler = defaultEdhExcptHndlr
           }
   unEdh act naExit (edhSwitchState ets . exit) etsNew
 
