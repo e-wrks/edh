@@ -1768,7 +1768,7 @@ callEdhMethod ::
 callEdhMethod !this !that !mth !apk !scopeMod !exit =
   case edh'procedure'decl mth of
     -- calling a host method procedure
-    HostDecl !hp -> \ !etsCaller ->
+    HostDecl !hp -> \ !etsCaller -> do
       let !callerCtx = edh'context etsCaller
           !callerFrame = edh'ctx'tip callerCtx
           !callerScope = contextScope callerCtx
@@ -1783,14 +1783,11 @@ callEdhMethod !this !that !mth !apk !scopeMod !exit =
                   edh'scope'proc = mth,
                   edh'effects'stack = []
                 }
-          !mthCtx =
+      !calleeFrame <- newCallFrame mthScope $ edh'exe'src'loc callerFrame
+      let !mthCtx =
             callerCtx
-              { edh'ctx'tip =
-                  callerFrame
-                    { edh'frame'scope = mthScope,
-                      edh'exc'handler = defaultEdhExcptHndlr
-                    },
-                edh'ctx'stack = edh'ctx'tip callerCtx : edh'ctx'stack callerCtx,
+              { edh'ctx'tip = calleeFrame,
+                edh'ctx'stack = callerFrame : edh'ctx'stack callerCtx,
                 edh'ctx'genr'caller = Nothing,
                 edh'ctx'match = true,
                 edh'ctx'pure = False,
@@ -1798,12 +1795,12 @@ callEdhMethod !this !that !mth !apk !scopeMod !exit =
                 edh'ctx'eff'target = Nothing
               }
           !etsMth = etsCaller {edh'context = mthCtx}
-       in runEdhTx etsMth $
-            hp apk $ \ !val ->
-              -- return whatever the result a host procedure returned
-              -- a host procedure is responsible for returning sense-making
-              -- result anyway
-              edhSwitchState etsCaller $ exit val
+      runEdhTx etsMth $
+        hp apk $ \ !val ->
+          -- return whatever the result a host procedure returned
+          -- a host procedure is responsible for returning sense-making
+          -- result anyway
+          edhSwitchState etsCaller $ exit val
     -- calling an Edh method procedure
     ProcDecl _ _ _ !pb !pl ->
       callEdhMethod' Nothing this that mth pl pb apk scopeMod exit
@@ -2003,13 +2000,11 @@ edhPrepareForLoop
                           edh'scope'proc = gnr'proc,
                           edh'effects'stack = []
                         }
-                    !calleeCtx =
+                !calleeFrame <-
+                  newCallFrame calleeScope $ edh'exe'src'loc callerFrame
+                let !calleeCtx =
                       looperCtx
-                        { edh'ctx'tip =
-                            looperFrame
-                              { edh'frame'scope = calleeScope,
-                                edh'exc'handler = defaultEdhExcptHndlr
-                              },
+                        { edh'ctx'tip = calleeFrame,
                           edh'ctx'stack = callerFrame : edh'ctx'stack looperCtx,
                           edh'ctx'genr'caller = Just $ recvYield etsLooper exit,
                           edh'ctx'match = true,
@@ -2862,12 +2857,8 @@ evalCaseBranches !tgtVal (ExprSrc !x !src'span) !exit !ets =
 
 newNestedFrame :: EdhCallFrame -> STM EdhCallFrame
 newNestedFrame !baseOnFrame = do
-  s <- newNestedScope $ edh'frame'scope baseOnFrame
-  return
-    baseOnFrame
-      { edh'frame'scope = s,
-        edh'exc'handler = defaultEdhExcptHndlr
-      }
+  !s <- newNestedScope $ edh'frame'scope baseOnFrame
+  newCallFrame s $ edh'exe'src'loc baseOnFrame
 
 newNestedScope :: Scope -> STM Scope
 newNestedScope !baseOnScope = do
@@ -2889,22 +2880,18 @@ newNestedScope !baseOnScope = do
       }
 
 pushEdhStack' :: Scope -> EdhTx -> EdhTx
-pushEdhStack' !scope !act !ets = runEdhTx etsNew act
+pushEdhStack' !scope !act !ets = do
+  !tipNew <- newCallFrame scope $ edh'exe'src'loc tip
+  let !etsNew = ets {edh'context = ctxNew}
+      !ctxNew =
+        ctx
+          { edh'ctx'tip = tipNew,
+            edh'ctx'stack = tip : edh'ctx'stack ctx
+          }
+  runEdhTx etsNew act
   where
     !ctx = edh'context ets
     !tip = edh'ctx'tip ctx
-
-    !etsNew = ets {edh'context = ctxNew}
-    !ctxNew =
-      ctx
-        { edh'ctx'tip = tipNew,
-          edh'ctx'stack = tip : edh'ctx'stack ctx
-        }
-    !tipNew =
-      tip
-        { edh'frame'scope = scope,
-          edh'exc'handler = defaultEdhExcptHndlr
-        }
 
 pushEdhStack :: EdhTx -> EdhTx
 pushEdhStack !act !ets = do
