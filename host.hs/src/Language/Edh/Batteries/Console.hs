@@ -181,18 +181,14 @@ conReadCommandProc
                   >>= \(EdhInput !name !lineNo !lines_) -> do
                     -- use a fresh dyamic effects cache
                     -- todo try reuse existing effects cache as possible?
-                    !tipFrame <- newCallFrame cmdScope $ edh'exe'src'loc tip
+                    !tipFrame <-
+                      newCallFrame'
+                        cmdScope
+                        (edh'exe'src'loc tip)
+                        (edh'exc'handler tip)
                     let !srcName = if T.null name then "<console>" else name
                         !etsCmd =
-                          ets
-                            { edh'context =
-                                ctx
-                                  { edh'ctx'tip =
-                                      tipFrame
-                                        { edh'exc'handler = edh'exc'handler tip
-                                        }
-                                  }
-                            }
+                          ets {edh'context = ctx {edh'ctx'tip = tipFrame}}
                     runEdhTx etsCmd $
                       evalEdh' srcName lineNo (T.unlines lines_) $
                         edhSwitchState ets . exitEdhTx exit
