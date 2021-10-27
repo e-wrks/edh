@@ -404,6 +404,7 @@ createEdhWorld !console = do
     Just "NO" -> pure ()
     _ -> addSignalHandler keyboardTermination $ modifyIORef' trapReq (+ 1)
 
+  !rootEffects <- newTVarIO Map.empty
   -- assembly the world with pieces prepared above
   let !world =
         EdhWorld
@@ -415,6 +416,7 @@ createEdhWorld !console = do
             edh'world'console = console,
             edh'value'wrapper = edhWrapValue,
             edh'scope'wrapper = edhWrapScope,
+            edh'root'effects = rootEffects,
             edh'exception'wrapper = edhWrapException,
             edh'module'class = clsModule,
             edh'trap'request = trapReq
@@ -632,18 +634,16 @@ createEdhWorld !console = do
           \(scope :: Scope) -> do
             -- eval specified expr with the original scope on top of current
             -- call stack
+            !tipFrame <- newCallFrame scope src'loc
             let !ctx = edh'context ets
+                !tip = edh'ctx'tip ctx
+                !stack = edh'ctx'stack ctx
                 !etsEval =
                   ets
                     { edh'context =
                         ctx
-                          { edh'ctx'tip =
-                              EdhCallFrame
-                                scope
-                                src'loc
-                                defaultEdhExcptHndlr,
-                            edh'ctx'stack =
-                              edh'ctx'tip ctx : edh'ctx'stack ctx,
+                          { edh'ctx'tip = tipFrame,
+                            edh'ctx'stack = tip : stack,
                             edh'ctx'genr'caller = Nothing,
                             edh'ctx'match = true,
                             edh'ctx'pure = False,

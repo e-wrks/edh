@@ -351,12 +351,27 @@ data EdhCallFrame = EdhCallFrame
     edh'frame'scope :: !Scope,
     -- | the source location currently under execution
     edh'exe'src'loc :: !SrcLoc,
+    -- | cache of dynamic effects to accelerate repeated resolution
+    edh'effects'cache ::
+      !(TVar (Map.HashMap AttrKey (EdhValue, [EdhCallFrame]))),
+    -- | cache of fallback effects to accelerate repeated resolution
+    edh'effs'fb'cache ::
+      !(TVar (Map.HashMap AttrKey (EdhValue, [EdhCallFrame]))),
     -- | the exception handler, `catch`/`finally` should capture the
     -- outer scope, and run its *tried* block with a new stack whose
     -- top frame is a scope all same but the `edh'exc'handler` field,
     -- which executes its handling logics appropriately.
     edh'exc'handler :: !EdhExcptHndlr
   }
+
+newCallFrame :: Scope -> SrcLoc -> STM EdhCallFrame
+newCallFrame !scope !src'loc = newCallFrame' scope src'loc defaultEdhExcptHndlr
+
+newCallFrame' :: Scope -> SrcLoc -> EdhExcptHndlr -> STM EdhCallFrame
+newCallFrame' !scope !src'loc !exh = do
+  cache <- newTVar Map.empty
+  fbCache <- newTVar Map.empty
+  return $ EdhCallFrame scope src'loc cache fbCache exh
 
 frameMovePC :: EdhCallFrame -> SrcRange -> EdhCallFrame
 frameMovePC !frame !src'span =
@@ -579,6 +594,9 @@ data EdhWorld = EdhWorld
     edh'value'wrapper :: !(Maybe Text -> Dynamic -> STM Object),
     -- wrapping a scope as object for reflective purpose
     edh'scope'wrapper :: !(Scope -> STM Object),
+    -- | world root effects
+    edh'root'effects ::
+      !(TVar (Map.HashMap AttrKey (EdhValue, [EdhCallFrame]))),
     -- wrapping a host exceptin as an Edh object
     edh'exception'wrapper ::
       !(Maybe EdhThreadState -> SomeException -> STM Object),
@@ -637,6 +655,8 @@ worldContext !world =
         EdhCallFrame
           (edh'world'root world)
           (SrcLoc (SrcDoc "<world>") noSrcRange)
+          (edh'root'effects world)
+          (edh'root'effects world)
           defaultEdhExcptHndlr,
       edh'ctx'stack = [],
       edh'ctx'genr'caller = Nothing,

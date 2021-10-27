@@ -3,8 +3,9 @@ module Language.Edh.CoreLang where
 
 -- import           Debug.Trace
 
-import Control.Concurrent.STM (STM, readTVar, writeTVar)
+import Control.Concurrent.STM
 import Data.Either (partitionEithers)
+import qualified Data.HashMap.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -65,41 +66,48 @@ resolveEffectfulAttr ::
   STM (Maybe (EdhValue, [EdhCallFrame]))
 resolveEffectfulAttr ets !k = resolve
   where
-    resolve [] =
-      iopdLookup
-        (AttrByName edhEffectDefaultsMagicName)
-        (edh'scope'entity $ contextScope $ edh'context ets)
-        >>= \case
-          Nothing -> return Nothing
-          Just (EdhObject !effsObj) -> case edh'obj'store effsObj of
-            HashStore !esEffDefs ->
-              iopdLookup k esEffDefs >>= \case
-                Nothing -> return Nothing
-                Just !val -> return $ Just (val, [])
-            -- todo crash in these cases?
-            --      warning may be more proper but in what way?
-            _ -> return Nothing
-          _ -> return Nothing
-    resolve (EdhCallFrame scope _ _ : rest) =
-      iopdLookup (AttrByName edhEffectsMagicName) (edh'scope'entity scope)
-        >>= \case
-          Nothing -> resolve rest
-          Just (EdhObject !effsObj) -> case edh'obj'store effsObj of
-            HashStore !esEffs ->
-              iopdLookup k esEffs >>= \case
-                Just !val -> case val of
-                  EdhProcedure !callable _origEffOuterStack ->
-                    return $
-                      Just (EdhProcedure callable (Just rest), rest)
-                  EdhBoundProc !callable !this !that _origEffOuterStack ->
-                    return $
-                      Just (EdhBoundProc callable this that (Just rest), rest)
-                  _ -> return $ Just (val, rest)
-                Nothing -> resolve rest
-            -- todo crash in these cases?
-            --      warning may be more proper but in what way?
-            _ -> resolve rest
-          _ -> resolve rest
+    fallback = resolveEffectfulDefault ets k $ tip : stack
+      where
+        ctx = edh'context ets
+        tip = edh'ctx'tip ctx
+        stack = edh'ctx'stack ctx
+
+    resolve [] = fallback
+    resolve (frm : rest) = do
+      Map.lookup k <$> readTVar cache >>= \case
+        Just art -> return $ Just art
+        Nothing ->
+          iopdLookup
+            (AttrByName edhEffectsMagicName)
+            (edh'scope'entity $ edh'frame'scope frm)
+            >>= \case
+              Nothing -> upSearch
+              Just (EdhObject !effsObj) -> case edh'obj'store effsObj of
+                HashStore !esEffs ->
+                  iopdLookup k esEffs >>= \case
+                    Just !val -> case val of
+                      EdhProcedure !callable _origEffOuterStack ->
+                        return $
+                          Just (EdhProcedure callable (Just rest), rest)
+                      EdhBoundProc !callable !this !that _origEffOuterStack ->
+                        return $
+                          Just (EdhBoundProc callable this that (Just rest), rest)
+                      _ -> return $ Just (val, rest)
+                    Nothing -> upSearch
+                -- todo crash in these cases?
+                --      warning may be more proper but in what way?
+                _ -> upSearch
+              _ -> upSearch
+      where
+        cache = edh'effects'cache frm
+        upSearch
+          | null rest = fallback -- avoid attempting twice when no fallback
+          | otherwise =
+            resolve rest >>= \case
+              Nothing -> fallback
+              Just art -> do
+                modifyTVar' cache $ Map.insert k art
+                return $ Just art
 {-# INLINE resolveEffectfulAttr #-}
 
 resolveEffectfulDefault ::
@@ -110,28 +118,39 @@ resolveEffectfulDefault ::
 resolveEffectfulDefault _ets !k = resolve
   where
     resolve [] = return Nothing
-    resolve (EdhCallFrame scope _ _ : rest) =
-      iopdLookup
-        (AttrByName edhEffectDefaultsMagicName)
-        (edh'scope'entity scope)
-        >>= \case
-          Nothing -> resolve rest
-          Just (EdhObject !effsObj) -> case edh'obj'store effsObj of
-            HashStore !esEffs ->
-              iopdLookup k esEffs >>= \case
-                Just !val -> case val of
-                  EdhProcedure !callable _origEffOuterStack ->
-                    return $
-                      Just (EdhProcedure callable (Just rest), rest)
-                  EdhBoundProc !callable !this !that _origEffOuterStack ->
-                    return $
-                      Just (EdhBoundProc callable this that (Just rest), rest)
-                  _ -> return $ Just (val, rest)
-                Nothing -> resolve rest
-            -- todo crash in these cases?
-            --      warning may be more proper but in what way?
-            _ -> resolve rest
-          _ -> resolve rest
+    resolve (frm : rest) = do
+      let cache = edh'effs'fb'cache frm
+      Map.lookup k <$> readTVar cache >>= \case
+        Just art -> return $ Just art
+        Nothing ->
+          go >>= \case
+            Nothing -> return Nothing
+            Just art -> do
+              modifyTVar' cache $ Map.insert k art
+              return $ Just art
+      where
+        go =
+          iopdLookup
+            (AttrByName edhEffectDefaultsMagicName)
+            (edh'scope'entity $ edh'frame'scope frm)
+            >>= \case
+              Nothing -> resolve rest
+              Just (EdhObject !effsObj) -> case edh'obj'store effsObj of
+                HashStore !esEffs ->
+                  iopdLookup k esEffs >>= \case
+                    Just !val -> case val of
+                      EdhProcedure !callable _origEffOuterStack ->
+                        return $
+                          Just (EdhProcedure callable (Just rest), rest)
+                      EdhBoundProc !callable !this !that _origEffOuterStack ->
+                        return $
+                          Just (EdhBoundProc callable this that (Just rest), rest)
+                      _ -> return $ Just (val, rest)
+                    Nothing -> resolve rest
+                -- todo crash in these cases?
+                --      warning may be more proper but in what way?
+                _ -> resolve rest
+              _ -> resolve rest
 {-# INLINE resolveEffectfulDefault #-}
 
 -- * Edh inheritance resolution

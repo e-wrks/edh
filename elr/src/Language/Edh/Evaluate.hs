@@ -64,11 +64,11 @@ getEdhErrCtx !unwind !ets =
 
     -- @remind look here for how to pretty-show backtrace of Edh call stack
     prettyFrame :: EdhCallFrame -> ErrContext
-    prettyFrame (EdhCallFrame !scope !exe'loc _) =
+    prettyFrame !frm =
       "📜 "
-        <> procedureName (edh'scope'proc scope)
+        <> procedureName (edh'scope'proc $ edh'frame'scope frm)
         <> " 👉 "
-        <> prettySrcLoc exe'loc
+        <> (prettySrcLoc $ edh'exe'src'loc frm)
 
     unwindStack :: Int -> [EdhCallFrame] -> [EdhCallFrame]
     unwindStack c s | c <= 0 = s
@@ -962,13 +962,11 @@ callEdhOperator !this !that !mth !prede !args !exit =
                 edh'scope'proc = mth,
                 edh'effects'stack = []
               }
-          !mthCtx =
+      !tipFrame <-
+        newCallFrame mthScope (SrcLoc (SrcDoc "<intrinsic>") noSrcRange)
+      let !mthCtx =
             callerCtx
-              { edh'ctx'tip =
-                  EdhCallFrame
-                    mthScope
-                    (SrcLoc (SrcDoc "<intrinsic>") noSrcRange)
-                    defaultEdhExcptHndlr,
+              { edh'ctx'tip = tipFrame,
                 edh'ctx'stack = edh'ctx'tip callerCtx : edh'ctx'stack callerCtx,
                 edh'ctx'genr'caller = Nothing,
                 edh'ctx'match = true,
@@ -997,29 +995,27 @@ callEdhOperator' ::
   [EdhValue] ->
   EdhTxExit EdhValue ->
   EdhTx
-callEdhOperator' !this !that !mth !prede !proc'loc (StmtSrc !body'stmt _) !args !exit !ets =
-  recvEdhArgs
-    ets
-    recvCtx
-    (edh'procedure'args $ edh'procedure'decl mth)
-    (ArgsPack args odEmpty)
-    $ \ !ed -> do
-      !es <- iopdFromList $ odToList ed
-      let !mthScope =
-            Scope
-              { edh'scope'entity = es,
-                edh'scope'this = this,
-                edh'scope'that = that,
-                edh'scope'proc = mth,
-                edh'effects'stack = []
-              }
-          !mthCtx =
+callEdhOperator'
+  !this
+  !that
+  !mth
+  !prede
+  !proc'loc
+  (StmtSrc !body'stmt _)
+  !args
+  !exit
+  !ets =
+    do
+      !recvTipFrame <-
+        newCallFrame
+          (edh'procedure'lexi mth)
+            { edh'scope'this = this,
+              edh'scope'that = that
+            }
+          proc'loc
+      let !recvCtx =
             callerCtx
-              { edh'ctx'tip =
-                  EdhCallFrame
-                    mthScope
-                    proc'loc
-                    defaultEdhExcptHndlr,
+              { edh'ctx'tip = recvTipFrame,
                 edh'ctx'stack = new'stack,
                 edh'ctx'genr'caller = Nothing,
                 edh'ctx'match = true,
@@ -1027,40 +1023,49 @@ callEdhOperator' !this !that !mth !prede !proc'loc (StmtSrc !body'stmt _) !args 
                 edh'ctx'exp'target = Nothing,
                 edh'ctx'eff'target = Nothing
               }
-          !etsMth = ets {edh'context = mthCtx}
-      case prede of
-        Nothing -> pure ()
-        -- put the overridden predecessor operator into the overriding
-        -- operator procedure's runtime scope
-        Just !predOp -> iopdInsert (edh'procedure'name mth) predOp es
-      runEdhTx etsMth $
-        evalStmt body'stmt $ \ !bodyResult ->
-          edhSwitchState ets $
-            exitEdhTx exit $ case edhDeFlowCtrl bodyResult of
-              -- explicit return
-              EdhReturn !rtnVal -> rtnVal
-              -- no explicit return
-              !mthRtn -> mthRtn
-  where
-    !callerCtx = edh'context ets
-    !new'stack = edh'ctx'tip callerCtx : edh'ctx'stack callerCtx
-    !recvCtx =
-      callerCtx
-        { edh'ctx'tip =
-            EdhCallFrame
-              (edh'procedure'lexi mth)
-                { edh'scope'this = this,
-                  edh'scope'that = that
-                }
-              proc'loc
-              defaultEdhExcptHndlr,
-          edh'ctx'stack = new'stack,
-          edh'ctx'genr'caller = Nothing,
-          edh'ctx'match = true,
-          edh'ctx'pure = False,
-          edh'ctx'exp'target = Nothing,
-          edh'ctx'eff'target = Nothing
-        }
+      recvEdhArgs
+        ets
+        recvCtx
+        (edh'procedure'args $ edh'procedure'decl mth)
+        (ArgsPack args odEmpty)
+        $ \ !ed -> do
+          !es <- iopdFromList $ odToList ed
+          let !mthScope =
+                Scope
+                  { edh'scope'entity = es,
+                    edh'scope'this = this,
+                    edh'scope'that = that,
+                    edh'scope'proc = mth,
+                    edh'effects'stack = []
+                  }
+          !tipFrame <- newCallFrame mthScope proc'loc
+          let !mthCtx =
+                callerCtx
+                  { edh'ctx'tip = tipFrame,
+                    edh'ctx'stack = new'stack,
+                    edh'ctx'genr'caller = Nothing,
+                    edh'ctx'match = true,
+                    edh'ctx'pure = False,
+                    edh'ctx'exp'target = Nothing,
+                    edh'ctx'eff'target = Nothing
+                  }
+              !etsMth = ets {edh'context = mthCtx}
+          case prede of
+            Nothing -> pure ()
+            -- put the overridden predecessor operator into the overriding
+            -- operator procedure's runtime scope
+            Just !predOp -> iopdInsert (edh'procedure'name mth) predOp es
+          runEdhTx etsMth $
+            evalStmt body'stmt $ \ !bodyResult ->
+              edhSwitchState ets $
+                exitEdhTx exit $ case edhDeFlowCtrl bodyResult of
+                  -- explicit return
+                  EdhReturn !rtnVal -> rtnVal
+                  -- no explicit return
+                  !mthRtn -> mthRtn
+    where
+      !callerCtx = edh'context ets
+      !new'stack = edh'ctx'tip callerCtx : edh'ctx'stack callerCtx
 
 -- The Edh call convention is so called call-by-repacking, i.e. a new pack of
 -- arguments are evaluated & packed at the calling site, then passed to the
@@ -1824,7 +1829,24 @@ callEdhMethod'
   !apk
   !scopeMod
   !exit
-  !etsCaller =
+  !etsCaller = do
+    !recvTipFrame <-
+      newCallFrame
+        (edh'procedure'lexi mth)
+          { edh'scope'this = this,
+            edh'scope'that = that
+          }
+        proc'loc
+    let !recvCtx =
+          callerCtx
+            { edh'ctx'tip = recvTipFrame,
+              edh'ctx'stack = new'stack,
+              edh'ctx'genr'caller = Nothing,
+              edh'ctx'match = true,
+              edh'ctx'pure = False,
+              edh'ctx'exp'target = Nothing,
+              edh'ctx'eff'target = Nothing
+            }
     recvEdhArgs
       etsCaller
       recvCtx
@@ -1841,13 +1863,10 @@ callEdhMethod'
                     edh'scope'proc = mth,
                     edh'effects'stack = []
                   }
-            !mthCtx =
+        !tipFrame <- newCallFrame mthScope proc'loc
+        let !mthCtx =
               callerCtx
-                { edh'ctx'tip =
-                    EdhCallFrame
-                      mthScope
-                      proc'loc
-                      defaultEdhExcptHndlr,
+                { edh'ctx'tip = tipFrame,
                   edh'ctx'stack = new'stack,
                   edh'ctx'genr'caller = gnr'caller,
                   edh'ctx'match = true,
@@ -1868,23 +1887,6 @@ callEdhMethod'
     where
       !callerCtx = edh'context etsCaller
       !new'stack = edh'ctx'tip callerCtx : edh'ctx'stack callerCtx
-      !recvCtx =
-        callerCtx
-          { edh'ctx'tip =
-              EdhCallFrame
-                (edh'procedure'lexi mth)
-                  { edh'scope'this = this,
-                    edh'scope'that = that
-                  }
-                proc'loc
-                defaultEdhExcptHndlr,
-            edh'ctx'stack = new'stack,
-            edh'ctx'genr'caller = Nothing,
-            edh'ctx'match = true,
-            edh'ctx'pure = False,
-            edh'ctx'exp'target = Nothing,
-            edh'ctx'eff'target = Nothing
-          }
 
 edhPrepareForLoop ::
   EdhThreadState -> -- ets to prepare the looping
@@ -2586,14 +2588,8 @@ moduleContext !world !modu =
         >>= \case
           EdhString !file -> return file
           _ -> return "<bogus __file__>"
-    return $
-      (worldContext world)
-        { edh'ctx'tip =
-            EdhCallFrame
-              moduScope
-              (SrcLoc (SrcDoc moduFile) zeroSrcRange)
-              defaultEdhExcptHndlr
-        }
+    !tipFrame <- newCallFrame moduScope (SrcLoc (SrcDoc moduFile) zeroSrcRange)
+    return $ (worldContext world) {edh'ctx'tip = tipFrame}
 {-# INLINE moduleContext #-}
 
 parseEdh ::
@@ -3517,14 +3513,11 @@ readEdhSrcFile !edhFile =
 
 runSrcFileInScope ::
   Scope -> FilePath -> Text -> EdhTxExit EdhValue -> EdhTx
-runSrcFileInScope !runScope !srcFile !srcText !exit !ets =
+runSrcFileInScope !runScope !srcFile !srcText !exit !ets = do
+  !tipFrame <- newCallFrame runScope (SrcLoc (SrcDoc srcName) zeroSrcRange)
   let !ctxLoad =
         ctx
-          { edh'ctx'tip =
-              EdhCallFrame
-                runScope
-                (SrcLoc (SrcDoc srcName) zeroSrcRange)
-                defaultEdhExcptHndlr,
+          { edh'ctx'tip = tipFrame,
             edh'ctx'stack = edh'ctx'tip ctx : edh'ctx'stack ctx,
             edh'ctx'pure = False,
             edh'ctx'exp'target = Nothing,
@@ -3538,14 +3531,11 @@ runSrcFileInScope !runScope !srcFile !srcText !exit !ets =
 
 runStmtsInScope ::
   Scope -> Text -> [StmtSrc] -> EdhTxExit EdhValue -> EdhTx
-runStmtsInScope !runScope !srcName !stmts !exit !ets =
+runStmtsInScope !runScope !srcName !stmts !exit !ets = do
+  !tipFrame <- newCallFrame runScope (SrcLoc (SrcDoc srcName) zeroSrcRange)
   let !ctxLoad =
         ctx
-          { edh'ctx'tip =
-              EdhCallFrame
-                runScope
-                (SrcLoc (SrcDoc srcName) zeroSrcRange)
-                defaultEdhExcptHndlr,
+          { edh'ctx'tip = tipFrame,
             edh'ctx'stack = edh'ctx'tip ctx : edh'ctx'stack ctx,
             edh'ctx'pure = False,
             edh'ctx'exp'target = Nothing,
@@ -4752,9 +4742,10 @@ evalExpr'
                 edh'scope'proc = clsProc,
                 edh'effects'stack = []
               }
-          !clsCtx =
+      !tipFrame <- newCallFrame clsScope proc'loc
+      let !clsCtx =
             ctx
-              { edh'ctx'tip = EdhCallFrame clsScope proc'loc defaultEdhExcptHndlr,
+              { edh'ctx'tip = tipFrame,
                 edh'ctx'stack = edh'ctx'tip ctx : edh'ctx'stack ctx,
                 edh'ctx'genr'caller = Nothing,
                 edh'ctx'match = true,
@@ -4933,9 +4924,10 @@ evalExpr'
                     edh'scope'proc = objClassProc nsObj,
                     edh'effects'stack = []
                   }
-              !nsCtx =
+          !tipFrame <- newCallFrame nsScope proc'loc
+          let !nsCtx =
                 ctx
-                  { edh'ctx'tip = EdhCallFrame nsScope proc'loc defaultEdhExcptHndlr,
+                  { edh'ctx'tip = tipFrame,
                     edh'ctx'stack = edh'ctx'tip ctx : edh'ctx'stack ctx,
                     edh'ctx'genr'caller = Nothing,
                     edh'ctx'match = true,
@@ -5975,7 +5967,7 @@ resolveEdhBehave' !ets !effKey !exit =
       Nothing -> exit Nothing
   where
     edhTargetStackForBehave :: [EdhCallFrame]
-    edhTargetStackForBehave = edh'ctx'stack ctx where !ctx = edh'context ets
+    edhTargetStackForBehave = edh'ctx'stack $ edh'context ets
 
 resolveEdhFallback ::
   EdhThreadState -> AttrKey -> (EdhValue -> STM ()) -> STM ()
@@ -5996,7 +5988,7 @@ resolveEdhFallback' !ets !effKey !exit =
       Nothing -> exit Nothing
   where
     edhTargetStackForFallback :: [EdhCallFrame]
-    edhTargetStackForFallback = edh'ctx'stack ctx where !ctx = edh'context ets
+    edhTargetStackForFallback = edh'ctx'stack $ edh'context ets
 
 parseEdhIndex ::
   EdhThreadState -> EdhValue -> (Either ErrMessage EdhIndex -> STM ()) -> STM ()
@@ -6608,26 +6600,22 @@ runEdhInSandbox ::
   EdhHostProc ->
   EdhTxExit EdhValue ->
   STM ()
-runEdhInSandbox !ets !sandbox !act !exit =
+runEdhInSandbox !ets !sandbox !act !exit = do
+  !tipFrame <- newCallFrame sandbox (SrcLoc (SrcDoc "<sandbox>") zeroSrcRange)
+  let !etsSandbox =
+        ets
+          { edh'context =
+              ctxPriv
+                { edh'ctx'tip = tipFrame,
+                  edh'ctx'stack =
+                    edh'ctx'tip ctxPriv :
+                    edh'ctx'stack ctxPriv
+                }
+          }
   runEdhTx etsSandbox $
-    act $ \ !result ->
-      edhSwitchState ets $ exitEdhTx exit result
+    act $ \ !result -> edhSwitchState ets $ exitEdhTx exit result
   where
     !ctxPriv = edh'context ets
-    !etsSandbox =
-      ets
-        { edh'context =
-            ctxPriv
-              { edh'ctx'tip =
-                  EdhCallFrame
-                    sandbox
-                    (SrcLoc (SrcDoc "<sandbox>") zeroSrcRange)
-                    defaultEdhExcptHndlr,
-                edh'ctx'stack =
-                  edh'ctx'tip ctxPriv :
-                  edh'ctx'stack ctxPriv
-              }
-        }
 
 -- | Uncaught exception in any thread (main or a descendant) will terminate the
 -- whole Edh program, see:

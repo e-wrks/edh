@@ -707,19 +707,14 @@ mkObjSandboxM !obj = Edh $ \_naExit !exit !ets -> do
 
 runInSandboxM :: forall r. Scope -> Edh r -> Edh r
 runInSandboxM !sandbox !act = Edh $ \_naExit !exit !ets -> do
+  !tipFrame <- newCallFrame sandbox (SrcLoc (SrcDoc "<sandbox>") zeroSrcRange)
   let !ctxPriv = edh'context ets
       !etsSandbox =
         ets
           { edh'context =
               ctxPriv
-                { edh'ctx'tip =
-                    EdhCallFrame
-                      sandbox
-                      (SrcLoc (SrcDoc "<sandbox>") zeroSrcRange)
-                      defaultEdhExcptHndlr,
-                  edh'ctx'stack =
-                    edh'ctx'tip ctxPriv :
-                    edh'ctx'stack ctxPriv
+                { edh'ctx'tip = tipFrame,
+                  edh'ctx'stack = edh'ctx'tip ctxPriv : edh'ctx'stack ctxPriv
                 }
           }
   runEdh etsSandbox act $ \ !result _ets ->

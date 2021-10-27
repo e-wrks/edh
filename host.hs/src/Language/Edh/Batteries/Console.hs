@@ -4,9 +4,6 @@ import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad (void)
 import Data.Lossless.Decimal
-  ( Decimal,
-    decimalToInteger,
-  )
 import Data.Text (Text)
 import qualified Data.Text as T
 import Debug.Trace (trace)
@@ -181,22 +178,24 @@ conReadCommandProc
               cio $ ConsoleIn cmdIn ps1 ps2
               atomically $
                 readTMVar cmdIn
-                  >>= \(EdhInput !name !lineNo !lines_) ->
+                  >>= \(EdhInput !name !lineNo !lines_) -> do
+                    -- use a fresh dyamic effects cache
+                    -- todo try reuse existing effects cache as possible?
+                    !tipFrame <- newCallFrame cmdScope $ edh'exe'src'loc tip
                     let !srcName = if T.null name then "<console>" else name
                         !etsCmd =
                           ets
                             { edh'context =
                                 ctx
                                   { edh'ctx'tip =
-                                      (edh'ctx'tip ctx)
-                                        { edh'frame'scope = cmdScope
+                                      tipFrame
+                                        { edh'exc'handler = edh'exc'handler tip
                                         }
                                   }
                             }
-                     in runEdhTx etsCmd $
-                          evalEdh' srcName lineNo (T.unlines lines_) $
-                            edhSwitchState ets
-                              . exitEdhTx exit
+                    runEdhTx etsCmd $
+                      evalEdh' srcName lineNo (T.unlines lines_) $
+                        edhSwitchState ets . exitEdhTx exit
      in case inScopeOf of
           Just !so ->
             castObjSelfStore so >>= \case
@@ -209,6 +208,7 @@ conReadCommandProc
           _ -> doReadCmd (callingScope ctx)
     where
       !ctx = edh'context ets
+      tip = edh'ctx'tip ctx
       !world = edh'prog'world $ edh'thread'prog ets
       !cio = consoleIO $ edh'world'console world
 
