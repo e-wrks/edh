@@ -331,9 +331,7 @@ callingSrcLoc :: Context -> SrcLoc
 callingSrcLoc = edh'exe'src'loc . callingFrame
 
 callingFrame :: Context -> EdhCallFrame
-callingFrame (Context !tip !stack _ _ _ _ _) = case stack of
-  f : _ -> f
-  _ -> tip
+callingFrame (Context !tip _stack _ _ _ _ _) = tip
 
 -- the yield receiver, a.k.a. the caller's continuation
 type EdhGenrCaller =
