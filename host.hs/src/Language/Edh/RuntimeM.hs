@@ -85,5 +85,6 @@ runModuleM' !world !impPath !preRun =
               !modu <- createEdhModule world (T.pack impPath) moduFile
               runProgramM' world $ do
                 !moduCtx <- inlineSTM $ moduleContext world modu
-                inContext moduCtx preRun
-                evalSrcM (T.pack moduFile) moduSource
+                inContext moduCtx $ do
+                  preRun
+                  evalSrcM (T.pack moduFile) moduSource
