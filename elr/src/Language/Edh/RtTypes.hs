@@ -351,9 +351,6 @@ data EdhCallFrame = EdhCallFrame
     edh'frame'scope :: !Scope,
     -- | the source location currently under execution
     edh'exe'src'loc :: !SrcLoc,
-    -- | cache of dynamic effects to accelerate repeated resolution
-    edh'effects'cache ::
-      !(TVar (Map.HashMap AttrKey (EdhValue, [EdhCallFrame]))),
     -- | cache of fallback effects to accelerate repeated resolution
     edh'effs'fb'cache ::
       !(TVar (Map.HashMap AttrKey (EdhValue, [EdhCallFrame]))),
@@ -369,9 +366,8 @@ newCallFrame !scope !src'loc = newCallFrame' scope src'loc defaultEdhExcptHndlr
 
 newCallFrame' :: Scope -> SrcLoc -> EdhExcptHndlr -> STM EdhCallFrame
 newCallFrame' !scope !src'loc !exh = do
-  cache <- newTVar Map.empty
   fbCache <- newTVar Map.empty
-  return $ EdhCallFrame scope src'loc cache fbCache exh
+  return $ EdhCallFrame scope src'loc fbCache exh
 
 frameMovePC :: EdhCallFrame -> SrcRange -> EdhCallFrame
 frameMovePC !frame !src'span =
@@ -655,7 +651,6 @@ worldContext !world =
         EdhCallFrame
           (edh'world'root world)
           (SrcLoc (SrcDoc "<world>") noSrcRange)
-          (edh'root'effects world)
           (edh'root'effects world)
           defaultEdhExcptHndlr,
       edh'ctx'stack = [],

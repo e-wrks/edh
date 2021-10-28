@@ -65,16 +65,10 @@ resolveEffectfulAttr ::
   [EdhCallFrame] ->
   STM (Maybe (EdhValue, [EdhCallFrame]))
 resolveEffectfulAttr ets !k !effsStack =
-  Map.lookup k <$> readTVar cache >>= \case
+  resolve effsStack >>= \case
     Just art -> return $ Just art
-    Nothing ->
-      resolve effsStack >>= \case
-        Just art -> do
-          modifyTVar' cache $ Map.insert k art
-          return $ Just art
-        Nothing -> fallback
+    Nothing -> fallback
   where
-    cache = edh'effects'cache $ edh'ctx'tip $ edh'context ets
     resolve [] = return Nothing
     resolve (frm : rest) =
       iopdLookup
