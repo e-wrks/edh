@@ -65,7 +65,7 @@ createEdhWorld !console = do
           (AttrByName "<root>")
           rootScope
           (DocCmt ["the root namespace"])
-          phantomHostProc
+          (specialProc "<root>" "<world-root>")
       rootObj = Object idRoot (HashStore hsRoot) nsClassObj ssRoot
 
       sandboxScope = Scope hsSandbox sandboxObj sandboxObj sandboxProc []
@@ -75,7 +75,7 @@ createEdhWorld !console = do
           (AttrByName "<sandbox>")
           sandboxScope
           (DocCmt ["the sandbox namespace"])
-          phantomHostProc
+          (specialProc "<sandbox>" "<world-root>")
       sandboxObj =
         Object idSandbox (HashStore hsSandbox) sandboxClassObj ssSandbox
       sandboxClass = Class sandboxProc hsSandbox phantomAllocator mroSandbox
@@ -88,7 +88,7 @@ createEdhWorld !console = do
           (AttrByName "class")
           rootScope
           (DocCmt ["the meta class"])
-          phantomHostProc
+          (specialProc "<meta-class>" "<world-root>")
       metaClass = Class metaProc hsMeta phantomAllocator mroMeta
       metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
 
@@ -98,7 +98,7 @@ createEdhWorld !console = do
           (AttrByName "namespace")
           rootScope
           (DocCmt ["the namespace class"])
-          phantomHostProc
+          (specialProc "<meta-namespace>" "<world-root>")
       nsClass = Class nsProc hsNamespace phantomAllocator mroNamespace
       nsClassObj =
         Object idNamespace (ClassStore nsClass) metaClassObj ssNamespace
@@ -205,9 +205,9 @@ createEdhWorld !console = do
   let scopeAllocator :: "ofObj" ?: Object -> EdhObjectAllocator
       scopeAllocator (optionalArg -> !maybeOfObj) !exit !ets =
         case maybeOfObj of
-          Just !obj ->
-            objectScope obj
-              >>= \ !objScope -> exit Nothing $ HostStore $ toDyn objScope
+          Just !obj -> do
+            !objScope <- objectScope obj
+            exit Nothing $ HostStore $ toDyn objScope
           Nothing ->
             exit Nothing $ HostStore $ toDyn $ contextScope $ edh'context ets
   !clsScope <-
@@ -424,6 +424,15 @@ createEdhWorld !console = do
 
   return world
   where
+    specialProc :: Text -> Text -> ProcDecl
+    specialProc n l =
+      ProcDecl
+        (AttrAddrSrc (QuaintAttr n) noSrcRange)
+        NullaryReceiver
+        Nothing
+        (StmtSrc VoidStmt noSrcRange)
+        (SrcLoc (SrcDoc l) noSrcRange)
+
     mthClassRepr :: EdhHostProc
     mthClassRepr !exit !ets = case edh'obj'store clsObj of
       ClassStore !cls ->

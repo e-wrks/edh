@@ -101,7 +101,8 @@ noSrcRange = SrcRange (SrcPos (-1) (-1)) (SrcPos (-1) (-1))
 
 prettySrcPos :: SrcDoc -> SrcPos -> Text
 prettySrcPos (SrcDoc !file) (SrcPos !line !char)
-  | line < 0 || char < 0 = "<host-code>"
+  | line <= 0 && char <= 0 =
+    file
   | otherwise =
     file <> ":" <> T.pack (show $ 1 + line) <> ":"
       <> T.pack
@@ -109,9 +110,7 @@ prettySrcPos (SrcDoc !file) (SrcPos !line !char)
 
 prettySrcRange :: SrcDoc -> SrcRange -> Text
 prettySrcRange (SrcDoc !file) (SrcRange (SrcPos !start'line !start'char) (SrcPos !end'line !end'char))
-  | start'line < 0 || start'char < 0 =
-    "<host-code>"
-  | end'line == 0 && end'char == 0 =
+  | end'line <= 0 && end'char <= 0 =
     file
   | end'line == start'line && end'char == start'char =
     file <> ":" <> T.pack (show $ 1 + start'line) <> ":"
