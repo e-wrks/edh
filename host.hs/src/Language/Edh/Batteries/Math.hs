@@ -100,35 +100,35 @@ powProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
--- | virtual property Decimal.finite
+-- | virtual attribute Decimal.finite
 --
 -- test whether the decimal value is finite, i.e. not inf/-inf/nan
 decFiniteProc :: "d" !: Decimal -> EdhHostProc
 decFiniteProc (mandatoryArg -> d) !exit =
   exitEdhTx exit $ EdhBool $ decimalIsFinite d
 
--- | virtual property Decimal.ceil
+-- | virtual attribute Decimal.ceil
 --
 -- get the least integer not less than x
 decCeilProc :: "d" !: Decimal -> EdhHostProc
 decCeilProc (mandatoryArg -> d) !exit =
   exitEdhTx exit $ EdhDecimal $ fromInteger $ ceiling d
 
--- | virtual property Decimal.floor
+-- | virtual attribute Decimal.floor
 --
 -- get the the greatest integer not greater than x
 decFloorProc :: "d" !: Decimal -> EdhHostProc
 decFloorProc (mandatoryArg -> d) !exit =
   exitEdhTx exit $ EdhDecimal $ fromInteger $ floor d
 
--- | virtual property Decimal.trunc
+-- | virtual attribute Decimal.trunc
 --
 -- truncate to integer toward zero
 decTruncProc :: "d" !: Decimal -> EdhHostProc
 decTruncProc (mandatoryArg -> d) !exit =
   exitEdhTx exit $ EdhDecimal $ fromInteger $ truncate d
 
--- | virtual property Decimal.round
+-- | virtual attribute Decimal.round
 --
 -- round to integer toward zero
 decRoundProc :: "d" !: Decimal -> EdhHostProc

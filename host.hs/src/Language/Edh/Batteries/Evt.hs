@@ -24,7 +24,7 @@ evtPubProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
          in postEdhEvent es val2Pub $ \() -> exitEdhTx exit val2Rtn
     _ -> exitEdhTx exit edhNA
 
--- | virtual property <sink>.subseq
+-- | virtual attribute <sink>.subseq
 --
 -- obtain a non-lingering, shadow copy of the event sink
 sink'subseqProc :: "sinkValue" !: EdhValue -> EdhHostProc
@@ -34,7 +34,7 @@ sink'subseqProc (mandatoryArg -> !sinkVal) !exit !ets =
     _ -> edhSimpleDesc ets sinkVal $ \ !badDesc ->
       throwEdh ets UsageError $ "not an event sink but a " <> badDesc
 
--- | virtual property <sink>.mrv
+-- | virtual attribute <sink>.mrv
 --
 -- get most recent event value from a sink, without blocking
 --
@@ -55,7 +55,7 @@ sink'mrvProc (mandatoryArg -> !sinkVal) !exit !ets =
     _ -> edhSimpleDesc ets sinkVal $ \ !badDesc ->
       throwEdh ets UsageError $ "not an event sink but a " <> badDesc
 
--- | virtual property <sink>.eos
+-- | virtual attribute <sink>.eos
 --
 -- check whether an event sink is already at end-of-stream
 sink'eosProc :: "sinkValue" !: EdhValue -> EdhHostProc

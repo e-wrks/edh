@@ -17,12 +17,12 @@ error( 'Executing meta module: ' ++ __name__ )
 export {
 
   {##
-   # virtual property of a string value, encoding the string into utf-8 bytes
+   # virtual attribute of a string value, encoding the string into utf-8 bytes
    # as a blob value
    #}
   method __String_bytes__ ( s: 'String' ) pass
   {##
-   # virtual property of a blob value, decoding (assuming utf-8 bytes) into a
+   # virtual attribute of a blob value, decoding (assuming utf-8 bytes) into a
    # string
    #}
   method __Blob_utf8string__( b: 'Blob' ) pass
@@ -67,12 +67,12 @@ export {
    #}
   method __Descriptor_name__ ( mth: 'Descriptor' ) pass
   {##
-   # the virtual property of an event sink, to obtain a non-lingering copy of
+   # the virtual attribute of an event sink, to obtain a non-lingering copy of
    # the event sink
    #}
   method __Sink_subseq__ ( _: sink ) : sink pass
   {##
-   # the virtual property of an event sink, to obtain the most recent value
+   # the virtual attribute of an event sink, to obtain the most recent value
    # from the event sink
    #
    # note this only works for a lingering event sink, `nil` is always returned
@@ -80,20 +80,20 @@ export {
    #}
   method __Sink_mrv__ ( _: sink ) pass
   {##
-   # the virtual property of an event sink, to check whether it is already at
+   # the virtual attribute of an event sink, to check whether it is already at
    # end-of-stream
    #}
   method __Sink_eos__ ( _: sink ) : 'Bool' pass
   {##
-   # the virtual property of a dict, to obtain number of entries in it
+   # the virtual attribute of a dict, to obtain number of entries in it
    #}
   method __Dict_size__ ( d: 'Dict' ) pass
   {##
-   # the virtual property of a dict, to obtain all keys in it
+   # the virtual attribute of a dict, to obtain all keys in it
    #}
   method __Dict_keys__ ( d: 'Dict' ) pass
   {##
-   # the virtual property of a dict, to obtain all values in it
+   # the virtual attribute of a dict, to obtain all values in it
    #}
   method __Dict_values__ ( d: 'Dict' ) pass
   {##
