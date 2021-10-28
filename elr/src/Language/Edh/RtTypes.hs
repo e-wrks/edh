@@ -444,7 +444,7 @@ rootScopeOf !scope =
 
 edhScopeSrcLoc :: Scope -> SrcLoc
 edhScopeSrcLoc !scope = case edh'procedure'decl $ edh'scope'proc scope of
-  HostDecl {} -> SrcLoc (SrcDoc "<host-code>") noSrcRange
+  HostDecl {} -> SrcLoc (SrcDoc "<host-world>") noSrcRange
   ProcDecl _ _ _ (StmtSrc _ !body'span) !loc -> loc {src'range = body'span}
 
 -- | A class is wrapped as an object per se, the object's storage structure is
@@ -969,7 +969,7 @@ callableDoc = \case
 
 callableLoc :: EdhProcDefi -> SrcLoc
 callableLoc = \case
-  EdhIntrOp _fixity _preced _ -> SrcLoc (SrcDoc "<host-code>") noSrcRange
+  EdhIntrOp _fixity _preced _ -> SrcLoc (SrcDoc "<host-world>") noSrcRange
   EdhOprtor _fixity _preced _ !pd -> procedureLoc' pd
   EdhMethod !pd -> procedureLoc' pd
   EdhGnrtor !pd -> procedureLoc' pd
@@ -1694,7 +1694,7 @@ instance Show ProcDecl where
     "<edh-proc " <> T.unpack (attrAddrStr addr) <> ">"
 
 procedureLoc :: ProcDecl -> SrcLoc
-procedureLoc HostDecl {} = SrcLoc (SrcDoc "<host-code>") noSrcRange
+procedureLoc HostDecl {} = SrcLoc (SrcDoc "<host-world>") noSrcRange
 procedureLoc pd@ProcDecl {} = edh'procedure'loc pd
 
 procedureLoc' :: ProcDefi -> SrcLoc
