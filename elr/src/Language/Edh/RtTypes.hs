@@ -1298,7 +1298,7 @@ data StmtSrc = StmtSrc !Stmt !SrcRange
   deriving (Eq)
 
 instance Show StmtSrc where
-  show (StmtSrc s _) = "{" <> show s <> "}"
+  show (StmtSrc s _) = show s
 
 stmtSrcSpan :: StmtSrc -> SrcRange
 stmtSrcSpan (StmtSrc _ !s'span) = s'span
@@ -1313,7 +1313,7 @@ data OptDocCmt = NoDocCmt | DocCmt [Text]
 instance Show OptDocCmt where
   show NoDocCmt = "<no-doc>"
   show (DocCmt []) = "<empty-doc>"
-  show (DocCmt _lines) = "<with-doc>"
+  show (DocCmt lns) = "<" <> show (length lns) <> "-doc-lines>"
 
 data Stmt
   = -- | literal `pass` to fill a place where a statement needed,

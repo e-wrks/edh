@@ -2615,12 +2615,8 @@ parseEdh' !world !srcName !lineNo !srcCode = do
                         pstateOffset = 0,
                         pstateSourcePos =
                           SourcePos
-                            { sourceName =
-                                T.unpack
-                                  srcName,
-                              sourceLine =
-                                mkPos
-                                  lineNo,
+                            { sourceName = T.unpack srcName,
+                              sourceLine = mkPos lineNo,
                               sourceColumn = mkPos 1
                             },
                         pstateTabWidth = mkPos 2,
