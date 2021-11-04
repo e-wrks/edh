@@ -14,6 +14,7 @@ import Data.Dynamic
 import qualified Data.HashMap.Strict as Map
 import Data.Hashable (Hashable (hashWithSalt))
 import Data.IORef
+import Data.List
 import Data.Lossless.Decimal as D
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -997,6 +998,43 @@ callableLoc = \case
 -- database for storage, will tend to define a generated UUID
 -- attribute or the like.
 
+data UnitFormula
+  = -- | Converting from the source unit by division by a conversion factor
+    RatioFormula !Decimal
+  | -- | Converting from the source unit by evaluating an expression with
+    -- the value in that unit bound to an attribute keyed by bracket symbol
+    -- of that unit
+    ExprFomula !ExprDefi !Text
+  deriving (Eq)
+
+instance Hashable UnitFormula where
+  hashWithSalt s (RatioFormula r) =
+    s `hashWithSalt` (-1 :: Int) `hashWithSalt` r
+  hashWithSalt s (ExprFomula x _src) =
+    s `hashWithSalt` (-2 :: Int) `hashWithSalt` x
+
+data UnitDefi = UnitDefi !AttrName !(Map.HashMap UoM UnitFormula)
+  deriving (Eq)
+
+instance Show UnitDefi where
+  show (UnitDefi sym formulae) =
+    "uom " <> T.unpack sym <> " {# " -- TODO show details of formulae
+      <> show (Map.size formulae)
+      <> " formula(e) #}"
+
+instance Hashable UnitDefi where
+  hashWithSalt s (UnitDefi sym formulae) =
+    s `hashWithSalt` sym `hashWithSalt` formulae
+
+data Quantity = Quantity !Decimal !UoM
+  deriving (Eq)
+
+instance Show Quantity where
+  show (Quantity qty unit) = show qty <> show unit
+
+instance Hashable Quantity where
+  hashWithSalt s (Quantity qty unit) = s `hashWithSalt` qty `hashWithSalt` unit
+
 data EdhBound = OpenBound EdhValue | ClosedBound EdhValue
   deriving (Eq)
 
@@ -1074,6 +1112,10 @@ data EdhValue
     EdhSink !Sink
   | -- | named value, a.k.a. term definition
     EdhNamedValue !AttrName !EdhValue
+  | -- | unit of measure definition
+    EdhUoM !UnitDefi
+  | -- | quantity with associated unit of measure
+    EdhQty !Quantity
   | -- | 1st class expression value, with source (or not, if empty)
     EdhExpr !ExprDefi !Text
 
@@ -1123,6 +1165,8 @@ instance Show EdhValue where
     -- Edh operators are all left-associative, parenthesis needed
     T.unpack n <> " := (" <> show v <> ")"
   show (EdhNamedValue n v) = T.unpack n <> " := " <> show v
+  show (EdhUoM defi) = show defi
+  show (EdhQty q) = show q
   show (EdhExpr (ExprDefi _ x _) s) =
     if T.null s
       then -- source-less form
@@ -1174,6 +1218,7 @@ instance Eq EdhValue where
     == EdhExpr (ExprDefi _ (LitExpr y'l) _) _ =
       x'l == y'l
   EdhExpr (ExprDefi x'u _ _) _ == EdhExpr (ExprDefi y'u _ _) _ = x'u == y'u
+  (EdhUoM x) == (EdhUoM y) = x == y
   -- todo: support coercing equality ?
   --       * without this, we are a strongly typed dynamic language
   --       * with this, we'll be a weakly typed dynamic language
@@ -1210,6 +1255,9 @@ instance Hashable EdhValue where
     s `hashWithSalt` (-9 :: Int) `hashWithSalt` u
   hashWithSalt s (EdhSink x) = hashWithSalt s x
   hashWithSalt s (EdhNamedValue _ v) = hashWithSalt s v
+  hashWithSalt s (EdhUoM defi) =
+    s `hashWithSalt` (-11 :: Int) `hashWithSalt` defi
+  hashWithSalt s (EdhQty q) = s `hashWithSalt` (-12 :: Int) `hashWithSalt` q
   hashWithSalt s (EdhExpr (ExprDefi _ (LitExpr l) _) _) = hashWithSalt s l
   hashWithSalt s (EdhExpr (ExprDefi u _ _) _) = hashWithSalt s u
 
@@ -1315,6 +1363,28 @@ instance Show OptDocCmt where
   show (DocCmt []) = "<empty-doc>"
   show (DocCmt lns) = "<" <> show (length lns) <> "-doc-lines>"
 
+data UnitDecl
+  = -- | Declare a base unit
+    BaseUnitDecl !AttrName
+  | -- | Convertible with same zero point, just scaling
+    --
+    -- Note bidirectional conversion is implied when rhs is a base unit
+    --
+    -- See: https://en.wikipedia.org/wiki/Conversion_factor
+    ConversionFactor !Decimal !AttrName !Decimal !UoM
+  | -- | Not with same zero point, need more sophisticated formula
+    --
+    -- E.g. https://en.wikipedia.org/wiki/Conversion_of_scales_of_temperature
+    ConversionFormula !AttrName !ExprSrc !Text !UoM
+  deriving (Eq)
+
+instance Show UnitDecl where
+  show (BaseUnitDecl sym) = T.unpack sym
+  show (ConversionFactor nQty nUnit dQty dUnit) =
+    show nQty <> T.unpack nUnit <> " = " <> show dQty <> show dUnit
+  show (ConversionFormula outUnit _formula fSrc _inUnit) =
+    "[" <> T.unpack outUnit <> "] = " <> T.unpack fSrc
+
 data Stmt
   = -- | literal `pass` to fill a place where a statement needed,
     -- same as in Python
@@ -1332,6 +1402,8 @@ data Stmt
     EffectStmt !ExprSrc !OptDocCmt
   | -- | assignment with args (un/re)pack sending/receiving syntax
     LetStmt !ArgsReceiver !ArgsPacker
+  | -- | unit of measure declaration
+    UnitStmt ![UnitDecl]
   | -- | super object declaration for a descendant object
     ExtendsStmt !ExprSrc
   | -- | perceiption declaration, a perceiver is bound to an event `sink`
@@ -1877,10 +1949,60 @@ data EffAddr
 data SourceSeg = SrcSeg !Text | IntplSeg !ExprSrc
   deriving (Eq, Show)
 
+-- | https://en.wikipedia.org/wiki/Unit_of_measurement#Base_and_derived_units
+data UoM = BaseUnit !AttrName | DerivedUnit [AttrName] [AttrName]
+  deriving (Eq)
+
+uomNormalize :: UoM -> UoM
+uomNormalize (BaseUnit !sym) = BaseUnit sym
+uomNormalize (DerivedUnit [!sym] []) = BaseUnit sym
+uomNormalize (DerivedUnit [] []) = BaseUnit "" -- unitless
+uomNormalize (DerivedUnit ns ds) =
+  -- TODO:
+  -- - place duplicate same base units consecutively
+  -- - remove common (number of) same base units between ns and ds
+  DerivedUnit ns ds
+
+uomMultiply :: UoM -> UoM -> UoM
+uomMultiply (BaseUnit u1) (BaseUnit u2) = DerivedUnit [u1, u2] []
+uomMultiply (BaseUnit u1) (DerivedUnit ns ds) =
+  uomNormalize $ DerivedUnit (u1 : ns) ds
+uomMultiply (DerivedUnit ns ds) (BaseUnit u2) =
+  uomNormalize $ DerivedUnit (ns ++ [u2]) ds
+uomMultiply (DerivedUnit ns1 ds1) (DerivedUnit ns2 ds2) =
+  uomNormalize $ DerivedUnit (ns1 ++ ns2) (ds1 ++ ds2)
+
+uomDivide :: UoM -> UoM -> UoM
+uomDivide (BaseUnit u1) (BaseUnit u2) = DerivedUnit [u1] [u2]
+uomDivide (BaseUnit u1) (DerivedUnit ns ds) =
+  uomNormalize $ DerivedUnit (u1 : ds) ns
+uomDivide (DerivedUnit ns ds) (BaseUnit u2) =
+  uomNormalize $ DerivedUnit ns (ds ++ [u2])
+uomDivide (DerivedUnit ns1 ds1) (DerivedUnit ns2 ds2) =
+  uomNormalize $ DerivedUnit (ns1 ++ ds2) (ds1 ++ ns2)
+
+instance Show UoM where
+  show (BaseUnit "") = "{# unitless #}" -- or (1) ?
+  show (BaseUnit sym) = T.unpack sym
+  -- TODO show duplicate uom syms in exponential form
+  show (DerivedUnit nUnits []) =
+    T.unpack $
+      T.intercalate "*" nUnits
+  show (DerivedUnit nUnits dUnits) =
+    T.unpack $
+      T.intercalate "*" nUnits <> "/" <> T.intercalate "/" dUnits
+
+instance Hashable UoM where
+  hashWithSalt s (BaseUnit sym) =
+    s `hashWithSalt` (-1 :: Int) `hashWithSalt` sym
+  hashWithSalt s (DerivedUnit nUnits dUnits) =
+    s `hashWithSalt` (-2 :: Int) `hashWithSalt` nUnits `hashWithSalt` dUnits
+
 data Literal
   = SinkCtor
   | NilLiteral
   | DecLiteral !Decimal
+  | QtyLiteral !Decimal !UoM
   | BoolLiteral !Bool
   | StringLiteral !Text
   | ValueLiteral !EdhValue
@@ -1890,6 +2012,8 @@ instance Hashable Literal where
   hashWithSalt s SinkCtor = hashWithSalt s (-1 :: Int)
   hashWithSalt s NilLiteral = hashWithSalt s (0 :: Int)
   hashWithSalt s (DecLiteral x) = hashWithSalt s x
+  hashWithSalt s (QtyLiteral qty unit) =
+    s `hashWithSalt` qty `hashWithSalt` unit
   hashWithSalt s (BoolLiteral x) = hashWithSalt s x
   hashWithSalt s (StringLiteral x) = hashWithSalt s x
   hashWithSalt s (ValueLiteral x) = hashWithSalt s x
@@ -1927,6 +2051,8 @@ edhTypeNameOf EdhReturn {} = "Return"
 edhTypeNameOf EdhOrd {} = "Ord"
 edhTypeNameOf EdhDefault {} = "Default"
 edhTypeNameOf EdhSink {} = "Sink"
+edhTypeNameOf EdhUoM {} = "UoM"
+edhTypeNameOf EdhQty {} = "Qty"
 edhTypeNameOf EdhExpr {} = "Expr"
 
 edhProcTypeNameOf :: EdhProcDefi -> Text

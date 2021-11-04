@@ -10,6 +10,7 @@ import Control.Monad.State.Strict (MonadState (get, put))
 import Data.Char
 import qualified Data.Char as Char
 import Data.Functor (($>))
+import Data.List
 import Data.Lossless.Decimal as D (Decimal (Decimal), inf, nan)
 import Data.Maybe
 import Data.Text (Text)
@@ -158,10 +159,10 @@ optionalSemicolon :: Parser Bool
 optionalSemicolon = fromMaybe False <$> optional (True <$ symbol ";")
 
 isIdentStart :: Char -> Bool
-isIdentStart !c = c == '_' || Char.isAlpha c
+isIdentStart !c = c == '_' || c == '°' || Char.isAlpha c
 
 isIdentChar :: Char -> Bool
-isIdentChar c = c == '_' || c == '\'' || Char.isAlphaNum c
+isIdentChar c = c == '_' || c == '\'' || c == '°' || Char.isAlphaNum c
 
 singleDot :: Parser ()
 singleDot = do
@@ -257,6 +258,42 @@ parseImportExpr !si = do
       void $ optional $ keyword "from"
       (!se, !si') <- parseExpr si
       return (ar, se, si')
+
+parseUnitStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseUnitStmt !si = do
+  void $ keyword "uom"
+  void optionalComma
+  -- todo: allow expr interpolation inside?
+  (,si) . UnitStmt <$> parseUnitDecls []
+  where
+    parseUnitDecls :: [UnitDecl] -> Parser [UnitDecl]
+    parseUnitDecls uds = (<|> return (reverse $! uds)) $ do
+      ud <- parseUnitDecl
+      void optionalComma
+      parseUnitDecls $ ud : uds
+
+    parseUnitDecl :: Parser UnitDecl
+    parseUnitDecl =
+      parseUnitConversionFormula -- starts with `[`
+        <|> parseConversionFactor -- starts with a digit
+        <|> BaseUnitDecl <$> lexeme parseUnitSym -- identifier chars
+
+    {- HLINT ignore "Use <$>" -}
+    parseConversionFactor :: Parser UnitDecl
+    parseConversionFactor = do
+      nQty <- parseDecLit
+      nUnit <- lexeme parseUnitSym
+      void $ char '=' <* sc
+      dQty <- parseDecLit
+      dUnit <- parseUoM
+      return $ ConversionFactor nQty nUnit dQty dUnit
+
+parseUnitConversionFormula :: Parser UnitDecl
+parseUnitConversionFormula = do
+  baseSym <- between (symbol "[") (symbol "]") (lexeme parseUnitSym)
+  void $ char '=' <* sc
+  -- TODO: parse expr with `[<uom>]` attr addr only
+  return $ ConversionFormula baseSym undefined "" undefined
 
 parseLetStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseLetStmt !si = do
@@ -977,6 +1014,7 @@ parseStmt' !prec !si = do
               parseDeferStmt si,
               parseEffectStmt docCmt si,
               parseLetStmt si,
+              parseUnitStmt si,
               parseExtendsStmt si,
               parsePerceiveStmt si,
               -- TODO validate <break> must within a loop construct
@@ -1265,9 +1303,46 @@ parseStringLit' = lexeme $ do
 parseBoolLit :: Parser Bool
 parseBoolLit = (keyword "true" $> True) <|> (keyword "false" $> False)
 
--- todo support HEX/OCT ?
+parseUnitSym :: Parser AttrName
+parseUnitSym = takeWhile1P (Just "UoM symbols") isIdentStart
+
+parseUoM :: Parser UoM
+parseUoM =
+  lexeme $
+    fmap uomNormalize $
+      (parseDs' [] [] <|>) $ do
+        sym1 <- parseUnitSym
+        parseNs [sym1]
+  where
+    parseNs :: [AttrName] -> Parser UoM
+    parseNs ns = parseNs' ns <|> parseDs' ns [] <|> return (DerivedUnit ns [])
+
+    parseNs' :: [AttrName] -> Parser UoM
+    parseNs' ns = do
+      void $ char '*'
+      nextSym <- parseUnitSym
+      parseNs $ ns ++ [nextSym]
+
+    parseDs :: [AttrName] -> [AttrName] -> Parser UoM
+    parseDs ns ds = parseDs' ns ds <|> return (DerivedUnit ns ds)
+
+    parseDs' :: [AttrName] -> [AttrName] -> Parser UoM
+    parseDs' ns ds = do
+      void $ char '/'
+      nextSym <- parseUnitSym
+      parseDs ns $ ds ++ [nextSym]
+
+parseNumOrQty :: Parser Literal
+parseNumOrQty = lexeme $ do
+  qty <- parseDecLit'
+  QtyLiteral qty <$> parseUoM <|> return (DecLiteral qty)
+
 parseDecLit :: Parser Decimal
-parseDecLit = lexeme $ do
+parseDecLit = lexeme parseDecLit'
+
+-- todo support HEX/OCT ?
+parseDecLit' :: Parser Decimal
+parseDecLit' = do
   (!n, !e) <- b10Dec
   return $ Decimal 1 e n
   where
@@ -1476,7 +1551,7 @@ parseLitExpr =
       ValueLiteral EdhBreak <$ litKw "break",
       ValueLiteral EdhContinue <$ litKw "continue",
       ValueLiteral EdhFallthrough <$ litKw "fallthrough",
-      DecLiteral <$> parseDecLit
+      parseNumOrQty
     ]
   where
     litKw = hidden . keyword
