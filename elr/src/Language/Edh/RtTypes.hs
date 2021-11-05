@@ -1941,7 +1941,7 @@ instance Hashable Quantity where
 
 data UnitDecl
   = -- | Declare a dimensional base unit
-    BaseUnitDecl !AttrName
+    BaseUnitDecl !AttrName !SrcRange
   | -- | Declare a conversion factor between a source unit and a base unit
     --
     -- Such two units have a common zero point, they are mutually convertible
@@ -1950,21 +1950,21 @@ data UnitDecl
     -- Note bidirectional conversion is implied when rhs is a base unit.
     --
     -- See: https://en.wikipedia.org/wiki/Conversion_factor
-    ConversionFactor !Decimal !AttrName !Decimal !UoM
+    ConversionFactor !Decimal !AttrName !SrcRange !Decimal !UoM !SrcRange
   | -- | Declare a one way conversion from a source unit to a base unit
     --
     -- Usually such two units don't have a common zero point, more
     -- sophisticated formula is thus needed.
     --
     -- E.g. https://en.wikipedia.org/wiki/Conversion_of_scales_of_temperature
-    ConversionFormula !AttrName !ExprSrc !Text !UoM
+    ConversionFormula !AttrName !SrcRange !ExprSrc !Text !UoM
   deriving (Eq)
 
 instance Show UnitDecl where
-  show (BaseUnitDecl sym) = T.unpack sym
-  show (ConversionFactor nQty nUnit dQty dUnit) =
+  show (BaseUnitDecl sym _) = T.unpack sym
+  show (ConversionFactor nQty nUnit _ dQty dUnit _) =
     show nQty <> T.unpack nUnit <> " = " <> show dQty <> show dUnit
-  show (ConversionFormula outUnit _formula fSrc _inUnit) =
+  show (ConversionFormula outUnit _ _formula fSrc _inUnit) =
     "[" <> T.unpack outUnit <> "] = " <> T.unpack fSrc
 
 -- | Parsed unit of measure specification

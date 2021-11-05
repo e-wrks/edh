@@ -28,10 +28,22 @@ sz = 325.9MB
 sz.unify()
 
 # %%
-sz.reduce(TB)
+sz.unify(B)
+
+# %%
+sz.unify(GB)
 
 # %%
 KB.unify(sz)
+
+# %%
+sz.reduce()
+
+# %%
+sz.reduce(MB)
+
+# %%
+sz.reduce(KB)
 
 
 # %%
@@ -56,14 +68,28 @@ uom
 
 # %%
 
+uom 1N = 1kg*m/s/s
+
+# %%
+
+f = 5N
+m = 2.3kg
+t = 0.5s
+
+v0 = 0m/s
+v1 = v0 + f/m*t
+
+
+# %%
+
 desc$expr {
 
   uom
   , K
   , [K] = [°C] + 273.15
-  , [°C] = [K] − 273.15
-  , [°F] = [°C] * 9⁄5 + 32
-  , [°C] = ([°F] − 32) * 5⁄9
+  , [°C] = [K] - 273.15
+  , [°F] = [°C] * 9/5 + 32
+  , [°C] = ([°F] - 32) * 5/9
 
 }
 
