@@ -285,7 +285,7 @@ parseUnitStmt !si = do
       nUnit <- lexeme parseUnitSym
       void $ char '=' <* sc
       dQty <- parseDecLit
-      dUnit <- parseUoM
+      dUnit <- fromMaybe (BaseUnit "") <$> optional parseUoM
       return $ ConversionFactor nQty nUnit dQty dUnit
 
 parseUnitConversionFormula :: Parser UnitDecl
