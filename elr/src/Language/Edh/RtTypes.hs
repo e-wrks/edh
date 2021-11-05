@@ -998,43 +998,6 @@ callableLoc = \case
 -- database for storage, will tend to define a generated UUID
 -- attribute or the like.
 
-data UnitFormula
-  = -- | Converting from the source unit by division by a conversion factor
-    RatioFormula !Decimal
-  | -- | Converting from the source unit by evaluating an expression with
-    -- the value in that unit bound to an attribute keyed by bracket symbol
-    -- of that unit
-    ExprFomula !ExprDefi !Text
-  deriving (Eq)
-
-instance Hashable UnitFormula where
-  hashWithSalt s (RatioFormula r) =
-    s `hashWithSalt` (-1 :: Int) `hashWithSalt` r
-  hashWithSalt s (ExprFomula x _src) =
-    s `hashWithSalt` (-2 :: Int) `hashWithSalt` x
-
-data UnitDefi = UnitDefi !AttrName !(Map.HashMap UoM UnitFormula)
-  deriving (Eq)
-
-instance Show UnitDefi where
-  show (UnitDefi sym formulae) =
-    "uom " <> T.unpack sym <> " {# " -- TODO show details of formulae
-      <> show (Map.size formulae)
-      <> " formula(e) #}"
-
-instance Hashable UnitDefi where
-  hashWithSalt s (UnitDefi sym formulae) =
-    s `hashWithSalt` sym `hashWithSalt` formulae
-
-data Quantity = Quantity !Decimal !UoM
-  deriving (Eq)
-
-instance Show Quantity where
-  show (Quantity qty unit) = show qty <> show unit
-
-instance Hashable Quantity where
-  hashWithSalt s (Quantity qty unit) = s `hashWithSalt` qty `hashWithSalt` unit
-
 data EdhBound = OpenBound EdhValue | ClosedBound EdhValue
   deriving (Eq)
 
@@ -1362,28 +1325,6 @@ instance Show OptDocCmt where
   show NoDocCmt = "<no-doc>"
   show (DocCmt []) = "<empty-doc>"
   show (DocCmt lns) = "<" <> show (length lns) <> "-doc-lines>"
-
-data UnitDecl
-  = -- | Declare a base unit
-    BaseUnitDecl !AttrName
-  | -- | Convertible with same zero point, just scaling
-    --
-    -- Note bidirectional conversion is implied when rhs is a base unit
-    --
-    -- See: https://en.wikipedia.org/wiki/Conversion_factor
-    ConversionFactor !Decimal !AttrName !Decimal !UoM
-  | -- | Not with same zero point, need more sophisticated formula
-    --
-    -- E.g. https://en.wikipedia.org/wiki/Conversion_of_scales_of_temperature
-    ConversionFormula !AttrName !ExprSrc !Text !UoM
-  deriving (Eq)
-
-instance Show UnitDecl where
-  show (BaseUnitDecl sym) = T.unpack sym
-  show (ConversionFactor nQty nUnit dQty dUnit) =
-    show nQty <> T.unpack nUnit <> " = " <> show dQty <> show dUnit
-  show (ConversionFormula outUnit _formula fSrc _inUnit) =
-    "[" <> T.unpack outUnit <> "] = " <> T.unpack fSrc
 
 data Stmt
   = -- | literal `pass` to fill a place where a statement needed,
@@ -1949,18 +1890,102 @@ data EffAddr
 data SourceSeg = SrcSeg !Text | IntplSeg !ExprSrc
   deriving (Eq, Show)
 
--- | https://en.wikipedia.org/wiki/Unit_of_measurement#Base_and_derived_units
+-- | Conversion formula from a source UoM (base or derived) to a base UoM
+data UnitFormula
+  = -- | Converting from the source unit by multiplying a conversion factor
+    RatioFormula !Decimal
+  | -- | Converting from the source unit by evaluating an expression with
+    -- the value in that unit bound to an attribute keyed by bracket symbol
+    -- of that unit
+    ExprFomula !ExprDefi !Text
+  deriving (Eq)
+
+instance Hashable UnitFormula where
+  hashWithSalt s (RatioFormula r) =
+    s `hashWithSalt` (-1 :: Int) `hashWithSalt` r
+  hashWithSalt s (ExprFomula x _src) =
+    s `hashWithSalt` (-2 :: Int) `hashWithSalt` x
+
+-- | Base unit definition
+--
+-- The unit symbol here can never be empty. But the formulae map can contain a
+-- formula from an empty 'BaseUnit' (i.e. the dimensionless 1), indicating
+-- this base unit is effectively dimensionless too, and that formula if a
+-- 'RatioFormula' serves as the divisor to convert quantity in this unit to
+-- pure number.
+data UnitDefi = UnitDefi !AttrName !(Map.HashMap UoM UnitFormula)
+  deriving (Eq)
+
+instance Show UnitDefi where
+  show (UnitDefi sym formulae) =
+    "uom " <> T.unpack sym <> " {# " -- TODO show details of formulae
+      <> show (Map.size formulae)
+      <> " formula(e) #}"
+
+instance Hashable UnitDefi where
+  hashWithSalt s (UnitDefi sym formulae) =
+    s `hashWithSalt` sym `hashWithSalt` formulae
+
+-- | A quanty in some specified unit of measure
+--
+-- In case the uom is a 'BaseUnit' of empty symbol (i.e. dimensionless 1),
+-- this quantity is equivalent to a pure number.
+data Quantity = Quantity !Decimal !UoM
+  deriving (Eq)
+
+instance Show Quantity where
+  show (Quantity qty unit) = show qty <> show unit
+
+instance Hashable Quantity where
+  hashWithSalt s (Quantity qty unit) = s `hashWithSalt` qty `hashWithSalt` unit
+
+data UnitDecl
+  = -- | Declare a dimensional base unit
+    BaseUnitDecl !AttrName
+  | -- | Declare a conversion factor between a source unit and a base unit
+    --
+    -- Such two units have a common zero point, they are mutually convertible
+    -- by just scaling.
+    --
+    -- Note bidirectional conversion is implied when rhs is a base unit.
+    --
+    -- See: https://en.wikipedia.org/wiki/Conversion_factor
+    ConversionFactor !Decimal !AttrName !Decimal !UoM
+  | -- | Declare a one way conversion from a source unit to a base unit
+    --
+    -- Usually such two units don't have a common zero point, more
+    -- sophisticated formula is thus needed.
+    --
+    -- E.g. https://en.wikipedia.org/wiki/Conversion_of_scales_of_temperature
+    ConversionFormula !AttrName !ExprSrc !Text !UoM
+  deriving (Eq)
+
+instance Show UnitDecl where
+  show (BaseUnitDecl sym) = T.unpack sym
+  show (ConversionFactor nQty nUnit dQty dUnit) =
+    show nQty <> T.unpack nUnit <> " = " <> show dQty <> show dUnit
+  show (ConversionFormula outUnit _formula fSrc _inUnit) =
+    "[" <> T.unpack outUnit <> "] = " <> T.unpack fSrc
+
+-- | Parsed unit of measure specification
+--
+-- Note the order of base units appearance in a derived unit is significant,
+-- thus considered different UoM, though multiple occurrences of the same base
+-- unit will be moved together as by normalization.
+--
+-- See https://en.wikipedia.org/wiki/Unit_of_measurement#Base_and_derived_units
 data UoM = BaseUnit !AttrName | DerivedUnit [AttrName] [AttrName]
   deriving (Eq)
 
+-- | TODO implement reduction of complex derived units
 uomNormalize :: UoM -> UoM
 uomNormalize (BaseUnit !sym) = BaseUnit sym
 uomNormalize (DerivedUnit [!sym] []) = BaseUnit sym
-uomNormalize (DerivedUnit [] []) = BaseUnit "" -- unitless
+uomNormalize (DerivedUnit [] []) = BaseUnit "" -- dimensionless one (1)
 uomNormalize (DerivedUnit ns ds) =
   -- TODO:
-  -- - place duplicate same base units consecutively
-  -- - remove common (number of) same base units between ns and ds
+  -- - move duplicate same base units together, to the 1st-appear place
+  -- - shake-off common (number of) same base units between ns and ds
   DerivedUnit ns ds
 
 uomMultiply :: UoM -> UoM -> UoM
@@ -1982,9 +2007,9 @@ uomDivide (DerivedUnit ns1 ds1) (DerivedUnit ns2 ds2) =
   uomNormalize $ DerivedUnit (ns1 ++ ds2) (ds1 ++ ns2)
 
 instance Show UoM where
-  show (BaseUnit "") = "{# unitless #}" -- or (1) ?
+  show (BaseUnit "") = "{# ① #}"
   show (BaseUnit sym) = T.unpack sym
-  -- TODO show duplicate uom syms in exponential form
+  -- TODO show repeated base units in exponential form?
   show (DerivedUnit nUnits []) =
     T.unpack $
       T.intercalate "*" nUnits

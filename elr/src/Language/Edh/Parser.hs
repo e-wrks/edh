@@ -276,7 +276,7 @@ parseUnitStmt !si = do
     parseUnitDecl =
       parseUnitConversionFormula -- starts with `[`
         <|> parseConversionFactor -- starts with a digit
-        <|> BaseUnitDecl <$> lexeme parseUnitSym -- identifier chars
+        <|> BaseUnitDecl <$> lexeme parseUnitSym -- UoM chars
 
     {- HLINT ignore "Use <$>" -}
     parseConversionFactor :: Parser UnitDecl
