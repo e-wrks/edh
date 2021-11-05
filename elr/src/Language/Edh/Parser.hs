@@ -159,10 +159,10 @@ optionalSemicolon :: Parser Bool
 optionalSemicolon = fromMaybe False <$> optional (True <$ symbol ";")
 
 isIdentStart :: Char -> Bool
-isIdentStart !c = c == '_' || c == '°' || Char.isAlpha c
+isIdentStart !c = c == '_' || Char.isAlpha c
 
 isIdentChar :: Char -> Bool
-isIdentChar c = c == '_' || c == '\'' || c == '°' || Char.isAlphaNum c
+isIdentChar c = c == '_' || c == '\'' || Char.isAlphaNum c
 
 singleDot :: Parser ()
 singleDot = do
@@ -1304,7 +1304,7 @@ parseBoolLit :: Parser Bool
 parseBoolLit = (keyword "true" $> True) <|> (keyword "false" $> False)
 
 parseUnitSym :: Parser AttrName
-parseUnitSym = takeWhile1P (Just "UoM symbols") isIdentStart
+parseUnitSym = takeWhile1P (Just "UoM symbols") isMeasurementUnitChar
 
 parseUoM :: Parser UoM
 parseUoM =

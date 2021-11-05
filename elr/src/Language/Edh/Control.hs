@@ -237,6 +237,17 @@ isOperatorChar !c =
       Char.OtherPunctuation -> True
       _ -> False
 
+isMeasurementUnitChar :: Char -> Bool
+isMeasurementUnitChar !c =
+  if c < toEnum 128
+    then c `elem` ("'\"$%" :: [Char]) || Char.isAlpha c
+    else
+      Char.isAlpha c || case Char.generalCategory c of
+        Char.MathSymbol -> True
+        Char.CurrencySymbol -> True
+        Char.OtherSymbol -> True
+        _ -> False
+
 -- no backtracking needed for precedence dict, so it
 -- can live in the inner monad of 'ParsecT'.
 type Parser = ParsecT Void Text (State EdhParserState)
