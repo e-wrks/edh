@@ -1182,6 +1182,7 @@ instance Eq EdhValue where
       x'l == y'l
   EdhExpr (ExprDefi x'u _ _) _ == EdhExpr (ExprDefi y'u _ _) _ = x'u == y'u
   (EdhUoM x) == (EdhUoM y) = x == y
+  (EdhQty x) == (EdhQty y) = x == y
   -- todo: support coercing equality ?
   --       * without this, we are a strongly typed dynamic language
   --       * with this, we'll be a weakly typed dynamic language
@@ -1982,7 +1983,7 @@ instance Show Quantity where
 instance Hashable Quantity where
   hashWithSalt s (Quantity qty unit) = s `hashWithSalt` qty `hashWithSalt` unit
 
--- | Parsed unit of measure specification
+-- | Unit of measure specification
 --
 -- Note the order of base units appearance in a derived unit is significant,
 -- thus considered different UoM, though multiple occurrences of the same base
@@ -1992,13 +1993,14 @@ instance Hashable Quantity where
 data UoM = BaseUnit !AttrName | DerivedUnit [AttrName] [AttrName]
   deriving (Eq)
 
--- | TODO implement reduction of complex derived units
+-- TODO do we need api for full expansion to all primitive units?
+
 uomNormalize :: UoM -> UoM
 uomNormalize (BaseUnit !sym) = BaseUnit sym
 uomNormalize (DerivedUnit [!sym] []) = BaseUnit sym
 uomNormalize (DerivedUnit [] []) = BaseUnit "" -- dimensionless one (1)
 uomNormalize (DerivedUnit ns ds) =
-  -- TODO:
+  -- TODO: implement reduction of complex derived units
   -- - move duplicate same base units together, to the 1st-appear place
   -- - shake-off common (number of) same base units between ns and ds
   DerivedUnit ns ds

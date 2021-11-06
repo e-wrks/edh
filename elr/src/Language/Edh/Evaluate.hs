@@ -4119,6 +4119,8 @@ edhValueRepr !ets !val !exitRepr = case val of
   EdhObject !obj -> edhObjRepr ets obj exitRepr
   -- repr of named value is just its name
   EdhNamedValue !n _v -> exitRepr n
+  EdhUoM !uom -> exitRepr $ uom'defi'sym uom
+  EdhQty !qty -> exitRepr $ T.pack $ show qty
   EdhProcedure !callable _ -> exitRepr $ callableName callable
   EdhBoundProc !callable _ _ _ ->
     exitRepr $ "{# bound #} " <> callableName callable
@@ -4197,6 +4199,8 @@ edhValueStr _ (EdhUUID !u) !exit = exit $ UUID.toText u
 edhValueStr ets (EdhObject !o) !exit = edhObjStr ets o exit
 edhValueStr _ (EdhNamedValue !name EdhNil) !exit = exit name
 edhValueStr !ets (EdhNamedValue _ !v) !exit = edhValueStr ets v exit
+edhValueStr _ (EdhUoM !uom) !exit = exit $ uom'defi'sym uom
+edhValueStr _ (EdhQty !qty) !exit = exit $ T.pack $ show qty
 edhValueStr !ets !v !exit = edhValueRepr ets v exit
 
 edhValueStrTx :: EdhValue -> EdhTxExit Text -> EdhTx
@@ -5670,6 +5674,9 @@ pvlToDictEntries !ets !pvl !exit = do
 edhValueNull :: EdhThreadState -> EdhValue -> (Bool -> STM ()) -> STM ()
 edhValueNull _ EdhNil !exit = exit True
 edhValueNull !ets (EdhNamedValue _ v) !exit = edhValueNull ets v exit
+edhValueNull _ (EdhUoM _uom) !exit = exit False
+edhValueNull _ (EdhQty (Quantity q _uom)) !exit =
+  exit $ D.decimalIsNaN q || q == 0
 edhValueNull _ (EdhDecimal d) !exit = exit $ D.decimalIsNaN d || d == 0
 edhValueNull _ (EdhBool b) !exit = exit $ not b
 edhValueNull _ (EdhString s) !exit = exit $ T.null s
@@ -5710,6 +5717,10 @@ edhIdentEqual EdhNamedValue {} _ = return False
 edhIdentEqual _ EdhNamedValue {} = return False
 edhIdentEqual (EdhDecimal (D.Decimal 0 0 0)) (EdhDecimal (D.Decimal 0 0 0)) =
   return True
+edhIdentEqual
+  (EdhQty (Quantity (D.Decimal 0 0 0) x'uom))
+  (EdhQty (Quantity (D.Decimal 0 0 0) y'uom)) =
+    return $ x'uom == y'uom
 edhIdentEqual x y = liftA2 (==) (edhValueIdent x) (edhValueIdent y)
 
 edhNamelyEqual ::
