@@ -2962,6 +2962,8 @@ evalStmt :: Stmt -> EdhTxExit EdhValue -> EdhTx
 evalStmt !stmt !exit = case stmt of
   ExprStmt !expr !docCmt ->
     evalExpr' expr docCmt $ \ !result -> exitEdhTx exit result
+  UnitStmt decls ->
+    undefined
   LetStmt !argsRcvr (ArgsPacker !argsSndr _) -> \ !ets -> do
     let !ctx = edh'context ets
         !scope = contextScope ctx
@@ -3787,14 +3789,28 @@ intplStmt !ets !stmt !exit = case stmt of
   ExprStmt !x !docCmt -> intplExpr ets x $ \ !x' -> exit $ ExprStmt x' docCmt
   _ -> exit stmt
 
-evalLiteral :: Literal -> STM EdhValue
-evalLiteral = \case
-  DecLiteral !v -> return (EdhDecimal v)
-  StringLiteral !v -> return (EdhString v)
-  BoolLiteral !v -> return (EdhBool v)
-  NilLiteral -> return nil
-  SinkCtor -> EdhSink <$> newSink
-  ValueLiteral !v -> return v
+evalLiteral :: EdhThreadState -> Literal -> (EdhValue -> STM ()) -> STM ()
+evalLiteral ets lit exit = case lit of
+  DecLiteral !v -> exit (EdhDecimal v)
+  StringLiteral !v -> exit (EdhString v)
+  BoolLiteral !v -> exit (EdhBool v)
+  NilLiteral -> exit nil
+  SinkCtor -> EdhSink <$> newSink >>= exit
+  ValueLiteral !v -> exit v
+  QtyLiteral v uom -> do
+    let scope = contextScope $ edh'context ets
+    case uom of
+      BaseUnit uSym ->
+        -- support mathematical notation e.g.:
+        --   3x = 3*x
+        -- where x is not a UoM but some variable
+        edhUltimate <$> lookupEdhCtxAttr scope (AttrByName uSym) >>= \case
+          EdhDecimal d -> exit $ EdhDecimal $ v * d
+          -- todo: complain this eager? or postpone until really needed?
+          -- EdhNil ->
+          --   throwEdh ets EvalError $ "UoM [" <> uSym <> "] not in scope"
+          _ -> exit $ EdhQty $ Quantity v uom
+      _ -> exit $ EdhQty $ Quantity v uom
 
 evalAttrRef :: AttrRef -> EdhTxExit EdhValue -> EdhTx
 evalAttrRef !addr !exit !ets = case addr of
@@ -3844,7 +3860,7 @@ evalDictLit [] !dsl !exit !ets =
 evalDictLit ((k, v) : entries) !dsl !exit !ets = case k of
   LitDictKey !lit -> runEdhTx ets $
     evalExprSrc v $ \ !vVal _ets ->
-      evalLiteral lit >>= \ !kVal ->
+      evalLiteral ets lit $ \ !kVal ->
         runEdhTx ets $ evalDictLit entries ((kVal, vVal) : dsl) exit
   AddrDictKey !addr -> runEdhTx ets $
     evalAttrRef (DirectRef addr) $ \ !kVal ->
@@ -4304,7 +4320,7 @@ evalExpr' (ExprWithSrc (ExprSrc !x !x'span) !sss) !docCmt !exit = \ !ets ->
       exitEdh ets exit $
         EdhExpr (ExprDefi u x' curSrcLoc {src'range = x'span}) $ T.concat ssl
 evalExpr' (LitExpr !lit) _docCmt !exit =
-  \ !ets -> evalLiteral lit >>= exitEdh ets exit
+  \ !ets -> evalLiteral ets lit $ exitEdh ets exit
 evalExpr' (PrefixExpr PrefixPlus !expr') !docCmt !exit =
   evalExprSrc' expr' docCmt exit
 evalExpr' (PrefixExpr PrefixMinus !expr') !docCmt !exit =
