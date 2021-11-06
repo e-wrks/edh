@@ -3160,12 +3160,15 @@ evalStmt !stmt !exit = case stmt of
       $ evalExprSrc' effs docCmt $
         \ !rtn -> edhSwitchState ets $ exit rtn
   VoidStmt -> exitEdhTx exit nil
-  UnitStmt !decls !docCmt -> \ !ets -> do
-    let defineUnits :: [UnitDecl] -> STM ()
-        defineUnits [] = exitEdh ets exit nil
-        defineUnits (ud : rest) = runEdhTx ets $
-          defineUnit docCmt ud $ \_ _ets -> defineUnits rest
-    defineUnits decls
+  UnitStmt !decls !docCmt -> \ !ets ->
+    case edh'ctx'eff'target $ edh'context ets of
+      Just {} -> throwEdh ets UsageError "uom is always lexical, not effectful"
+      Nothing -> do
+        let defineUnits :: [UnitDecl] -> STM ()
+            defineUnits [] = exitEdh ets exit nil
+            defineUnits (ud : rest) = runEdhTx ets $
+              defineUnit docCmt ud $ \_ _ets -> defineUnits rest
+        defineUnits decls
   IllegalSegment !err'msg !err'pos -> \ !ets -> do
     let SrcLoc !doc _pos = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
     -- todo add tolerating mode?
@@ -3205,6 +3208,9 @@ defineUnit !docCmt !decl !exit !ets = case decl of
         Nothing -> do
           let defi = UnitDefi docCmt sym Map.empty
           iopdInsert (AttrByName sym) (EdhUoM defi) $ edh'scope'entity scope
+          case edh'ctx'exp'target ctx of
+            Nothing -> pure ()
+            Just !esExps -> iopdInsert (AttrByName sym) (EdhUoM defi) esExps
           exit' defi
         Just (EdhUoM (UnitDefi prevCmt defiSym prevFormulae), _prevScope)
           | defiSym == sym -> do
@@ -3215,6 +3221,10 @@ defineUnit !docCmt !decl !exit !ets = case decl of
               _ ->
                 iopdInsert (AttrByName sym) (EdhUoM defi) $
                   edh'scope'entity scope
+            case edh'ctx'exp'target ctx of
+              Nothing -> pure ()
+              Just !esExps ->
+                iopdInsert (AttrByName sym) (EdhUoM defi) esExps
             exit' defi
         Just (badVal, _) -> edhSimpleDesc ets badVal $ \ !badDesc ->
           throwEdh ets UsageError $
@@ -3224,6 +3234,9 @@ defineUnit !docCmt !decl !exit !ets = case decl of
         Nothing -> do
           let defi = UnitDefi docCmt sym $ Map.singleton srcUoM uf
           iopdInsert (AttrByName sym) (EdhUoM defi) $ edh'scope'entity scope
+          case edh'ctx'exp'target ctx of
+            Nothing -> pure ()
+            Just !esExps -> iopdInsert (AttrByName sym) (EdhUoM defi) esExps
           exit' defi
         Just (EdhUoM (UnitDefi prevCmt defiSym prevFormulae), _prevScope)
           | defiSym == sym -> do
@@ -3232,6 +3245,9 @@ defineUnit !docCmt !decl !exit !ets = case decl of
                     Map.insert srcUoM uf prevFormulae
             iopdInsert (AttrByName sym) (EdhUoM defi) $
               edh'scope'entity scope
+            case edh'ctx'exp'target ctx of
+              Nothing -> pure ()
+              Just !esExps -> iopdInsert (AttrByName sym) (EdhUoM defi) esExps
             exit' defi
         Just (badVal, _) -> edhSimpleDesc ets badVal $ \ !badDesc ->
           throwEdh ets UsageError $
