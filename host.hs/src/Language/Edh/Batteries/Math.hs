@@ -75,8 +75,7 @@ divIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
--- | operator (%) modulus of integer division, following Python
--- http://python-history.blogspot.com/2010/08/why-pythons-integer-division-floors.html
+-- | operator (mod) modulus of integer division, following Haskell/Ada
 modIntProc :: EdhIntrinsicOp
 modIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
@@ -86,6 +85,19 @@ modIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
         EdhDecimal !rhNum -> case decimalToInteger rhNum of
           Nothing -> intrinsicOpReturnNA exit lhVal rhVal
           Just rhi -> exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `mod` rhi
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    _ -> intrinsicOpReturnNA'WithLHV exit lhVal
+
+-- | operator (rem) modulus of integer division, following Haskell/Ada
+remIntProc :: EdhIntrinsicOp
+remIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  case edhUltimate lhVal of
+    EdhDecimal !lhNum -> case decimalToInteger lhNum of
+      Nothing -> intrinsicOpReturnNA'WithLHV exit lhVal
+      Just lhi -> evalExprSrc rhExpr $ \ !rhVal -> case edhUltimate rhVal of
+        EdhDecimal !rhNum -> case decimalToInteger rhNum of
+          Nothing -> intrinsicOpReturnNA exit lhVal rhVal
+          Just rhi -> exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `rem` rhi
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
