@@ -18,6 +18,7 @@ import qualified Data.HashMap.Strict as Map
 import Data.IORef
 import qualified Data.Lossless.Decimal as D
 import Data.Maybe
+import Data.Ratio
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (Decoding (Some))
@@ -3986,6 +3987,20 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
             <> "\n---expr-source-form:\n"
             <> src
             <> "\n---end-of-expr-desc---"
+    exitDesc descStr
+  EdhUoM (UnitDefi _docCmt buSym formulae) -> do
+    let showFormula :: (UoM, UnitFormula) -> Text
+        showFormula (srcUnit, RatioFormula cFactor) =
+          T.pack (show $ numerator r) <> buSym <> " = "
+            <> T.pack
+              (show (denominator r) <> show srcUnit)
+          where
+            r = toRational cFactor
+        showFormula (_srcUnit, ExprFormula _x !xSrc) =
+          "[" <> buSym <> "] = " <> xSrc
+    let descStr =
+          "'UoM' value for base unit [" <> buSym <> "], with formula(e):\n"
+            <> T.unlines (("  " <>) . showFormula <$> Map.toList formulae)
     exitDesc descStr
   _ -> edhValueRepr ets val $ \ !valRepr ->
     exitDesc $ "'" <> edhTypeNameOf val <> "' value `" <> valRepr <> "`"
