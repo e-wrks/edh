@@ -289,12 +289,15 @@ parseUnitStmt !docCmt !si = do
     {- HLINT ignore "Use <$>" -}
     parseConversionFactor :: Parser UnitDecl
     parseConversionFactor = do
-      nQty <- parseDecLit
+      nQty <- parseDecLit'
       (nuSym, nuSpan) <- parseBaseUnitSpec
       void $ char '=' <* sc
-      dQty <- parseDecLit
+      dQty <- parseDecLit'
+
       (duSpec, duSpan) <-
-        fromMaybe (BaseUnit "", noSrcRange) <$> optional parseUoM
+        parseUoM <|> do
+          sc
+          return (BaseUnit "", noSrcRange)
       return $ ConversionFactor nQty nuSym nuSpan dQty duSpec duSpan
 
     parseUnitConversionFormula :: Parser UnitDecl
