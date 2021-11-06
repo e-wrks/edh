@@ -2962,8 +2962,6 @@ evalStmt :: Stmt -> EdhTxExit EdhValue -> EdhTx
 evalStmt !stmt !exit = case stmt of
   ExprStmt !expr !docCmt ->
     evalExpr' expr docCmt $ \ !result -> exitEdhTx exit result
-  UnitStmt decls ->
-    undefined
   LetStmt !argsRcvr (ArgsPacker !argsSndr _) -> \ !ets -> do
     let !ctx = edh'context ets
         !scope = contextScope ctx
@@ -3161,11 +3159,82 @@ evalStmt !stmt !exit = case stmt of
       $ evalExprSrc' effs docCmt $
         \ !rtn -> edhSwitchState ets $ exit rtn
   VoidStmt -> exitEdhTx exit nil
+  UnitStmt !decls !docCmt -> \ !ets -> do
+    let defineUnits :: [UnitDecl] -> STM ()
+        defineUnits [] = exitEdh ets exit nil
+        defineUnits (ud : rest) = runEdhTx ets $
+          defineUnit docCmt ud $ \_ _ets -> defineUnits rest
+    defineUnits decls
   IllegalSegment !err'msg !err'pos -> \ !ets -> do
     let SrcLoc !doc _pos = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
     -- todo add tolerating mode?
     throwEdh ets EvalError $
       "illegal code at: " <> prettySrcPos doc err'pos <> "\n" <> err'msg
+
+defineUnit :: OptDocCmt -> UnitDecl -> EdhTxExit UnitDefi -> EdhTx
+defineUnit !docCmt !decl !exit !ets = case decl of
+  BaseUnitDecl sym _ ->
+    defineFormula sym Nothing $ exitEdh ets exit
+  ConversionFactor nQty nSym _ dQty dUnit _ ->
+    defineFormula nSym (Just (dUnit, RatioFormula $ nQty / dQty)) $ \ !defi ->
+      case dUnit of
+        BaseUnit dSym ->
+          defineFormula
+            dSym
+            (Just (BaseUnit nSym, RatioFormula $ dQty / nQty))
+            $ \_ -> exitEdh ets exit defi
+        _ -> exitEdh ets exit defi
+  ConversionFormula outSym _ (ExprSrc !x !x'span) fSrc inUnit -> do
+    !u <- unsafeIOToSTM newUnique
+    let curSrcLoc = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
+        formulaDefi = ExprDefi u x curSrcLoc {src'range = x'span}
+    defineFormula outSym (Just (inUnit, ExprFormula formulaDefi fSrc)) $
+      exitEdh ets exit
+  where
+    !ctx = edh'context ets
+    !scope = contextScope ctx
+
+    -- Note we intentionally do not update the UoM definition in outer scopes,
+    --      if already defined there, a new definition incorporating existing
+    --      formulae is always inserted into current scope.
+    defineFormula ::
+      AttrName -> Maybe (UoM, UnitFormula) -> (UnitDefi -> STM ()) -> STM ()
+    defineFormula sym Nothing !exit' =
+      resolveEdhCtxAttr scope (AttrByName sym) >>= \case
+        Nothing -> do
+          let defi = UnitDefi docCmt sym Map.empty
+          iopdInsert (AttrByName sym) (EdhUoM defi) $ edh'scope'entity scope
+          exit' defi
+        Just (EdhUoM (UnitDefi prevCmt defiSym prevFormulae), _prevScope)
+          | defiSym == sym -> do
+            let defi =
+                  UnitDefi (mergeDocCmts prevCmt docCmt) sym prevFormulae
+            case docCmt of
+              NoDocCmt -> pure ()
+              _ ->
+                iopdInsert (AttrByName sym) (EdhUoM defi) $
+                  edh'scope'entity scope
+            exit' defi
+        Just (badVal, _) -> edhSimpleDesc ets badVal $ \ !badDesc ->
+          throwEdh ets UsageError $
+            "can not re-define as UoM [" <> sym <> "] from: " <> badDesc
+    defineFormula sym (Just (srcUoM, uf)) !exit' =
+      resolveEdhCtxAttr scope (AttrByName sym) >>= \case
+        Nothing -> do
+          let defi = UnitDefi docCmt sym $ Map.singleton srcUoM uf
+          iopdInsert (AttrByName sym) (EdhUoM defi) $ edh'scope'entity scope
+          exit' defi
+        Just (EdhUoM (UnitDefi prevCmt defiSym prevFormulae), _prevScope)
+          | defiSym == sym -> do
+            let defi =
+                  UnitDefi (mergeDocCmts prevCmt docCmt) sym $
+                    Map.insert srcUoM uf prevFormulae
+            iopdInsert (AttrByName sym) (EdhUoM defi) $
+              edh'scope'entity scope
+            exit' defi
+        Just (badVal, _) -> edhSimpleDesc ets badVal $ \ !badDesc ->
+          throwEdh ets UsageError $
+            "can not define UoM [" <> sym <> "] into: " <> badDesc
 
 type CheckImportExternalModule = Text -> EdhTx -> EdhTx
 

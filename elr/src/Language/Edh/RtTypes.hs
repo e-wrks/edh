@@ -1326,6 +1326,12 @@ instance Show OptDocCmt where
   show (DocCmt []) = "<empty-doc>"
   show (DocCmt lns) = "<" <> show (length lns) <> "-doc-lines>"
 
+mergeDocCmts :: OptDocCmt -> OptDocCmt -> OptDocCmt
+mergeDocCmts NoDocCmt cmt = cmt
+mergeDocCmts cmt NoDocCmt = cmt
+mergeDocCmts (DocCmt lns1) (DocCmt lns2) =
+  DocCmt $ lns1 ++ ["---"] ++ lns2
+
 data Stmt
   = -- | literal `pass` to fill a place where a statement needed,
     -- same as in Python
@@ -1344,7 +1350,7 @@ data Stmt
   | -- | assignment with args (un/re)pack sending/receiving syntax
     LetStmt !ArgsReceiver !ArgsPacker
   | -- | unit of measure declaration
-    UnitStmt ![UnitDecl]
+    UnitStmt ![UnitDecl] !OptDocCmt
   | -- | super object declaration for a descendant object
     ExtendsStmt !ExprSrc
   | -- | perceiption declaration, a perceiver is bound to an event `sink`
@@ -1897,13 +1903,13 @@ data UnitFormula
   | -- | Converting from the source unit by evaluating an expression with
     -- the value in that unit bound to an attribute keyed by bracket symbol
     -- of that unit
-    ExprFomula !ExprDefi !Text
+    ExprFormula !ExprDefi !Text
   deriving (Eq)
 
 instance Hashable UnitFormula where
   hashWithSalt s (RatioFormula r) =
     s `hashWithSalt` (-1 :: Int) `hashWithSalt` r
-  hashWithSalt s (ExprFomula x _src) =
+  hashWithSalt s (ExprFormula x _src) =
     s `hashWithSalt` (-2 :: Int) `hashWithSalt` x
 
 -- | Base unit definition
@@ -1913,31 +1919,27 @@ instance Hashable UnitFormula where
 -- this base unit is effectively dimensionless too, and that formula if a
 -- 'RatioFormula' serves as the divisor to convert quantity in this unit to
 -- pure number.
-data UnitDefi = UnitDefi !AttrName !(Map.HashMap UoM UnitFormula)
-  deriving (Eq)
+data UnitDefi = UnitDefi
+  { uom'defi'doc :: !OptDocCmt,
+    uom'defi'sym :: !AttrName,
+    uom'defi'formulae :: !(Map.HashMap UoM UnitFormula)
+  }
+
+instance Eq UnitDefi where
+  -- todo: should compare conversion formulae as well?
+  -- mind to update hashing as well
+  UnitDefi _ x'sym _ == UnitDefi _ y'sym _ = x'sym == y'sym
 
 instance Show UnitDefi where
-  show (UnitDefi sym formulae) =
-    "uom " <> T.unpack sym <> " {# " -- TODO show details of formulae
-      <> show (Map.size formulae)
+  show (UnitDefi _docCmt sym formulae) =
+    "uom " <> T.unpack sym <> " {# " <> show (Map.size formulae)
       <> " formula(e) #}"
 
 instance Hashable UnitDefi where
-  hashWithSalt s (UnitDefi sym formulae) =
-    s `hashWithSalt` sym `hashWithSalt` formulae
-
--- | A quanty in some specified unit of measure
---
--- In case the uom is a 'BaseUnit' of empty symbol (i.e. dimensionless 1),
--- this quantity is equivalent to a pure number.
-data Quantity = Quantity !Decimal !UoM
-  deriving (Eq)
-
-instance Show Quantity where
-  show (Quantity qty unit) = show qty <> show unit
-
-instance Hashable Quantity where
-  hashWithSalt s (Quantity qty unit) = s `hashWithSalt` qty `hashWithSalt` unit
+  hashWithSalt s (UnitDefi _docCmt sym _formulae) =
+    -- todo: should hash conversion formulae as well?
+    -- mind to update Eq instance as well
+    s `hashWithSalt` sym -- `hashWithSalt` formulae
 
 data UnitDecl
   = -- | Declare a dimensional base unit
@@ -1962,10 +1964,23 @@ data UnitDecl
 
 instance Show UnitDecl where
   show (BaseUnitDecl sym _) = T.unpack sym
-  show (ConversionFactor nQty nUnit _ dQty dUnit _) =
-    show nQty <> T.unpack nUnit <> " = " <> show dQty <> show dUnit
-  show (ConversionFormula outUnit _ _formula fSrc _inUnit) =
-    "[" <> T.unpack outUnit <> "] = " <> T.unpack fSrc
+  show (ConversionFactor nQty nSym _ dQty dUnit _) =
+    show nQty <> T.unpack nSym <> " = " <> show dQty <> show dUnit
+  show (ConversionFormula outSym _ _formulaX fSrc _inUnit) =
+    "[" <> T.unpack outSym <> "] = " <> T.unpack fSrc
+
+-- | A quanty in some specified unit of measure
+--
+-- In case the uom is a 'BaseUnit' of empty symbol (i.e. dimensionless 1),
+-- this quantity is equivalent to a pure number.
+data Quantity = Quantity !Decimal !UoM
+  deriving (Eq)
+
+instance Show Quantity where
+  show (Quantity qty unit) = show qty <> show unit
+
+instance Hashable Quantity where
+  hashWithSalt s (Quantity qty unit) = s `hashWithSalt` qty `hashWithSalt` unit
 
 -- | Parsed unit of measure specification
 --

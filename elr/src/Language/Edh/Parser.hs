@@ -260,12 +260,12 @@ parseImportExpr !si = do
       (!se, !si') <- parseExpr si
       return (ar, se, si')
 
-parseUnitStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
-parseUnitStmt !si = do
+parseUnitStmt :: OptDocCmt -> IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseUnitStmt !docCmt !si = do
   void $ keyword "uom"
   void optionalComma
   -- todo: allow expr interpolation inside?
-  (,si) . UnitStmt <$> parseUnitDecls []
+  (,si) . flip UnitStmt docCmt <$> parseUnitDecls []
   where
     parseUnitDecls :: [UnitDecl] -> Parser [UnitDecl]
     parseUnitDecls uds = (<|> return (reverse $! uds)) $ do
@@ -1162,7 +1162,7 @@ parseStmt' !prec !si = do
               parseDeferStmt si,
               parseEffectStmt docCmt si,
               parseLetStmt si,
-              parseUnitStmt si,
+              parseUnitStmt docCmt si,
               parseExtendsStmt si,
               parsePerceiveStmt si,
               -- TODO validate <break> must within a loop construct
