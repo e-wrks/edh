@@ -1978,7 +1978,13 @@ data Quantity = Quantity !Decimal !UoM
   deriving (Eq)
 
 instance Show Quantity where
-  show (Quantity qty unit) = show qty <> show unit
+  show (Quantity qty unit) = case D.showDecimal' qty of
+    Left (n, d) -> case unit of
+      BaseUnit u -> n <> T.unpack u <> "/" <> d
+      DerivedUnit ns ds ->
+        n <> T.unpack (T.intercalate "*" ns) <> "/" <> d
+          <> T.unpack (T.intercalate "*" ds)
+    Right s -> s <> show unit
 
 instance Hashable Quantity where
   hashWithSalt s (Quantity qty unit) = s `hashWithSalt` qty `hashWithSalt` unit
