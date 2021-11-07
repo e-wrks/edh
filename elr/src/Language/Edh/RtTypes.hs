@@ -1949,6 +1949,14 @@ data UnitDefi
         uom'defi'denominators :: ![NamedUnitDefi]
       }
 
+uomDefiIdent :: UnitDefi -> AttrName
+uomDefiIdent (NamedUnitDefi' ud) = uom'defi'sym ud
+uomDefiIdent (ArithUnitDefi ns []) =
+  T.intercalate "*" (uom'defi'sym <$> ns)
+uomDefiIdent (ArithUnitDefi ns ds) =
+  T.intercalate "*" (uom'defi'sym <$> ns) <> "/"
+    <> T.intercalate "/" (uom'defi'sym <$> ds)
+
 instance Eq UnitDefi where
   NamedUnitDefi' x == NamedUnitDefi' y = x == y
   ArithUnitDefi x'ns x'ds == ArithUnitDefi y'ns y'ds =
@@ -1956,11 +1964,9 @@ instance Eq UnitDefi where
   _ == _ = False
 
 instance Show UnitDefi where
-  show (NamedUnitDefi' d) = show d
-  show (ArithUnitDefi ns []) =
-    intercalate "*" (show <$> ns)
-  show (ArithUnitDefi ns ds) =
-    intercalate "*" (show <$> ns) <> "/" <> intercalate "/" (show <$> ds)
+  show u = case uomDefiIdent u of
+    "" -> "{# ① #}"
+    uomIdent -> T.unpack uomIdent
 
 instance Hashable UnitDefi where
   hashWithSalt s (NamedUnitDefi' d) =
@@ -2054,16 +2060,18 @@ uomDivide (ArithUnit ns ds) (NamedUnit u2) =
 uomDivide (ArithUnit ns1 ds1) (ArithUnit ns2 ds2) =
   uomNormalize $ ArithUnit (ns1 ++ ds2) (ds1 ++ ns2)
 
+uomSpecIdent :: UnitSpec -> AttrName
+uomSpecIdent (NamedUnit sym) = sym
+-- TODO render repeated named units in exponential form?
+uomSpecIdent (ArithUnit nUnits []) =
+  T.intercalate "*" nUnits
+uomSpecIdent (ArithUnit nUnits dUnits) =
+  T.intercalate "*" nUnits <> "/" <> T.intercalate "/" dUnits
+
 instance Show UnitSpec where
-  show (NamedUnit "") = "{# ① #}"
-  show (NamedUnit sym) = T.unpack sym
-  -- TODO show repeated named units in exponential form?
-  show (ArithUnit nUnits []) =
-    T.unpack $
-      T.intercalate "*" nUnits
-  show (ArithUnit nUnits dUnits) =
-    T.unpack $
-      T.intercalate "*" nUnits <> "/" <> T.intercalate "/" dUnits
+  show u = case uomSpecIdent u of
+    "" -> "{# ① #}"
+    uomIdent -> T.unpack uomIdent
 
 instance Hashable UnitSpec where
   hashWithSalt s (NamedUnit sym) =

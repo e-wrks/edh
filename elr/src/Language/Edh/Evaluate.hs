@@ -3289,6 +3289,63 @@ defineUnit !docCmt !decl !exit !ets = case decl of
           throwEdh ets UsageError $
             "can not define UoM [" <> sym <> "] into: " <> badDesc
 
+unifyToUnit :: UnitDefi -> EdhValue -> EdhTxExit Decimal -> EdhTx
+unifyToUnit !uom !val !uniExit !ets = case edhUltimate val of
+  EdhQty qty -> tryUnifyTo uom qty (exitEdh ets uniExit) $
+    edhSimpleDesc ets val $ \ !badDesc ->
+      throwEdh ets UsageError $
+        "can not unify " <> badDesc <> " to UoM [" <> T.pack (show uom) <> "]"
+  _ -> edhSimpleDesc ets val $ \ !badDesc ->
+    throwEdh ets UsageError $ "can only unify quantities, not a " <> badDesc
+  where
+    tryUnifyTo ::
+      UnitDefi -> Quantity -> (Decimal -> STM ()) -> STM () -> STM ()
+    tryUnifyTo tgtUoM q@(Quantity qty srcUoM) exit naExit =
+      if srcUoM == tgtUoM
+        then exit qty -- shortcut
+        else case tgtUoM of
+          NamedUnitDefi' ud -> do
+            let exitByConverting :: UnitFormula -> AttrName -> Decimal -> STM ()
+                exitByConverting f u d = case f of
+                  RatioFormula r -> exit $ d * r
+                  ExprFormula x _ -> evalFormula d u x exit
+
+                tryIndirect :: [(UnitSpec, UnitFormula)] -> STM ()
+                tryIndirect [] = naExit
+                tryIndirect ((u, formula) : rest) =
+                  resolveUnitSpec ets u $ \tgtUoM' ->
+                    tryUnifyTo
+                      tgtUoM'
+                      q
+                      (exitByConverting formula (uomDefiIdent tgtUoM'))
+                      $ tryIndirect rest
+
+                tryDirect :: [(UnitSpec, UnitFormula)] -> STM ()
+                tryDirect [] = tryIndirect fl
+                tryDirect ((u, formula) : rest) =
+                  if uomSpecIdent u == srcUnitIdent
+                    then exitByConverting formula srcUnitIdent qty
+                    else tryDirect rest
+
+                fl = Map.toList $ uom'defi'formulae ud
+            tryDirect fl
+          ArithUnitDefi _nuds _duds ->
+            naExit -- TODO impl. this case
+      where
+        srcUnitIdent = uomDefiIdent srcUoM
+
+    evalFormula ::
+      Decimal -> AttrName -> ExprDefi -> (Decimal -> STM ()) -> STM ()
+    evalFormula d u x exit = runEdhTx ets $
+      pushEdhStack $ \ !ets' -> do
+        iopdInsert (AttrByName $ "[" <> u <> "]") (EdhDecimal d) $
+          edh'scope'entity $ contextScope $ edh'context ets'
+        runEdhTx ets' $
+          evalExprDefi x $ \case
+            EdhDecimal rd -> \_ets -> exit rd
+            badVal -> edhSimpleDescTx badVal $ \badDesc ->
+              throwEdhTx EvalError $ "bad result from UoM formula - " <> badDesc
+
 type CheckImportExternalModule = Text -> EdhTx -> EdhTx
 
 importInto ::
@@ -3910,6 +3967,31 @@ intplStmt !ets !stmt !exit = case stmt of
     exit $ ReturnStmt x' docCmt
   ExprStmt !x !docCmt -> intplExpr ets x $ \ !x' -> exit $ ExprStmt x' docCmt
   _ -> exit stmt
+
+resolveUnitSpec :: EdhThreadState -> UnitSpec -> (UnitDefi -> STM ()) -> STM ()
+resolveUnitSpec !ets !uomSpec !exit = case uomSpec of
+  NamedUnit uSym -> resolveNamed uSym $ \uom ->
+    exit $ NamedUnitDefi' uom
+  ArithUnit nus dus -> resolveArith nus $ \nuds ->
+    resolveArith dus $ \duds ->
+      exit $ ArithUnitDefi nuds duds
+  where
+    scope = contextScope $ edh'context ets
+
+    resolveArith :: [AttrName] -> ([NamedUnitDefi] -> STM ()) -> STM ()
+    resolveArith us = go [] us
+      where
+        go uds [] exit' = exit' $ reverse $! uds
+        go uds (u : rest) exit' = resolveNamed u $ \ud ->
+          go (ud : uds) rest exit'
+
+    resolveNamed :: AttrName -> (NamedUnitDefi -> STM ()) -> STM ()
+    resolveNamed uSym exit' =
+      edhUltimate <$> lookupEdhCtxAttr scope (AttrByName uSym) >>= \case
+        EdhUoM (NamedUnitDefi' ud) | uom'defi'sym ud == uSym -> exit' ud
+        badVal -> edhSimpleDesc ets badVal $ \ !badDesc ->
+          throwEdh ets UsageError $
+            "expect a UoM by [" <> uSym <> "], but it's a " <> badDesc
 
 -- | Resolve quantity literal to pure number or runtime quantity value
 --
