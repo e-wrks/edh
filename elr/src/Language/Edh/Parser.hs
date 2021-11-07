@@ -283,26 +283,26 @@ parseUnitStmt !docCmt !si = do
     --
     parseBaseDecl :: Parser UnitDecl
     parseBaseDecl = do
-      (buSym, buSpan) <- parseBaseUnitSpec
-      return $ BaseUnitDecl buSym buSpan
+      (buSym, buSpan) <- parseNamedUnitSpec
+      return $ PrimUnitDecl buSym buSpan
 
     {- HLINT ignore "Use <$>" -}
     parseConversionFactor :: Parser UnitDecl
     parseConversionFactor = do
       nQty <- parseDecLit'
-      (nuSym, nuSpan) <- parseBaseUnitSpec
+      (nuSym, nuSpan) <- parseNamedUnitSpec
       void $ char '=' <* sc
       dQty <- parseDecLit'
 
       (duSpec, duSpan) <-
         parseUoM <|> do
           sc
-          return (BaseUnit "", noSrcRange)
+          return (NamedUnit "", noSrcRange)
       return $ ConversionFactor nQty nuSym nuSpan dQty duSpec duSpan
 
     parseUnitConversionFormula :: Parser UnitDecl
     parseUnitConversionFormula = do
-      (buSym, buSpan) <- parseBaseUnitRef
+      (buSym, buSpan) <- parseNamedUnitRef
       void $ char '=' <* sc
       !s <- getInput
       !o <- getOffset
@@ -315,7 +315,7 @@ parseUnitStmt !docCmt !si = do
           buSpan
           x
           src'text
-          (BaseUnit src'uom)
+          (NamedUnit src'uom)
 
 parseUnitFormula :: Parser (ExprSrc, AttrName)
 parseUnitFormula = do
@@ -348,7 +348,7 @@ parseFormulaPrec precedingOp prec = parseExpr1st >>= parseMoreInfix precedingOp
     -- Base unit reference as expression
     parseBURX :: Parser ExprSrc
     parseBURX = do
-      (buSym, buSpan) <- parseBaseUnitRef
+      (buSym, buSpan) <- parseNamedUnitRef
       return $
         ExprSrc
           ( AttrExpr $
@@ -1454,15 +1454,15 @@ parseStringLit' = lexeme $ do
 parseBoolLit :: Parser Bool
 parseBoolLit = (keyword "true" $> True) <|> (keyword "false" $> False)
 
-parseBaseUnitRef :: Parser (AttrName, SrcRange)
-parseBaseUnitRef =
-  parseWithRng $ between (symbol "[") (symbol "]") $ lexeme parseBaseUnitSym
+parseNamedUnitRef :: Parser (AttrName, SrcRange)
+parseNamedUnitRef =
+  parseWithRng $ between (symbol "[") (symbol "]") $ lexeme parseNamedUnitSym
 
-parseBaseUnitSpec :: Parser (AttrName, SrcRange)
-parseBaseUnitSpec = parseWithRng $ lexeme parseBaseUnitSym
+parseNamedUnitSpec :: Parser (AttrName, SrcRange)
+parseNamedUnitSpec = parseWithRng $ lexeme parseNamedUnitSym
 
-parseBaseUnitSym :: Parser AttrName
-parseBaseUnitSym = takeWhile1P (Just "UoM symbols") isMeasurementUnitChar
+parseNamedUnitSym :: Parser AttrName
+parseNamedUnitSym = takeWhile1P (Just "UoM symbols") isMeasurementUnitChar
 
 parseUoM :: Parser (UoM, SrcRange)
 parseUoM =
@@ -1472,26 +1472,26 @@ parseUoM =
         choice
           [ parseDs' [] [],
             do
-              sym1 <- parseBaseUnitSym
+              sym1 <- parseNamedUnitSym
               parseNs [sym1]
           ]
   where
     parseNs :: [AttrName] -> Parser UoM
-    parseNs ns = parseNs' ns <|> parseDs' ns [] <|> return (DerivedUnit ns [])
+    parseNs ns = parseNs' ns <|> parseDs' ns [] <|> return (ArithUnit ns [])
 
     parseNs' :: [AttrName] -> Parser UoM
     parseNs' ns = try $ do
       void $ char '*'
-      nextSym <- parseBaseUnitSym
+      nextSym <- parseNamedUnitSym
       parseNs $ ns ++ [nextSym]
 
     parseDs :: [AttrName] -> [AttrName] -> Parser UoM
-    parseDs ns ds = parseDs' ns ds <|> return (DerivedUnit ns ds)
+    parseDs ns ds = parseDs' ns ds <|> return (ArithUnit ns ds)
 
     parseDs' :: [AttrName] -> [AttrName] -> Parser UoM
     parseDs' ns ds = try $ do
       void $ char '/'
-      nextSym <- parseBaseUnitSym
+      nextSym <- parseNamedUnitSym
       parseDs ns $ ds ++ [nextSym]
 
 parseNumOrQty :: Parser Literal

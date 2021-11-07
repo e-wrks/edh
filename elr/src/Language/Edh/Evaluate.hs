@@ -3175,17 +3175,17 @@ evalStmt !stmt !exit = case stmt of
     throwEdh ets EvalError $
       "illegal code at: " <> prettySrcPos doc err'pos <> "\n" <> err'msg
 
-defineUnit :: OptDocCmt -> UnitDecl -> EdhTxExit UnitDefi -> EdhTx
+defineUnit :: OptDocCmt -> UnitDecl -> EdhTxExit NamedUnitDefi -> EdhTx
 defineUnit !docCmt !decl !exit !ets = case decl of
-  BaseUnitDecl sym _ ->
+  PrimUnitDecl sym _ ->
     defineFormula sym Nothing $ exitEdh ets exit
   ConversionFactor nQty nSym _ dQty dUnit _ ->
     defineFormula nSym (Just (dUnit, RatioFormula $ nQty / dQty)) $ \ !defi ->
       case dUnit of
-        BaseUnit dSym ->
+        NamedUnit dSym ->
           defineFormula
             dSym
-            (Just (BaseUnit nSym, RatioFormula $ dQty / nQty))
+            (Just (NamedUnit nSym, RatioFormula $ dQty / nQty))
             $ \_ -> exitEdh ets exit defi
         _ -> exitEdh ets exit defi
   ConversionFormula outSym _ (ExprSrc !x !x'span) fSrc inUnit -> do
@@ -3202,53 +3202,75 @@ defineUnit !docCmt !decl !exit !ets = case decl of
     --      if already defined there, a new definition incorporating existing
     --      formulae is always inserted into current scope.
     defineFormula ::
-      AttrName -> Maybe (UoM, UnitFormula) -> (UnitDefi -> STM ()) -> STM ()
+      AttrName ->
+      Maybe (UoM, UnitFormula) ->
+      (NamedUnitDefi -> STM ()) ->
+      STM ()
     defineFormula sym Nothing !exit' =
       resolveEdhCtxAttr scope (AttrByName sym) >>= \case
         Nothing -> do
-          let defi = UnitDefi docCmt sym Map.empty
-          iopdInsert (AttrByName sym) (EdhUoM defi) $ edh'scope'entity scope
+          let defi = NamedUnitDefi docCmt sym Map.empty
+          iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
+            edh'scope'entity scope
           case edh'ctx'exp'target ctx of
             Nothing -> pure ()
-            Just !esExps -> iopdInsert (AttrByName sym) (EdhUoM defi) esExps
+            Just !esExps ->
+              iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) esExps
           exit' defi
-        Just (EdhUoM (UnitDefi prevCmt defiSym prevFormulae), _prevScope)
-          | defiSym == sym -> do
-            let defi =
-                  UnitDefi (mergeDocCmts prevCmt docCmt) sym prevFormulae
-            case docCmt of
-              NoDocCmt -> pure ()
-              _ ->
-                iopdInsert (AttrByName sym) (EdhUoM defi) $
-                  edh'scope'entity scope
-            case edh'ctx'exp'target ctx of
-              Nothing -> pure ()
-              Just !esExps ->
-                iopdInsert (AttrByName sym) (EdhUoM defi) esExps
-            exit' defi
+        Just
+          ( EdhUoM
+              (NamedUnitDefi' (NamedUnitDefi prevCmt defiSym prevFormulae)),
+            _prevScope
+            )
+            | defiSym == sym -> do
+              let defi =
+                    NamedUnitDefi (mergeDocCmts prevCmt docCmt) sym prevFormulae
+              case docCmt of
+                NoDocCmt -> pure ()
+                _ ->
+                  iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
+                    edh'scope'entity scope
+              case edh'ctx'exp'target ctx of
+                Nothing -> pure ()
+                Just !esExps ->
+                  iopdInsert
+                    (AttrByName sym)
+                    (EdhUoM $ NamedUnitDefi' defi)
+                    esExps
+              exit' defi
         Just (badVal, _) -> edhSimpleDesc ets badVal $ \ !badDesc ->
           throwEdh ets UsageError $
             "can not re-define as UoM [" <> sym <> "] from: " <> badDesc
     defineFormula sym (Just (srcUoM, uf)) !exit' =
       resolveEdhCtxAttr scope (AttrByName sym) >>= \case
         Nothing -> do
-          let defi = UnitDefi docCmt sym $ Map.singleton srcUoM uf
-          iopdInsert (AttrByName sym) (EdhUoM defi) $ edh'scope'entity scope
+          let defi = NamedUnitDefi docCmt sym $ Map.singleton srcUoM uf
+          iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
+            edh'scope'entity scope
           case edh'ctx'exp'target ctx of
             Nothing -> pure ()
-            Just !esExps -> iopdInsert (AttrByName sym) (EdhUoM defi) esExps
+            Just !esExps ->
+              iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) esExps
           exit' defi
-        Just (EdhUoM (UnitDefi prevCmt defiSym prevFormulae), _prevScope)
-          | defiSym == sym -> do
-            let defi =
-                  UnitDefi (mergeDocCmts prevCmt docCmt) sym $
-                    Map.insert srcUoM uf prevFormulae
-            iopdInsert (AttrByName sym) (EdhUoM defi) $
-              edh'scope'entity scope
-            case edh'ctx'exp'target ctx of
-              Nothing -> pure ()
-              Just !esExps -> iopdInsert (AttrByName sym) (EdhUoM defi) esExps
-            exit' defi
+        Just
+          ( EdhUoM
+              (NamedUnitDefi' (NamedUnitDefi prevCmt defiSym prevFormulae)),
+            _prevScope
+            )
+            | defiSym == sym -> do
+              let defi =
+                    NamedUnitDefi (mergeDocCmts prevCmt docCmt) sym $
+                      Map.insert srcUoM uf prevFormulae
+              iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
+                edh'scope'entity scope
+              case edh'ctx'exp'target ctx of
+                Nothing -> pure ()
+                Just !esExps ->
+                  iopdInsert
+                    (AttrByName sym)
+                    (EdhUoM $ NamedUnitDefi' defi)
+                    esExps
+              exit' defi
         Just (badVal, _) -> edhSimpleDesc ets badVal $ \ !badDesc ->
           throwEdh ets UsageError $
             "can not define UoM [" <> sym <> "] into: " <> badDesc
@@ -3886,7 +3908,7 @@ evalLiteral ets lit exit = case lit of
   QtyLiteral v uom -> do
     let scope = contextScope $ edh'context ets
     case uom of
-      BaseUnit uSym ->
+      NamedUnit uSym ->
         -- support mathematical notation e.g.:
         --   3x = 3*x
         -- where x is not a UoM but some variable
@@ -4004,7 +4026,7 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
             <> src
             <> "\n---end-of-expr-desc---"
     exitDesc descStr
-  EdhUoM (UnitDefi _docCmt buSym formulae) -> do
+  EdhUoM (NamedUnitDefi' (NamedUnitDefi _docCmt buSym formulae)) -> do
     let showFormula :: (UoM, UnitFormula) -> Text
         showFormula (srcUnit, RatioFormula cFactor) =
           T.pack (show $ numerator r) <> buSym <> " = "
@@ -4015,8 +4037,11 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
         showFormula (_srcUnit, ExprFormula _x !xSrc) =
           "[" <> buSym <> "] = " <> xSrc
     let descStr =
-          "'UoM' value for base unit [" <> buSym <> "], with formula(e):\n"
+          "'UoM' value for named unit [" <> buSym <> "], with formula(e):\n"
             <> T.unlines (("  " <>) . showFormula <$> Map.toList formulae)
+    exitDesc descStr
+  EdhUoM d@(ArithUnitDefi _ns _ds) -> do
+    let descStr = T.pack $ "'UoM' value for arithmetic unit [" <> show d <> "]"
     exitDesc descStr
   _ -> edhValueRepr ets val $ \ !valRepr ->
     exitDesc $ "'" <> edhTypeNameOf val <> "' value `" <> valRepr <> "`"
@@ -4150,7 +4175,7 @@ edhValueRepr !ets !val !exitRepr = case val of
   EdhObject !obj -> edhObjRepr ets obj exitRepr
   -- repr of named value is just its name
   EdhNamedValue !n _v -> exitRepr n
-  EdhUoM !uom -> exitRepr $ uom'defi'sym uom
+  EdhUoM !uom -> exitRepr $ T.pack $ show uom
   EdhQty !qty -> exitRepr $ T.pack $ show qty
   EdhProcedure !callable _ -> exitRepr $ callableName callable
   EdhBoundProc !callable _ _ _ ->
@@ -4230,7 +4255,7 @@ edhValueStr _ (EdhUUID !u) !exit = exit $ UUID.toText u
 edhValueStr ets (EdhObject !o) !exit = edhObjStr ets o exit
 edhValueStr _ (EdhNamedValue !name EdhNil) !exit = exit name
 edhValueStr !ets (EdhNamedValue _ !v) !exit = edhValueStr ets v exit
-edhValueStr _ (EdhUoM !uom) !exit = exit $ uom'defi'sym uom
+edhValueStr _ (EdhUoM !uom) !exit = exit $ T.pack $ show uom
 edhValueStr _ (EdhQty !qty) !exit = exit $ T.pack $ show qty
 edhValueStr !ets !v !exit = edhValueRepr ets v exit
 

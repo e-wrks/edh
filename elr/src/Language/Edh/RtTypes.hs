@@ -1897,7 +1897,7 @@ data EffAddr
 data SourceSeg = SrcSeg !Text | IntplSeg !ExprSrc
   deriving (Eq, Show)
 
--- | Conversion formula from a source UoM (base or derived) to a base UoM
+-- | Conversion formula from a source UoM (named or arithmetic) to a named UoM
 data UnitFormula
   = -- | Converting from the source unit by multiplying a conversion factor
     RatioFormula !Decimal
@@ -1913,48 +1913,73 @@ instance Hashable UnitFormula where
   hashWithSalt s (ExprFormula x _src) =
     s `hashWithSalt` (-2 :: Int) `hashWithSalt` x
 
--- | Base unit definition
+-- | Defined unit of measure as 1st class value
 --
 -- The unit symbol here can never be empty. But the formulae map can contain a
--- formula from an empty 'BaseUnit' (i.e. the dimensionless 1), indicating
--- this base unit is effectively dimensionless too, and that formula if a
+-- formula from an empty 'NamedUnit' (i.e. the dimensionless 1), indicating
+-- this named unit is effectively dimensionless too, and that formula if a
 -- 'RatioFormula' serves as the divisor to convert quantity in this unit to
 -- pure number.
-data UnitDefi = UnitDefi
+data NamedUnitDefi = NamedUnitDefi
   { uom'defi'doc :: !OptDocCmt,
     uom'defi'sym :: !AttrName,
     uom'defi'formulae :: !(Map.HashMap UoM UnitFormula)
   }
 
-instance Eq UnitDefi where
-  -- todo: should compare conversion formulae as well?
-  -- mind to update hashing as well
-  UnitDefi _ x'sym _ == UnitDefi _ y'sym _ = x'sym == y'sym
+instance Eq NamedUnitDefi where
+  NamedUnitDefi _ x'sym _ == NamedUnitDefi _ y'sym _ =
+    -- todo: should compare conversion formulae as well?
+    -- mind to update hashing as well
+    x'sym == y'sym
 
-instance Show UnitDefi where
-  show (UnitDefi _docCmt sym formulae) =
-    "uom " <> T.unpack sym <> " {# " <> show (Map.size formulae)
-      <> " formula(e) #}"
+instance Show NamedUnitDefi where
+  show (NamedUnitDefi _docCmt sym _formulae) = T.unpack sym
 
-instance Hashable UnitDefi where
-  hashWithSalt s (UnitDefi _docCmt sym _formulae) =
+instance Hashable NamedUnitDefi where
+  hashWithSalt s (NamedUnitDefi _docCmt sym _formulae) =
     -- todo: should hash conversion formulae as well?
     -- mind to update Eq instance as well
     s `hashWithSalt` sym -- `hashWithSalt` formulae
 
+data UnitDefi
+  = NamedUnitDefi' !NamedUnitDefi
+  | ArithUnitDefi
+      { uom'defi'numerators :: ![NamedUnitDefi],
+        uom'defi'denominators :: ![NamedUnitDefi]
+      }
+
+instance Eq UnitDefi where
+  NamedUnitDefi' x == NamedUnitDefi' y = x == y
+  ArithUnitDefi x'ns x'ds == ArithUnitDefi y'ns y'ds =
+    x'ns == y'ns && x'ds == y'ds
+  _ == _ = False
+
+instance Show UnitDefi where
+  show (NamedUnitDefi' d) = show d
+  show (ArithUnitDefi ns []) =
+    intercalate "*" (show <$> ns)
+  show (ArithUnitDefi ns ds) =
+    intercalate "*" (show <$> ns) <> "/" <> intercalate "/" (show <$> ds)
+
+instance Hashable UnitDefi where
+  hashWithSalt s (NamedUnitDefi' d) =
+    s `hashWithSalt` (-1 :: Int) `hashWithSalt` d
+  hashWithSalt s (ArithUnitDefi ns ds) =
+    s `hashWithSalt` (-2 :: Int) `hashWithSalt` ns `hashWithSalt` ds
+
 data UnitDecl
-  = -- | Declare a dimensional base unit
-    BaseUnitDecl !AttrName !SrcRange
-  | -- | Declare a conversion factor between a source unit and a base unit
+  = -- | Declare a primary named unit
+    PrimUnitDecl !AttrName !SrcRange
+  | -- | Declare a conversion factor between a source unit and a named unit
     --
     -- Such two units have a common zero point, they are mutually convertible
     -- by just scaling.
     --
-    -- Note bidirectional conversion is implied when rhs is a base unit.
+    -- Note bidirectional conversion is implied when rhs is a named unit.
     --
     -- See: https://en.wikipedia.org/wiki/Conversion_factor
     ConversionFactor !Decimal !AttrName !SrcRange !Decimal !UoM !SrcRange
-  | -- | Declare a one way conversion from a source unit to a base unit
+  | -- | Declare a one way conversion from a source unit to a named unit
     --
     -- Usually such two units don't have a common zero point, more
     -- sophisticated formula is thus needed.
@@ -1964,7 +1989,7 @@ data UnitDecl
   deriving (Eq)
 
 instance Show UnitDecl where
-  show (BaseUnitDecl sym _) = T.unpack sym
+  show (PrimUnitDecl sym _) = T.unpack sym
   show (ConversionFactor nQty nSym _ dQty dUnit _) =
     show nQty <> T.unpack nSym <> " = " <> show dQty <> show dUnit
   show (ConversionFormula outSym _ _formulaX fSrc _inUnit) =
@@ -1972,7 +1997,7 @@ instance Show UnitDecl where
 
 -- | A quanty in some specified unit of measure
 --
--- In case the uom is a 'BaseUnit' of empty symbol (i.e. dimensionless 1),
+-- In case the uom is a 'NamedUnit' of empty symbol (i.e. dimensionless 1),
 -- this quantity is equivalent to a pure number.
 data Quantity = Quantity !Decimal !UoM
   deriving (Eq)
@@ -1980,8 +2005,8 @@ data Quantity = Quantity !Decimal !UoM
 instance Show Quantity where
   show (Quantity qty unit) = case D.showDecimal' qty of
     Left (n, d) -> case unit of
-      BaseUnit u -> n <> T.unpack u <> "/" <> d
-      DerivedUnit ns ds ->
+      NamedUnit u -> n <> T.unpack u <> "/" <> d
+      ArithUnit ns ds ->
         n <> T.unpack (T.intercalate "*" ns) <> "/" <> d
           <> T.unpack (T.intercalate "*" ds)
     Right s -> s <> show unit
@@ -1991,59 +2016,57 @@ instance Hashable Quantity where
 
 -- | Unit of measure specification
 --
--- Note the order of base units appearance in a derived unit is significant,
--- thus considered different UoM, though multiple occurrences of the same base
+-- Note the order of named units appearance in a arithmetic unit is significant,
+-- thus considered different UoM, though multiple occurrences of the same named
 -- unit will be moved together as by normalization.
---
--- See https://en.wikipedia.org/wiki/Unit_of_measurement#Base_and_derived_units
-data UoM = BaseUnit !AttrName | DerivedUnit [AttrName] [AttrName]
+data UoM = NamedUnit !AttrName | ArithUnit [AttrName] [AttrName]
   deriving (Eq)
 
 -- TODO do we need api for full expansion to all primitive units?
 
 uomNormalize :: UoM -> UoM
-uomNormalize (BaseUnit !sym) = BaseUnit sym
-uomNormalize (DerivedUnit [!sym] []) = BaseUnit sym
-uomNormalize (DerivedUnit [] []) = BaseUnit "" -- dimensionless one (1)
-uomNormalize (DerivedUnit ns ds) =
-  -- TODO: implement reduction of complex derived units
-  -- - move duplicate same base units together, to the 1st-appear place
-  -- - shake-off common (number of) same base units between ns and ds
-  DerivedUnit ns ds
+uomNormalize (NamedUnit !sym) = NamedUnit sym
+uomNormalize (ArithUnit [!sym] []) = NamedUnit sym
+uomNormalize (ArithUnit [] []) = NamedUnit "" -- dimensionless one (1)
+uomNormalize (ArithUnit ns ds) =
+  -- TODO: implement reduction of complex arithmetic units
+  -- - move duplicate same named units together, to the 1st-appear place
+  -- - shake-off common (number of) same named units between ns and ds
+  ArithUnit ns ds
 
 uomMultiply :: UoM -> UoM -> UoM
-uomMultiply (BaseUnit u1) (BaseUnit u2) = DerivedUnit [u1, u2] []
-uomMultiply (BaseUnit u1) (DerivedUnit ns ds) =
-  uomNormalize $ DerivedUnit (u1 : ns) ds
-uomMultiply (DerivedUnit ns ds) (BaseUnit u2) =
-  uomNormalize $ DerivedUnit (ns ++ [u2]) ds
-uomMultiply (DerivedUnit ns1 ds1) (DerivedUnit ns2 ds2) =
-  uomNormalize $ DerivedUnit (ns1 ++ ns2) (ds1 ++ ds2)
+uomMultiply (NamedUnit u1) (NamedUnit u2) = ArithUnit [u1, u2] []
+uomMultiply (NamedUnit u1) (ArithUnit ns ds) =
+  uomNormalize $ ArithUnit (u1 : ns) ds
+uomMultiply (ArithUnit ns ds) (NamedUnit u2) =
+  uomNormalize $ ArithUnit (ns ++ [u2]) ds
+uomMultiply (ArithUnit ns1 ds1) (ArithUnit ns2 ds2) =
+  uomNormalize $ ArithUnit (ns1 ++ ns2) (ds1 ++ ds2)
 
 uomDivide :: UoM -> UoM -> UoM
-uomDivide (BaseUnit u1) (BaseUnit u2) = DerivedUnit [u1] [u2]
-uomDivide (BaseUnit u1) (DerivedUnit ns ds) =
-  uomNormalize $ DerivedUnit (u1 : ds) ns
-uomDivide (DerivedUnit ns ds) (BaseUnit u2) =
-  uomNormalize $ DerivedUnit ns (ds ++ [u2])
-uomDivide (DerivedUnit ns1 ds1) (DerivedUnit ns2 ds2) =
-  uomNormalize $ DerivedUnit (ns1 ++ ds2) (ds1 ++ ns2)
+uomDivide (NamedUnit u1) (NamedUnit u2) = ArithUnit [u1] [u2]
+uomDivide (NamedUnit u1) (ArithUnit ns ds) =
+  uomNormalize $ ArithUnit (u1 : ds) ns
+uomDivide (ArithUnit ns ds) (NamedUnit u2) =
+  uomNormalize $ ArithUnit ns (ds ++ [u2])
+uomDivide (ArithUnit ns1 ds1) (ArithUnit ns2 ds2) =
+  uomNormalize $ ArithUnit (ns1 ++ ds2) (ds1 ++ ns2)
 
 instance Show UoM where
-  show (BaseUnit "") = "{# ① #}"
-  show (BaseUnit sym) = T.unpack sym
-  -- TODO show repeated base units in exponential form?
-  show (DerivedUnit nUnits []) =
+  show (NamedUnit "") = "{# ① #}"
+  show (NamedUnit sym) = T.unpack sym
+  -- TODO show repeated named units in exponential form?
+  show (ArithUnit nUnits []) =
     T.unpack $
       T.intercalate "*" nUnits
-  show (DerivedUnit nUnits dUnits) =
+  show (ArithUnit nUnits dUnits) =
     T.unpack $
       T.intercalate "*" nUnits <> "/" <> T.intercalate "/" dUnits
 
 instance Hashable UoM where
-  hashWithSalt s (BaseUnit sym) =
+  hashWithSalt s (NamedUnit sym) =
     s `hashWithSalt` (-1 :: Int) `hashWithSalt` sym
-  hashWithSalt s (DerivedUnit nUnits dUnits) =
+  hashWithSalt s (ArithUnit nUnits dUnits) =
     s `hashWithSalt` (-2 :: Int) `hashWithSalt` nUnits `hashWithSalt` dUnits
 
 data Literal

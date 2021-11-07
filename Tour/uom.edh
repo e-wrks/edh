@@ -53,9 +53,9 @@ sz.reduce(KB)
 # %%
 
 uom
-, g
-, 1g = 1000mg
+, kg
 , 1kg = 1000g
+, 1g = 1000mg
 
 
 # %%
@@ -128,15 +128,15 @@ uom
 
 uom
 , s
-, 1Min = 60s
-, 1Hr = 60Min
-, 1D = 24Hr
+, 1min = 60s
+, 1h = 60min
+, 1d = 24h
 
 uom 1Hz = 1/s
 
 # %%
 
-3Hz * 1.5Hr
+3Hz * 1.5h
 
 
 # %%
