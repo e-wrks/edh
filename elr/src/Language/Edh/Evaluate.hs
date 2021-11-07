@@ -16,6 +16,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import qualified Data.HashMap.Strict as Map
 import Data.IORef
+import Data.Lossless.Decimal (Decimal (..))
 import qualified Data.Lossless.Decimal as D
 import Data.Maybe
 import Data.Ratio
@@ -3205,7 +3206,7 @@ defineUnit !docCmt !decl !exit !ets = case decl of
     defineFormula ::
       Bool ->
       AttrName ->
-      Maybe (UoM, UnitFormula) ->
+      Maybe (UnitSpec, UnitFormula) ->
       (NamedUnitDefi -> STM ()) ->
       STM ()
     defineFormula prim sym Nothing !exit' =
@@ -3910,6 +3911,51 @@ intplStmt !ets !stmt !exit = case stmt of
   ExprStmt !x !docCmt -> intplExpr ets x $ \ !x' -> exit $ ExprStmt x' docCmt
   _ -> exit stmt
 
+-- | Resolve quantity literal to pure number or runtime quantity value
+--
+-- Bonus support for mathematical notations e.g.:
+--   3x = 3*x
+-- where x is not a UoM but some numeric variable
+resolveQuantity ::
+  EdhThreadState ->
+  Decimal ->
+  UnitSpec ->
+  (Either Decimal Quantity -> STM ()) ->
+  STM ()
+resolveQuantity !ets !q !uomSpec !exit = case uomSpec of
+  NamedUnit uSym -> resolveNamed uSym $ \case
+    Left d -> exit $ Left $ q * d
+    Right uom -> exit $ Right $ Quantity q $ NamedUnitDefi' uom
+  ArithUnit nus dus -> resolveArith (*) q nus $ \q' nuds ->
+    resolveArith (/) q' dus $ \qty duds ->
+      exit $ Right $ Quantity qty $ ArithUnitDefi nuds duds
+  where
+    scope = contextScope $ edh'context ets
+
+    resolveArith ::
+      (Decimal -> Decimal -> Decimal) ->
+      Decimal ->
+      [AttrName] ->
+      (Decimal -> [NamedUnitDefi] -> STM ()) ->
+      STM ()
+    resolveArith op q' us = go q' [] us
+      where
+        go q'' uds [] exit' = exit' q'' $ reverse $! uds
+        go q'' uds (u : rest) exit' = resolveNamed u $ \case
+          Left d -> go (q'' `op` d) uds rest exit'
+          Right ud -> go q'' (ud : uds) rest exit'
+
+    resolveNamed ::
+      AttrName -> (Either Decimal NamedUnitDefi -> STM ()) -> STM ()
+    resolveNamed uSym exit' =
+      edhUltimate <$> lookupEdhCtxAttr scope (AttrByName uSym) >>= \case
+        EdhDecimal d -> exit' $ Left d
+        EdhUoM (NamedUnitDefi' ud) | uom'defi'sym ud == uSym -> exit' $ Right ud
+        badVal -> edhSimpleDesc ets badVal $ \ !badDesc ->
+          throwEdh ets UsageError $
+            "expect a UoM or pure number by [" <> uSym <> "], but it's a "
+              <> badDesc
+
 evalLiteral :: EdhThreadState -> Literal -> (EdhValue -> STM ()) -> STM ()
 evalLiteral ets lit exit = case lit of
   DecLiteral !v -> exit (EdhDecimal v)
@@ -3918,20 +3964,9 @@ evalLiteral ets lit exit = case lit of
   NilLiteral -> exit nil
   SinkCtor -> EdhSink <$> newSink >>= exit
   ValueLiteral !v -> exit v
-  QtyLiteral v uom -> do
-    let scope = contextScope $ edh'context ets
-    case uom of
-      NamedUnit uSym ->
-        -- support mathematical notation e.g.:
-        --   3x = 3*x
-        -- where x is not a UoM but some variable
-        edhUltimate <$> lookupEdhCtxAttr scope (AttrByName uSym) >>= \case
-          EdhDecimal d -> exit $ EdhDecimal $ v * d
-          -- todo: complain this eager? or postpone until really needed?
-          -- EdhNil ->
-          --   throwEdh ets EvalError $ "UoM [" <> uSym <> "] not in scope"
-          _ -> exit $ EdhQty $ Quantity v uom
-      _ -> exit $ EdhQty $ Quantity v uom
+  QtyLiteral !q !uomSpec -> resolveQuantity ets q uomSpec $ \case
+    Left d -> exit $ EdhDecimal d
+    Right qty -> exit $ EdhQty qty
 
 evalAttrRef :: AttrRef -> EdhTxExit EdhValue -> EdhTx
 evalAttrRef !addr !exit !ets = case addr of
@@ -4040,7 +4075,7 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
             <> "\n---end-of-expr-desc---"
     exitDesc descStr
   EdhUoM (NamedUnitDefi' (NamedUnitDefi _docCmt isPrim buSym formulae)) -> do
-    let showFormula :: (UoM, UnitFormula) -> Text
+    let showFormula :: (UnitSpec, UnitFormula) -> Text
         showFormula (srcUnit, RatioFormula cFactor) =
           T.pack (show $ numerator r) <> buSym <> " = "
             <> T.pack
@@ -5786,11 +5821,11 @@ edhIdentEqual (EdhNamedValue x'n x'v) (EdhNamedValue y'n y'v) =
     else return False
 edhIdentEqual EdhNamedValue {} _ = return False
 edhIdentEqual _ EdhNamedValue {} = return False
-edhIdentEqual (EdhDecimal (D.Decimal 0 0 0)) (EdhDecimal (D.Decimal 0 0 0)) =
+edhIdentEqual (EdhDecimal (Decimal 0 0 0)) (EdhDecimal (Decimal 0 0 0)) =
   return True
 edhIdentEqual
-  (EdhQty (Quantity (D.Decimal 0 0 0) x'uom))
-  (EdhQty (Quantity (D.Decimal 0 0 0) y'uom)) =
+  (EdhQty (Quantity (Decimal 0 0 0) x'uom))
+  (EdhQty (Quantity (Decimal 0 0 0) y'uom)) =
     return $ x'uom == y'uom
 edhIdentEqual x y = liftA2 (==) (edhValueIdent x) (edhValueIdent y)
 
@@ -7133,7 +7168,7 @@ driveEdhThread !eps !defers !tq !unmask = readIORef trapReq >>= taskLoop
                 !doneNS <- getMonotonicTimeNSec
                 let !secCost =
                       -- leverage lossless decimal's pretty show of numbers
-                      (fromIntegral (doneNS - trapStartNS) :: D.Decimal) / 1e9
+                      (fromIntegral (doneNS - trapStartNS) :: Decimal) / 1e9
                 !thId <- myThreadId
                 atomically $
                   logger

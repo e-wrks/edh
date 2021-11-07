@@ -1897,7 +1897,7 @@ data EffAddr
 data SourceSeg = SrcSeg !Text | IntplSeg !ExprSrc
   deriving (Eq, Show)
 
--- | Conversion formula from a source UoM (named or arithmetic) to a named UoM
+-- | Conversion formula from a source unit (named or arithmetic) to a named unit
 data UnitFormula
   = -- | Converting from the source unit by multiplying a conversion factor
     RatioFormula !Decimal
@@ -1924,7 +1924,7 @@ data NamedUnitDefi = NamedUnitDefi
   { uom'defi'doc :: !OptDocCmt,
     uom'defi'prim :: !Bool,
     uom'defi'sym :: !AttrName,
-    uom'defi'formulae :: !(Map.HashMap UoM UnitFormula)
+    uom'defi'formulae :: !(Map.HashMap UnitSpec UnitFormula)
   }
 
 instance Eq NamedUnitDefi where
@@ -1979,14 +1979,14 @@ data UnitDecl
     -- Note bidirectional conversion is implied when rhs is a named unit.
     --
     -- See: https://en.wikipedia.org/wiki/Conversion_factor
-    ConversionFactor !Decimal !AttrName !SrcRange !Decimal !UoM !SrcRange
+    ConversionFactor !Decimal !AttrName !SrcRange !Decimal !UnitSpec !SrcRange
   | -- | Declare a one way conversion from a source unit to a named unit
     --
     -- Usually such two units don't have a common zero point, more
     -- sophisticated formula is thus needed.
     --
     -- E.g. https://en.wikipedia.org/wiki/Conversion_of_scales_of_temperature
-    ConversionFormula !AttrName !SrcRange !ExprSrc !Text !UoM
+    ConversionFormula !AttrName !SrcRange !ExprSrc !Text !UnitSpec
   deriving (Eq)
 
 instance Show UnitDecl where
@@ -2000,16 +2000,17 @@ instance Show UnitDecl where
 --
 -- In case the uom is a 'NamedUnit' of empty symbol (i.e. dimensionless 1),
 -- this quantity is equivalent to a pure number.
-data Quantity = Quantity !Decimal !UoM
+data Quantity = Quantity !Decimal !UnitDefi
   deriving (Eq)
 
 instance Show Quantity where
   show (Quantity qty unit) = case D.showDecimal' qty of
     Left (n, d) -> case unit of
-      NamedUnit u -> n <> T.unpack u <> "/" <> d
-      ArithUnit ns ds ->
-        n <> T.unpack (T.intercalate "*" ns) <> "/" <> d
-          <> T.unpack (T.intercalate "*" ds)
+      NamedUnitDefi' u -> n <> show u <> "/" <> d
+      ArithUnitDefi nus dus ->
+        let ns = show <$> nus
+            ds = show <$> dus
+         in n <> intercalate "*" ns <> "/" <> d <> intercalate "*" ds
     Right s -> s <> show unit
 
 instance Hashable Quantity where
@@ -2017,15 +2018,15 @@ instance Hashable Quantity where
 
 -- | Unit of measure specification
 --
--- Note the order of named units appearance in a arithmetic unit is significant,
--- thus considered different UoM, though multiple occurrences of the same named
--- unit will be moved together as by normalization.
-data UoM = NamedUnit !AttrName | ArithUnit [AttrName] [AttrName]
+-- Note the order of named units in an arithmetic unit matters, though multiple
+-- occurrences of the same named unit will be moved together to the first
+-- appearance place, as with the normalization process.
+data UnitSpec = NamedUnit !AttrName | ArithUnit [AttrName] [AttrName]
   deriving (Eq)
 
 -- TODO do we need api for full expansion to all primary units?
 
-uomNormalize :: UoM -> UoM
+uomNormalize :: UnitSpec -> UnitSpec
 uomNormalize (NamedUnit !sym) = NamedUnit sym
 uomNormalize (ArithUnit [!sym] []) = NamedUnit sym
 uomNormalize (ArithUnit [] []) = NamedUnit "" -- dimensionless one (1)
@@ -2035,7 +2036,7 @@ uomNormalize (ArithUnit ns ds) =
   -- - shake-off common (number of) same named units between ns and ds
   ArithUnit ns ds
 
-uomMultiply :: UoM -> UoM -> UoM
+uomMultiply :: UnitSpec -> UnitSpec -> UnitSpec
 uomMultiply (NamedUnit u1) (NamedUnit u2) = ArithUnit [u1, u2] []
 uomMultiply (NamedUnit u1) (ArithUnit ns ds) =
   uomNormalize $ ArithUnit (u1 : ns) ds
@@ -2044,7 +2045,7 @@ uomMultiply (ArithUnit ns ds) (NamedUnit u2) =
 uomMultiply (ArithUnit ns1 ds1) (ArithUnit ns2 ds2) =
   uomNormalize $ ArithUnit (ns1 ++ ns2) (ds1 ++ ds2)
 
-uomDivide :: UoM -> UoM -> UoM
+uomDivide :: UnitSpec -> UnitSpec -> UnitSpec
 uomDivide (NamedUnit u1) (NamedUnit u2) = ArithUnit [u1] [u2]
 uomDivide (NamedUnit u1) (ArithUnit ns ds) =
   uomNormalize $ ArithUnit (u1 : ds) ns
@@ -2053,7 +2054,7 @@ uomDivide (ArithUnit ns ds) (NamedUnit u2) =
 uomDivide (ArithUnit ns1 ds1) (ArithUnit ns2 ds2) =
   uomNormalize $ ArithUnit (ns1 ++ ds2) (ds1 ++ ns2)
 
-instance Show UoM where
+instance Show UnitSpec where
   show (NamedUnit "") = "{# ① #}"
   show (NamedUnit sym) = T.unpack sym
   -- TODO show repeated named units in exponential form?
@@ -2064,7 +2065,7 @@ instance Show UoM where
     T.unpack $
       T.intercalate "*" nUnits <> "/" <> T.intercalate "/" dUnits
 
-instance Hashable UoM where
+instance Hashable UnitSpec where
   hashWithSalt s (NamedUnit sym) =
     s `hashWithSalt` (-1 :: Int) `hashWithSalt` sym
   hashWithSalt s (ArithUnit nUnits dUnits) =
@@ -2074,7 +2075,7 @@ data Literal
   = SinkCtor
   | NilLiteral
   | DecLiteral !Decimal
-  | QtyLiteral !Decimal !UoM
+  | QtyLiteral !Decimal !UnitSpec
   | BoolLiteral !Bool
   | StringLiteral !Text
   | ValueLiteral !EdhValue

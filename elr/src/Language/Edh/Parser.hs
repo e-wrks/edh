@@ -295,7 +295,7 @@ parseUnitStmt !docCmt !si = do
       dQty <- parseDecLit'
 
       (duSpec, duSpan) <-
-        parseUoM <|> do
+        parseUnitSpec <|> do
           sc
           return (NamedUnit "", noSrcRange)
       return $ ConversionFactor nQty nuSym nuSpan dQty duSpec duSpan
@@ -1464,8 +1464,8 @@ parseNamedUnitSpec = parseWithRng $ lexeme parseNamedUnitSym
 parseNamedUnitSym :: Parser AttrName
 parseNamedUnitSym = takeWhile1P (Just "UoM symbols") isMeasurementUnitChar
 
-parseUoM :: Parser (UoM, SrcRange)
-parseUoM =
+parseUnitSpec :: Parser (UnitSpec, SrcRange)
+parseUnitSpec =
   parseWithRng $
     lexeme $
       fmap uomNormalize $
@@ -1476,19 +1476,19 @@ parseUoM =
               parseNs [sym1]
           ]
   where
-    parseNs :: [AttrName] -> Parser UoM
+    parseNs :: [AttrName] -> Parser UnitSpec
     parseNs ns = parseNs' ns <|> parseDs' ns [] <|> return (ArithUnit ns [])
 
-    parseNs' :: [AttrName] -> Parser UoM
+    parseNs' :: [AttrName] -> Parser UnitSpec
     parseNs' ns = try $ do
       void $ char '*'
       nextSym <- parseNamedUnitSym
       parseNs $ ns ++ [nextSym]
 
-    parseDs :: [AttrName] -> [AttrName] -> Parser UoM
+    parseDs :: [AttrName] -> [AttrName] -> Parser UnitSpec
     parseDs ns ds = parseDs' ns ds <|> return (ArithUnit ns ds)
 
-    parseDs' :: [AttrName] -> [AttrName] -> Parser UoM
+    parseDs' :: [AttrName] -> [AttrName] -> Parser UnitSpec
     parseDs' ns ds = try $ do
       void $ char '/'
       nextSym <- parseNamedUnitSym
@@ -1498,7 +1498,7 @@ parseNumOrQty :: Parser Literal
 parseNumOrQty = lexeme $ do
   qty <- parseDecLit'
   choice
-    [ QtyLiteral qty . fst <$> parseUoM,
+    [ QtyLiteral qty . fst <$> parseUnitSpec,
       return (DecLiteral qty)
     ]
 
