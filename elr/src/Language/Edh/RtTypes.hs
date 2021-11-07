@@ -1922,21 +1922,22 @@ instance Hashable UnitFormula where
 -- pure number.
 data NamedUnitDefi = NamedUnitDefi
   { uom'defi'doc :: !OptDocCmt,
+    uom'defi'prim :: !Bool,
     uom'defi'sym :: !AttrName,
     uom'defi'formulae :: !(Map.HashMap UoM UnitFormula)
   }
 
 instance Eq NamedUnitDefi where
-  NamedUnitDefi _ x'sym _ == NamedUnitDefi _ y'sym _ =
+  NamedUnitDefi _ _ x'sym _ == NamedUnitDefi _ _ y'sym _ =
     -- todo: should compare conversion formulae as well?
     -- mind to update hashing as well
     x'sym == y'sym
 
 instance Show NamedUnitDefi where
-  show (NamedUnitDefi _docCmt sym _formulae) = T.unpack sym
+  show (NamedUnitDefi _docCmt _prim sym _formulae) = T.unpack sym
 
 instance Hashable NamedUnitDefi where
-  hashWithSalt s (NamedUnitDefi _docCmt sym _formulae) =
+  hashWithSalt s (NamedUnitDefi _docCmt _prim sym _formulae) =
     -- todo: should hash conversion formulae as well?
     -- mind to update Eq instance as well
     s `hashWithSalt` sym -- `hashWithSalt` formulae
@@ -2022,7 +2023,7 @@ instance Hashable Quantity where
 data UoM = NamedUnit !AttrName | ArithUnit [AttrName] [AttrName]
   deriving (Eq)
 
--- TODO do we need api for full expansion to all primitive units?
+-- TODO do we need api for full expansion to all primary units?
 
 uomNormalize :: UoM -> UoM
 uomNormalize (NamedUnit !sym) = NamedUnit sym

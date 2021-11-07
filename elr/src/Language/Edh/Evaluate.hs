@@ -3178,12 +3178,13 @@ evalStmt !stmt !exit = case stmt of
 defineUnit :: OptDocCmt -> UnitDecl -> EdhTxExit NamedUnitDefi -> EdhTx
 defineUnit !docCmt !decl !exit !ets = case decl of
   PrimUnitDecl sym _ ->
-    defineFormula sym Nothing $ exitEdh ets exit
+    defineFormula True sym Nothing $ exitEdh ets exit
   ConversionFactor nQty nSym _ dQty dUnit _ ->
-    defineFormula nSym (Just (dUnit, RatioFormula $ nQty / dQty)) $ \ !defi ->
-      case dUnit of
+    defineFormula False nSym (Just (dUnit, RatioFormula $ nQty / dQty)) $
+      \ !defi -> case dUnit of
         NamedUnit dSym ->
           defineFormula
+            False
             dSym
             (Just (NamedUnit nSym, RatioFormula $ dQty / nQty))
             $ \_ -> exitEdh ets exit defi
@@ -3192,7 +3193,7 @@ defineUnit !docCmt !decl !exit !ets = case decl of
     !u <- unsafeIOToSTM newUnique
     let curSrcLoc = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
         formulaDefi = ExprDefi u x curSrcLoc {src'range = x'span}
-    defineFormula outSym (Just (inUnit, ExprFormula formulaDefi fSrc)) $
+    defineFormula False outSym (Just (inUnit, ExprFormula formulaDefi fSrc)) $
       exitEdh ets exit
   where
     !ctx = edh'context ets
@@ -3202,14 +3203,15 @@ defineUnit !docCmt !decl !exit !ets = case decl of
     --      if already defined there, a new definition incorporating existing
     --      formulae is always inserted into current scope.
     defineFormula ::
+      Bool ->
       AttrName ->
       Maybe (UoM, UnitFormula) ->
       (NamedUnitDefi -> STM ()) ->
       STM ()
-    defineFormula sym Nothing !exit' =
+    defineFormula prim sym Nothing !exit' =
       resolveEdhCtxAttr scope (AttrByName sym) >>= \case
         Nothing -> do
-          let defi = NamedUnitDefi docCmt sym Map.empty
+          let defi = NamedUnitDefi docCmt prim sym Map.empty
           iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
             edh'scope'entity scope
           case edh'ctx'exp'target ctx of
@@ -3219,12 +3221,18 @@ defineUnit !docCmt !decl !exit !ets = case decl of
           exit' defi
         Just
           ( EdhUoM
-              (NamedUnitDefi' (NamedUnitDefi prevCmt defiSym prevFormulae)),
+              ( NamedUnitDefi'
+                  (NamedUnitDefi prevCmt prevPrim defiSym prevFormulae)
+                ),
             _prevScope
             )
             | defiSym == sym -> do
               let defi =
-                    NamedUnitDefi (mergeDocCmts prevCmt docCmt) sym prevFormulae
+                    NamedUnitDefi
+                      (mergeDocCmts prevCmt docCmt)
+                      (prim || prevPrim)
+                      sym
+                      prevFormulae
               case docCmt of
                 NoDocCmt -> pure ()
                 _ ->
@@ -3241,10 +3249,10 @@ defineUnit !docCmt !decl !exit !ets = case decl of
         Just (badVal, _) -> edhSimpleDesc ets badVal $ \ !badDesc ->
           throwEdh ets UsageError $
             "can not re-define as UoM [" <> sym <> "] from: " <> badDesc
-    defineFormula sym (Just (srcUoM, uf)) !exit' =
+    defineFormula prim sym (Just (srcUoM, uf)) !exit' =
       resolveEdhCtxAttr scope (AttrByName sym) >>= \case
         Nothing -> do
-          let defi = NamedUnitDefi docCmt sym $ Map.singleton srcUoM uf
+          let defi = NamedUnitDefi docCmt prim sym $ Map.singleton srcUoM uf
           iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
             edh'scope'entity scope
           case edh'ctx'exp'target ctx of
@@ -3254,13 +3262,18 @@ defineUnit !docCmt !decl !exit !ets = case decl of
           exit' defi
         Just
           ( EdhUoM
-              (NamedUnitDefi' (NamedUnitDefi prevCmt defiSym prevFormulae)),
+              ( NamedUnitDefi'
+                  (NamedUnitDefi prevCmt prevPrim defiSym prevFormulae)
+                ),
             _prevScope
             )
             | defiSym == sym -> do
               let defi =
-                    NamedUnitDefi (mergeDocCmts prevCmt docCmt) sym $
-                      Map.insert srcUoM uf prevFormulae
+                    NamedUnitDefi
+                      (mergeDocCmts prevCmt docCmt)
+                      (prim || prevPrim)
+                      sym
+                      $ Map.insert srcUoM uf prevFormulae
               iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
                 edh'scope'entity scope
               case edh'ctx'exp'target ctx of
@@ -4026,7 +4039,7 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
             <> src
             <> "\n---end-of-expr-desc---"
     exitDesc descStr
-  EdhUoM (NamedUnitDefi' (NamedUnitDefi _docCmt buSym formulae)) -> do
+  EdhUoM (NamedUnitDefi' (NamedUnitDefi _docCmt isPrim buSym formulae)) -> do
     let showFormula :: (UoM, UnitFormula) -> Text
         showFormula (srcUnit, RatioFormula cFactor) =
           T.pack (show $ numerator r) <> buSym <> " = "
@@ -4036,8 +4049,10 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
             r = toRational cFactor
         showFormula (_srcUnit, ExprFormula _x !xSrc) =
           "[" <> buSym <> "] = " <> xSrc
-    let descStr =
-          "'UoM' value for named unit [" <> buSym <> "], with formula(e):\n"
+    let uCate = if isPrim then "primary" else "secondary"
+        descStr =
+          "'UoM' value for named " <> uCate <> " unit [" <> buSym
+            <> "], with formula(e):\n"
             <> T.unlines (("  " <>) . showFormula <$> Map.toList formulae)
     exitDesc descStr
   EdhUoM d@(ArithUnitDefi _ns _ds) -> do
