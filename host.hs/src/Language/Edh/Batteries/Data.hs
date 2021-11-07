@@ -726,7 +726,7 @@ dictValuesProc (Dict _ !ds) !exit !ets =
 listPushProc :: List -> EdhHostProc
 listPushProc l@(List _ !lv) !exit !ets =
   mkHostProc' (contextScope $ edh'context ets) EdhMethod "push" listPush
-    >>= \ !mth -> exitEdh ets exit mth
+    >>= exitEdh ets exit
   where
     listPush :: [EdhValue] -> EdhHostProc
     listPush !args !exit' !ets' = do
@@ -736,7 +736,7 @@ listPushProc l@(List _ !lv) !exit !ets =
 listPopProc :: List -> EdhHostProc
 listPopProc (List _ !lv) !exit !ets =
   mkHostProc' (contextScope $ edh'context ets) EdhMethod "pop" listPop
-    >>= \ !mth -> exitEdh ets exit mth
+    >>= exitEdh ets exit
   where
     listPop :: "def'val" ?: EdhValue -> EdhHostProc
     listPop (defaultArg edhNone -> !def'val) !exit' !ets' =

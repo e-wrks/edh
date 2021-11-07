@@ -530,6 +530,7 @@ installEdhBatteries world = do
                   (EdhMethod, "__Decimal_floor__", wrapHostProc decFloorProc),
                   (EdhMethod, "__Decimal_trunc__", wrapHostProc decTruncProc),
                   (EdhMethod, "__Decimal_round__", wrapHostProc decRoundProc),
+                  (EdhMethod, "__UoM_unify__", wrapHostProc uomUnifyProc),
                   (EdhMethod, "UUID", wrapHostProc uuidCtorProc),
                   (EdhMethod, "error", wrapHostProc errorProc),
                   (EdhMethod, "id", wrapHostProc idProc),

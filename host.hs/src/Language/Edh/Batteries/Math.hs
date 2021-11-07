@@ -6,6 +6,7 @@ import Control.Concurrent.STM
 import Data.Lossless.Decimal as D
 import Language.Edh.Args
 import Language.Edh.Batteries.Data
+import Language.Edh.Batteries.InterOp
 import Language.Edh.Control
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
@@ -146,6 +147,18 @@ decTruncProc (mandatoryArg -> d) !exit =
 decRoundProc :: "d" !: Decimal -> EdhHostProc
 decRoundProc (mandatoryArg -> d) !exit =
   exitEdhTx exit $ EdhDecimal $ fromInteger $ round d
+
+-- | virtual attribute UoM.unify
+--
+-- convert a quantity to be in the specified unit of measure
+uomUnifyProc :: "u" !: UnitDefi -> EdhHostProc
+uomUnifyProc (mandatoryArg -> uom) !exit !ets =
+  mkHostProc' (contextScope $ edh'context ets) EdhMethod "unify" uomUnify
+    >>= exitEdh ets exit
+  where
+    uomUnify :: "val" !: EdhValue -> EdhHostProc
+    uomUnify (mandatoryArg -> val) !exit' =
+      unifyToUnit uom val $ exit' . EdhDecimal
 
 -- | operator (and)
 nullishAndProc :: EdhIntrinsicOp

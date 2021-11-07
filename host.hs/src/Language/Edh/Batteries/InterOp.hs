@@ -103,6 +103,22 @@ instance EdhAllocator fn' => EdhAllocator (Maybe EdhValue -> fn') where
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit =
     allocEdhObj (fn (Just val)) (ArgsPack args kwargs) exit
 
+-- receive anonymous arg taking 'UnitDefi'
+instance EdhAllocator fn' => EdhAllocator (UnitDefi -> fn') where
+  allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
+    EdhUoM !val' -> allocEdhObj (fn val') (ArgsPack args kwargs) exit
+    _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
+  allocEdhObj _ _ _ = throwEdhTx UsageError "missing anonymous arg"
+
+-- receive optional anonymous arg taking 'UnitDefi'
+instance EdhAllocator fn' => EdhAllocator (Maybe UnitDefi -> fn') where
+  allocEdhObj !fn (ArgsPack [] !kwargs) !exit =
+    allocEdhObj (fn Nothing) (ArgsPack [] kwargs) exit
+  allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
+    EdhUoM !val' ->
+      allocEdhObj (fn (Just val')) (ArgsPack args kwargs) exit
+    _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
+
 -- receive anonymous arg taking 'Decimal'
 instance EdhAllocator fn' => EdhAllocator (Decimal -> fn') where
   allocEdhObj !fn (ArgsPack (val : args) !kwargs) !exit = case val of
@@ -506,6 +522,66 @@ instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Mayb
             exit
       (!maybeVal, !kwargs') ->
         allocEdhObj (fn (NamedEdhArg maybeVal)) (ArgsPack args kwargs') exit
+    where
+      !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+
+-- receive named arg taking 'UnitDefi'
+instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg UnitDefi name -> fn') where
+  allocEdhObj !fn (ArgsPack !args !kwargs) !exit =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhUoM !val' ->
+          allocEdhObj (fn (NamedEdhArg val')) (ArgsPack args kwargs') exit
+        _ ->
+          throwEdhTx UsageError $
+            "arg type mismatch: expect UoM for "
+              <> argName
+              <> " but given "
+              <> edhTypeNameOf val
+      (Nothing, !kwargs') -> case args of
+        [] -> throwEdhTx UsageError $ "missing named arg: " <> argName
+        val : args' -> case val of
+          EdhUoM !val' ->
+            allocEdhObj (fn (NamedEdhArg val')) (ArgsPack args' kwargs') exit
+          _ ->
+            throwEdhTx UsageError $
+              "arg type mismatch: expect UoM for "
+                <> argName
+                <> " but given "
+                <> edhTypeNameOf val
+    where
+      !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+
+-- receive named, optional arg taking 'UnitDefi'
+instance (KnownSymbol name, EdhAllocator fn') => EdhAllocator (NamedEdhArg (Maybe UnitDefi) name -> fn') where
+  allocEdhObj !fn (ArgsPack !args !kwargs) !exit =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhUoM !val' ->
+          allocEdhObj
+            (fn (NamedEdhArg (Just val')))
+            (ArgsPack args kwargs')
+            exit
+        _ ->
+          throwEdhTx UsageError $
+            "arg type mismatch: expect UoM for "
+              <> argName
+              <> " but given "
+              <> edhTypeNameOf val
+      (Nothing, !kwargs') -> case args of
+        [] -> allocEdhObj (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
+        val : args' -> case val of
+          EdhUoM !val' ->
+            allocEdhObj
+              (fn (NamedEdhArg (Just val')))
+              (ArgsPack args' kwargs')
+              exit
+          _ ->
+            throwEdhTx UsageError $
+              "arg type mismatch: expect UoM for "
+                <> argName
+                <> " but given "
+                <> edhTypeNameOf val
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
@@ -1993,6 +2069,22 @@ instance EdhCallable fn' => EdhCallable (Maybe EdhValue -> fn') where
   callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit =
     callFromEdh (fn (Just val)) (ArgsPack args kwargs) exit
 
+-- receive anonymous arg taking 'UnitDefi'
+instance EdhCallable fn' => EdhCallable (UnitDefi -> fn') where
+  callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
+    EdhUoM !val' -> callFromEdh (fn val') (ArgsPack args kwargs) exit
+    _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
+  callFromEdh _ _ _ = throwEdhTx UsageError "missing anonymous arg"
+
+-- receive optional anonymous arg taking 'UnitDefi'
+instance EdhCallable fn' => EdhCallable (Maybe UnitDefi -> fn') where
+  callFromEdh !fn (ArgsPack [] !kwargs) !exit =
+    callFromEdh (fn Nothing) (ArgsPack [] kwargs) exit
+  callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
+    EdhUoM !val' ->
+      callFromEdh (fn (Just val')) (ArgsPack args kwargs) exit
+    _ -> throwEdhTx UsageError "arg type mismatch: anonymous"
+
 -- receive anonymous arg taking 'Decimal'
 instance EdhCallable fn' => EdhCallable (Decimal -> fn') where
   callFromEdh !fn (ArgsPack (val : args) !kwargs) !exit = case val of
@@ -2396,6 +2488,66 @@ instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Maybe 
             exit
       (!maybeVal, !kwargs') ->
         callFromEdh (fn (NamedEdhArg maybeVal)) (ArgsPack args kwargs') exit
+    where
+      !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+
+-- receive named arg taking 'UnitDefi'
+instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg UnitDefi name -> fn') where
+  callFromEdh !fn (ArgsPack !args !kwargs) !exit =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhUoM !val' ->
+          callFromEdh (fn (NamedEdhArg val')) (ArgsPack args kwargs') exit
+        _ ->
+          throwEdhTx UsageError $
+            "arg type mismatch: expect UoM for "
+              <> argName
+              <> " but given "
+              <> edhTypeNameOf val
+      (Nothing, !kwargs') -> case args of
+        [] -> throwEdhTx UsageError $ "missing named arg: " <> argName
+        val : args' -> case val of
+          EdhUoM !val' ->
+            callFromEdh (fn (NamedEdhArg val')) (ArgsPack args' kwargs') exit
+          _ ->
+            throwEdhTx UsageError $
+              "arg type mismatch: expect UoM for "
+                <> argName
+                <> " but given "
+                <> edhTypeNameOf val
+    where
+      !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+
+-- receive named, optional arg taking 'UnitDefi'
+instance (KnownSymbol name, EdhCallable fn') => EdhCallable (NamedEdhArg (Maybe UnitDefi) name -> fn') where
+  callFromEdh !fn (ArgsPack !args !kwargs) !exit =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhUoM !val' ->
+          callFromEdh
+            (fn (NamedEdhArg (Just val')))
+            (ArgsPack args kwargs')
+            exit
+        _ ->
+          throwEdhTx UsageError $
+            "arg type mismatch: expect UoM for "
+              <> argName
+              <> " but given "
+              <> edhTypeNameOf val
+      (Nothing, !kwargs') -> case args of
+        [] -> callFromEdh (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs') exit
+        val : args' -> case val of
+          EdhUoM !val' ->
+            callFromEdh
+              (fn (NamedEdhArg (Just val')))
+              (ArgsPack args' kwargs')
+              exit
+          _ ->
+            throwEdhTx UsageError $
+              "arg type mismatch: expect UoM for "
+                <> argName
+                <> " but given "
+                <> edhTypeNameOf val
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
