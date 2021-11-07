@@ -104,24 +104,28 @@ uom
 
 desc$ K
 
+# %%
+
+desc$ @'°C'
+
 
 # %%
 
 uom
-, $
-, 1$ = 100¢
+, USD
+, 1USD = 100¢
 
 # %%
 uom
-, 1$ = 6.4¥
-, 1$ = 0.87€
-, 1€ = 1.16$
+, 1USD = 6.4CNY
+, 1USD = 0.87EUR
+, 1EUR = 1.16USD
 
 # %%
-@'$'.unify( 80% * 25¥ ).toFixed(2)
+USD.unify( 80% * 25CNY ).toFixed(2)
 
 # %%
-¥.unify( 37€ * 2% ).toFixed(2)
+CNY.unify( 37EUR * 2% ).toFixed(2)
 
 
 # %%
