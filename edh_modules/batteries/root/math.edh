@@ -32,5 +32,7 @@ export method min( *all ) {
 export method __Decimal_toFixed__(n) return method toFixed(digs= 0) {
   if n is nan then return "NaN"
   amp = 10**digs
+  # TODO pad trailing zeros as appropriate, avoid scientific notations
+  #      maybe need Haskell impl. for those?
   return repr$ (amp * n).round / amp
 }
