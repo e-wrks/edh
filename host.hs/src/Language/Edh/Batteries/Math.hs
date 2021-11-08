@@ -213,6 +213,13 @@ decRoundProc :: "d" !: Decimal -> EdhHostProc
 decRoundProc (mandatoryArg -> d) !exit =
   exitEdhTx exit $ EdhDecimal $ fromInteger $ round d
 
+-- | virtual attribute Decimal.int
+--
+-- integer part (toward zero) as string
+decIntProc :: "d" !: Decimal -> EdhHostProc
+decIntProc (mandatoryArg -> d) !exit =
+  exitEdhTx exit $ EdhString $ T.pack $ show (truncate d :: Integer)
+
 -- | virtual attribute UoM.unify
 --
 -- convert a quantity to be in the specified unit of measure

@@ -29,10 +29,16 @@ export method min( *all ) {
 
 
 {## Resembles `Number.prototype.toFixed()` as in JavaScript #}
-export method __Decimal_toFixed__(n) return method toFixed(digs= 0) {
+export method __Decimal_toFixed__( n: 'Decimal' )
+return method toFixed(digs= 0) {
+  if digs < 0 then throw UsageError('negative decimal digits: ' ++ digs)
   if n is nan then return "NaN"
+  if digs <= 0 then return repr$ n.round
+
   amp = 10**digs
-  # TODO pad trailing zeros as appropriate, avoid scientific notations
-  #      maybe need Haskell impl. for those?
-  return repr$ (amp * n).round / amp
+  let (q, r) = (*( (amp * n).round quotRem amp ))
+  , intPart = q.int # string form of truncated, scientific notation avoided
+  , fracPart = repr$ r
+  fracPart = fracPart ++ '0' * (digs - len(fracPart))
+  return intPart ++ '.' ++ fracPart
 }
