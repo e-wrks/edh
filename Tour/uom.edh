@@ -6,7 +6,7 @@ uom 100% = 1
 desc$ @'%'
 
 # %%
-21.5%
+pcnt = 21.5%
 
 # %%
 
@@ -39,6 +39,12 @@ sz = 325.9MB
 sz.unified
 
 # %%
+MB.unify(sz)
+
+# %%
+KB.unify(sz)
+
+# %%
 sz.reduced
 
 
@@ -68,8 +74,10 @@ uom
 desc$ m
 
 # %%
+desc$ mm
 
-desc$ cm
+# %%
+325mm.reduced
 
 
 # %%
@@ -124,6 +132,12 @@ desc$ K
 # %%
 
 desc$ @'°C'
+
+# %%
+25°C.unified
+
+# %%
+@'°F'.unify(25°C)
 
 
 # %%

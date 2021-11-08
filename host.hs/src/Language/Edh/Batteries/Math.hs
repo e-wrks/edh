@@ -5,7 +5,6 @@ module Language.Edh.Batteries.Math where
 import Control.Concurrent.STM
 import Data.Lossless.Decimal as D
 import qualified Data.Text as T
-import Language.Edh.Args
 import Language.Edh.Batteries.Data
 import Language.Edh.Batteries.InterOp
 import Language.Edh.Control
@@ -181,62 +180,62 @@ powProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
 -- | virtual attribute Decimal.finite
 --
 -- test whether the decimal value is finite, i.e. not inf/-inf/nan
-decFiniteProc :: "d" !: Decimal -> EdhHostProc
-decFiniteProc (mandatoryArg -> d) !exit =
+decFiniteProc :: Decimal -> EdhHostProc
+decFiniteProc !d !exit =
   exitEdhTx exit $ EdhBool $ decimalIsFinite d
 
 -- | virtual attribute Decimal.ceil
 --
 -- get the least integer not less than x
-decCeilProc :: "d" !: Decimal -> EdhHostProc
-decCeilProc (mandatoryArg -> d) !exit =
+decCeilProc :: Decimal -> EdhHostProc
+decCeilProc !d !exit =
   exitEdhTx exit $ EdhDecimal $ fromInteger $ ceiling d
 
 -- | virtual attribute Decimal.floor
 --
 -- get the the greatest integer not greater than x
-decFloorProc :: "d" !: Decimal -> EdhHostProc
-decFloorProc (mandatoryArg -> d) !exit =
+decFloorProc :: Decimal -> EdhHostProc
+decFloorProc !d !exit =
   exitEdhTx exit $ EdhDecimal $ fromInteger $ floor d
 
 -- | virtual attribute Decimal.trunc
 --
 -- truncate to integer toward zero
-decTruncProc :: "d" !: Decimal -> EdhHostProc
-decTruncProc (mandatoryArg -> d) !exit =
+decTruncProc :: Decimal -> EdhHostProc
+decTruncProc !d !exit =
   exitEdhTx exit $ EdhDecimal $ fromInteger $ truncate d
 
 -- | virtual attribute Decimal.round
 --
 -- round to integer toward zero
-decRoundProc :: "d" !: Decimal -> EdhHostProc
-decRoundProc (mandatoryArg -> d) !exit =
+decRoundProc :: Decimal -> EdhHostProc
+decRoundProc !d !exit =
   exitEdhTx exit $ EdhDecimal $ fromInteger $ round d
 
 -- | virtual attribute Decimal.int
 --
 -- integer part (toward zero) as string
-decIntProc :: "d" !: Decimal -> EdhHostProc
-decIntProc (mandatoryArg -> d) !exit =
+decIntProc :: Decimal -> EdhHostProc
+decIntProc !d !exit =
   exitEdhTx exit $ EdhString $ T.pack $ show (truncate d :: Integer)
 
 -- | virtual attribute UoM.unify
 --
 -- convert a quantity to be in the specified unit of measure
-uomUnifyProc :: "u" !: UnitDefi -> EdhHostProc
-uomUnifyProc (mandatoryArg -> uom) !exit !ets =
-  mkHostProc' (contextScope $ edh'context ets) EdhMethod "unify" uomUnify
+uomUnifyProc :: UnitDefi -> EdhHostProc
+uomUnifyProc uom !exit !ets =
+  mkHostProc' (contextScope $ edh'context ets) EdhMethod "unifyQty" unifyQty
     >>= exitEdh ets exit
   where
-    uomUnify :: "val" !: EdhValue -> EdhHostProc
-    uomUnify (mandatoryArg -> val) !exit' =
+    unifyQty :: EdhValue -> EdhHostProc
+    unifyQty val !exit' =
       mustUnifyToUnit uom val $ exit' . EdhDecimal
 
 -- | virtual attribute Qty.unified
 --
 -- convert a specified quantity to be in a primary unit of measure if possible
-qtyUnifiedProc :: "qty" !: Quantity -> EdhHostProc
-qtyUnifiedProc (mandatoryArg -> qty) !exit =
+qtyUnifiedProc :: Quantity -> EdhHostProc
+qtyUnifiedProc qty !exit =
   unifyToPrimUnit
     qty
     ( \case
@@ -246,6 +245,14 @@ qtyUnifiedProc (mandatoryArg -> qty) !exit =
     -- todo: or return as is?
     $ throwEdhTx UsageError $
       T.pack $ "no primary unit for " <> show qty <> " to be unified to"
+
+-- | virtual attribute Qty.reduced
+--
+-- try convert a specified quantity with the goal for the number to be within
+-- `0.1 ~ 10` scale range
+qtyReducedProc :: Quantity -> EdhHostProc
+qtyReducedProc qty !exit =
+  reduceQtyNumber qty (exit . EdhQty) (exit $ EdhQty qty)
 
 -- | operator (and)
 nullishAndProc :: EdhIntrinsicOp
