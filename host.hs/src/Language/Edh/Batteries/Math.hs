@@ -49,6 +49,17 @@ mulProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
     EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum * rhNum)
+        EdhString !rhStr -> case D.decimalToInteger lhNum of
+          Just lhInt ->
+            exitEdhTx exit $ EdhString $ T.replicate (fromIntegral lhInt) rhStr
+          Nothing -> intrinsicOpReturnNA exit lhVal rhVal
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    EdhString lhStr -> evalExprSrc rhExpr $ \ !rhVal ->
+      case edhUltimate rhVal of
+        EdhDecimal !rhNum -> case D.decimalToInteger rhNum of
+          Just rhInt ->
+            exitEdhTx exit $ EdhString $ T.replicate (fromIntegral rhInt) lhStr
+          Nothing -> intrinsicOpReturnNA exit lhVal rhVal
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
