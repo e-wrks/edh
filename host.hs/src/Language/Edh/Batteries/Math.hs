@@ -373,9 +373,8 @@ inRangeProc inverse eqTester !lhExpr !rhExpr !exit !ets = runEdhTx ets $
 -- | operator (is)
 idEqProc :: (Bool -> Bool) -> EdhIntrinsicOp
 idEqProc inverse !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
-  evalExprSrc rhExpr $
-    \ !rhVal !ets ->
-      (EdhBool . inverse <$> edhIdentEqual lhVal rhVal) >>= exitEdh ets exit
+  evalExprSrc rhExpr $ \ !rhVal !ets ->
+    edhIdentEqual lhVal rhVal >>= exitEdh ets exit . EdhBool . inverse
 
 -- * ordering comparisons
 
