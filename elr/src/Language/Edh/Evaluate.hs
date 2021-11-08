@@ -3289,14 +3289,18 @@ defineUnit !docCmt !decl !exit !ets = case decl of
           throwEdh ets UsageError $
             "can not define UoM [" <> sym <> "] into: " <> badDesc
 
-unifyToUnit :: UnitDefi -> EdhValue -> EdhTxExit Decimal -> EdhTx
-unifyToUnit !uom !val !uniExit !ets = case edhUltimate val of
-  EdhQty qty -> tryUnifyTo uom qty (exitEdh ets uniExit) $
-    edhSimpleDesc ets val $ \ !badDesc ->
-      throwEdh ets UsageError $
+mustUnifyToUnit :: UnitDefi -> EdhValue -> EdhTxExit Decimal -> EdhTx
+mustUnifyToUnit !uom !val !exit = case edhUltimate val of
+  EdhQty qty -> unifyToUnit uom qty exit $
+    edhSimpleDescTx val $ \ !badDesc ->
+      throwEdhTx UsageError $
         "can not unify " <> badDesc <> " to UoM [" <> T.pack (show uom) <> "]"
-  _ -> edhSimpleDesc ets val $ \ !badDesc ->
-    throwEdh ets UsageError $ "can only unify quantities, not a " <> badDesc
+  _ -> edhSimpleDescTx val $ \ !badDesc ->
+    throwEdhTx UsageError $ "can only unify quantities, not a " <> badDesc
+
+unifyToUnit :: UnitDefi -> Quantity -> EdhTxExit Decimal -> EdhTx -> EdhTx
+unifyToUnit !u0 !q0 !exit0 naExit0 !ets =
+  tryUnifyTo u0 q0 (exitEdh ets exit0) $ runEdhTx ets naExit0
   where
     tryUnifyTo ::
       UnitDefi -> Quantity -> (Decimal -> STM ()) -> STM () -> STM ()

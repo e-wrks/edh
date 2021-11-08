@@ -158,7 +158,7 @@ uomUnifyProc (mandatoryArg -> uom) !exit !ets =
   where
     uomUnify :: "val" !: EdhValue -> EdhHostProc
     uomUnify (mandatoryArg -> val) !exit' =
-      unifyToUnit uom val $ exit' . EdhDecimal
+      mustUnifyToUnit uom val $ exit' . EdhDecimal
 
 -- | operator (and)
 nullishAndProc :: EdhIntrinsicOp
