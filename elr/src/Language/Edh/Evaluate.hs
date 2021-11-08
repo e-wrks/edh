@@ -3216,7 +3216,7 @@ defineUnit !docCmt !decl !exit !ets = case decl of
     defineFormula prim sym Nothing !exit' =
       resolveEdhCtxAttr scope (AttrByName sym) >>= \case
         Nothing -> do
-          let defi = NamedUnitDefi docCmt prim sym Map.empty
+          let defi = NamedUnitDefi docCmt prim sym []
           iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
             edh'scope'entity scope
           case edh'ctx'exp'target ctx of
@@ -3257,7 +3257,7 @@ defineUnit !docCmt !decl !exit !ets = case decl of
     defineFormula prim sym (Just (srcUoM, uf)) !exit' =
       resolveEdhCtxAttr scope (AttrByName sym) >>= \case
         Nothing -> do
-          let defi = NamedUnitDefi docCmt prim sym $ Map.singleton srcUoM uf
+          let defi = NamedUnitDefi docCmt prim sym [(srcUoM, uf)]
           iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
             edh'scope'entity scope
           case edh'ctx'exp'target ctx of
@@ -3278,7 +3278,7 @@ defineUnit !docCmt !decl !exit !ets = case decl of
                       (mergeDocCmts prevCmt docCmt)
                       (prim || prevPrim)
                       sym
-                      $ Map.insert srcUoM uf prevFormulae
+                      $ mergeFormulaInto srcUoM uf prevFormulae
               iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
                 edh'scope'entity scope
               case edh'ctx'exp'target ctx of
@@ -3292,6 +3292,29 @@ defineUnit !docCmt !decl !exit !ets = case decl of
         Just (badVal, _) -> edhSimpleDesc ets badVal $ \ !badDesc ->
           throwEdh ets UsageError $
             "can not define UoM [" <> sym <> "] into: " <> badDesc
+
+    mergeFormulaInto ::
+      UnitSpec ->
+      UnitFormula ->
+      [(UnitSpec, UnitFormula)] ->
+      [(UnitSpec, UnitFormula)]
+    -- TODO validate uniqueness by spec
+    mergeFormulaInto u f l = case f of
+      RatioFormula r -> do
+        let go rfs [] = reverse $! (u, f) : rfs
+            go rfs l'@(e@(_, f') : rest) = case f' of
+              RatioFormula r' ->
+                if r' < r
+                  then go (e : rfs) rest
+                  else (reverse $! rfs) ++ (u, f) : l'
+              ExprFormula {} -> (reverse $! rfs) ++ (u, f) : l'
+        go [] l
+      ExprFormula {} -> do
+        let go rfs [] = reverse $! (u, f) : rfs
+            go rfs l'@(e@(_, f') : rest) = case f' of
+              RatioFormula {} -> go (e : rfs) rest
+              ExprFormula {} -> (reverse $! rfs) ++ (u, f) : l'
+        go [] l
 
 mustUnifyToUnit :: UnitDefi -> EdhValue -> EdhTxExit Decimal -> EdhTx
 mustUnifyToUnit !uom !val exit = case edhUltimate val of
@@ -3313,7 +3336,7 @@ unifyToUnit !u0 !q0 exit0 naExit0 !ets =
         then exit qty -- shortcut
         else case tgtUoM of
           NamedUnitDefi' ud -> do
-            let fl = Map.toList $ uom'defi'formulae ud
+            let fl = uom'defi'formulae ud
 
                 tryIndirect :: [(UnitSpec, UnitFormula)] -> STM ()
                 tryIndirect [] = naExit
@@ -3398,7 +3421,7 @@ unifyToPrimUnit qty@(Quantity q0 u0) exit naExit !ets
           NamedUnitDefi' ud ->
             (backlog <>) $
               fromList $
-                (<$> Map.toList (uom'defi'formulae ud)) $
+                (<$> uom'defi'formulae ud) $
                   \(uomSpec, formula) -> (uom, uomSpec, formula)
           ArithUnitDefi {} -> backlog
 
@@ -4044,7 +4067,7 @@ resolveUnitSpec !ets !uomSpec !exit0 = case uomSpec of
     resolveNamed :: AttrName -> (NamedUnitDefi -> STM ()) -> STM ()
     resolveNamed "" exit =
       -- dimensionless unit
-      exit $ NamedUnitDefi NoDocCmt True "" Map.empty
+      exit $ NamedUnitDefi NoDocCmt True "" []
     resolveNamed uSym exit =
       edhUltimate <$> lookupEdhCtxAttr scope (AttrByName uSym) >>= \case
         EdhUoM (NamedUnitDefi' ud) | uom'defi'sym ud == uSym -> exit ud
@@ -4229,7 +4252,7 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
         descStr =
           "'UoM' value for named " <> uCate <> " unit [" <> buSym
             <> "], with formula(e):\n"
-            <> T.unlines (("  " <>) . showFormula <$> Map.toList formulae)
+            <> T.unlines (("  " <>) . showFormula <$> formulae)
     exitDesc descStr
   EdhUoM d@(ArithUnitDefi _ns _ds) -> do
     let descStr = T.pack $ "'UoM' value for arithmetic unit [" <> show d <> "]"

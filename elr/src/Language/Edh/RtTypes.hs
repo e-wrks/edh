@@ -1924,8 +1924,14 @@ data NamedUnitDefi = NamedUnitDefi
   { uom'defi'doc :: !OptDocCmt,
     uom'defi'prim :: !Bool,
     uom'defi'sym :: !AttrName,
-    uom'defi'formulae :: !(Map.HashMap UnitSpec UnitFormula)
+    -- | List of formulae convertible to this unit
+    -- INVARIANT: 
+    --  - sorted by conversion factor, or nan if not a ratio factor, so expr
+    --    formulae will always appear last
+    --  - unit specs are unique, overwriting cases should be exceptional
+    uom'defi'formulae :: ![(UnitSpec, UnitFormula)]
   }
+
 
 instance Eq NamedUnitDefi where
   NamedUnitDefi _ _ x'sym _ == NamedUnitDefi _ _ y'sym _ =
@@ -2069,7 +2075,7 @@ uomDivide (ArithUnit ns1 ds1) (ArithUnit ns2 ds2) =
   uomNormalize $ ArithUnit (ns1 ++ ds2) (ds1 ++ ns2)
 
 isDimensionlessUnitSpec :: UnitSpec -> Bool
-isDimensionlessUnitSpec (NamedUnit sym) = T.null sym 
+isDimensionlessUnitSpec (NamedUnit sym) = T.null sym
 isDimensionlessUnitSpec ArithUnit {} = False
 
 uomSpecIdent :: UnitSpec -> AttrName
