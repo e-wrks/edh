@@ -17,95 +17,164 @@ error( 'Executing meta module: ' ++ __name__ )
 export {
 
   {##
-   # virtual attribute of a string value, encoding the string into utf-8 bytes
-   # as a blob value
+   # strip white spaces off from both ends
    #}
-  method __String_bytes__ ( s: 'String' ) pass
+  method __String_strip__ ( s: 'String' ) : 'String' pass
   {##
-   # virtual attribute of a blob value, decoding (assuming utf-8 bytes) into a
-   # string
+   # strip white spaces off from starting end
    #}
-  method __Blob_utf8string__( b: 'Blob' ) pass
+  method __String_stripStart__ ( s: 'String' ) : 'String' pass
   {##
-   # the virtual name property of an intrinsic operator
+   # strip white spaces off from ending end
+   #}
+  method __String_stripEnd__ ( s: 'String' ) : 'String' pass
+  {##
+   # encode the string into utf-8 bytes as a blob value
+   #}
+  method __String_bytes__ ( s: 'String' ) : 'Blob' pass
+
+  {##
+   # with the outer most block from the expr src removed
+   #}
+  method __Expr_deBlock__( b: 'Expr' ) : 'Expr' pass
+
+  {##
+   # decode the (assuming utf-8) bytes as a string value
+   #}
+  method __Blob_utf8string__( b: 'Blob' ) : 'String' pass
+
+  {##
+   # lower bound of the range
+   #}
+  method __Range_lower__( r: 'Range' ) pass
+  {##
+   # upper bound of the range
+   #}
+  method __Range_upper__( r: 'Range' ) pass
+
+  {##
+   # whether the number is finite (i.e. none of `nan`, `inf`, `-inf`)
+   #}
+  method __Decimal_finite__( d: 'Decimal' ) : 'Bool' pass
+  {##
+   # least integer not less than the number
+   #}
+  method __Decimal_ceil__( d: 'Decimal' ) : 'Decimal' pass
+  {##
+   # greatest integer not greater than the number
+   #}
+  method __Decimal_floor__( d: 'Decimal' ) : 'Decimal' pass
+  {##
+   # the number truncated
+i.e. the integer nearest the number, between zero and the number
+   #}
+  method __Decimal_trunc__( d: 'Decimal' ) : 'Decimal' pass
+  {##
+   # the number rounded
+i.e. the nearest integer to the number; the even integer if it is equidistant between two integers
+   #}
+  method __Decimal_round__( d: 'Decimal' ) : 'Decimal' pass
+  {##
+   # string form of the number truncated, scientific notation avoided
+   #}
+  method __Decimal_int__( d: 'Decimal' ) : 'String' pass
+
+  {##
+   # Convert some quantity to be in the unit of measure, return the pure number
+   #}
+  method __UoM_unify__( d: 'UoM' ) : (q: 'Qty') -> 'Decimal' pass
+
+  {##
+   # Convert the quantity to be of some primary unit
+can yield a pure number if convertible to a dimensionless quantity
+   #}
+  method __Qty_unified__( d: 'Qty' ) : 'Qty' | 'Decimal' pass
+
+  {##
+   # name of an intrinsic operator
    #}
   method __IntrinsicOperator_name__ ( op: 'IntrinsicOperator' ) pass
   {##
-   # the virtual name property of a method procedure
+   # name of a method procedure
    #}
   method __Method_name__ ( mth: 'Method' ) pass
   {##
-   # the virtual name property of a method procedure
+   # name of a method procedure
    #}
   method __HostMethod_name__ ( mth: 'HostMethod' ) pass
   {##
-   # the virtual name property of an operator
+   # name of an operator
    #}
   method __Operator_name__ ( mth: 'Operator' ) pass
   {##
-   # the virtual name property of an operator
+   # name of an operator
    #}
   method __HostOperator_name__ ( mth: 'HostOperator' ) pass
   {##
-   # the virtual name property of a generator procedure
+   # name of a generator procedure
    #}
   method __Generator_name__ ( mth: 'Generator' ) pass
   {##
-   # the virtual name property of a generator procedure
+   # name of a generator procedure
    #}
   method __HostGenerator_name__ ( mth: 'HostGenerator' ) pass
   {##
-   # the virtual name property of a iterpreter procedure
+   # name of a iterpreter procedure
    #}
   method __Interpreter_name__ ( mth: 'Interpreter' ) pass
   {##
-   # the virtual name property of a producer procedure
+   # name of a producer procedure
    #}
   method __Producer_name__ ( mth: 'Producer' ) pass
   {##
-   # the virtual name property of a property descriptor
+   # name of a property descriptor
    #}
   method __Descriptor_name__ ( mth: 'Descriptor' ) pass
+
   {##
-   # the virtual attribute of an event sink, to obtain a non-lingering copy of
-   # the event sink
+   # a non-lingering copy of the event sink
    #}
   method __Sink_subseq__ ( _: sink ) : sink pass
   {##
-   # the virtual attribute of an event sink, to obtain the most recent value
-   # from the event sink
+   # the most recent value from the event sink
    #
    # note this only works for a lingering event sink, `nil` is always returned
    # for non-lingering event sinks
    #}
   method __Sink_mrv__ ( _: sink ) pass
   {##
-   # the virtual attribute of an event sink, to check whether it is already at
-   # end-of-stream
+   # whether the event sink is already at end-of-stream
    #}
   method __Sink_eos__ ( _: sink ) : 'Bool' pass
+
   {##
-   # the virtual attribute of a dict, to obtain number of entries in it
+   # number of entries in the dict
    #}
-  method __Dict_size__ ( d: 'Dict' ) pass
+  method __Dict_size__ ( d: 'Dict' ) : 'Decimal' pass
   {##
-   # the virtual attribute of a dict, to obtain all keys in it
+   # all keys in the dict
    #}
   method __Dict_keys__ ( d: 'Dict' ) pass
   {##
-   # the virtual attribute of a dict, to obtain all values in it
+   # all values in the dict
    #}
   method __Dict_values__ ( d: 'Dict' ) pass
+
   {##
-   # the virtual method of a list, to prepand an element into it
+   # prepand an element into the list
    #}
   method __List_push__ ( l: 'List' ) pass
   {##
-   # the virtual method of a list, to pop out the first element from it
+   # pop out the first element from the list
    #}
   method __List_pop__ ( l: 'List' ) pass
   {##
-   # the virtual method of a list, to reverse its contents
+   # reverse the list's contents, return itself
    #}
-  method __List_reverse__ ( l: 'List' ) pass
+  method __List_reverse__ ( l: 'List' ) : 'List' pass
+  {##
+   # make a copy of the list
+   #}
+  method __List_copy__ ( l: 'List' ) : 'List' pass
+
 }
