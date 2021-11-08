@@ -3326,46 +3326,40 @@ mustUnifyToUnit !uom !val exit = case edhUltimate val of
     throwEdhTx UsageError $ "can only unify quantities, not a " <> badDesc
 
 unifyToUnit :: UnitDefi -> Quantity -> EdhTxExit Decimal -> EdhTx -> EdhTx
-unifyToUnit !u0 !q0 exit0 naExit0 !ets =
-  tryUnifyTo u0 q0 (exitEdh ets exit0) $ runEdhTx ets naExit0
+unifyToUnit tgtUoM q@(Quantity qty srcUoM) exit naExit =
+  if srcUoM == tgtUoM
+    then exitEdhTx exit qty -- shortcut
+    else case tgtUoM of
+      NamedUnitDefi' ud -> do
+        let fl = uom'defi'formulae ud
+
+            tryIndirect :: [(UnitSpec, UnitFormula)] -> EdhTx
+            tryIndirect [] = naExit
+            tryIndirect ((u, formula) : rest) =
+              resolveUnitSpec u $ \tgtUoM' ->
+                unifyToUnit
+                  tgtUoM'
+                  q
+                  (exitByConverting formula tgtUoM')
+                  $ tryIndirect rest
+
+            tryDirect :: [(UnitSpec, UnitFormula)] -> EdhTx
+            tryDirect [] = tryIndirect fl
+            tryDirect ((u, formula) : rest) =
+              if uomSpecIdent u == srcUnitIdent
+                then exitByConverting formula srcUoM qty
+                else tryDirect rest
+
+        tryDirect fl
+      ArithUnitDefi _nuds _duds ->
+        naExit -- TODO impl. this case
   where
-    tryUnifyTo ::
-      UnitDefi -> Quantity -> (Decimal -> STM ()) -> STM () -> STM ()
-    tryUnifyTo tgtUoM q@(Quantity qty srcUoM) exit naExit =
-      if srcUoM == tgtUoM
-        then exit qty -- shortcut
-        else case tgtUoM of
-          NamedUnitDefi' ud -> do
-            let fl = uom'defi'formulae ud
+    srcUnitIdent = uomDefiIdent srcUoM
 
-                tryIndirect :: [(UnitSpec, UnitFormula)] -> STM ()
-                tryIndirect [] = naExit
-                tryIndirect ((u, formula) : rest) =
-                  resolveUnitSpec ets u $ \tgtUoM' ->
-                    tryUnifyTo
-                      tgtUoM'
-                      q
-                      (exitByConverting formula tgtUoM')
-                      $ tryIndirect rest
-
-                tryDirect :: [(UnitSpec, UnitFormula)] -> STM ()
-                tryDirect [] = tryIndirect fl
-                tryDirect ((u, formula) : rest) =
-                  if uomSpecIdent u == srcUnitIdent
-                    then exitByConverting formula srcUoM qty
-                    else tryDirect rest
-
-            tryDirect fl
-          ArithUnitDefi _nuds _duds ->
-            naExit -- TODO impl. this case
-      where
-        srcUnitIdent = uomDefiIdent srcUoM
-
-        exitByConverting :: UnitFormula -> UnitDefi -> Decimal -> STM ()
-        exitByConverting f u d = case f of
-          RatioFormula r -> exit $ d * r
-          ExprFormula x _ ->
-            runEdhTx ets $ evalUnitFormula d u x $ \rd _ets -> exit rd
+    exitByConverting :: UnitFormula -> UnitDefi -> Decimal -> EdhTx
+    exitByConverting f u d = case f of
+      RatioFormula r -> exit $ d * r
+      ExprFormula x _ -> evalUnitFormula d u x exit
 
 evalUnitFormula :: Decimal -> UnitDefi -> ExprDefi -> EdhTxExit Decimal -> EdhTx
 evalUnitFormula d u x exit !ets = runEdhTx ets $
@@ -3380,41 +3374,39 @@ evalUnitFormula d u x exit !ets = runEdhTx ets $
 
 unifyToPrimUnit ::
   Quantity -> EdhTxExit (Either Decimal Quantity) -> EdhTx -> EdhTx
-unifyToPrimUnit qty@(Quantity q0 u0) exit naExit !ets
-  | isDimensionlessUnit u0 = exitEdh ets exit $ Left q0
-  | isPrimaryUnit u0 = exitEdh ets exit $ Right qty
+unifyToPrimUnit qty@(Quantity q0 u0) exit naExit
+  | isDimensionlessUnit u0 = exitEdhTx exit $ Left q0
+  | isPrimaryUnit u0 = exitEdhTx exit $ Right qty
   | otherwise = tryUnits (Just u0) empty
   where
     -- todo: optimize perf by leveraging conversion paths of ratio formulae
     tryUnits ::
-      Maybe UnitDefi -> Deque (UnitDefi, UnitSpec, UnitFormula) -> STM ()
+      Maybe UnitDefi -> Deque (UnitDefi, UnitSpec, UnitFormula) -> EdhTx
     tryUnits Nothing backlog = case Deque.uncons backlog of
-      Nothing -> runEdhTx ets naExit
+      Nothing -> naExit
       Just ((uomBridge, uomSpec, formula), backlog') ->
         if isDimensionlessUnitSpec uomSpec
           then case formula of
             RatioFormula r ->
               -- convertible to dimensionless via this bridge unit
-              runEdhTx ets $
-                unifyToUnit
-                  uomBridge
-                  qty
-                  (\d _ets -> exitEdh ets exit $ Left $ d / r)
-                  (const $ tryUnits Nothing backlog')
+              unifyToUnit
+                uomBridge
+                qty
+                (\d -> exitEdhTx exit $ Left $ d / r)
+                (tryUnits Nothing backlog')
             ExprFormula {} ->
               -- no way of reverse conversion
               tryUnits Nothing backlog'
-          else resolveUnitSpec ets uomSpec $ \uom ->
+          else resolveUnitSpec uomSpec $ \uom ->
             tryUnits (Just uom) backlog'
     tryUnits (Just uom) backlog =
       if isPrimaryUnit uom
         then
-          runEdhTx ets $
-            unifyToUnit
-              uom
-              qty
-              (edhSwitchState ets . exitEdhTx exit . Right . flip Quantity uom)
-              $ const tryMore
+          unifyToUnit
+            uom
+            qty
+            (exitEdhTx exit . Right . flip Quantity uom)
+            tryMore
         else tryMore
       where
         tryMore = tryUnits Nothing $ case uom of
@@ -4047,13 +4039,13 @@ intplStmt !ets !stmt !exit = case stmt of
   ExprStmt !x !docCmt -> intplExpr ets x $ \ !x' -> exit $ ExprStmt x' docCmt
   _ -> exit stmt
 
-resolveUnitSpec :: EdhThreadState -> UnitSpec -> (UnitDefi -> STM ()) -> STM ()
-resolveUnitSpec !ets !uomSpec !exit0 = case uomSpec of
+resolveUnitSpec :: UnitSpec -> EdhTxExit UnitDefi -> EdhTx
+resolveUnitSpec !uomSpec !exit0 !ets = case uomSpec of
   NamedUnit uSym -> resolveNamed uSym $ \uom ->
-    exit0 $ NamedUnitDefi' uom
+    exitEdh ets exit0 $ NamedUnitDefi' uom
   ArithUnit nus dus -> resolveArith nus $ \nuds ->
     resolveArith dus $ \duds ->
-      exit0 $ ArithUnitDefi nuds duds
+      exitEdh ets exit0 $ ArithUnitDefi nuds duds
   where
     scope = contextScope $ edh'context ets
 
