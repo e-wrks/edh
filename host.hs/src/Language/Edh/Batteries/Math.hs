@@ -4,6 +4,7 @@ module Language.Edh.Batteries.Math where
 
 import Control.Concurrent.STM
 import Data.Lossless.Decimal as D
+import qualified Data.Text as T
 import Language.Edh.Args
 import Language.Edh.Batteries.Data
 import Language.Edh.Batteries.InterOp
@@ -159,6 +160,21 @@ uomUnifyProc (mandatoryArg -> uom) !exit !ets =
     uomUnify :: "val" !: EdhValue -> EdhHostProc
     uomUnify (mandatoryArg -> val) !exit' =
       mustUnifyToUnit uom val $ exit' . EdhDecimal
+
+-- | virtual attribute Qty.unified
+--
+-- convert a specified quantity to be in a primary unit of measure if possible
+qtyUnifiedProc :: "qty" !: Quantity -> EdhHostProc
+qtyUnifiedProc (mandatoryArg -> qty) !exit =
+  unifyToPrimUnit
+    qty
+    ( \case
+        Left d -> exitEdhTx exit $ EdhDecimal d
+        Right q -> exitEdhTx exit $ EdhQty q
+    )
+    -- todo: or return as is?
+    $ throwEdhTx UsageError $
+      T.pack $ "no primary unit for " <> show qty <> " to be unified to"
 
 -- | operator (and)
 nullishAndProc :: EdhIntrinsicOp

@@ -6,8 +6,15 @@ uom 100% = 1
 desc$ @'%'
 
 # %%
+21.5%
 
-37%.unify()
+# %%
+
+pcnt = 3/8 * 100%
+
+# %%
+
+pcnt.unified
 
 
 # %%
@@ -29,25 +36,10 @@ sz = 512KB
 sz = 325.9MB
 
 # %%
-sz.unify()
+sz.unified
 
 # %%
-sz.unify(B)
-
-# %%
-sz.unify(GB)
-
-# %%
-KB.unify(sz)
-
-# %%
-sz.reduce()
-
-# %%
-sz.reduce(MB)
-
-# %%
-sz.reduce(KB)
+sz.reduced
 
 
 # %%
@@ -56,6 +48,10 @@ uom
 , kg
 , 1kg = 1000g
 , 1g = 1000mg
+
+# %%
+
+36g.unified
 
 
 # %%
@@ -78,10 +74,31 @@ desc$ cm
 
 # %%
 
+# following Python practice,
+# `min` is already occupied by the world root procedure for minimum.
+# TODO put `abs/max/min` into a `Math` namespace as JavaScript does?
+
+uom
+, s
+, 1minute = 60s
+, 1h = 60minute
+, 1d = 24h
+
+uom 1Hz = 1/s
+
+# %%
+
+3Hz * 1.5h
+
+
+# %%
+
 uom 1N = 1kg*m/s/s
 
 desc$ N
 
+# %% # supposed to fail as N is not declared to be a primary unit
+5N.unified
 
 # %%
 
@@ -126,21 +143,6 @@ USD.unify( 80% * 25CNY ).toFixed(2)
 
 # %%
 CNY.unify( 37EUR * 2% ).toFixed(2)
-
-
-# %%
-
-uom
-, s
-, 1min = 60s
-, 1h = 60min
-, 1d = 24h
-
-uom 1Hz = 1/s
-
-# %%
-
-3Hz * 1.5h
 
 
 # %%

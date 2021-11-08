@@ -8,6 +8,7 @@ module Language.Edh.Evaluate where
 import Control.Applicative
 import Control.Concurrent.STM
 import Control.Exception
+import Control.Monad
 import Control.Monad.State.Strict
 import qualified Data.Aeson as A
 import Data.ByteString (ByteString)
@@ -28,8 +29,11 @@ import Data.Text.Encoding.Error (lenientDecode)
 import Data.Typeable hiding (TypeRep, typeOf, typeRep)
 import qualified Data.UUID as UUID
 import Data.Unique
+import Deque.Lazy (Deque)
+import qualified Deque.Lazy as Deque
 import GHC.Clock
 import GHC.Conc (forkIOWithUnmask, myThreadId, unsafeIOToSTM)
+import GHC.Exts
 import Language.Edh.Control
 import Language.Edh.CoreLang
 import Language.Edh.IOPD
@@ -3290,7 +3294,7 @@ defineUnit !docCmt !decl !exit !ets = case decl of
             "can not define UoM [" <> sym <> "] into: " <> badDesc
 
 mustUnifyToUnit :: UnitDefi -> EdhValue -> EdhTxExit Decimal -> EdhTx
-mustUnifyToUnit !uom !val !exit = case edhUltimate val of
+mustUnifyToUnit !uom !val exit = case edhUltimate val of
   EdhQty qty -> unifyToUnit uom qty exit $
     edhSimpleDescTx val $ \ !badDesc ->
       throwEdhTx UsageError $
@@ -3299,7 +3303,7 @@ mustUnifyToUnit !uom !val !exit = case edhUltimate val of
     throwEdhTx UsageError $ "can only unify quantities, not a " <> badDesc
 
 unifyToUnit :: UnitDefi -> Quantity -> EdhTxExit Decimal -> EdhTx -> EdhTx
-unifyToUnit !u0 !q0 !exit0 naExit0 !ets =
+unifyToUnit !u0 !q0 exit0 naExit0 !ets =
   tryUnifyTo u0 q0 (exitEdh ets exit0) $ runEdhTx ets naExit0
   where
     tryUnifyTo ::
@@ -3309,10 +3313,7 @@ unifyToUnit !u0 !q0 !exit0 naExit0 !ets =
         then exit qty -- shortcut
         else case tgtUoM of
           NamedUnitDefi' ud -> do
-            let exitByConverting :: UnitFormula -> AttrName -> Decimal -> STM ()
-                exitByConverting f u d = case f of
-                  RatioFormula r -> exit $ d * r
-                  ExprFormula x _ -> evalFormula d u x exit
+            let fl = Map.toList $ uom'defi'formulae ud
 
                 tryIndirect :: [(UnitSpec, UnitFormula)] -> STM ()
                 tryIndirect [] = naExit
@@ -3321,34 +3322,85 @@ unifyToUnit !u0 !q0 !exit0 naExit0 !ets =
                     tryUnifyTo
                       tgtUoM'
                       q
-                      (exitByConverting formula (uomDefiIdent tgtUoM'))
+                      (exitByConverting formula tgtUoM')
                       $ tryIndirect rest
 
                 tryDirect :: [(UnitSpec, UnitFormula)] -> STM ()
                 tryDirect [] = tryIndirect fl
                 tryDirect ((u, formula) : rest) =
                   if uomSpecIdent u == srcUnitIdent
-                    then exitByConverting formula srcUnitIdent qty
+                    then exitByConverting formula srcUoM qty
                     else tryDirect rest
 
-                fl = Map.toList $ uom'defi'formulae ud
             tryDirect fl
           ArithUnitDefi _nuds _duds ->
             naExit -- TODO impl. this case
       where
         srcUnitIdent = uomDefiIdent srcUoM
 
-    evalFormula ::
-      Decimal -> AttrName -> ExprDefi -> (Decimal -> STM ()) -> STM ()
-    evalFormula d u x exit = runEdhTx ets $
-      pushEdhStack $ \ !ets' -> do
-        iopdInsert (AttrByName $ "[" <> u <> "]") (EdhDecimal d) $
-          edh'scope'entity $ contextScope $ edh'context ets'
-        runEdhTx ets' $
-          evalExprDefi x $ \case
-            EdhDecimal rd -> \_ets -> exit rd
-            badVal -> edhSimpleDescTx badVal $ \badDesc ->
-              throwEdhTx EvalError $ "bad result from UoM formula - " <> badDesc
+        exitByConverting :: UnitFormula -> UnitDefi -> Decimal -> STM ()
+        exitByConverting f u d = case f of
+          RatioFormula r -> exit $ d * r
+          ExprFormula x _ ->
+            runEdhTx ets $ evalUnitFormula d u x $ \rd _ets -> exit rd
+
+evalUnitFormula :: Decimal -> UnitDefi -> ExprDefi -> EdhTxExit Decimal -> EdhTx
+evalUnitFormula d u x exit !ets = runEdhTx ets $
+  pushEdhStack $ \ !ets' -> do
+    iopdInsert (AttrByName $ "[" <> uomDefiIdent u <> "]") (EdhDecimal d) $
+      edh'scope'entity $ contextScope $ edh'context ets'
+    runEdhTx ets' $
+      evalExprDefi x $ \case
+        EdhDecimal rd -> \_ets -> exitEdh ets exit rd
+        badVal -> edhSimpleDescTx badVal $ \badDesc ->
+          throwEdhTx EvalError $ "UoM formula gives bad result: " <> badDesc
+
+unifyToPrimUnit ::
+  Quantity -> EdhTxExit (Either Decimal Quantity) -> EdhTx -> EdhTx
+unifyToPrimUnit qty@(Quantity q0 u0) exit naExit !ets
+  | isDimensionlessUnit u0 = exitEdh ets exit $ Left q0
+  | isPrimaryUnit u0 = exitEdh ets exit $ Right qty
+  | otherwise = tryUnits (Just u0) empty
+  where
+    -- todo: optimize perf by leveraging conversion paths of ratio formulae
+    tryUnits ::
+      Maybe UnitDefi -> Deque (UnitDefi, UnitSpec, UnitFormula) -> STM ()
+    tryUnits Nothing backlog = case Deque.uncons backlog of
+      Nothing -> runEdhTx ets naExit
+      Just ((uomBridge, uomSpec, formula), backlog') ->
+        if isDimensionlessUnitSpec uomSpec
+          then case formula of
+            RatioFormula r ->
+              -- convertible to dimensionless via this bridge unit
+              runEdhTx ets $
+                unifyToUnit
+                  uomBridge
+                  qty
+                  (\d _ets -> exitEdh ets exit $ Left $ d / r)
+                  (const $ tryUnits Nothing backlog')
+            ExprFormula {} ->
+              -- no way of reverse conversion
+              tryUnits Nothing backlog'
+          else resolveUnitSpec ets uomSpec $ \uom ->
+            tryUnits (Just uom) backlog'
+    tryUnits (Just uom) backlog =
+      if isPrimaryUnit uom
+        then
+          runEdhTx ets $
+            unifyToUnit
+              uom
+              qty
+              (edhSwitchState ets . exitEdhTx exit . Right . flip Quantity uom)
+              $ const tryMore
+        else tryMore
+      where
+        tryMore = tryUnits Nothing $ case uom of
+          NamedUnitDefi' ud ->
+            (backlog <>) $
+              fromList $
+                (<$> Map.toList (uom'defi'formulae ud)) $
+                  \(uomSpec, formula) -> (uom, uomSpec, formula)
+          ArithUnitDefi {} -> backlog
 
 type CheckImportExternalModule = Text -> EdhTx -> EdhTx
 
@@ -3973,34 +4025,37 @@ intplStmt !ets !stmt !exit = case stmt of
   _ -> exit stmt
 
 resolveUnitSpec :: EdhThreadState -> UnitSpec -> (UnitDefi -> STM ()) -> STM ()
-resolveUnitSpec !ets !uomSpec !exit = case uomSpec of
+resolveUnitSpec !ets !uomSpec !exit0 = case uomSpec of
   NamedUnit uSym -> resolveNamed uSym $ \uom ->
-    exit $ NamedUnitDefi' uom
+    exit0 $ NamedUnitDefi' uom
   ArithUnit nus dus -> resolveArith nus $ \nuds ->
     resolveArith dus $ \duds ->
-      exit $ ArithUnitDefi nuds duds
+      exit0 $ ArithUnitDefi nuds duds
   where
     scope = contextScope $ edh'context ets
 
     resolveArith :: [AttrName] -> ([NamedUnitDefi] -> STM ()) -> STM ()
     resolveArith us = go [] us
       where
-        go uds [] exit' = exit' $ reverse $! uds
-        go uds (u : rest) exit' = resolveNamed u $ \ud ->
-          go (ud : uds) rest exit'
+        go uds [] exit = exit $ reverse $! uds
+        go uds (u : rest) exit = resolveNamed u $ \ud ->
+          go (ud : uds) rest exit
 
     resolveNamed :: AttrName -> (NamedUnitDefi -> STM ()) -> STM ()
-    resolveNamed uSym exit' =
+    resolveNamed "" exit =
+      -- dimensionless unit
+      exit $ NamedUnitDefi NoDocCmt True "" Map.empty
+    resolveNamed uSym exit =
       edhUltimate <$> lookupEdhCtxAttr scope (AttrByName uSym) >>= \case
-        EdhUoM (NamedUnitDefi' ud) | uom'defi'sym ud == uSym -> exit' ud
+        EdhUoM (NamedUnitDefi' ud) | uom'defi'sym ud == uSym -> exit ud
         badVal -> edhSimpleDesc ets badVal $ \ !badDesc ->
           throwEdh ets UsageError $
             "expect a UoM by [" <> uSym <> "], but it's a " <> badDesc
 
 -- | Resolve quantity literal to pure number or runtime quantity value
 --
--- Bonus support for mathematical notations e.g.:
---   3x = 3*x
+-- Bonus support for mathematical notations e.g.
+--   3x to be interpreted as 3*x
 -- where x is not a UoM but some numeric variable
 resolveQuantity ::
   EdhThreadState ->
@@ -4008,13 +4063,13 @@ resolveQuantity ::
   UnitSpec ->
   (Either Decimal Quantity -> STM ()) ->
   STM ()
-resolveQuantity !ets !q !uomSpec !exit = case uomSpec of
+resolveQuantity !ets !q !uomSpec !exit0 = case uomSpec of
   NamedUnit uSym -> resolveNamed uSym $ \case
-    Left d -> exit $ Left $ q * d
-    Right uom -> exit $ Right $ Quantity q $ NamedUnitDefi' uom
+    Left d -> exit0 $ Left $ q * d
+    Right uom -> exit0 $ Right $ Quantity q $ NamedUnitDefi' uom
   ArithUnit nus dus -> resolveArith (*) q nus $ \q' nuds ->
     resolveArith (/) q' dus $ \qty duds ->
-      exit $ Right $ Quantity qty $ ArithUnitDefi nuds duds
+      exit0 $ Right $ Quantity qty $ ArithUnitDefi nuds duds
   where
     scope = contextScope $ edh'context ets
 
@@ -4026,17 +4081,17 @@ resolveQuantity !ets !q !uomSpec !exit = case uomSpec of
       STM ()
     resolveArith op q' us = go q' [] us
       where
-        go q'' uds [] exit' = exit' q'' $ reverse $! uds
-        go q'' uds (u : rest) exit' = resolveNamed u $ \case
-          Left d -> go (q'' `op` d) uds rest exit'
-          Right ud -> go q'' (ud : uds) rest exit'
+        go q'' uds [] exit = exit q'' $ reverse $! uds
+        go q'' uds (u : rest) exit = resolveNamed u $ \case
+          Left d -> go (q'' `op` d) uds rest exit
+          Right ud -> go q'' (ud : uds) rest exit
 
     resolveNamed ::
       AttrName -> (Either Decimal NamedUnitDefi -> STM ()) -> STM ()
-    resolveNamed uSym exit' =
+    resolveNamed uSym exit =
       edhUltimate <$> lookupEdhCtxAttr scope (AttrByName uSym) >>= \case
-        EdhDecimal d -> exit' $ Left d
-        EdhUoM (NamedUnitDefi' ud) | uom'defi'sym ud == uSym -> exit' $ Right ud
+        EdhDecimal d -> exit $ Left d
+        EdhUoM (NamedUnitDefi' ud) | uom'defi'sym ud == uSym -> exit $ Right ud
         badVal -> edhSimpleDesc ets badVal $ \ !badDesc ->
           throwEdh ets UsageError $
             "expect a UoM or pure number by [" <> uSym <> "], but it's a "

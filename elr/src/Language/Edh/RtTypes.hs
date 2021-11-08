@@ -1957,6 +1957,14 @@ uomDefiIdent (ArithUnitDefi ns ds) =
   T.intercalate "*" (uom'defi'sym <$> ns) <> "/"
     <> T.intercalate "/" (uom'defi'sym <$> ds)
 
+isPrimaryUnit :: UnitDefi -> Bool
+isPrimaryUnit (NamedUnitDefi' u) = uom'defi'prim u
+isPrimaryUnit ArithUnitDefi {} = False
+
+isDimensionlessUnit :: UnitDefi -> Bool
+isDimensionlessUnit (NamedUnitDefi' u) = T.null $ uom'defi'sym u
+isDimensionlessUnit ArithUnitDefi {} = False
+
 instance Eq UnitDefi where
   NamedUnitDefi' x == NamedUnitDefi' y = x == y
   ArithUnitDefi x'ns x'ds == ArithUnitDefi y'ns y'ds =
@@ -2059,6 +2067,10 @@ uomDivide (ArithUnit ns ds) (NamedUnit u2) =
   uomNormalize $ ArithUnit ns (ds ++ [u2])
 uomDivide (ArithUnit ns1 ds1) (ArithUnit ns2 ds2) =
   uomNormalize $ ArithUnit (ns1 ++ ds2) (ds1 ++ ns2)
+
+isDimensionlessUnitSpec :: UnitSpec -> Bool
+isDimensionlessUnitSpec (NamedUnit sym) = T.null sym 
+isDimensionlessUnitSpec ArithUnit {} = False
 
 uomSpecIdent :: UnitSpec -> AttrName
 uomSpecIdent (NamedUnit sym) = sym
