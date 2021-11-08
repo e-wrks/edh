@@ -73,7 +73,35 @@ divProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
--- | operator (//) integer division, following Python
+-- | operator (quot) integer division truncated toward zero
+quotIntProc :: EdhIntrinsicOp
+quotIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  case edhUltimate lhVal of
+    EdhDecimal !lhNum -> case decimalToInteger lhNum of
+      Nothing -> intrinsicOpReturnNA'WithLHV exit lhVal
+      Just !lhi -> evalExprSrc rhExpr $ \ !rhVal -> case edhUltimate rhVal of
+        EdhDecimal !rhNum -> case decimalToInteger rhNum of
+          Nothing -> intrinsicOpReturnNA exit lhVal rhVal
+          Just !rhi ->
+            exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `quot` rhi
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    _ -> intrinsicOpReturnNA'WithLHV exit lhVal
+
+-- | operator (rem) integer remainder, following Haskell
+remIntProc :: EdhIntrinsicOp
+remIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  case edhUltimate lhVal of
+    EdhDecimal !lhNum -> case decimalToInteger lhNum of
+      Nothing -> intrinsicOpReturnNA'WithLHV exit lhVal
+      Just lhi -> evalExprSrc rhExpr $ \ !rhVal -> case edhUltimate rhVal of
+        EdhDecimal !rhNum -> case decimalToInteger rhNum of
+          Nothing -> intrinsicOpReturnNA exit lhVal rhVal
+          Just rhi -> exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `rem` rhi
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    _ -> intrinsicOpReturnNA'WithLHV exit lhVal
+
+-- | operator (//) integer division truncated toward negative infinity,
+-- following Python
 -- http://python-history.blogspot.com/2010/08/why-pythons-integer-division-floors.html
 divIntProc :: EdhIntrinsicOp
 divIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
@@ -88,7 +116,7 @@ divIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
--- | operator (mod) modulus of integer division, following Haskell/Ada
+-- | operator (mod) integer modulus, following Haskell
 modIntProc :: EdhIntrinsicOp
 modIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
@@ -101,16 +129,41 @@ modIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
--- | operator (rem) modulus of integer division, following Haskell/Ada
-remIntProc :: EdhIntrinsicOp
-remIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+-- | operator (quotRem) simultaneous quot and rem, following Haskell
+quotRemIntProc :: EdhIntrinsicOp
+quotRemIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
     EdhDecimal !lhNum -> case decimalToInteger lhNum of
       Nothing -> intrinsicOpReturnNA'WithLHV exit lhVal
       Just lhi -> evalExprSrc rhExpr $ \ !rhVal -> case edhUltimate rhVal of
         EdhDecimal !rhNum -> case decimalToInteger rhNum of
           Nothing -> intrinsicOpReturnNA exit lhVal rhVal
-          Just rhi -> exitEdhTx exit $ EdhDecimal $ Decimal 1 0 $ lhi `rem` rhi
+          Just rhi ->
+            let (q, r) = lhi `quotRem` rhi
+             in exitEdhTx exit $
+                  EdhArgsPack $
+                    ArgsPack
+                      [EdhDecimal $ Decimal 1 0 q, EdhDecimal $ Decimal 1 0 r]
+                      odEmpty
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    _ -> intrinsicOpReturnNA'WithLHV exit lhVal
+
+-- | operator (divMod) simultaneous div and mod, following Haskell
+divModIntProc :: EdhIntrinsicOp
+divModIntProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  case edhUltimate lhVal of
+    EdhDecimal !lhNum -> case decimalToInteger lhNum of
+      Nothing -> intrinsicOpReturnNA'WithLHV exit lhVal
+      Just lhi -> evalExprSrc rhExpr $ \ !rhVal -> case edhUltimate rhVal of
+        EdhDecimal !rhNum -> case decimalToInteger rhNum of
+          Nothing -> intrinsicOpReturnNA exit lhVal rhVal
+          Just rhi ->
+            let (q, m) = lhi `divMod` rhi
+             in exitEdhTx exit $
+                  EdhArgsPack $
+                    ArgsPack
+                      [EdhDecimal $ Decimal 1 0 q, EdhDecimal $ Decimal 1 0 m]
+                      odEmpty
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
