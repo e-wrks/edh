@@ -1468,7 +1468,7 @@ parseUnitSpec :: Parser (UnitSpec, SrcRange)
 parseUnitSpec =
   parseWithRng $
     lexeme $
-      fmap uomNormalize $
+      fmap uomNormalizeSpec $
         choice
           [ parseDs' [] [],
             do

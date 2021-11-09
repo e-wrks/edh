@@ -147,10 +147,24 @@ mulProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
     EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum * rhNum)
+        EdhQty (Quantity rhq rhu) ->
+          exitEdhTx exit $ EdhQty $ Quantity (lhNum * rhq) rhu
         EdhString !rhStr -> case D.decimalToInteger lhNum of
           Just lhInt ->
             exitEdhTx exit $ EdhString $ T.replicate (fromIntegral lhInt) rhStr
           Nothing -> intrinsicOpReturnNA exit lhVal rhVal
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    EdhQty lhQty@(Quantity lhq lhu) -> evalExprSrc rhExpr $ \ !rhVal ->
+      case edhUltimate rhVal of
+        EdhDecimal !rhNum ->
+          exitEdhTx exit $ EdhQty $ Quantity (lhq * rhNum) lhu
+        EdhQty rhQty@(Quantity rhq rhu) -> qtyToPureNumber rhQty $ \case
+          Just rhNum -> exitEdhTx exit $ EdhQty $ Quantity (lhq * rhNum) lhu
+          Nothing -> qtyToPureNumber lhQty $ \case
+            Just lhNum -> exitEdhTx exit $ EdhQty $ Quantity (lhNum * rhq) rhu
+            Nothing ->
+              exitEdhTx exit $
+                EdhQty $ Quantity (lhq * rhq) (uomMultiply lhu rhu)
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     EdhString lhStr -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
@@ -168,6 +182,20 @@ divProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
     EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum / rhNum)
+        EdhQty rhQty@(Quantity rhq rhu) -> qtyToPureNumber rhQty $ \case
+          Just rhNum -> exitEdhTx exit $ EdhDecimal $ lhNum / rhNum
+          Nothing ->
+            exitEdhTx exit $
+              EdhQty $ Quantity (lhNum / rhq) (uomReciprocal rhu)
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    EdhQty (Quantity lhq lhu) -> evalExprSrc rhExpr $ \ !rhVal ->
+      case edhUltimate rhVal of
+        EdhDecimal !rhNum ->
+          exitEdhTx exit $ EdhQty $ Quantity (lhq / rhNum) lhu
+        EdhQty rhQty@(Quantity rhq rhu) -> qtyToPureNumber rhQty $ \case
+          Just rhNum -> exitEdhTx exit $ EdhQty $ Quantity (lhq / rhNum) lhu
+          Nothing ->
+            exitEdhTx exit $ EdhQty $ Quantity (lhq / rhq) (uomDivide lhu rhu)
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 

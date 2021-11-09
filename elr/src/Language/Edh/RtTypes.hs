@@ -1925,13 +1925,12 @@ data NamedUnitDefi = NamedUnitDefi
     uom'defi'prim :: !Bool,
     uom'defi'sym :: !AttrName,
     -- | List of formulae convertible to this unit
-    -- INVARIANT: 
+    -- INVARIANT:
     --  - sorted by conversion factor, or nan if not a ratio factor, so expr
     --    formulae will always appear last
     --  - unit specs are unique, overwriting cases should be exceptional
     uom'defi'formulae :: ![(UnitSpec, UnitFormula)]
   }
-
 
 instance Eq NamedUnitDefi where
   NamedUnitDefi _ _ x'sym _ == NamedUnitDefi _ _ y'sym _ =
@@ -1954,6 +1953,40 @@ data UnitDefi
       { uom'defi'numerators :: ![NamedUnitDefi],
         uom'defi'denominators :: ![NamedUnitDefi]
       }
+
+uomNormalizeDefi :: UnitDefi -> UnitDefi
+uomNormalizeDefi (NamedUnitDefi' !ud) = NamedUnitDefi' ud
+uomNormalizeDefi (ArithUnitDefi [!ud] []) = NamedUnitDefi' ud
+uomNormalizeDefi (ArithUnitDefi [] []) =
+  -- dimensionless one (1)
+  NamedUnitDefi' $ NamedUnitDefi NoDocCmt True "" []
+uomNormalizeDefi (ArithUnitDefi ns ds) =
+  -- TODO: implement reduction of complex arithmetic units
+  -- - move duplicate same named units together, to the 1st-appear place
+  -- - shake-off common (number of) same named units between ns and ds
+  ArithUnitDefi ns ds
+
+uomReciprocal :: UnitDefi -> UnitDefi
+uomReciprocal (NamedUnitDefi' u) = ArithUnitDefi [] [u]
+uomReciprocal (ArithUnitDefi ns ds) = ArithUnitDefi ds ns
+
+uomMultiply :: UnitDefi -> UnitDefi -> UnitDefi
+uomMultiply (NamedUnitDefi' u1) (NamedUnitDefi' u2) = ArithUnitDefi [u1, u2] []
+uomMultiply (NamedUnitDefi' u1) (ArithUnitDefi ns ds) =
+  uomNormalizeDefi $ ArithUnitDefi (u1 : ns) ds
+uomMultiply (ArithUnitDefi ns ds) (NamedUnitDefi' u2) =
+  uomNormalizeDefi $ ArithUnitDefi (ns ++ [u2]) ds
+uomMultiply (ArithUnitDefi ns1 ds1) (ArithUnitDefi ns2 ds2) =
+  uomNormalizeDefi $ ArithUnitDefi (ns1 ++ ns2) (ds1 ++ ds2)
+
+uomDivide :: UnitDefi -> UnitDefi -> UnitDefi
+uomDivide (NamedUnitDefi' u1) (NamedUnitDefi' u2) = ArithUnitDefi [u1] [u2]
+uomDivide (NamedUnitDefi' u1) (ArithUnitDefi ns ds) =
+  uomNormalizeDefi $ ArithUnitDefi (u1 : ds) ns
+uomDivide (ArithUnitDefi ns ds) (NamedUnitDefi' u2) =
+  uomNormalizeDefi $ ArithUnitDefi ns (ds ++ [u2])
+uomDivide (ArithUnitDefi ns1 ds1) (ArithUnitDefi ns2 ds2) =
+  uomNormalizeDefi $ ArithUnitDefi (ns1 ++ ds2) (ds1 ++ ns2)
 
 uomDefiIdent :: UnitDefi -> AttrName
 uomDefiIdent (NamedUnitDefi' ud) = uom'defi'sym ud
@@ -2046,33 +2079,15 @@ data UnitSpec = NamedUnit !AttrName | ArithUnit [AttrName] [AttrName]
 
 -- TODO do we need api for full expansion to all primary units?
 
-uomNormalize :: UnitSpec -> UnitSpec
-uomNormalize (NamedUnit !sym) = NamedUnit sym
-uomNormalize (ArithUnit [!sym] []) = NamedUnit sym
-uomNormalize (ArithUnit [] []) = NamedUnit "" -- dimensionless one (1)
-uomNormalize (ArithUnit ns ds) =
+uomNormalizeSpec :: UnitSpec -> UnitSpec
+uomNormalizeSpec (NamedUnit !sym) = NamedUnit sym
+uomNormalizeSpec (ArithUnit [!sym] []) = NamedUnit sym
+uomNormalizeSpec (ArithUnit [] []) = NamedUnit "" -- dimensionless one (1)
+uomNormalizeSpec (ArithUnit ns ds) =
   -- TODO: implement reduction of complex arithmetic units
   -- - move duplicate same named units together, to the 1st-appear place
   -- - shake-off common (number of) same named units between ns and ds
   ArithUnit ns ds
-
-uomMultiply :: UnitSpec -> UnitSpec -> UnitSpec
-uomMultiply (NamedUnit u1) (NamedUnit u2) = ArithUnit [u1, u2] []
-uomMultiply (NamedUnit u1) (ArithUnit ns ds) =
-  uomNormalize $ ArithUnit (u1 : ns) ds
-uomMultiply (ArithUnit ns ds) (NamedUnit u2) =
-  uomNormalize $ ArithUnit (ns ++ [u2]) ds
-uomMultiply (ArithUnit ns1 ds1) (ArithUnit ns2 ds2) =
-  uomNormalize $ ArithUnit (ns1 ++ ns2) (ds1 ++ ds2)
-
-uomDivide :: UnitSpec -> UnitSpec -> UnitSpec
-uomDivide (NamedUnit u1) (NamedUnit u2) = ArithUnit [u1] [u2]
-uomDivide (NamedUnit u1) (ArithUnit ns ds) =
-  uomNormalize $ ArithUnit (u1 : ds) ns
-uomDivide (ArithUnit ns ds) (NamedUnit u2) =
-  uomNormalize $ ArithUnit ns (ds ++ [u2])
-uomDivide (ArithUnit ns1 ds1) (ArithUnit ns2 ds2) =
-  uomNormalize $ ArithUnit (ns1 ++ ds2) (ds1 ++ ns2)
 
 isDimensionlessUnitSpec :: UnitSpec -> Bool
 isDimensionlessUnitSpec (NamedUnit sym) = T.null sym

@@ -3344,40 +3344,54 @@ unifyToUnit tgtUoM (Left q) exit naExit =
       if isDimensionlessUnitSpec srcUoM
         then exitEdhTx exit $ q * r
         else go rest
-unifyToUnit tgtUoM (Right q@(Quantity qty srcUoM)) exit naExit =
-  if srcUoM == tgtUoM
-    then exitEdhTx exit qty -- shortcut
-    else case tgtUoM of
-      NamedUnitDefi' ud -> do
-        let fl = uom'defi'formulae ud
-
-            tryIndirect :: [(UnitSpec, UnitFormula)] -> EdhTx
-            tryIndirect [] = naExit
-            tryIndirect ((u, formula) : rest) =
-              resolveUnitSpec u $ \tgtUoM' ->
-                unifyToUnit
-                  tgtUoM'
-                  (Right q)
-                  (exitByConverting formula tgtUoM')
-                  $ tryIndirect rest
-
-            tryDirect :: [(UnitSpec, UnitFormula)] -> EdhTx
-            tryDirect [] = tryIndirect fl
-            tryDirect ((u, formula) : rest) =
-              if uomSpecIdent u == srcUnitIdent
-                then exitByConverting formula srcUoM qty
-                else tryDirect rest
-
-        tryDirect fl
-      ArithUnitDefi _nuds _duds ->
-        naExit -- TODO impl. this case
+unifyToUnit u0 (Right q0) exit0 naExit0 =
+  unifyQty Map.empty u0 q0 exit0 naExit0
   where
-    srcUnitIdent = uomDefiIdent srcUoM
+    unifyQty ::
+      Map.HashMap AttrName Bool ->
+      UnitDefi ->
+      Quantity ->
+      EdhTxExit Decimal ->
+      EdhTx ->
+      EdhTx
+    unifyQty visited tgtUoM q@(Quantity qty srcUoM) exit naExit =
+      if srcUoM == tgtUoM
+        then exitEdhTx exit qty -- shortcut
+        else case tgtUoM of
+          NamedUnitDefi' ud -> do
+            let fl = uom'defi'formulae ud
 
-    exitByConverting :: UnitFormula -> UnitDefi -> Decimal -> EdhTx
-    exitByConverting f u d = case f of
-      RatioFormula r -> exit $ d * r
-      ExprFormula x _ -> evalUnitFormula d u x exit
+                tryIndirect :: [(UnitSpec, UnitFormula)] -> EdhTx
+                tryIndirect [] = naExit
+                tryIndirect ((u, formula) : rest) =
+                  case Map.lookup (uomSpecIdent u) visited of
+                    Just {} -> tryIndirect rest
+                    Nothing -> resolveUnitSpec u $ \tgtUoM' ->
+                      unifyQty
+                        visited'
+                        tgtUoM'
+                        q
+                        (exitByConverting formula tgtUoM')
+                        $ tryIndirect rest
+
+                tryDirect :: [(UnitSpec, UnitFormula)] -> EdhTx
+                tryDirect [] = tryIndirect fl
+                tryDirect ((u, formula) : rest) =
+                  if uomSpecIdent u == srcUnitIdent
+                    then exitByConverting formula srcUoM qty
+                    else tryDirect rest
+
+            tryDirect fl
+          ArithUnitDefi _nuds _duds ->
+            naExit -- TODO impl. this case
+      where
+        visited' = Map.insert (uomDefiIdent tgtUoM) True visited
+        srcUnitIdent = uomDefiIdent srcUoM
+
+        exitByConverting :: UnitFormula -> UnitDefi -> Decimal -> EdhTx
+        exitByConverting f u d = case f of
+          RatioFormula r -> exit $ d * r
+          ExprFormula x _ -> evalUnitFormula d u x exit
 
 evalUnitFormula :: Decimal -> UnitDefi -> ExprDefi -> EdhTxExit Decimal -> EdhTx
 evalUnitFormula d u x exit !ets = runEdhTx ets $
@@ -3389,6 +3403,22 @@ evalUnitFormula d u x exit !ets = runEdhTx ets $
         EdhDecimal rd -> \_ets -> exitEdh ets exit rd
         badVal -> edhSimpleDescTx badVal $ \badDesc ->
           throwEdhTx EvalError $ "UoM formula gives bad result: " <> badDesc
+
+qtyToPureNumber :: Quantity -> EdhTxExit (Maybe Decimal) -> EdhTx
+qtyToPureNumber (Quantity q u) exit =
+  if isDimensionlessUnit u
+    then exitEdhTx exit $ Just q
+    else case u of
+      ArithUnitDefi {} -> exitEdhTx exit Nothing
+      NamedUnitDefi' ud -> go $ uom'defi'formulae ud
+  where
+    go [] = exitEdhTx exit Nothing
+    go ((uSpec, formula) : rest) =
+      if isDimensionlessUnitSpec uSpec
+        then case formula of
+          RatioFormula r -> exitEdhTx exit $ Just $ q / r
+          ExprFormula {} -> go rest
+        else go rest
 
 unifyToPrimUnit ::
   Quantity -> EdhTxExit (Either Decimal Quantity) -> EdhTx -> EdhTx
@@ -4166,6 +4196,8 @@ resolveQuantity !ets !q !uomSpec !exit0 = case uomSpec of
       AttrName -> (Either Decimal NamedUnitDefi -> STM ()) -> STM ()
     resolveNamed uSym exit =
       edhUltimate <$> lookupEdhCtxAttr scope (AttrByName uSym) >>= \case
+        EdhNil ->
+          throwEdh ets UsageError $ "UoM [" <> uSym <> "] not in scope"
         EdhDecimal d -> exit $ Left d
         EdhUoM (NamedUnitDefi' ud) | uom'defi'sym ud == uSym -> exit $ Right ud
         badVal -> edhSimpleDesc ets badVal $ \ !badDesc ->

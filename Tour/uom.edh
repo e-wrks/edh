@@ -10,7 +10,7 @@ pcnt = 21.5%
 
 # %%
 
-pcnt = 3/8 * 100%
+pcnt = (3+2)/8 * 100%
 
 # %%
 
@@ -46,6 +46,9 @@ KB.unify(sz)
 
 # %%
 sz.reduced
+
+# %%
+sz.reduced.toFixed(2)
 
 
 # %%
@@ -105,17 +108,14 @@ uom 1N = 1kg*m/s/s
 
 desc$ N
 
-# %% # supposed to fail as N is not declared to be a primary unit
-5N.unified
-
 # %%
 
-f = 5N
-m = 2.3kg
-t = 0.5s
+force = 5N
+mass = 2.3kg
+time = 0.5s
 
 v0 = 0m/s
-v1 = v0 + f/m*t
+v1 = v0 + force/mass*time
 
 
 # %%
@@ -146,15 +146,18 @@ uom
 , USD
 , 1USD = 100¢
 
-# %%
 uom
 , 1USD = 6.4CNY
 , 1USD = 0.87EUR
 , 1EUR = 1.16USD
 
 # %%
-USD.unify( 80% * 25CNY ).toFixed(2)
+80% * 27CNY
+# %%
+USD.unify( 80% * 27CNY ).toFixed(2)
 
+# %%
+37EUR * 2%
 # %%
 CNY.unify( 37EUR * 2% ).toFixed(2)
 
