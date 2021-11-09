@@ -3417,17 +3417,19 @@ unifyToPrimUnit qty@(Quantity q0 u0) exit naExit
                   \(uomSpec, formula) -> (uom, uomSpec, formula)
           ArithUnitDefi {} -> backlog
 
--- | Reduce the scale of the number for a quantity, by converting to larger or
--- smaller units
+-- | Reduce the absolute scale of the number for a quantity
+--
+-- Try converting to some larger or smaller unit, with the goal for the number
+-- to be within `0.9 ~ 10` scale.
 reduceQtyNumber :: Quantity -> EdhTxExit Quantity -> EdhTx -> EdhTx
 reduceQtyNumber qty@(Quantity q uom) exit naExit =
-  if q >= 0.1 && q < 10
+  if q > 0.9 && q < 10
     then -- already in good scale, return as is
       exitEdhTx exit qty
     else case uom of
       NamedUnitDefi' ud -> do
         let fl = uom'defi'formulae ud
-        if q < 0.1
+        if q <= 0.9
           then upScale fl naExit
           else -- i.e. q >= 10
             dnScale (reverse fl) naExit
@@ -3439,7 +3441,7 @@ reduceQtyNumber qty@(Quantity q uom) exit naExit =
     upScale ((_, ExprFormula {}) : _) fbExit = fbExit
     upScale ((tgtSpec, RatioFormula r) : rest) fbExit = do
       let q' = q / r
-      if q' > 10 || q' <= q
+      if q' >= 10 || q' <= q
         then fbExit
         else upScale rest $
           resolveUnitSpec tgtSpec $ \ !tgtUoM -> do
@@ -3451,7 +3453,7 @@ reduceQtyNumber qty@(Quantity q uom) exit naExit =
     dnScale ((_, ExprFormula {}) : rest) fbExit = dnScale rest fbExit
     dnScale ((tgtSpec, RatioFormula r) : rest) fbExit = do
       let q' = q / r
-      if q' < 0.1 || q' >= q
+      if q' <= 0.9 || q' >= q
         then fbExit
         else dnScale rest $
           resolveUnitSpec tgtSpec $ \ !tgtUoM -> do

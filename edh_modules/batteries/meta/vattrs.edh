@@ -90,7 +90,7 @@ can yield a pure number if convertible to a dimensionless quantity
    #}
   method __Qty_unified__( _: 'Qty' ) : 'Qty' | 'Decimal' pass
   {##
-   # try convert a specified quantity with the goal for the number to be within `0.1 ~ 10` scale range
+   # try convert a specified quantity with the goal for the number to be within `0.9 ~ 10` scale range
    #}
   method __Qty_reduced__( _: 'Qty' ) : 'Qty' pass
 

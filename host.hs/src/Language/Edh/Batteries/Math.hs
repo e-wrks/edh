@@ -249,7 +249,7 @@ qtyUnifiedProc qty !exit =
 -- | virtual attribute Qty.reduced
 --
 -- try convert a specified quantity with the goal for the number to be within
--- `0.1 ~ 10` scale range
+-- `0.9 ~ 10` scale range
 qtyReducedProc :: Quantity -> EdhHostProc
 qtyReducedProc qty !exit =
   reduceQtyNumber qty (exit . EdhQty) (exit $ EdhQty qty)

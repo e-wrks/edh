@@ -30,7 +30,7 @@ uom
 desc$ KB
 
 # %%
-sz = 512KB
+sz = 952KB
 
 # %%
 sz = 325.9MB

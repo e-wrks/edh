@@ -30,7 +30,7 @@ export method min( *all ) {
 
 {## Resembles `Number.prototype.toFixed()` as in JavaScript #}
 export method __Decimal_toFixed__( n: 'Decimal' )
-return method toFixed(digs= 0) {
+method toFixed(digs= 0) {
   if digs < 0 then throw UsageError('negative decimal digits: ' ++ digs)
   if n is nan then return "NaN"
   if digs <= 0 then return repr$ n.round
