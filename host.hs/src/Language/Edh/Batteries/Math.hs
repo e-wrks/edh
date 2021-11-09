@@ -4,6 +4,7 @@ module Language.Edh.Batteries.Math where
 
 import Control.Concurrent.STM
 import Data.Lossless.Decimal as D
+import Data.Text (Text)
 import qualified Data.Text as T
 import Language.Edh.Args
 import Language.Edh.Batteries.Data
@@ -224,33 +225,43 @@ decIntProc !d !exit =
 --
 -- resembles `Number.prototype.toFixed()` as in JavaScript
 decToFixedProc :: Decimal -> EdhHostProc
-decToFixedProc !d !exit0 !ets0 =
-  mkHostProc' (contextScope $ edh'context ets0) EdhMethod "toFixed" toFixed
-    >>= exitEdh ets0 exit0
-  where
-    toFixed :: "digs" ?: Decimal -> EdhHostProc
-    toFixed (defaultArg 0 -> nDigs) !exit = case D.decimalToInteger nDigs of
-      Just digs
-        -- Mozilla suggests 0 ~ 20, and "implementations may optionally support
-        -- a larger range of values", we choose 0 ~ 200 here.
-        | 0 <= digs && digs <= 200 -> do
-          let (iDigs :: Int) = fromInteger digs
-          if
-              | not (decimalIsFinite d) ->
-                exitEdhTx exit $ EdhString $ T.pack $ show d
-              | iDigs <= 0 -> do
-                let (i :: Integer) = round d
-                exitEdhTx exit $ EdhString $ T.pack $ show i
-              | otherwise -> do
-                let (amp :: Integer) = 10 ^ iDigs
-                    (q, r) = round (fromInteger amp * d) `quotRem` amp
-                    fracPart = show r
-                    padZeros = replicate (iDigs - length fracPart) '0'
-                exitEdhTx exit $
-                  EdhString $ T.pack $ show q <> "." <> fracPart <> padZeros
-      _ ->
-        throwEdhTx UsageError $
-          "invalid number of decimal digits: " <> T.pack (show nDigs)
+decToFixedProc !d !exit !ets =
+  mkHostProc'
+    (contextScope $ edh'context ets)
+    EdhMethod
+    "toFixed"
+    (decToFixed d EdhString)
+    >>= exitEdh ets exit
+
+decToFixed ::
+  Decimal ->
+  (Text -> EdhValue) ->
+  "digs" ?: Decimal ->
+  EdhTxExit EdhValue ->
+  EdhTx
+decToFixed d cnvt (defaultArg 0 -> nDigs) !exit =
+  case D.decimalToInteger nDigs of
+    Just digs
+      -- Mozilla suggests 0 ~ 20, and "implementations may optionally support
+      -- a larger range of values", we choose 0 ~ 200 here.
+      | 0 <= digs && digs <= 200 -> do
+        let (iDigs :: Int) = fromInteger digs
+        if
+            | not (decimalIsFinite d) ->
+              exitEdhTx exit $ cnvt $ T.pack $ show d
+            | iDigs <= 0 -> do
+              let (i :: Integer) = round d
+              exitEdhTx exit $ cnvt $ T.pack $ show i
+            | otherwise -> do
+              let (amp :: Integer) = 10 ^ iDigs
+                  (q, r) = round (fromInteger amp * d) `quotRem` amp
+                  fracPart = show r
+                  padZeros = replicate (iDigs - length fracPart) '0'
+              exitEdhTx exit $
+                cnvt $ T.pack $ show q <> "." <> fracPart <> padZeros
+    _ ->
+      throwEdhTx UsageError $
+        "invalid number of decimal digits: " <> T.pack (show nDigs)
 
 -- | virtual attribute UoM.unify
 --
@@ -286,6 +297,18 @@ qtyUnifiedProc !qty !exit =
 qtyReducedProc :: Quantity -> EdhHostProc
 qtyReducedProc !qty !exit =
   reduceQtyNumber qty (exit . EdhQty) (exit $ EdhQty qty)
+
+-- | virtual attribute Qty.toFixed()
+--
+-- resembles `Number.prototype.toFixed()` as in JavaScript
+qtyToFixedProc :: Quantity -> EdhHostProc
+qtyToFixedProc (Quantity q uom) !exit !ets =
+  mkHostProc'
+    (contextScope $ edh'context ets)
+    EdhMethod
+    "toFixed"
+    (decToFixed q $ EdhString . (<> uomDefiIdent uom))
+    >>= exitEdh ets exit
 
 -- | operator (and)
 nullishAndProc :: EdhIntrinsicOp

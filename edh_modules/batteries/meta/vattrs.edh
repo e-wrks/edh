@@ -78,6 +78,10 @@ i.e. the nearest integer to the number; the even integer if it is equidistant be
    # string form of the number truncated, scientific notation avoided
    #}
   method __Decimal_int__( _: 'Decimal' ) : 'String' pass
+  {##
+   # resembles `Number.prototype.toFixed()` as in JavaScript
+   #}
+  method __Decimal_toFixed__( _: 'Decimal' ) : (digs: 'Decimal') -> 'String' pass
 
   {##
    # convert some quantity to be in the unit of measure, return the pure number
@@ -93,6 +97,10 @@ can yield a pure number if convertible to a dimensionless quantity
    # try convert a specified quantity with the goal for the number to be within `0.9 ~ 10` scale range
    #}
   method __Qty_reduced__( _: 'Qty' ) : 'Qty' pass
+  {##
+   # resembles `Number.prototype.toFixed()` as in JavaScript
+   #}
+  method __Qty_toFixed__( _: 'Decimal' ) : (digs: 'Decimal') -> 'String' pass
 
   {##
    # name of an intrinsic operator

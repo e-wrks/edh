@@ -541,6 +541,7 @@ installEdhBatteries world = do
                   (EdhMethod, "__UoM_unify__", wrapHostProc uomUnifyProc),
                   (EdhMethod, "__Qty_unified__", wrapHostProc qtyUnifiedProc),
                   (EdhMethod, "__Qty_reduced__", wrapHostProc qtyReducedProc),
+                  (EdhMethod, "__Qty_toFixed__", wrapHostProc qtyToFixedProc),
                   (EdhMethod, "UUID", wrapHostProc uuidCtorProc),
                   (EdhMethod, "error", wrapHostProc errorProc),
                   (EdhMethod, "id", wrapHostProc idProc),
