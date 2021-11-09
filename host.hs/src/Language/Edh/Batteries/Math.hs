@@ -21,7 +21,27 @@ addProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
   case edhUltimate lhVal of
     EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
-        EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum + rhNum)
+        EdhDecimal !rhNum -> exitEdhTx exit $ EdhDecimal $ lhNum + rhNum
+        EdhQty (Quantity rhq rhu) ->
+          unifyToUnit
+            rhu
+            (Left lhNum)
+            (\lhq -> exitEdhTx exit $ EdhQty $ Quantity (lhq + rhq) rhu)
+            (exitEdhTx exit $ EdhQty $ Quantity (lhNum + rhq) rhu)
+        _ ->
+          concatProc
+            (ExprSrc (LitExpr (ValueLiteral lhVal)) noSrcRange)
+            (ExprSrc (LitExpr (ValueLiteral rhVal)) noSrcRange)
+            exit
+    EdhQty lhQty@(Quantity lhq lhu) -> evalExprSrc rhExpr $ \ !rhVal ->
+      case edhUltimate rhVal of
+        EdhDecimal !rhNum ->
+          unifyToUnit
+            lhu
+            (Left rhNum)
+            (\rhq -> exitEdhTx exit $ EdhQty $ Quantity (lhq + rhq) lhu)
+            (exitEdhTx exit $ EdhQty $ Quantity (lhq + rhNum) lhu)
+        EdhQty rhQty -> qtyAddSub (+) lhQty rhQty exit
         _ ->
           concatProc
             (ExprSrc (LitExpr (ValueLiteral lhVal)) noSrcRange)
@@ -33,6 +53,67 @@ addProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
         rhExpr
         exit
 
+qtyAddSub ::
+  (Decimal -> Decimal -> Decimal) ->
+  Quantity ->
+  Quantity ->
+  EdhTxExit EdhValue ->
+  EdhTx
+qtyAddSub op lhQty0@(Quantity lhq0 lhu0) rhQty0@(Quantity rhq0 rhu0) exit =
+  if lhu0 == rhu0
+    then exitEdhTx exit $ EdhQty $ Quantity (lhq0 `op` rhq0) lhu0
+    else
+      unifyToPrimUnit
+        lhQty0
+        ( \lhuq ->
+            unifyToPrimUnit
+              rhQty0
+              (tryPrimaryArith lhuq)
+              (tryDirectConversion lhQty0 rhQty0)
+        )
+        (tryDirectConversion lhQty0 rhQty0)
+  where
+    tryPrimaryArith ::
+      Either Decimal Quantity ->
+      Either Decimal Quantity ->
+      EdhTx
+    tryPrimaryArith lhuq rhuq = case lhuq of
+      Left lhNum -> case rhuq of
+        Left rhNum -> exitEdhTx exit $ EdhDecimal $ lhNum `op` rhNum
+        Right {} ->
+          exitEdhTx exit $ EdhQty $ Quantity (lhNum `op` rhq0) rhu0
+      Right lhQty'@(Quantity lhq' lhu') -> case rhuq of
+        Left rhNum ->
+          exitEdhTx exit $ EdhQty $ Quantity (lhq0 `op` rhNum) lhu0
+        Right rhQty'@(Quantity rhq' rhu') ->
+          if lhu' == rhu'
+            then exitEdhTx exit $ EdhQty $ Quantity (lhq' `op` rhq') lhu'
+            else tryDirectConversion lhQty' rhQty'
+
+    tryDirectConversion :: Quantity -> Quantity -> EdhTx
+    tryDirectConversion lhQty@(Quantity lhq lhu) rhQty@(Quantity rhq rhu) =
+      unifyToUnit
+        lhu
+        (Right rhQty)
+        ( \rhq' ->
+            exitEdhTx exit $ EdhQty $ Quantity (lhq `op` rhq') lhu
+        )
+        ( unifyToUnit
+            rhu
+            (Right lhQty)
+            ( \lhq' ->
+                exitEdhTx exit $
+                  EdhQty $ Quantity (lhq' `op` rhq) rhu
+            )
+            ( throwEdhTx UsageError $
+                "can not unify the two units: ["
+                  <> uomDefiIdent lhu
+                  <> "] and ["
+                  <> uomDefiIdent rhu
+                  <> "]"
+            )
+        )
+
 -- | operator (-)
 subtProc :: EdhIntrinsicOp
 subtProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
@@ -40,6 +121,22 @@ subtProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
     EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum - rhNum)
+        EdhQty (Quantity rhq rhu) ->
+          unifyToUnit
+            rhu
+            (Left lhNum)
+            (\lhq -> exitEdhTx exit $ EdhQty $ Quantity (lhq - rhq) rhu)
+            (exitEdhTx exit $ EdhQty $ Quantity (lhNum - rhq) rhu)
+        _ -> intrinsicOpReturnNA exit lhVal rhVal
+    EdhQty lhQty@(Quantity lhq lhu) -> evalExprSrc rhExpr $ \ !rhVal ->
+      case edhUltimate rhVal of
+        EdhDecimal !rhNum ->
+          unifyToUnit
+            lhu
+            (Left rhNum)
+            (\rhq -> exitEdhTx exit $ EdhQty $ Quantity (lhq - rhq) lhu)
+            (exitEdhTx exit $ EdhQty $ Quantity (lhq - rhNum) lhu)
+        EdhQty rhQty -> qtyAddSub (-) lhQty rhQty exit
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 

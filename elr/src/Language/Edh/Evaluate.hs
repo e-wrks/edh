@@ -3318,15 +3318,33 @@ defineUnit !docCmt !decl !exit !ets = case decl of
 
 mustUnifyToUnit :: UnitDefi -> EdhValue -> EdhTxExit Decimal -> EdhTx
 mustUnifyToUnit !uom !val exit = case edhUltimate val of
-  EdhQty qty -> unifyToUnit uom qty exit $
+  EdhDecimal q ->
+    unifyToUnit uom (Left q) exit $
+      throwEdhTx UsageError $
+        "can not unify a pure number to UoM [" <> T.pack (show uom) <> "]"
+  EdhQty qty -> unifyToUnit uom (Right qty) exit $
     edhSimpleDescTx val $ \ !badDesc ->
       throwEdhTx UsageError $
         "can not unify " <> badDesc <> " to UoM [" <> T.pack (show uom) <> "]"
   _ -> edhSimpleDescTx val $ \ !badDesc ->
     throwEdhTx UsageError $ "can only unify quantities, not a " <> badDesc
 
-unifyToUnit :: UnitDefi -> Quantity -> EdhTxExit Decimal -> EdhTx -> EdhTx
-unifyToUnit tgtUoM q@(Quantity qty srcUoM) exit naExit =
+unifyToUnit ::
+  UnitDefi -> Either Decimal Quantity -> EdhTxExit Decimal -> EdhTx -> EdhTx
+unifyToUnit tgtUoM (Left q) exit naExit =
+  if isDimensionlessUnit tgtUoM
+    then exitEdhTx exit q
+    else case tgtUoM of
+      NamedUnitDefi' ud -> go $ uom'defi'formulae ud
+      ArithUnitDefi {} -> naExit
+  where
+    go [] = naExit
+    go ((_, ExprFormula {}) : rest) = go rest
+    go ((srcUoM, RatioFormula r) : rest) =
+      if isDimensionlessUnitSpec srcUoM
+        then exitEdhTx exit $ q * r
+        else go rest
+unifyToUnit tgtUoM (Right q@(Quantity qty srcUoM)) exit naExit =
   if srcUoM == tgtUoM
     then exitEdhTx exit qty -- shortcut
     else case tgtUoM of
@@ -3339,7 +3357,7 @@ unifyToUnit tgtUoM q@(Quantity qty srcUoM) exit naExit =
               resolveUnitSpec u $ \tgtUoM' ->
                 unifyToUnit
                   tgtUoM'
-                  q
+                  (Right q)
                   (exitByConverting formula tgtUoM')
                   $ tryIndirect rest
 
@@ -3391,7 +3409,7 @@ unifyToPrimUnit qty@(Quantity q0 u0) exit naExit
               -- convertible to dimensionless via this bridge unit
               unifyToUnit
                 uomBridge
-                qty
+                (Right qty)
                 (\d -> exitEdhTx exit $ Left $ d / r)
                 (tryUnits Nothing backlog')
             ExprFormula {} ->
@@ -3404,7 +3422,7 @@ unifyToPrimUnit qty@(Quantity q0 u0) exit naExit
         then
           unifyToUnit
             uom
-            qty
+            (Right qty)
             (exitEdhTx exit . Right . flip Quantity uom)
             tryMore
         else tryMore
