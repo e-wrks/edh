@@ -5,6 +5,7 @@ module Language.Edh.Batteries.Math where
 import Control.Concurrent.STM
 import Data.Lossless.Decimal as D
 import qualified Data.Text as T
+import Language.Edh.Args
 import Language.Edh.Batteries.Data
 import Language.Edh.Batteries.InterOp
 import Language.Edh.Control
@@ -219,11 +220,43 @@ decIntProc :: Decimal -> EdhHostProc
 decIntProc !d !exit =
   exitEdhTx exit $ EdhString $ T.pack $ show (truncate d :: Integer)
 
+-- | virtual attribute Decimal.toFixed()
+--
+-- resembles `Number.prototype.toFixed()` as in JavaScript
+decToFixedProc :: Decimal -> EdhHostProc
+decToFixedProc !d !exit0 !ets0 =
+  mkHostProc' (contextScope $ edh'context ets0) EdhMethod "toFixed" toFixed
+    >>= exitEdh ets0 exit0
+  where
+    toFixed :: "digs" ?: Decimal -> EdhHostProc
+    toFixed (defaultArg 0 -> nDigs) !exit = case D.decimalToInteger nDigs of
+      Just digs
+        -- Mozilla suggests 0 ~ 20, and "implementations may optionally support
+        -- a larger range of values", we choose 0 ~ 200 here.
+        | 0 <= digs && digs <= 200 -> do
+          let (iDigs :: Int) = fromInteger digs
+          if
+              | not (decimalIsFinite d) ->
+                exitEdhTx exit $ EdhString $ T.pack $ show d
+              | iDigs <= 0 -> do
+                let (i :: Integer) = round d
+                exitEdhTx exit $ EdhString $ T.pack $ show i
+              | otherwise -> do
+                let (amp :: Integer) = 10 ^ iDigs
+                    (q, r) = round (fromInteger amp * d) `quotRem` amp
+                    fracPart = show r
+                    padZeros = replicate (iDigs - length fracPart) '0'
+                exitEdhTx exit $
+                  EdhString $ T.pack $ show q <> "." <> fracPart <> padZeros
+      _ ->
+        throwEdhTx UsageError $
+          "invalid number of decimal digits: " <> T.pack (show nDigs)
+
 -- | virtual attribute UoM.unify
 --
 -- convert a quantity to be in the specified unit of measure
 uomUnifyProc :: UnitDefi -> EdhHostProc
-uomUnifyProc uom !exit !ets =
+uomUnifyProc !uom !exit !ets =
   mkHostProc' (contextScope $ edh'context ets) EdhMethod "unifyQty" unifyQty
     >>= exitEdh ets exit
   where
@@ -235,7 +268,7 @@ uomUnifyProc uom !exit !ets =
 --
 -- convert a specified quantity to be in a primary unit of measure if possible
 qtyUnifiedProc :: Quantity -> EdhHostProc
-qtyUnifiedProc qty !exit =
+qtyUnifiedProc !qty !exit =
   unifyToPrimUnit
     qty
     ( \case
@@ -251,7 +284,7 @@ qtyUnifiedProc qty !exit =
 -- try convert a specified quantity with the goal for the number to be within
 -- `0.9 ~ 10` scale range
 qtyReducedProc :: Quantity -> EdhHostProc
-qtyReducedProc qty !exit =
+qtyReducedProc !qty !exit =
   reduceQtyNumber qty (exit . EdhQty) (exit $ EdhQty qty)
 
 -- | operator (and)
