@@ -1,0 +1,189 @@
+
+# %%
+
+uom 100% = 1
+
+desc$ @'%'
+
+# %%
+pcnt = 21.5%
+
+# %%
+
+pcnt = (3+2)/8 * 100%
+
+# %%
+
+pcnt.unified
+
+
+# %%
+
+uom
+, B
+, 1KB = 1024B
+, 1MB = 1024KB
+, 1GB = 1024MB
+, 1TB = 1024GB
+, 1PB = 1024TB
+
+desc$ KB
+
+# %%
+sz = 952KB
+
+# %%
+sz = 325.9MB
+
+# %%
+sz.unified
+
+# %%
+MB.unify(sz)
+
+# %%
+KB.unify(sz)
+
+# %%
+sz.reduced
+
+# %%
+sz.reduced.toFixed(2)
+
+
+# %%
+
+uom
+, kg
+, 1kg = 1000g
+, 1g = 1000mg
+
+# %%
+
+36g.unified
+
+
+# %%
+
+uom
+, m
+, 1km = 1000m
+, 1m = 10dm
+, 1dm = 10cm
+, 1cm = 10mm
+, 1mm = 1000um
+, 1um = 1000nm
+
+desc$ m
+
+# %%
+desc$ mm
+
+# %%
+325mm.reduced
+
+
+# %%
+
+# following Python practice,
+# `min` is already occupied by the world root procedure for minimum.
+# TODO put `abs/max/min` into a `Math` namespace as JavaScript does?
+
+uom
+, s
+, 1minute = 60s
+, 1h = 60minute
+, 1d = 24h
+
+uom 1Hz = 1/s
+
+# %%
+freq = 3Hz
+duration = 1.5minute
+
+n'occurrence = duration * freq
+
+# %%
+n'occurrence = 125
+duration = 5minute
+
+freq = n'occurrence / duration
+
+# %%
+freq = freq.asIn(Hz)
+
+# %%
+freq.toFixed(2)
+
+
+# %%
+
+uom 1N = 1kg*m/s/s
+
+desc$ N
+
+# %%
+
+force = 5N
+mass = 2.3kg
+time = 0.5s
+
+v0 = 1.3m/s
+
+accel = force/mass
+v1 = v0 + accel*time
+
+# %%
+v1.toFixed(2)
+
+
+# %%
+
+uom
+, K
+, [K] = [°C] + 273.15
+, [°C] = [K] - 273.15
+, [°F] = [°C] * 9/5 + 32
+, [°C] = ([°F] - 32) * 5/9
+
+desc$ K
+
+# %%
+
+desc$ @'°C'
+
+# %%
+25°C.unified
+
+# %%
+; @'°F'.unify(25°C)
+
+
+# %%
+
+uom
+, USD
+, 1USD = 100¢
+
+uom
+, 1USD = 6.4CNY
+, 1USD = 0.87EUR
+, 1EUR = 1.16USD
+
+# %%
+80% * 27CNY
+# %%
+USD.unify( 80% * 27CNY ).toFixed(2)
+
+# %%
+37EUR * 2%
+# %%
+CNY.unify( 37EUR * 2% ).toFixed(2)
+
+
+# %%
+
+uom
+, °
+, 1° = 60'
+, 1' = 60''

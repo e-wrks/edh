@@ -9,7 +9,9 @@ import Control.Monad
 import Control.Monad.State.Strict (MonadState (get, put))
 import Data.Char
 import qualified Data.Char as Char
+import Data.Function
 import Data.Functor (($>))
+import Data.List
 import Data.Lossless.Decimal as D (Decimal (Decimal), inf, nan)
 import Data.Maybe
 import Data.Text (Text)
@@ -257,6 +259,192 @@ parseImportExpr !si = do
       void $ optional $ keyword "from"
       (!se, !si') <- parseExpr si
       return (ar, se, si')
+
+parseUnitStmt :: OptDocCmt -> IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
+parseUnitStmt !docCmt !si = do
+  void $ keyword "uom"
+  void optionalComma
+  -- todo: allow expr interpolation inside?
+  (,si) . flip UnitStmt docCmt <$> parseUnitDecls []
+  where
+    parseUnitDecls :: [UnitDecl] -> Parser [UnitDecl]
+    parseUnitDecls uds = (<|> return (reverse $! uds)) $ do
+      ud <- parseUnitDecl
+      optionalComma >>= \case
+        False -> return $ reverse $! ud : uds
+        True -> parseUnitDecls $ ud : uds
+
+    parseUnitDecl :: Parser UnitDecl
+    parseUnitDecl =
+      parseUnitConversionFormula -- starts with `[`
+        <|> parseConversionFactor -- starts with a digit
+        <|> parseBaseDecl -- string of UoM chars
+
+    --
+    parseBaseDecl :: Parser UnitDecl
+    parseBaseDecl = do
+      (buSym, buSpan) <- parseNamedUnitSpec
+      return $ PrimUnitDecl buSym buSpan
+
+    {- HLINT ignore "Use <$>" -}
+    parseConversionFactor :: Parser UnitDecl
+    parseConversionFactor = do
+      nQty <- parseDecLit'
+      (nuSym, nuSpan) <- parseNamedUnitSpec
+      void $ char '=' <* sc
+      dQty <- parseDecLit'
+
+      duSpec <-
+        parseUnitSpec <|> do
+          sc
+          return $ NamedUnit "" noSrcRange
+      return $ ConversionFactor nQty nuSym nuSpan dQty duSpec
+
+    parseUnitConversionFormula :: Parser UnitDecl
+    parseUnitConversionFormula = do
+      (buSym, buSpan) <- parseNamedUnitRef
+      void $ char '=' <* sc
+      !s <- getInput
+      !o <- getOffset
+      (!x, !src'uom) <- parseUnitFormula
+      EdhParserState _ _lexeme'end !lexeme'end'offs <- get
+      let !src'text = maybe "" fst $ takeN_ (lexeme'end'offs - o) s
+      return $
+        ConversionFormula
+          buSym
+          buSpan
+          x
+          src'text
+          src'uom
+
+parseUnitFormula :: Parser (ExprSrc, AttrName)
+parseUnitFormula = do
+  xr@(ExprSrc x _) <- parseFormulaPrec Nothing (-20)
+  case nub $ findBUR x [] of
+    [] -> return (xr, "")
+    [srcUnitSym] -> return (xr, srcUnitSym)
+    rs ->
+      fail $
+        T.unpack $
+          "too many source units: " <> T.intercalate " & " (reverse rs)
+  where
+    findBUR :: Expr -> [AttrName] -> [AttrName]
+    findBUR (AttrExpr (DirectRef (AttrAddrSrc (QuaintAttr s) _))) l =
+      case T.stripPrefix "[" s of
+        Just s' -> case T.stripSuffix "]" s' of
+          Just s'' -> T.strip s'' : l
+          Nothing -> l
+        Nothing -> l
+    findBUR (ParenExpr (ExprSrc x _)) l = findBUR x l
+    findBUR (InfixExpr _ (ExprSrc lhx _) (ExprSrc rhx _)) l =
+      findBUR lhx l & findBUR rhx
+    -- todo: scan more structures once they become possible
+    findBUR _ l = l
+
+parseFormulaPrec ::
+  Maybe (OpSymSrc, OpFixity) -> Precedence -> Parser ExprSrc
+parseFormulaPrec precedingOp prec = parseExpr1st >>= parseMoreInfix precedingOp
+  where
+    -- Base unit reference as expression
+    parseBURX :: Parser ExprSrc
+    parseBURX = do
+      (buSym, buSpan) <- parseNamedUnitRef
+      return $
+        ExprSrc
+          ( AttrExpr $
+              DirectRef $
+                AttrAddrSrc (QuaintAttr $ "[" <> buSym <> "]") buSpan
+          )
+          buSpan
+
+    parseParen :: Parser ExprSrc
+    parseParen =
+      parseXR $
+        (ParenExpr <$>) $
+          between (symbol "(") (symbol ")") $
+            parseFormulaPrec Nothing (-20)
+
+    parseExpr1st :: Parser ExprSrc
+    parseExpr1st =
+      choice
+        [ parseBURX, -- starts with [
+          parseParen, -- starts with (
+          -- todo: implement these ctrl flow constructs
+          -- parsePrefixX,
+          -- parseForX,
+          -- parseDoForOrWhileX,
+          -- parseWhileX,
+          -- parseIfX,
+          -- parseCaseX,
+          -- parseBlock,
+          parseXR (LitExpr <$> parseLit)
+        ]
+
+    parseXR :: Parser Expr -> Parser ExprSrc
+    parseXR = (uncurry ExprSrc <$>) . parseWithRng
+
+    parseMoreInfix ::
+      Maybe (OpSymSrc, OpFixity) -> ExprSrc -> Parser ExprSrc
+    parseMoreInfix !pOp !leftExpr =
+      tighterOp prec >>= \case
+        Nothing -> return leftExpr
+        Just (!opFixity, !opPrec, !opSym) -> do
+          !rightExpr <- parseFormulaPrec (Just (opSym, opFixity)) opPrec
+          parseMoreInfix pOp $
+            ExprSrc
+              (InfixExpr opSym leftExpr rightExpr)
+              (SrcRange (exprSrcStart leftExpr) (exprSrcEnd rightExpr))
+      where
+        tighterOp ::
+          Precedence ->
+          Parser (Maybe (OpFixity, Precedence, OpSymSrc))
+        tighterOp prec' = do
+          !beforeOp <- getParserState
+          !errRptPos <- getOffset
+          optional (try parseInfixOp) >>= \case
+            Nothing -> return Nothing
+            Just opSymSrc@(OpSymSrc !opSym _opSpan) -> do
+              EdhParserState !opPD _ _ <- get
+              case lookupOpFromDict opSym opPD of
+                Nothing -> do
+                  setOffset errRptPos
+                  fail $ "undeclared operator: " <> T.unpack opSym
+                Just (opFixity, opPrec, _) ->
+                  if opPrec == prec'
+                    then case opFixity of
+                      InfixL -> do
+                        -- leave this op to be encountered later, i.e.
+                        -- after left-hand expr collapsed into one
+                        setParserState beforeOp
+                        return Nothing
+                      InfixR -> return $ Just (opFixity, opPrec, opSymSrc)
+                      Infix -> case pOp of
+                        Nothing -> return $ Just (opFixity, opPrec, opSymSrc)
+                        Just (_opSym, !pFixity) -> case pFixity of
+                          Infix ->
+                            fail $
+                              "cannot mix [infix "
+                                <> show prec'
+                                <> " ("
+                                <> T.unpack opSym
+                                <> ")] and [infix "
+                                <> show opPrec
+                                <> " ("
+                                <> T.unpack opSym
+                                <> ")] in the same infix expression"
+                          _ -> do
+                            -- leave this op to be encountered later, i.e.
+                            -- after left-hand expr collapsed into one
+                            setParserState beforeOp
+                            return Nothing
+                    else
+                      if opPrec > prec'
+                        then return $ Just (opFixity, opPrec, opSymSrc)
+                        else do
+                          -- leave this op to be encountered later, i.e.
+                          -- after left-hand expr collapsed into one
+                          setParserState beforeOp
+                          return Nothing
 
 parseLetStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseLetStmt !si = do
@@ -977,6 +1165,7 @@ parseStmt' !prec !si = do
               parseDeferStmt si,
               parseEffectStmt docCmt si,
               parseLetStmt si,
+              parseUnitStmt docCmt si,
               parseExtendsStmt si,
               parsePerceiveStmt si,
               -- TODO validate <break> must within a loop construct
@@ -1265,9 +1454,72 @@ parseStringLit' = lexeme $ do
 parseBoolLit :: Parser Bool
 parseBoolLit = (keyword "true" $> True) <|> (keyword "false" $> False)
 
--- todo support HEX/OCT ?
+parseNamedUnitRef :: Parser (AttrName, SrcRange)
+parseNamedUnitRef =
+  between (symbol "[") (symbol "]") $ lexeme parseNamedUnitSym
+
+parseNamedUnitSpec :: Parser (AttrName, SrcRange)
+parseNamedUnitSpec = lexeme parseNamedUnitSym
+
+parseNamedUnitSym :: Parser (AttrName, SrcRange)
+parseNamedUnitSym =
+  parseWithRng $ do
+    !uomSym <- takeWhile1P (Just "UoM symbols") isMeasurementUnitChar
+    !sp <- getSourcePos
+    !o <- getOffset
+    !s <- get
+    put
+      s
+        { edh'parser'lexeme'end'pos = lspSrcPosFromParsec sp,
+          edh'parser'lexeme'end'offset = o
+        }
+    return uomSym
+
+parseUnitSpec :: Parser UnitSpec
+parseUnitSpec =
+  lexeme $
+    fmap uomNormalizeSpec $
+      choice
+        [ parseDs' [] [],
+          do
+            sym1 <- parseNamedUnitSym
+            parseNs [sym1]
+        ]
+  where
+    parseNs :: [(AttrName, SrcRange)] -> Parser UnitSpec
+    parseNs ns = parseNs' ns <|> parseDs' ns [] <|> return (ArithUnit ns [])
+
+    parseNs' :: [(AttrName, SrcRange)] -> Parser UnitSpec
+    parseNs' ns = try $ do
+      void $ char '*'
+      nextSym <- parseNamedUnitSym
+      parseNs $ ns ++ [nextSym]
+
+    parseDs ::
+      [(AttrName, SrcRange)] -> [(AttrName, SrcRange)] -> Parser UnitSpec
+    parseDs ns ds = parseDs' ns ds <|> return (ArithUnit ns ds)
+
+    parseDs' ::
+      [(AttrName, SrcRange)] -> [(AttrName, SrcRange)] -> Parser UnitSpec
+    parseDs' ns ds = try $ do
+      void $ char '/'
+      nextSym <- parseNamedUnitSym
+      parseDs ns $ ds ++ [nextSym]
+
+parseNumOrQty :: Parser Literal
+parseNumOrQty = lexeme $ do
+  qty <- parseDecLit'
+  choice
+    [ QtyLiteral qty <$> parseUnitSpec,
+      return (DecLiteral qty)
+    ]
+
 parseDecLit :: Parser Decimal
-parseDecLit = lexeme $ do
+parseDecLit = lexeme parseDecLit'
+
+-- todo support HEX/OCT ?
+parseDecLit' :: Parser Decimal
+parseDecLit' = do
   (!n, !e) <- b10Dec
   return $ Decimal 1 e n
   where
@@ -1331,11 +1583,7 @@ parseAttrAddrSrc :: Parser AttrAddrSrc
 parseAttrAddrSrc = let ?allowKwAttr = False in parseAttrAddrSrc'
 
 parseAttrAddrSrc' :: (?allowKwAttr :: Bool) => Parser AttrAddrSrc
-parseAttrAddrSrc' = do
-  !startPos <- getSourcePos
-  !addr <- parseAttrAddr
-  !lexeme'end <- lexemeEndPos
-  return $ AttrAddrSrc addr $ SrcRange (lspSrcPosFromParsec startPos) lexeme'end
+parseAttrAddrSrc' = uncurry AttrAddrSrc <$> parseWithRng parseAttrAddr
 
 parseAttrAddr :: (?allowKwAttr :: Bool) => Parser AttrAddr
 parseAttrAddr = parseAtNotation <|> NamedAttr <$> parseAttrName
@@ -1399,7 +1647,7 @@ parseAlphNumName = do
             Nothing -> return ()
             Just ident ->
               fail $ "illegal keyword `" <> T.unpack ident <> "` as identifier"
-          optional parseLitExpr >>= \case
+          optional parseLit >>= \case
             Nothing -> return ()
             Just lit ->
               fail $ "illegal literal `" <> show lit <> "` as identifier"
@@ -1457,8 +1705,8 @@ illegalKeywrodAsIdent = do
       )
     <|> return Nothing
 
-parseLitExpr :: Parser Literal
-parseLitExpr =
+parseLit :: Parser Literal
+parseLit =
   choice
     [ NilLiteral <$ litKw "nil",
       BoolLiteral <$> parseBoolLit,
@@ -1476,17 +1724,10 @@ parseLitExpr =
       ValueLiteral EdhBreak <$ litKw "break",
       ValueLiteral EdhContinue <$ litKw "continue",
       ValueLiteral EdhFallthrough <$ litKw "fallthrough",
-      DecLiteral <$> parseDecLit
+      parseNumOrQty
     ]
   where
     litKw = hidden . keyword
-
-parseOpSrc :: Parser OpSymSrc
-parseOpSrc = do
-  !startPos <- getSourcePos
-  !opSym <- parseOpLit
-  !lexeme'end <- lexemeEndPos
-  return $ OpSymSrc opSym $ SrcRange (lspSrcPosFromParsec startPos) lexeme'end
 
 parseOpLit :: Parser Text
 parseOpLit = choice [quaintOpLit, freeformOpLit, stdOpLit]
@@ -1567,7 +1808,7 @@ parseDictOrBlock !si0 =
             Parser ((DictKeyExpr, ExprSrc), IntplSrcInfo)
         nextEntry = (litEntry <|> addrEntry <|> exprEntry) <* optionalComma
         litEntry = try $ do
-          !k <- parseLitExpr
+          !k <- parseLit
           entryColon
           (!v, !si') <- parseExpr si
           return ((LitDictKey k, v), si')
@@ -1798,7 +2039,7 @@ parseExprPrec !precedingOp !prec !si =
         !startPos <- getSourcePos
         (!x, !si') <-
           choice
-            [ (,si) . LitExpr <$> parseLitExpr,
+            [ (,si) . LitExpr <$> parseLit,
               nullaryKwStmt "rethrow" RethrowStmt,
               (,si) <$> parseSymbolExpr,
               parsePrefixExpr si,
@@ -1938,11 +2179,7 @@ parseExprPrec !precedingOp !prec !si =
                           return Nothing
 
 parseInfixOp :: Parser OpSymSrc
-parseInfixOp = do
-  !startPos <- getSourcePos
-  !opSym <- parseOpLit
-  !lexeme'end <- lexemeEndPos
-  return $ OpSymSrc opSym $ SrcRange (lspSrcPosFromParsec startPos) lexeme'end
+parseInfixOp = uncurry OpSymSrc <$> parseWithRng parseOpLit
 
 parseExpr :: IntplSrcInfo -> Parser (ExprSrc, IntplSrcInfo)
 parseExpr = parseExprPrec Nothing (-10)

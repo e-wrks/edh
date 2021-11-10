@@ -14,6 +14,7 @@ import Data.Dynamic
 import qualified Data.HashMap.Strict as Map
 import Data.Hashable (Hashable (hashWithSalt))
 import Data.IORef
+import Data.List
 import Data.Lossless.Decimal as D
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -1074,6 +1075,10 @@ data EdhValue
     EdhSink !Sink
   | -- | named value, a.k.a. term definition
     EdhNamedValue !AttrName !EdhValue
+  | -- | unit of measure definition
+    EdhUoM !UnitDefi
+  | -- | quantity with associated unit of measure
+    EdhQty !Quantity
   | -- | 1st class expression value, with source (or not, if empty)
     EdhExpr !ExprDefi !Text
 
@@ -1123,6 +1128,8 @@ instance Show EdhValue where
     -- Edh operators are all left-associative, parenthesis needed
     T.unpack n <> " := (" <> show v <> ")"
   show (EdhNamedValue n v) = T.unpack n <> " := " <> show v
+  show (EdhUoM defi) = show defi
+  show (EdhQty q) = show q
   show (EdhExpr (ExprDefi _ x _) s) =
     if T.null s
       then -- source-less form
@@ -1174,6 +1181,8 @@ instance Eq EdhValue where
     == EdhExpr (ExprDefi _ (LitExpr y'l) _) _ =
       x'l == y'l
   EdhExpr (ExprDefi x'u _ _) _ == EdhExpr (ExprDefi y'u _ _) _ = x'u == y'u
+  (EdhUoM x) == (EdhUoM y) = x == y
+  (EdhQty x) == (EdhQty y) = x == y
   -- todo: support coercing equality ?
   --       * without this, we are a strongly typed dynamic language
   --       * with this, we'll be a weakly typed dynamic language
@@ -1210,6 +1219,9 @@ instance Hashable EdhValue where
     s `hashWithSalt` (-9 :: Int) `hashWithSalt` u
   hashWithSalt s (EdhSink x) = hashWithSalt s x
   hashWithSalt s (EdhNamedValue _ v) = hashWithSalt s v
+  hashWithSalt s (EdhUoM defi) =
+    s `hashWithSalt` (-11 :: Int) `hashWithSalt` defi
+  hashWithSalt s (EdhQty q) = s `hashWithSalt` (-12 :: Int) `hashWithSalt` q
   hashWithSalt s (EdhExpr (ExprDefi _ (LitExpr l) _) _) = hashWithSalt s l
   hashWithSalt s (EdhExpr (ExprDefi u _ _) _) = hashWithSalt s u
 
@@ -1315,6 +1327,12 @@ instance Show OptDocCmt where
   show (DocCmt []) = "<empty-doc>"
   show (DocCmt lns) = "<" <> show (length lns) <> "-doc-lines>"
 
+mergeDocCmts :: OptDocCmt -> OptDocCmt -> OptDocCmt
+mergeDocCmts NoDocCmt cmt = cmt
+mergeDocCmts cmt NoDocCmt = cmt
+mergeDocCmts (DocCmt lns1) (DocCmt lns2) =
+  DocCmt $ lns1 ++ ["---"] ++ lns2
+
 data Stmt
   = -- | literal `pass` to fill a place where a statement needed,
     -- same as in Python
@@ -1332,6 +1350,8 @@ data Stmt
     EffectStmt !ExprSrc !OptDocCmt
   | -- | assignment with args (un/re)pack sending/receiving syntax
     LetStmt !ArgsReceiver !ArgsPacker
+  | -- | unit of measure declaration
+    UnitStmt ![UnitDecl] !OptDocCmt
   | -- | super object declaration for a descendant object
     ExtendsStmt !ExprSrc
   | -- | perceiption declaration, a perceiver is bound to an event `sink`
@@ -1877,10 +1897,206 @@ data EffAddr
 data SourceSeg = SrcSeg !Text | IntplSeg !ExprSrc
   deriving (Eq, Show)
 
+-- | Conversion formula from a source unit (named or arithmetic) to a named unit
+data UnitFormula
+  = -- | Converting from the source unit by multiplying a conversion factor
+    RatioFormula !Decimal
+  | -- | Converting from the source unit by evaluating an expression with
+    -- the value in that unit bound to an attribute keyed by bracket symbol
+    -- of that unit
+    ExprFormula !ExprDefi !Text
+  deriving (Eq)
+
+instance Hashable UnitFormula where
+  hashWithSalt s (RatioFormula r) =
+    s `hashWithSalt` (-1 :: Int) `hashWithSalt` r
+  hashWithSalt s (ExprFormula x _src) =
+    s `hashWithSalt` (-2 :: Int) `hashWithSalt` x
+
+-- | Defined unit of measure as 1st class value
+--
+-- The unit symbol here can never be empty. But the formulae map can contain a
+-- formula from an empty 'NamedUnit' (i.e. the dimensionless 1), indicating
+-- this named unit is effectively dimensionless too, and that formula if a
+-- 'RatioFormula' serves as the divisor to convert quantity in this unit to
+-- pure number.
+data NamedUnitDefi = NamedUnitDefi
+  { uom'defi'doc :: !OptDocCmt,
+    uom'defi'prim :: !Bool,
+    uom'defi'sym :: !AttrName,
+    -- | List of formulae convertible to this unit
+    -- INVARIANT:
+    --  - sorted by conversion factor, or nan if not a ratio factor, so expr
+    --    formulae will always appear last
+    --  - unit specs are unique, overwriting cases should be exceptional
+    uom'defi'formulae :: ![(UnitSpec, UnitFormula)]
+  }
+
+instance Eq NamedUnitDefi where
+  NamedUnitDefi _ _ x'sym _ == NamedUnitDefi _ _ y'sym _ =
+    -- todo: should compare conversion formulae as well?
+    -- mind to update hashing as well
+    x'sym == y'sym
+
+instance Show NamedUnitDefi where
+  show (NamedUnitDefi _docCmt _prim sym _formulae) = T.unpack sym
+
+instance Hashable NamedUnitDefi where
+  hashWithSalt s (NamedUnitDefi _docCmt _prim sym _formulae) =
+    -- todo: should hash conversion formulae as well?
+    -- mind to update Eq instance as well
+    s `hashWithSalt` sym -- `hashWithSalt` formulae
+
+data UnitDefi
+  = NamedUnitDefi' !NamedUnitDefi
+  | ArithUnitDefi
+      { uom'defi'numerators :: ![NamedUnitDefi],
+        uom'defi'denominators :: ![NamedUnitDefi]
+      }
+
+uomReciprocal :: UnitDefi -> UnitDefi
+uomReciprocal (NamedUnitDefi' u) = ArithUnitDefi [] [u]
+uomReciprocal (ArithUnitDefi ns ds) = ArithUnitDefi ds ns
+
+uomDefiIdent :: UnitDefi -> AttrName
+uomDefiIdent (NamedUnitDefi' ud) = uom'defi'sym ud
+uomDefiIdent (ArithUnitDefi ns []) =
+  T.intercalate "*" (uom'defi'sym <$> ns)
+uomDefiIdent (ArithUnitDefi ns ds) =
+  T.intercalate "*" (uom'defi'sym <$> ns) <> "/"
+    <> T.intercalate "/" (uom'defi'sym <$> ds)
+
+isPrimaryUnit :: UnitDefi -> Bool
+isPrimaryUnit (NamedUnitDefi' u) = uom'defi'prim u
+isPrimaryUnit ArithUnitDefi {} = False
+
+isDimensionlessUnit :: UnitDefi -> Bool
+isDimensionlessUnit (NamedUnitDefi' u) = T.null $ uom'defi'sym u
+isDimensionlessUnit (ArithUnitDefi [] []) = True
+isDimensionlessUnit ArithUnitDefi {} = False
+
+instance Eq UnitDefi where
+  NamedUnitDefi' x == NamedUnitDefi' y = x == y
+  ArithUnitDefi x'ns x'ds == ArithUnitDefi y'ns y'ds =
+    x'ns == y'ns && x'ds == y'ds
+  _ == _ = False
+
+instance Show UnitDefi where
+  show u = case uomDefiIdent u of
+    "" -> "{# ① #}"
+    uomIdent -> T.unpack uomIdent
+
+instance Hashable UnitDefi where
+  hashWithSalt s (NamedUnitDefi' d) =
+    s `hashWithSalt` (-1 :: Int) `hashWithSalt` d
+  hashWithSalt s (ArithUnitDefi ns ds) =
+    s `hashWithSalt` (-2 :: Int) `hashWithSalt` ns `hashWithSalt` ds
+
+data UnitDecl
+  = -- | Declare a primary named unit
+    PrimUnitDecl !AttrName !SrcRange
+  | -- | Declare a conversion factor between a source unit and a named unit
+    --
+    -- Such two units have a common zero point, they are mutually convertible
+    -- by just scaling.
+    --
+    -- Note bidirectional conversion is implied when rhs is a named unit.
+    --
+    -- See: https://en.wikipedia.org/wiki/Conversion_factor
+    ConversionFactor !Decimal !AttrName !SrcRange !Decimal !UnitSpec
+  | -- | Declare a one way conversion from a source unit to a named unit
+    --
+    -- Usually such two units don't have a common zero point, more
+    -- sophisticated formula is thus needed.
+    --
+    -- E.g. https://en.wikipedia.org/wiki/Conversion_of_scales_of_temperature
+    ConversionFormula !AttrName !SrcRange !ExprSrc !Text !AttrName
+  deriving (Eq)
+
+instance Show UnitDecl where
+  show (PrimUnitDecl sym _) = T.unpack sym
+  show (ConversionFactor nQty nSym _ dQty dUnit) =
+    show nQty <> T.unpack nSym <> " = " <> show dQty <> show dUnit
+  show (ConversionFormula outSym _ _formulaX fSrc _inUnit) =
+    "[" <> T.unpack outSym <> "] = " <> T.unpack fSrc
+
+-- | A quanty in some specified unit of measure
+--
+-- In case the uom is a 'NamedUnit' of empty symbol (i.e. dimensionless 1),
+-- this quantity is equivalent to a pure number.
+data Quantity = Quantity !Decimal !UnitDefi
+  deriving (Eq)
+
+instance Show Quantity where
+  show (Quantity qty unit) = case D.showDecimal' qty of
+    Left (n, d) -> case unit of
+      NamedUnitDefi' u -> n <> show u <> "/" <> d
+      ArithUnitDefi nus dus ->
+        let ns = show <$> nus
+            ds = show <$> dus
+         in n <> intercalate "*" ns <> "/" <> d <> intercalate "*" ds
+    Right s -> s <> show unit
+
+instance Hashable Quantity where
+  hashWithSalt s (Quantity qty unit) = s `hashWithSalt` qty `hashWithSalt` unit
+
+-- | Unit of measure specification
+--
+-- Note the order of named units in an arithmetic unit matters, though multiple
+-- occurrences of the same named unit will be moved together to the first
+-- appearance place, as with the normalization process.
+data UnitSpec
+  = NamedUnit !AttrName !SrcRange
+  | ArithUnit [(AttrName, SrcRange)] [(AttrName, SrcRange)]
+
+instance Eq UnitSpec where
+  NamedUnit x'sym _ == NamedUnit y'sym _ = x'sym == y'sym
+  ArithUnit x'ns x'ds == ArithUnit y'ns y'ds =
+    (fst <$> x'ns) == (fst <$> y'ns)
+      && (fst <$> x'ds) == (fst <$> y'ds)
+  _ == _ = False
+
+-- | Normalize a UoM specification as one is parsed
+uomNormalizeSpec :: UnitSpec -> UnitSpec
+uomNormalizeSpec u@NamedUnit {} = u
+uomNormalizeSpec (ArithUnit [(!uomSpec, !uomSpan)] []) =
+  NamedUnit uomSpec uomSpan
+uomNormalizeSpec (ArithUnit [] []) =
+  NamedUnit "" noSrcRange -- dimensionless one (1)
+uomNormalizeSpec (ArithUnit ns ds) =
+  -- TODO: proper reductions
+  ArithUnit ns ds
+
+isDimensionlessUnitSpec :: UnitSpec -> Bool
+isDimensionlessUnitSpec (NamedUnit sym _) = T.null sym
+isDimensionlessUnitSpec ArithUnit {} = False
+
+uomSpecIdent :: UnitSpec -> AttrName
+uomSpecIdent (NamedUnit sym _) = sym
+-- todo: render repeated named units in exponential form?
+uomSpecIdent (ArithUnit nUnits []) =
+  T.intercalate "*" (fst <$> nUnits)
+uomSpecIdent (ArithUnit nUnits dUnits) =
+  T.intercalate "*" (fst <$> nUnits) <> "/"
+    <> T.intercalate "/" (fst <$> dUnits)
+
+instance Show UnitSpec where
+  show u = case uomSpecIdent u of
+    "" -> "{# ① #}"
+    uomIdent -> T.unpack uomIdent
+
+instance Hashable UnitSpec where
+  hashWithSalt s (NamedUnit sym _) =
+    s `hashWithSalt` (-1 :: Int) `hashWithSalt` sym
+  hashWithSalt s (ArithUnit nUnits dUnits) =
+    s `hashWithSalt` (-2 :: Int) `hashWithSalt` (fst <$> nUnits)
+      `hashWithSalt` (fst <$> dUnits)
+
 data Literal
   = SinkCtor
   | NilLiteral
   | DecLiteral !Decimal
+  | QtyLiteral !Decimal !UnitSpec
   | BoolLiteral !Bool
   | StringLiteral !Text
   | ValueLiteral !EdhValue
@@ -1890,6 +2106,8 @@ instance Hashable Literal where
   hashWithSalt s SinkCtor = hashWithSalt s (-1 :: Int)
   hashWithSalt s NilLiteral = hashWithSalt s (0 :: Int)
   hashWithSalt s (DecLiteral x) = hashWithSalt s x
+  hashWithSalt s (QtyLiteral qty uomSpec) =
+    s `hashWithSalt` qty `hashWithSalt` uomSpec
   hashWithSalt s (BoolLiteral x) = hashWithSalt s x
   hashWithSalt s (StringLiteral x) = hashWithSalt s x
   hashWithSalt s (ValueLiteral x) = hashWithSalt s x
@@ -1927,6 +2145,8 @@ edhTypeNameOf EdhReturn {} = "Return"
 edhTypeNameOf EdhOrd {} = "Ord"
 edhTypeNameOf EdhDefault {} = "Default"
 edhTypeNameOf EdhSink {} = "Sink"
+edhTypeNameOf EdhUoM {} = "UoM"
+edhTypeNameOf EdhQty {} = "Qty"
 edhTypeNameOf EdhExpr {} = "Expr"
 
 edhProcTypeNameOf :: EdhProcDefi -> Text

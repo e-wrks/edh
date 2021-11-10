@@ -263,12 +263,20 @@ powerDecimal x y = case decimalToInteger y of
   Just y'i -> fromRational $ toRational x ^^%^^ y'i
 
 showDecimal :: Decimal -> String
-showDecimal v
-  | d == 0 = if n == 0 then "nan" else if n < 0 then "-inf" else "inf"
-  | d == 1 = showDecInt n e
-  | d == (-1) = showDecInt (- n) e
-  | e < 0 = showDecInt n 0 ++ "/" ++ showDecInt d (- e)
-  | otherwise = showDecInt n e ++ "/" ++ showDecInt d 0
+showDecimal v = case showDecimal' v of
+  Left (n, d) -> n ++ "/" ++ d
+  Right s -> s
+
+showDecimal' :: Decimal -> Either (String, String) String
+showDecimal' v
+  | d == 0 =
+    if n == 0
+      then Right "nan"
+      else if n < 0 then Right "-inf" else Right "inf"
+  | d == 1 = Right $ showDecInt n e
+  | d == (-1) = Right $ showDecInt (- n) e
+  | e < 0 = Left (showDecInt n 0, showDecInt d (- e))
+  | otherwise = Left (showDecInt n e, showDecInt d 0)
   where
     Decimal d e n = normalizeDecimal v
     showDecInt :: Integer -> Integer -> String
@@ -296,7 +304,11 @@ showDecimal v
                               "0." ++ replicate (- fromInteger mid) '0' ++ s
                         )
               normForm =
-                d1 : fractPart ds ++ if ee == 0 then "" else "e" ++ straightInt ee
+                d1 :
+                fractPart ds
+                  ++ if ee == 0
+                    then ""
+                    else "e" ++ straightInt ee
            in if abs ee < 5 then cmpcForm else normForm
         _ -> error "impossible case"
       | otherwise = error "bug"

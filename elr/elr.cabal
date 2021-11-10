@@ -71,6 +71,7 @@ library
     , bytestring
     , clock
     , containers
+    , deque
     , directory
     , filepath
     , ghc                   >=8.6.5

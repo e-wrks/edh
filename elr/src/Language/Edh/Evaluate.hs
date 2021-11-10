@@ -8,6 +8,7 @@ module Language.Edh.Evaluate where
 import Control.Applicative
 import Control.Concurrent.STM
 import Control.Exception
+import Control.Monad
 import Control.Monad.State.Strict
 import qualified Data.Aeson as A
 import Data.ByteString (ByteString)
@@ -16,8 +17,11 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import qualified Data.HashMap.Strict as Map
 import Data.IORef
+import Data.List
+import Data.Lossless.Decimal (Decimal (..))
 import qualified Data.Lossless.Decimal as D
 import Data.Maybe
+import Data.Ratio
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (Decoding (Some))
@@ -26,8 +30,11 @@ import Data.Text.Encoding.Error (lenientDecode)
 import Data.Typeable hiding (TypeRep, typeOf, typeRep)
 import qualified Data.UUID as UUID
 import Data.Unique
+import Deque.Lazy (Deque)
+import qualified Deque.Lazy as Deque
 import GHC.Clock
 import GHC.Conc (forkIOWithUnmask, myThreadId, unsafeIOToSTM)
+import GHC.Exts
 import Language.Edh.Control
 import Language.Edh.CoreLang
 import Language.Edh.IOPD
@@ -68,7 +75,7 @@ getEdhErrCtx !unwind !ets =
       "📜 "
         <> procedureName (edh'scope'proc $ edh'frame'scope frm)
         <> " 👉 "
-        <> (prettySrcLoc $ edh'exe'src'loc frm)
+        <> prettySrcLoc (edh'exe'src'loc frm)
 
     unwindStack :: Int -> [EdhCallFrame] -> [EdhCallFrame]
     unwindStack c s | c <= 0 = s
@@ -3159,11 +3166,524 @@ evalStmt !stmt !exit = case stmt of
       $ evalExprSrc' effs docCmt $
         \ !rtn -> edhSwitchState ets $ exit rtn
   VoidStmt -> exitEdhTx exit nil
+  UnitStmt !decls !docCmt -> \ !ets ->
+    case edh'ctx'eff'target $ edh'context ets of
+      Just {} -> throwEdh ets UsageError "uom is always lexical, not effectful"
+      Nothing -> do
+        let defineUnits :: [UnitDecl] -> STM ()
+            defineUnits [] = exitEdh ets exit nil
+            defineUnits (ud : rest) = runEdhTx ets $
+              defineUnit docCmt ud $ \_ _ets -> defineUnits rest
+        defineUnits decls
   IllegalSegment !err'msg !err'pos -> \ !ets -> do
     let SrcLoc !doc _pos = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
     -- todo add tolerating mode?
     throwEdh ets EvalError $
       "illegal code at: " <> prettySrcPos doc err'pos <> "\n" <> err'msg
+
+defineUnit :: OptDocCmt -> UnitDecl -> EdhTxExit NamedUnitDefi -> EdhTx
+defineUnit !docCmt !decl !exit !ets = case decl of
+  PrimUnitDecl sym _ ->
+    defineFormula True sym Nothing $ exitEdh ets exit
+  ConversionFactor nQty nSym nSpan dQty dUnit ->
+    defineFormula False nSym (Just (dUnit, RatioFormula $ nQty / dQty)) $
+      \ !defi -> case dUnit of
+        NamedUnit dSym _ ->
+          defineFormula
+            False
+            dSym
+            (Just (NamedUnit nSym nSpan, RatioFormula $ dQty / nQty))
+            $ \_ -> exitEdh ets exit defi
+        _ -> exitEdh ets exit defi
+  ConversionFormula outSym _ (ExprSrc !x !x'span) fSrc inSym -> do
+    !u <- unsafeIOToSTM newUnique
+    let curSrcLoc = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
+        formulaDefi = ExprDefi u x curSrcLoc {src'range = x'span}
+    defineFormula
+      False
+      outSym
+      (Just (NamedUnit inSym noSrcRange, ExprFormula formulaDefi fSrc))
+      $ exitEdh ets exit
+  where
+    !ctx = edh'context ets
+    !scope = contextScope ctx
+
+    -- Note we intentionally do not update the UoM definition in outer scopes,
+    --      if already defined there, a new definition incorporating existing
+    --      formulae is always inserted into current scope.
+    defineFormula ::
+      Bool ->
+      AttrName ->
+      Maybe (UnitSpec, UnitFormula) ->
+      (NamedUnitDefi -> STM ()) ->
+      STM ()
+    defineFormula prim sym Nothing !exit' =
+      resolveEdhCtxAttr scope (AttrByName sym) >>= \case
+        Nothing -> do
+          let defi = NamedUnitDefi docCmt prim sym []
+          iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
+            edh'scope'entity scope
+          case edh'ctx'exp'target ctx of
+            Nothing -> pure ()
+            Just !esExps ->
+              iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) esExps
+          exit' defi
+        Just
+          ( EdhUoM
+              ( NamedUnitDefi'
+                  (NamedUnitDefi prevCmt prevPrim defiSym prevFormulae)
+                ),
+            _prevScope
+            )
+            | defiSym == sym -> do
+              let defi =
+                    NamedUnitDefi
+                      (mergeDocCmts prevCmt docCmt)
+                      (prim || prevPrim)
+                      sym
+                      prevFormulae
+              case docCmt of
+                NoDocCmt -> pure ()
+                _ ->
+                  iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
+                    edh'scope'entity scope
+              case edh'ctx'exp'target ctx of
+                Nothing -> pure ()
+                Just !esExps ->
+                  iopdInsert
+                    (AttrByName sym)
+                    (EdhUoM $ NamedUnitDefi' defi)
+                    esExps
+              exit' defi
+        Just (badVal, _) -> edhSimpleDesc ets badVal $ \ !badDesc ->
+          throwEdh ets UsageError $
+            "can not re-define as UoM [" <> sym <> "] from: " <> badDesc
+    defineFormula prim sym (Just (srcUoM, uf)) !exit' =
+      resolveEdhCtxAttr scope (AttrByName sym) >>= \case
+        Nothing -> do
+          let defi = NamedUnitDefi docCmt prim sym [(srcUoM, uf)]
+          iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
+            edh'scope'entity scope
+          case edh'ctx'exp'target ctx of
+            Nothing -> pure ()
+            Just !esExps ->
+              iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) esExps
+          exit' defi
+        Just
+          ( EdhUoM
+              ( NamedUnitDefi'
+                  (NamedUnitDefi prevCmt prevPrim defiSym prevFormulae)
+                ),
+            _prevScope
+            )
+            | defiSym == sym -> do
+              let defi =
+                    NamedUnitDefi
+                      (mergeDocCmts prevCmt docCmt)
+                      (prim || prevPrim)
+                      sym
+                      $ mergeFormulaInto srcUoM uf prevFormulae
+              iopdInsert (AttrByName sym) (EdhUoM $ NamedUnitDefi' defi) $
+                edh'scope'entity scope
+              case edh'ctx'exp'target ctx of
+                Nothing -> pure ()
+                Just !esExps ->
+                  iopdInsert
+                    (AttrByName sym)
+                    (EdhUoM $ NamedUnitDefi' defi)
+                    esExps
+              exit' defi
+        Just (badVal, _) -> edhSimpleDesc ets badVal $ \ !badDesc ->
+          throwEdh ets UsageError $
+            "can not define UoM [" <> sym <> "] into: " <> badDesc
+
+    mergeFormulaInto ::
+      UnitSpec ->
+      UnitFormula ->
+      [(UnitSpec, UnitFormula)] ->
+      [(UnitSpec, UnitFormula)]
+    mergeFormulaInto u f l = nubBy (\(u1, _) (u2, _) -> u1 == u2) $ case f of
+      RatioFormula r -> do
+        let go rfs [] = reverse $! (u, f) : rfs
+            go rfs l'@(e@(_, f') : rest) = case f' of
+              RatioFormula r' ->
+                if r' < r
+                  then go (e : rfs) rest
+                  else (reverse $! rfs) ++ (u, f) : l'
+              ExprFormula {} -> (reverse $! rfs) ++ (u, f) : l'
+        go [] l
+      ExprFormula {} -> do
+        let go rfs [] = reverse $! (u, f) : rfs
+            go rfs l'@(e@(_, f') : rest) = case f' of
+              RatioFormula {} -> go (e : rfs) rest
+              ExprFormula {} -> (reverse $! rfs) ++ (u, f) : l'
+        go [] l
+
+mustUnifyToUnit :: UnitDefi -> EdhValue -> EdhTxExit Decimal -> EdhTx
+mustUnifyToUnit !uom !val exit = case edhUltimate val of
+  EdhDecimal q ->
+    unifyToUnit uom (Left q) exit $
+      throwEdhTx UsageError $
+        "can not unify a pure number to UoM [" <> uomDefiIdent uom <> "]"
+  EdhQty qty -> unifyToUnit uom (Right qty) exit $
+    edhSimpleDescTx val $ \ !badDesc ->
+      throwEdhTx UsageError $
+        "can not unify " <> badDesc <> " to UoM [" <> uomDefiIdent uom <> "]"
+  _ -> edhSimpleDescTx val $ \ !badDesc ->
+    throwEdhTx UsageError $ "can only unify quantities, not a " <> badDesc
+
+unifyToUnit ::
+  UnitDefi -> Either Decimal Quantity -> EdhTxExit Decimal -> EdhTx -> EdhTx
+unifyToUnit tgtUoM (Left q) exit naExit =
+  if isDimensionlessUnit tgtUoM
+    then exitEdhTx exit q
+    else case tgtUoM of
+      NamedUnitDefi' ud -> go $ uom'defi'formulae ud
+      ArithUnitDefi {} -> naExit
+  where
+    go [] = naExit
+    go ((_, ExprFormula {}) : rest) = go rest
+    go ((srcUoM, RatioFormula r) : rest) =
+      if isDimensionlessUnitSpec srcUoM
+        then exitEdhTx exit $ q * r
+        else go rest
+unifyToUnit u0 (Right q0) exit0 naExit0 =
+  unifyQty Map.empty u0 q0 exit0 naExit0
+  where
+    unifyQty ::
+      Map.HashMap AttrName Bool ->
+      UnitDefi ->
+      Quantity ->
+      EdhTxExit Decimal ->
+      EdhTx ->
+      EdhTx
+    unifyQty visited tgtUoM q@(Quantity qty srcUoM) exit naExit =
+      if srcUoM == tgtUoM
+        then exitEdhTx exit qty -- shortcut
+        else case tgtUoM of
+          NamedUnitDefi' ud -> do
+            let fl = uom'defi'formulae ud
+
+                tryIndirect :: [(UnitSpec, UnitFormula)] -> EdhTx
+                tryIndirect [] = naExit
+                tryIndirect ((u, formula) : rest) =
+                  case Map.lookup (uomSpecIdent u) visited of
+                    Just {} -> tryIndirect rest
+                    Nothing -> resolveUnitSpec u $ \tgtUoM' ->
+                      unifyQty
+                        visited'
+                        tgtUoM'
+                        q
+                        (exitByConverting formula tgtUoM')
+                        $ tryIndirect rest
+
+                tryDirect :: [(UnitSpec, UnitFormula)] -> EdhTx
+                tryDirect [] = tryIndirect fl
+                tryDirect ((u, formula) : rest) =
+                  if uomSpecIdent u == srcUnitIdent
+                    then exitByConverting formula srcUoM qty
+                    else tryDirect rest
+
+            tryDirect fl
+          ArithUnitDefi _nuds _duds ->
+            naExit -- TODO impl. this case
+      where
+        visited' = Map.insert (uomDefiIdent tgtUoM) True visited
+        srcUnitIdent = uomDefiIdent srcUoM
+
+        exitByConverting :: UnitFormula -> UnitDefi -> Decimal -> EdhTx
+        exitByConverting f u d = case f of
+          RatioFormula r -> exit $ d * r
+          ExprFormula x _ -> evalUnitFormula d u x exit
+
+evalUnitFormula :: Decimal -> UnitDefi -> ExprDefi -> EdhTxExit Decimal -> EdhTx
+evalUnitFormula d u x exit !ets = runEdhTx ets $
+  pushEdhStack $ \ !ets' -> do
+    iopdInsert (AttrByName $ "[" <> uomDefiIdent u <> "]") (EdhDecimal d) $
+      edh'scope'entity $ contextScope $ edh'context ets'
+    runEdhTx ets' $
+      evalExprDefi x $ \case
+        EdhDecimal rd -> \_ets -> exitEdh ets exit rd
+        badVal -> edhSimpleDescTx badVal $ \badDesc ->
+          throwEdhTx EvalError $ "UoM formula gives bad result: " <> badDesc
+
+qtyToPureNumber :: Quantity -> EdhTxExit (Maybe Decimal) -> EdhTx
+qtyToPureNumber (Quantity q u) exit =
+  if isDimensionlessUnit u
+    then exitEdhTx exit $ Just q
+    else case u of
+      ArithUnitDefi {} -> exitEdhTx exit Nothing
+      NamedUnitDefi' ud -> go $ uom'defi'formulae ud
+  where
+    go [] = exitEdhTx exit Nothing
+    go ((uSpec, formula) : rest) =
+      if isDimensionlessUnitSpec uSpec
+        then case formula of
+          RatioFormula r -> exitEdhTx exit $ Just $ q / r
+          ExprFormula {} -> go rest
+        else go rest
+
+unifyToPrimUnit ::
+  Quantity -> EdhTxExit (Either Decimal Quantity) -> EdhTx -> EdhTx
+unifyToPrimUnit qty@(Quantity q0 u0) exit naExit
+  | isDimensionlessUnit u0 = exitEdhTx exit $ Left q0
+  | isPrimaryUnit u0 = exitEdhTx exit $ Right qty
+  | otherwise = tryUnits (Just u0) empty
+  where
+    -- todo: optimize perf by leveraging conversion paths of ratio formulae
+    tryUnits ::
+      Maybe UnitDefi -> Deque (UnitDefi, UnitSpec, UnitFormula) -> EdhTx
+    tryUnits Nothing backlog = case Deque.uncons backlog of
+      Nothing -> naExit
+      Just ((uomBridge, uomSpec, formula), backlog') ->
+        if isDimensionlessUnitSpec uomSpec
+          then case formula of
+            RatioFormula r ->
+              -- convertible to dimensionless via this bridge unit
+              unifyToUnit
+                uomBridge
+                (Right qty)
+                (\d -> exitEdhTx exit $ Left $ d / r)
+                (tryUnits Nothing backlog')
+            ExprFormula {} ->
+              -- no way of reverse conversion
+              tryUnits Nothing backlog'
+          else resolveUnitSpec uomSpec $ \uom ->
+            tryUnits (Just uom) backlog'
+    tryUnits (Just uom) backlog = case uom of
+      NamedUnitDefi' ud ->
+        if uom'defi'prim ud
+          then
+            unifyToUnit
+              uom
+              (Right qty)
+              (exitEdhTx exit . Right . flip Quantity uom)
+              tryMore
+          else tryMore
+      ArithUnitDefi ns ds -> do
+        let tryList ::
+              [NamedUnitDefi] ->
+              [NamedUnitDefi] ->
+              Decimal ->
+              [NamedUnitDefi] ->
+              EdhTxExit (Decimal, [NamedUnitDefi], [NamedUnitDefi]) ->
+              EdhTx
+            tryList ns' ds' r [] exit' = exit' (r, ns', ds')
+            tryList ns' ds' r (ud : rest) exit' =
+              unifyToPrimUnit
+                (Quantity r $ NamedUnitDefi' ud)
+                ( \case
+                    Left d -> tryList ns' ds' d rest exit'
+                    Right (Quantity q' u') -> case u' of
+                      NamedUnitDefi' ud' ->
+                        tryList (ns' ++ [ud']) ds' q' rest exit'
+                      ArithUnitDefi ns'' ds'' ->
+                        tryList (ns' ++ ns'') (ds' ++ ds'') q' rest exit'
+                )
+                tryMore
+        tryList [] [] 1 ns $ \(nr, nns, nds) ->
+          tryList [] [] 1 ds $ \(dr, dns, dds) ->
+            exitEdhTx exit $
+              Right $
+                Quantity
+                  (q0 * nr / dr)
+                  $ normalizeArithUnit (nns ++ dds) (nds ++ dns)
+      where
+        tryMore = tryUnits Nothing $ case uom of
+          NamedUnitDefi' ud ->
+            (backlog <>) $
+              fromList $
+                (<$> uom'defi'formulae ud) $
+                  \(uomSpec, formula) -> (uom, uomSpec, formula)
+          ArithUnitDefi {} -> backlog
+
+normalizeUnit :: UnitDefi -> UnitDefi
+normalizeUnit (NamedUnitDefi' ud) = NamedUnitDefi' ud
+normalizeUnit (ArithUnitDefi ns ds) = normalizeArithUnit ns ds
+
+-- | Dimensionless unit, effectively one (1)
+dimensionlessUnit :: UnitDefi
+dimensionlessUnit = NamedUnitDefi' $ NamedUnitDefi NoDocCmt True "" []
+
+normalizeArithUnit :: [NamedUnitDefi] -> [NamedUnitDefi] -> UnitDefi
+normalizeArithUnit [] [] = dimensionlessUnit
+normalizeArithUnit [ud] [] = NamedUnitDefi' ud
+normalizeArithUnit ns0 ds0 = case dcntUnits [] [] $ mergeUnits [] ns0 ds0 of
+  ([], []) -> dimensionlessUnit
+  (ns, ds) -> ArithUnitDefi ns ds
+  where
+    mergeUnits ::
+      [(NamedUnitDefi, Int)] ->
+      [NamedUnitDefi] ->
+      [NamedUnitDefi] ->
+      [(NamedUnitDefi, Int)]
+    mergeUnits cs [] [] = cs
+    mergeUnits cs (nu : rest) ds =
+      mergeUnits (ecntUnit nu (+ 1) cs) rest ds
+    mergeUnits cs [] (du : rest) =
+      mergeUnits (ecntUnit du (subtract 1) cs) [] rest
+
+    ecntUnit ::
+      NamedUnitDefi ->
+      (Int -> Int) ->
+      [(NamedUnitDefi, Int)] ->
+      [(NamedUnitDefi, Int)]
+    ecntUnit u t cs = go [] cs
+      where
+        go vs [] = reverse $ (u, t 0) : vs
+        go vs (e@(u', c) : rest) =
+          if u == u'
+            then reverse ((u, t c) : vs) ++ rest
+            else go (e : vs) rest
+
+    dcntUnits ::
+      [NamedUnitDefi] ->
+      [NamedUnitDefi] ->
+      [(NamedUnitDefi, Int)] ->
+      ([NamedUnitDefi], [NamedUnitDefi])
+    dcntUnits ns ds [] = (ns, ds)
+    dcntUnits ns ds ((u, n) : rest)
+      | n > 0 = dcntUnits (ns ++ replicate n u) ds rest
+      | n < 0 = dcntUnits ns (ds ++ replicate (- n) u) rest
+      | otherwise = dcntUnits ns ds rest -- n == 0
+
+qtyMul :: Quantity -> Quantity -> EdhTxExit (Either Decimal Quantity) -> EdhTx
+qtyMul qty1@(Quantity q1 u01) qty2@(Quantity q2 u02) exit =
+  qtyExpandUnits qty1 $ \case
+    Left d1 ->
+      exitEdhTx exit $ Right $ Quantity (d1 * q2) u02
+    Right (Quantity q1' u01') -> qtyExpandUnits qty2 $ \case
+      Left d2 ->
+        exitEdhTx exit $ Right $ Quantity (q1 * d2) u01
+      Right (Quantity q2' u02') -> do
+        let u = uncurry normalizeArithUnit $ uomMul u01' u02'
+        if isDimensionlessUnit u
+          then exitEdhTx exit $ Left (q1' * q2')
+          else exitEdhTx exit $ Right $ Quantity (q1' * q2') u
+  where
+    uomMul :: UnitDefi -> UnitDefi -> ([NamedUnitDefi], [NamedUnitDefi])
+    uomMul (NamedUnitDefi' u1) (NamedUnitDefi' u2) = ([u1, u2], [])
+    uomMul (NamedUnitDefi' u1) (ArithUnitDefi ns ds) = (u1 : ns, ds)
+    uomMul (ArithUnitDefi ns ds) (NamedUnitDefi' u2) = (ns ++ [u2], ds)
+    uomMul (ArithUnitDefi ns1 ds1) (ArithUnitDefi ns2 ds2) =
+      (ns1 ++ ns2, ds1 ++ ds2)
+
+qtyDiv :: Quantity -> Quantity -> EdhTxExit (Either Decimal Quantity) -> EdhTx
+qtyDiv qty1@(Quantity q1 u01) qty2@(Quantity q2 u02) exit =
+  qtyExpandUnits qty1 $ \r1 -> qtyExpandUnits qty2 $ \r2 ->
+    case r1 of
+      Left d1 -> case r2 of
+        Left d2 ->
+          exitEdhTx exit $ Left $ d1 / d2
+        Right Quantity {} ->
+          exitEdhTx exit $
+            Right $ Quantity (d1 / q2) $ normalizeUnit $ uomReciprocal u02
+      Right (Quantity q1' u01') -> case r2 of
+        Left d2 ->
+          exitEdhTx exit $ Right $ Quantity (q1 / d2) u01
+        Right (Quantity q2' u02') -> do
+          let u = uncurry normalizeArithUnit $ uomDiv u01' u02'
+          if isDimensionlessUnit u
+            then exitEdhTx exit $ Left (q1' / q2')
+            else exitEdhTx exit $ Right $ Quantity (q1' / q2') u
+  where
+    uomDiv :: UnitDefi -> UnitDefi -> ([NamedUnitDefi], [NamedUnitDefi])
+    uomDiv (NamedUnitDefi' u1) (NamedUnitDefi' u2) = ([u1], [u2])
+    uomDiv (NamedUnitDefi' u1) (ArithUnitDefi ns ds) = (u1 : ds, ns)
+    uomDiv (ArithUnitDefi ns ds) (NamedUnitDefi' u2) = (ns, ds ++ [u2])
+    uomDiv (ArithUnitDefi ns1 ds1) (ArithUnitDefi ns2 ds2) =
+      (ns1 ++ ds2, ds1 ++ ns2)
+
+qtyExpandUnits :: Quantity -> EdhTxExit (Either Decimal Quantity) -> EdhTx
+qtyExpandUnits (Quantity q0 u0) exit0
+  | isDimensionlessUnit u0 = exitEdhTx exit0 $ Left q0
+  | otherwise = case u0 of
+    NamedUnitDefi' ud -> doExpand [] [] q0 [ud] []
+    ArithUnitDefi ns ds -> doExpand [] [] q0 ns ds
+  where
+    doExit :: (Decimal, [NamedUnitDefi], [NamedUnitDefi]) -> EdhTx
+    doExit (q, [], []) = exitEdhTx exit0 $ Left q
+    doExit (q, ns, ds) = do
+      let u = normalizeArithUnit ns ds
+      if isDimensionlessUnit u
+        then exitEdhTx exit0 $ Left q
+        else exitEdhTx exit0 $ Right $ Quantity q u
+
+    doExpand ::
+      [NamedUnitDefi] ->
+      [NamedUnitDefi] ->
+      Decimal ->
+      [NamedUnitDefi] ->
+      [NamedUnitDefi] ->
+      EdhTx
+    doExpand ns ds !q [] [] = doExit (q, ns, ds)
+    doExpand ns ds q (nu : rest) ids =
+      unifyToPrimUnit
+        (Quantity q $ NamedUnitDefi' nu)
+        ( \case
+            Left q' -> doExpand ns ds q' rest ids
+            Right (Quantity q' u') -> case u' of
+              NamedUnitDefi' nu' ->
+                doExpand (ns ++ [nu']) ds q' rest ids
+              ArithUnitDefi ns' ds' ->
+                doExpand (ns ++ ns') (ds ++ ds') q' rest ids
+        )
+        $ doExpand (ns ++ [nu]) ds q rest ids
+    doExpand ns ds !q [] (du : rest) =
+      unifyToPrimUnit
+        (Quantity 1 $ NamedUnitDefi' du)
+        ( \case
+            Left r -> doExpand ns ds (q / r) [] rest
+            Right (Quantity r u') -> case u' of
+              NamedUnitDefi' du' ->
+                doExpand ns (ds ++ [du']) (q / r) [] rest
+              ArithUnitDefi ns' ds' ->
+                doExpand (ns ++ ds') (ds ++ ns') (q / r) [] rest
+        )
+        $ doExpand ns (ds ++ [du]) q [] rest
+
+-- | Reduce the absolute scale of the number for a quantity
+--
+-- Try converting to some larger or smaller unit, with the goal for the number
+-- to be within `0.9 ~ 10` scale.
+reduceQtyNumber :: Quantity -> EdhTxExit Quantity -> EdhTx -> EdhTx
+reduceQtyNumber qty@(Quantity q uom) exit naExit =
+  if q > 0.9 && q < 10
+    then -- already in good scale, return as is
+      exitEdhTx exit qty
+    else case uom of
+      NamedUnitDefi' ud -> do
+        let fl = uom'defi'formulae ud
+        if q <= 0.9
+          then upScale fl naExit
+          else -- i.e. q >= 10
+            dnScale (reverse fl) naExit
+      ArithUnitDefi _nuds _duds ->
+        naExit -- TODO impl. this case
+  where
+    upScale :: [(UnitSpec, UnitFormula)] -> EdhTx -> EdhTx
+    upScale [] fbExit = fbExit
+    upScale ((_, ExprFormula {}) : _) fbExit = fbExit
+    upScale ((tgtSpec, RatioFormula r) : rest) fbExit = do
+      let q' = q / r
+      if q' >= 10 || q' <= q
+        then fbExit
+        else upScale rest $
+          resolveUnitSpec tgtSpec $ \ !tgtUoM -> do
+            let qty' = Quantity q' tgtUoM
+            reduceQtyNumber qty' exit $ exitEdhTx exit qty'
+
+    dnScale :: [(UnitSpec, UnitFormula)] -> EdhTx -> EdhTx
+    dnScale [] fbExit = fbExit
+    dnScale ((_, ExprFormula {}) : rest) fbExit = dnScale rest fbExit
+    dnScale ((tgtSpec, RatioFormula r) : rest) fbExit = do
+      let q' = q / r
+      if q' <= 0.9 || q' >= q
+        then fbExit
+        else dnScale rest $
+          resolveUnitSpec tgtSpec $ \ !tgtUoM -> do
+            let qty' = Quantity q' tgtUoM
+            reduceQtyNumber qty' exit $ exitEdhTx exit qty'
 
 type CheckImportExternalModule = Text -> EdhTx -> EdhTx
 
@@ -3787,14 +4307,93 @@ intplStmt !ets !stmt !exit = case stmt of
   ExprStmt !x !docCmt -> intplExpr ets x $ \ !x' -> exit $ ExprStmt x' docCmt
   _ -> exit stmt
 
-evalLiteral :: Literal -> STM EdhValue
-evalLiteral = \case
-  DecLiteral !v -> return (EdhDecimal v)
-  StringLiteral !v -> return (EdhString v)
-  BoolLiteral !v -> return (EdhBool v)
-  NilLiteral -> return nil
-  SinkCtor -> EdhSink <$> newSink
-  ValueLiteral !v -> return v
+resolveUnitSpec :: UnitSpec -> EdhTxExit UnitDefi -> EdhTx
+resolveUnitSpec !uomSpec !exit0 !ets = case uomSpec of
+  NamedUnit uSym _ -> resolveNamed uSym $ \uom ->
+    exitEdh ets exit0 $ NamedUnitDefi' uom
+  ArithUnit nus dus -> resolveArith nus $ \nuds ->
+    resolveArith dus $ \duds ->
+      exitEdh ets exit0 $ ArithUnitDefi nuds duds
+  where
+    scope = contextScope $ edh'context ets
+
+    resolveArith ::
+      [(AttrName, SrcRange)] -> ([NamedUnitDefi] -> STM ()) -> STM ()
+    resolveArith us = go [] us
+      where
+        go uds [] exit = exit $ reverse $! uds
+        go uds ((u, _) : rest) exit = resolveNamed u $ \ud ->
+          go (ud : uds) rest exit
+
+    resolveNamed :: AttrName -> (NamedUnitDefi -> STM ()) -> STM ()
+    resolveNamed "" exit =
+      -- dimensionless unit
+      exit $ NamedUnitDefi NoDocCmt True "" []
+    resolveNamed uSym exit =
+      edhUltimate <$> lookupEdhCtxAttr scope (AttrByName uSym) >>= \case
+        EdhUoM (NamedUnitDefi' ud) | uom'defi'sym ud == uSym -> exit ud
+        badVal -> edhSimpleDesc ets badVal $ \ !badDesc ->
+          throwEdh ets UsageError $
+            "expect a UoM by [" <> uSym <> "], but it's a " <> badDesc
+
+-- | Resolve quantity literal to pure number or runtime quantity value
+--
+-- Bonus support for mathematical notations e.g.
+--   3x to be interpreted as 3*x
+-- where x is not a UoM but some numeric variable
+resolveQuantity ::
+  EdhThreadState ->
+  Decimal ->
+  UnitSpec ->
+  (Either Decimal Quantity -> STM ()) ->
+  STM ()
+resolveQuantity !ets !q !uomSpec !exit0 = case uomSpec of
+  NamedUnit uSym _ -> resolveNamed uSym $ \case
+    Left d -> exit0 $ Left $ q * d
+    Right uom -> exit0 $ Right $ Quantity q $ NamedUnitDefi' uom
+  ArithUnit nus dus -> resolveArith (*) q nus $ \q' nuds ->
+    resolveArith (/) q' dus $ \qty duds ->
+      exit0 $ Right $ Quantity qty $ ArithUnitDefi nuds duds
+  where
+    scope = contextScope $ edh'context ets
+
+    resolveArith ::
+      (Decimal -> Decimal -> Decimal) ->
+      Decimal ->
+      [(AttrName, SrcRange)] ->
+      (Decimal -> [NamedUnitDefi] -> STM ()) ->
+      STM ()
+    resolveArith op q' us = go q' [] us
+      where
+        go q'' uds [] exit = exit q'' $ reverse $! uds
+        go q'' uds ((u, _) : rest) exit = resolveNamed u $ \case
+          Left d -> go (q'' `op` d) uds rest exit
+          Right ud -> go q'' (ud : uds) rest exit
+
+    resolveNamed ::
+      AttrName -> (Either Decimal NamedUnitDefi -> STM ()) -> STM ()
+    resolveNamed uSym exit =
+      edhUltimate <$> lookupEdhCtxAttr scope (AttrByName uSym) >>= \case
+        EdhNil ->
+          throwEdh ets UsageError $ "UoM [" <> uSym <> "] not in scope"
+        EdhDecimal d -> exit $ Left d
+        EdhUoM (NamedUnitDefi' ud) | uom'defi'sym ud == uSym -> exit $ Right ud
+        badVal -> edhSimpleDesc ets badVal $ \ !badDesc ->
+          throwEdh ets UsageError $
+            "expect a UoM or pure number by [" <> uSym <> "], but it's a "
+              <> badDesc
+
+evalLiteral :: EdhThreadState -> Literal -> (EdhValue -> STM ()) -> STM ()
+evalLiteral ets lit exit = case lit of
+  DecLiteral !v -> exit (EdhDecimal v)
+  StringLiteral !v -> exit (EdhString v)
+  BoolLiteral !v -> exit (EdhBool v)
+  NilLiteral -> exit nil
+  SinkCtor -> EdhSink <$> newSink >>= exit
+  ValueLiteral !v -> exit v
+  QtyLiteral !q !uomSpec -> resolveQuantity ets q uomSpec $ \case
+    Left d -> exit $ EdhDecimal d
+    Right qty -> exit $ EdhQty qty
 
 evalAttrRef :: AttrRef -> EdhTxExit EdhValue -> EdhTx
 evalAttrRef !addr !exit !ets = case addr of
@@ -3844,7 +4443,7 @@ evalDictLit [] !dsl !exit !ets =
 evalDictLit ((k, v) : entries) !dsl !exit !ets = case k of
   LitDictKey !lit -> runEdhTx ets $
     evalExprSrc v $ \ !vVal _ets ->
-      evalLiteral lit >>= \ !kVal ->
+      evalLiteral ets lit $ \ !kVal ->
         runEdhTx ets $ evalDictLit entries ((kVal, vVal) : dsl) exit
   AddrDictKey !addr -> runEdhTx ets $
     evalAttrRef (DirectRef addr) $ \ !kVal ->
@@ -3901,6 +4500,25 @@ edhValueDesc !ets !val !exitDesc = case edhUltimate val of
             <> "\n---expr-source-form:\n"
             <> src
             <> "\n---end-of-expr-desc---"
+    exitDesc descStr
+  EdhUoM (NamedUnitDefi' (NamedUnitDefi _docCmt isPrim buSym formulae)) -> do
+    let showFormula :: (UnitSpec, UnitFormula) -> Text
+        showFormula (srcUnit, RatioFormula cFactor) =
+          T.pack (show $ numerator r) <> buSym <> " = "
+            <> T.pack
+              (show (denominator r) <> show srcUnit)
+          where
+            r = toRational cFactor
+        showFormula (_srcUnit, ExprFormula _x !xSrc) =
+          "[" <> buSym <> "] = " <> xSrc
+    let uCate = if isPrim then "primary" else "secondary"
+        descStr =
+          "'UoM' value for named " <> uCate <> " unit [" <> buSym
+            <> "], with formula(e):\n"
+            <> T.unlines (("  " <>) . showFormula <$> formulae)
+    exitDesc descStr
+  EdhUoM d@(ArithUnitDefi _ns _ds) -> do
+    let descStr = T.pack $ "'UoM' value for arithmetic unit [" <> show d <> "]"
     exitDesc descStr
   _ -> edhValueRepr ets val $ \ !valRepr ->
     exitDesc $ "'" <> edhTypeNameOf val <> "' value `" <> valRepr <> "`"
@@ -4034,6 +4652,8 @@ edhValueRepr !ets !val !exitRepr = case val of
   EdhObject !obj -> edhObjRepr ets obj exitRepr
   -- repr of named value is just its name
   EdhNamedValue !n _v -> exitRepr n
+  EdhUoM !uom -> exitRepr $ T.pack $ show uom
+  EdhQty !qty -> exitRepr $ T.pack $ show qty
   EdhProcedure !callable _ -> exitRepr $ callableName callable
   EdhBoundProc !callable _ _ _ ->
     exitRepr $ "{# bound #} " <> callableName callable
@@ -4112,6 +4732,8 @@ edhValueStr _ (EdhUUID !u) !exit = exit $ UUID.toText u
 edhValueStr ets (EdhObject !o) !exit = edhObjStr ets o exit
 edhValueStr _ (EdhNamedValue !name EdhNil) !exit = exit name
 edhValueStr !ets (EdhNamedValue _ !v) !exit = edhValueStr ets v exit
+edhValueStr _ (EdhUoM !uom) !exit = exit $ T.pack $ show uom
+edhValueStr _ (EdhQty !qty) !exit = exit $ T.pack $ show qty
 edhValueStr !ets !v !exit = edhValueRepr ets v exit
 
 edhValueStrTx :: EdhValue -> EdhTxExit Text -> EdhTx
@@ -4304,7 +4926,7 @@ evalExpr' (ExprWithSrc (ExprSrc !x !x'span) !sss) !docCmt !exit = \ !ets ->
       exitEdh ets exit $
         EdhExpr (ExprDefi u x' curSrcLoc {src'range = x'span}) $ T.concat ssl
 evalExpr' (LitExpr !lit) _docCmt !exit =
-  \ !ets -> evalLiteral lit >>= exitEdh ets exit
+  \ !ets -> evalLiteral ets lit $ exitEdh ets exit
 evalExpr' (PrefixExpr PrefixPlus !expr') !docCmt !exit =
   evalExprSrc' expr' docCmt exit
 evalExpr' (PrefixExpr PrefixMinus !expr') !docCmt !exit =
@@ -5585,6 +6207,9 @@ pvlToDictEntries !ets !pvl !exit = do
 edhValueNull :: EdhThreadState -> EdhValue -> (Bool -> STM ()) -> STM ()
 edhValueNull _ EdhNil !exit = exit True
 edhValueNull !ets (EdhNamedValue _ v) !exit = edhValueNull ets v exit
+edhValueNull _ (EdhUoM _uom) !exit = exit False
+edhValueNull _ (EdhQty (Quantity q _uom)) !exit =
+  exit $ D.decimalIsNaN q || q == 0
 edhValueNull _ (EdhDecimal d) !exit = exit $ D.decimalIsNaN d || d == 0
 edhValueNull _ (EdhBool b) !exit = exit $ not b
 edhValueNull _ (EdhString s) !exit = exit $ T.null s
@@ -5623,8 +6248,12 @@ edhIdentEqual (EdhNamedValue x'n x'v) (EdhNamedValue y'n y'v) =
     else return False
 edhIdentEqual EdhNamedValue {} _ = return False
 edhIdentEqual _ EdhNamedValue {} = return False
-edhIdentEqual (EdhDecimal (D.Decimal 0 0 0)) (EdhDecimal (D.Decimal 0 0 0)) =
+edhIdentEqual (EdhDecimal (Decimal 0 0 0)) (EdhDecimal (Decimal 0 0 0)) =
   return True
+edhIdentEqual
+  (EdhQty (Quantity (Decimal 0 0 0) x'uom))
+  (EdhQty (Quantity (Decimal 0 0 0) y'uom)) =
+    return $ x'uom == y'uom
 edhIdentEqual x y = liftA2 (==) (edhValueIdent x) (edhValueIdent y)
 
 edhNamelyEqual ::
@@ -6966,7 +7595,7 @@ driveEdhThread !eps !defers !tq !unmask = readIORef trapReq >>= taskLoop
                 !doneNS <- getMonotonicTimeNSec
                 let !secCost =
                       -- leverage lossless decimal's pretty show of numbers
-                      (fromIntegral (doneNS - trapStartNS) :: D.Decimal) / 1e9
+                      (fromIntegral (doneNS - trapStartNS) :: Decimal) / 1e9
                 !thId <- myThreadId
                 atomically $
                   logger

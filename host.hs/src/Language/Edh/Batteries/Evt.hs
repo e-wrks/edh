@@ -3,7 +3,6 @@ module Language.Edh.Batteries.Evt where
 -- import           Debug.Trace
 
 import Control.Concurrent.STM
-import Language.Edh.Args
 import Language.Edh.Control
 import Language.Edh.Evaluate
 import Language.Edh.RtTypes
@@ -27,8 +26,8 @@ evtPubProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
 -- | virtual attribute <sink>.subseq
 --
 -- obtain a non-lingering, shadow copy of the event sink
-sink'subseqProc :: "sinkValue" !: EdhValue -> EdhHostProc
-sink'subseqProc (mandatoryArg -> !sinkVal) !exit !ets =
+sink'subseqProc :: EdhValue -> EdhHostProc
+sink'subseqProc !sinkVal !exit !ets =
   case edhUltimate sinkVal of
     EdhSink !sink -> exitEdh ets exit $ EdhSink sink {sink'mrv = Nothing}
     _ -> edhSimpleDesc ets sinkVal $ \ !badDesc ->
@@ -46,8 +45,8 @@ sink'subseqProc (mandatoryArg -> !sinkVal) !exit !ets =
 --
 -- NOTE
 --   a non-lingering copy of a sink will always return `nil` as its `.mrv`
-sink'mrvProc :: "sinkValue" !: EdhValue -> EdhHostProc
-sink'mrvProc (mandatoryArg -> !sinkVal) !exit !ets =
+sink'mrvProc :: EdhValue -> EdhHostProc
+sink'mrvProc !sinkVal !exit !ets =
   case edhUltimate sinkVal of
     EdhSink !sink -> case sink'mrv sink of
       Nothing -> exitEdh ets exit nil
@@ -58,8 +57,8 @@ sink'mrvProc (mandatoryArg -> !sinkVal) !exit !ets =
 -- | virtual attribute <sink>.eos
 --
 -- check whether an event sink is already at end-of-stream
-sink'eosProc :: "sinkValue" !: EdhValue -> EdhHostProc
-sink'eosProc (mandatoryArg -> !sinkVal) !exit !ets =
+sink'eosProc :: EdhValue -> EdhHostProc
+sink'eosProc !sinkVal !exit !ets =
   case edhUltimate sinkVal of
     EdhSink !sink ->
       readTVar (sink'subc sink)

@@ -26,11 +26,3 @@ export method min( *all ) {
   ) then n = i
   return n
 }
-
-
-{## Resembles `Number.prototype.toFixed()` as in JavaScript #}
-export method __Decimal_toFixed__(n) return method toFixed(digs= 0) {
-  if n is nan then return "NaN"
-  amp = 10**digs
-  return repr$ (amp * n).round / amp
-}
