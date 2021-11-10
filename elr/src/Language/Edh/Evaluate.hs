@@ -3321,11 +3321,11 @@ mustUnifyToUnit !uom !val exit = case edhUltimate val of
   EdhDecimal q ->
     unifyToUnit uom (Left q) exit $
       throwEdhTx UsageError $
-        "can not unify a pure number to UoM [" <> T.pack (show uom) <> "]"
+        "can not unify a pure number to UoM [" <> uomDefiIdent uom <> "]"
   EdhQty qty -> unifyToUnit uom (Right qty) exit $
     edhSimpleDescTx val $ \ !badDesc ->
       throwEdhTx UsageError $
-        "can not unify " <> badDesc <> " to UoM [" <> T.pack (show uom) <> "]"
+        "can not unify " <> badDesc <> " to UoM [" <> uomDefiIdent uom <> "]"
   _ -> edhSimpleDescTx val $ \ !badDesc ->
     throwEdhTx UsageError $ "can only unify quantities, not a " <> badDesc
 
@@ -3447,15 +3447,44 @@ unifyToPrimUnit qty@(Quantity q0 u0) exit naExit
               tryUnits Nothing backlog'
           else resolveUnitSpec uomSpec $ \uom ->
             tryUnits (Just uom) backlog'
-    tryUnits (Just uom) backlog =
-      if isPrimaryUnit uom
-        then
-          unifyToUnit
-            uom
-            (Right qty)
-            (exitEdhTx exit . Right . flip Quantity uom)
-            tryMore
-        else tryMore
+    tryUnits (Just uom) backlog = case uom of
+      NamedUnitDefi' ud ->
+        if uom'defi'prim ud
+          then
+            unifyToUnit
+              uom
+              (Right qty)
+              (exitEdhTx exit . Right . flip Quantity uom)
+              tryMore
+          else tryMore
+      ArithUnitDefi ns ds -> do
+        let tryList ::
+              [NamedUnitDefi] ->
+              [NamedUnitDefi] ->
+              Decimal ->
+              [NamedUnitDefi] ->
+              EdhTxExit (Decimal, [NamedUnitDefi], [NamedUnitDefi]) ->
+              EdhTx
+            tryList ns' ds' r [] exit' = exit' (r, ns', ds')
+            tryList ns' ds' r (ud : rest) exit' =
+              unifyToPrimUnit
+                (Quantity r $ NamedUnitDefi' ud)
+                ( \case
+                    Left d -> tryList ns' ds' d rest exit'
+                    Right (Quantity q' u') -> case u' of
+                      NamedUnitDefi' ud' ->
+                        tryList (ns' ++ [ud']) ds' q' rest exit'
+                      ArithUnitDefi ns'' ds'' ->
+                        tryList (ns' ++ ns'') (ds' ++ ds'') q' rest exit'
+                )
+                tryMore
+        tryList [] [] 1 ns $ \(nr, nns, nds) ->
+          tryList [] [] 1 ds $ \(dr, dns, dds) ->
+            exitEdhTx exit $
+              Right $
+                Quantity
+                  (q0 * nr / dr)
+                  $ normalizeArithUnit (nns ++ dds) (nds ++ dns)
       where
         tryMore = tryUnits Nothing $ case uom of
           NamedUnitDefi' ud ->
@@ -3464,6 +3493,151 @@ unifyToPrimUnit qty@(Quantity q0 u0) exit naExit
                 (<$> uom'defi'formulae ud) $
                   \(uomSpec, formula) -> (uom, uomSpec, formula)
           ArithUnitDefi {} -> backlog
+
+normalizeUnit :: UnitDefi -> UnitDefi
+normalizeUnit (NamedUnitDefi' ud) = NamedUnitDefi' ud
+normalizeUnit (ArithUnitDefi ns ds) = normalizeArithUnit ns ds
+
+-- | Dimensionless unit, effectively one (1)
+dimensionlessUnit :: UnitDefi
+dimensionlessUnit = NamedUnitDefi' $ NamedUnitDefi NoDocCmt True "" []
+
+normalizeArithUnit :: [NamedUnitDefi] -> [NamedUnitDefi] -> UnitDefi
+normalizeArithUnit [] [] = dimensionlessUnit
+normalizeArithUnit [ud] [] = NamedUnitDefi' ud
+normalizeArithUnit ns0 ds0 = case dcntUnits [] [] $ mergeUnits [] ns0 ds0 of
+  ([], []) -> dimensionlessUnit
+  (ns, ds) -> ArithUnitDefi ns ds
+  where
+    mergeUnits ::
+      [(NamedUnitDefi, Int)] ->
+      [NamedUnitDefi] ->
+      [NamedUnitDefi] ->
+      [(NamedUnitDefi, Int)]
+    mergeUnits cs [] [] = cs
+    mergeUnits cs (nu : rest) ds =
+      mergeUnits (ecntUnit nu (+ 1) cs) rest ds
+    mergeUnits cs [] (du : rest) =
+      mergeUnits (ecntUnit du (subtract 1) cs) [] rest
+
+    ecntUnit ::
+      NamedUnitDefi ->
+      (Int -> Int) ->
+      [(NamedUnitDefi, Int)] ->
+      [(NamedUnitDefi, Int)]
+    ecntUnit u t cs = go [] cs
+      where
+        go vs [] = reverse $ (u, t 0) : vs
+        go vs (e@(u', c) : rest) =
+          if u == u'
+            then reverse ((u, t c) : vs) ++ rest
+            else go (e : vs) rest
+
+    dcntUnits ::
+      [NamedUnitDefi] ->
+      [NamedUnitDefi] ->
+      [(NamedUnitDefi, Int)] ->
+      ([NamedUnitDefi], [NamedUnitDefi])
+    dcntUnits ns ds [] = (ns, ds)
+    dcntUnits ns ds ((u, n) : rest)
+      | n > 0 = dcntUnits (ns ++ replicate n u) ds rest
+      | n < 0 = dcntUnits ns (ds ++ replicate (- n) u) rest
+      | otherwise = dcntUnits ns ds rest -- n == 0
+
+qtyMul :: Quantity -> Quantity -> EdhTxExit (Either Decimal Quantity) -> EdhTx
+qtyMul qty1@(Quantity q1 u01) qty2@(Quantity q2 u02) exit =
+  qtyExpandUnits qty1 $ \case
+    Left d1 ->
+      exitEdhTx exit $ Right $ Quantity (d1 * q2) u02
+    Right (Quantity q1' u01') -> qtyExpandUnits qty2 $ \case
+      Left d2 ->
+        exitEdhTx exit $ Right $ Quantity (q1 * d2) u01
+      Right (Quantity q2' u02') -> do
+        let u = uncurry normalizeArithUnit $ uomMul u01' u02'
+        if isDimensionlessUnit u
+          then exitEdhTx exit $ Left (q1' * q2')
+          else exitEdhTx exit $ Right $ Quantity (q1' * q2') u
+  where
+    uomMul :: UnitDefi -> UnitDefi -> ([NamedUnitDefi], [NamedUnitDefi])
+    uomMul (NamedUnitDefi' u1) (NamedUnitDefi' u2) = ([u1, u2], [])
+    uomMul (NamedUnitDefi' u1) (ArithUnitDefi ns ds) = (u1 : ns, ds)
+    uomMul (ArithUnitDefi ns ds) (NamedUnitDefi' u2) = (ns ++ [u2], ds)
+    uomMul (ArithUnitDefi ns1 ds1) (ArithUnitDefi ns2 ds2) =
+      (ns1 ++ ns2, ds1 ++ ds2)
+
+qtyDiv :: Quantity -> Quantity -> EdhTxExit (Either Decimal Quantity) -> EdhTx
+qtyDiv qty1@(Quantity q1 u01) qty2@(Quantity q2 u02) exit =
+  qtyExpandUnits qty1 $ \r1 -> qtyExpandUnits qty2 $ \r2 ->
+    case r1 of
+      Left d1 -> case r2 of
+        Left d2 ->
+          exitEdhTx exit $ Left $ d1 / d2
+        Right Quantity {} ->
+          exitEdhTx exit $
+            Right $ Quantity (d1 / q2) $ normalizeUnit $ uomReciprocal u02
+      Right (Quantity q1' u01') -> case r2 of
+        Left d2 ->
+          exitEdhTx exit $ Right $ Quantity (q1 / d2) u01
+        Right (Quantity q2' u02') -> do
+          let u = uncurry normalizeArithUnit $ uomDiv u01' u02'
+          if isDimensionlessUnit u
+            then exitEdhTx exit $ Left (q1' / q2')
+            else exitEdhTx exit $ Right $ Quantity (q1' / q2') u
+  where
+    uomDiv :: UnitDefi -> UnitDefi -> ([NamedUnitDefi], [NamedUnitDefi])
+    uomDiv (NamedUnitDefi' u1) (NamedUnitDefi' u2) = ([u1], [u2])
+    uomDiv (NamedUnitDefi' u1) (ArithUnitDefi ns ds) = (u1 : ds, ns)
+    uomDiv (ArithUnitDefi ns ds) (NamedUnitDefi' u2) = (ns, ds ++ [u2])
+    uomDiv (ArithUnitDefi ns1 ds1) (ArithUnitDefi ns2 ds2) =
+      (ns1 ++ ds2, ds1 ++ ns2)
+
+qtyExpandUnits :: Quantity -> EdhTxExit (Either Decimal Quantity) -> EdhTx
+qtyExpandUnits (Quantity q0 u0) exit0
+  | isDimensionlessUnit u0 = exitEdhTx exit0 $ Left q0
+  | otherwise = case u0 of
+    NamedUnitDefi' ud -> doExpand [] [] q0 [ud] []
+    ArithUnitDefi ns ds -> doExpand [] [] q0 ns ds
+  where
+    doExit :: (Decimal, [NamedUnitDefi], [NamedUnitDefi]) -> EdhTx
+    doExit (q, [], []) = exitEdhTx exit0 $ Left q
+    doExit (q, ns, ds) = do
+      let u = normalizeArithUnit ns ds
+      if isDimensionlessUnit u
+        then exitEdhTx exit0 $ Left q
+        else exitEdhTx exit0 $ Right $ Quantity q u
+
+    doExpand ::
+      [NamedUnitDefi] ->
+      [NamedUnitDefi] ->
+      Decimal ->
+      [NamedUnitDefi] ->
+      [NamedUnitDefi] ->
+      EdhTx
+    doExpand ns ds !q [] [] = doExit (q, ns, ds)
+    doExpand ns ds q (nu : rest) ids =
+      unifyToPrimUnit
+        (Quantity q $ NamedUnitDefi' nu)
+        ( \case
+            Left q' -> doExpand ns ds q' rest ids
+            Right (Quantity q' u') -> case u' of
+              NamedUnitDefi' nu' ->
+                doExpand (ns ++ [nu']) ds q' rest ids
+              ArithUnitDefi ns' ds' ->
+                doExpand (ns ++ ns') (ds ++ ds') q' rest ids
+        )
+        $ doExpand (ns ++ [nu]) ds q rest ids
+    doExpand ns ds !q [] (du : rest) =
+      unifyToPrimUnit
+        (Quantity 1 $ NamedUnitDefi' du)
+        ( \case
+            Left r -> doExpand ns ds (q / r) [] rest
+            Right (Quantity r u') -> case u' of
+              NamedUnitDefi' du' ->
+                doExpand ns (ds ++ [du']) (q / r) [] rest
+              ArithUnitDefi ns' ds' ->
+                doExpand (ns ++ ds') (ds ++ ns') (q / r) [] rest
+        )
+        $ doExpand ns (ds ++ [du]) q [] rest
 
 -- | Reduce the absolute scale of the number for a quantity
 --

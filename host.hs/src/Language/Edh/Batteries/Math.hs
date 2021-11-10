@@ -158,13 +158,9 @@ mulProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum ->
           exitEdhTx exit $ EdhQty $ Quantity (lhq * rhNum) lhu
-        EdhQty rhQty@(Quantity rhq rhu) -> qtyToPureNumber rhQty $ \case
-          Just rhNum -> exitEdhTx exit $ EdhQty $ Quantity (lhq * rhNum) lhu
-          Nothing -> qtyToPureNumber lhQty $ \case
-            Just lhNum -> exitEdhTx exit $ EdhQty $ Quantity (lhNum * rhq) rhu
-            Nothing ->
-              exitEdhTx exit $
-                EdhQty $ Quantity (lhq * rhq) (uomMultiply lhu rhu)
+        EdhQty !rhQty -> qtyMul lhQty rhQty $ \case
+          Left d -> exitEdhTx exit $ EdhDecimal d
+          Right q -> exitEdhTx exit $ EdhQty q
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     EdhString lhStr -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
@@ -182,20 +178,20 @@ divProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
     EdhDecimal !lhNum -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum -> exitEdhTx exit (EdhDecimal $ lhNum / rhNum)
-        EdhQty rhQty@(Quantity rhq rhu) -> qtyToPureNumber rhQty $ \case
-          Just rhNum -> exitEdhTx exit $ EdhDecimal $ lhNum / rhNum
-          Nothing ->
+        EdhQty !rhQty -> qtyExpandUnits rhQty $ \case
+          Left rhNum -> exitEdhTx exit $ EdhDecimal $ lhNum / rhNum
+          Right (Quantity rhq rhu) ->
             exitEdhTx exit $
-              EdhQty $ Quantity (lhNum / rhq) (uomReciprocal rhu)
+              EdhQty $
+                Quantity (lhNum / rhq) $ normalizeUnit $ uomReciprocal rhu
         _ -> intrinsicOpReturnNA exit lhVal rhVal
-    EdhQty (Quantity lhq lhu) -> evalExprSrc rhExpr $ \ !rhVal ->
+    EdhQty lhQty@(Quantity lhq lhu) -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
         EdhDecimal !rhNum ->
           exitEdhTx exit $ EdhQty $ Quantity (lhq / rhNum) lhu
-        EdhQty rhQty@(Quantity rhq rhu) -> qtyToPureNumber rhQty $ \case
-          Just rhNum -> exitEdhTx exit $ EdhQty $ Quantity (lhq / rhNum) lhu
-          Nothing ->
-            exitEdhTx exit $ EdhQty $ Quantity (lhq / rhq) (uomDivide lhu rhu)
+        EdhQty !rhQty -> qtyDiv lhQty rhQty $ \case
+          Left d -> exitEdhTx exit $ EdhDecimal d
+          Right q -> exitEdhTx exit $ EdhQty q
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     _ -> intrinsicOpReturnNA'WithLHV exit lhVal
 
@@ -399,6 +395,23 @@ uomUnifyProc !uom !exit !ets =
     unifyQty :: EdhValue -> EdhHostProc
     unifyQty val !exit' =
       mustUnifyToUnit uom val $ exit' . EdhDecimal
+
+-- | virtual attribute Qty.asIn
+--
+-- convert a specified quantity to be in the specified unit of measure
+qtyAsInProc :: Quantity -> EdhHostProc
+qtyAsInProc !qty !exit !ets =
+  mkHostProc' (contextScope $ edh'context ets) EdhMethod "asIn" qtyAsInUoM
+    >>= exitEdh ets exit
+  where
+    qtyAsInUoM :: UnitDefi -> EdhHostProc
+    qtyAsInUoM !uom !exit' =
+      unifyToUnit uom (Right qty) (exit' . EdhQty . flip Quantity uom) $
+        edhValueReprTx (EdhQty qty) $ \ !qtyStr ->
+          throwEdhTx UsageError $
+            "can not convert quantity " <> qtyStr <> " to be in UoM ["
+              <> uomDefiIdent uom
+              <> "]"
 
 -- | virtual attribute Qty.unified
 --

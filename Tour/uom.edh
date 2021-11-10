@@ -98,8 +98,22 @@ uom
 uom 1Hz = 1/s
 
 # %%
+freq = 3Hz
+duration = 1.5minute
 
-3Hz * 1.5h
+n'occurrence = duration * freq
+
+# %%
+n'occurrence = 125
+duration = 5minute
+
+freq = n'occurrence / duration
+
+# %%
+freq = freq.asIn(Hz)
+
+# %%
+freq.toFixed(2)
 
 
 # %%
@@ -114,8 +128,13 @@ force = 5N
 mass = 2.3kg
 time = 0.5s
 
-v0 = 0m/s
-v1 = v0 + force/mass*time
+v0 = 1.3m/s
+
+accel = force/mass
+v1 = v0 + accel*time
+
+# %%
+v1.toFixed(2)
 
 
 # %%

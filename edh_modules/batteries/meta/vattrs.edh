@@ -89,6 +89,10 @@ i.e. the nearest integer to the number; the even integer if it is equidistant be
   method __UoM_unify__( _: 'UoM' ) : (_: 'Qty') -> 'Decimal' pass
 
   {##
+   # convert the quantity to be in a specified unit of measure
+   #}
+  method __Qty_asIn__( _: 'Qty' ) : ( _: 'UoM' ) -> 'Qty' pass
+  {##
    # convert the quantity to be of some primary unit
 can yield a pure number if convertible to a dimensionless quantity
    #}
