@@ -6,23 +6,3 @@ import * 'batteries/meta'
 
 {## For source level compatibility with JavaScript #}
 export NaN := nan
-
-
-export method abs( n ) if n is nan then nan else n<0 and -n or n
-
-
-export method max( *all ) {
-  n = nan
-  for i from all do if (
-    n is nan or ( i is not nan and i > n )
-  ) then n = i
-  return n
-}
-
-export method min( *all ) {
-  n = nan
-  for i from all do if (
-    n is nan or ( i is not nan and i < n )
-  ) then n = i
-  return n
-}

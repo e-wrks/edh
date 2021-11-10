@@ -1,0 +1,41 @@
+{## Optional math procedures intended for manual import
+
+Procedures in this module are not automatically imported into world root scope
+
+- To get Python source feel, do `import * 'math'`
+
+  Then `abs()/max()/min()` are in your (typically module's) global scope
+
+- To get JavaScript source feel, do `import * as Math 'math'`
+
+  Then write `Math.abs()` `Math.max()` `Math.min()` for the jobs
+
+ #}
+
+export {
+
+  {## Get absolute value of a number
+   #}
+  export method abs( n ) if n is nan then nan else n<0 and -n or n
+
+  {## Get maximum from all listed numbers
+   #}
+  export method max( *all ) {
+    n = nan
+    for i from all do if (
+      n is nan or ( i is not nan and i > n )
+    ) then n = i
+    return n
+  }
+
+  {## Get minimum from all listed numbers
+   #}
+  export method min( *all ) {
+    n = nan
+    for i from all do if (
+      n is nan or ( i is not nan and i < n )
+    ) then n = i
+    return n
+  }
+
+}
