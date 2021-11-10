@@ -3185,7 +3185,7 @@ defineUnit :: OptDocCmt -> UnitDecl -> EdhTxExit NamedUnitDefi -> EdhTx
 defineUnit !docCmt !decl !exit !ets = case decl of
   PrimUnitDecl sym _ ->
     defineFormula True sym Nothing $ exitEdh ets exit
-  ConversionFactor nQty nSym nSpan dQty dUnit _ ->
+  ConversionFactor nQty nSym nSpan dQty dUnit ->
     defineFormula False nSym (Just (dUnit, RatioFormula $ nQty / dQty)) $
       \ !defi -> case dUnit of
         NamedUnit dSym _ ->
@@ -4391,7 +4391,7 @@ evalLiteral ets lit exit = case lit of
   NilLiteral -> exit nil
   SinkCtor -> EdhSink <$> newSink >>= exit
   ValueLiteral !v -> exit v
-  QtyLiteral !q !uomSpec _uomSpan -> resolveQuantity ets q uomSpec $ \case
+  QtyLiteral !q !uomSpec -> resolveQuantity ets q uomSpec $ \case
     Left d -> exit $ EdhDecimal d
     Right qty -> exit $ EdhQty qty
 

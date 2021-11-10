@@ -2003,7 +2003,7 @@ data UnitDecl
     -- Note bidirectional conversion is implied when rhs is a named unit.
     --
     -- See: https://en.wikipedia.org/wiki/Conversion_factor
-    ConversionFactor !Decimal !AttrName !SrcRange !Decimal !UnitSpec !SrcRange
+    ConversionFactor !Decimal !AttrName !SrcRange !Decimal !UnitSpec
   | -- | Declare a one way conversion from a source unit to a named unit
     --
     -- Usually such two units don't have a common zero point, more
@@ -2015,7 +2015,7 @@ data UnitDecl
 
 instance Show UnitDecl where
   show (PrimUnitDecl sym _) = T.unpack sym
-  show (ConversionFactor nQty nSym _ dQty dUnit _) =
+  show (ConversionFactor nQty nSym _ dQty dUnit) =
     show nQty <> T.unpack nSym <> " = " <> show dQty <> show dUnit
   show (ConversionFormula outSym _ _formulaX fSrc _inUnit) =
     "[" <> T.unpack outSym <> "] = " <> T.unpack fSrc
@@ -2096,7 +2096,7 @@ data Literal
   = SinkCtor
   | NilLiteral
   | DecLiteral !Decimal
-  | QtyLiteral !Decimal !UnitSpec !SrcRange
+  | QtyLiteral !Decimal !UnitSpec
   | BoolLiteral !Bool
   | StringLiteral !Text
   | ValueLiteral !EdhValue
@@ -2106,7 +2106,7 @@ instance Hashable Literal where
   hashWithSalt s SinkCtor = hashWithSalt s (-1 :: Int)
   hashWithSalt s NilLiteral = hashWithSalt s (0 :: Int)
   hashWithSalt s (DecLiteral x) = hashWithSalt s x
-  hashWithSalt s (QtyLiteral qty uomSpec _uomSpan) =
+  hashWithSalt s (QtyLiteral qty uomSpec) =
     s `hashWithSalt` qty `hashWithSalt` uomSpec
   hashWithSalt s (BoolLiteral x) = hashWithSalt s x
   hashWithSalt s (StringLiteral x) = hashWithSalt s x
