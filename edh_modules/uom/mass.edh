@@ -1,0 +1,8 @@
+
+export {
+
+  uom kg # kilogram is primary, others are secondary
+  , 1kg = 1000g
+  , 1g = 1000mg
+
+}

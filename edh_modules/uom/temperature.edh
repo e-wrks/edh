@@ -1,0 +1,10 @@
+
+export {
+
+  uom K # Kelvin is primary, all others are secondary
+  , [K] = [°C] + 273.15
+  , [°C] = [K] - 273.15
+  , [°F] = [°C] * 9/5 + 32
+  , [°C] = ([°F] - 32) * 5/9
+
+}

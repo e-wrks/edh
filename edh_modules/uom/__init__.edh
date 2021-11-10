@@ -1,0 +1,19 @@
+{## Generally useful Units of Measure
+
+Caveat: You probably don't want to import all of these at once, the symbols are too common to conflict with common variable names. Importing sub-modules underneath can be more desirable in more cases.
+
+todo: maybe strictly follow SI?
+> https://en.wikipedia.org/wiki/International_System_of_Units
+
+ #}
+
+export {
+
+  import * './info-size'
+  import * './durfreq'
+  import * './distance'
+  import * './mass'
+  import * './newton'
+  import * './temperature'
+
+}

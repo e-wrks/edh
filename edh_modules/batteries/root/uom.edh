@@ -1,0 +1,9 @@
+{## Units of Measure to live in world root scope
+ #}
+export {
+
+  {## Percent is a secondary UoM, and can convert to dimensionless
+   #}
+  uom 100% = 1
+
+}

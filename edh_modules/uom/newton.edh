@@ -1,0 +1,8 @@
+
+export {
+
+  {## Newton is secondary
+   #}
+  uom 1N = 1kg*m/s/s
+
+}
