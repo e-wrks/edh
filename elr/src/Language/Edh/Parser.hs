@@ -1463,7 +1463,17 @@ parseNamedUnitSpec = lexeme parseNamedUnitSym
 
 parseNamedUnitSym :: Parser (AttrName, SrcRange)
 parseNamedUnitSym =
-  parseWithRng $ takeWhile1P (Just "UoM symbols") isMeasurementUnitChar
+  parseWithRng $ do
+    !uomSym <- takeWhile1P (Just "UoM symbols") isMeasurementUnitChar
+    !sp <- getSourcePos
+    !o <- getOffset
+    !s <- get
+    put
+      s
+        { edh'parser'lexeme'end'pos = lspSrcPosFromParsec sp,
+          edh'parser'lexeme'end'offset = o
+        }
+    return uomSym
 
 parseUnitSpec :: Parser UnitSpec
 parseUnitSpec =
