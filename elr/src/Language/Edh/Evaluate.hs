@@ -4387,7 +4387,7 @@ evalLiteral ets lit exit = case lit of
   NilLiteral -> exit nil
   SinkCtor -> EdhSink <$> newSink >>= exit
   ValueLiteral !v -> exit v
-  QtyLiteral !q !uomSpec -> resolveQuantity ets q uomSpec $ \case
+  QtyLiteral !q !uomSpec _uomSpan -> resolveQuantity ets q uomSpec $ \case
     Left d -> exit $ EdhDecimal d
     Right qty -> exit $ EdhQty qty
 

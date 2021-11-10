@@ -2084,7 +2084,7 @@ data Literal
   = SinkCtor
   | NilLiteral
   | DecLiteral !Decimal
-  | QtyLiteral !Decimal !UnitSpec
+  | QtyLiteral !Decimal !UnitSpec !SrcRange
   | BoolLiteral !Bool
   | StringLiteral !Text
   | ValueLiteral !EdhValue
@@ -2094,8 +2094,8 @@ instance Hashable Literal where
   hashWithSalt s SinkCtor = hashWithSalt s (-1 :: Int)
   hashWithSalt s NilLiteral = hashWithSalt s (0 :: Int)
   hashWithSalt s (DecLiteral x) = hashWithSalt s x
-  hashWithSalt s (QtyLiteral qty unit) =
-    s `hashWithSalt` qty `hashWithSalt` unit
+  hashWithSalt s (QtyLiteral qty uomSpec _uomSpan) =
+    s `hashWithSalt` qty `hashWithSalt` uomSpec
   hashWithSalt s (BoolLiteral x) = hashWithSalt s x
   hashWithSalt s (StringLiteral x) = hashWithSalt s x
   hashWithSalt s (ValueLiteral x) = hashWithSalt s x

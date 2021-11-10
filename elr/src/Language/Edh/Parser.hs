@@ -1498,7 +1498,7 @@ parseNumOrQty :: Parser Literal
 parseNumOrQty = lexeme $ do
   qty <- parseDecLit'
   choice
-    [ QtyLiteral qty . fst <$> parseUnitSpec,
+    [ uncurry (QtyLiteral qty) <$> parseUnitSpec,
       return (DecLiteral qty)
     ]
 
