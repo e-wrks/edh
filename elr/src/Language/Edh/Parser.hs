@@ -297,7 +297,7 @@ parseUnitStmt !docCmt !si = do
       (duSpec, duSpan) <-
         parseUnitSpec <|> do
           sc
-          return (NamedUnit "", noSrcRange)
+          return (NamedUnit "" noSrcRange, noSrcRange)
       return $ ConversionFactor nQty nuSym nuSpan dQty duSpec duSpan
 
     parseUnitConversionFormula :: Parser UnitDecl
@@ -315,7 +315,7 @@ parseUnitStmt !docCmt !si = do
           buSpan
           x
           src'text
-          (NamedUnit src'uom)
+          src'uom
 
 parseUnitFormula :: Parser (ExprSrc, AttrName)
 parseUnitFormula = do
@@ -1456,13 +1456,14 @@ parseBoolLit = (keyword "true" $> True) <|> (keyword "false" $> False)
 
 parseNamedUnitRef :: Parser (AttrName, SrcRange)
 parseNamedUnitRef =
-  parseWithRng $ between (symbol "[") (symbol "]") $ lexeme parseNamedUnitSym
+  between (symbol "[") (symbol "]") $ lexeme parseNamedUnitSym
 
 parseNamedUnitSpec :: Parser (AttrName, SrcRange)
-parseNamedUnitSpec = parseWithRng $ lexeme parseNamedUnitSym
+parseNamedUnitSpec = lexeme parseNamedUnitSym
 
-parseNamedUnitSym :: Parser AttrName
-parseNamedUnitSym = takeWhile1P (Just "UoM symbols") isMeasurementUnitChar
+parseNamedUnitSym :: Parser (AttrName, SrcRange)
+parseNamedUnitSym =
+  parseWithRng $ takeWhile1P (Just "UoM symbols") isMeasurementUnitChar
 
 parseUnitSpec :: Parser (UnitSpec, SrcRange)
 parseUnitSpec =
@@ -1476,19 +1477,21 @@ parseUnitSpec =
               parseNs [sym1]
           ]
   where
-    parseNs :: [AttrName] -> Parser UnitSpec
+    parseNs :: [(AttrName, SrcRange)] -> Parser UnitSpec
     parseNs ns = parseNs' ns <|> parseDs' ns [] <|> return (ArithUnit ns [])
 
-    parseNs' :: [AttrName] -> Parser UnitSpec
+    parseNs' :: [(AttrName, SrcRange)] -> Parser UnitSpec
     parseNs' ns = try $ do
       void $ char '*'
       nextSym <- parseNamedUnitSym
       parseNs $ ns ++ [nextSym]
 
-    parseDs :: [AttrName] -> [AttrName] -> Parser UnitSpec
+    parseDs ::
+      [(AttrName, SrcRange)] -> [(AttrName, SrcRange)] -> Parser UnitSpec
     parseDs ns ds = parseDs' ns ds <|> return (ArithUnit ns ds)
 
-    parseDs' :: [AttrName] -> [AttrName] -> Parser UnitSpec
+    parseDs' ::
+      [(AttrName, SrcRange)] -> [(AttrName, SrcRange)] -> Parser UnitSpec
     parseDs' ns ds = try $ do
       void $ char '/'
       nextSym <- parseNamedUnitSym

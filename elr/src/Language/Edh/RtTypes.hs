@@ -2010,7 +2010,7 @@ data UnitDecl
     -- sophisticated formula is thus needed.
     --
     -- E.g. https://en.wikipedia.org/wiki/Conversion_of_scales_of_temperature
-    ConversionFormula !AttrName !SrcRange !ExprSrc !Text !UnitSpec
+    ConversionFormula !AttrName !SrcRange !ExprSrc !Text !AttrName
   deriving (Eq)
 
 instance Show UnitDecl where
@@ -2045,29 +2045,40 @@ instance Hashable Quantity where
 -- Note the order of named units in an arithmetic unit matters, though multiple
 -- occurrences of the same named unit will be moved together to the first
 -- appearance place, as with the normalization process.
-data UnitSpec = NamedUnit !AttrName | ArithUnit [AttrName] [AttrName]
-  deriving (Eq)
+data UnitSpec
+  = NamedUnit !AttrName !SrcRange
+  | ArithUnit [(AttrName, SrcRange)] [(AttrName, SrcRange)]
+
+instance Eq UnitSpec where
+  NamedUnit x'sym _ == NamedUnit y'sym _ = x'sym == y'sym
+  ArithUnit x'ns x'ds == ArithUnit y'ns y'ds =
+    (fst <$> x'ns) == (fst <$> y'ns)
+      && (fst <$> x'ds) == (fst <$> y'ds)
+  _ == _ = False
 
 -- | Normalize a UoM specification as one is parsed
 uomNormalizeSpec :: UnitSpec -> UnitSpec
-uomNormalizeSpec (NamedUnit !sym) = NamedUnit sym
-uomNormalizeSpec (ArithUnit [!sym] []) = NamedUnit sym
-uomNormalizeSpec (ArithUnit [] []) = NamedUnit "" -- dimensionless one (1)
+uomNormalizeSpec u@NamedUnit {} = u
+uomNormalizeSpec (ArithUnit [(!uomSpec, !uomSpan)] []) =
+  NamedUnit uomSpec uomSpan
+uomNormalizeSpec (ArithUnit [] []) =
+  NamedUnit "" noSrcRange -- dimensionless one (1)
 uomNormalizeSpec (ArithUnit ns ds) =
   -- TODO: proper reductions
   ArithUnit ns ds
 
 isDimensionlessUnitSpec :: UnitSpec -> Bool
-isDimensionlessUnitSpec (NamedUnit sym) = T.null sym
+isDimensionlessUnitSpec (NamedUnit sym _) = T.null sym
 isDimensionlessUnitSpec ArithUnit {} = False
 
 uomSpecIdent :: UnitSpec -> AttrName
-uomSpecIdent (NamedUnit sym) = sym
+uomSpecIdent (NamedUnit sym _) = sym
 -- todo: render repeated named units in exponential form?
 uomSpecIdent (ArithUnit nUnits []) =
-  T.intercalate "*" nUnits
+  T.intercalate "*" (fst <$> nUnits)
 uomSpecIdent (ArithUnit nUnits dUnits) =
-  T.intercalate "*" nUnits <> "/" <> T.intercalate "/" dUnits
+  T.intercalate "*" (fst <$> nUnits) <> "/"
+    <> T.intercalate "/" (fst <$> dUnits)
 
 instance Show UnitSpec where
   show u = case uomSpecIdent u of
@@ -2075,10 +2086,11 @@ instance Show UnitSpec where
     uomIdent -> T.unpack uomIdent
 
 instance Hashable UnitSpec where
-  hashWithSalt s (NamedUnit sym) =
+  hashWithSalt s (NamedUnit sym _) =
     s `hashWithSalt` (-1 :: Int) `hashWithSalt` sym
   hashWithSalt s (ArithUnit nUnits dUnits) =
-    s `hashWithSalt` (-2 :: Int) `hashWithSalt` nUnits `hashWithSalt` dUnits
+    s `hashWithSalt` (-2 :: Int) `hashWithSalt` (fst <$> nUnits)
+      `hashWithSalt` (fst <$> dUnits)
 
 data Literal
   = SinkCtor
