@@ -17,6 +17,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import qualified Data.HashMap.Strict as Map
 import Data.IORef
+import Data.List
 import Data.Lossless.Decimal (Decimal (..))
 import qualified Data.Lossless.Decimal as D
 import Data.Maybe
@@ -3298,8 +3299,7 @@ defineUnit !docCmt !decl !exit !ets = case decl of
       UnitFormula ->
       [(UnitSpec, UnitFormula)] ->
       [(UnitSpec, UnitFormula)]
-    -- TODO validate uniqueness by spec
-    mergeFormulaInto u f l = case f of
+    mergeFormulaInto u f l = nubBy (\(u1, _) (u2, _) -> u1 == u2) $ case f of
       RatioFormula r -> do
         let go rfs [] = reverse $! (u, f) : rfs
             go rfs l'@(e@(_, f') : rest) = case f' of
