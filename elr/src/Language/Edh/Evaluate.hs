@@ -75,7 +75,7 @@ getEdhErrCtx !unwind !ets =
       "📜 "
         <> procedureName (edh'scope'proc $ edh'frame'scope frm)
         <> " 👉 "
-        <> (prettySrcLoc $ edh'exe'src'loc frm)
+        <> prettySrcLoc (edh'exe'src'loc frm)
 
     unwindStack :: Int -> [EdhCallFrame] -> [EdhCallFrame]
     unwindStack c s | c <= 0 = s
