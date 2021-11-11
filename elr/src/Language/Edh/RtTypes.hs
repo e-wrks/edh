@@ -1916,19 +1916,19 @@ instance Hashable UnitFormula where
 -- | Defined unit of measure as 1st class value
 --
 -- The unit symbol here can never be empty. But the formulae map can contain a
--- formula from an empty 'NamedUnit' (i.e. the dimensionless 1), indicating
--- this named unit is effectively dimensionless too, and that formula if a
--- 'RatioFormula' serves as the divisor to convert quantity in this unit to
--- pure number.
+-- formula from a 'NamedUnit' of empty identity (i.e. the dimensionless 1,
+-- effectively unitless), indicating this named unit is effectively
+-- dimensionless.
 data NamedUnitDefi = NamedUnitDefi
   { uom'defi'doc :: !OptDocCmt,
     uom'defi'prim :: !Bool,
     uom'defi'sym :: !AttrName,
     -- | List of formulae convertible to this unit
     -- INVARIANT:
-    --  - sorted by conversion factor, or nan if not a ratio factor, so expr
-    --    formulae will always appear last
-    --  - unit specs are unique, overwriting cases should be exceptional
+    --  - sorted by conversion factor, while arbitrary order at last if not a
+    --    ratio factor, i.e. expr formulae always appear last
+    --  - source unit specs are unique, overwriting cases should be exceptional
+    --    but no errout by far in current implementation
     uom'defi'formulae :: ![(UnitSpec, UnitFormula)]
   }
 
@@ -1970,10 +1970,10 @@ isPrimaryUnit :: UnitDefi -> Bool
 isPrimaryUnit (NamedUnitDefi' u) = uom'defi'prim u
 isPrimaryUnit ArithUnitDefi {} = False
 
-isDimensionlessUnit :: UnitDefi -> Bool
-isDimensionlessUnit (NamedUnitDefi' u) = T.null $ uom'defi'sym u
-isDimensionlessUnit (ArithUnitDefi [] []) = True
-isDimensionlessUnit ArithUnitDefi {} = False
+isUnitless :: UnitDefi -> Bool
+isUnitless (NamedUnitDefi' u) = T.null $ uom'defi'sym u
+isUnitless (ArithUnitDefi [] []) = True
+isUnitless ArithUnitDefi {} = False
 
 instance Eq UnitDefi where
   NamedUnitDefi' x == NamedUnitDefi' y = x == y
@@ -2067,9 +2067,9 @@ uomNormalizeSpec (ArithUnit ns ds) =
   -- TODO: proper reductions
   ArithUnit ns ds
 
-isDimensionlessUnitSpec :: UnitSpec -> Bool
-isDimensionlessUnitSpec (NamedUnit sym _) = T.null sym
-isDimensionlessUnitSpec ArithUnit {} = False
+isUnitlessSpec :: UnitSpec -> Bool
+isUnitlessSpec (NamedUnit sym _) = T.null sym
+isUnitlessSpec ArithUnit {} = False
 
 uomSpecIdent :: UnitSpec -> AttrName
 uomSpecIdent (NamedUnit sym _) = sym

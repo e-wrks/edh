@@ -2,7 +2,7 @@
  #}
 export {
 
-  {## Percent is a secondary UoM, and can convert to dimensionless
+  {## Percent is a secondary, dimensionless UoM, convertible to unitless pure number
    #}
   uom 100% = 1
 
