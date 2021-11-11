@@ -3334,9 +3334,9 @@ mustUnifyToUnit !uom !val exit = case edhUltimate val of
 
 unifyToUnit ::
   UnitDefi -> Either Decimal Quantity -> EdhTxExit Decimal -> EdhTx -> EdhTx
-unifyToUnit tgtUoM (Left q) exit naExit =
+unifyToUnit tgtUoM (Left d) exit naExit =
   if isUnitless tgtUoM
-    then exitEdhTx exit q
+    then exitEdhTx exit d
     else case tgtUoM of
       NamedUnitDefi' ud -> go $ uom'defi'formulae ud
       ArithUnitDefi {} -> naExit
@@ -3345,7 +3345,7 @@ unifyToUnit tgtUoM (Left q) exit naExit =
     go ((_, ExprFormula {}) : rest) = go rest
     go ((srcUoM, RatioFormula r) : rest) =
       if isUnitlessSpec srcUoM
-        then exitEdhTx exit $ q * r
+        then exitEdhTx exit $ d * r
         else go rest
 unifyToUnit u0 (Right q0) exit0 naExit0 =
   unifyQty Map.empty u0 q0 exit0 naExit0
@@ -3483,11 +3483,8 @@ unifyToPrimUnit qty@(Quantity q0 u0) exit naExit
                 tryMore
         tryList [] [] 1 ns $ \(nr, nns, nds) ->
           tryList [] [] 1 ds $ \(dr, dns, dds) ->
-            exitEdhTx exit $
-              Right $
-                Quantity
-                  (q0 * nr / dr)
-                  $ normalizeArithUnit (nns ++ dds) (nds ++ dns)
+            normalizeArithUnit (nns ++ dds) (nds ++ dns) $ \(normR, normUoM) ->
+              exitEdhTx exit $ Right $ Quantity (normR * q0 * nr / dr) normUoM
       where
         tryMore = tryUnits Nothing $ case uom of
           NamedUnitDefi' ud ->
@@ -3497,20 +3494,19 @@ unifyToPrimUnit qty@(Quantity q0 u0) exit naExit
                   \(uomSpec, formula) -> (uom, uomSpec, formula)
           ArithUnitDefi {} -> backlog
 
-normalizeUnit :: UnitDefi -> UnitDefi
-normalizeUnit (NamedUnitDefi' ud) = NamedUnitDefi' ud
-normalizeUnit (ArithUnitDefi ns ds) = normalizeArithUnit ns ds
+normalizeUnit :: UnitDefi -> EdhTxExit (Decimal, UnitDefi) -> EdhTx
+normalizeUnit (NamedUnitDefi' ud) exit = exit (1, NamedUnitDefi' ud)
+normalizeUnit (ArithUnitDefi ns ds) exit = normalizeArithUnit ns ds exit
 
--- | Unitless unit, effectively the dimensionless one (1)
-unitlessUnit :: UnitDefi
-unitlessUnit = NamedUnitDefi' $ NamedUnitDefi NoDocCmt True "" []
-
-normalizeArithUnit :: [NamedUnitDefi] -> [NamedUnitDefi] -> UnitDefi
-normalizeArithUnit [] [] = unitlessUnit
-normalizeArithUnit [ud] [] = NamedUnitDefi' ud
-normalizeArithUnit ns0 ds0 = case dcntUnits [] [] $ mergeUnits [] ns0 ds0 of
-  ([], []) -> unitlessUnit
-  (ns, ds) -> ArithUnitDefi ns ds
+normalizeArithUnit ::
+  [NamedUnitDefi] -> [NamedUnitDefi] -> EdhTxExit (Decimal, UnitDefi) -> EdhTx
+normalizeArithUnit [] [] exit = exit (1, unitlessUnit)
+normalizeArithUnit [ud] [] exit = exit (1, NamedUnitDefi' ud)
+normalizeArithUnit ns0 ds0 exit = exit $
+  case dcntUnits [] [] $ mergeUnits [] ns0 ds0 of
+    ([], []) -> (1, unitlessUnit)
+    ([ud], []) -> (1, NamedUnitDefi' ud)
+    (ns, ds) -> (1, ArithUnitDefi ns ds)
   where
     mergeUnits ::
       [(NamedUnitDefi, Int)] ->
@@ -3547,6 +3543,10 @@ normalizeArithUnit ns0 ds0 = case dcntUnits [] [] $ mergeUnits [] ns0 ds0 of
       | n < 0 = dcntUnits ns (ds ++ replicate (- n) u) rest
       | otherwise = dcntUnits ns ds rest -- n == 0
 
+-- | Unitless unit, effectively the dimensionless one (1)
+unitlessUnit :: UnitDefi
+unitlessUnit = NamedUnitDefi' $ NamedUnitDefi NoDocCmt True "" []
+
 qtyMul :: Quantity -> Quantity -> EdhTxExit (Either Decimal Quantity) -> EdhTx
 qtyMul qty1@(Quantity q1 u01) qty2@(Quantity q2 u02) exit =
   qtyExpandUnits qty1 $ \case
@@ -3555,11 +3555,11 @@ qtyMul qty1@(Quantity q1 u01) qty2@(Quantity q2 u02) exit =
     Right (Quantity q1' u01') -> qtyExpandUnits qty2 $ \case
       Left d2 ->
         exitEdhTx exit $ Right $ Quantity (q1 * d2) u01
-      Right (Quantity q2' u02') -> do
-        let u = uncurry normalizeArithUnit $ uomMul u01' u02'
-        if isUnitless u
-          then exitEdhTx exit $ Left (q1' * q2')
-          else exitEdhTx exit $ Right $ Quantity (q1' * q2') u
+      Right (Quantity q2' u02') ->
+        uncurry normalizeArithUnit (uomMul u01' u02') $ \(normR, normUoM) ->
+          if isUnitless normUoM
+            then exitEdhTx exit $ Left (normR * q1' * q2')
+            else exitEdhTx exit $ Right $ Quantity (q1' * q2') normUoM
   where
     uomMul :: UnitDefi -> UnitDefi -> ([NamedUnitDefi], [NamedUnitDefi])
     uomMul (NamedUnitDefi' u1) (NamedUnitDefi' u2) = ([u1, u2], [])
@@ -3576,16 +3576,16 @@ qtyDiv qty1@(Quantity q1 u01) qty2@(Quantity q2 u02) exit =
         Left d2 ->
           exitEdhTx exit $ Left $ d1 / d2
         Right Quantity {} ->
-          exitEdhTx exit $
-            Right $ Quantity (d1 / q2) $ normalizeUnit $ uomReciprocal u02
+          normalizeUnit (uomReciprocal u02) $ \(normR, normUoM) ->
+            exitEdhTx exit $ Right $ Quantity (normR * d1 / q2) normUoM
       Right (Quantity q1' u01') -> case r2 of
         Left d2 ->
           exitEdhTx exit $ Right $ Quantity (q1 / d2) u01
-        Right (Quantity q2' u02') -> do
-          let u = uncurry normalizeArithUnit $ uomDiv u01' u02'
-          if isUnitless u
-            then exitEdhTx exit $ Left (q1' / q2')
-            else exitEdhTx exit $ Right $ Quantity (q1' / q2') u
+        Right (Quantity q2' u02') ->
+          uncurry normalizeArithUnit (uomDiv u01' u02') $ \(normR, normUoM) ->
+            if isUnitless normUoM
+              then exitEdhTx exit $ Left (normR * q1' / q2')
+              else exitEdhTx exit $ Right $ Quantity (q1' / q2') normUoM
   where
     uomDiv :: UnitDefi -> UnitDefi -> ([NamedUnitDefi], [NamedUnitDefi])
     uomDiv (NamedUnitDefi' u1) (NamedUnitDefi' u2) = ([u1], [u2])
@@ -3595,52 +3595,63 @@ qtyDiv qty1@(Quantity q1 u01) qty2@(Quantity q2 u02) exit =
       (ns1 ++ ds2, ds1 ++ ns2)
 
 qtyExpandUnits :: Quantity -> EdhTxExit (Either Decimal Quantity) -> EdhTx
-qtyExpandUnits (Quantity q0 u0) exit0
-  | isUnitless u0 = exitEdhTx exit0 $ Left q0
-  | otherwise = case u0 of
-    NamedUnitDefi' ud -> doExpand [] [] q0 [ud] []
-    ArithUnitDefi ns ds -> doExpand [] [] q0 ns ds
+qtyExpandUnits (Quantity q0 u0) exit0 = doExpand u0 $ \case
+  Left r -> exit0 $ Left (q0 / r)
+  Right (r, ns, ds) -> normalizeArithUnit ns ds $ \(normR, normUoM) -> do
+    let qty = Quantity (normR * q0 / r) normUoM
+    unifyToPrimUnit qty exit0 $ exit0 $ Right qty
   where
-    doExit :: (Decimal, [NamedUnitDefi], [NamedUnitDefi]) -> EdhTx
-    doExit (q, [], []) = exitEdhTx exit0 $ Left q
-    doExit (q, ns, ds) = do
-      let u = normalizeArithUnit ns ds
-      if isUnitless u
-        then exitEdhTx exit0 $ Left q
-        else exitEdhTx exit0 $ Right $ Quantity q u
-
     doExpand ::
-      [NamedUnitDefi] ->
-      [NamedUnitDefi] ->
-      Decimal ->
-      [NamedUnitDefi] ->
-      [NamedUnitDefi] ->
+      UnitDefi ->
+      EdhTxExit (Either Decimal (Decimal, [NamedUnitDefi], [NamedUnitDefi])) ->
       EdhTx
-    doExpand ns ds !q [] [] = doExit (q, ns, ds)
-    doExpand ns ds q (nu : rest) ids =
-      unifyToPrimUnit
-        (Quantity q $ NamedUnitDefi' nu)
-        ( \case
-            Left q' -> doExpand ns ds q' rest ids
-            Right (Quantity q' u') -> case u' of
-              NamedUnitDefi' nu' ->
-                doExpand (ns ++ [nu']) ds q' rest ids
-              ArithUnitDefi ns' ds' ->
-                doExpand (ns ++ ns') (ds ++ ds') q' rest ids
-        )
-        $ doExpand (ns ++ [nu]) ds q rest ids
-    doExpand ns ds !q [] (du : rest) =
-      unifyToPrimUnit
-        (Quantity 1 $ NamedUnitDefi' du)
-        ( \case
-            Left r -> doExpand ns ds (q / r) [] rest
-            Right (Quantity r u') -> case u' of
-              NamedUnitDefi' du' ->
-                doExpand ns (ds ++ [du']) (q / r) [] rest
-              ArithUnitDefi ns' ds' ->
-                doExpand (ns ++ ds') (ds ++ ns') (q / r) [] rest
-        )
-        $ doExpand ns (ds ++ [du]) q [] rest
+    doExpand u exit =
+      if isUnitless u
+        then exit $ Left 1 -- unitless
+        else case u of
+          NamedUnitDefi' ud -> expandNamed ud exit
+          ArithUnitDefi ns ds -> expandArith ns ds $ exit . Right
+
+    expandArith ::
+      [NamedUnitDefi] ->
+      [NamedUnitDefi] ->
+      EdhTxExit (Decimal, [NamedUnitDefi], [NamedUnitDefi]) ->
+      EdhTx
+    expandArith ns1 ds1 exit1 = go ns1 ds1 exit1
+      where
+        go [] [] exit = exit (1, [], [])
+        go (u : rest) ds exit = expandNamed u $ \case
+          Left r -> go rest ds $ \(r', xns, xds) ->
+            exit (r' * r, xns, xds)
+          Right (r, xns, xds) -> go rest ds $ \(r', xns', xds') ->
+            exit (r' * r, xns ++ xns', xds ++ xds')
+        go [] (u : rest) exit = expandNamed u $ \case
+          Left r -> go [] rest $ \(r', xns, xds) ->
+            exit (r' / r, xns, xds)
+          Right (r, xns, xds) -> go [] rest $ \(r', xns', xds') ->
+            exit (r' / r, xds ++ xns', xns ++ xds')
+
+    expandNamed ::
+      NamedUnitDefi ->
+      EdhTxExit (Either Decimal (Decimal, [NamedUnitDefi], [NamedUnitDefi])) ->
+      EdhTx
+    expandNamed ud exit = go $ uom'defi'formulae ud
+      where
+        go [] = exit $ Right (1, [ud], [])
+        go ((uomSpec, formula) : rest) =
+          if isUnitlessSpec uomSpec
+            then case formula of
+              RatioFormula r -> exit $ Left r
+              ExprFormula {} -> go rest
+            else case formula of
+              RatioFormula r -> case uomSpec of
+                NamedUnit {} -> go rest
+                ArithUnit {} ->
+                  resolveUnitSpec uomSpec $
+                    flip doExpand $ \case
+                      Left r' -> exit $ Left (r * r')
+                      Right (r', ns, ds) -> exit $ Right (r * r', ns, ds)
+              ExprFormula {} -> go rest
 
 -- | Reduce the absolute scale of the number for a quantity
 --
@@ -6313,6 +6324,24 @@ edhValueEqual !ets !lhVal !rhVal !exitEq =
             $ \callAsMethod -> \case
               (_, EdhNil) -> tryRightHandMagic
               !magicArt -> callAsMethod magicArt
+      EdhQty lhQty@(Quantity lhq lhu) -> case rhv of
+        EdhQty rhQty@(Quantity rhq rhu) ->
+          runEdhTx ets $
+            unifyToUnit
+              lhu
+              (Right rhQty)
+              (\rhq' _ets -> exitEq $ Just $ rhq' == lhq)
+              $ unifyToUnit
+                rhu
+                (Right lhQty)
+                (\lhq' _ets -> exitEq $ Just $ lhq' == rhq)
+                $ \_ets -> exitEq $ Just False
+        EdhDecimal rhNum ->
+          runEdhTx ets $
+            qtyToPureNumber lhQty $ \case
+              Nothing -> \_ets -> exitEq $ Just False
+              Just lhNum -> \_ets -> exitEq $ Just $ lhNum == rhNum
+        _ -> tryRightHandMagic
       _ -> tryRightHandMagic
   where
     !lhv = edhUltimate lhVal
@@ -6349,6 +6378,12 @@ edhValueEqual !ets !lhVal !rhVal !exitEq =
           $ \callAsMethod -> \case
             (_, EdhNil) -> exitEq Nothing
             !magicArt -> callAsMethod magicArt
+      EdhQty rhQty -> case lhv of
+        EdhDecimal lhNum -> runEdhTx ets $
+          qtyToPureNumber rhQty $ \case
+            Nothing -> \_ets -> exitEq $ Just False
+            Just rhNum -> \_ets -> exitEq $ Just $ lhNum == rhNum
+        _ -> exitEq $ Just False
       _ -> exitEq Nothing
 
 edhListEq ::

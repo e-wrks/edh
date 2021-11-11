@@ -95,9 +95,7 @@ qtyAddSub op lhQty0@(Quantity lhq0 lhu0) rhQty0@(Quantity rhq0 rhu0) exit =
       unifyToUnit
         lhu
         (Right rhQty)
-        ( \rhq' ->
-            exitEdhTx exit $ EdhQty $ Quantity (lhq `op` rhq') lhu
-        )
+        (\rhq' -> exitEdhTx exit $ EdhQty $ Quantity (lhq `op` rhq') lhu)
         ( unifyToUnit
             rhu
             (Right lhQty)
@@ -181,9 +179,8 @@ divProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
         EdhQty !rhQty -> qtyExpandUnits rhQty $ \case
           Left rhNum -> exitEdhTx exit $ EdhDecimal $ lhNum / rhNum
           Right (Quantity rhq rhu) ->
-            exitEdhTx exit $
-              EdhQty $
-                Quantity (lhNum / rhq) $ normalizeUnit $ uomReciprocal rhu
+            normalizeUnit (uomReciprocal rhu) $ \(normR, normUoM) ->
+              exitEdhTx exit $ EdhQty $ Quantity (normR * lhNum / rhq) normUoM
         _ -> intrinsicOpReturnNA exit lhVal rhVal
     EdhQty lhQty@(Quantity lhq lhu) -> evalExprSrc rhExpr $ \ !rhVal ->
       case edhUltimate rhVal of
