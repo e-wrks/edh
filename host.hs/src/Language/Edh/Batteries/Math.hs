@@ -396,6 +396,12 @@ uomUnifyProc !uom !exit !ets =
     unifyQty val !exit' =
       mustUnifyToUnit uom val $ exit' . EdhDecimal
 
+-- | virtual attribute Qty.uom
+--
+-- get uom of the quantity
+qtyUnitProc :: Quantity -> EdhHostProc
+qtyUnitProc (Quantity _ u) !exit = exit $ EdhUoM u
+
 -- | virtual attribute Qty.asIn
 --
 -- convert a specified quantity to be in the specified unit of measure
