@@ -1544,9 +1544,7 @@ parseDecLit' = do
     b10DecPoints :: Integer -> Integer -> Parser (Integer, Integer)
     b10DecPoints !n !e =
       choice
-        [ do
-            !d <- b10Dig
-            b10DecPoints (n * 10 + d) (e - 1),
+        [ tryMoreDig,
           try $ do
             void $ char 'e' <|> char 'E'
             !sign'e <- signNum
@@ -1554,6 +1552,13 @@ parseDecLit' = do
             return (n, e + sign'e * e'),
           return (n, e)
         ]
+      where
+        tryMoreDig :: Parser (Integer, Integer)
+        tryMoreDig =
+          -- todo validate for `_` to appear at certain pos only?
+          (char '_' >> tryMoreDig) <|> do
+            !d <- b10Dig
+            b10DecPoints (n * 10 + d) (e - 1)
 
     signNum :: Parser Integer
     signNum =
@@ -1564,14 +1569,14 @@ parseDecLit' = do
         ]
 
     b10Int :: Integer -> Parser Integer
-    b10Int !n = tryMoreDig n <|> return n
-
-    tryMoreDig :: Integer -> Parser Integer
-    tryMoreDig !n =
-      -- todo validate for `_` to appear at certain pos only?
-      (char '_' >> tryMoreDig n) <|> do
-        !d <- b10Dig
-        b10Int $ n * 10 + d
+    b10Int !n = tryMoreDig <|> return n
+      where
+        tryMoreDig :: Parser Integer
+        tryMoreDig =
+          -- todo validate for `_` to appear at certain pos only?
+          (char '_' >> tryMoreDig) <|> do
+            !d <- b10Dig
+            b10Int $ n * 10 + d
 
     b10Dig :: Parser Integer
     b10Dig = do
