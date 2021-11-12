@@ -3347,59 +3347,69 @@ unifyToUnit tgtUoM (Left d) exit naExit =
       if isUnitlessSpec srcUoM
         then exitEdhTx exit $ d * r
         else go rest
-unifyToUnit u0 (Right q0) exit0 naExit0 =
-  unifyQty Map.empty u0 q0 exit0 naExit0
+unifyToUnit (NamedUnitDefi' u) (Right q) exit naExit =
+  qtyUnifyToNamed u q exit naExit
+unifyToUnit ArithUnitDefi {} Right {} _exit naExit =
+  naExit -- TODO implement this case
+
+qtyUnifyToNamed ::
+  NamedUnitDefi ->
+  Quantity ->
+  EdhTxExit Decimal ->
+  EdhTx ->
+  EdhTx
+qtyUnifyToNamed = doUnify Map.empty
   where
-    unifyQty ::
+    doUnify ::
       Map.HashMap AttrName Bool ->
-      UnitDefi ->
+      NamedUnitDefi ->
       Quantity ->
       EdhTxExit Decimal ->
       EdhTx ->
       EdhTx
-    unifyQty visited tgtUoM q@(Quantity qty srcUoM) exit naExit =
-      if srcUoM == tgtUoM
-        then exitEdhTx exit qty -- shortcut
-        else case tgtUoM of
-          NamedUnitDefi' ud -> do
-            let fl = uom'defi'formulae ud
+    doUnify visited tgtUnit qty@(Quantity q srcUoM) exit naExit =
+      if srcUnitIdent == tgtUnitIdent
+        then exitEdhTx exit q -- shortcut
+        else do
+          let fl = uom'defi'formulae tgtUnit
 
-                tryIndirect :: [(UnitSpec, UnitFormula)] -> EdhTx
-                tryIndirect [] = naExit
-                tryIndirect ((u, formula) : rest) =
-                  case Map.lookup (uomSpecIdent u) visited of
-                    Just {} -> tryIndirect rest
-                    Nothing -> resolveUnitSpec u $ \tgtUoM' ->
-                      unifyQty
+              tryIndirect :: [(UnitSpec, UnitFormula)] -> EdhTx
+              tryIndirect [] = naExit
+              tryIndirect ((u, formula) : rest) =
+                case Map.lookup (uomSpecIdent u) visited of
+                  Just {} -> tryIndirect rest
+                  Nothing -> resolveUnitSpec u $ \case
+                    NamedUnitDefi' bridgeUnit ->
+                      doUnify
                         visited'
-                        tgtUoM'
-                        q
-                        (exitByConverting formula tgtUoM')
+                        bridgeUnit
+                        qty
+                        (exitByConverting formula $ uom'defi'sym bridgeUnit)
                         $ tryIndirect rest
+                    ArithUnitDefi {} -> tryIndirect rest
 
-                tryDirect :: [(UnitSpec, UnitFormula)] -> EdhTx
-                tryDirect [] = tryIndirect fl
-                tryDirect ((u, formula) : rest) =
-                  if uomSpecIdent u == srcUnitIdent
-                    then exitByConverting formula srcUoM qty
-                    else tryDirect rest
+              tryDirect :: [(UnitSpec, UnitFormula)] -> EdhTx
+              tryDirect [] = tryIndirect fl
+              tryDirect ((u, formula) : rest) =
+                if uomSpecIdent u == srcUnitIdent
+                  then exitByConverting formula srcUnitIdent q
+                  else tryDirect rest
 
-            tryDirect fl
-          ArithUnitDefi _nuds _duds ->
-            naExit -- TODO impl. this case
+          tryDirect fl
       where
-        visited' = Map.insert (uomDefiIdent tgtUoM) True visited
+        tgtUnitIdent = uom'defi'sym tgtUnit
+        visited' = Map.insert tgtUnitIdent True visited
         srcUnitIdent = uomDefiIdent srcUoM
 
-        exitByConverting :: UnitFormula -> UnitDefi -> Decimal -> EdhTx
-        exitByConverting f u d = case f of
+        exitByConverting :: UnitFormula -> AttrName -> Decimal -> EdhTx
+        exitByConverting f uomIdent d = case f of
           RatioFormula r -> exit $ d * r
-          ExprFormula x _ -> evalUnitFormula d u x exit
+          ExprFormula x _ -> evalUnitFormula d uomIdent x exit
 
-evalUnitFormula :: Decimal -> UnitDefi -> ExprDefi -> EdhTxExit Decimal -> EdhTx
-evalUnitFormula d u x exit !ets = runEdhTx ets $
+evalUnitFormula :: Decimal -> AttrName -> ExprDefi -> EdhTxExit Decimal -> EdhTx
+evalUnitFormula d uomIdent x exit !ets = runEdhTx ets $
   pushEdhStack $ \ !ets' -> do
-    iopdInsert (AttrByName $ "[" <> uomDefiIdent u <> "]") (EdhDecimal d) $
+    iopdInsert (AttrByName $ "[" <> uomIdent <> "]") (EdhDecimal d) $
       edh'scope'entity $ contextScope $ edh'context ets'
     runEdhTx ets' $
       evalExprDefi x $ \case
