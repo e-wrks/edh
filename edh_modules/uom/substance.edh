@@ -1,0 +1,11 @@
+
+export {
+
+  {## mole is a primary unit for the amount of substance
+
+Note it is declared primary (thus not convertible to unitless), as SI considers it dimensional
+   #}
+  uom mol
+  , 1mol = 6.022_140_76e23
+
+}

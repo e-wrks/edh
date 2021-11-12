@@ -1,0 +1,46 @@
+
+export {
+
+  {## Commonplace units of information/storage by modern computer convention
+
+Bit and byte are defined as primary units, while all others are secondary.
+   #}
+  uom B
+  , 1KB = 1024B
+  , 1MB = 1024KB
+  , 1GB = 1024MB
+  , 1TB = 1024GB
+  , 1PB = 1024TB
+
+  {## Bit is the atomic unit of information, but less used in not-so-theoretical context
+
+Bit and byte are defined as primary units, while all others are secondary.
+   #}
+  uom bit
+  , 8bit = 1B # establish the conversion with commonplace units
+
+  # Decimal prefixes (SI)
+  , 1Kbit = 1e3bit
+  , 1Mbit = 1e6bit
+  , 1Gbit = 1e9bit
+  , 1Tbit = 1e12bit
+
+  # Binary prefixes (IEC 80000-13)
+  , 1Kibit = 1024bit
+  , 1Mibit = 1024Kibit
+  , 1Gibit = 1024Mibit
+  , 1Tibit = 1024Gibit
+
+
+  {## Commonplace data rate units
+
+Not all possible ones are named here, just those often seen.
+
+See: https://en.wikipedia.org/wiki/Data-rate_units
+   #}
+  uom
+  , 1kbps = 1e3bit/s
+  , 1Mbps = 1e6bit/s
+  , 1Gbps = 1e9bit/s
+
+}

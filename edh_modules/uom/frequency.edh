@@ -1,0 +1,10 @@
+
+export{
+
+  import (s, **) './duration'
+
+  {## Hertz is a secondary (convertible to unitless) unit for frequency
+   #}
+  uom 1Hz = 1/s
+
+}

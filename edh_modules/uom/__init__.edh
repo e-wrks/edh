@@ -9,11 +9,14 @@ todo: maybe strictly follow SI?
 
 export {
 
-  import * './info-size'
-  import * './durfreq'
+  import * './information'
+  import * './duration'
+  import * './frequency'
   import * './distance'
+  import * './volume'
   import * './mass'
   import * './newton'
   import * './temperature'
+  import * './substance'
 
 }

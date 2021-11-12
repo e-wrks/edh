@@ -1,8 +1,13 @@
 
 export {
 
-  uom kg # kilogram is primary, others are secondary
+  {## Unit of mass
+
+Kilogram is the primary unit, others are secondary.
+   #}
+  uom kg
   , 1kg = 1000g
   , 1g = 1000mg
+  , 1t = 1000kg
 
 }

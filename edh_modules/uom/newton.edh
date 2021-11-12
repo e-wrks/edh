@@ -1,7 +1,11 @@
 
 export {
 
-  {## Newton is secondary
+  import * './duration'
+  import * './distance'
+  import * './mass'
+
+  {## Newton is a secondary unit of the force
    #}
   uom 1N = 1kg*m/s/s
 
