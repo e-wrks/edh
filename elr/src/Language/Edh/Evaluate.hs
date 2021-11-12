@@ -3658,26 +3658,29 @@ qtyExpandUnits (Quantity q0 u0) exit0 = doExpand u0 $ \case
 -- Try converting to some larger or smaller unit, with the goal for the number
 -- to be within `0.9 ~ 10` scale.
 reduceQtyNumber :: Quantity -> EdhTxExit Quantity -> EdhTx -> EdhTx
-reduceQtyNumber qty@(Quantity q uom) exit naExit =
-  if q > 0.9 && q < 10
-    then -- already in good scale, return as is
-      exitEdhTx exit qty
-    else case uom of
-      NamedUnitDefi' ud -> do
-        let fl = uom'defi'formulae ud
-        if q <= 0.9
-          then upScale fl naExit
-          else -- i.e. q >= 10
-            dnScale (reverse fl) naExit
-      ArithUnitDefi _nuds _duds ->
-        naExit -- TODO impl. this case
+reduceQtyNumber qty@(Quantity q uom) exit naExit
+  | not $ D.decimalIsFinite q = exit qty
+  | qv > 0.9 && qv < 10 =
+    exitEdhTx exit qty -- already in good scale, return as is
+  | otherwise = case uom of
+    NamedUnitDefi' ud -> do
+      let fl = uom'defi'formulae ud
+      if qv <= 0.9
+        then upScale fl naExit
+        else -- i.e. qv >= 10
+          dnScale (reverse fl) naExit
+    ArithUnitDefi _nuds _duds ->
+      naExit -- TODO impl. this case
   where
+    qv = abs q
+
     upScale :: [(UnitSpec, UnitFormula)] -> EdhTx -> EdhTx
     upScale [] fbExit = fbExit
     upScale ((_, ExprFormula {}) : _) fbExit = fbExit
     upScale ((tgtSpec, RatioFormula r) : rest) fbExit = do
       let q' = q / r
-      if q' >= 10 || q' <= q
+          qv' = abs q'
+      if qv' >= 10 || qv' <= qv
         then fbExit
         else upScale rest $
           resolveUnitSpec tgtSpec $ \ !tgtUoM -> do
@@ -3689,7 +3692,8 @@ reduceQtyNumber qty@(Quantity q uom) exit naExit =
     dnScale ((_, ExprFormula {}) : rest) fbExit = dnScale rest fbExit
     dnScale ((tgtSpec, RatioFormula r) : rest) fbExit = do
       let q' = q / r
-      if q' <= 0.9 || q' >= q
+          qv' = abs q'
+      if qv' <= 0.9 || qv' >= qv
         then fbExit
         else dnScale rest $
           resolveUnitSpec tgtSpec $ \ !tgtUoM -> do
