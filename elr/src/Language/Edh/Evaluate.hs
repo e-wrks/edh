@@ -3510,13 +3510,17 @@ normalizeUnit (ArithUnitDefi ns ds) exit = normalizeArithUnit ns ds exit
 
 normalizeArithUnit ::
   [NamedUnitDefi] -> [NamedUnitDefi] -> EdhTxExit (Decimal, UnitDefi) -> EdhTx
-normalizeArithUnit [] [] exit = exit (1, unitlessUnit)
-normalizeArithUnit [ud] [] exit = exit (1, NamedUnitDefi' ud)
-normalizeArithUnit ns0 ds0 exit = exit $
-  case dcntUnits [] [] $ mergeUnits [] ns0 ds0 of
-    ([], []) -> (1, unitlessUnit)
-    ([ud], []) -> (1, NamedUnitDefi' ud)
-    (ns, ds) -> (1, ArithUnitDefi ns ds)
+normalizeArithUnit [] [] exit0 = exit0 (1, unitlessUnit)
+normalizeArithUnit [ud] [] exit0 = exit0 (1, NamedUnitDefi' ud)
+normalizeArithUnit ns0 ds0 exit0 =
+  unifyNamedUnits ns0 $ \(nr, ns0') ->
+    unifyNamedUnits ds0 $ \(dr, ds0') ->
+      reduceArithUnits ns0' ds0' $ \(ar, ns0'', ds0'') -> do
+        let r = nr / dr * ar
+        exit0 $ case dcntUnits [] [] $ mergeUnits [] ns0'' ds0'' of
+          ([], []) -> (r, unitlessUnit)
+          ([ud], []) -> (r, NamedUnitDefi' ud)
+          (ns, ds) -> (r, ArithUnitDefi ns ds)
   where
     mergeUnits ::
       [(NamedUnitDefi, Int)] ->
@@ -3553,6 +3557,45 @@ normalizeArithUnit ns0 ds0 exit = exit $
       | n < 0 = dcntUnits ns (ds ++ replicate (- n) u) rest
       | otherwise = dcntUnits ns ds rest -- n == 0
 
+    -- unify units in the list those convertible to eachothers
+    --
+    -- a ratio formula between 2 named units is bidirectional, so we don't need
+    -- to scan the list another (reversed) pass.
+    unifyNamedUnits ::
+      [NamedUnitDefi] -> EdhTxExit (Decimal, [NamedUnitDefi]) -> EdhTx
+    unifyNamedUnits us exit = go1 1 [] us
+      where
+        go1 r1 rs1 [] = exit (r1, reverse rs1)
+        go1 r1 rs1 [u1] = go1 r1 (u1 : rs1) []
+        go1 r1 rs1 (u1 : rest1) = go2 [] r1 rest1
+          where
+            go2 rs2 r2 [] = go1 r2 (u1 : rs1) (reverse rs2)
+            go2 rs2 r2 (u2 : rest2) =
+              qtyUnifyToNamed
+                u1
+                (Quantity 1 $ NamedUnitDefi' u2)
+                (\r -> go2 (u1 : rs2) (r2 * r) rest2)
+                (go2 (u2 : rs2) r2 rest2)
+
+    reduceArithUnits ::
+      [NamedUnitDefi] ->
+      [NamedUnitDefi] ->
+      EdhTxExit (Decimal, [NamedUnitDefi], [NamedUnitDefi]) ->
+      EdhTx
+    reduceArithUnits ns1 ds1 exit = go1 [] [] 1 ns1 ds1
+      where
+        go1 rns rds r1 [] ds = exit (r1, reverse rns, reverse rds ++ ds)
+        go1 rns rds r1 ns [] = exit (r1, reverse rns ++ ns, reverse rds)
+        go1 rns rds r1 (nu : rest1) ds = go2 [] r1 ds
+          where
+            go2 rs r2 [] = go1 (nu : rns) rds r2 rest1 (reverse rs)
+            go2 rs r2 (du : rest2) =
+              qtyUnifyToNamed
+                nu
+                (Quantity 1 $ NamedUnitDefi' du)
+                (\r -> go1 rns rds (r2 / r) rest1 (reverse rs ++ rest2))
+                (go2 (du : rs) r2 rest2)
+
 -- | Unitless unit, effectively the dimensionless one (1)
 unitlessUnit :: UnitDefi
 unitlessUnit = NamedUnitDefi' $ NamedUnitDefi NoDocCmt True "" []
@@ -3569,7 +3612,7 @@ qtyMul qty1@(Quantity q1 u01) qty2@(Quantity q2 u02) exit =
         uncurry normalizeArithUnit (uomMul u01' u02') $ \(normR, normUoM) ->
           if isUnitless normUoM
             then exitEdhTx exit $ Left (normR * q1' * q2')
-            else exitEdhTx exit $ Right $ Quantity (q1' * q2') normUoM
+            else exitEdhTx exit $ Right $ Quantity (normR * q1' * q2') normUoM
   where
     uomMul :: UnitDefi -> UnitDefi -> ([NamedUnitDefi], [NamedUnitDefi])
     uomMul (NamedUnitDefi' u1) (NamedUnitDefi' u2) = ([u1, u2], [])
@@ -3595,7 +3638,7 @@ qtyDiv qty1@(Quantity q1 u01) qty2@(Quantity q2 u02) exit =
           uncurry normalizeArithUnit (uomDiv u01' u02') $ \(normR, normUoM) ->
             if isUnitless normUoM
               then exitEdhTx exit $ Left (normR * q1' / q2')
-              else exitEdhTx exit $ Right $ Quantity (q1' / q2') normUoM
+              else exitEdhTx exit $ Right $ Quantity (normR * q1' / q2') normUoM
   where
     uomDiv :: UnitDefi -> UnitDefi -> ([NamedUnitDefi], [NamedUnitDefi])
     uomDiv (NamedUnitDefi' u1) (NamedUnitDefi' u2) = ([u1], [u2])
