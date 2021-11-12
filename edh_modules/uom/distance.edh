@@ -1,7 +1,12 @@
 
 export {
 
-  uom m # meter is primary, all others are secondary
+
+  {## Units for distance, i.e. how long the travel is
+
+Meter is primary, all others are secondary.
+   #}
+  uom m
   , 1km = 1000m
   , 1m = 10dm
   , 1dm = 10cm

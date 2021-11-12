@@ -1,11 +1,11 @@
 
 export{
 
-  {## Unit for duration, i.e. how much time elapsed
+  {## Units for duration, i.e. how much time elapsed
 
-Second is the primary unit, all others are secondary
+Second is the primary unit, all others are secondary.
    #}
-  uom s #
+  uom s
   , 1min = 60s
   , 1h = 60min
   , 1d = 24h

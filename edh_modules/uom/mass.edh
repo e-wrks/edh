@@ -1,7 +1,7 @@
 
 export {
 
-  {## Unit of mass
+  {## Units of mass
 
 Kilogram is the primary unit, others are secondary.
    #}

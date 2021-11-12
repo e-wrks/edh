@@ -1,7 +1,11 @@
 
 export {
 
-  uom K # Kelvin is primary, all others are secondary
+  {## Units of temperatures
+
+Kelvin is the primary unit, others are secondary.
+   #}
+  uom K
   , [K] = [°C] + 273.15
   , [°C] = [K] - 273.15
   , [°F] = [°C] * 9/5 + 32
