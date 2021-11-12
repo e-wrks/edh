@@ -3733,7 +3733,7 @@ reduceQtyNumber qty@(Quantity q uom) exit naExit
     upScale ((tgtSpec, RatioFormula r) : rest) fbExit = do
       let q' = q / r
           qv' = abs q'
-      if qv' >= 10 || qv' <= qv
+      if qv' <= qv || (qv' >= 10 && qv' > 1 / qv)
         then fbExit
         else upScale rest $
           resolveUnitSpec tgtSpec $ \ !tgtUoM -> do
@@ -3746,7 +3746,7 @@ reduceQtyNumber qty@(Quantity q uom) exit naExit
     dnScale ((tgtSpec, RatioFormula r) : rest) fbExit = do
       let q' = q / r
           qv' = abs q'
-      if qv' <= 0.9 || qv' >= qv
+      if qv' >= qv || (qv' <= 0.9 && 1 / qv' > qv)
         then fbExit
         else dnScale rest $
           resolveUnitSpec tgtSpec $ \ !tgtUoM -> do
