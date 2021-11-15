@@ -141,7 +141,7 @@ instance
       if uomDefiIdent u == uomIdent
         then callFromEdhM (fn $ Qty q) (ArgsPack args kwargs)
         else mEdh $ \exit ->
-          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+          resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
             unifyToUnit
               uom
               (Right qty)
@@ -156,7 +156,7 @@ instance
                   <> "] but given "
                   <> uomDefiIdent u
     EdhDecimal !d -> mEdh $ \exit ->
-      resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+      resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
         unifyToUnit
           uom
           (Left d)
@@ -191,7 +191,7 @@ instance
       if uomDefiIdent u == uomIdent
         then callFromEdhM (fn $ Just $ Qty q) (ArgsPack args kwargs)
         else mEdh $ \exit ->
-          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+          resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
             unifyToUnit
               uom
               (Right qty)
@@ -206,7 +206,7 @@ instance
                   <> "] but given "
                   <> uomDefiIdent u
     EdhDecimal !d -> mEdh $ \exit ->
-      resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+      resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
         unifyToUnit
           uom
           (Left d)
@@ -646,7 +646,7 @@ instance
                 (fn (NamedEdhArg (Qty q)))
                 (ArgsPack args kwargs')
             else mEdh $ \exit ->
-              resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+              resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
                 unifyToUnit
                   uom
                   (Right qty)
@@ -666,7 +666,7 @@ instance
                       <> " but given "
                       <> uomDefiIdent u
         EdhDecimal !d -> mEdh $ \exit ->
-          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+          resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
             unifyToUnit
               uom
               (Left d)
@@ -700,7 +700,7 @@ instance
                   (fn (NamedEdhArg (Qty q)))
                   (ArgsPack args' kwargs')
               else mEdh $ \exit ->
-                resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+                resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
                   unifyToUnit
                     uom
                     (Right qty)
@@ -720,7 +720,7 @@ instance
                         <> " but given "
                         <> uomDefiIdent u
           EdhDecimal !d -> mEdh $ \exit ->
-            resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+            resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
               unifyToUnit
                 uom
                 (Left d)
@@ -764,7 +764,7 @@ instance
                 (fn (NamedEdhArg $ Just $ Qty q))
                 (ArgsPack args kwargs')
             else mEdh $ \exit ->
-              resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+              resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
                 unifyToUnit
                   uom
                   (Right qty)
@@ -784,7 +784,7 @@ instance
                       <> " but given "
                       <> uomDefiIdent u
         EdhDecimal !d -> mEdh $ \exit ->
-          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+          resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
             unifyToUnit
               uom
               (Left d)
@@ -818,7 +818,7 @@ instance
                   (fn (NamedEdhArg $ Just $ Qty q))
                   (ArgsPack args' kwargs')
               else mEdh $ \exit ->
-                resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+                resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
                   unifyToUnit
                     uom
                     (Right qty)
@@ -838,7 +838,7 @@ instance
                         <> " but given "
                         <> uomDefiIdent u
           EdhDecimal !d -> mEdh $ \exit ->
-            resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+            resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
               unifyToUnit
                 uom
                 (Left d)
@@ -2424,7 +2424,7 @@ instance
       if uomDefiIdent u == uomIdent
         then allocObjM (fn $ Qty q) (ArgsPack args kwargs)
         else mEdh $ \exit ->
-          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+          resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
             unifyToUnit
               uom
               (Right qty)
@@ -2439,7 +2439,7 @@ instance
                   <> "] but given "
                   <> uomDefiIdent u
     EdhDecimal !d -> mEdh $ \exit ->
-      resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+      resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
         unifyToUnit
           uom
           (Left d)
@@ -2474,7 +2474,7 @@ instance
       if uomDefiIdent u == uomIdent
         then allocObjM (fn $ Just $ Qty q) (ArgsPack args kwargs)
         else mEdh $ \exit ->
-          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+          resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
             unifyToUnit
               uom
               (Right qty)
@@ -2489,7 +2489,7 @@ instance
                   <> "] but given "
                   <> uomDefiIdent u
     EdhDecimal !d -> mEdh $ \exit ->
-      resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+      resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
         unifyToUnit
           uom
           (Left d)
@@ -2929,7 +2929,7 @@ instance
                 (fn (NamedEdhArg (Qty q)))
                 (ArgsPack args kwargs')
             else mEdh $ \exit ->
-              resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+              resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
                 unifyToUnit
                   uom
                   (Right qty)
@@ -2949,7 +2949,7 @@ instance
                       <> " but given "
                       <> uomDefiIdent u
         EdhDecimal !d -> mEdh $ \exit ->
-          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+          resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
             unifyToUnit
               uom
               (Left d)
@@ -2983,7 +2983,7 @@ instance
                   (fn (NamedEdhArg (Qty q)))
                   (ArgsPack args' kwargs')
               else mEdh $ \exit ->
-                resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+                resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
                   unifyToUnit
                     uom
                     (Right qty)
@@ -3003,7 +3003,7 @@ instance
                         <> " but given "
                         <> uomDefiIdent u
           EdhDecimal !d -> mEdh $ \exit ->
-            resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+            resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
               unifyToUnit
                 uom
                 (Left d)
@@ -3047,7 +3047,7 @@ instance
                 (fn (NamedEdhArg $ Just $ Qty q))
                 (ArgsPack args kwargs')
             else mEdh $ \exit ->
-              resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+              resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
                 unifyToUnit
                   uom
                   (Right qty)
@@ -3067,7 +3067,7 @@ instance
                       <> " but given "
                       <> uomDefiIdent u
         EdhDecimal !d -> mEdh $ \exit ->
-          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+          resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
             unifyToUnit
               uom
               (Left d)
@@ -3101,7 +3101,7 @@ instance
                   (fn (NamedEdhArg $ Just $ Qty q))
                   (ArgsPack args' kwargs')
               else mEdh $ \exit ->
-                resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+                resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
                   unifyToUnit
                     uom
                     (Right qty)
@@ -3121,7 +3121,7 @@ instance
                         <> " but given "
                         <> uomDefiIdent u
           EdhDecimal !d -> mEdh $ \exit ->
-            resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+            resolveUnitSpec (NamedUnit uomIdent) $ \uom ->
               unifyToUnit
                 uom
                 (Left d)

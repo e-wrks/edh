@@ -297,7 +297,7 @@ parseUnitStmt !docCmt !si = do
       duSpec <-
         parseUnitSpec <|> do
           sc
-          return $ NamedUnit "" noSrcRange
+          return $ NamedUnitSrc "" noSrcRange
       return $ ConversionFactor nQty nuSym nuSpan dQty duSpec
 
     parseUnitConversionFormula :: Parser UnitDecl
@@ -1475,7 +1475,7 @@ parseNamedUnitSym =
         }
     return uomSym
 
-parseUnitSpec :: Parser UnitSpec
+parseUnitSpec :: Parser UnitSpecSrc
 parseUnitSpec =
   lexeme $
     fmap uomNormalizeSpec $
@@ -1486,21 +1486,21 @@ parseUnitSpec =
             parseNs [sym1]
         ]
   where
-    parseNs :: [(AttrName, SrcRange)] -> Parser UnitSpec
-    parseNs ns = parseNs' ns <|> parseDs' ns [] <|> return (ArithUnit ns [])
+    parseNs :: [(AttrName, SrcRange)] -> Parser UnitSpecSrc
+    parseNs ns = parseNs' ns <|> parseDs' ns [] <|> return (ArithUnitSrc ns [])
 
-    parseNs' :: [(AttrName, SrcRange)] -> Parser UnitSpec
+    parseNs' :: [(AttrName, SrcRange)] -> Parser UnitSpecSrc
     parseNs' ns = try $ do
       void $ char '*'
       nextSym <- parseNamedUnitSym
       parseNs $ ns ++ [nextSym]
 
     parseDs ::
-      [(AttrName, SrcRange)] -> [(AttrName, SrcRange)] -> Parser UnitSpec
-    parseDs ns ds = parseDs' ns ds <|> return (ArithUnit ns ds)
+      [(AttrName, SrcRange)] -> [(AttrName, SrcRange)] -> Parser UnitSpecSrc
+    parseDs ns ds = parseDs' ns ds <|> return (ArithUnitSrc ns ds)
 
     parseDs' ::
-      [(AttrName, SrcRange)] -> [(AttrName, SrcRange)] -> Parser UnitSpec
+      [(AttrName, SrcRange)] -> [(AttrName, SrcRange)] -> Parser UnitSpecSrc
     parseDs' ns ds = try $ do
       void $ char '/'
       nextSym <- parseNamedUnitSym

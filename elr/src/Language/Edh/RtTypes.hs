@@ -2003,7 +2003,7 @@ data UnitDecl
     -- Note bidirectional conversion is implied when rhs is a named unit.
     --
     -- See: https://en.wikipedia.org/wiki/Conversion_factor
-    ConversionFactor !Decimal !AttrName !SrcRange !Decimal !UnitSpec
+    ConversionFactor !Decimal !AttrName !SrcRange !Decimal !UnitSpecSrc
   | -- | Declare a one way conversion from a source unit to a named unit
     --
     -- Usually such two units don't have a common zero point, more
@@ -2046,39 +2046,27 @@ instance Hashable Quantity where
 -- occurrences of the same named unit will be moved together to the first
 -- appearance place, as with the normalization process.
 data UnitSpec
-  = NamedUnit !AttrName !SrcRange
-  | ArithUnit [(AttrName, SrcRange)] [(AttrName, SrcRange)]
+  = NamedUnit !AttrName
+  | ArithUnit [AttrName] [AttrName]
 
 instance Eq UnitSpec where
-  NamedUnit x'sym _ == NamedUnit y'sym _ = x'sym == y'sym
+  NamedUnit x'sym == NamedUnit y'sym = x'sym == y'sym
   ArithUnit x'ns x'ds == ArithUnit y'ns y'ds =
-    (fst <$> x'ns) == (fst <$> y'ns)
-      && (fst <$> x'ds) == (fst <$> y'ds)
+    x'ns == y'ns && x'ds == y'ds
   _ == _ = False
 
--- | Normalize a UoM specification as one is parsed
-uomNormalizeSpec :: UnitSpec -> UnitSpec
-uomNormalizeSpec u@NamedUnit {} = u
-uomNormalizeSpec (ArithUnit [(!uomSpec, !uomSpan)] []) =
-  NamedUnit uomSpec uomSpan
-uomNormalizeSpec (ArithUnit [] []) =
-  NamedUnit "" noSrcRange -- dimensionless one (1)
-uomNormalizeSpec (ArithUnit ns ds) =
-  -- TODO: proper reductions
-  ArithUnit ns ds
-
 isUnitlessSpec :: UnitSpec -> Bool
-isUnitlessSpec (NamedUnit sym _) = T.null sym
+isUnitlessSpec (NamedUnit sym) = T.null sym
 isUnitlessSpec ArithUnit {} = False
 
 uomSpecIdent :: UnitSpec -> AttrName
-uomSpecIdent (NamedUnit sym _) = sym
+uomSpecIdent (NamedUnit sym) = sym
 -- todo: render repeated named units in exponential form?
 uomSpecIdent (ArithUnit nUnits []) =
-  T.intercalate "*" (fst <$> nUnits)
+  T.intercalate "*" nUnits
 uomSpecIdent (ArithUnit nUnits dUnits) =
-  T.intercalate "*" (fst <$> nUnits) <> "/"
-    <> T.intercalate "/" (fst <$> dUnits)
+  T.intercalate "*" nUnits <> "/"
+    <> T.intercalate "/" dUnits
 
 instance Show UnitSpec where
   show u = case uomSpecIdent u of
@@ -2086,17 +2074,51 @@ instance Show UnitSpec where
     uomIdent -> T.unpack uomIdent
 
 instance Hashable UnitSpec where
-  hashWithSalt s (NamedUnit sym _) =
+  hashWithSalt s (NamedUnit sym) =
     s `hashWithSalt` (-1 :: Int) `hashWithSalt` sym
   hashWithSalt s (ArithUnit nUnits dUnits) =
-    s `hashWithSalt` (-2 :: Int) `hashWithSalt` (fst <$> nUnits)
-      `hashWithSalt` (fst <$> dUnits)
+    s `hashWithSalt` (-2 :: Int) `hashWithSalt` nUnits
+      `hashWithSalt` dUnits
+
+-- | Unit of measure specification, with src info
+data UnitSpecSrc
+  = NamedUnitSrc !AttrName !SrcRange
+  | ArithUnitSrc [(AttrName, SrcRange)] [(AttrName, SrcRange)]
+
+unitSpecWithoutSrc :: UnitSpecSrc -> UnitSpec
+unitSpecWithoutSrc (NamedUnitSrc sym _) = NamedUnit sym
+unitSpecWithoutSrc (ArithUnitSrc nUnits dUnits) =
+  ArithUnit (fst <$> nUnits) (fst <$> dUnits)
+
+-- | Normalize a UoM specification as one is parsed
+uomNormalizeSpec :: UnitSpecSrc -> UnitSpecSrc
+uomNormalizeSpec u@NamedUnitSrc {} = u
+uomNormalizeSpec (ArithUnitSrc [(sym, src'span)] []) =
+  NamedUnitSrc sym src'span
+uomNormalizeSpec (ArithUnitSrc [] []) =
+  NamedUnitSrc "" noSrcRange -- dimensionless one (1)
+uomNormalizeSpec (ArithUnitSrc ns ds) =
+  -- TODO: proper reductions
+  ArithUnitSrc ns ds
+
+instance Eq UnitSpecSrc where
+  NamedUnitSrc x'sym _ == NamedUnitSrc y'sym _ = x'sym == y'sym
+  ArithUnitSrc x'ns x'ds == ArithUnitSrc y'ns y'ds =
+    (fst <$> x'ns) == (fst <$> y'ns)
+      && (fst <$> x'ds) == (fst <$> y'ds)
+  _ == _ = False
+
+instance Show UnitSpecSrc where
+  show = show . unitSpecWithoutSrc
+
+instance Hashable UnitSpecSrc where
+  hashWithSalt s u = hashWithSalt s $ unitSpecWithoutSrc u
 
 data Literal
   = SinkCtor
   | NilLiteral
   | DecLiteral !Decimal
-  | QtyLiteral !Decimal !UnitSpec
+  | QtyLiteral !Decimal !UnitSpecSrc
   | BoolLiteral !Bool
   | StringLiteral !Text
   | ValueLiteral !EdhValue

@@ -3185,14 +3185,17 @@ defineUnit :: OptDocCmt -> UnitDecl -> EdhTxExit NamedUnitDefi -> EdhTx
 defineUnit !docCmt !decl !exit !ets = case decl of
   PrimUnitDecl sym _ ->
     defineFormula True sym Nothing $ exitEdh ets exit
-  ConversionFactor nQty nSym nSpan dQty dUnit ->
-    defineFormula False nSym (Just (dUnit, RatioFormula $ nQty / dQty)) $
-      \ !defi -> case dUnit of
-        NamedUnit dSym _ ->
+  ConversionFactor nQty nSym _nSpan dQty dUnit ->
+    defineFormula
+      False
+      nSym
+      (Just (unitSpecWithoutSrc dUnit, RatioFormula $ nQty / dQty))
+      $ \ !defi -> case dUnit of
+        NamedUnitSrc dSym _ ->
           defineFormula
             False
             dSym
-            (Just (NamedUnit nSym nSpan, RatioFormula $ dQty / nQty))
+            (Just (NamedUnit nSym, RatioFormula $ dQty / nQty))
             $ \_ -> exitEdh ets exit defi
         _ -> exitEdh ets exit defi
   ConversionFormula outSym _ (ExprSrc !x !x'span) fSrc inSym -> do
@@ -3202,7 +3205,7 @@ defineUnit !docCmt !decl !exit !ets = case decl of
     defineFormula
       False
       outSym
-      (Just (NamedUnit inSym noSrcRange, ExprFormula formulaDefi fSrc))
+      (Just (NamedUnit inSym, ExprFormula formulaDefi fSrc))
       $ exitEdh ets exit
   where
     !ctx = edh'context ets
@@ -4377,7 +4380,7 @@ intplStmt !ets !stmt !exit = case stmt of
 
 resolveUnitSpec :: UnitSpec -> EdhTxExit UnitDefi -> EdhTx
 resolveUnitSpec !uomSpec !exit0 !ets = case uomSpec of
-  NamedUnit uSym _ -> resolveNamed uSym $ \uom ->
+  NamedUnit uSym -> resolveNamed uSym $ \uom ->
     exitEdh ets exit0 $ NamedUnitDefi' uom
   ArithUnit nus dus -> resolveArith nus $ \nuds ->
     resolveArith dus $ \duds ->
@@ -4386,11 +4389,11 @@ resolveUnitSpec !uomSpec !exit0 !ets = case uomSpec of
     scope = contextScope $ edh'context ets
 
     resolveArith ::
-      [(AttrName, SrcRange)] -> ([NamedUnitDefi] -> STM ()) -> STM ()
+      [AttrName] -> ([NamedUnitDefi] -> STM ()) -> STM ()
     resolveArith us = go [] us
       where
         go uds [] exit = exit $ reverse $! uds
-        go uds ((u, _) : rest) exit = resolveNamed u $ \ud ->
+        go uds (u : rest) exit = resolveNamed u $ \ud ->
           go (ud : uds) rest exit
 
     resolveNamed :: AttrName -> (NamedUnitDefi -> STM ()) -> STM ()
@@ -4416,7 +4419,7 @@ resolveQuantity ::
   (Either Decimal Quantity -> STM ()) ->
   STM ()
 resolveQuantity !ets !q !uomSpec !exit0 = case uomSpec of
-  NamedUnit uSym _ -> resolveNamed uSym $ \case
+  NamedUnit uSym -> resolveNamed uSym $ \case
     Left d -> exit0 $ Left $ q * d
     Right uom -> exit0 $ Right $ Quantity q $ NamedUnitDefi' uom
   ArithUnit nus dus -> resolveArith (*) q nus $ \q' nuds ->
@@ -4428,13 +4431,13 @@ resolveQuantity !ets !q !uomSpec !exit0 = case uomSpec of
     resolveArith ::
       (Decimal -> Decimal -> Decimal) ->
       Decimal ->
-      [(AttrName, SrcRange)] ->
+      [AttrName] ->
       (Decimal -> [NamedUnitDefi] -> STM ()) ->
       STM ()
     resolveArith op q' us = go q' [] us
       where
         go q'' uds [] exit = exit q'' $ reverse $! uds
-        go q'' uds ((u, _) : rest) exit = resolveNamed u $ \case
+        go q'' uds (u : rest) exit = resolveNamed u $ \case
           Left d -> go (q'' `op` d) uds rest exit
           Right ud -> go q'' (ud : uds) rest exit
 
@@ -4459,9 +4462,10 @@ evalLiteral ets lit exit = case lit of
   NilLiteral -> exit nil
   SinkCtor -> EdhSink <$> newSink >>= exit
   ValueLiteral !v -> exit v
-  QtyLiteral !q !uomSpec -> resolveQuantity ets q uomSpec $ \case
-    Left d -> exit $ EdhDecimal d
-    Right qty -> exit $ EdhQty qty
+  QtyLiteral !q !uomSpec ->
+    resolveQuantity ets q (unitSpecWithoutSrc uomSpec) $ \case
+      Left d -> exit $ EdhDecimal d
+      Right qty -> exit $ EdhQty qty
 
 evalAttrRef :: AttrRef -> EdhTxExit EdhValue -> EdhTx
 evalAttrRef !addr !exit !ets = case addr of
