@@ -1452,16 +1452,7 @@ invokeMagic ::
   (((Object, EdhValue) -> STM ()) -> (Object, EdhValue) -> STM ()) ->
   EdhTx
 invokeMagic !obj !magicKey !apk !exit !checkBypassCall !ets =
-  case edh'obj'store obj of
-    ClassStore {} ->
-      lookupEdhObjMagic (edh'obj'class obj) magicKey >>= withMagicArt
-    _ ->
-      runEdhTx ets $
-        getObjAttrWithMagic'
-          obj
-          magicKey
-          (\_ets -> withMagicArt (obj, EdhNil))
-          (\ !r _ets -> withMagicArt r)
+  lookupEdhObjMagic obj magicKey >>= withMagicArt
   where
     withMagicArt :: (Object, EdhValue) -> STM ()
     withMagicArt !magicArt = do
