@@ -11,6 +11,7 @@ import qualified Data.ByteString as B
 import Data.Dynamic
 import Data.Hashable
 import Data.IORef
+import Data.Lossless.Decimal (Decimal)
 import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -716,6 +717,17 @@ runInSandboxM !sandbox !act = Edh $ \_naExit !exit !ets -> do
     exitEdh ets exit result
 
 -- ** Value Manipulations
+
+edhQuantity :: Decimal -> UnitSpec -> Edh (Either Decimal Quantity)
+edhQuantity q uomSpec = mEdh $ \exit ets ->
+  resolveQuantity ets q uomSpec $ exitEdh ets exit
+
+edhReduceQtyNumber :: Quantity -> Edh Quantity
+edhReduceQtyNumber qty = edhReduceQtyNumber' qty <|> return qty
+
+edhReduceQtyNumber' :: Quantity -> Edh Quantity
+edhReduceQtyNumber' qty = mEdh' $ \naExit exit ->
+  reduceQtyNumber qty (exitEdhTx exit) (naExit "unable to reduce quantity")
 
 -- | Convert an @Edh@ object to string
 edhObjStrM :: Object -> Edh Text
