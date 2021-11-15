@@ -307,12 +307,26 @@ prepareExpStoreM !fromObj = case edh'obj'store fromObj of
         prepareMagicStore (AttrByName edhExportsMagicName) tgtEnt $
           edhCreateNsObj ets NoDocCmt phantomHostProc $ AttrByName "export"
 
--- | Import an @Edh@ module identified by the import spec
+-- | Import the @Edh@ module identified by the import spec
 --
 -- The spec can be absolute or relative to current context module.
 importModuleM :: Text -> Edh Object
 importModuleM !importSpec = mEdh $ \ !exit ->
   importEdhModule importSpec $ exitEdhTx exit
+
+-- | Import into current scope all artifacts exported from the @Edh@ module
+-- identified by the import spec
+--
+-- The spec can be absolute or relative to current context module.
+importAllM :: Text -> Edh ()
+importAllM !importSpec = mEdh $ \ !exit !ets -> do
+  let ctx = edh'context ets
+      scope = contextScope ctx
+      tgtEnt = edh'scope'entity scope
+      reExpObj = edh'scope'this scope
+  runEdhTx ets $
+    importEdhModule' tgtEnt reExpObj (WildReceiver noSrcRange) importSpec $
+      const $ exitEdhTx exit ()
 
 -- ** Effect Resolution
 
