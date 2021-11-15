@@ -12,6 +12,7 @@ import Data.Unique
 import GHC.TypeLits (KnownSymbol, symbolVal)
 import Language.Edh.Args
 import Language.Edh.Control
+import Language.Edh.Evaluate
 import Language.Edh.IOPD
 import Language.Edh.Monad
 import Language.Edh.RtTypes
@@ -128,6 +129,103 @@ instance EdhCallableM fn' => EdhCallableM (Maybe EdhValue -> fn') where
     callFromEdhM (fn Nothing) (ArgsPack [] kwargs)
   callFromEdhM !fn (ArgsPack (val : args) !kwargs) =
     callFromEdhM (fn (Just val)) (ArgsPack args kwargs)
+
+-- receive anonymous arg taking a quantity value,
+-- converted in to the designated uom
+instance
+  (EdhCallableM fn', KnownSymbol uom) =>
+  EdhCallableM (QtyAsIn uom -> fn')
+  where
+  callFromEdhM !fn (ArgsPack (val : args) !kwargs) = case val of
+    EdhQty qty@(Quantity !q !u) ->
+      if uomDefiIdent u == uomIdent
+        then callFromEdhM (fn $ Qty q) (ArgsPack args kwargs)
+        else mEdh $ \exit ->
+          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+            unifyToUnit
+              uom
+              (Right qty)
+              ( \q' ets ->
+                  runEdh
+                    ets
+                    (callFromEdhM (fn $ Qty q') (ArgsPack args kwargs))
+                    exit
+              )
+              $ throwEdhTx UsageError $
+                "arg uom mismatch: expect quantity in [" <> uomIdent
+                  <> "] but given "
+                  <> uomDefiIdent u
+    EdhDecimal !d -> mEdh $ \exit ->
+      resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+        unifyToUnit
+          uom
+          (Left d)
+          ( \q' ets ->
+              runEdh
+                ets
+                (callFromEdhM (fn $ Qty q') (ArgsPack args kwargs))
+                exit
+          )
+          $ throwEdhTx UsageError $
+            "arg uom mismatch: expect quantity in [" <> uomIdent
+              <> "] but given a pure number"
+    _ ->
+      throwEdhM UsageError $
+        "arg type mismatch: expect quantity in [" <> uomIdent
+          <> "] but given "
+          <> edhTypeNameOf val
+    where
+      !uomIdent = T.pack $ symbolVal (Proxy :: Proxy uom)
+  callFromEdhM _ _ = throwEdhM UsageError "missing anonymous arg"
+
+-- receive optional anonymous arg taking a quantity value,
+-- converted in to the designated uom
+instance
+  (EdhCallableM fn', KnownSymbol uom) =>
+  EdhCallableM (Maybe (QtyAsIn uom) -> fn')
+  where
+  callFromEdhM !fn (ArgsPack [] !kwargs) =
+    callFromEdhM (fn Nothing) (ArgsPack [] kwargs)
+  callFromEdhM !fn (ArgsPack (val : args) !kwargs) = case val of
+    EdhQty qty@(Quantity !q !u) ->
+      if uomDefiIdent u == uomIdent
+        then callFromEdhM (fn $ Just $ Qty q) (ArgsPack args kwargs)
+        else mEdh $ \exit ->
+          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+            unifyToUnit
+              uom
+              (Right qty)
+              ( \q' ets ->
+                  runEdh
+                    ets
+                    (callFromEdhM (fn $ Just $ Qty q') (ArgsPack args kwargs))
+                    exit
+              )
+              $ throwEdhTx UsageError $
+                "arg uom mismatch: expect quantity in [" <> uomIdent
+                  <> "] but given "
+                  <> uomDefiIdent u
+    EdhDecimal !d -> mEdh $ \exit ->
+      resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+        unifyToUnit
+          uom
+          (Left d)
+          ( \q' ets ->
+              runEdh
+                ets
+                (callFromEdhM (fn $ Just $ Qty q') (ArgsPack args kwargs))
+                exit
+          )
+          $ throwEdhTx UsageError $
+            "arg uom mismatch: expect quantity in [" <> uomIdent
+              <> "] but given a pure number"
+    _ ->
+      throwEdhM UsageError $
+        "arg type mismatch: expect quantity in [" <> uomIdent
+          <> "] but given "
+          <> edhTypeNameOf val
+    where
+      !uomIdent = T.pack $ symbolVal (Proxy :: Proxy uom)
 
 -- receive anonymous arg taking 'Decimal'
 instance EdhCallableM fn' => EdhCallableM (Decimal -> fn') where
@@ -531,6 +629,243 @@ instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Mayb
         callFromEdhM (fn (NamedEdhArg maybeVal)) (ArgsPack args kwargs')
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+
+-- receive named arg taking a quantity value,
+-- converted in to the designated uom
+instance
+  (KnownSymbol name, KnownSymbol uom, EdhCallableM fn') =>
+  EdhCallableM (NamedEdhArg (QtyAsIn uom) name -> fn')
+  where
+  callFromEdhM !fn (ArgsPack !args !kwargs) =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhQty qty@(Quantity !q !u) ->
+          if uomDefiIdent u == uomIdent
+            then
+              callFromEdhM
+                (fn (NamedEdhArg (Qty q)))
+                (ArgsPack args kwargs')
+            else mEdh $ \exit ->
+              resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+                unifyToUnit
+                  uom
+                  (Right qty)
+                  ( \q' ets ->
+                      runEdh
+                        ets
+                        ( callFromEdhM
+                            (fn (NamedEdhArg (Qty q')))
+                            (ArgsPack args kwargs')
+                        )
+                        exit
+                  )
+                  $ throwEdhTx UsageError $
+                    "arg uom mismatch: expect quantity in [" <> uomIdent
+                      <> "] for "
+                      <> argName
+                      <> " but given "
+                      <> uomDefiIdent u
+        EdhDecimal !d -> mEdh $ \exit ->
+          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+            unifyToUnit
+              uom
+              (Left d)
+              ( \q' ets ->
+                  runEdh
+                    ets
+                    ( callFromEdhM
+                        (fn (NamedEdhArg (Qty q')))
+                        (ArgsPack args kwargs')
+                    )
+                    exit
+              )
+              $ throwEdhTx UsageError $
+                "arg uom mismatch: expect quantity in [" <> uomIdent
+                  <> "] for "
+                  <> argName
+                  <> " but given a pure number"
+        _ ->
+          throwEdhM UsageError $
+            "arg type mismatch: expect quantity in [" <> uomIdent <> "] for "
+              <> argName
+              <> " but given "
+              <> edhTypeNameOf val
+      (Nothing, !kwargs') -> case args of
+        [] -> throwEdhM UsageError $ "missing named arg: " <> argName
+        val : args' -> case val of
+          EdhQty qty@(Quantity !q !u) ->
+            if uomDefiIdent u == uomIdent
+              then
+                callFromEdhM
+                  (fn (NamedEdhArg (Qty q)))
+                  (ArgsPack args' kwargs')
+              else mEdh $ \exit ->
+                resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+                  unifyToUnit
+                    uom
+                    (Right qty)
+                    ( \q' ets ->
+                        runEdh
+                          ets
+                          ( callFromEdhM
+                              (fn (NamedEdhArg (Qty q')))
+                              (ArgsPack args' kwargs')
+                          )
+                          exit
+                    )
+                    $ throwEdhTx UsageError $
+                      "arg uom mismatch: expect quantity in [" <> uomIdent
+                        <> "] for "
+                        <> argName
+                        <> " but given "
+                        <> uomDefiIdent u
+          EdhDecimal !d -> mEdh $ \exit ->
+            resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+              unifyToUnit
+                uom
+                (Left d)
+                ( \q' ets ->
+                    runEdh
+                      ets
+                      ( callFromEdhM
+                          (fn (NamedEdhArg (Qty q')))
+                          (ArgsPack args' kwargs')
+                      )
+                      exit
+                )
+                $ throwEdhTx UsageError $
+                  "arg uom mismatch: expect quantity in [" <> uomIdent
+                    <> "] for "
+                    <> argName
+                    <> " but given a pure number"
+          _ ->
+            throwEdhM UsageError $
+              "arg type mismatch: expect quantity in [" <> uomIdent <> "] for "
+                <> argName
+                <> " but given "
+                <> edhTypeNameOf val
+    where
+      !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+      !uomIdent = T.pack $ symbolVal (Proxy :: Proxy uom)
+
+-- receive named, optional arg taking a quantity value,
+-- converted in to the designated uom
+instance
+  (KnownSymbol name, KnownSymbol uom, EdhCallableM fn') =>
+  EdhCallableM (NamedEdhArg (Maybe (QtyAsIn uom)) name -> fn')
+  where
+  callFromEdhM !fn (ArgsPack !args !kwargs) =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhQty qty@(Quantity !q !u) ->
+          if uomDefiIdent u == uomIdent
+            then
+              callFromEdhM
+                (fn (NamedEdhArg $ Just $ Qty q))
+                (ArgsPack args kwargs')
+            else mEdh $ \exit ->
+              resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+                unifyToUnit
+                  uom
+                  (Right qty)
+                  ( \q' ets ->
+                      runEdh
+                        ets
+                        ( callFromEdhM
+                            (fn (NamedEdhArg $ Just $ Qty q'))
+                            (ArgsPack args kwargs')
+                        )
+                        exit
+                  )
+                  $ throwEdhTx UsageError $
+                    "arg uom mismatch: expect quantity in [" <> uomIdent
+                      <> "] for "
+                      <> argName
+                      <> " but given "
+                      <> uomDefiIdent u
+        EdhDecimal !d -> mEdh $ \exit ->
+          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+            unifyToUnit
+              uom
+              (Left d)
+              ( \q' ets ->
+                  runEdh
+                    ets
+                    ( callFromEdhM
+                        (fn (NamedEdhArg $ Just $ Qty q'))
+                        (ArgsPack args kwargs')
+                    )
+                    exit
+              )
+              $ throwEdhTx UsageError $
+                "arg uom mismatch: expect quantity in [" <> uomIdent
+                  <> "] for "
+                  <> argName
+                  <> " but given a pure number"
+        _ ->
+          throwEdhM UsageError $
+            "arg type mismatch: expect quantity in [" <> uomIdent <> "] for "
+              <> argName
+              <> " but given "
+              <> edhTypeNameOf val
+      (Nothing, !kwargs') -> case args of
+        [] -> callFromEdhM (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs')
+        val : args' -> case val of
+          EdhQty qty@(Quantity !q !u) ->
+            if uomDefiIdent u == uomIdent
+              then
+                callFromEdhM
+                  (fn (NamedEdhArg $ Just $ Qty q))
+                  (ArgsPack args' kwargs')
+              else mEdh $ \exit ->
+                resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+                  unifyToUnit
+                    uom
+                    (Right qty)
+                    ( \q' ets ->
+                        runEdh
+                          ets
+                          ( callFromEdhM
+                              (fn (NamedEdhArg $ Just $ Qty q'))
+                              (ArgsPack args' kwargs')
+                          )
+                          exit
+                    )
+                    $ throwEdhTx UsageError $
+                      "arg uom mismatch: expect quantity in [" <> uomIdent
+                        <> "] for "
+                        <> argName
+                        <> " but given "
+                        <> uomDefiIdent u
+          EdhDecimal !d -> mEdh $ \exit ->
+            resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+              unifyToUnit
+                uom
+                (Left d)
+                ( \q' ets ->
+                    runEdh
+                      ets
+                      ( callFromEdhM
+                          (fn (NamedEdhArg $ Just $ Qty q'))
+                          (ArgsPack args' kwargs')
+                      )
+                      exit
+                )
+                $ throwEdhTx UsageError $
+                  "arg uom mismatch: expect quantity in [" <> uomIdent
+                    <> "] for "
+                    <> argName
+                    <> " but given a pure number"
+          _ ->
+            throwEdhM UsageError $
+              "arg type mismatch: expect quantity in [" <> uomIdent <> "] for "
+                <> argName
+                <> " but given "
+                <> edhTypeNameOf val
+            where
+    where
+      !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+      !uomIdent = T.pack $ symbolVal (Proxy :: Proxy uom)
 
 -- receive named arg taking 'Decimal'
 instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg Decimal name -> fn') where
@@ -2078,6 +2413,103 @@ instance EdhAllocatorM fn' => EdhAllocatorM (Maybe EdhValue -> fn') where
   allocObjM !fn (ArgsPack (val : args) !kwargs) =
     allocObjM (fn (Just val)) (ArgsPack args kwargs)
 
+-- receive anonymous arg taking a quantity value,
+-- converted in to the designated uom
+instance
+  (EdhAllocatorM fn', KnownSymbol uom) =>
+  EdhAllocatorM (QtyAsIn uom -> fn')
+  where
+  allocObjM !fn (ArgsPack (val : args) !kwargs) = case val of
+    EdhQty qty@(Quantity !q !u) ->
+      if uomDefiIdent u == uomIdent
+        then allocObjM (fn $ Qty q) (ArgsPack args kwargs)
+        else mEdh $ \exit ->
+          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+            unifyToUnit
+              uom
+              (Right qty)
+              ( \q' ets ->
+                  runEdh
+                    ets
+                    (allocObjM (fn $ Qty q') (ArgsPack args kwargs))
+                    exit
+              )
+              $ throwEdhTx UsageError $
+                "arg uom mismatch: expect quantity in [" <> uomIdent
+                  <> "] but given "
+                  <> uomDefiIdent u
+    EdhDecimal !d -> mEdh $ \exit ->
+      resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+        unifyToUnit
+          uom
+          (Left d)
+          ( \q' ets ->
+              runEdh
+                ets
+                (allocObjM (fn $ Qty q') (ArgsPack args kwargs))
+                exit
+          )
+          $ throwEdhTx UsageError $
+            "arg uom mismatch: expect quantity in [" <> uomIdent
+              <> "] but given a pure number"
+    _ ->
+      throwEdhM UsageError $
+        "arg type mismatch: expect quantity in [" <> uomIdent
+          <> "] but given "
+          <> edhTypeNameOf val
+    where
+      !uomIdent = T.pack $ symbolVal (Proxy :: Proxy uom)
+  allocObjM _ _ = throwEdhM UsageError "missing anonymous arg"
+
+-- receive optional anonymous arg taking a quantity value,
+-- converted in to the designated uom
+instance
+  (EdhAllocatorM fn', KnownSymbol uom) =>
+  EdhAllocatorM (Maybe (QtyAsIn uom) -> fn')
+  where
+  allocObjM !fn (ArgsPack [] !kwargs) =
+    allocObjM (fn Nothing) (ArgsPack [] kwargs)
+  allocObjM !fn (ArgsPack (val : args) !kwargs) = case val of
+    EdhQty qty@(Quantity !q !u) ->
+      if uomDefiIdent u == uomIdent
+        then allocObjM (fn $ Just $ Qty q) (ArgsPack args kwargs)
+        else mEdh $ \exit ->
+          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+            unifyToUnit
+              uom
+              (Right qty)
+              ( \q' ets ->
+                  runEdh
+                    ets
+                    (allocObjM (fn $ Just $ Qty q') (ArgsPack args kwargs))
+                    exit
+              )
+              $ throwEdhTx UsageError $
+                "arg uom mismatch: expect quantity in [" <> uomIdent
+                  <> "] but given "
+                  <> uomDefiIdent u
+    EdhDecimal !d -> mEdh $ \exit ->
+      resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+        unifyToUnit
+          uom
+          (Left d)
+          ( \q' ets ->
+              runEdh
+                ets
+                (allocObjM (fn $ Just $ Qty q') (ArgsPack args kwargs))
+                exit
+          )
+          $ throwEdhTx UsageError $
+            "arg uom mismatch: expect quantity in [" <> uomIdent
+              <> "] but given a pure number"
+    _ ->
+      throwEdhM UsageError $
+        "arg type mismatch: expect quantity in [" <> uomIdent
+          <> "] but given "
+          <> edhTypeNameOf val
+    where
+      !uomIdent = T.pack $ symbolVal (Proxy :: Proxy uom)
+
 -- receive anonymous arg taking 'Decimal'
 instance EdhAllocatorM fn' => EdhAllocatorM (Decimal -> fn') where
   allocObjM !fn (ArgsPack (val : args) !kwargs) = case val of
@@ -2480,6 +2912,243 @@ instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Ma
         allocObjM (fn (NamedEdhArg maybeVal)) (ArgsPack args kwargs')
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+
+-- receive named arg taking a quantity value,
+-- converted in to the designated uom
+instance
+  (KnownSymbol name, KnownSymbol uom, EdhAllocatorM fn') =>
+  EdhAllocatorM (NamedEdhArg (QtyAsIn uom) name -> fn')
+  where
+  allocObjM !fn (ArgsPack !args !kwargs) =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhQty qty@(Quantity !q !u) ->
+          if uomDefiIdent u == uomIdent
+            then
+              allocObjM
+                (fn (NamedEdhArg (Qty q)))
+                (ArgsPack args kwargs')
+            else mEdh $ \exit ->
+              resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+                unifyToUnit
+                  uom
+                  (Right qty)
+                  ( \q' ets ->
+                      runEdh
+                        ets
+                        ( allocObjM
+                            (fn (NamedEdhArg (Qty q')))
+                            (ArgsPack args kwargs')
+                        )
+                        exit
+                  )
+                  $ throwEdhTx UsageError $
+                    "arg uom mismatch: expect quantity in [" <> uomIdent
+                      <> "] for "
+                      <> argName
+                      <> " but given "
+                      <> uomDefiIdent u
+        EdhDecimal !d -> mEdh $ \exit ->
+          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+            unifyToUnit
+              uom
+              (Left d)
+              ( \q' ets ->
+                  runEdh
+                    ets
+                    ( allocObjM
+                        (fn (NamedEdhArg (Qty q')))
+                        (ArgsPack args kwargs')
+                    )
+                    exit
+              )
+              $ throwEdhTx UsageError $
+                "arg uom mismatch: expect quantity in [" <> uomIdent
+                  <> "] for "
+                  <> argName
+                  <> " but given a pure number"
+        _ ->
+          throwEdhM UsageError $
+            "arg type mismatch: expect quantity in [" <> uomIdent <> "] for "
+              <> argName
+              <> " but given "
+              <> edhTypeNameOf val
+      (Nothing, !kwargs') -> case args of
+        [] -> throwEdhM UsageError $ "missing named arg: " <> argName
+        val : args' -> case val of
+          EdhQty qty@(Quantity !q !u) ->
+            if uomDefiIdent u == uomIdent
+              then
+                allocObjM
+                  (fn (NamedEdhArg (Qty q)))
+                  (ArgsPack args' kwargs')
+              else mEdh $ \exit ->
+                resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+                  unifyToUnit
+                    uom
+                    (Right qty)
+                    ( \q' ets ->
+                        runEdh
+                          ets
+                          ( allocObjM
+                              (fn (NamedEdhArg (Qty q')))
+                              (ArgsPack args' kwargs')
+                          )
+                          exit
+                    )
+                    $ throwEdhTx UsageError $
+                      "arg uom mismatch: expect quantity in [" <> uomIdent
+                        <> "] for "
+                        <> argName
+                        <> " but given "
+                        <> uomDefiIdent u
+          EdhDecimal !d -> mEdh $ \exit ->
+            resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+              unifyToUnit
+                uom
+                (Left d)
+                ( \q' ets ->
+                    runEdh
+                      ets
+                      ( allocObjM
+                          (fn (NamedEdhArg (Qty q')))
+                          (ArgsPack args' kwargs')
+                      )
+                      exit
+                )
+                $ throwEdhTx UsageError $
+                  "arg uom mismatch: expect quantity in [" <> uomIdent
+                    <> "] for "
+                    <> argName
+                    <> " but given a pure number"
+          _ ->
+            throwEdhM UsageError $
+              "arg type mismatch: expect quantity in [" <> uomIdent <> "] for "
+                <> argName
+                <> " but given "
+                <> edhTypeNameOf val
+    where
+      !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+      !uomIdent = T.pack $ symbolVal (Proxy :: Proxy uom)
+
+-- receive named, optional arg taking a quantity value,
+-- converted in to the designated uom
+instance
+  (KnownSymbol name, KnownSymbol uom, EdhAllocatorM fn') =>
+  EdhAllocatorM (NamedEdhArg (Maybe (QtyAsIn uom)) name -> fn')
+  where
+  allocObjM !fn (ArgsPack !args !kwargs) =
+    case odTakeOut (AttrByName argName) kwargs of
+      (Just !val, !kwargs') -> case val of
+        EdhQty qty@(Quantity !q !u) ->
+          if uomDefiIdent u == uomIdent
+            then
+              allocObjM
+                (fn (NamedEdhArg $ Just $ Qty q))
+                (ArgsPack args kwargs')
+            else mEdh $ \exit ->
+              resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+                unifyToUnit
+                  uom
+                  (Right qty)
+                  ( \q' ets ->
+                      runEdh
+                        ets
+                        ( allocObjM
+                            (fn (NamedEdhArg $ Just $ Qty q'))
+                            (ArgsPack args kwargs')
+                        )
+                        exit
+                  )
+                  $ throwEdhTx UsageError $
+                    "arg uom mismatch: expect quantity in [" <> uomIdent
+                      <> "] for "
+                      <> argName
+                      <> " but given "
+                      <> uomDefiIdent u
+        EdhDecimal !d -> mEdh $ \exit ->
+          resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+            unifyToUnit
+              uom
+              (Left d)
+              ( \q' ets ->
+                  runEdh
+                    ets
+                    ( allocObjM
+                        (fn (NamedEdhArg $ Just $ Qty q'))
+                        (ArgsPack args kwargs')
+                    )
+                    exit
+              )
+              $ throwEdhTx UsageError $
+                "arg uom mismatch: expect quantity in [" <> uomIdent
+                  <> "] for "
+                  <> argName
+                  <> " but given a pure number"
+        _ ->
+          throwEdhM UsageError $
+            "arg type mismatch: expect quantity in [" <> uomIdent <> "] for "
+              <> argName
+              <> " but given "
+              <> edhTypeNameOf val
+      (Nothing, !kwargs') -> case args of
+        [] -> allocObjM (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs')
+        val : args' -> case val of
+          EdhQty qty@(Quantity !q !u) ->
+            if uomDefiIdent u == uomIdent
+              then
+                allocObjM
+                  (fn (NamedEdhArg $ Just $ Qty q))
+                  (ArgsPack args' kwargs')
+              else mEdh $ \exit ->
+                resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+                  unifyToUnit
+                    uom
+                    (Right qty)
+                    ( \q' ets ->
+                        runEdh
+                          ets
+                          ( allocObjM
+                              (fn (NamedEdhArg $ Just $ Qty q'))
+                              (ArgsPack args' kwargs')
+                          )
+                          exit
+                    )
+                    $ throwEdhTx UsageError $
+                      "arg uom mismatch: expect quantity in [" <> uomIdent
+                        <> "] for "
+                        <> argName
+                        <> " but given "
+                        <> uomDefiIdent u
+          EdhDecimal !d -> mEdh $ \exit ->
+            resolveUnitSpec (NamedUnit uomIdent noSrcRange) $ \uom ->
+              unifyToUnit
+                uom
+                (Left d)
+                ( \q' ets ->
+                    runEdh
+                      ets
+                      ( allocObjM
+                          (fn (NamedEdhArg $ Just $ Qty q'))
+                          (ArgsPack args' kwargs')
+                      )
+                      exit
+                )
+                $ throwEdhTx UsageError $
+                  "arg uom mismatch: expect quantity in [" <> uomIdent
+                    <> "] for "
+                    <> argName
+                    <> " but given a pure number"
+          _ ->
+            throwEdhM UsageError $
+              "arg type mismatch: expect quantity in [" <> uomIdent <> "] for "
+                <> argName
+                <> " but given "
+                <> edhTypeNameOf val
+            where
+    where
+      !argName = T.pack $ symbolVal (Proxy :: Proxy name)
+      !uomIdent = T.pack $ symbolVal (Proxy :: Proxy uom)
 
 -- receive named arg taking 'Decimal'
 instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg Decimal name -> fn') where

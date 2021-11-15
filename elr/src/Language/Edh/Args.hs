@@ -17,10 +17,12 @@ module Language.Edh.Args
     type ($:),
     appliedArg,
     effectfulArg,
+    QtyAsIn (..),
   )
 where
 
 import Data.Kind (Constraint, Type)
+import Data.Lossless.Decimal (Decimal)
 import Data.Maybe
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
@@ -67,3 +69,5 @@ appliedArg (ComputArg a) = a
 
 effectfulArg :: name $: a -> a
 effectfulArg (ComputArg (Effective a)) = a
+
+newtype QtyAsIn (uom :: Symbol) = Qty Decimal
