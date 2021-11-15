@@ -1271,6 +1271,15 @@ thisHostObjectOf = do
       "bug: this object is not wrapping a host value of type: "
         <> T.pack (show $ typeRep @t)
 
+thatHostObjectOf :: forall t. (Typeable t) => Edh (Object, t)
+thatHostObjectOf = do
+  !ets <- edhThreadState
+  let !that = edh'scope'that $ contextScope $ edh'context ets
+  (hostObjectOf @t that <|>) $
+    naM $
+      "bug: that object has not instance wrapping a host value of type: "
+        <> T.pack (show $ typeRep @t)
+
 {- HLINT ignore "Redundant <$>" -}
 
 hostObjectOf :: forall t. (Typeable t) => Object -> Edh (Object, t)
