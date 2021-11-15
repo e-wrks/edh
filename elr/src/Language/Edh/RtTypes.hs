@@ -2027,18 +2027,21 @@ instance Show UnitDecl where
 data Quantity = Quantity !Decimal !UnitDefi
   deriving (Eq)
 
+edhQtyStr :: Quantity -> Text
+edhQtyStr qty = T.pack $ show qty -- todo: optimize perf.
+
 instance Show Quantity where
-  show (Quantity qty unit) = case D.showDecimal' qty of
-    Left (n, d) -> case unit of
-      NamedUnitDefi' u -> n <> show u <> "/" <> d
+  show (Quantity q u) = case D.showDecimal' q of
+    Left (n, d) -> case u of
+      NamedUnitDefi' ud -> n <> show ud <> "/" <> d
       ArithUnitDefi nus dus ->
         let ns = show <$> nus
             ds = show <$> dus
          in n <> intercalate "*" ns <> "/" <> d <> intercalate "*" ds
-    Right s -> s <> show unit
+    Right s -> s <> show u
 
 instance Hashable Quantity where
-  hashWithSalt s (Quantity qty unit) = s `hashWithSalt` qty `hashWithSalt` unit
+  hashWithSalt s (Quantity q u) = s `hashWithSalt` q `hashWithSalt` u
 
 -- | Unit of measure specification
 --

@@ -718,6 +718,12 @@ runInSandboxM !sandbox !act = Edh $ \_naExit !exit !ets -> do
 
 -- ** Value Manipulations
 
+edhPrettyQty :: Decimal -> UnitSpec -> Edh Text
+edhPrettyQty q u =
+  edhQuantity q u >>= \case
+    Left num -> return $ T.pack $ show num
+    Right qty -> edhQtyStr <$> edhReduceQtyNumber qty
+
 edhQuantity :: Decimal -> UnitSpec -> Edh (Either Decimal Quantity)
 edhQuantity q uomSpec = mEdh $ \exit ets ->
   resolveQuantity ets q uomSpec $ exitEdh ets exit
