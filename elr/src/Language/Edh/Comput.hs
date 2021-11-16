@@ -825,13 +825,22 @@ defaultCtorArg'' Nothing ctor args kwargs =
 
 -- * Defining Methods/Classes for Curried Host Computation
 
+defineComputMethod_ ::
+  forall c.
+  (Typeable c, ScriptableComput c) =>
+  AttrName ->
+  c ->
+  Edh ()
+defineComputMethod_ !mthName !comput =
+  void $ defineComputMethod @c mthName comput
+
 defineComputMethod ::
   forall c.
   (Typeable c, ScriptableComput c) =>
-  c ->
   AttrName ->
+  c ->
   Edh EdhValue
-defineComputMethod !comput !mthName =
+defineComputMethod !mthName !comput =
   defEdhProc EdhMethod mthName (mthProc, argsRcvr)
   where
     mthProc :: ArgsPack -> Edh EdhValue
@@ -846,13 +855,13 @@ defineComputMethod !comput !mthName =
               !argsRepr <- tshowAppliedArgs appliedArgs
               !argsAheadRepr <- tshowArgsAhead $ odToList $ argsScriptedAhead c
               defineComputMethod
-                c
                 (mthName <> "( " <> argsRepr <> argsAheadRepr <> ")")
+                c
             FullyApplied c appliedArgs -> do
               !argsRepr <- tshowAppliedArgs appliedArgs
               defineComputMethod
-                c
                 (mthName <> "( " <> argsRepr <> ")")
+                c
             FullyEffected !d _extras _appliedArgs -> do
               !apkRepr <- edhValueReprM $ EdhArgsPack apk
               EdhObject <$> wrapM'' (mthName <> apkRepr) d
@@ -878,11 +887,30 @@ defineComputMethod !comput !mthName =
       !repr <- edhValueReprM v
       return $ attrKeyStr k <> "= " <> repr <> ", " <> restRepr
 
+defineComputClass_ ::
+  forall c.
+  (ScriptableComput c, Typeable c) =>
+  AttrName ->
+  c ->
+  Edh ()
+defineComputClass_ !clsName !rootComput =
+  void $ defineComputClass' True clsName rootComput
+
+defineComputClass'_ ::
+  forall c.
+  (ScriptableComput c, Typeable c) =>
+  EffectOnCtor ->
+  AttrName ->
+  c ->
+  Edh ()
+defineComputClass'_ !effOnCtor !clsName !rootComput =
+  void $ defineComputClass' effOnCtor clsName rootComput
+
 defineComputClass ::
   forall c.
   (ScriptableComput c, Typeable c) =>
-  c ->
   AttrName ->
+  c ->
   Edh Object
 defineComputClass = defineComputClass' True
 
@@ -892,10 +920,10 @@ defineComputClass' ::
   forall c.
   (ScriptableComput c, Typeable c) =>
   EffectOnCtor ->
-  c ->
   AttrName ->
+  c ->
   Edh Object
-defineComputClass' !effOnCtor !rootComput !clsName =
+defineComputClass' !effOnCtor !clsName !rootComput =
   defEdhClass clsName computAllocator [] $ do
     defEdhProc'_ EdhMethod "(@)" attrReadProc
     defEdhProc'_ EdhMethod "([])" attrReadProc
