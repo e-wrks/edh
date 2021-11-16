@@ -227,10 +227,15 @@ getObjAttrWithMagic' ::
   EdhTx ->
   EdhTxExit (Object, EdhValue) ->
   EdhTx
-getObjAttrWithMagic' !obj !key exitNoAttr !exit =
+getObjAttrWithMagic' !obj !key exitNoAttr !exit = case edh'obj'store obj of
+  -- class objects are magic providers, never magic consumers
+  ClassStore {} -> \ !ets ->
+    lookupEdhSelfMagic obj key >>= \case
+      EdhNil -> runEdhTx ets exitNoAttr
+      art -> exitEdh ets exit (obj, art)
   -- give super objects the magical power to intercept attribute access on
   -- descendant objects, by intercepting the attr resolution
-  trySuperMagic (AttrByName "(@<-)")
+  _ -> trySuperMagic (AttrByName "(@<-)")
   where
     -- TODO support defaulting along the list of super objs?
     trySuperMagic :: AttrKey -> EdhTx
@@ -1452,33 +1457,43 @@ invokeMagic ::
   (((Object, EdhValue) -> STM ()) -> (Object, EdhValue) -> STM ()) ->
   EdhTx
 invokeMagic !obj !magicKey !apk !exit !checkBypassCall !ets =
-  lookupEdhObjMagic obj magicKey >>= withMagicArt
+  runEdhTx ets $
+    getObjAttrWithMagic'
+      obj
+      magicKey
+      (\_ets -> checkBypassCall callAsMethod (obj, EdhNil))
+      (\result _ets -> checkBypassCall callAsMethod result)
   where
-    withMagicArt :: (Object, EdhValue) -> STM ()
-    withMagicArt !magicArt = do
-      let callAsMethod :: (Object, EdhValue) -> STM ()
-          callAsMethod = \case
-            (_, EdhBoundProc !callee !this !that !effOuter) ->
-              callProc callee this that $
-                flip (maybe id) effOuter $
-                  \ !outerStack !s -> s {edh'effects'stack = outerStack}
-            (this, EdhProcedure !callee !effOuter) -> callProc
-              callee
-              this
-              obj
-              $ flip (maybe id) effOuter $
-                \ !outerStack !s -> s {edh'effects'stack = outerStack}
-            (badInst, badMagic) -> edhSimpleDesc ets badMagic $ \ !badDesc ->
-              edhObjRepr ets obj $ \ !objRepr ->
-                throwEdh ets UsageError $
-                  "bad " <> attrKeyStr magicKey <> " magic " <> badDesc
-                    <> " on "
-                    <> objClassName obj
-                    <> "("
-                    <> objClassName badInst
-                    <> ") object: "
-                    <> objRepr
-      checkBypassCall callAsMethod magicArt
+    callAsMethod :: (Object, EdhValue) -> STM ()
+    callAsMethod = \case
+      (_, EdhBoundProc !callee !this !that !effOuter) ->
+        callProc callee this that $
+          flip (maybe id) effOuter $
+            \ !outerStack !s -> s {edh'effects'stack = outerStack}
+      (this, EdhProcedure !callee !effOuter) -> callProc
+        callee
+        this
+        obj
+        $ flip (maybe id) effOuter $
+          \ !outerStack !s -> s {edh'effects'stack = outerStack}
+      (badInst, EdhNil) -> edhObjRepr ets obj $ \ !objRepr ->
+        throwEdh ets UsageError $
+          "no " <> attrKeyStr magicKey <> " magic on "
+            <> objClassName obj
+            <> "("
+            <> objClassName badInst
+            <> ") object: "
+            <> objRepr
+      (badInst, badMagic) -> edhSimpleDesc ets badMagic $ \ !badDesc ->
+        edhObjRepr ets obj $ \ !objRepr ->
+          throwEdh ets UsageError $
+            "bad " <> attrKeyStr magicKey <> " magic " <> badDesc
+              <> " on "
+              <> objClassName obj
+              <> "("
+              <> objClassName badInst
+              <> ") object: "
+              <> objRepr
 
     callerScope = contextScope $ edh'context ets
 

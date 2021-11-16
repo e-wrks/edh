@@ -308,17 +308,6 @@ lookupEdhSelfMagic !obj !key = case edh'obj'store obj of
         !clsObj = edh'obj'class obj
 {-# INLINE lookupEdhSelfMagic #-}
 
-lookupEdhObjMagic :: Object -> AttrKey -> STM (Object, EdhValue)
-lookupEdhObjMagic !obj !key =
-  (obj :) <$> readTVar (edh'obj'supers obj) >>= searchMagic
-  where
-    searchMagic [] = return (obj, EdhNil)
-    searchMagic (o : rest) =
-      lookupEdhSelfMagic o key >>= \case
-        EdhNil -> searchMagic rest
-        !art -> return (o, art)
-{-# INLINE lookupEdhObjMagic #-}
-
 -- * import/export/include
 
 normalizeModuRefSpec :: Text -> Text
