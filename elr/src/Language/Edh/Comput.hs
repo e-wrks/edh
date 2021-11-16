@@ -832,7 +832,7 @@ defineComputMethod ::
   AttrName ->
   Edh EdhValue
 defineComputMethod !comput !mthName =
-  mkEdhProc EdhMethod mthName (mthProc, argsRcvr)
+  defEdhProc EdhMethod mthName (mthProc, argsRcvr)
   where
     mthProc :: ArgsPack -> Edh EdhValue
     mthProc !apk =
@@ -896,20 +896,12 @@ defineComputClass' ::
   AttrName ->
   Edh Object
 defineComputClass' !effOnCtor !rootComput !clsName =
-  mkEdhClass clsName computAllocator [] $ do
-    !clsScope <- contextScope . edh'context <$> edhThreadState
-    !mths <-
-      sequence $
-        [ (AttrByName nm,) <$> mkEdhProc vc nm hp
-          | (nm, vc, hp) <-
-              [ ("(@)", EdhMethod, wrapEdhProc attrReadProc),
-                ("([])", EdhMethod, wrapEdhProc attrReadProc),
-                ("__repr__", EdhMethod, wrapEdhProc reprProc),
-                ("__show__", EdhMethod, wrapEdhProc showProc),
-                ("__call__", EdhMethod, wrapEdhProc callProc)
-              ]
-        ]
-    iopdUpdateEdh mths $ edh'scope'entity clsScope
+  defEdhClass clsName computAllocator [] $ do
+    defEdhProc'_ EdhMethod "(@)" attrReadProc
+    defEdhProc'_ EdhMethod "([])" attrReadProc
+    defEdhProc'_ EdhMethod "__repr__" reprProc
+    defEdhProc'_ EdhMethod "__show__" showProc
+    defEdhProc'_ EdhMethod "__call__" callProc
   where
     computAllocator :: ArgsPack -> Edh (Maybe Unique, ObjectStore)
     computAllocator !apk =

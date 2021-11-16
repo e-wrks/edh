@@ -307,13 +307,6 @@ prepareExpStoreM !fromObj = case edh'obj'store fromObj of
         prepareMagicStore (AttrByName edhExportsMagicName) tgtEnt $
           edhCreateNsObj ets NoDocCmt phantomHostProc $ AttrByName "export"
 
--- | Import the @Edh@ module identified by the import spec
---
--- The spec can be absolute or relative to current context module.
-importModuleM :: Text -> Edh Object
-importModuleM !importSpec = mEdh $ \ !exit ->
-  importEdhModule importSpec $ exitEdhTx exit
-
 -- | Import into current scope all artifacts exported from the @Edh@ module
 -- identified by the import spec
 --
@@ -327,6 +320,47 @@ importAllM !importSpec = mEdh $ \ !exit !ets -> do
   runEdhTx ets $
     importEdhModule' tgtEnt reExpObj (WildReceiver noSrcRange) importSpec $
       const $ exitEdhTx exit ()
+
+-- | Import the @Edh@ module identified by the import spec
+--
+-- The spec can be absolute or relative to current context module.
+importModuleM :: Text -> Edh Object
+importModuleM !importSpec = mEdh $ \ !exit ->
+  importEdhModule importSpec $ exitEdhTx exit
+
+-- | Make all artifacts defined during an action to be exported from contextual
+-- this object in current scope
+exportM_ :: forall a. Edh a -> Edh ()
+exportM_ = void . exportM
+
+-- | Make all artifacts defined during an action to be exported from contextual
+-- this object in current scope
+exportM :: forall a. Edh a -> Edh a
+exportM act = Edh $ \naExit exit ets -> do
+  let exit' result _ets = exit result ets
+  prepareExpStore ets (edh'scope'this $ contextScope $ edh'context ets) $
+    \ !esExps ->
+      unEdh
+        act
+        naExit
+        exit'
+        ets
+          { edh'context = (edh'context ets) {edh'ctx'exp'target = Just esExps}
+          }
+
+-- | Discourage artifact definitions during the run of an action
+pureM_ :: forall a. Edh a -> Edh ()
+pureM_ = void . pureM
+
+-- | Discourage artifact definitions during the run of an action
+pureM :: forall a. Edh a -> Edh a
+pureM act = Edh $ \naExit exit ets -> do
+  let exit' result _ets = exit result ets
+  unEdh
+    act
+    naExit
+    exit'
+    ets {edh'context = (edh'context ets) {edh'ctx'pure = True}}
 
 -- ** Effect Resolution
 
@@ -654,7 +688,12 @@ pushStackM' !scope !act = Edh $ \naExit exit ets -> do
       !ctxNew =
         ctx
           { edh'ctx'tip = tipNew,
-            edh'ctx'stack = tip : edh'ctx'stack ctx
+            edh'ctx'stack = tip : edh'ctx'stack ctx,
+            edh'ctx'genr'caller = Nothing,
+            edh'ctx'match = true,
+            edh'ctx'pure = False,
+            edh'ctx'exp'target = Nothing,
+            edh'ctx'eff'target = Nothing
           }
   unEdh act naExit (edhSwitchState ets . exit) etsNew
 
@@ -996,6 +1035,77 @@ mkEdhClass !clsName !allocator !superClasses !clsBody = do
         rptEdhNotApplicable
         (\(maybeIdent, oStore) _ets -> ctorExit maybeIdent oStore)
         ets
+
+-- | Define an @Edh@ artifact into current scope
+--
+-- Note pure and exporting semantics are honored.
+defEdhArt :: AttrName -> EdhValue -> Edh ()
+defEdhArt nm = defEdhArt' (AttrByName nm)
+
+-- | Define an @Edh@ artifact into current scope
+--
+-- Note pure and exporting semantics are honored.
+defEdhArt' :: AttrKey -> EdhValue -> Edh ()
+defEdhArt' key val = do
+  !ets <- edhThreadState
+  let !ctx = edh'context ets
+      esDefs = edh'scope'entity $ contextScope ctx
+
+  unless (edh'ctx'pure ctx) $
+    inlineSTM $ iopdInsert key val esDefs
+
+  case edh'ctx'exp'target ctx of
+    Nothing -> pure ()
+    Just !esExps -> inlineSTM $ iopdInsert key val esExps
+
+-- | Define an @Edh@ host procedure into current scope
+--
+-- Note pure and exporting semantics are honored.
+defEdhProc_ ::
+  (ProcDefi -> EdhProcDefi) ->
+  AttrName ->
+  (ArgsPack -> Edh EdhValue, ArgsReceiver) ->
+  Edh ()
+defEdhProc_ !vc !nm !hp = void $ defEdhProc vc nm hp
+
+-- | Define an @Edh@ host procedure into current scope
+--
+-- Note pure and exporting semantics are honored.
+defEdhProc ::
+  (ProcDefi -> EdhProcDefi) ->
+  AttrName ->
+  (ArgsPack -> Edh EdhValue, ArgsReceiver) ->
+  Edh EdhValue
+defEdhProc !vc !nm !hp = do
+  !pv <- mkEdhProc vc nm hp
+  defEdhArt nm pv
+  return pv
+
+-- | Define an @Edh@ host class into current scope
+--
+-- Note pure and exporting semantics are honored.
+defEdhClass_ ::
+  AttrName ->
+  (ArgsPack -> Edh (Maybe Unique, ObjectStore)) ->
+  [Object] ->
+  Edh () ->
+  Edh ()
+defEdhClass_ !clsName !allocator !superClasses !clsBody =
+  void $ defEdhClass clsName allocator superClasses clsBody
+
+-- | Define an @Edh@ host class into current scope
+--
+-- Note pure and exporting semantics are honored.
+defEdhClass ::
+  AttrName ->
+  (ArgsPack -> Edh (Maybe Unique, ObjectStore)) ->
+  [Object] ->
+  Edh () ->
+  Edh Object
+defEdhClass !clsName !allocator !superClasses !clsBody = do
+  clsObj <- mkEdhClass clsName allocator superClasses clsBody
+  defEdhArt clsName (EdhObject clsObj)
+  return clsObj
 
 -- ** Edh Error from STM
 

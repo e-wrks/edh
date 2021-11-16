@@ -1,5 +1,6 @@
 module Language.Edh.InterOpM where
 
+import Control.Monad
 import Data.ByteString (ByteString)
 import Data.Dynamic
 import Data.Lossless.Decimal (Decimal)
@@ -35,6 +36,31 @@ mkEdhProc' ::
   Edh EdhValue
 mkEdhProc' !vc !nm !fn = mkEdhProc vc nm $ wrapEdhProc fn
 
+-- | Define an @Edh@ host procedure into current scope
+--
+-- Note pure and exporting semantics are honored.
+defEdhProc' ::
+  EdhCallableM fn =>
+  (ProcDefi -> EdhProcDefi) ->
+  AttrName ->
+  fn ->
+  Edh EdhValue
+defEdhProc' !vc !nm !hp = do
+  !pv <- mkEdhProc' vc nm hp
+  defEdhArt nm pv
+  return pv
+
+-- | Define an @Edh@ host procedure into current scope
+--
+-- Note pure and exporting semantics are honored.
+defEdhProc'_ ::
+  EdhCallableM fn =>
+  (ProcDefi -> EdhProcDefi) ->
+  AttrName ->
+  fn ->
+  Edh ()
+defEdhProc'_ !vc !nm !hp = void $ defEdhProc' vc nm hp
+
 mkEdhProperty ::
   AttrName ->
   Edh EdhValue ->
@@ -69,6 +95,24 @@ mkEdhProperty !nm !getterProc !maybeSetterProc = do
                 \apk -> unEdh (callFromEdhM setterProc apk) rptEdhNotApplicable
             }
   return $ EdhProcedure (EdhDescriptor getter setter) Nothing
+
+defEdhProperty ::
+  AttrName ->
+  Edh EdhValue ->
+  Maybe (Maybe EdhValue -> Edh EdhValue) ->
+  Edh EdhValue
+defEdhProperty !nm !getterProc !maybeSetterProc = do
+  pd <- mkEdhProperty nm getterProc maybeSetterProc
+  defEdhArt nm pd
+  return pd
+
+defEdhProperty_ ::
+  AttrName ->
+  Edh EdhValue ->
+  Maybe (Maybe EdhValue -> Edh EdhValue) ->
+  Edh ()
+defEdhProperty_ !nm !getterProc !maybeSetterProc =
+  void $ defEdhProperty nm getterProc maybeSetterProc
 
 -- | Class for a procedure implemented in the host language (which is Haskell)
 -- that can be called from Edh code.

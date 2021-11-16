@@ -3,6 +3,7 @@
 module Language.Edh.RuntimeM
   ( createEdhWorld,
     declareEdhOperators,
+    installModuleM_,
     installModuleM,
     runProgramM,
     runProgramM',
@@ -35,6 +36,10 @@ import Language.Edh.RtTypes
 import Language.Edh.Runtime
 import System.FilePath
 import Prelude
+
+installModuleM_ :: EdhWorld -> Text -> Edh () -> IO ()
+installModuleM_ !world !moduName !preInstall =
+  void $ installModuleM world moduName preInstall
 
 installModuleM :: EdhWorld -> Text -> Edh () -> IO Object
 installModuleM !world !moduName !preInstall = do
