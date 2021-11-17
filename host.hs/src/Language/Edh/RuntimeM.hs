@@ -6,6 +6,7 @@ module Language.Edh.RuntimeM
     installModuleM_,
     installModuleM,
     runProgramM,
+    runProgramM_,
     runProgramM',
     createEdhModule,
     runModuleM,
@@ -20,8 +21,8 @@ where
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
+import Control.Monad.IO.Class
 import qualified Data.ByteString as B
-import Data.Dynamic
 import qualified Data.HashMap.Strict as Map
 import Data.Maybe
 import Data.Text (Text)
@@ -37,29 +38,16 @@ import Language.Edh.Runtime
 import System.FilePath
 import Prelude
 
-installModuleM_ :: EdhWorld -> Text -> Edh () -> IO ()
-installModuleM_ !world !moduName !preInstall =
-  void $ installModuleM world moduName preInstall
-
-installModuleM :: EdhWorld -> Text -> Edh () -> IO Object
-installModuleM !world !moduName !preInstall = do
-  !modu <-
-    createEdhModule world moduName $ T.unpack $ "<host:" <> moduName <> ">"
-  void $
-    runProgramM' world $ do
-      !moduCtx <- inlineSTM $ moduleContext world modu
-      inContext moduCtx preInstall
-      inlineSTM $ do
-        !moduSlot <- newTVar $ ModuLoaded modu
-        !moduMap <- takeTMVar (edh'world'modules world)
-        putTMVar (edh'world'modules world) $
-          Map.insert (HostModule moduName) moduSlot moduMap
-      return nil
-  return modu
-
 runProgramM :: EdhWorld -> Edh EdhValue -> IO (Either EdhError EdhValue)
 runProgramM !world !prog =
   tryJust edhKnownError $ runProgramM' world prog
+
+runProgramM_ :: EdhWorld -> Edh a -> IO ()
+runProgramM_ !world !prog =
+  void $
+    runProgramM' world $ do
+      void prog
+      return nil
 
 runProgramM' :: EdhWorld -> Edh EdhValue -> IO EdhValue
 runProgramM' !world !prog = do
@@ -73,23 +61,50 @@ runProgramM' !world !prog = do
     Just (Right v) -> return v
     Just (Left e) -> throwIO e
 
-runModuleM :: EdhWorld -> FilePath -> Edh () -> IO (Either EdhError EdhValue)
-runModuleM !world !impPath !preRun =
-  tryJust edhKnownError $ runModuleM' world impPath preRun
+runModuleM :: FilePath -> Edh EdhValue
+runModuleM !impPath = runModuleM' impPath $ pure ()
 
-runModuleM' :: EdhWorld -> FilePath -> Edh () -> IO EdhValue
-runModuleM' !world !impPath !preRun =
-  let ?fileExt = ".edh"
-   in locateEdhMainModule impPath >>= \case
+runModuleM' :: FilePath -> Edh () -> Edh EdhValue
+runModuleM' !impPath !preRun = do
+  !world <- edh'prog'world <$> edhProgramState
+  (modu, moduFile, moduSource) <-
+    liftIO $ let ?fileExt = ".edh" in prepareModu world
+  !moduCtx <- inlineSTM $ moduleContext world modu
+  inContext moduCtx $ do
+    preRun
+    evalSrcM moduFile moduSource
+  where
+    prepareModu :: (?fileExt :: FilePath) => EdhWorld -> IO (Object, Text, Text)
+    prepareModu !world =
+      locateEdhMainModule impPath >>= \case
         Left !err ->
-          throwIO $ EdhError PackageError err (toDyn nil) "<run-modu>"
+          throwHostIO PackageError err
         Right !moduFile -> do
           !fileContent <- B.readFile moduFile
           case streamDecodeUtf8With lenientDecode fileContent of
-            Some !moduSource _ _ -> do
-              !modu <- createEdhModule world (T.pack impPath) moduFile
-              runProgramM' world $ do
-                !moduCtx <- inlineSTM $ moduleContext world modu
-                inContext moduCtx $ do
-                  preRun
-                  evalSrcM (T.pack moduFile) moduSource
+            Some !moduSource _ _ ->
+              (,T.pack moduFile,moduSource)
+                <$> createEdhModule world (T.pack impPath) moduFile
+
+installModuleM_ :: Text -> Edh () -> Edh ()
+installModuleM_ !moduName !preInstall =
+  void $ installModuleM moduName preInstall
+
+installModuleM :: Text -> Edh () -> Edh Object
+installModuleM !moduName !preInstall = do
+  !world <- edh'prog'world <$> edhProgramState
+  !modu <-
+    liftIO $
+      createEdhModule world moduName $
+        T.unpack $ "<host:" <> moduName <> ">"
+
+  !moduCtx <- inlineSTM $ moduleContext world modu
+  inContext moduCtx preInstall
+
+  liftSTM $ do
+    !moduSlot <- newTVar $ ModuLoaded modu
+    !moduMap <- takeTMVar (edh'world'modules world)
+    putTMVar (edh'world'modules world) $
+      Map.insert (HostModule moduName) moduSlot moduMap
+
+  return modu

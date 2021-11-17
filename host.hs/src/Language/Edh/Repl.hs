@@ -73,7 +73,7 @@ edhRepl' !console !worldInit !moduSpec = do
   -- here being the host interpreter, we loop infinite runs of the Edh
   -- console REPL program, unless cleanly shutdown, for resilience
   let doneRightOrRebirth =
-        runModuleM world moduSpec (pure ()) >>= \case
+        runProgramM world (runModuleM moduSpec) >>= \case
           -- to run a module is to seek its `__main__.edh` and execute the
           -- code there in a volatile module context, it can import itself
           -- (i.e. `__init__.edh`) during the run. all imported modules can
