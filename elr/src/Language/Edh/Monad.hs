@@ -671,16 +671,16 @@ callMagicM obj magicKey apk =
   Edh $ \_naExit -> callMagicMethod obj magicKey apk
 
 -- | Run the specified 'Edh' action in a nested new scope
-pushStackM :: Edh a -> Edh a
-pushStackM !act = do
+runNested :: Edh a -> Edh a
+runNested !act = do
   !ets <- edhThreadState
   let !scope = edh'frame'scope $ edh'ctx'tip $ edh'context ets
   !scope' <- inlineSTM $ newNestedScope scope
-  pushStackM' scope' act
+  runNestedIn scope' act
 
 -- | Run the specified 'Edh' action in a specified scope
-pushStackM' :: Scope -> Edh a -> Edh a
-pushStackM' !scope !act = Edh $ \naExit exit ets -> do
+runNestedIn :: Scope -> Edh a -> Edh a
+runNestedIn !scope !act = Edh $ \naExit exit ets -> do
   let !ctx = edh'context ets
       !tip = edh'ctx'tip ctx
   !tipNew <- newCallFrame scope $ edh'exe'src'loc tip
@@ -1020,7 +1020,7 @@ mkEdhClass !clsName !allocator !superClasses !clsBody = do
             edh'scope'proc = clsProc,
             edh'effects'stack = []
           }
-  pushStackM' clsScope clsBody
+  runNestedIn clsScope clsBody
   !mroInvalid <- inlineSTM $ fillClassMRO cls superClasses
   unless (T.null mroInvalid) $ throwEdhM UsageError mroInvalid
   return clsObj
