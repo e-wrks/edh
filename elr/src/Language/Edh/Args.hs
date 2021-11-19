@@ -9,7 +9,7 @@ module Language.Edh.Args
     mandatoryArg,
     optionalArg,
     defaultArg,
-    Being (..),
+    QtyAsIn (..),
     ComputArg (..),
     Effective (..),
     computArgName,
@@ -17,7 +17,7 @@ module Language.Edh.Args
     type ($:),
     appliedArg,
     effectfulArg,
-    QtyAsIn (..),
+    Being (..),
   )
 where
 
@@ -29,6 +29,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 import Prelude
+
+-- * Monadic Edh Procedure Arguments
 
 newtype NamedEdhArg (t :: Type) (name :: Symbol) = NamedEdhArg t
 
@@ -50,8 +52,9 @@ optionalArg (NamedEdhArg !ma) = ma
 defaultArg :: t -> name ?: t -> t
 defaultArg !a (NamedEdhArg !ma) = fromMaybe a ma
 
-data Being (k :: * -> Constraint) where
-  Being :: forall k t. (k t) => t -> Being k
+newtype QtyAsIn (uom :: Symbol) = Qty Decimal
+
+-- * Curried & Effected Edh Procedure Arguments
 
 newtype ComputArg (a :: Type) (name :: Symbol) = ComputArg a
 
@@ -70,4 +73,7 @@ appliedArg (ComputArg a) = a
 effectfulArg :: name $: a -> a
 effectfulArg (ComputArg (Effective a)) = a
 
-newtype QtyAsIn (uom :: Symbol) = Qty Decimal
+-- * Higher Kinded Argument Type Helpers
+
+data Being (k :: * -> Constraint) where
+  Being :: forall k t. (k t) => t -> Being k
