@@ -224,17 +224,12 @@ attrKeyValue :: AttrKey -> EdhValue
 attrKeyValue (AttrByName !nm) = EdhString nm
 attrKeyValue (AttrBySym !sym) = EdhSymbol sym
 
--- | A symbol can stand in place of an alphanumeric name, used to
--- address an attribute from an object entity, but symbols are
--- uniquely existing regardless however it is (alphanumerically)
--- named, this can be leveraged to solve naming clashes among
--- modules supplied by different parties.
---
--- And symbol values reside in a lexical outer scope are available
--- to its lexical inner scopes, e.g. a symbol bound to a module is
--- available to all procedures defined in the module, and a symbol
--- bound within a class procedure is available to all its methods
--- as well as nested classes.
+-- | A symbol serves as attribute identifier as well as an alphanumeric name,
+-- which can be used to address an attribute from within a scope or an object,
+-- but symbols are unique existences regardless whatever one is
+-- (alphanumerically) named, this can be leveraged to solve naming clashes
+-- among modules from different sofware vendors those get developed
+-- independently from eachothers.
 data Symbol = Symbol !Unique !Text
 
 instance Eq Symbol where
@@ -247,22 +242,20 @@ instance Hashable Symbol where
   hashWithSalt s (Symbol u _) = hashWithSalt s u
 
 instance Show Symbol where
-  show (Symbol _ desc) = T.unpack desc
+  show (Symbol _ bornName) = T.unpack bornName
 
+-- | A symbol is given an alphanumeric name as defined, Edh code can only define
+-- symbols with an \@ prefix in their names, this is the norm. But Haskell code
+-- can deliberately define symbols without such a prefix, which is unusual.
 symbolName :: Symbol -> Text
-symbolName (Symbol _ !desc) = case T.stripPrefix "@" desc of
-  Nothing -> desc
-  Just !name -> name
-
-globalSymbol :: Text -> Symbol
-globalSymbol !description = unsafePerformIO $ do
-  !u <- newUnique
-  return $ Symbol u description
+symbolName (Symbol _ !bornName) = case T.stripPrefix "@" bornName of
+  Nothing -> bornName
+  Just !normName -> normName
 
 mkSymbol :: Text -> STM Symbol
-mkSymbol !description = do
+mkSymbol !bornName = do
   !u <- unsafeIOToSTM newUnique
-  return $ Symbol u description
+  return $ Symbol u bornName
 
 mkUUID :: STM UUID.UUID
 mkUUID = unsafeIOToSTM UUID.nextRandom

@@ -958,6 +958,12 @@ createHostObjectM' !clsObj !hsd !supers = do
   !ss <- newTVarEdh supers
   return $ Object oid (HostStore hsd) clsObj ss
 
+-- | Give birth to a symbol value
+--
+-- Note that normal symbols should use an \@ prefix for their born names
+mkEdhSymbol :: Text -> Edh Symbol
+mkEdhSymbol !bornName = inlineSTM $ mkSymbol bornName
+
 -- | Wrap an arguments-pack taking @'Edh' 'EdhValue'@ action as an @Edh@
 -- procedure
 --
@@ -1057,6 +1063,16 @@ defEdhArt' key val = do
   case edh'ctx'exp'target ctx of
     Nothing -> pure ()
     Just !esExps -> inlineSTM $ iopdInsert key val esExps
+
+-- | Define an @Edh@ symbol into current scope
+--
+-- Note that the conventional \@ prefix will be added to the attribute name
+-- specified here
+defEdhSymbol :: AttrName -> Edh Symbol
+defEdhSymbol name = do
+  sym <- mkEdhSymbol ("@" <> name)
+  defEdhArt name $ EdhSymbol sym
+  return sym
 
 -- | Define an @Edh@ host procedure into current scope
 --
