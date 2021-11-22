@@ -2464,7 +2464,7 @@ edhThrow !ets !exv = do
 edhErrorUncaught :: EdhThreadState -> EdhValue -> STM a
 edhErrorUncaught !ets !exv = case exv of
   EdhObject !exo -> case edh'obj'store exo of
-    HostStore !hsd -> case unwrapArbiHostValue hsd of
+    HostStore !hsd -> case unwrapHostValue hsd of
       Just (exc :: SomeException) -> case edhKnownError exc of
         Just !err -> throwSTM err
         Nothing -> throwSTM $ EdhIOError exc
@@ -2561,7 +2561,7 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
   where
     isRecoverable !exv = case exv of
       EdhObject !exo -> case edh'obj'store exo of
-        HostStore !hsd -> case unwrapArbiHostValue hsd of
+        HostStore !hsd -> case unwrapHostValue hsd of
           Just (exc :: SomeException) -> case fromException exc of
             Just ProgramHalt {} -> return False
             _ -> case fromException exc of

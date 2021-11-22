@@ -12,6 +12,7 @@ module Language.Edh.EHI
     module Language.Edh.Comput,
     module Language.Edh.RtTypes,
     module Language.Edh.IOPD,
+    module Language.Edh.RUID,
     module Language.Edh.Sink,
     module Language.Edh.Control,
     module Language.Edh.CoreLang,
@@ -26,9 +27,13 @@ module Language.Edh.EHI
     throwHostSTM',
     throwHostIO,
     throwHostIO',
+
+    -- ** Re-exports
+    Hashable (..),
   )
 where
 
+import Data.Hashable
 import qualified Data.Lossless.Decimal as D
 import Language.Edh.Args
 import Language.Edh.Batteries
@@ -39,6 +44,7 @@ import Language.Edh.Evaluate
 import Language.Edh.IOPD
 import Language.Edh.InterOpM
 import Language.Edh.Monad
+import Language.Edh.RUID
 import Language.Edh.RtTypes
 import Language.Edh.RuntimeM
 import Language.Edh.Sink

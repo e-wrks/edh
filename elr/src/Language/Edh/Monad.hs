@@ -867,6 +867,18 @@ mutCloneHostObjectM ::
 mutCloneHostObjectM !endObj !mutObj =
   mutCloneObjectM endObj mutObj . HostStore . wrapHostValue
 
+-- Clone a composite object with one of its object instance `mutObj` mutated
+-- to bear the new host storage data
+--
+-- Other member instances are either deep-cloned as class based super, or left
+-- intact as prototype based super
+--
+-- todo maybe check new storage data type matches the old one?
+mutCloneArbiHostObjectM ::
+  forall v. (Typeable v) => Object -> Object -> v -> Edh Object
+mutCloneArbiHostObjectM !endObj !mutObj !v =
+  mutCloneObjectM endObj mutObj =<< pinAndStoreHostValue v
+
 -- | Parse an @Edh@ value as an index in @Edh@ semantics
 parseEdhIndexM :: EdhValue -> Edh (Either ErrMessage EdhIndex)
 parseEdhIndexM !val = Edh $ \_naExit !exit !ets ->
@@ -906,6 +918,18 @@ throwHostM = inlineSTM . throwSTM
 
 -- ** Artifacts Making
 
+-- | Pin an arbitrary Haskell value, to have a designated identity
+pinHostValueM :: forall v. (Typeable v) => v -> Edh HostValue
+pinHostValueM = inlineSTM . pinHostValue
+
+-- | Convert an identifiable host value into an object store
+storeHostValue :: forall v. (Eq v, Hashable v, Typeable v) => v -> ObjectStore
+storeHostValue v = HostStore $ wrapHostValue v
+
+-- | Pin an arbitrary host value and convert into an object store
+pinAndStoreHostValue :: forall v. (Typeable v) => v -> Edh ObjectStore
+pinAndStoreHostValue v = inlineSTM $ HostStore <$> pinHostValue v
+
 -- | Wrap an identifiable Haskell value as an @Edh@ object
 wrapM :: forall v. (Eq v, Hashable v, Typeable v) => v -> Edh Object
 wrapM t = do
@@ -914,8 +938,7 @@ wrapM t = do
       edhWrapValue = edh'value'wrapper world Nothing
   inlineSTM $ edhWrapValue $ wrapHostValue t
 
--- | Wrap an identifiable Haskell value as an @Edh@ object, with custom type
--- name
+-- | Wrap an identifiable Haskell value as an @Edh@ object, with custom repr
 wrapM' :: forall v. (Eq v, Hashable v, Typeable v) => Text -> v -> Edh Object
 wrapM' !repr t = do
   !ets <- edhThreadState
@@ -929,15 +952,15 @@ wrapArbiM t = do
   !ets <- edhThreadState
   let world = edh'prog'world $ edh'thread'prog ets
       edhWrapValue = edh'value'wrapper world Nothing
-  inlineSTM $ wrapArbiHostValue t >>= edhWrapValue
+  inlineSTM $ pinHostValue t >>= edhWrapValue
 
--- | Wrap an arbitrary Haskell value as an @Edh@ object, with custom type name
+-- | Wrap an arbitrary Haskell value as an @Edh@ object, with custom repr
 wrapArbiM' :: forall v. (Typeable v) => Text -> v -> Edh Object
 wrapArbiM' !repr t = do
   !ets <- edhThreadState
   let world = edh'prog'world $ edh'thread'prog ets
       edhWrapValue = edh'value'wrapper world (Just repr)
-  inlineSTM $ wrapArbiHostValue t >>= edhWrapValue
+  inlineSTM $ pinHostValue t >>= edhWrapValue
 
 -- | Wrap an arbitrary Haskell value as an @Edh@ object
 wrapHostM :: HostValue -> Edh Object
@@ -947,7 +970,7 @@ wrapHostM !dd = do
       edhWrapValue = edh'value'wrapper world Nothing
   inlineSTM $ edhWrapValue dd
 
--- | Wrap an arbitrary Haskell value as an @Edh@ object, with custom type name
+-- | Wrap an arbitrary Haskell value as an @Edh@ object, with custom repr
 wrapHostM' :: Text -> HostValue -> Edh Object
 wrapHostM' !repr !dd = do
   !ets <- edhThreadState
@@ -979,6 +1002,23 @@ createHostObjectM' :: Object -> HostValue -> [Object] -> Edh Object
 createHostObjectM' !clsObj !hsd !supers = do
   !ss <- newTVarEdh supers
   return $ Object (HostStore hsd) clsObj ss
+
+-- | Create an Edh host object from the specified class and host data
+--
+-- note the caller is responsible to make sure the supplied host data
+-- is compatible with the class
+createArbiHostObjectM :: forall v. (Typeable v) => Object -> v -> Edh Object
+createArbiHostObjectM !clsObj !v = createArbiHostObjectM' clsObj v []
+
+-- | Create an Edh host object from the specified class and host data
+--
+-- note the caller is responsible to make sure the supplied host data
+-- is compatible with the class
+createArbiHostObjectM' ::
+  forall v. (Typeable v) => Object -> v -> [Object] -> Edh Object
+createArbiHostObjectM' !clsObj !v !supers = do
+  !hv <- pinHostValueM v
+  createHostObjectM' clsObj hv supers
 
 -- | Give birth to a symbol value
 --

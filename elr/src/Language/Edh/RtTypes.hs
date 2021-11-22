@@ -394,57 +394,60 @@ edhScopeSrcLoc !scope = case edh'procedure'decl $ edh'scope'proc scope of
   HostDecl {} -> SrcLoc (SrcDoc "<host-world>") noSrcRange
   ProcDecl _ _ _ (StmtSrc _ !body'span) !loc -> loc {src'range = body'span}
 
--- | Edh can wrap host values with identity (the type with an Eq instance),
--- additionally they should be hashable to facilitate fast lookups
-data HostValue
-  = forall v. (Eq v, Hashable v, Typeable v) => HostValue !(TypeRep v) !v
+data HostValue where
+  -- | Edh can wrap host values with identity (the type with an 'Eq' instance),
+  -- additionally they should be hashable (the type with a 'Hashable' instance)
+  -- for the wrapping object eligible as Edh dict keys.
+  HostValue ::
+    forall v.
+    (Eq v, Hashable v, Typeable v) =>
+    TypeRep v ->
+    v ->
+    HostValue
+  -- | For host values not naturally having an identity, or not hashable, you
+  -- can pin them to an 'RUID' to bear such a hashable identity.
+  PinnedHostValue ::
+    forall v.
+    (Typeable v) =>
+    v ->
+    RUID ->
+    HostValue
 
 instance Eq HostValue where
   HostValue x'tr x'v == HostValue y'tr y'v = case x'tr `eqTypeRep` y'tr of
     Nothing -> False
     Just HRefl -> x'v == y'v
+  PinnedHostValue _ x'u == PinnedHostValue _ y'u = x'u == y'u
+  _ == _ = False
 
 instance Hashable HostValue where
   hashWithSalt s (HostValue _tr v) = s `hashWithSalt` v
+  hashWithSalt s (PinnedHostValue _ u) = s `hashWithSalt` u
 
 instance Show HostValue where
   show (HostValue tr _) = "<host-value: " <> show tr <> ">"
+  show (PinnedHostValue (_ :: v) u) =
+    "<pinned-host-value: " <> show (typeRep @v) <> " # " <> show u <> ">"
 
 wrapHostValue :: forall v. (Eq v, Hashable v, Typeable v) => v -> HostValue
 wrapHostValue = HostValue (typeRep @v)
 
-unwrapHostValue ::
-  forall v. (Eq v, Hashable v, Typeable v) => HostValue -> Maybe v
+pinHostValue :: forall v. (Typeable v) => v -> STM HostValue
+pinHostValue !v = PinnedHostValue v <$> newRUID'STM
+
+-- | Unwrap a host value to be of its original Haskell type
+unwrapHostValue :: forall v. (Typeable v) => HostValue -> Maybe v
 unwrapHostValue (HostValue tr v) = case tr `eqTypeRep` typeRep @v of
   Nothing -> Nothing
   Just HRefl -> Just v
+unwrapHostValue (PinnedHostValue (v :: v') _u) = case eqT of
+  Nothing -> Nothing
+  Just (Refl :: v' :~: v) -> Just v
 
-data ArbiHostValue = forall v. (Typeable v) => ArbiHostValue !v !RUID
-
-instance Eq ArbiHostValue where
-  ArbiHostValue _ x'u == ArbiHostValue _ y'u = x'u == y'u
-
-instance Hashable ArbiHostValue where
-  hashWithSalt s (ArbiHostValue _ u) = s `hashWithSalt` u
-
-instance Show ArbiHostValue where
-  show (ArbiHostValue (_ :: v) u) =
-    "<arbi-host-value: " <> show (typeRep @v) <> " # " <> show u <> ">"
-
-wrapArbiHostValue :: forall v. (Typeable v) => v -> STM HostValue
-wrapArbiHostValue v = wrapHostValue . ArbiHostValue v <$> newRUID'STM
-
-unwrapArbiHostValue ::
-  forall v. (Typeable v) => HostValue -> Maybe v
-unwrapArbiHostValue (HostValue tr v) =
-  case tr `eqTypeRep` typeRep @ArbiHostValue of
-    Just HRefl -> case v of
-      ArbiHostValue (av :: v') _ -> case eqT of
-        Nothing -> Nothing
-        Just (Refl :: v' :~: v) -> Just av
-    Nothing -> case tr `eqTypeRep` typeRep @v of
-      Nothing -> Nothing
-      Just HRefl -> Just v
+-- | Convert a 'HostValue' to 'Dynamc'
+hostToDynamic :: HostValue -> Dynamic
+hostToDynamic (HostValue tr v) = Dynamic tr v
+hostToDynamic (PinnedHostValue v _u) = toDyn v
 
 -- | A class is wrapped as an object per se, the object's storage structure is
 -- here:
@@ -543,7 +546,10 @@ instance Hashable ObjectStore where
 instance Show ObjectStore where
   show HashStore {} = "<<HashStore>>"
   show (ClassStore cls) = "<<ClassStore:" <> show cls <> ">>"
-  show (HostStore (HostValue tr _)) = "<<HostStore:" <> show tr <> ">>"
+  show (HostStore (HostValue tr _)) =
+    "<<HostStore:" <> show tr <> ">>"
+  show (HostStore (PinnedHostValue (_ :: v) _)) =
+    "<<HostStorePinned:" <> show (typeRep @v) <> ">>"
 
 -- | Try cast and unveil an Object's storage of a known type, while not
 -- considering any super object eligible
@@ -2157,6 +2163,8 @@ edhTypeNameOf (EdhObject o) = case edh'obj'store o of
     ProcDecl {} -> "Class"
     HostDecl {} -> "HostClass"
   HostStore (HostValue tr _) -> "HostValue:" <> T.pack (show tr)
+  HostStore (PinnedHostValue (_ :: v) _) ->
+    "PinnedHostValue:" <> T.pack (show (typeRep @v))
 edhTypeNameOf (EdhProcedure pc _) = edhProcTypeNameOf pc
 edhTypeNameOf (EdhBoundProc pc _ _ _) = edhProcTypeNameOf pc
 edhTypeNameOf EdhBreak = "Break"

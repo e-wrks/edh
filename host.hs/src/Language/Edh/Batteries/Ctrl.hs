@@ -99,7 +99,7 @@ catchProc !tryExpr !catchExpr !exit !etsOuter = do
       !throwerThId <- unsafeIOToSTM myThreadId
       let !isThreadTerminate = case exv of
             EdhObject !exo -> case edh'obj'store exo of
-              HostStore !hsd -> case unwrapArbiHostValue hsd of
+              HostStore !hsd -> case unwrapHostValue hsd of
                 Just (e :: SomeException) -> case fromException e of
                   Just ThreadTerminate -> True
                   _ -> False

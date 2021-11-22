@@ -2279,7 +2279,7 @@ instance
       tryObjs :: [Object] -> Edh EdhValue
       tryObjs [] = throwEdhM UsageError "arg host type mismatch: anonymous"
       tryObjs (obj : rest) = case edh'obj'store obj of
-        HostStore !hsd -> case unwrapArbiHostValue hsd of
+        HostStore !hsd -> case unwrapHostValue hsd of
           Just (d :: h) ->
             callFromEdhM (fn d) (ArgsPack args kwargs)
           Nothing -> tryObjs rest
@@ -2301,7 +2301,7 @@ instance
       tryObjs :: [Object] -> Edh EdhValue
       tryObjs [] = throwEdhM UsageError "arg host type mismatch: anonymous"
       tryObjs (obj : rest) = case edh'obj'store obj of
-        HostStore !hsd -> case unwrapArbiHostValue hsd of
+        HostStore !hsd -> case unwrapHostValue hsd of
           Just (d :: h) ->
             callFromEdhM (fn (Just d)) (ArgsPack args kwargs)
           Nothing -> tryObjs rest
@@ -2346,7 +2346,7 @@ instance
           tryObjs [] =
             throwEdhM UsageError $ "arg host type mismatch: " <> argName
           tryObjs (obj : rest) = case edh'obj'store obj of
-            HostStore !hsd -> case unwrapArbiHostValue hsd of
+            HostStore !hsd -> case unwrapHostValue hsd of
               Just (d :: h) ->
                 callFromEdhM (fn (NamedEdhArg d)) (ArgsPack args' kwargs')
               Nothing -> tryObjs rest
@@ -2392,7 +2392,7 @@ instance
           tryObjs [] =
             throwEdhM UsageError $ "arg host type mismatch: " <> argName
           tryObjs (obj : rest) = case edh'obj'store obj of
-            HostStore !hsd -> case unwrapArbiHostValue hsd of
+            HostStore !hsd -> case unwrapHostValue hsd of
               Just (d :: h) ->
                 callFromEdhM
                   (fn (NamedEdhArg (Just d)))
@@ -4562,7 +4562,7 @@ instance
       tryObjs :: [Object] -> Edh ObjectStore
       tryObjs [] = throwEdhM UsageError "arg host type mismatch: anonymous"
       tryObjs (obj : rest) = case edh'obj'store obj of
-        HostStore !hsd -> case unwrapArbiHostValue hsd of
+        HostStore !hsd -> case unwrapHostValue hsd of
           Just (d :: h) ->
             allocObjM (fn d) (ArgsPack args kwargs)
           Nothing -> tryObjs rest
@@ -4584,7 +4584,7 @@ instance
       tryObjs :: [Object] -> Edh ObjectStore
       tryObjs [] = throwEdhM UsageError "arg host type mismatch: anonymous"
       tryObjs (obj : rest) = case edh'obj'store obj of
-        HostStore !hsd -> case unwrapArbiHostValue hsd of
+        HostStore !hsd -> case unwrapHostValue hsd of
           Just (d :: h) ->
             allocObjM (fn (Just d)) (ArgsPack args kwargs)
           Nothing -> tryObjs rest
@@ -4629,7 +4629,7 @@ instance
           tryObjs [] =
             throwEdhM UsageError $ "arg host type mismatch: " <> argName
           tryObjs (obj : rest) = case edh'obj'store obj of
-            HostStore !hsd -> case unwrapArbiHostValue hsd of
+            HostStore !hsd -> case unwrapHostValue hsd of
               Just (d :: h) ->
                 allocObjM (fn (NamedEdhArg d)) (ArgsPack args' kwargs')
               Nothing -> tryObjs rest
@@ -4675,7 +4675,7 @@ instance
           tryObjs [] =
             throwEdhM UsageError $ "arg host type mismatch: " <> argName
           tryObjs (obj : rest) = case edh'obj'store obj of
-            HostStore !hsd -> case unwrapArbiHostValue hsd of
+            HostStore !hsd -> case unwrapHostValue hsd of
               Just (d :: h) ->
                 allocObjM
                   (fn (NamedEdhArg (Just d)))

@@ -285,7 +285,7 @@ createEdhWorld !console = do
       edhWrapException !etsMaybe !exc = do
         let exitWith :: Object -> SomeException -> STM Object
             exitWith cls xe = do
-              !hs <- HostStore <$> wrapArbiHostValue xe
+              !hs <- HostStore <$> pinHostValue xe
               !supersErr <- newTVar []
               return $ Object hs cls supersErr
         case edhKnownError exc of
@@ -666,12 +666,12 @@ createEdhWorld !console = do
       _ -> createErr $ EdhArgsPack apk
       where
         createErr !hv = do
-          !hs <- wrapArbiHostValue $ toException $ ProgramHalt $ toDyn hv
+          !hs <- pinHostValue $ toException $ ProgramHalt $ toDyn hv
           exit $ HostStore hs
 
     -- this is called in case a ThreadTerminate is constructed by Edh code
     thTermAllocator _ !exit _ = do
-      !hs <- wrapArbiHostValue $ toException ThreadTerminate
+      !hs <- pinHostValue $ toException ThreadTerminate
       exit $ HostStore hs
 
     -- creating an IOError from Edh code
@@ -682,13 +682,13 @@ createEdhWorld !console = do
       where
         createErr !msg = do
           !hs <-
-            wrapArbiHostValue $
+            pinHostValue $
               toException $ EdhIOError $ toException $ userError msg
           exit $ HostStore hs
 
     -- a peer error is most prolly created from Edh code
     peerErrAllocator !apk !exit _ = do
-      !hs <- wrapArbiHostValue $ toException peerError
+      !hs <- pinHostValue $ toException peerError
       exit $ HostStore hs
       where
         peerError = case apk of
@@ -698,12 +698,12 @@ createEdhWorld !console = do
 
     -- creating a tagged Edh error from Edh code
     errAllocator !tag !apk !exit !ets = do
-      !hs <- wrapArbiHostValue $ toException $ edhCreateError 0 ets tag apk
+      !hs <- pinHostValue $ toException $ edhCreateError 0 ets tag apk
       exit $ HostStore hs
 
     mthErrRepr :: EdhHostProc
     mthErrRepr !exit !ets = case edh'obj'store errObj of
-      HostStore !hsd -> case unwrapArbiHostValue hsd of
+      HostStore !hsd -> case unwrapHostValue hsd of
         Just (exc :: SomeException) -> case edhKnownError exc of
           Just (ProgramHalt !dhv) -> case fromDynamic dhv of
             Just (val :: EdhValue) -> edhValueRepr ets val $ \ !repr ->
@@ -748,7 +748,7 @@ createEdhWorld !console = do
 
     mthErrShow :: EdhHostProc
     mthErrShow !exit !ets = case edh'obj'store errObj of
-      HostStore !hsd -> case unwrapArbiHostValue hsd of
+      HostStore !hsd -> case unwrapHostValue hsd of
         Just (exc :: SomeException) -> case edhKnownError exc of
           Just err@(EdhError _errTag _errMsg !details _cc) -> do
             let !detailsText = case fromDynamic details of
@@ -775,7 +775,7 @@ createEdhWorld !console = do
 
     mthErrDesc :: EdhHostProc
     mthErrDesc !exit !ets = case edh'obj'store errObj of
-      HostStore !hsd -> case unwrapArbiHostValue hsd of
+      HostStore !hsd -> case unwrapHostValue hsd of
         Just (exc :: SomeException) -> case edhKnownError exc of
           Just err@(EdhError _errTag _errMsg !details _errCtx) ->
             case fromDynamic details of
@@ -802,7 +802,7 @@ createEdhWorld !console = do
 
     mthErrCtxGetter :: EdhHostProc
     mthErrCtxGetter !exit !ets = case edh'obj'store errObj of
-      HostStore !hsd -> case unwrapArbiHostValue hsd of
+      HostStore !hsd -> case unwrapHostValue hsd of
         Just (exc :: SomeException) -> case edhKnownError exc of
           Just (EdhError _errTag _errMsg _details !errCtx) ->
             exitEdh ets exit $ EdhString errCtx
@@ -814,7 +814,7 @@ createEdhWorld !console = do
 
     mthErrMsgGetter :: EdhHostProc
     mthErrMsgGetter !exit !ets = case edh'obj'store errObj of
-      HostStore !hsd -> case unwrapArbiHostValue hsd of
+      HostStore !hsd -> case unwrapHostValue hsd of
         Just (exc :: SomeException) -> case edhKnownError exc of
           Just (EdhError _errTag !errMsg _errDetails _errCtx) ->
             exitEdh ets exit $ EdhString errMsg
@@ -826,7 +826,7 @@ createEdhWorld !console = do
 
     mthErrDetailsGetter :: EdhHostProc
     mthErrDetailsGetter !exit !ets = case edh'obj'store errObj of
-      HostStore !hsd -> case unwrapArbiHostValue hsd of
+      HostStore !hsd -> case unwrapHostValue hsd of
         Just (exc :: SomeException) -> case edhKnownError exc of
           Just (EdhError _errTag _errMsg !errDetails _errCtx) ->
             case fromDynamic errDetails of

@@ -23,6 +23,7 @@ import Language.Edh.Control
 import Language.Edh.IOPD
 import Language.Edh.InterOpM
 import Language.Edh.Monad
+import Language.Edh.RUID
 import Language.Edh.RtTypes
 import Type.Reflection (typeRep)
 import Prelude
@@ -45,9 +46,6 @@ type IfEffectful = Bool
 type TypeName = Text
 
 -- | Scripted Result
---
--- todo: implement 'Eq' and 'Hashable', then exclusively wrap directly as
---       'HostValue', so as to have accurate identities?
 data ScriptedResult
   = -- | The computation done with a sole Edh value, though it can be a rather
     -- complex object on its own
@@ -58,7 +56,7 @@ data ScriptedResult
   | -- | Partially applied host computation, with all args ever applied
     forall c.
     (ScriptableComput c, Typeable c) =>
-    PartiallyApplied !c ![(ComputArgDecl, EdhValue)]
+    PartiallyApplied !RUID !c ![(ComputArgDecl, EdhValue)]
   | -- | Fully applied host computation, with all args ever applied
     --
     -- It's pending effected yet, thus has to be called again with niladic apk
@@ -66,10 +64,25 @@ data ScriptedResult
     -- arguments from that call site.
     forall c.
     (ScriptableComput c, Typeable c) =>
-    FullyApplied !c ![(ComputArgDecl, EdhValue)]
+    FullyApplied !RUID !c ![(ComputArgDecl, EdhValue)]
   | -- | The computation is finally done, with the result as a host value plus
     -- extra named result values, and with all args ever applied
     FullyEffected !HostValue !KwArgs ![(ComputArgDecl, EdhValue)]
+
+instance Eq ScriptedResult where
+  ScriptDone x'v == ScriptDone y'v = x'v == y'v
+  ScriptDone' x'v == ScriptDone' y'v = x'v == y'v
+  PartiallyApplied x'u _ _ == PartiallyApplied y'u _ _ = x'u == y'u
+  FullyApplied x'u _ _ == FullyApplied y'u _ _ = x'u == y'u
+  FullyEffected x'v _ _ == FullyEffected y'v _ _ = x'v == y'v
+  _ == _ = False
+
+instance Hashable ScriptedResult where
+  hashWithSalt s (ScriptDone v) = s `hashWithSalt` v
+  hashWithSalt s (ScriptDone' v) = s `hashWithSalt` v
+  hashWithSalt s (PartiallyApplied u _ _) = s `hashWithSalt` u
+  hashWithSalt s (FullyApplied u _ _) = s `hashWithSalt` u
+  hashWithSalt s (FullyEffected v _ _) = s `hashWithSalt` v
 
 -- | Argument Type that can be adapted from script values
 class Typeable a => ComputArgAdapter a where
@@ -117,13 +130,15 @@ instance
           >>= \case
             ScriptDone !done -> return $ ScriptDone done
             ScriptDone' !done -> return $ ScriptDone' done
-            PartiallyApplied c !appliedArgs ->
+            PartiallyApplied _u c !appliedArgs -> do
+              u <- inlineSTM newRUID'STM
               return $
-                PartiallyApplied c $
+                PartiallyApplied u c $
                   (argDecl, adaptedArgValue ad) : appliedArgs
-            FullyApplied c !appliedArgs ->
+            FullyApplied _u c !appliedArgs -> do
+              u <- inlineSTM newRUID'STM
               return $
-                FullyApplied c $ (argDecl, adaptedArgValue ad) : appliedArgs
+                FullyApplied u c $ (argDecl, adaptedArgValue ad) : appliedArgs
             FullyEffected d extras !appliedArgs ->
               return $
                 FullyEffected d extras $
@@ -137,19 +152,22 @@ instance
             >>= \case
               ScriptDone !done -> return $ ScriptDone done
               ScriptDone' !done -> return $ ScriptDone' done
-              PartiallyApplied c !appliedArgs ->
+              PartiallyApplied _u c !appliedArgs -> do
+                u <- inlineSTM newRUID'STM
                 return $
-                  PartiallyApplied c $
+                  PartiallyApplied u c $
                     (argDecl, adaptedArgValue ad) : appliedArgs
-              FullyApplied c !appliedArgs ->
+              FullyApplied _u c !appliedArgs -> do
+                u <- inlineSTM newRUID'STM
                 return $
-                  FullyApplied c $ (argDecl, adaptedArgValue ad) : appliedArgs
+                  FullyApplied u c $ (argDecl, adaptedArgValue ad) : appliedArgs
               FullyEffected d extras !appliedArgs ->
                 return $
                   FullyEffected d extras $
                     (argDecl, adaptedArgValue ad) : appliedArgs
-        [] ->
-          return $ PartiallyApplied (PendingApplied kwargs' f) []
+        [] -> do
+          u <- inlineSTM newRUID'STM
+          return $ PartiallyApplied u (PendingApplied kwargs' f) []
     where
       argName = AttrByName $ T.pack $ TypeLits.symbolVal (Proxy :: Proxy name)
       argDecl = ComputArgDecl False argName (adaptedArgType @a)
@@ -177,12 +195,14 @@ instance
         callByScript (f $ ComputArg ad) (ArgsPack args kwargs') >>= \case
           ScriptDone !done -> return $ ScriptDone done
           ScriptDone' !done -> return $ ScriptDone' done
-          PartiallyApplied c !appliedArgs ->
+          PartiallyApplied _u c !appliedArgs -> do
+            u <- inlineSTM newRUID'STM
             return $
-              PartiallyApplied c $ (argDecl, adaptedArgValue ad) : appliedArgs
-          FullyApplied c !appliedArgs ->
+              PartiallyApplied u c $ (argDecl, adaptedArgValue ad) : appliedArgs
+          FullyApplied _u c !appliedArgs -> do
+            u <- inlineSTM newRUID'STM
             return $
-              FullyApplied c $ (argDecl, adaptedArgValue ad) : appliedArgs
+              FullyApplied u c $ (argDecl, adaptedArgValue ad) : appliedArgs
           FullyEffected d extras !appliedArgs ->
             return $
               FullyEffected d extras $
@@ -193,19 +213,22 @@ instance
           callByScript (f $ ComputArg ad) (ArgsPack args' kwargs') >>= \case
             ScriptDone !done -> return $ ScriptDone done
             ScriptDone' !done -> return $ ScriptDone' done
-            PartiallyApplied c !appliedArgs ->
+            PartiallyApplied _u c !appliedArgs -> do
+              u <- inlineSTM newRUID'STM
               return $
-                PartiallyApplied c $
+                PartiallyApplied u c $
                   (argDecl, adaptedArgValue ad) : appliedArgs
-            FullyApplied c !appliedArgs ->
+            FullyApplied _u c !appliedArgs -> do
+              u <- inlineSTM newRUID'STM
               return $
-                FullyApplied c $ (argDecl, adaptedArgValue ad) : appliedArgs
+                FullyApplied u c $ (argDecl, adaptedArgValue ad) : appliedArgs
             FullyEffected d extras !appliedArgs ->
               return $
                 FullyEffected d extras $
                   (argDecl, adaptedArgValue ad) : appliedArgs
-        [] ->
-          return $ PartiallyApplied (PendingApplied kwargs' f) []
+        [] -> do
+          u <- inlineSTM newRUID'STM
+          return $ PartiallyApplied u (PendingApplied kwargs' f) []
     where
       argName = AttrByName $ T.pack $ TypeLits.symbolVal (Proxy :: Proxy name)
       argDecl = ComputArgDecl False argName (adaptedArgType @a)
@@ -234,7 +257,9 @@ instance
   callByScript p@(PendingMaybeEffected !f) (ArgsPack !args !kwargs)
     | not $ null args = throwEdhM UsageError "extranous args"
     | not $ odNull kwargs = throwEdhM UsageError "extranous kwargs"
-    | not ?effecting = return $ FullyApplied p []
+    | not ?effecting = do
+      u <- inlineSTM newRUID'STM
+      return $ FullyApplied u p []
     | otherwise = applyMaybeEffectfulArg f
 
 -- | resolve then apply one more effectful arg to the effecting computation
@@ -255,7 +280,9 @@ instance
   callByScript !f (ArgsPack !args !kwargs)
     | not $ null args = throwEdhM UsageError "extranous args"
     | not $ odNull kwargs = throwEdhM UsageError "extranous kwargs"
-    | not ?effecting = return $ FullyApplied (PendingMaybeEffected f) []
+    | not ?effecting = do
+      u <- inlineSTM newRUID'STM
+      return $ FullyApplied u (PendingMaybeEffected f) []
     | otherwise = applyMaybeEffectfulArg f
 
 -- | resolve then apply one more effectful arg to the effecting computation
@@ -315,7 +342,9 @@ instance
   callByScript p@(PendingEffected !f) (ArgsPack !args !kwargs)
     | not $ null args = throwEdhM UsageError "extranous args"
     | not $ odNull kwargs = throwEdhM UsageError "extranous kwargs"
-    | not ?effecting = return $ FullyApplied p []
+    | not ?effecting = do
+      u <- inlineSTM newRUID'STM
+      return $ FullyApplied u p []
     | otherwise = applyEffectfulArg f
 
 -- | resolve then apply one more effectful arg to the effecting computation
@@ -337,7 +366,9 @@ instance
   callByScript !f (ArgsPack !args !kwargs)
     | not $ null args = throwEdhM UsageError "extranous args"
     | not $ odNull kwargs = throwEdhM UsageError "extranous kwargs"
-    | not ?effecting = return $ FullyApplied (PendingEffected f) []
+    | not ?effecting = do
+      u <- inlineSTM newRUID'STM
+      return $ FullyApplied u (PendingEffected f) []
     | otherwise = applyEffectfulArg f
 
 -- | resolve then apply one more effectful arg to the effecting computation
@@ -381,17 +412,6 @@ instance ScriptableComput EdhValue where
       then throwEdhM UsageError "extranous arguments"
       else return $ ScriptDone v
 
--- | Wrap a pure computation result as scripted, without recording of all args
--- ever applied
-data ComputDone a = (Eq a, Hashable a, Typeable a) => ComputDone !a
-
-instance ScriptableComput (ComputDone a) where
-  scriptableArgs _ = []
-  callByScript (ComputDone a) (ArgsPack !args !kwargs) =
-    if not (null args) || not (odNull kwargs)
-      then throwEdhM UsageError "extranous arguments"
-      else return $ ScriptDone' (wrapHostValue a)
-
 -- | Wrap a pure computation result as scripted
 data ComputPure a = (Eq a, Hashable a, Typeable a) => ComputPure !a
 
@@ -402,6 +422,18 @@ instance ScriptableComput (ComputPure a) where
       then throwEdhM UsageError "extranous arguments"
       else return $ FullyEffected (wrapHostValue a) odEmpty []
 
+-- | Wrap a pure computation result as scripted
+data ComputPinPure a = (Typeable a) => ComputPinPure !a
+
+instance ScriptableComput (ComputPinPure a) where
+  scriptableArgs _ = []
+  callByScript (ComputPinPure a) (ArgsPack !args !kwargs) =
+    if not (null args) || not (odNull kwargs)
+      then throwEdhM UsageError "extranous arguments"
+      else do
+        hv <- pinHostValueM a
+        return $ FullyEffected hv odEmpty []
+
 -- | Edh aware computation result as scripted
 instance ScriptableComput (Edh HostValue) where
   scriptableArgs _ = []
@@ -411,7 +443,11 @@ instance ScriptableComput (Edh HostValue) where
       then throwEdhM UsageError "extranous arguments"
       else (<$> act) $ \ !d -> FullyEffected d odEmpty []
 
--- | Edh aware computation result as scripted
+-- | Edh aware computation giving identifiable host result, as scripted
+--
+-- This is more preferable only if the result type has both 'Eq' and 'Hashable'
+-- instance, rather than to 'Pin' them with additionally designated
+-- (i.e. 'RUID') identities.
 instance
   {-# OVERLAPPABLE #-}
   (Eq a, Hashable a, Typeable a) =>
@@ -423,6 +459,30 @@ instance
     if not (null args) || not (odNull kwargs)
       then throwEdhM UsageError "extranous arguments"
       else (<$> act) $ \ !a -> FullyEffected (wrapHostValue a) odEmpty []
+
+-- | Pin a host value is to have Edh runtime to designate an 'RUID' for it, to
+-- have a proper identity ('Eq' + 'Hashable' instance) from scripting
+-- perspective.
+newtype Pin a = Pin a
+
+-- | Edh aware computation giving arbitrary host result, as scripted
+--
+-- Better not to 'Pin' the result when there are both 'Eq' and 'Hashable'
+-- instance for it, which speak the identity of such result values, those
+-- identities are more natural for scripting purpose.
+instance
+  (Typeable a) =>
+  ScriptableComput (Edh (Pin a))
+  where
+  scriptableArgs _ = []
+
+  callByScript !act (ArgsPack !args !kwargs) =
+    if not (null args) || not (odNull kwargs)
+      then throwEdhM UsageError "extranous arguments"
+      else do
+        Pin !a <- act
+        !hv <- pinHostValueM a
+        return $ FullyEffected hv odEmpty []
 
 -- | Edh aware computation result as scripted, without recording all args ever
 -- applied
@@ -465,6 +525,26 @@ instance ScriptableComput (InflateEdh' a) where
       else (<$> act) $ \(!d, !extras) ->
         FullyEffected d extras []
 
+-- | Wrap an Edh aware computation result as scripted, and you would give out
+-- one or more named results in addition, those can be separately obtained by
+-- the script at will
+--
+-- Better not to 'Pin' the result when there are both 'Eq' and 'Hashable'
+-- instance for it, which speak the identity of such result values, those
+-- identities are more natural for scripting purpose.
+data PinInflateEdh a = (Typeable a) => PinInflateEdh (Edh (a, KwArgs))
+
+instance ScriptableComput (PinInflateEdh a) where
+  scriptableArgs _ = []
+
+  callByScript (PinInflateEdh !act) (ArgsPack !args !kwargs) =
+    if not (null args) || not (odNull kwargs)
+      then throwEdhM UsageError "extranous arguments"
+      else do
+        (!d, !extras) <- act
+        !hv <- pinHostValueM d
+        return $ FullyEffected hv extras []
+
 -- | Wrap a scripted general computation in the 'EIO' monad
 data ComputEIO a = (Eq a, Hashable a, Typeable a) => ComputEIO (EIO a)
 
@@ -481,7 +561,7 @@ instance ScriptableComput (ComputEIO a) where
 -- Use this form in case you construct a 'HostValue' result yourself
 --
 -- Note the type @a@ is for information purpose only, no way get asserted
-data ComputEIO' a = Typeable a => ComputEIO' (EIO HostValue)
+newtype ComputEIO' a = ComputEIO' (EIO HostValue)
 
 instance ScriptableComput (ComputEIO' a) where
   scriptableArgs _ = []
@@ -490,6 +570,24 @@ instance ScriptableComput (ComputEIO' a) where
     if not (null args) || not (odNull kwargs)
       then throwEdhM UsageError "extranous arguments"
       else (<$> liftEIO act) $ \ !d -> FullyEffected d odEmpty []
+
+-- | Wrap a scripted general computation in the 'EIO' monad
+--
+-- Better not to 'Pin' the result when there are both 'Eq' and 'Hashable'
+-- instance for it, which speak the identity of such result values, those
+-- identities are more natural for scripting purpose.
+data PinComputEIO a = Typeable a => PinComputEIO (EIO a)
+
+instance ScriptableComput (PinComputEIO a) where
+  scriptableArgs _ = []
+
+  callByScript (PinComputEIO !act) (ArgsPack !args !kwargs) =
+    if not (null args) || not (odNull kwargs)
+      then throwEdhM UsageError "extranous arguments"
+      else do
+        !d <- liftEIO act
+        !hv <- pinHostValueM d
+        return $ FullyEffected hv odEmpty []
 
 -- | Wrap a scripted general computation in the 'EIO' monad, without recording
 -- all args ever applied
@@ -521,7 +619,7 @@ instance ScriptableComput (ComputIO a) where
 -- Use this form in case you construct a 'HostValue' result yourself
 --
 -- Note the type @a@ is for information purpose only, no way get asserted
-data ComputIO' a = (Eq a, Hashable a, Typeable a) => ComputIO' (IO HostValue)
+newtype ComputIO' a = ComputIO' (IO HostValue)
 
 instance ScriptableComput (ComputIO' a) where
   scriptableArgs _ = []
@@ -530,6 +628,24 @@ instance ScriptableComput (ComputIO' a) where
     if not (null args) || not (odNull kwargs)
       then throwEdhM UsageError "extranous arguments"
       else (<$> liftIO act) $ \ !d -> FullyEffected d odEmpty []
+
+-- | Wrap a scripted general computation in the 'IO' monad
+--
+-- Better not to 'Pin' the result when there are both 'Eq' and 'Hashable'
+-- instance for it, which speak the identity of such result values, those
+-- identities are more natural for scripting purpose.
+data PinComputIO a = Typeable a => PinComputIO (IO a)
+
+instance ScriptableComput (PinComputIO a) where
+  scriptableArgs _ = []
+
+  callByScript (PinComputIO !act) (ArgsPack !args !kwargs) =
+    if not (null args) || not (odNull kwargs)
+      then throwEdhM UsageError "extranous arguments"
+      else do
+        !d <- liftIO act
+        !hv <- pinHostValueM d
+        return $ FullyEffected hv odEmpty []
 
 -- | Wrap a scripted general computation in the 'IO' monad, without recording
 -- all args ever applied
@@ -571,6 +687,24 @@ instance ScriptableComput (ComputSTM' a) where
     if not (null args) || not (odNull kwargs)
       then throwEdhM UsageError "extranous arguments"
       else (<$> liftSTM act) $ \ !d -> FullyEffected d odEmpty []
+
+-- | Wrap a scripted general computation in the 'STM' monad
+--
+-- Better not to 'Pin' the result when there are both 'Eq' and 'Hashable'
+-- instance for it, which speak the identity of such result values, those
+-- identities are more natural for scripting purpose.
+data PinComputSTM a = Typeable a => PinComputSTM (STM a)
+
+instance ScriptableComput (PinComputSTM a) where
+  scriptableArgs _ = []
+
+  callByScript (PinComputSTM !act) (ArgsPack !args !kwargs) =
+    if not (null args) || not (odNull kwargs)
+      then throwEdhM UsageError "extranous arguments"
+      else do
+        !d <- liftSTM act
+        !hv <- pinHostValueM d
+        return $ FullyEffected hv odEmpty []
 
 -- | Wrap a scripted general computation in the 'STM' monad, without recording
 -- all args ever applied
@@ -708,7 +842,7 @@ instance
   adaptEdhArg !v = case edhUltimate v of
     EdhNil -> return Nothing
     EdhObject o -> case edh'obj'store o of
-      HostStore dd -> case unwrapArbiHostValue dd of
+      HostStore dd -> case unwrapHostValue dd of
         Just (sr :: ScriptedResult) -> case sr of
           ScriptDone' d -> return $ Just $ HostData d o
           FullyEffected d _extras _applied ->
@@ -726,7 +860,7 @@ instance TypeLits.KnownSymbol tn => ComputArgAdapter (HostData tn) where
 
   adaptEdhArg !v = case edhUltimate v of
     EdhObject o -> case edh'obj'store o of
-      HostStore dd -> case unwrapArbiHostValue dd of
+      HostStore dd -> case unwrapHostValue dd of
         Just (sr :: ScriptedResult) -> case sr of
           ScriptDone' d -> return $ HostData d o
           FullyEffected d _extras _applied -> return $ HostData d o
@@ -745,16 +879,16 @@ instance Typeable t => ComputArgAdapter (Maybe (HostVal t)) where
   adaptEdhArg !v = case edhUltimate v of
     EdhNil -> return Nothing
     EdhObject o -> case edh'obj'store o of
-      HostStore dd -> case unwrapArbiHostValue dd of
+      HostStore dd -> case unwrapHostValue dd of
         Just (sr :: ScriptedResult) -> case sr of
-          ScriptDone' d -> case unwrapArbiHostValue d of
+          ScriptDone' d -> case unwrapHostValue d of
             Just (t :: t) -> return $ Just $ HostVal t o
             Nothing -> mzero
-          FullyEffected d _extras _applied -> case unwrapArbiHostValue d of
+          FullyEffected d _extras _applied -> case unwrapHostValue d of
             Just (t :: t) -> return $ Just $ HostVal t o
             Nothing -> mzero
           _ -> mzero
-        Nothing -> case unwrapArbiHostValue dd of
+        Nothing -> case unwrapHostValue dd of
           Just (t :: t) -> return $ Just $ HostVal t o
           Nothing -> mzero
       _ -> mzero
@@ -768,16 +902,16 @@ instance Typeable t => ComputArgAdapter (HostVal t) where
 
   adaptEdhArg !v = case edhUltimate v of
     EdhObject o -> case edh'obj'store o of
-      HostStore dd -> case unwrapArbiHostValue dd of
+      HostStore dd -> case unwrapHostValue dd of
         Just (sr :: ScriptedResult) -> case sr of
-          ScriptDone' d -> case unwrapArbiHostValue d of
+          ScriptDone' d -> case unwrapHostValue d of
             Just (t :: t) -> return $ HostVal t o
             Nothing -> mzero
-          FullyEffected d _extras _applied -> case unwrapArbiHostValue d of
+          FullyEffected d _extras _applied -> case unwrapHostValue d of
             Just (t :: t) -> return $ HostVal t o
             Nothing -> mzero
           _ -> mzero
-        Nothing -> case unwrapArbiHostValue dd of
+        Nothing -> case unwrapHostValue dd of
           Just (t :: t) -> return $ HostVal t o
           Nothing -> mzero
       _ -> mzero
@@ -860,13 +994,13 @@ defineComputMethod !mthName !comput =
             ScriptDone' !done -> do
               !apkRepr <- edhValueReprM $ EdhArgsPack apk
               EdhObject <$> wrapHostM' (mthName <> apkRepr) done
-            PartiallyApplied c appliedArgs -> do
+            PartiallyApplied _u c appliedArgs -> do
               !argsRepr <- tshowAppliedArgs appliedArgs
               !argsAheadRepr <- tshowArgsAhead $ odToList $ argsScriptedAhead c
               defineComputMethod
                 (mthName <> "( " <> argsRepr <> argsAheadRepr <> ")")
                 c
-            FullyApplied c appliedArgs -> do
+            FullyApplied _u c appliedArgs -> do
               !argsRepr <- tshowAppliedArgs appliedArgs
               defineComputMethod
                 (mthName <> "( " <> argsRepr <> ")")
@@ -943,7 +1077,7 @@ defineComputClass' !effOnCtor !clsName !rootComput =
     computAllocator :: ArgsPack -> Edh ObjectStore
     computAllocator !apk =
       (let ?effecting = effOnCtor in callByScript rootComput apk)
-        >>= \ !sr -> HostStore <$> inlineSTM (wrapArbiHostValue sr)
+        >>= \ !sr -> pinAndStoreHostValue sr
 
     -- Obtain an applied argument or a result field by name
     attrReadProc :: EdhValue -> Edh EdhValue
@@ -953,9 +1087,9 @@ defineComputClass' !effOnCtor !clsName !rootComput =
         thisScripted >>= \case
           ScriptDone {} -> return nil
           ScriptDone' {} -> return nil
-          PartiallyApplied _c appliedArgs ->
+          PartiallyApplied _u _c appliedArgs ->
             return $ appliedArgByKey argKey appliedArgs
-          FullyApplied _c appliedArgs ->
+          FullyApplied _u _c appliedArgs ->
             return $ appliedArgByKey argKey appliedArgs
           FullyEffected _d !extras appliedArgs -> case odLookup argKey extras of
             Just !val -> return val
@@ -978,7 +1112,7 @@ defineComputClass' !effOnCtor !clsName !rootComput =
           ScriptDone' !dd ->
             return $
               EdhString $ "{# " <> clsName <> ": " <> T.pack (show dd) <> " #} "
-          PartiallyApplied c appliedArgs -> do
+          PartiallyApplied _u c appliedArgs -> do
             !appliedArgsRepr <- tshowAppliedArgs appliedArgs
             !argsAheadRepr <- tshowArgsAhead (odToList $ argsScriptedAhead c)
             !moreArgsRepr <- tshowMoreArgs (scriptableArgs c)
@@ -988,7 +1122,7 @@ defineComputClass' !effOnCtor !clsName !rootComput =
                   <> ") {# "
                   <> moreArgsRepr
                   <> "#}"
-          FullyApplied c appliedArgs -> do
+          FullyApplied _u c appliedArgs -> do
             !appliedArgsRepr <- tshowAppliedArgs appliedArgs
             !moreArgsRepr <- tshowMoreArgs (scriptableArgs c)
             return $
@@ -1075,7 +1209,7 @@ defineComputClass' !effOnCtor !clsName !rootComput =
           ScriptDone' !dd ->
             return $
               EdhString $ clsName <> ": <host> " <> T.pack (show dd)
-          PartiallyApplied c appliedArgs -> do
+          PartiallyApplied _u c appliedArgs -> do
             !appliedArgsRepr <- tshowAppliedArgs appliedArgs
             !argsAheadRepr <- tshowArgsAhead (odToList $ argsScriptedAhead c)
             !moreArgsRepr <- tshowMoreArgs (scriptableArgs c)
@@ -1085,7 +1219,7 @@ defineComputClass' !effOnCtor !clsName !rootComput =
                   <> "\n) {#\n"
                   <> moreArgsRepr
                   <> "\n#}"
-          FullyApplied c appliedArgs -> do
+          FullyApplied _u c appliedArgs -> do
             !appliedArgsRepr <- tshowAppliedArgs appliedArgs
             !moreArgsRepr <- tshowMoreArgs (scriptableArgs c)
             return $
@@ -1166,10 +1300,10 @@ defineComputClass' !effOnCtor !clsName !rootComput =
               EdhObject . edh'scope'that . contextScope . edh'context
                 <$> edhThreadState
             else throwEdhM UsageError "extranous arguments"
-        PartiallyApplied c appliedArgs ->
+        PartiallyApplied _u c appliedArgs ->
           let ?effecting = True
            in callByScript c apk >>= exitWith appliedArgs
-        FullyApplied c appliedArgs ->
+        FullyApplied _u c appliedArgs ->
           let ?effecting = True
            in callByScript c apk >>= exitWith appliedArgs
         FullyEffected {} ->
@@ -1188,21 +1322,20 @@ defineComputClass' !effOnCtor !clsName !rootComput =
               <$> wrapHostM'
                 ("<" <> clsName <> "/done:" <> T.pack (show dd) <> ">")
                 dd
-          PartiallyApplied c' appliedArgs' ->
+          PartiallyApplied _u c' appliedArgs' -> do
+            u <- inlineSTM newRUID'STM
             (exitDerived =<<) $
-              inlineSTM $
-                wrapArbiHostValue $
-                  PartiallyApplied c' $! appliedArgs ++ appliedArgs'
-          FullyApplied c' appliedArgs' ->
+              pinHostValueM $
+                PartiallyApplied u c' $! appliedArgs ++ appliedArgs'
+          FullyApplied _u c' appliedArgs' -> do
+            u <- inlineSTM newRUID'STM
             (exitDerived =<<) $
-              inlineSTM $
-                wrapArbiHostValue $
-                  FullyApplied c' $! appliedArgs ++ appliedArgs'
+              pinHostValueM $
+                FullyApplied u c' $! appliedArgs ++ appliedArgs'
           FullyEffected !d !extras appliedArgs' ->
             (exitDerived =<<) $
-              inlineSTM $
-                wrapArbiHostValue $
-                  FullyEffected d extras $! appliedArgs ++ appliedArgs'
+              pinHostValueM $
+                FullyEffected d extras $! appliedArgs ++ appliedArgs'
           where
             exitDerived :: HostValue -> Edh EdhValue
             exitDerived dd = do
@@ -1217,7 +1350,7 @@ defineComputClass' !effOnCtor !clsName !rootComput =
       !ets <- edhThreadState
       let !this = edh'scope'this $ contextScope $ edh'context ets
       case edh'obj'store this of
-        HostStore !dhs -> case unwrapArbiHostValue dhs of
+        HostStore !dhs -> case unwrapHostValue dhs of
           Just (sr :: ScriptedResult) -> return sr
           Nothing -> naM "bug: this is not a scripted Comput"
         _ -> naM "bug: Comput not a host object"
@@ -1239,13 +1372,13 @@ mapEffectedComput ::
   Object ->
   Edh Object
 mapEffectedComput f inst = case edh'obj'store inst of
-  HostStore !dhs -> case unwrapArbiHostValue dhs of
+  HostStore !dhs -> case unwrapHostValue dhs of
     Just (sr :: ScriptedResult) -> case sr of
       FullyEffected !d !extras !appliedArgs -> tryDynData d $ \ !d' ->
-        inlineSTM $ wrapArbiHostValue $ FullyEffected d' extras appliedArgs
+        pinHostValueM $ FullyEffected d' extras appliedArgs
       ScriptDone' !d ->
         -- todo should use id here?
-        tryDynData d $ inlineSTM . wrapArbiHostValue . ScriptDone'
+        tryDynData d $ pinHostValueM . ScriptDone'
       _ -> naAct
     _ -> tryDynData dhs return
   _ -> naAct
@@ -1253,18 +1386,18 @@ mapEffectedComput f inst = case edh'obj'store inst of
     naAct = naM $ "not of expected host type: " <> T.pack (show $ typeRep @a)
 
     tryDynData :: HostValue -> (HostValue -> Edh HostValue) -> Edh Object
-    tryDynData dd wd = case unwrapArbiHostValue dd of
+    tryDynData dd wd = case unwrapHostValue dd of
       Nothing -> naAct
       Just (a :: a) -> do
-        dd' <- inlineSTM $ wrapArbiHostValue $ f a
+        dd' <- pinHostValueM $ f a
         dd'' <- wd dd'
         return inst {edh'obj'store = HostStore dd''}
 
--- | Obtain the 'HostValue' value of a host object, it can be an effected comput
--- or a raw host value
-dynamicHostData :: Object -> Maybe HostValue
-dynamicHostData !obj = case edh'obj'store obj of
-  HostStore !dhs -> case unwrapArbiHostValue dhs of
+-- | Obtain the 'HostValue' value from a possible host object, it can be an
+-- effected comput or a raw host value
+objHostValue :: Object -> Maybe HostValue
+objHostValue !obj = case edh'obj'store obj of
+  HostStore !dhs -> case unwrapHostValue dhs of
     Just (sr :: ScriptedResult) -> case sr of
       FullyEffected !d _extras _appliedArgs -> Just d
       ScriptDone' !d -> Just d
@@ -1272,18 +1405,22 @@ dynamicHostData !obj = case edh'obj'store obj of
     _ -> Just dhs
   _ -> Nothing
 
+-- | Obtain the host value from a possible host object, as 'Dynamic'
+objDynamicValue :: Object -> Maybe Dynamic
+objDynamicValue = fmap hostToDynamic . objHostValue
+
 hostInstanceOf :: forall t. (Typeable t) => Object -> Edh t
-hostInstanceOf !inst = case dynamicHostData inst of
+hostInstanceOf !inst = case objHostValue inst of
   Nothing ->
     naM $
       "not a host object with expected type: " <> T.pack (show $ typeRep @t)
-  Just dd@(HostValue tr _) -> case unwrapArbiHostValue dd of
+  Just hv -> case unwrapHostValue hv of
     Nothing ->
       naM $
-        "a " <> edhClassName inst
-          <> " object wraps a host value of type '"
-          <> T.pack (show tr)
-          <> "' instead of expected: "
+        "a " <> objClassName inst
+          <> " object wraps a "
+          <> T.pack (show hv)
+          <> ", instead of expected host type: "
           <> T.pack (show $ typeRep @t)
     Just (d :: t) -> return d
 
@@ -1317,9 +1454,9 @@ hostObjectOf !obj = (obj :) <$> readTVarEdh (edh'obj'supers obj) >>= go
         "object " <> badDesc
           <> " does not wrap an expected host value of type: "
           <> T.pack (show $ typeRep @t)
-    go (inst : rest) = case dynamicHostData inst of
+    go (inst : rest) = case objHostValue inst of
       Nothing -> go rest
-      Just !dd -> case unwrapArbiHostValue dd of
+      Just !dd -> case unwrapHostValue dd of
         Nothing -> go rest
         Just (d :: t) -> return (inst, d)
 
