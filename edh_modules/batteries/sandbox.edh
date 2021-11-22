@@ -15,7 +15,6 @@ export {
   import * './root/evt'
   import * './root/math'
   import * './root/slice'
-  import * './root/reflect'
   import * './root/uri'
 
   {##

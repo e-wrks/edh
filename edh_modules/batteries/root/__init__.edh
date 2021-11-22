@@ -20,7 +20,6 @@ export {
   import * './math'
   import * './ops'
   import * './slice'
-  import * './reflect'
   import * './cmd'
   import * './uri'
   import * './debug'

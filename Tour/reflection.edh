@@ -1,13 +1,9 @@
 
 # expression is 1st class citizen in Edh
 
-# with original src reserved
+# create as literal
 x = expr a + b*c
 type( x )
-
-# without src info
-x' = makeExpr( a + b*c )
-type( x' )
 
 # a scope can be captured anywhere within Edh code
 this'modu'scope = scope()
