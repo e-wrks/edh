@@ -1,13 +1,11 @@
 module Language.Edh.RtTypes where
 
 -- import           Debug.Trace
-
 import Control.Applicative
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Exception (SomeException)
 import Control.Monad
-import qualified Data.Bits as Bits
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import Data.Dynamic
@@ -18,14 +16,16 @@ import Data.List
 import Data.Lossless.Decimal as D
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Typeable hiding (TypeRep, typeOf, typeRep)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
-import Data.Unique
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Control
 import Language.Edh.IOPD
+import Language.Edh.RUID
 import System.IO.Unsafe (unsafePerformIO)
 import System.Posix
+import Type.Reflection
 import Prelude
 
 -- | A pack of evaluated argument values with positional/keyword origin,
@@ -77,17 +77,9 @@ newtype KeywordArgs = KeywordArgs KwArgs
 newtype PackedArgs = PackedArgs ArgsPack
 
 -- | A dict in Edh is neither an object nor an entity, but just a
--- mutable associative array.
-data Dict = Dict !Unique !DictStore
-
-instance Eq Dict where
-  Dict x'u _ == Dict y'u _ = x'u == y'u
-
-instance Ord Dict where
-  compare (Dict x'u _) (Dict y'u _) = compare x'u y'u
-
-instance Hashable Dict where
-  hashWithSalt s (Dict u _) = hashWithSalt s u
+-- mutable associative array with identity.
+newtype Dict = Dict DictStore
+  deriving (Eq, Hashable)
 
 instance Show Dict where
   show _ = "<dict>"
@@ -98,9 +90,7 @@ type DictStore = IOPD EdhValue EdhValue
 --
 -- Note nil allowed as valid key, nil value triggers deletion semantics
 createEdhDict :: [(EdhValue, EdhValue)] -> STM Dict
-createEdhDict !entries = do
-  !u <- unsafeIOToSTM newUnique
-  Dict u <$> iopdFromList' edhValueIdent entries
+createEdhDict !entries = Dict <$> iopdFromList' edhValueIdent entries
 
 -- | Set one dict item value by key
 --
@@ -116,32 +106,12 @@ dictEntryList !d =
   (<$> iopdToList d) $ fmap $ \(k, v) -> EdhArgsPack $ ArgsPack [k, v] odEmpty
 
 -- | Identity value of an arbitrary value
---
--- this follows the semantic of Python's `id` function for object values and
--- a few other types, notably including event sink values;
--- and for values of immutable types, this follows the semantic of Haskell to
--- just return the value itself.
---
--- but unlike Python's `id` function which returns integers, here we return
--- `UUID`s for objects et al.
 edhValueIdent :: EdhValue -> STM EdhValue
 edhValueIdent = identityOf
   where
-    idFromUnique :: Unique -> EdhValue
-    idFromUnique !u =
-      EdhUUID $
-        UUID.fromWords
-          0xcafe
-          0xface
-          (fromIntegral $ Bits.shiftR i 32)
-          (fromIntegral i)
-      where
-        -- todo hashUnique doesn't guarantee free of collision, better impl?
-        i = hashUnique u
-
     identityOf :: EdhValue -> STM EdhValue
-    identityOf (EdhObject !o) = idOfObj o
-    identityOf (EdhSink !s) = return $ idFromUnique $ sink'uniq s
+    identityOf ov@EdhObject {} = return ov
+    identityOf sv@EdhSink {} = return sv
     identityOf (EdhNamedValue !n !v) = EdhNamedValue n <$> identityOf v
     identityOf (EdhRange (ClosedBound !l) (ClosedBound !u)) = do
       l'i <- identityOf l
@@ -160,12 +130,14 @@ edhValueIdent = identityOf
       u'i <- identityOf u
       return $ EdhRange (OpenBound l'i) (OpenBound u'i)
     identityOf (EdhPair !l !r) = liftA2 EdhPair (identityOf l) (identityOf r)
-    identityOf (EdhDict (Dict !u _)) = return $ idFromUnique u
-    identityOf (EdhList (List !u _)) = return $ idFromUnique u
-    identityOf (EdhProcedure !p _) = return $ idOfProc p
-    identityOf (EdhBoundProc !p !this !that _) =
-      EdhPair (idOfProc p) <$> liftA2 EdhPair (idOfObj this) (idOfObj that)
-    identityOf (EdhExpr (ExprDefi !u _ _) _) = return $ idFromUnique u
+    identityOf v@EdhDict {} = return v
+    identityOf v@EdhList {} = return v
+    identityOf v@EdhProcedure {} = return v
+    identityOf (EdhBoundProc !p !this !that !eff'stack) =
+      return $
+        EdhPair (EdhProcedure p eff'stack) $
+          EdhPair (EdhObject this) (EdhObject that)
+    identityOf v@EdhExpr {} = return v
     identityOf (EdhArgsPack (ArgsPack !args !kwargs)) =
       EdhArgsPack
         <$> liftA2
@@ -173,31 +145,6 @@ edhValueIdent = identityOf
           (sequence $ identityOf <$> args)
           (odMapSTM identityOf kwargs)
     identityOf !v = return v
-
-    idOfObj :: Object -> STM EdhValue
-    idOfObj o = case edh'obj'store o of
-      HashStore !hs ->
-        iopdLookup (AttrByName "__id__") hs >>= \case
-          Just !idv -> identityOf idv
-          _ -> return ouid
-      _ -> return ouid
-      where
-        ouid = idFromUnique $ edh'obj'ident o
-
-    idOfProcDefi :: ProcDefi -> EdhValue
-    idOfProcDefi !def = idFromUnique $ edh'procedure'ident def
-
-    idOfProc :: EdhProcDefi -> EdhValue
-    idOfProc (EdhIntrOp _ _ !def) =
-      idFromUnique $ intrinsic'op'uniq def
-    idOfProc (EdhOprtor _ _ _ !def) = idOfProcDefi def
-    idOfProc (EdhMethod !def) = idOfProcDefi def
-    idOfProc (EdhGnrtor !def) = idOfProcDefi def
-    idOfProc (EdhIntrpr !def) = idOfProcDefi def
-    idOfProc (EdhPrducr !def) = idOfProcDefi def
-    idOfProc (EdhDescriptor !getter !maybeSetter) = case maybeSetter of
-      Nothing -> idOfProcDefi getter
-      Just !setter -> EdhPair (idOfProcDefi getter) (idOfProcDefi setter)
 
 -- | Backing storage for a scope or a hash object
 type EntityStore = IOPD AttrKey EdhValue
@@ -230,7 +177,7 @@ attrKeyValue (AttrBySym !sym) = EdhSymbol sym
 -- (alphanumerically) named, this can be leveraged to solve naming clashes
 -- among modules from different sofware vendors those get developed
 -- independently from eachothers.
-data Symbol = Symbol !Unique !Text
+data Symbol = Symbol !RUID !Text
 
 instance Eq Symbol where
   Symbol x'u _ == Symbol y'u _ = x'u == y'u
@@ -254,7 +201,7 @@ symbolName (Symbol _ !bornName) = case T.stripPrefix "@" bornName of
 
 mkSymbol :: Text -> STM Symbol
 mkSymbol !bornName = do
-  !u <- unsafeIOToSTM newUnique
+  !u <- newRUID'STM
   return $ Symbol u bornName
 
 mkUUID :: STM UUID.UUID
@@ -268,11 +215,11 @@ mkDefault' = mkDefault'' Nothing
 
 mkDefault'' :: Maybe EdhThreadState -> ArgsPack -> Expr -> STM EdhValue
 mkDefault'' !etsMaybe !apk !x = do
-  !u <- unsafeIOToSTM newUnique
+  !u <- newRUID'STM
   return $ EdhDefault u apk x etsMaybe
 
 -- | A list in Edh is a multable, singly-linked, prepend list.
-data List = List !Unique !(TVar [EdhValue])
+data List = List !RUID !(TVar [EdhValue])
 
 instance Eq List where
   List x'u _ == List y'u _ = x'u == y'u
@@ -410,6 +357,12 @@ data Scope = Scope
     edh'effects'stack :: [EdhCallFrame]
   }
 
+instance Eq Scope where
+  x == y = edh'scope'entity x == edh'scope'entity y
+
+instance Hashable Scope where
+  hashWithSalt s p = s `hashWithSalt` edh'scope'entity p
+
 instance Show Scope where
   show !scope =
     T.unpack $
@@ -441,6 +394,58 @@ edhScopeSrcLoc !scope = case edh'procedure'decl $ edh'scope'proc scope of
   HostDecl {} -> SrcLoc (SrcDoc "<host-world>") noSrcRange
   ProcDecl _ _ _ (StmtSrc _ !body'span) !loc -> loc {src'range = body'span}
 
+-- | Edh can wrap host values with identity (the type with an Eq instance),
+-- additionally they should be hashable to facilitate fast lookups
+data HostValue
+  = forall v. (Eq v, Hashable v, Typeable v) => HostValue !(TypeRep v) !v
+
+instance Eq HostValue where
+  HostValue x'tr x'v == HostValue y'tr y'v = case x'tr `eqTypeRep` y'tr of
+    Nothing -> False
+    Just HRefl -> x'v == y'v
+
+instance Hashable HostValue where
+  hashWithSalt s (HostValue _tr v) = s `hashWithSalt` v
+
+instance Show HostValue where
+  show (HostValue tr _) = "<host-value: " <> show tr <> ">"
+
+wrapHostValue :: forall v. (Eq v, Hashable v, Typeable v) => v -> HostValue
+wrapHostValue = HostValue (typeRep @v)
+
+unwrapHostValue ::
+  forall v. (Eq v, Hashable v, Typeable v) => HostValue -> Maybe v
+unwrapHostValue (HostValue tr v) = case tr `eqTypeRep` typeRep @v of
+  Nothing -> Nothing
+  Just HRefl -> Just v
+
+data ArbiHostValue = forall v. (Typeable v) => ArbiHostValue !v !RUID
+
+instance Eq ArbiHostValue where
+  ArbiHostValue _ x'u == ArbiHostValue _ y'u = x'u == y'u
+
+instance Hashable ArbiHostValue where
+  hashWithSalt s (ArbiHostValue _ u) = s `hashWithSalt` u
+
+instance Show ArbiHostValue where
+  show (ArbiHostValue (_ :: v) u) =
+    "<arbi-host-value: " <> show (typeRep @v) <> " # " <> show u <> ">"
+
+wrapArbiHostValue :: forall v. (Typeable v) => v -> STM HostValue
+wrapArbiHostValue v = wrapHostValue . ArbiHostValue v <$> newRUID'STM
+
+unwrapArbiHostValue ::
+  forall v. (Typeable v) => HostValue -> Maybe v
+unwrapArbiHostValue (HostValue tr v) =
+  case tr `eqTypeRep` typeRep @ArbiHostValue of
+    Just HRefl -> case v of
+      ArbiHostValue (av :: v') _ -> case eqT of
+        Nothing -> Nothing
+        Just (Refl :: v' :~: v) -> Just av
+    Nothing -> case tr `eqTypeRep` typeRep @v of
+      Nothing -> Nothing
+      Just HRefl -> Just v
+
 -- | A class is wrapped as an object per se, the object's storage structure is
 -- here:
 -- - the procedure created the class, from which the class name, the lexical
@@ -450,24 +455,25 @@ edhScopeSrcLoc !scope = case edh'procedure'decl $ edh'scope'proc scope of
 -- - the storage allocator for new objects of the class to be created
 data Class = Class
   { edh'class'proc :: !ProcDefi,
-    edh'class'store :: !EntityStore,
+    edh'class'arts :: !EntityStore,
     edh'class'allocator :: !(ArgsPack -> EdhObjectAllocator),
     -- | the C3 linearized method resolution order, with self omitted
     edh'class'mro :: !(TVar [Object])
   }
 
+edhClassIdent :: Class -> RUID
+edhClassIdent = edh'procedure'ident . edh'class'proc
+
+instance Eq Class where
+  x == y = edhClassIdent x == edhClassIdent y
+
+instance Hashable Class where
+  hashWithSalt s cls = s `hashWithSalt` edhClassIdent cls
+
 instance Show Class where
   show cls = ("class:" <>) $ T.unpack $ procedureName $ edh'class'proc cls
 
-instance Eq Class where
-  Class x'p _ _ _ == Class y'p _ _ _ = x'p == y'p
-
-instance Hashable Class where
-  hashWithSalt s (Class p _ _ _) = hashWithSalt s p
-
-type EdhObjectAllocator = EdhAllocExit -> EdhTx
-
-type EdhAllocExit = Maybe Unique -> ObjectStore -> STM ()
+type EdhObjectAllocator = (ObjectStore -> STM ()) -> EdhTx
 
 objClass :: Object -> Class
 objClass !obj = case edh'obj'store $ edh'obj'class obj of
@@ -493,9 +499,7 @@ objClassProc = edhClassProc . edh'obj'class
 -- | An object views an entity, with inheritance relationship
 -- to any number of super objects.
 data Object = Object
-  { -- | unique identifier of an Edh object
-    edh'obj'ident :: !Unique,
-    -- | the storage for entity attributes of the object
+  { -- | the storage as well as identity of the object
     edh'obj'store :: !ObjectStore,
     -- | the class object must have a 'ClassStore' storage
     -- note this field can not be strict, or it's infinite loop creating the
@@ -506,13 +510,10 @@ data Object = Object
   }
 
 instance Eq Object where
-  Object x'u _ _ _ == Object y'u _ _ _ = x'u == y'u
-
-instance Ord Object where
-  compare (Object x'u _ _ _) (Object y'u _ _ _) = compare x'u y'u
+  x == y = edh'obj'store x == edh'obj'store y
 
 instance Hashable Object where
-  hashWithSalt s (Object u _ _ _) = hashWithSalt s u
+  hashWithSalt s o = s `hashWithSalt` edh'obj'store o
 
 instance Show Object where
   -- it's not right to call 'atomically' here to read 'edh'obj'supers' for
@@ -526,31 +527,45 @@ instance Show Object where
 data ObjectStore
   = HashStore !EntityStore
   | ClassStore !Class -- in case this is a class object
-  | HostStore !Dynamic
+  | HostStore !HostValue
+
+instance Eq ObjectStore where
+  HashStore x'es == HashStore y'es = x'es == y'es
+  ClassStore x'cls == ClassStore y'cls = x'cls == y'cls
+  HostStore x'val == HostStore y'val = x'val == y'val
+  _ == _ = False
+
+instance Hashable ObjectStore where
+  hashWithSalt s (HashStore es) = s `hashWithSalt` es
+  hashWithSalt s (ClassStore cls) = s `hashWithSalt` cls
+  hashWithSalt s (HostStore hv) = s `hashWithSalt` hv
 
 instance Show ObjectStore where
   show HashStore {} = "<<HashStore>>"
   show (ClassStore cls) = "<<ClassStore:" <> show cls <> ">>"
-  show (HostStore (Dynamic tr _)) = "<<HostStore:" <> show tr <> ">>"
+  show (HostStore (HostValue tr _)) = "<<HostStore:" <> show tr <> ">>"
 
 -- | Try cast and unveil an Object's storage of a known type, while not
 -- considering any super object eligible
-castObjSelfStore :: forall a. (Typeable a) => Object -> STM (Maybe a)
+castObjSelfStore ::
+  forall a. (Eq a, Hashable a, Typeable a) => Object -> STM (Maybe a)
 castObjSelfStore !obj = case edh'obj'store obj of
-  HostStore !hsd -> case fromDynamic hsd of
+  HostStore !hsd -> case unwrapHostValue hsd of
     Just (hsv :: a) -> return $ Just hsv
     Nothing -> return Nothing
   _ -> return Nothing
 
 -- | Try cast and unveil a possible Object's storage of a known type, while not
 -- considering any super object eligible
-castObjSelfStore' :: forall a. (Typeable a) => EdhValue -> STM (Maybe a)
+castObjSelfStore' ::
+  forall a. (Eq a, Hashable a, Typeable a) => EdhValue -> STM (Maybe a)
 castObjSelfStore' !val = case edhUltimate val of
   EdhObject !obj -> castObjSelfStore obj
   _ -> return Nothing
 
 -- | Try cast and unveil an Object's storage of a known type
-castObjectStore :: forall a. (Typeable a) => Object -> STM (Maybe (Object, a))
+castObjectStore ::
+  forall a. (Eq a, Hashable a, Typeable a) => Object -> STM (Maybe (Object, a))
 castObjectStore !obj = readTVar (edh'obj'supers obj) >>= goSearch . (obj :)
   where
     goSearch [] = return Nothing
@@ -561,7 +576,10 @@ castObjectStore !obj = readTVar (edh'obj'supers obj) >>= goSearch . (obj :)
 
 -- | Try cast and unveil a possible Object's storage of a known type
 castObjectStore' ::
-  forall a. (Typeable a) => EdhValue -> STM (Maybe (Object, a))
+  forall a.
+  (Eq a, Hashable a, Typeable a) =>
+  EdhValue ->
+  STM (Maybe (Object, a))
 castObjectStore' !val = case edhUltimate val of
   EdhObject !obj -> castObjectStore obj
   _ -> return Nothing
@@ -581,7 +599,7 @@ data EdhWorld = EdhWorld
     -- | for console logging, input and output
     edh'world'console :: !EdhConsole,
     -- | wrapping any host value as object
-    edh'value'wrapper :: !(Maybe Text -> Dynamic -> STM Object),
+    edh'value'wrapper :: !(Maybe Text -> HostValue -> STM Object),
     -- wrapping a scope as object for reflective purpose
     edh'scope'wrapper :: !(Scope -> STM Object),
     -- | world root effects
@@ -622,7 +640,6 @@ data CachedFrag = CachedFrag !EpochTime !Text ![StmtSrc]
 
 createEdhModule :: EdhWorld -> Text -> String -> IO Object
 createEdhModule !world !moduName !srcName = do
-  !idModu <- newUnique
   !hs <-
     atomically $
       iopdFromList
@@ -632,8 +649,7 @@ createEdhModule !world !moduName !srcName = do
   !ss <- newTVarIO []
   return
     Object
-      { edh'obj'ident = idModu,
-        edh'obj'store = HashStore hs,
+      { edh'obj'store = HashStore hs,
         edh'obj'class = edh'module'class world,
         edh'obj'supers = ss
       }
@@ -825,7 +841,7 @@ edhFlipOp !op = flipped
     flipped !lhExpr !rhExpr !exit = op rhExpr lhExpr exit
 
 data IntrinOpDefi = IntrinOpDefi
-  { intrinsic'op'uniq :: !Unique,
+  { intrinsic'op'uniq :: !RUID,
     intrinsic'op'symbol :: !AttrName,
     intrinsic'op :: EdhIntrinsicOp
   }
@@ -841,7 +857,7 @@ type EdhHostProc = EdhTxExit EdhValue -> EdhTx
 -- | An event sink is similar to a Go channel, but is broadcast
 -- in nature, in contrast to the unicast nature of channels in Go.
 data Sink = Sink
-  { sink'uniq :: !Unique,
+  { sink'uniq :: !RUID,
     -- | most recent value for the lingering copy of an event sink
     --
     -- an event sink always starts out being the original lingering copy,
@@ -865,14 +881,11 @@ data Sink = Sink
 instance Eq Sink where
   Sink x'u _ _ _ _ == Sink y'u _ _ _ _ = x'u == y'u
 
-instance Ord Sink where
-  compare (Sink x'u _ _ _ _) (Sink y'u _ _ _ _) = compare x'u y'u
-
 instance Hashable Sink where
   hashWithSalt s (Sink s'u _ _ _ _) = hashWithSalt s s'u
 
 instance Show Sink where
-  show Sink {} = "<sink>"
+  show _ = "<sink>"
 
 -- | executable precedures
 data EdhProcDefi
@@ -1063,7 +1076,7 @@ data EdhValue
     -- the apk can be used to pass back intermediate result values evaluated
     -- from expressions, e.g lhs and rhs of an infix operator, to avoid
     -- duplicate evaluation of expressions involved
-    EdhDefault !Unique !ArgsPack !Expr !(Maybe EdhThreadState)
+    EdhDefault !RUID !ArgsPack !Expr !(Maybe EdhThreadState)
   | -- | event sink
     EdhSink !Sink
   | -- | named value, a.k.a. term definition
@@ -1268,12 +1281,12 @@ edhNone = EdhNamedValue "None" EdhNil
 edhNothing :: EdhValue
 edhNothing = EdhNamedValue "Nothing" EdhNil
 
--- | NA for not-applicable, similar to @NotImplemented@ as in Python
+-- | NA for Not/Applicable, similar to @NotImplemented@ as in Python
 edhNA :: EdhValue
 edhNA =
   EdhNamedValue "NA" $
     EdhDefault
-      (unsafePerformIO newUnique)
+      (unsafePerformIO newRUID)
       (ArgsPack [] odEmpty)
       (ExprWithSrc (ExprSrc (LitExpr NilLiteral) noSrcRange) [SrcSeg "nil"])
       Nothing
@@ -1715,7 +1728,7 @@ procedureLoc' = procedureLoc . edh'procedure'decl
 
 -- | Procedure definition, result of execution of the declaration
 data ProcDefi = ProcDefi
-  { edh'procedure'ident :: !Unique,
+  { edh'procedure'ident :: !RUID,
     edh'procedure'name :: !AttrKey,
     edh'procedure'lexi :: !Scope,
     edh'procedure'doc :: !OptDocCmt,
@@ -1724,9 +1737,6 @@ data ProcDefi = ProcDefi
 
 instance Eq ProcDefi where
   ProcDefi x'u _ _ _ _ == ProcDefi y'u _ _ _ _ = x'u == y'u
-
-instance Ord ProcDefi where
-  compare (ProcDefi x'u _ _ _ _) (ProcDefi y'u _ _ _ _) = compare x'u y'u
 
 instance Hashable ProcDefi where
   hashWithSalt s (ProcDefi !u _ _ _ _) = s `hashWithSalt` u
@@ -1749,16 +1759,13 @@ procedureName !pd = case edh'procedure'name pd of
 
 -- | Expression definition
 data ExprDefi = ExprDefi
-  { edh'expr'ident :: !Unique,
+  { edh'expr'ident :: !RUID,
     edh'expr'body :: !Expr,
     edh'expr'loc :: !SrcLoc
   }
 
 instance Eq ExprDefi where
   ExprDefi x'u _ _ == ExprDefi y'u _ _ = x'u == y'u
-
-instance Ord ExprDefi where
-  compare (ExprDefi x'u _ _) (ExprDefi y'u _ _) = compare x'u y'u
 
 instance Hashable ExprDefi where
   hashWithSalt s (ExprDefi !u _ _) = s `hashWithSalt` u
@@ -2149,7 +2156,7 @@ edhTypeNameOf (EdhObject o) = case edh'obj'store o of
   ClassStore !cls -> case edh'procedure'decl $ edh'class'proc cls of
     ProcDecl {} -> "Class"
     HostDecl {} -> "HostClass"
-  HostStore (Dynamic tr _) -> "HostValue:" <> T.pack (show tr)
+  HostStore (HostValue tr _) -> "HostValue:" <> T.pack (show tr)
 edhTypeNameOf (EdhProcedure pc _) = edhProcTypeNameOf pc
 edhTypeNameOf (EdhBoundProc pc _ _ _) = edhProcTypeNameOf pc
 edhTypeNameOf EdhBreak = "Break"
@@ -2211,6 +2218,7 @@ objectScope !obj = case edh'obj'store obj of
           _ -> error $ "bug: not a string - " <> show v
      in case procedureName ocProc of
           "module" -> do
+            !u <- newRUID'STM
             !moduName <-
               mustStr
                 <$> iopdLookupDefault
@@ -2230,7 +2238,7 @@ objectScope !obj = case edh'obj'store obj of
                   edh'scope'that = obj,
                   edh'scope'proc =
                     ProcDefi
-                      { edh'procedure'ident = edh'obj'ident obj,
+                      { edh'procedure'ident = u,
                         edh'procedure'name =
                           AttrByName $ "module:" <> moduName,
                         edh'procedure'lexi = edh'procedure'lexi ocProc,
@@ -2267,18 +2275,25 @@ objectScope !obj = case edh'obj'store obj of
     ocProc = edh'class'proc oc
 
 -- | Wrap any host value as an object
-edhWrapHostValue :: Typeable t => EdhThreadState -> t -> STM Object
-edhWrapHostValue !ets = edhWrapValue . toDyn
+edhWrapHostValue ::
+  forall v. (Eq v, Hashable v, Typeable v) => EdhThreadState -> v -> STM Object
+edhWrapHostValue !ets = edhWrapValue . wrapHostValue
   where
     !world = edh'prog'world $ edh'thread'prog ets
     edhWrapValue = edh'value'wrapper world Nothing
 
 -- | Wrap any host value as an object, with custom repr
-edhWrapHostValue' :: Typeable t => EdhThreadState -> Text -> t -> STM Object
-edhWrapHostValue' !ets !repr !v = edhWrapHostValue'' ets repr (toDyn v)
+edhWrapHostValue' ::
+  forall v.
+  (Eq v, Hashable v, Typeable v) =>
+  EdhThreadState ->
+  Text ->
+  v ->
+  STM Object
+edhWrapHostValue' !ets !repr !v = edhWrapHostValue'' ets repr (wrapHostValue v)
 
 -- | Wrap any host value as an object, with custom repr
-edhWrapHostValue'' :: EdhThreadState -> Text -> Dynamic -> STM Object
+edhWrapHostValue'' :: EdhThreadState -> Text -> HostValue -> STM Object
 edhWrapHostValue'' !ets !repr = edhWrapValue
   where
     !world = edh'prog'world $ edh'thread'prog ets
@@ -2313,7 +2328,7 @@ mkHostProc ::
   (ArgsPack -> EdhHostProc, ArgsReceiver) ->
   STM EdhValue
 mkHostProc !scope !vc !nm (!p, _args) = do
-  !u <- unsafeIOToSTM newUnique
+  !u <- newRUID'STM
   return $
     EdhProcedure
       ( vc
@@ -2334,7 +2349,7 @@ mkSymbolicHostProc ::
   (ArgsPack -> EdhHostProc, ArgsReceiver) ->
   STM EdhValue
 mkSymbolicHostProc !scope !vc !sym (!p, _args) = do
-  !u <- unsafeIOToSTM newUnique
+  !u <- newRUID'STM
   return $
     EdhProcedure
       ( vc
@@ -2365,7 +2380,7 @@ mkHostProperty' ::
   STM EdhValue
 mkHostProperty' !scope !pk !getterProc !maybeSetterProc = do
   getter <- do
-    u <- unsafeIOToSTM newUnique
+    u <- newRUID'STM
     return $
       ProcDefi
         { edh'procedure'ident = u,
@@ -2377,7 +2392,7 @@ mkHostProperty' !scope !pk !getterProc !maybeSetterProc = do
   setter <- case maybeSetterProc of
     Nothing -> return Nothing
     Just !setterProc -> do
-      u <- unsafeIOToSTM newUnique
+      u <- newRUID'STM
       return $
         Just $
           ProcDefi

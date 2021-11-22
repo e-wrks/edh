@@ -14,8 +14,9 @@ import qualified Data.Aeson as A
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
-import Data.Dynamic (Dynamic, fromDynamic, toDyn)
+import Data.Dynamic
 import qualified Data.HashMap.Strict as Map
+import Data.Hashable
 import Data.IORef
 import Data.List
 import Data.Lossless.Decimal (Decimal (..))
@@ -27,9 +28,7 @@ import qualified Data.Text as T
 import Data.Text.Encoding (Decoding (Some))
 import qualified Data.Text.Encoding as TE
 import Data.Text.Encoding.Error (lenientDecode)
-import Data.Typeable hiding (TypeRep, typeOf, typeRep)
 import qualified Data.UUID as UUID
-import Data.Unique
 import Deque.Lazy (Deque)
 import qualified Deque.Lazy as Deque
 import GHC.Clock
@@ -40,6 +39,7 @@ import Language.Edh.CoreLang
 import Language.Edh.IOPD
 import Language.Edh.Parser
 import Language.Edh.PkgMan
+import Language.Edh.RUID
 import Language.Edh.RtTypes
 import Language.Edh.Sink
 import Language.Edh.Utils
@@ -442,7 +442,7 @@ writeObjAttr ::
   STM ()
 writeObjAttr !ets !obj !key !val !exit = case edh'obj'store obj of
   HashStore !hs -> iopdInsert key val hs >> exit val
-  ClassStore !cls -> iopdInsert key val (edh'class'store cls) >> exit val
+  ClassStore !cls -> iopdInsert key val (edh'class'arts cls) >> exit val
   HostStore _ ->
     throwEdh ets UsageError $
       "no such property `"
@@ -596,7 +596,7 @@ prepareExpStore' ::
   EdhThreadState -> Object -> STM () -> (EntityStore -> STM ()) -> STM ()
 prepareExpStore' !ets !fromObj !naExit !exit = case edh'obj'store fromObj of
   HashStore !tgtEnt -> fromStore tgtEnt
-  ClassStore !cls -> fromStore $ edh'class'store cls
+  ClassStore !cls -> fromStore $ edh'class'arts cls
   HostStore _ -> naExit
   where
     fromStore tgtEnt =
@@ -628,7 +628,7 @@ edhCreateNsObj ::
   EntityStore ->
   STM Object
 edhCreateNsObj !ets !docCmt !pd !nsName !nsStore = do
-  !idNs <- unsafeIOToSTM newUnique
+  !idNs <- newRUID'STM
   !ss <- newTVar []
   let !nsProc =
         ProcDefi
@@ -640,7 +640,6 @@ edhCreateNsObj !ets !docCmt !pd !nsName !nsStore = do
           }
       !nsObj =
         Object
-          idNs
           (HashStore nsStore)
           nsClsObj
             { edh'obj'store = ClassStore nsClass {edh'class'proc = nsProc}
@@ -660,8 +659,9 @@ edhCreateNsObj !ets !docCmt !pd !nsName !nsStore = do
 --
 -- note the caller is responsible to make sure the supplied host data
 -- is compatible with the class
-edhCreateHostObj :: forall t. Typeable t => Object -> t -> STM Object
-edhCreateHostObj !clsObj !hd = edhCreateHostObj' clsObj (toDyn hd) []
+edhCreateHostObj ::
+  forall v. (Eq v, Hashable v, Typeable v) => Object -> v -> STM Object
+edhCreateHostObj !clsObj !hd = edhCreateHostObj' clsObj (wrapHostValue hd) []
 
 -- | Create an Edh host object from the specified class, host storage data and
 -- list of super objects.
@@ -669,11 +669,10 @@ edhCreateHostObj !clsObj !hd = edhCreateHostObj' clsObj (toDyn hd) []
 -- note the caller is responsible to make sure the supplied host storage data
 -- is compatible with the class, the super objects are compatible with the
 -- class' mro.
-edhCreateHostObj' :: Object -> Dynamic -> [Object] -> STM Object
+edhCreateHostObj' :: Object -> HostValue -> [Object] -> STM Object
 edhCreateHostObj' !clsObj !hsd !supers = do
-  !oid <- unsafeIOToSTM newUnique
   !ss <- newTVar supers
-  return $ Object oid (HostStore hsd) clsObj ss
+  return $ Object (HostStore hsd) clsObj ss
 
 -- | Construct an Edh object from a class.
 edhConstructObj :: Object -> ArgsPack -> (Object -> EdhTx) -> EdhTx
@@ -715,19 +714,12 @@ edhConstructObj !clsObj !apk !exit !ets = do
                                           }
                                     }
                             runEdhTx etsAlloc $
-                              edh'class'allocator cls apkCtor' $
-                                \ !oidMaybe !es -> do
-                                  !oid <-
-                                    maybe
-                                      (unsafeIOToSTM newUnique)
-                                      return
-                                      oidMaybe
-                                  !ss <- newTVar supers
-                                  let !o = Object oid es co ss
-                                  -- put into instance map by class
-                                  modifyTVar' instMap $
-                                    Map.insert co (o, apkCtor')
-                                  exitOne o
+                              edh'class'allocator cls apkCtor' $ \ !os -> do
+                                !ss <- newTVar supers
+                                let !o = Object os co ss
+                                -- put into instance map by class
+                                modifyTVar' instMap $ Map.insert co (o, apkCtor')
+                                exitOne o
                   case restSupers of
                     [] -> allocIt
                     (nextSuper : restSupers') ->
@@ -771,7 +763,7 @@ edhConstructObj !clsObj !apk !exit !ets = do
     reformCtorArgs ::
       Object -> Class -> ArgsPack -> (ArgsPack -> STM ()) -> STM ()
     reformCtorArgs !co !cls !apkCtor !exit' =
-      iopdLookup (AttrByName "__reform_ctor_args__") (edh'class'store cls)
+      iopdLookup (AttrByName "__reform_ctor_args__") (edh'class'arts cls)
         >>= \case
           Nothing -> exit' apkCtor
           Just (EdhProcedure (EdhMethod !mth) _) ->
@@ -796,15 +788,15 @@ edhConstructObj !clsObj !apk !exit !ets = do
 --
 -- todo maybe check new storage data type matches the old one?
 edhCloneHostObj ::
-  Typeable h =>
+  (Eq v, Hashable v, Typeable v) =>
   EdhThreadState ->
   Object ->
   Object ->
-  h ->
+  v ->
   (Object -> STM ()) ->
   STM ()
 edhCloneHostObj !ets !endObj !mutObj !newData !exit =
-  edhMutCloneObj ets mutObj endObj (HostStore $ toDyn newData) exit
+  edhMutCloneObj ets mutObj endObj (HostStore $ wrapHostValue newData) exit
 
 -- Clone a composite object with one of its object instance `mutObj` mutated
 -- to bear the new object stroage
@@ -844,15 +836,13 @@ edhMutCloneObj !ets !endObj !mutObj !newStore !exitEnd =
           !supers <- readTVar (edh'obj'supers obj)
           cloneSupers [] supers mro $
             \ !supersClone -> do
-              !oidNew <- unsafeIOToSTM newUnique
               !supersNew <- newTVar supersClone
               !objClone <-
                 if obj == mutObj
                   then
                     return
                       mutObj
-                        { edh'obj'ident = oidNew,
-                          edh'obj'store = newStore,
+                        { edh'obj'store = newStore,
                           edh'obj'supers = supersNew
                         }
                   else case edh'obj'store obj of
@@ -860,20 +850,18 @@ edhMutCloneObj !ets !endObj !mutObj !newStore !exitEnd =
                       !es' <- iopdClone es
                       let !objClone =
                             obj
-                              { edh'obj'ident = oidNew,
-                                edh'obj'store = HashStore es',
+                              { edh'obj'store = HashStore es',
                                 edh'obj'supers = supersNew
                               }
                       return objClone
                     ClassStore !cls -> do
-                      !cs' <- iopdClone $ edh'class'store cls
+                      !cs' <- iopdClone $ edh'class'arts cls
                       let !clsClone =
                             obj
-                              { edh'obj'ident = oidNew,
-                                edh'obj'store =
+                              { edh'obj'store =
                                   ClassStore
                                     cls
-                                      { edh'class'store = cs'
+                                      { edh'class'arts = cs'
                                       },
                                 edh'obj'supers = supersNew
                               }
@@ -881,8 +869,7 @@ edhMutCloneObj !ets !endObj !mutObj !newStore !exitEnd =
                     HostStore !hsd -> do
                       let !objClone =
                             obj
-                              { edh'obj'ident = oidNew,
-                                edh'obj'store = HostStore hsd,
+                              { edh'obj'store = HostStore hsd,
                                 edh'obj'supers = supersNew
                               }
                       return objClone
@@ -1284,13 +1271,13 @@ packEdhExprs !ets !pkrs !pkExit = do
           throwEdh ets EvalError "unpack to expr not supported yet"
         SendPosArg (ExprSrc !argExpr !arg'span) -> pkExprs xs $
           \ !posArgs -> do
-            !xu <- unsafeIOToSTM newUnique
+            !xu <- newRUID'STM
             exit $
               EdhExpr (ExprDefi xu argExpr curSrcLoc {src'range = arg'span}) "" :
               posArgs
         SendKwArg (AttrAddrSrc !kwAddr _) (ExprSrc !argExpr !arg'span) ->
           resolveEdhAttrAddr ets kwAddr $ \ !kwKey -> do
-            !xu <- unsafeIOToSTM newUnique
+            !xu <- newRUID'STM
             iopdInsert
               kwKey
               ( EdhExpr
@@ -1382,10 +1369,10 @@ packEdhArgs !ets !argSenders !pkExit = do
                       $ \ !kw -> do
                         iopdInsert kw (edhNonNil $ edhDeFlowCtrl v) kwIOPD
                         pkArgs xs exit
-                  EdhDict (Dict _ !ds) -> unpackDict ds
+                  EdhDict (Dict !ds) -> unpackDict ds
                   EdhObject !obj -> case edh'obj'store obj of
                     HashStore !hs -> unpackObj hs
-                    ClassStore !cls -> unpackObj (edh'class'store cls)
+                    ClassStore !cls -> unpackObj (edh'class'arts cls)
                     HostStore {} -> edhValueRepr ets val $ \ !objRepr ->
                       throwEdh ets EvalError $
                         "can not unpack kwargs from a host object - "
@@ -2270,7 +2257,7 @@ edhPrepareForLoop
               ]
 
           -- loop from a dict
-          (EdhDict (Dict _ !d)) -> do
+          (EdhDict (Dict !d)) -> do
             !del <- iopdToList d
             -- don't be tempted to yield pairs from a dict here,
             -- it'll be messy if some entry values are themselves pairs
@@ -2477,7 +2464,7 @@ edhThrow !ets !exv = do
 edhErrorUncaught :: EdhThreadState -> EdhValue -> STM a
 edhErrorUncaught !ets !exv = case exv of
   EdhObject !exo -> case edh'obj'store exo of
-    HostStore !hsd -> case fromDynamic hsd of
+    HostStore !hsd -> case unwrapArbiHostValue hsd of
       Just (exc :: SomeException) -> case edhKnownError exc of
         Just !err -> throwSTM err
         Nothing -> throwSTM $ EdhIOError exc
@@ -2574,7 +2561,7 @@ edhCatch !etsOuter !tryAct !exit !passOn = do
   where
     isRecoverable !exv = case exv of
       EdhObject !exo -> case edh'obj'store exo of
-        HostStore !hsd -> case fromDynamic hsd of
+        HostStore !hsd -> case unwrapArbiHostValue hsd of
           Just (exc :: SomeException) -> case fromException exc of
             Just ProgramHalt {} -> return False
             _ -> case fromException exc of
@@ -2679,50 +2666,59 @@ evalEdh' !srcName !lineNo !srcCode !exit !ets =
         }
 
 withThisHostObj ::
-  forall a. Typeable a => EdhThreadState -> (a -> STM ()) -> STM ()
+  forall v.
+  (Eq v, Hashable v, Typeable v) =>
+  EdhThreadState ->
+  (v -> STM ()) ->
+  STM ()
 withThisHostObj !ets =
   withHostObject ets (edh'scope'this $ contextScope $ edh'context ets)
 
 withThisHostObj' ::
-  forall a.
-  Typeable a =>
+  forall v.
+  (Eq v, Hashable v, Typeable v) =>
   EdhThreadState ->
   STM () ->
-  (a -> STM ()) ->
+  (v -> STM ()) ->
   STM ()
 withThisHostObj' !ets =
   withHostObject' (edh'scope'this $ contextScope $ edh'context ets)
 
 withHostObject ::
-  forall a.
-  Typeable a =>
+  forall v.
+  (Eq v, Hashable v, Typeable v) =>
   EdhThreadState ->
   Object ->
-  (a -> STM ()) ->
+  (v -> STM ()) ->
   STM ()
 withHostObject !ets !obj !exit = withHostObject' obj naExit exit
   where
     naExit =
       throwEdh ets UsageError $
         "not a host object of expected storage type <<"
-          <> T.pack (show $ typeRep @a)
+          <> T.pack (show $ typeRep @v)
           <> ">> but bearing a: "
           <> T.pack (show $ edh'obj'store obj)
 
 withHostObject' ::
-  forall a. Typeable a => Object -> STM () -> (a -> STM ()) -> STM ()
+  forall v.
+  (Eq v, Hashable v, Typeable v) =>
+  Object ->
+  STM () ->
+  (v -> STM ()) ->
+  STM ()
 withHostObject' !obj !naExit !exit = case edh'obj'store obj of
-  HostStore !hsd -> case fromDynamic hsd of
-    Just (hsv :: a) -> exit hsv
+  HostStore !hsd -> case unwrapHostValue hsd of
+    Just (hsv :: v) -> exit hsv
     _ -> naExit
   _ -> naExit
 
 withDerivedHostObject ::
-  forall a.
-  Typeable a =>
+  forall v.
+  (Eq v, Hashable v, Typeable v) =>
   EdhThreadState ->
   Object ->
-  (Object -> a -> STM ()) ->
+  (Object -> v -> STM ()) ->
   STM ()
 withDerivedHostObject !ets !endObj !exit =
   withDerivedHostObject'
@@ -2733,26 +2729,26 @@ withDerivedHostObject !ets !endObj !exit =
     naExit =
       throwEdh ets UsageError $
         "not derived from a host object of expected storage type: "
-          <> T.pack (show $ typeRep @a)
+          <> T.pack (show $ typeRep @v)
 
 withDerivedHostObject' ::
-  forall a.
-  Typeable a =>
+  forall v.
+  (Eq v, Hashable v, Typeable v) =>
   Object ->
   STM () ->
-  (Object -> a -> STM ()) ->
+  (Object -> v -> STM ()) ->
   STM ()
 withDerivedHostObject' !endObj !naExit !exit = case edh'obj'store endObj of
-  HostStore !hsd -> case fromDynamic hsd of
-    Just (hsv :: a) -> exit endObj hsv
+  HostStore !hsd -> case unwrapHostValue hsd of
+    Just (hsv :: v) -> exit endObj hsv
     _ -> readTVar (edh'obj'supers endObj) >>= checkSupers
   _ -> readTVar (edh'obj'supers endObj) >>= checkSupers
   where
     checkSupers :: [Object] -> STM ()
     checkSupers [] = naExit
     checkSupers (superObj : rest) = case edh'obj'store superObj of
-      HostStore !hsd -> case fromDynamic hsd of
-        Just (hsv :: a) -> exit superObj hsv
+      HostStore !hsd -> case unwrapHostValue hsd of
+        Just (hsv :: v) -> exit superObj hsv
         _ -> checkSupers rest
       _ -> checkSupers rest
 
@@ -2872,7 +2868,7 @@ newNestedFrame !baseOnFrame = do
 newNestedScope :: Scope -> STM Scope
 newNestedScope !baseOnScope = do
   !esAdhoc <- iopdEmpty
-  !spid <- unsafeIOToSTM newUnique
+  !spid <- newRUID'STM
   return $
     baseOnScope
       { edh'scope'entity = esAdhoc,
@@ -3125,7 +3121,7 @@ evalStmt !stmt !exit = case stmt of
             exitEdh ets exit nil
       EdhObject !sinkLikeObj -> do
         let SrcLoc !doc _pos = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
-        !u <- unsafeIOToSTM newUnique
+        !u <- newRUID'STM
         runEdhTx ets $
           invokeMagic
             sinkLikeObj
@@ -3205,7 +3201,7 @@ defineUnit !docCmt !decl !exit !ets = case decl of
             $ \_ -> exitEdh ets exit defi
         _ -> exitEdh ets exit defi
   ConversionFormula outSym _ (ExprSrc !x !x'span) fSrc inSym -> do
-    !u <- unsafeIOToSTM newUnique
+    !u <- newRUID'STM
     let curSrcLoc = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
         formulaDefi = ExprDefi u x curSrcLoc {src'range = x'span}
     defineFormula
@@ -3857,7 +3853,7 @@ importFromObject !tgtEnt !reExpObj !argsRcvr !fromObj !done !ets =
          in case edh'obj'store objCls of
               ClassStore !cls -> do
                 -- ensure instance artifacts overwrite class artifacts
-                collectExp (edh'class'store cls) binder
+                collectExp (edh'class'arts cls) binder
                 collectExp hs binder
               _ ->
                 edhSimpleDesc ets (EdhObject $ edh'obj'class fromObj) $
@@ -3866,15 +3862,15 @@ importFromObject !tgtEnt !reExpObj !argsRcvr !fromObj !done !ets =
                     -- at least we can get an error thrown
                     throwEdh ets EvalError $
                       "bad class for the object to be imported - " <> badDesc
-      ClassStore !cls -> collectExp (edh'class'store cls) id
-      HostStore !hsd -> case fromDynamic hsd of
+      ClassStore !cls -> collectExp (edh'class'arts cls) id
+      HostStore !hsd -> case unwrapHostValue hsd of
         Just (fromScope :: Scope) ->
           let !this = edh'scope'this fromScope
               !that = edh'scope'that fromScope
            in collectExp (edh'scope'entity fromScope) (doBindTo this that)
         Nothing -> case edh'obj'store $ edh'obj'class obj of
           ClassStore !cls ->
-            collectExp (edh'class'store cls) (doBindTo obj fromObj)
+            collectExp (edh'class'arts cls) (doBindTo obj fromObj)
           _ ->
             edhSimpleDesc ets (EdhObject $ edh'obj'class fromObj) $ \ !badDesc ->
               -- note this seems not preventing cps exiting,
@@ -4178,7 +4174,7 @@ obtainEdhFragment :: Text -> EdhTxExit EdhValue -> EdhTx
 obtainEdhFragment !incSpec !exit =
   loadEdhFragment incSpec $ \(_moduName, !fragId, !srcCode, !stmts) !ets -> do
     let ExprSrc src'expr src'span = stmtsExpr stmts
-    u <- unsafeIOToSTM newUnique
+    u <- newRUID'STM
     exitEdh ets exit $
       EdhExpr
         (ExprDefi u src'expr (SrcLoc (SrcDoc fragId) src'span))
@@ -4721,7 +4717,7 @@ edhValueRepr !ets !val !exitRepr = case val of
         else edhProcessReprs ets ((\ !v -> (v, id)) <$> vs) $ \ !posReprs ->
           exitRepr $ "[ " <> T.concat ((<> ", ") <$> posReprs) <> "]"
   -- dict repr
-  EdhDict (Dict _ !ds) ->
+  EdhDict (Dict !ds) ->
     iopdToReverseList ds >>= \case
       [] -> exitRepr "{}"
       !entries -> reprDictCSR [] entries $
@@ -4875,7 +4871,7 @@ edhValueJson !ets !value !exitJson = valJson value exitJson
       EdhBool True -> exit "true"
       EdhBool False -> exit "false"
       EdhList (List _ !lv) -> readTVar lv >>= flip listJson exit
-      EdhDict (Dict _ !ds) -> iopdToList ds >>= flip dictJson exit
+      EdhDict (Dict !ds) -> iopdToList ds >>= flip dictJson exit
       EdhArgsPack (ArgsPack !args !kwargs) ->
         if null args
           then
@@ -5000,7 +4996,7 @@ evalExpr' (ExprWithSrc (ExprSrc !x !x'span) !sss) !docCmt !exit = \ !ets ->
                 edhValueRepr ets (edhDeCaseWrap val) $ \ !rs -> exit' rs
         curSrcLoc = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
     seqcontSTM (intplSrc <$> sss) $ \ !ssl -> do
-      !u <- unsafeIOToSTM newUnique
+      !u <- newRUID'STM
       exitEdh ets exit $
         EdhExpr (ExprDefi u x' curSrcLoc {src'range = x'span}) $ T.concat ssl
 evalExpr' (LitExpr !lit) _docCmt !exit =
@@ -5055,7 +5051,7 @@ evalExpr' (IfExpr !cond !cseq !alt) _docCmt !exit =
 evalExpr' (DictExpr !entries) _docCmt !exit = evalDictLit entries [] exit
 evalExpr' (ListExpr !xs) _docCmt !exit = evalExprs xs $ \ !l !ets -> do
   !ll <- newTVar l
-  !u <- unsafeIOToSTM newUnique
+  !u <- newRUID'STM
   exitEdh ets exit (EdhList $ List u ll)
 evalExpr' (ArgsPackExpr (ArgsPacker !argSenders _)) _docCmt !exit = \ !ets ->
   packEdhArgs ets argSenders $ \ !apk -> exitEdh ets exit $ EdhArgsPack apk
@@ -5163,7 +5159,7 @@ evalExpr' (IndexExpr !ixExpr !tgtExpr) _docCmt !exit =
     let !ixVal = edhDeCaseWrap ixV
      in evalExprSrc tgtExpr $ \ !tgtV -> case edhDeCaseWrap tgtV of
           -- indexing a dict
-          (EdhDict (Dict _ !d)) -> \ !ets ->
+          (EdhDict (Dict !d)) -> \ !ets ->
             lookupDictItem ixVal d >>= \case
               Nothing -> exitEdh ets exit nil
               Just !val -> exitEdh ets exit val
@@ -5291,12 +5287,12 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
                 ClassStore !cls ->
                   importInto
                     chkExtImp
-                    (edh'class'store cls)
+                    (edh'class'arts cls)
                     intoObj
                     argsRcvr
                     srcExpr
                     exit
-                HostStore !hsd -> case fromDynamic hsd of
+                HostStore !hsd -> case unwrapHostValue hsd of
                   Just (intoScope :: Scope) ->
                     importInto
                       chkExtImp
@@ -5344,7 +5340,7 @@ evalExpr' (DefaultExpr !maybeApk exprSrc@(ExprSrc !exprDef _)) _docCmt !exit =
                     UsageError
                     "you don't pass positional args for `effect default`"
       _ -> do
-        !u <- unsafeIOToSTM newUnique
+        !u <- newRUID'STM
         let withApk !apk =
               exitEdh ets exit $ EdhDefault u apk exprDef (Just ets)
         case maybeApk of
@@ -5378,21 +5374,21 @@ evalExpr'
           !nsClass = edh'obj'class $ edh'scope'this rootScope
           !metaClass = edh'obj'class nsClass
 
-      !idCls <- unsafeIOToSTM newUnique
+      !idCls <- newRUID'STM
       !cs <- iopdEmpty
       !ss <- newTVar []
       !mro <- newTVar []
       let allocatorProc :: ArgsPack -> EdhObjectAllocator
           allocatorProc !apkCtor !exitCtor !etsCtor = case argsRcvr of
             -- a normal class
-            NullaryReceiver -> exitCtor Nothing . HashStore =<< iopdEmpty
+            NullaryReceiver -> exitCtor . HashStore =<< iopdEmpty
             -- a data class
             _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
               dtcFieldKeys' ets argsRcvr $ \ !fks -> do
                 let dataFields = odFromList $
                       (<$> fks) $ \(fk, _prefix) ->
                         (fk, odLookupDefault edhNA fk dataAttrs)
-                exitCtor Nothing . HashStore
+                exitCtor . HashStore
                   =<< iopdFromList
                     [ ( AttrByName "__id__",
                         EdhArgsPack $ ArgsPack [EdhObject clsObj] dataFields
@@ -5408,7 +5404,7 @@ evalExpr'
                 edh'procedure'decl = pd
               }
           !cls = Class clsProc cs allocatorProc mro
-          !clsObj = Object idCls (ClassStore cls) metaClass ss
+          !clsObj = Object (ClassStore cls) metaClass ss
 
           doExit _rtn _ets =
             readTVar ss >>= fillClassMRO cls >>= \case
@@ -5628,7 +5624,7 @@ evalExpr' (MethodExpr HostDecl {}) _ _ =
   throwEdhTx EvalError "bug: eval host method decl"
 evalExpr' (MethodExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _ _)) !docCmt !exit =
   \ !ets -> resolveEdhAttrAddr ets addr $ \ !name -> do
-    !idProc <- unsafeIOToSTM newUnique
+    !idProc <- newRUID'STM
     let !mth =
           EdhMethod
             ProcDefi
@@ -5645,7 +5641,7 @@ evalExpr' (GeneratorExpr HostDecl {}) _ _ =
   throwEdhTx EvalError "bug: eval host method decl"
 evalExpr' (GeneratorExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _ _)) !docCmt !exit =
   \ !ets -> resolveEdhAttrAddr ets addr $ \ !name -> do
-    !idProc <- unsafeIOToSTM newUnique
+    !idProc <- newRUID'STM
     let !mth =
           EdhGnrtor
             ProcDefi
@@ -5662,7 +5658,7 @@ evalExpr' (InterpreterExpr HostDecl {}) _ _ =
   throwEdhTx EvalError "bug: eval host method decl"
 evalExpr' (InterpreterExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _ _)) !docCmt !exit =
   \ !ets -> resolveEdhAttrAddr ets addr $ \ !name -> do
-    !idProc <- unsafeIOToSTM newUnique
+    !idProc <- newRUID'STM
     let !mth =
           EdhIntrpr
             ProcDefi
@@ -5679,7 +5675,7 @@ evalExpr' (ProducerExpr HostDecl {}) _ _ =
   throwEdhTx EvalError "bug: eval host method decl"
 evalExpr' (ProducerExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _ _)) !docCmt !exit =
   \ !ets -> resolveEdhAttrAddr ets addr $ \ !name -> do
-    !idProc <- unsafeIOToSTM newUnique
+    !idProc <- newRUID'STM
     let !mth =
           EdhPrducr
             ProcDefi
@@ -6000,8 +5996,8 @@ evalInfixSrc'
                             exitEdh ets exit rtnVal
             -- @remind 3 pos-args - caller scope + lh/rh expr receiving operator
             (PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}] _) -> do
-              !lhu <- unsafeIOToSTM newUnique
-              !rhu <- unsafeIOToSTM newUnique
+              !lhu <- newRUID'STM
+              !rhu <- newRUID'STM
               !scopeWrapper <- mkScopeWrapper ets scope
               runEdhTx ets $
                 callEdhOperator
@@ -6241,7 +6237,7 @@ defineOperator
         defineScopeAttr ets (AttrByName opSym) opVal
         exitEdh ets exit opVal
       defineEdhOp = do
-        !idProc <- unsafeIOToSTM newUnique
+        !idProc <- newRUID'STM
         let !op =
               EdhOprtor
                 opFixity
@@ -6292,7 +6288,7 @@ edhValueNull _ (EdhDecimal d) !exit = exit $ D.decimalIsNaN d || d == 0
 edhValueNull _ (EdhBool b) !exit = exit $ not b
 edhValueNull _ (EdhString s) !exit = exit $ T.null s
 edhValueNull _ (EdhSymbol _) !exit = exit False
-edhValueNull _ (EdhDict (Dict _ ds)) !exit = iopdNull ds >>= exit
+edhValueNull _ (EdhDict (Dict ds)) !exit = iopdNull ds >>= exit
 edhValueNull _ (EdhList (List _ l)) !exit = readTVar l >>= exit . null
 edhValueNull _ (EdhArgsPack (ArgsPack args kwargs)) !exit =
   exit $ null args && odNull kwargs
@@ -6367,8 +6363,8 @@ edhValueEqual !ets !lhVal !rhVal !exitEq =
           !rhl <- readTVar rhll
           edhListEq ets lhl rhl exitEq
         _ -> exitEq $ Just False
-      EdhDict (Dict _ !lhd) -> case rhv of
-        EdhDict (Dict _ !rhd) -> do
+      EdhDict (Dict !lhd) -> case rhv of
+        EdhDict (Dict !rhd) -> do
           !lhl <- iopdToList lhd
           !rhl <- iopdToList rhd
           -- regenerate the entry lists with HashMap to elide diffs in
@@ -7156,7 +7152,7 @@ mkHostClass' ::
   [Object] ->
   STM Object
 mkHostClass' !scope !className !allocator !classStore !superClasses = do
-  !idCls <- unsafeIOToSTM newUnique
+  !idCls <- newRUID'STM
   !ssCls <- newTVar superClasses
   !mroCls <- newTVar []
   let !clsProc =
@@ -7167,7 +7163,7 @@ mkHostClass' !scope !className !allocator !classStore !superClasses = do
           NoDocCmt
           (HostDecl fakeHostProc)
       !cls = Class clsProc classStore allocator mroCls
-      !clsObj = Object idCls (ClassStore cls) metaClassObj ssCls
+      !clsObj = Object (ClassStore cls) metaClassObj ssCls
   !mroInvalid <- fillClassMRO cls superClasses
   unless (T.null mroInvalid) $
     throwSTM $
@@ -7193,7 +7189,7 @@ mkHostClass ::
   STM Object
 mkHostClass !scope !className !allocator !superClasses !storeMod = do
   !classStore <- iopdEmpty
-  !idCls <- unsafeIOToSTM newUnique
+  !idCls <- newRUID'STM
   !ssCls <- newTVar superClasses
   !mroCls <- newTVar []
   let !clsProc =
@@ -7204,7 +7200,7 @@ mkHostClass !scope !className !allocator !superClasses !storeMod = do
           NoDocCmt
           (HostDecl fakeHostProc)
       !cls = Class clsProc classStore allocator mroCls
-      !clsObj = Object idCls (ClassStore cls) metaClassObj ssCls
+      !clsObj = Object (ClassStore cls) metaClassObj ssCls
       !clsScope =
         scope
           { edh'scope'entity = classStore,
@@ -7284,12 +7280,11 @@ mkScopeSandbox !ets !origScope !exit =
 
 newSandbox :: EdhThreadState -> STM Scope
 newSandbox !ets = do
-  !u <- unsafeIOToSTM newUnique
+  !u <- newRUID'STM
   !es <- iopdEmpty
   let newSbObj =
         (edh'scope'this sbScope)
-          { edh'obj'ident = u,
-            edh'obj'store = HashStore es
+          { edh'obj'store = HashStore es
           }
       newSbProc = sbProc {edh'procedure'ident = u}
   return

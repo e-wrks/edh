@@ -14,13 +14,12 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.UUID as UUID
-import Data.Unique
-import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
 import Language.Edh.Batteries.InterOp
 import Language.Edh.Control
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
+import Language.Edh.RUID
 import Language.Edh.RtTypes
 import Prelude
 
@@ -101,7 +100,7 @@ rngUpperProc _val _exit = throwEdhTx EvalError "not a range"
 propertyProc :: EdhValue -> Maybe EdhValue -> EdhHostProc
 propertyProc !getterVal !setterVal !exit !ets =
   case edh'obj'store caller'this of
-    ClassStore !cls -> defProp (edh'class'store cls)
+    ClassStore !cls -> defProp (edh'class'arts cls)
     HashStore !hs -> defProp hs
     _ -> throwEdh ets UsageError "can not define property for a host object"
   where
@@ -142,7 +141,7 @@ propertyProc !getterVal !setterVal !exit !ets =
 
 setterProc :: EdhValue -> EdhHostProc
 setterProc !setterVal !exit !ets = case edh'obj'store caller'this of
-  ClassStore !cls -> defProp (edh'class'store cls)
+  ClassStore !cls -> defProp (edh'class'arts cls)
   HashStore !hs -> defProp hs
   _ -> throwEdh ets UsageError "can not define property for a host object"
   where
@@ -561,7 +560,7 @@ lenProc !v !kwargs !exit !ets = case edhUltimate v of
     {- HLINT ignore "Redundant <$>" -}
     length <$> readTVar lv >>= \ !llen ->
       exitEdh ets exit $ EdhDecimal $ fromIntegral llen
-  EdhDict (Dict _ !ds) ->
+  EdhDict (Dict !ds) ->
     iopdSize ds
       >>= \ !dlen -> exitEdh ets exit $ EdhDecimal $ fromIntegral dlen
   EdhArgsPack (ArgsPack !posArgs _kwArgs) ->
@@ -708,19 +707,18 @@ dictProc (ArgsPack !args !kwargs) !exit !ets = do
   flip iopdUpdate ds $
     {- HLINT ignore "Use first" -}
     (<$> odToList kwargs) $ \(key, val) -> (attrKeyValue key, val)
-  !u <- unsafeIOToSTM newUnique
-  exitEdh ets exit (EdhDict (Dict u ds))
+  exitEdh ets exit (EdhDict (Dict ds))
 
 dictSizeProc :: Dict -> EdhHostProc
-dictSizeProc (Dict _ !ds) !exit !ets =
+dictSizeProc (Dict !ds) !exit !ets =
   exitEdh ets exit . EdhDecimal . fromIntegral =<< iopdSize ds
 
 dictKeysProc :: Dict -> EdhHostProc
-dictKeysProc (Dict _ !ds) !exit !ets =
+dictKeysProc (Dict !ds) !exit !ets =
   exitEdh ets exit . EdhArgsPack . flip ArgsPack odEmpty =<< iopdKeys ds
 
 dictValuesProc :: Dict -> EdhHostProc
-dictValuesProc (Dict _ !ds) !exit !ets =
+dictValuesProc (Dict !ds) !exit !ets =
   exitEdh ets exit . EdhArgsPack . flip ArgsPack odEmpty =<< iopdValues ds
 
 listPushProc :: List -> EdhHostProc
@@ -751,7 +749,7 @@ listReverseProc l@(List _ !lv) !exit !ets = do
 
 listCopyProc :: List -> EdhHostProc
 listCopyProc (List _ !lv) !exit !ets = do
-  !u <- unsafeIOToSTM newUnique
+  !u <- newRUID'STM
   !lv' <- newTVar =<< readTVar lv
   exitEdh ets exit $ EdhList $ List u lv'
 
@@ -782,7 +780,7 @@ prpdProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
           EdhList (List _ !l) -> \ !ets -> do
             modifyTVar' l (lhv :)
             exitEdh ets exit rhVal
-          EdhDict (Dict _ !ds) -> \ !ets -> val2DictEntry ets lhv $ \(k, v) -> do
+          EdhDict (Dict !ds) -> \ !ets -> val2DictEntry ets lhv $ \(k, v) -> do
             setDictItem k v ds
             exitEdh ets exit rhVal
           _ -> exitEdhTx exit edhNA
@@ -902,7 +900,7 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
             ( \_iterVal !runLoop ->
                 runEdhTx ets $ runLoop $ \_ -> exitEdhTx exit lhVal
             )
-        EdhDict (Dict _ !d) ->
+        EdhDict (Dict !d) ->
           edhPrepareForLoop
             ets
             scoped
@@ -950,7 +948,7 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
         EdhList (List _ !l) -> do
           !ll <- readTVar l
           exitEdh ets exit (EdhArgsPack $ ArgsPack (vs ++ ll) kwvs)
-        EdhDict (Dict _ !ds) ->
+        EdhDict (Dict !ds) ->
           dictEntryList ds >>= \ !del ->
             exitEdh ets exit (EdhArgsPack $ ArgsPack (vs ++ del) kwvs)
         _ -> exitEdh ets exit edhNA
@@ -962,12 +960,12 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
           !ll <- readTVar l'
           modifyTVar' l (++ ll)
           exitEdh ets exit lhVal
-        EdhDict (Dict _ !ds) ->
+        EdhDict (Dict !ds) ->
           dictEntryList ds >>= \ !del -> do
             modifyTVar' l (++ del)
             exitEdh ets exit lhVal
         _ -> exitEdh ets exit edhNA
-      EdhDict (Dict _ !ds) -> case edhUltimate rhVal of
+      EdhDict (Dict !ds) -> case edhUltimate rhVal of
         EdhArgsPack (ArgsPack _ !kwargs) -> do
           iopdUpdate [(attrKeyValue k, v) | (k, v) <- odToList kwargs] ds
           exitEdh ets exit lhVal
@@ -976,7 +974,7 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
           pvlToDictEntries ets ll $ \ !del -> do
             iopdUpdate del ds
             exitEdh ets exit lhVal
-        EdhDict (Dict _ !ds') -> do
+        EdhDict (Dict !ds') -> do
           flip iopdUpdate ds =<< iopdToList ds'
           exitEdh ets exit lhVal
         _ -> exitEdh ets exit edhNA

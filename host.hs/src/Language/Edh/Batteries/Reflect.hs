@@ -8,12 +8,11 @@ import Control.Monad
 import Data.Dynamic
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Unique
-import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
 import Language.Edh.Control
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
+import Language.Edh.RUID
 import Language.Edh.RtTypes
 import Text.Megaparsec (errorBundlePretty)
 import Prelude
@@ -91,12 +90,12 @@ supersProc (ArgsPack !args !kwargs) !exit !ets = do
 sandboxProc :: "origObj" !: Object -> EdhHostProc
 sandboxProc (mandatoryArg -> !origObj) !exit !ets =
   case edh'obj'store origObj of
-    HostStore !hsd -> case fromDynamic hsd of
+    HostStore !hsd -> case unwrapHostValue hsd of
       Just (scope :: Scope) -> mkScopeSandbox ets scope $ \ !sbScope ->
         exitEdh ets exit $
           EdhObject $
             origObj
-              { edh'obj'store = HostStore $ toDyn sbScope
+              { edh'obj'store = HostStore $ wrapHostValue sbScope
               }
       Nothing -> goObj
     _ -> goObj
@@ -122,7 +121,7 @@ makeOpProc !args !exit = case args of
     EdhExpr (ExprDefi _ !rhe _rh'span) _
     ] ->
       \ !ets -> do
-        !xu <- unsafeIOToSTM newUnique
+        !xu <- newRUID'STM
         exitEdh ets exit $
           EdhExpr
             ( ExprDefi
@@ -158,7 +157,7 @@ parseEdhProc
               edhWrapException (Just ets) (toException edhErr)
                 >>= \ !exo -> edhThrow ets (EdhObject exo)
           Right (!stmts, _docCmt) -> do
-            !u <- newUnique
+            !u <- newRUID
             atomically $
               exitEdh ets exit $
                 EdhExpr

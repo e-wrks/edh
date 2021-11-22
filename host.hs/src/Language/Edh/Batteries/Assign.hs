@@ -21,7 +21,7 @@ assignProc (ExprSrc !lhe _) !rhExpr !exit !ets =
         let !rhv = edhDeCaseWrap rhVal
         evalExprSrc tgtExpr $ \ !tgtVal _ets -> case edhUltimate tgtVal of
           -- indexing assign to a dict
-          EdhDict (Dict _ !ds) -> do
+          EdhDict (Dict  !ds) -> do
             setDictItem ixVal rhv ds
             exitEdh ets exit rhv
 
@@ -76,7 +76,7 @@ assignWithOpProc !withOpSym lhExpr@(ExprSrc !lhe _) !rhExpr !exit !ets =
         let !rhv = edhDeCaseWrap rhVal
         evalExprSrc tgtExpr $ \ !tgtVal _ets -> case edhUltimate tgtVal of
           -- indexing assign to a dict
-          EdhDict (Dict _ !ds) ->
+          EdhDict (Dict  !ds) ->
             iopdLookupDefault EdhNil ixVal ds >>= \ !dVal ->
               runEdhTx ets $
                 evalInfix

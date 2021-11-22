@@ -32,6 +32,7 @@ library
     Language.Edh.IOPD
     Language.Edh.PkgMan
     Language.Edh.RtTypes
+    Language.Edh.RUID
     Language.Edh.Utils
     Language.Edh.Sink
     Language.Edh.InterOpM

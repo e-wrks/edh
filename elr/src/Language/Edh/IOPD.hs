@@ -11,6 +11,7 @@ import qualified Data.Vector as V
 import Data.Vector.Mutable (IOVector)
 import qualified Data.Vector.Mutable as MV
 import GHC.Conc (unsafeIOToSTM)
+import Language.Edh.RUID
 import Prelude
 
 -- | A type with some value(s) triggering deletion semantics
@@ -32,18 +33,26 @@ instance {-# OVERLAPPABLE #-} Deletable t where
 data IOPD k v where
   IOPD ::
     (Eq k, Hashable k, Deletable v) =>
-    { iopd'map :: {-# UNPACK #-} !(TVar (Map.HashMap k Int)),
-      iopd'write'pos :: {-# UNPACK #-} !(TVar Int),
-      iopd'num'holes :: {-# UNPACK #-} !(TVar Int),
-      -- use IOVector concerning immutable Vector to crash the program
+    { iopd'ident :: !RUID,
+      iopd'map :: !(TVar (Map.HashMap k Int)),
+      iopd'write'pos :: !(TVar Int),
+      iopd'num'holes :: !(TVar Int),
+      -- use a mutable 'IOVector' instead of immutable 'Vector',
+      -- to avoid crashing likewise:
       -- https://mail.haskell.org/pipermail/glasgow-haskell-users/2020-August/026947.html
-      iopd'array :: {-# UNPACK #-} !(TVar (IOVector (TVar (Maybe (k, v)))))
+      iopd'array :: !(TVar (IOVector (TVar (Maybe (k, v)))))
     } ->
     IOPD k v
 
+instance Eq (IOPD k v) where
+  x == y = iopd'ident x == iopd'ident y
+
+instance Hashable (IOPD k v) where
+  hashWithSalt s d = s `hashWithSalt` iopd'ident d
+
 iopdClone ::
   forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> STM (IOPD k v)
-iopdClone (IOPD !mv !wpv !nhv !av) = do
+iopdClone (IOPD _did !mv !wpv !nhv !av) = do
   !mv' <- newTVar =<< readTVar mv
   !wpv' <- newTVar =<< readTVar wpv
   !nhv' <- newTVar =<< readTVar nhv
@@ -51,7 +60,8 @@ iopdClone (IOPD !mv !wpv !nhv !av) = do
     newTVar =<< do
       !a <- readTVar av
       unsafeIOToSTM $ MV.clone a
-  return $ IOPD mv' wpv' nhv' av'
+  !did' <- newRUID'STM
+  return $ IOPD did' mv' wpv' nhv' av'
 
 iopdTransform ::
   forall k v v'.
@@ -59,7 +69,7 @@ iopdTransform ::
   (v -> v') ->
   IOPD k v ->
   STM (IOPD k v')
-iopdTransform !trans (IOPD !mv !wpv !nhv !av) = do
+iopdTransform !trans (IOPD _did !mv !wpv !nhv !av) = do
   !mv' <- newTVar =<< readTVar mv
   !wp <- readTVar wpv
   !wpv' <- newTVar wp
@@ -79,15 +89,17 @@ iopdTransform !trans (IOPD !mv !wpv !nhv !av) = do
                   >>= unsafeIOToSTM . MV.unsafeWrite a' i
             go (i - 1)
       go (wp - 1)
-  return $ IOPD mv' wpv' nhv' av'
+  !did' <- newRUID'STM
+  return $ IOPD did' mv' wpv' nhv' av'
 
 iopdEmptyIO :: forall k v. (Eq k, Hashable k, Deletable v) => IO (IOPD k v)
 iopdEmptyIO = do
+  !did <- newRUID
   !mv <- newTVarIO Map.empty
   !wpv <- newTVarIO 0
   !nhv <- newTVarIO 0
   !av <- newTVarIO =<< MV.unsafeNew 0
-  return $ IOPD mv wpv nhv av
+  return $ IOPD did mv wpv nhv av
 
 iopdEmpty :: forall k v. (Eq k, Hashable k, Deletable v) => STM (IOPD k v)
 iopdEmpty = do
@@ -95,16 +107,17 @@ iopdEmpty = do
   !wpv <- newTVar 0
   !nhv <- newTVar 0
   !av <- newTVar =<< unsafeIOToSTM (MV.unsafeNew 0)
-  return $ IOPD mv wpv nhv av
+  !did <- newRUID'STM
+  return $ IOPD did mv wpv nhv av
 
 iopdNull :: forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> STM Bool
-iopdNull (IOPD _mv !wpv !nhv _av) = do
+iopdNull (IOPD _did _mv !wpv !nhv _av) = do
   !wp <- readTVar wpv
   !nh <- readTVar nhv
   return (wp - nh <= 0)
 
 iopdSize :: forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> STM Int
-iopdSize (IOPD _mv !wpv !nhv _av) = do
+iopdSize (IOPD _did _mv !wpv !nhv _av) = do
   !wp <- readTVar wpv
   !nh <- readTVar nhv
   return $ wp - nh
@@ -126,7 +139,7 @@ iopdInsert' ::
   v ->
   IOPD k v ->
   STM ()
-iopdInsert' !keyMap !key !val d@(IOPD !mv !wpv _nhv !av) =
+iopdInsert' !keyMap !key !val d@(IOPD _did !mv !wpv _nhv !av) =
   if impliesDeletionAtRHS val
     then iopdDelete' keyMap key d
     else doInsert
@@ -154,7 +167,7 @@ iopdInsert' !keyMap !key !val d@(IOPD !mv !wpv _nhv !av) =
 
 iopdReserve ::
   forall k v. (Eq k, Hashable k, Deletable v) => Int -> IOPD k v -> STM ()
-iopdReserve !moreCap (IOPD _mv !wpv _nhv !av) = do
+iopdReserve !moreCap (IOPD _did _mv !wpv _nhv !av) = do
   !wp <- readTVar wpv
   !a <- readTVar av
   let !needCap = wp + moreCap
@@ -210,7 +223,7 @@ iopdLookup' ::
   k ->
   IOPD k v ->
   STM (Maybe v)
-iopdLookup' !keyMap !key (IOPD !mv _wpv _nhv !av) =
+iopdLookup' !keyMap !key (IOPD _did !mv _wpv _nhv !av) =
   keyMap key >>= \ !key' ->
     Map.lookup key' <$> readTVar mv >>= \case
       Nothing -> return Nothing
@@ -256,7 +269,7 @@ iopdDelete' ::
   k ->
   IOPD k v ->
   STM ()
-iopdDelete' !keyMap !key (IOPD !mv _wpv !nhv !av) =
+iopdDelete' !keyMap !key (IOPD _did !mv _wpv !nhv !av) =
   keyMap key >>= \ !key' ->
     Map.lookup key' <$> readTVar mv >>= \case
       Nothing -> return ()
@@ -266,7 +279,7 @@ iopdDelete' !keyMap !key (IOPD !mv _wpv !nhv !av) =
         modifyTVar' nhv (+ 1)
 
 iopdKeys :: forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> STM [k]
-iopdKeys (IOPD _mv !wpv _nhv !av) = do
+iopdKeys (IOPD _did _mv !wpv _nhv !av) = do
   !wp <- readTVar wpv
   !a <- readTVar av
   let go !keys !i | i < 0 = return keys
@@ -277,7 +290,7 @@ iopdKeys (IOPD _mv !wpv _nhv !av) = do
   go [] (wp - 1)
 
 iopdValues :: forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> STM [v]
-iopdValues (IOPD _mv !wpv _nhv !av) = do
+iopdValues (IOPD _did _mv !wpv _nhv !av) = do
   !wp <- readTVar wpv
   !a <- readTVar av
   let go !vals !i | i < 0 = return vals
@@ -289,7 +302,7 @@ iopdValues (IOPD _mv !wpv _nhv !av) = do
 
 iopdToList ::
   forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> STM [(k, v)]
-iopdToList (IOPD _mv !wpv _nhv !av) = do
+iopdToList (IOPD _did _mv !wpv _nhv !av) = do
   !wp <- readTVar wpv
   !a <- readTVar av
   let go !entries !i | i < 0 = return entries
@@ -301,7 +314,7 @@ iopdToList (IOPD _mv !wpv _nhv !av) = do
 
 iopdToReverseList ::
   forall k v. (Eq k, Hashable k, Deletable v) => IOPD k v -> STM [(k, v)]
-iopdToReverseList (IOPD _mv !wpv _nhv !av) = do
+iopdToReverseList (IOPD _did _mv !wpv _nhv !av) = do
   !wp <- readTVar wpv
   !a <- readTVar av
   let go !entries !i | i >= wp = return entries
@@ -354,14 +367,15 @@ iopdFromList' !keyMap !entries = do
   !wpv <- newTVar wpNew
   !nhv <- newTVar nhNew
   !av <- newTVar aNew
-  return $ IOPD mv wpv nhv av
+  !did <- newRUID'STM
+  return $ IOPD did mv wpv nhv av
 
 iopdSnapshot ::
   forall k v.
   (Eq k, Hashable k, Deletable v) =>
   IOPD k v ->
   STM (OrderedDict k v)
-iopdSnapshot (IOPD !mv !wpv _nhv !av) = do
+iopdSnapshot (IOPD _did !mv !wpv _nhv !av) = do
   !m <- readTVar mv
   !wp <- readTVar wpv
   !a <- readTVar av

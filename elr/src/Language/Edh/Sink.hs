@@ -7,9 +7,8 @@ import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
 import Data.Dynamic
-import Data.Unique
-import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Control
+import Language.Edh.RUID
 import Language.Edh.RtTypes
 import Prelude
 
@@ -20,7 +19,7 @@ newSink = newSink' True
 -- | Create a new event sink with lingering or not specified
 newSink' :: Bool -> STM Sink
 newSink' !lingering = do
-  !u <- unsafeIOToSTM newUnique
+  !u <- newRUID'STM
   !mrv <-
     if lingering
       then Just <$> newTVar nil

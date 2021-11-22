@@ -600,7 +600,7 @@ inRangeProc inverse eqTester !lhExpr !rhExpr !exit !ets = runEdhTx ets $
                   Just {} -> exitEdh ets exit $ EdhBool $ inverse True
               else chkInList lhVal vs
           EdhList (List _u !lv) -> readTVar lv >>= chkInList lhVal
-          EdhDict (Dict _ !ds) ->
+          EdhDict (Dict  !ds) ->
             iopdLookup lhVal ds >>= \case
               Nothing -> exitEdh ets exit $ EdhBool $ inverse False
               Just {} -> exitEdh ets exit $ EdhBool $ inverse True

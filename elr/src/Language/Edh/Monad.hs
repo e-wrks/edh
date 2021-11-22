@@ -16,11 +16,11 @@ import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Unique
-import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Control
 import Language.Edh.CoreLang
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
+import Language.Edh.RUID
 import Language.Edh.RtTypes
 import Prelude
 
@@ -297,7 +297,7 @@ edhValueAsAttrKeyM !keyVal = case edhUltimate keyVal of
 prepareExpStoreM :: Object -> Edh EntityStore
 prepareExpStoreM !fromObj = case edh'obj'store fromObj of
   HashStore !tgtEnt -> fromStore tgtEnt
-  ClassStore !cls -> fromStore $ edh'class'store cls
+  ClassStore !cls -> fromStore $ edh'class'arts cls
   HostStore _ ->
     naM $
       "no way exporting with a host object of class " <> objClassName fromObj
@@ -507,14 +507,10 @@ writeIORefEdh :: forall a. IORef a -> a -> Edh ()
 writeIORefEdh ref v = liftIO $ writeIORef ref v
 {-# INLINE writeIORefEdh #-}
 
--- | 'newUnique' lifted into 'Edh' monad
-newUniqueEdh :: Edh Unique
--- todo: safer impl. ?
--- note: liftIO/edhContIO here will break `ai` transactions if specified by
---       scripting code, there sure be scenarios in need of new Unique id(s)
---       but too bad to sacrifice `ai`-ability
-newUniqueEdh = inlineSTM $ unsafeIOToSTM newUnique
-{-# INLINE newUniqueEdh #-}
+-- | 'newRUID\'STM' lifted into 'Edh' monad
+newRUID'Edh :: Edh RUID
+newRUID'Edh = inlineSTM newRUID'STM
+{-# INLINE newRUID'Edh #-}
 
 -- | The 'IOPD' action lifted into 'Edh' monad
 iopdCloneEdh ::
@@ -866,9 +862,10 @@ mutCloneObjectM !endObj !mutObj !newStore = Edh $ \_naExit !exit !ets ->
 -- intact as prototype based super
 --
 -- todo maybe check new storage data type matches the old one?
-mutCloneHostObjectM :: (Typeable h) => Object -> Object -> h -> Edh Object
+mutCloneHostObjectM ::
+  forall v. (Eq v, Hashable v, Typeable v) => Object -> Object -> v -> Edh Object
 mutCloneHostObjectM !endObj !mutObj =
-  mutCloneObjectM endObj mutObj . HostStore . toDyn
+  mutCloneObjectM endObj mutObj . HostStore . wrapHostValue
 
 -- | Parse an @Edh@ value as an index in @Edh@ semantics
 parseEdhIndexM :: EdhValue -> Edh (Either ErrMessage EdhIndex)
@@ -909,25 +906,50 @@ throwHostM = inlineSTM . throwSTM
 
 -- ** Artifacts Making
 
--- | Wrap an arbitrary Haskell value as an @Edh@ object
-wrapM :: Typeable t => t -> Edh Object
+-- | Wrap an identifiable Haskell value as an @Edh@ object
+wrapM :: forall v. (Eq v, Hashable v, Typeable v) => v -> Edh Object
 wrapM t = do
   !ets <- edhThreadState
   let world = edh'prog'world $ edh'thread'prog ets
       edhWrapValue = edh'value'wrapper world Nothing
-  inlineSTM $ edhWrapValue $ toDyn t
+  inlineSTM $ edhWrapValue $ wrapHostValue t
 
--- | Wrap an arbitrary Haskell value as an @Edh@ object, with custom type name
-wrapM' :: Typeable t => Text -> t -> Edh Object
+-- | Wrap an identifiable Haskell value as an @Edh@ object, with custom type
+-- name
+wrapM' :: forall v. (Eq v, Hashable v, Typeable v) => Text -> v -> Edh Object
 wrapM' !repr t = do
   !ets <- edhThreadState
   let world = edh'prog'world $ edh'thread'prog ets
       edhWrapValue = edh'value'wrapper world (Just repr)
-  inlineSTM $ edhWrapValue $ toDyn t
+  inlineSTM $ edhWrapValue $ wrapHostValue t
+
+-- | Wrap an arbitrary Haskell value as an @Edh@ object
+wrapArbiM :: forall v. (Typeable v) => v -> Edh Object
+wrapArbiM t = do
+  !ets <- edhThreadState
+  let world = edh'prog'world $ edh'thread'prog ets
+      edhWrapValue = edh'value'wrapper world Nothing
+  inlineSTM $ wrapArbiHostValue t >>= edhWrapValue
 
 -- | Wrap an arbitrary Haskell value as an @Edh@ object, with custom type name
-wrapM'' :: Text -> Dynamic -> Edh Object
-wrapM'' !repr !dd = do
+wrapArbiM' :: forall v. (Typeable v) => Text -> v -> Edh Object
+wrapArbiM' !repr t = do
+  !ets <- edhThreadState
+  let world = edh'prog'world $ edh'thread'prog ets
+      edhWrapValue = edh'value'wrapper world (Just repr)
+  inlineSTM $ wrapArbiHostValue t >>= edhWrapValue
+
+-- | Wrap an arbitrary Haskell value as an @Edh@ object
+wrapHostM :: HostValue -> Edh Object
+wrapHostM !dd = do
+  !ets <- edhThreadState
+  let world = edh'prog'world $ edh'thread'prog ets
+      edhWrapValue = edh'value'wrapper world Nothing
+  inlineSTM $ edhWrapValue dd
+
+-- | Wrap an arbitrary Haskell value as an @Edh@ object, with custom type name
+wrapHostM' :: Text -> HostValue -> Edh Object
+wrapHostM' !repr !dd = do
   !ets <- edhThreadState
   let world = edh'prog'world $ edh'thread'prog ets
       edhWrapValue = edh'value'wrapper world (Just repr)
@@ -943,8 +965,9 @@ wrapScopeM s = Edh $ \_naExit !exit !ets -> do
 --
 -- note the caller is responsible to make sure the supplied host data
 -- is compatible with the class
-createHostObjectM :: forall t. Typeable t => Object -> t -> Edh Object
-createHostObjectM !clsObj !d = createHostObjectM' clsObj (toDyn d) []
+createHostObjectM ::
+  forall v. (Eq v, Hashable v, Typeable v) => Object -> v -> Edh Object
+createHostObjectM !clsObj !d = createHostObjectM' clsObj (wrapHostValue d) []
 
 -- | Create an Edh host object from the specified class, host storage data and
 -- list of super objects.
@@ -952,11 +975,10 @@ createHostObjectM !clsObj !d = createHostObjectM' clsObj (toDyn d) []
 -- note the caller is responsible to make sure the supplied host storage data
 -- is compatible with the class, the super objects are compatible with the
 -- class' mro.
-createHostObjectM' :: Object -> Dynamic -> [Object] -> Edh Object
+createHostObjectM' :: Object -> HostValue -> [Object] -> Edh Object
 createHostObjectM' !clsObj !hsd !supers = do
-  !oid <- newUniqueEdh
   !ss <- newTVarEdh supers
-  return $ Object oid (HostStore hsd) clsObj ss
+  return $ Object (HostStore hsd) clsObj ss
 
 -- | Give birth to a symbol value
 --
@@ -976,7 +998,7 @@ mkEdhProc ::
   Edh EdhValue
 mkEdhProc !vc !nm (!p, _args) = do
   !ets <- edhThreadState
-  !u <- newUniqueEdh
+  !u <- newRUID'Edh
   return $
     EdhProcedure
       ( vc
@@ -991,19 +1013,19 @@ mkEdhProc !vc !nm (!p, _args) = do
       )
       Nothing
 
--- | Use the arguments-pack taking @'Edh' ('Maybe' 'Unique', 'ObjectStore')@
--- action as the object allocator, and the @'Edh' ()@ action as class
--- initialization procedure, to create an @Edh@ class.
+-- | Use the arguments-pack taking @'Edh' 'ObjectStore'@ action as the object
+-- allocator, and the @'Edh' ()@ action as class initialization procedure, to
+-- create an @Edh@ class.
 mkEdhClass ::
   AttrName ->
-  (ArgsPack -> Edh (Maybe Unique, ObjectStore)) ->
+  (ArgsPack -> Edh ObjectStore) ->
   [Object] ->
   Edh () ->
   Edh Object
 mkEdhClass !clsName !allocator !superClasses !clsBody = do
   !ets <- edhThreadState
   !classStore <- inlineSTM iopdEmpty
-  !idCls <- newUniqueEdh
+  !idCls <- newRUID'Edh
   !ssCls <- newTVarEdh superClasses
   !mroCls <- newTVarEdh []
   let !scope = contextScope $ edh'context ets
@@ -1017,7 +1039,7 @@ mkEdhClass !clsName !allocator !superClasses !clsBody = do
           NoDocCmt
           (HostDecl fakeHostProc)
       !cls = Class clsProc classStore allocator' mroCls
-      !clsObj = Object idCls (ClassStore cls) metaClassObj ssCls
+      !clsObj = Object (ClassStore cls) metaClassObj ssCls
       !clsScope =
         scope
           { edh'scope'entity = classStore,
@@ -1039,7 +1061,7 @@ mkEdhClass !clsName !allocator !superClasses !clsBody = do
       unEdh
         (allocator apk)
         rptEdhNotApplicable
-        (\(maybeIdent, oStore) _ets -> ctorExit maybeIdent oStore)
+        (\oStore _ets -> ctorExit oStore)
         ets
 
 -- | Define an @Edh@ artifact into current scope
@@ -1102,7 +1124,7 @@ defEdhProc !vc !nm !hp = do
 -- Note pure and exporting semantics are honored.
 defEdhClass_ ::
   AttrName ->
-  (ArgsPack -> Edh (Maybe Unique, ObjectStore)) ->
+  (ArgsPack -> Edh ObjectStore) ->
   [Object] ->
   Edh () ->
   Edh ()
@@ -1114,7 +1136,7 @@ defEdhClass_ !clsName !allocator !superClasses !clsBody =
 -- Note pure and exporting semantics are honored.
 defEdhClass ::
   AttrName ->
-  (ArgsPack -> Edh (Maybe Unique, ObjectStore)) ->
+  (ArgsPack -> Edh ObjectStore) ->
   [Object] ->
   Edh () ->
   Edh Object

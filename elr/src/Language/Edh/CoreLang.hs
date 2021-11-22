@@ -265,7 +265,7 @@ lookupEdhSelfAttr !obj !key = case edh'obj'store obj of
       Just !v -> return v
       Nothing -> lookupFromClass
   ClassStore !cls ->
-    iopdLookup key (edh'class'store cls) >>= \case
+    iopdLookup key (edh'class'arts cls) >>= \case
       Just !v -> return v
       Nothing -> lookupFromClass
   where
@@ -274,7 +274,7 @@ lookupEdhSelfAttr !obj !key = case edh'obj'store obj of
         then return EdhNil -- reached ultimate meta class of the world
         else case edh'obj'store clsObj of
           ClassStore !cls ->
-            iopdLookup key (edh'class'store cls) >>= \case
+            iopdLookup key (edh'class'arts cls) >>= \case
               Just !v -> return v
               Nothing -> return EdhNil -- don't resort to meta class here
           _ -> return EdhNil -- todo should complain loudly here?
@@ -300,7 +300,7 @@ lookupEdhSelfMagic !obj !key = case edh'obj'store obj of
   where
     lookupFromClass = case edh'obj'store clsObj of
       ClassStore !cls ->
-        iopdLookup key (edh'class'store cls) >>= \case
+        iopdLookup key (edh'class'arts cls) >>= \case
           Just !v -> return v
           Nothing -> return EdhNil -- don't resort to meta class here
       _ -> return EdhNil -- todo should complain loudly here?

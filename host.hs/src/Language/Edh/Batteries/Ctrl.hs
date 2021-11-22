@@ -9,15 +9,14 @@ import Control.Exception
   ( Exception (fromException, toException),
     SomeException,
   )
-import Data.Dynamic (fromDynamic)
 import Data.Maybe (catMaybes)
 import qualified Data.Text as T
-import Data.Unique (newUnique)
 import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Control
 import Language.Edh.CoreLang
 import Language.Edh.Evaluate
 import Language.Edh.IOPD (iopdUpdate, odEmpty, odNull)
+import Language.Edh.RUID
 import Language.Edh.RtTypes
 import Prelude
 
@@ -100,7 +99,7 @@ catchProc !tryExpr !catchExpr !exit !etsOuter = do
       !throwerThId <- unsafeIOToSTM myThreadId
       let !isThreadTerminate = case exv of
             EdhObject !exo -> case edh'obj'store exo of
-              HostStore !hsd -> case fromDynamic hsd of
+              HostStore !hsd -> case unwrapArbiHostValue hsd of
                 Just (e :: SomeException) -> case fromException e of
                   Just ThreadTerminate -> True
                   _ -> False
@@ -167,7 +166,7 @@ arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
   methodArrowArgsReceiver (deParen'1 lhExpr) $ \case
     Left !err -> throwEdh ets UsageError err
     Right !argsRcvr -> do
-      !idProc <- unsafeIOToSTM newUnique
+      !idProc <- newRUID'STM
       let !pd =
             ProcDecl
               ( AttrAddrSrc
@@ -245,7 +244,7 @@ prodArrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
   producerArrowArgsReceiver (deParen'1 lhExpr) $ \case
     Left !err -> throwEdh ets UsageError err
     Right !argsRcvr -> do
-      !idProc <- unsafeIOToSTM newUnique
+      !idProc <- newRUID'STM
       let !pd =
             ProcDecl
               ( AttrAddrSrc
@@ -485,7 +484,7 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                     readTVar l >>= \case
                       (h : rest) -> do
                         rl <- newTVar rest
-                        u <- unsafeIOToSTM newUnique
+                        u <- newRUID'STM
                         doMatched h $ EdhList $ List u rl
                       _ -> exitEdh ets exit EdhCaseOther
                   _ -> exitEdh ets exit EdhCaseOther

@@ -17,8 +17,6 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding
 import Data.Text.Encoding.Error
-import Data.Unique
-import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
 import Language.Edh.Batteries.InterOp
 import Language.Edh.Control
@@ -26,6 +24,7 @@ import Language.Edh.CoreLang
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
 import Language.Edh.PkgMan
+import Language.Edh.RUID
 import Language.Edh.RtTypes
 import Language.Edh.Utils
 import System.Directory
@@ -37,24 +36,24 @@ import Prelude
 createEdhWorld :: EdhConsole -> IO EdhWorld
 createEdhWorld !console = do
   -- the meta class
-  !idMeta <- newUnique
+  !idMeta <- newRUID
   !hsMeta <- atomically iopdEmpty
   !ssMeta <- newTVarIO []
   !mroMeta <- newTVarIO [] -- no super class, and self is not stored
 
   -- the root object and root scope
-  !idRoot <- newUnique
+  !idRoot <- newRUID
   !hsRoot <- atomically iopdEmpty
   !ssRoot <- newTVarIO []
 
   -- the sandbox object and sandbox scope
-  !idSandbox <- newUnique
+  !idSandbox <- newRUID
   !hsSandbox <- atomically iopdEmpty
   !ssSandbox <- newTVarIO []
   !mroSandbox <- newTVarIO [] -- no super class, and self is not stored
 
   -- the namespace class, root object is a special instance of namespace class
-  !idNamespace <- newUnique
+  !idNamespace <- newRUID
   !hsNamespace <- atomically iopdEmpty
   !ssNamespace <- newTVarIO []
   !mroNamespace <- newTVarIO [] -- no super class, and self is not stored
@@ -66,7 +65,7 @@ createEdhWorld !console = do
           rootScope
           (DocCmt ["the root namespace"])
           (specialProc "<root>" "<world-root>")
-      rootObj = Object idRoot (HashStore hsRoot) nsClassObj ssRoot
+      rootObj = Object (HashStore hsRoot) nsClassObj ssRoot
 
       sandboxScope = Scope hsSandbox sandboxObj sandboxObj sandboxProc []
       sandboxProc =
@@ -77,10 +76,10 @@ createEdhWorld !console = do
           (DocCmt ["the sandbox namespace"])
           (specialProc "<sandbox>" "<world-root>")
       sandboxObj =
-        Object idSandbox (HashStore hsSandbox) sandboxClassObj ssSandbox
+        Object (HashStore hsSandbox) sandboxClassObj ssSandbox
       sandboxClass = Class sandboxProc hsSandbox phantomAllocator mroSandbox
       sandboxClassObj =
-        Object idSandbox (ClassStore sandboxClass) metaClassObj ssSandbox
+        Object (ClassStore sandboxClass) metaClassObj ssSandbox
 
       metaProc =
         ProcDefi
@@ -90,7 +89,7 @@ createEdhWorld !console = do
           (DocCmt ["the meta class"])
           (specialProc "<meta-class>" "<world-root>")
       metaClass = Class metaProc hsMeta phantomAllocator mroMeta
-      metaClassObj = Object idMeta (ClassStore metaClass) metaClassObj ssMeta
+      metaClassObj = Object (ClassStore metaClass) metaClassObj ssMeta
 
       nsProc =
         ProcDefi
@@ -101,7 +100,7 @@ createEdhWorld !console = do
           (specialProc "<meta-namespace>" "<world-root>")
       nsClass = Class nsProc hsNamespace phantomAllocator mroNamespace
       nsClassObj =
-        Object idNamespace (ClassStore nsClass) metaClassObj ssNamespace
+        Object (ClassStore nsClass) metaClassObj ssNamespace
 
   atomically $
     (flip iopdUpdate hsMeta =<<) $
@@ -156,9 +155,8 @@ createEdhWorld !console = do
         (allocEdhObj hostValueAllocator)
         hsHostValue
         []
-  let edhWrapValue :: Maybe Text -> Dynamic -> STM Object
+  let edhWrapValue :: Maybe Text -> HostValue -> STM Object
       edhWrapValue !maybeRepr !dd = do
-        !idHostValue <- unsafeIOToSTM newUnique
         !cls <- case maybeRepr of
           Nothing -> return clsHostValue
           Just !repr -> do
@@ -169,14 +167,13 @@ createEdhWorld !console = do
                 return
                   clsHostValue
                     { edh'obj'store =
-                        ClassStore $ hsCls {edh'class'store = hsCustRepr}
+                        ClassStore $ hsCls {edh'class'arts = hsCustRepr}
                     }
               _ -> error "bug: class not bearing ClassStore"
         !ss <- newTVar []
         return
           Object
-            { edh'obj'ident = idHostValue,
-              edh'obj'store = HostStore dd,
+            { edh'obj'store = HostStore dd,
               edh'obj'class = cls,
               edh'obj'supers = ss
             }
@@ -207,20 +204,18 @@ createEdhWorld !console = do
         case maybeOfObj of
           Just !obj -> do
             !objScope <- objectScope obj
-            exit Nothing $ HostStore $ toDyn objScope
+            exit $ HostStore $ wrapHostValue objScope
           Nothing ->
-            exit Nothing $ HostStore $ toDyn $ contextScope $ edh'context ets
+            exit $ HostStore $ wrapHostValue $ contextScope $ edh'context ets
   !clsScope <-
     atomically $
       mkHostClass' rootScope "scope" (allocEdhObj scopeAllocator) hsScope []
   let edhWrapScope :: Scope -> STM Object
       edhWrapScope !scope = do
-        !idScope <- unsafeIOToSTM newUnique
         !ss <- newTVar []
         return
           Object
-            { edh'obj'ident = idScope,
-              edh'obj'store = HostStore $ toDyn scope,
+            { edh'obj'store = HostStore $ wrapHostValue scope,
               edh'obj'class = clsScope,
               edh'obj'supers = ss
             }
@@ -288,8 +283,11 @@ createEdhWorld !console = do
 
   let edhWrapException :: Maybe EdhThreadState -> SomeException -> STM Object
       edhWrapException !etsMaybe !exc = do
-        !uidErr <- unsafeIOToSTM newUnique
-        !supersErr <- newTVar []
+        let exitWith :: Object -> SomeException -> STM Object
+            exitWith cls xe = do
+              !hs <- HostStore <$> wrapArbiHostValue xe
+              !supersErr <- newTVar []
+              return $ Object hs cls supersErr
         case edhKnownError exc of
           Just !err -> do
             let !clsErr = case err of
@@ -304,43 +302,23 @@ createEdhWorld !console = do
                     EvalError -> clsEvalError
                     UsageError -> clsUsageError
                     UserCancel -> clsUserCancel
-            return $
-              Object
-                uidErr
-                (HostStore $ toDyn $ toException err)
-                clsErr
-                supersErr
+            exitWith clsErr $ toException err
           Nothing -> case fromException exc of
             Just (EdhHostError tag msg details) -> do
               let !err = EdhError tag msg details $
                     case etsMaybe of
                       Just !ets -> getEdhErrCtx 0 ets
                       Nothing -> "<RTS>"
-              return $
-                Object
-                  uidErr
-                  (HostStore $ toDyn $ toException err)
-                  clsUserCancel
-                  supersErr
+              exitWith clsUserCancel $ toException err
             Nothing -> case fromException exc of
               Just UserInterrupt -> do
                 let !err = EdhError UserCancel "Ctrl^C pressed" (toDyn nil) $
                       case etsMaybe of
                         Just !ets -> getEdhErrCtx 0 ets
                         Nothing -> "<RTS>"
-                return $
-                  Object
-                    uidErr
-                    (HostStore $ toDyn $ toException err)
-                    clsUserCancel
-                    supersErr
+                exitWith clsUserCancel $ toException err
               _ ->
-                return $
-                  Object
-                    uidErr
-                    (HostStore $ toDyn $ toException $ EdhIOError exc)
-                    clsIOError
-                    supersErr
+                exitWith clsIOError $ toException $ EdhIOError exc
 
   atomically $
     iopdUpdate
@@ -384,8 +362,7 @@ createEdhWorld !console = do
     newTVarIO $
       ModuLoaded $
         Object
-          { edh'obj'ident = idRoot,
-            edh'obj'store = HashStore hsRoot,
+          { edh'obj'store = HashStore hsRoot,
             edh'obj'class = clsModule,
             edh'obj'supers = ssRoot
           }
@@ -666,7 +643,7 @@ createEdhWorld !console = do
 
     mthScopeOuterGetter :: EdhHostProc
     mthScopeOuterGetter !exit !ets = case edh'obj'store this of
-      HostStore !hsd -> case fromDynamic hsd of
+      HostStore !hsd -> case unwrapHostValue hsd of
         Nothing -> throwEdh ets EvalError "bogus scope object"
         Just (scope :: Scope) -> case outerScopeOf scope of
           Nothing -> exitEdh ets exit nil
@@ -675,7 +652,7 @@ createEdhWorld !console = do
               ets
               (edh'scope'that procScope)
               this
-              (HostStore $ toDyn outerScope)
+              (HostStore $ wrapHostValue outerScope)
               $ \ !outerScopeObj -> exitEdh ets exit $ EdhObject outerScopeObj
       _ -> exitEdh ets exit $ EdhString "bogus scope object"
       where
@@ -688,13 +665,14 @@ createEdhWorld !console = do
       ArgsPack [v] !kwargs | odNull kwargs -> createErr v
       _ -> createErr $ EdhArgsPack apk
       where
-        createErr !hv =
-          exit Nothing $
-            HostStore $ toDyn $ toException $ ProgramHalt $ toDyn hv
+        createErr !hv = do
+          !hs <- wrapArbiHostValue $ toException $ ProgramHalt $ toDyn hv
+          exit $ HostStore hs
 
     -- this is called in case a ThreadTerminate is constructed by Edh code
-    thTermAllocator _ !exit _ =
-      exit Nothing $ HostStore $ toDyn $ toException ThreadTerminate
+    thTermAllocator _ !exit _ = do
+      !hs <- wrapArbiHostValue $ toException ThreadTerminate
+      exit $ HostStore hs
 
     -- creating an IOError from Edh code
     ioErrAllocator apk@(ArgsPack !args !kwargs) !exit !ets = case args of
@@ -702,22 +680,16 @@ createEdhWorld !console = do
       _ -> edhValueRepr ets (EdhArgsPack apk) $
         \ !repr -> createErr $ T.unpack repr
       where
-        createErr !msg =
-          exit Nothing $
-            HostStore $
-              toDyn $
-                toException $
-                  EdhIOError $
-                    toException $
-                      userError msg
+        createErr !msg = do
+          !hs <-
+            wrapArbiHostValue $
+              toException $ EdhIOError $ toException $ userError msg
+          exit $ HostStore hs
 
     -- a peer error is most prolly created from Edh code
-    peerErrAllocator !apk !exit _ =
-      exit Nothing $
-        HostStore $
-          toDyn $
-            toException
-              peerError
+    peerErrAllocator !apk !exit _ = do
+      !hs <- wrapArbiHostValue $ toException peerError
+      exit $ HostStore hs
       where
         peerError = case apk of
           (ArgsPack [EdhString !peerSite, EdhString !details] !kwargs)
@@ -725,13 +697,13 @@ createEdhWorld !console = do
           _ -> EdhPeerError "<bogus-peer>" $ T.pack $ show apk
 
     -- creating a tagged Edh error from Edh code
-    errAllocator !tag !apk !exit !ets =
-      exit Nothing $
-        HostStore $ toDyn $ toException $ edhCreateError 0 ets tag apk
+    errAllocator !tag !apk !exit !ets = do
+      !hs <- wrapArbiHostValue $ toException $ edhCreateError 0 ets tag apk
+      exit $ HostStore hs
 
     mthErrRepr :: EdhHostProc
     mthErrRepr !exit !ets = case edh'obj'store errObj of
-      HostStore !hsd -> case fromDynamic hsd of
+      HostStore !hsd -> case unwrapArbiHostValue hsd of
         Just (exc :: SomeException) -> case edhKnownError exc of
           Just (ProgramHalt !dhv) -> case fromDynamic dhv of
             Just (val :: EdhValue) -> edhValueRepr ets val $ \ !repr ->
@@ -776,7 +748,7 @@ createEdhWorld !console = do
 
     mthErrShow :: EdhHostProc
     mthErrShow !exit !ets = case edh'obj'store errObj of
-      HostStore !hsd -> case fromDynamic hsd of
+      HostStore !hsd -> case unwrapArbiHostValue hsd of
         Just (exc :: SomeException) -> case edhKnownError exc of
           Just err@(EdhError _errTag _errMsg !details _cc) -> do
             let !detailsText = case fromDynamic details of
@@ -803,7 +775,7 @@ createEdhWorld !console = do
 
     mthErrDesc :: EdhHostProc
     mthErrDesc !exit !ets = case edh'obj'store errObj of
-      HostStore !hsd -> case fromDynamic hsd of
+      HostStore !hsd -> case unwrapArbiHostValue hsd of
         Just (exc :: SomeException) -> case edhKnownError exc of
           Just err@(EdhError _errTag _errMsg !details _errCtx) ->
             case fromDynamic details of
@@ -830,7 +802,7 @@ createEdhWorld !console = do
 
     mthErrCtxGetter :: EdhHostProc
     mthErrCtxGetter !exit !ets = case edh'obj'store errObj of
-      HostStore !hsd -> case fromDynamic hsd of
+      HostStore !hsd -> case unwrapArbiHostValue hsd of
         Just (exc :: SomeException) -> case edhKnownError exc of
           Just (EdhError _errTag _errMsg _details !errCtx) ->
             exitEdh ets exit $ EdhString errCtx
@@ -842,7 +814,7 @@ createEdhWorld !console = do
 
     mthErrMsgGetter :: EdhHostProc
     mthErrMsgGetter !exit !ets = case edh'obj'store errObj of
-      HostStore !hsd -> case fromDynamic hsd of
+      HostStore !hsd -> case unwrapArbiHostValue hsd of
         Just (exc :: SomeException) -> case edhKnownError exc of
           Just (EdhError _errTag !errMsg _errDetails _errCtx) ->
             exitEdh ets exit $ EdhString errMsg
@@ -854,7 +826,7 @@ createEdhWorld !console = do
 
     mthErrDetailsGetter :: EdhHostProc
     mthErrDetailsGetter !exit !ets = case edh'obj'store errObj of
-      HostStore !hsd -> case fromDynamic hsd of
+      HostStore !hsd -> case unwrapArbiHostValue hsd of
         Just (exc :: SomeException) -> case edhKnownError exc of
           Just (EdhError _errTag _errMsg !errDetails _errCtx) ->
             case fromDynamic errDetails of
@@ -877,7 +849,7 @@ createEdhWorld !console = do
       !extraArts
       !exit
       _ets =
-        exit Nothing . HashStore =<< iopdFromList moduArts
+        exit . HashStore =<< iopdFromList moduArts
         where
           moduArts =
             odToList extraArts
