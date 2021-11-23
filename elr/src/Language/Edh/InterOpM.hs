@@ -19,7 +19,7 @@ import Language.Edh.RtTypes
 import Type.Reflection
 import Prelude
 
--- * utilities
+-- * Utilities
 
 wrapEdhProc ::
   EdhCallableM fn => fn -> (ArgsPack -> Edh EdhValue, ArgsReceiver)
@@ -44,10 +44,7 @@ defEdhProc' ::
   AttrName ->
   fn ->
   Edh EdhValue
-defEdhProc' !vc !nm !hp = do
-  !pv <- mkEdhProc' vc nm hp
-  defEdhArt nm pv
-  return pv
+defEdhProc' !vc !nm !hp = defEdhProc vc nm $ wrapEdhProc hp
 
 -- | Define an @Edh@ host procedure into current scope
 --
@@ -58,7 +55,46 @@ defEdhProc'_ ::
   AttrName ->
   fn ->
   Edh ()
-defEdhProc'_ !vc !nm !hp = void $ defEdhProc' vc nm hp
+defEdhProc'_ !vc !nm !hp = defEdhProc_ vc nm $ wrapEdhProc hp
+
+-- | Use the @'Edh' 'ObjectStore'@ action as the object allocator, and the
+-- @'Edh' ()@ action as class initialization procedure, to create an @Edh@
+-- class.
+mkEdhClass' ::
+  EdhAllocatorM fn =>
+  AttrName ->
+  fn ->
+  [Object] ->
+  Edh () ->
+  Edh Object
+mkEdhClass' !clsName !allocator !superClasses !clsBody =
+  mkEdhClass clsName (allocObjM allocator) superClasses clsBody
+
+-- | Define an @Edh@ host class into current scope
+--
+-- Note pure and exporting semantics are honored.
+defEdhClass'_ ::
+  EdhAllocatorM fn =>
+  AttrName ->
+  fn ->
+  [Object] ->
+  Edh () ->
+  Edh ()
+defEdhClass'_ !clsName !allocator !superClasses !clsBody =
+  defEdhClass_ clsName (allocObjM allocator) superClasses clsBody
+
+-- | Define an @Edh@ host class into current scope
+--
+-- Note pure and exporting semantics are honored.
+defEdhClass' ::
+  EdhAllocatorM fn =>
+  AttrName ->
+  fn ->
+  [Object] ->
+  Edh () ->
+  Edh Object
+defEdhClass' !clsName !allocator !superClasses !clsBody =
+  defEdhClass clsName (allocObjM allocator) superClasses clsBody
 
 mkEdhProperty ::
   AttrName ->
@@ -95,6 +131,14 @@ mkEdhProperty !nm !getterProc !maybeSetterProc = do
             }
   return $ EdhProcedure (EdhDescriptor getter setter) Nothing
 
+defEdhProperty_ ::
+  AttrName ->
+  Edh EdhValue ->
+  Maybe (Maybe EdhValue -> Edh EdhValue) ->
+  Edh ()
+defEdhProperty_ !nm !getterProc !maybeSetterProc =
+  void $ defEdhProperty nm getterProc maybeSetterProc
+
 defEdhProperty ::
   AttrName ->
   Edh EdhValue ->
@@ -104,14 +148,6 @@ defEdhProperty !nm !getterProc !maybeSetterProc = do
   pd <- mkEdhProperty nm getterProc maybeSetterProc
   defEdhArt nm pd
   return pd
-
-defEdhProperty_ ::
-  AttrName ->
-  Edh EdhValue ->
-  Maybe (Maybe EdhValue -> Edh EdhValue) ->
-  Edh ()
-defEdhProperty_ !nm !getterProc !maybeSetterProc =
-  void $ defEdhProperty nm getterProc maybeSetterProc
 
 -- | Class for a procedure implemented in the host language (which is Haskell)
 -- that can be called from Edh code.
