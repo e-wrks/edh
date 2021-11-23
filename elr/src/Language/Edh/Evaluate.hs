@@ -6271,7 +6271,7 @@ edhIdentEqual
   (EdhQty (Quantity (Decimal 0 0 0) x'uom))
   (EdhQty (Quantity (Decimal 0 0 0) y'uom)) =
     return $ x'uom == y'uom
-edhIdentEqual x y = liftA2 (==) (edhValueIdent x) (edhValueIdent y)
+edhIdentEqual x y = return $ x == y
 
 edhNamelyEqual ::
   EdhThreadState -> EdhValue -> EdhValue -> (Bool -> STM ()) -> STM ()

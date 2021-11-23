@@ -399,17 +399,6 @@ uuidCtorProc (Just !uuidTxt) !exit !ets = case UUID.fromText uuidTxt of
   Just !uuid -> exitEdh ets exit $ EdhUUID uuid
   _ -> throwEdh ets UsageError $ "invalid uuid string: " <> uuidTxt
 
--- | utility id(val) -- obtain identity value of a value
---
--- this is useful e.g. in log records you have no other way to write
--- information about an event sink, so that it can be evident whether the sink
--- is the same as appeared in another log record. as `repr` of an event sink
--- is always '<sink>'. though it's not a problem when you have those values
--- pertaining to an interactive repl session, where `is` operator can easily
--- tell you that.
-idProc :: EdhValue -> EdhHostProc
-idProc !val !exit !ets = edhValueIdent val >>= exitEdh ets exit
-
 -- | utility json() - convert the args to json string
 jsonProc :: ArgsPack -> EdhHostProc
 jsonProc (ArgsPack [value] !kwargs) !exit !ets

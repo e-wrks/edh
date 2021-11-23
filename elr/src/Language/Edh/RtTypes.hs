@@ -90,61 +90,20 @@ type DictStore = IOPD EdhValue EdhValue
 --
 -- Note nil allowed as valid key, nil value triggers deletion semantics
 createEdhDict :: [(EdhValue, EdhValue)] -> STM Dict
-createEdhDict !entries = Dict <$> iopdFromList' edhValueIdent entries
+createEdhDict !entries = Dict <$> iopdFromList entries
 
 -- | Set one dict item value by key
 --
 -- Note nil allowed as valid key, nil value triggers deletion semantics
 setDictItem :: EdhValue -> EdhValue -> DictStore -> STM ()
-setDictItem = iopdInsert' edhValueIdent
+setDictItem = iopdInsert
 
 lookupDictItem :: EdhValue -> DictStore -> STM (Maybe EdhValue)
-lookupDictItem = iopdLookup' edhValueIdent
+lookupDictItem = iopdLookup
 
 dictEntryList :: DictStore -> STM [EdhValue]
 dictEntryList !d =
   (<$> iopdToList d) $ fmap $ \(k, v) -> EdhArgsPack $ ArgsPack [k, v] odEmpty
-
--- | Identity value of an arbitrary value
-edhValueIdent :: EdhValue -> STM EdhValue
-edhValueIdent = identityOf
-  where
-    identityOf :: EdhValue -> STM EdhValue
-    identityOf ov@EdhObject {} = return ov
-    identityOf sv@EdhSink {} = return sv
-    identityOf (EdhNamedValue !n !v) = EdhNamedValue n <$> identityOf v
-    identityOf (EdhRange (ClosedBound !l) (ClosedBound !u)) = do
-      l'i <- identityOf l
-      u'i <- identityOf u
-      return $ EdhRange (ClosedBound l'i) (ClosedBound u'i)
-    identityOf (EdhRange (ClosedBound !l) (OpenBound !u)) = do
-      l'i <- identityOf l
-      u'i <- identityOf u
-      return $ EdhRange (ClosedBound l'i) (OpenBound u'i)
-    identityOf (EdhRange (OpenBound !l) (ClosedBound !u)) = do
-      l'i <- identityOf l
-      u'i <- identityOf u
-      return $ EdhRange (OpenBound l'i) (ClosedBound u'i)
-    identityOf (EdhRange (OpenBound !l) (OpenBound !u)) = do
-      l'i <- identityOf l
-      u'i <- identityOf u
-      return $ EdhRange (OpenBound l'i) (OpenBound u'i)
-    identityOf (EdhPair !l !r) = liftA2 EdhPair (identityOf l) (identityOf r)
-    identityOf v@EdhDict {} = return v
-    identityOf v@EdhList {} = return v
-    identityOf v@EdhProcedure {} = return v
-    identityOf (EdhBoundProc !p !this !that !eff'stack) =
-      return $
-        EdhPair (EdhProcedure p eff'stack) $
-          EdhPair (EdhObject this) (EdhObject that)
-    identityOf v@EdhExpr {} = return v
-    identityOf (EdhArgsPack (ArgsPack !args !kwargs)) =
-      EdhArgsPack
-        <$> liftA2
-          ArgsPack
-          (sequence $ identityOf <$> args)
-          (odMapSTM identityOf kwargs)
-    identityOf !v = return v
 
 -- | Backing storage for a scope or a hash object
 type EntityStore = IOPD AttrKey EdhValue

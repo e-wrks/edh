@@ -546,7 +546,6 @@ installEdhBatteries world = do
                   (EdhMethod, "__Qty_toFixed__", wrapHostProc qtyToFixedProc),
                   (EdhMethod, "UUID", wrapHostProc uuidCtorProc),
                   (EdhMethod, "error", wrapHostProc errorProc),
-                  (EdhMethod, "id", wrapHostProc idProc),
                   (EdhMethod, "blob", wrapHostProc blobProc),
                   (EdhIntrpr, "str", wrapHostProc strProc),
                   (EdhMethod, "json", wrapHostProc jsonProc),
