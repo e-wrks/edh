@@ -891,7 +891,7 @@ instance Hashable Sink where
   hashWithSalt s (Sink s'u _ _ _ _) = hashWithSalt s s'u
 
 instance Show Sink where
-  show _ = "<sink>"
+  show s = "<sink" <> show (sink'uniq s) <> ">"
 
 -- | executable precedures
 data EdhProcDefi

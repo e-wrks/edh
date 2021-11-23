@@ -15,7 +15,10 @@ import Prelude
 
 -- | Currently implemented as an 'Integer' counter
 newtype RUID = RUID Integer
-  deriving (Eq, Hashable, Ord, Show)
+  deriving (Eq, Hashable, Ord)
+
+instance Show RUID where
+  show (RUID cnt) = "#" <> show cnt <> "#"
 
 -- | Assign a new identifier
 newRUID :: IO RUID
