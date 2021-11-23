@@ -1,6 +1,9 @@
 
 export {
 
+  # s (second) is referenced by data rate formulae
+  import (s, **) './duration'
+
   {## Commonplace units of information/storage by modern computer convention
 
 Bit and byte are defined as primary units, while all others are secondary.
