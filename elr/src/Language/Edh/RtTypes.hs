@@ -1649,12 +1649,22 @@ data InpAnno
     --
     -- Wide delimiter quoted literal string, content is not interpreted anyway.
     QuaintAnno !Text
+  | -- | Quantity annotation
+    QtyAnno
+      !(Maybe QtyBoundSrc)
+      !(Maybe UnitSpecSrc) -- Nothing for single uom range, or lower uom if not
+      !(Maybe QtyBoundSrc)
+      !UnitSpecSrc -- upper uom or the single uom
   | -- | Alternate annotation
     --
     -- To express sum types
     AltAnno !InpAnno !InpAnno
   | -- | Effects expectations, with or without result type annotation
     EffsExpAnno ![EffArgAnno] !(Maybe InpAnno)
+  deriving (Eq, Show)
+
+-- | Bound value for a quantity annotation
+data QtyBoundSrc = QtyBoundSrc !Decimal !SrcRange
   deriving (Eq, Show)
 
 -- | Specify an argument expected from dynamic scoping (i.e. effectful)

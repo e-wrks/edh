@@ -865,10 +865,9 @@ parseInpAnno :: IntplSrcInfo -> Parser (Maybe InpAnno, IntplSrcInfo)
 parseInpAnno !si0 =
   -- seems no operator can stand in this place, or else we should do:
   -- optional (try $ string ":" >> notFollowedBy (satisfy isOperatorChar) >> sc)
-  optional (try $ symbol ":")
-    >>= \case
-      Nothing -> return (Nothing, si0)
-      Just {} -> go si0
+  optional (try $ symbol ":") >>= \case
+    Nothing -> return (Nothing, si0)
+    Just {} -> go si0
   where
     go si = do
       (gotAnno, si') <- parseOne si
@@ -891,6 +890,7 @@ parseInpAnno !si0 =
           parseApkOrProcSig si, -- an apk result or procedure signature
           parseEffExps si, -- effects expections
           parseStrSpec si, -- literal string - narrow for type, wide for quaint
+          parseQtyAnno si,
           parseCtorProto si -- direct/indirect attribute addressor,
           -- optionally called with args for prototyping
         ]
@@ -932,6 +932,14 @@ parseInpAnno !si0 =
       if wide
         then return (QuaintAnno str, si)
         else return (TypeStrAnno str, si)
+
+    parseQtyAnno si = try $ do
+      lowerBound <- optional $ uncurry QtyBoundSrc <$> parseWithRng parseDecLit
+      lowerUnit <- optional parseUnitSpec
+      void $ symbol "~"
+      upperBound <- optional $ uncurry QtyBoundSrc <$> parseWithRng parseDecLit
+      upperUnit <- parseUnitSpec
+      return (QtyAnno lowerBound lowerUnit upperBound upperUnit, si)
 
     parseCtorProto si = do
       ctorAddr <- parseAttrRef
