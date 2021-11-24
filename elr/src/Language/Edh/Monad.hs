@@ -12,6 +12,7 @@ import Data.Dynamic
 import Data.Hashable
 import Data.IORef
 import Data.Lossless.Decimal (Decimal)
+import qualified Data.Lossless.Decimal as D
 import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -771,7 +772,9 @@ edhPrettyQty :: Decimal -> UnitSpec -> Edh Text
 edhPrettyQty q u =
   edhQuantity q u >>= \case
     Left num -> return $ T.pack $ show num
-    Right qty -> edhQtyStr <$> edhReduceQtyNumber qty
+    Right qty ->
+      edhReduceQtyNumber qty >>= \(Quantity q' u') ->
+        return $ T.pack $ D.showDecimalLimited 2 q' <> show u'
 
 edhQuantity :: Decimal -> UnitSpec -> Edh (Either Decimal Quantity)
 edhQuantity q uomSpec = mEdh $ \exit ets ->

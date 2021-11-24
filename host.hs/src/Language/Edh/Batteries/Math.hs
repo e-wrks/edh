@@ -364,19 +364,7 @@ decToFixed d cnvt (defaultArg 0 -> nDigs) !exit =
       -- a larger range of values", we choose 0 ~ 200 here.
       | 0 <= digs && digs <= 200 -> do
         let (iDigs :: Int) = fromInteger digs
-        if
-            | not (decimalIsFinite d) ->
-              exitEdhTx exit $ cnvt $ T.pack $ show d
-            | iDigs <= 0 -> do
-              let (i :: Integer) = round d
-              exitEdhTx exit $ cnvt $ T.pack $ show i
-            | otherwise -> do
-              let (amp :: Integer) = 10 ^ iDigs
-                  (q, r) = round (fromInteger amp * d) `quotRem` amp
-                  fracPart = show r
-                  padZeros = replicate (iDigs - length fracPart) '0'
-              exitEdhTx exit $
-                cnvt $ T.pack $ show q <> "." <> fracPart <> padZeros
+        exitEdhTx exit $ cnvt $ T.pack $ showDecimalFixed iDigs d
     _ ->
       throwEdhTx UsageError $
         "invalid number of decimal digits: " <> T.pack (show nDigs)
@@ -600,7 +588,7 @@ inRangeProc inverse eqTester !lhExpr !rhExpr !exit !ets = runEdhTx ets $
                   Just {} -> exitEdh ets exit $ EdhBool $ inverse True
               else chkInList lhVal vs
           EdhList (List _u !lv) -> readTVar lv >>= chkInList lhVal
-          EdhDict (Dict  !ds) ->
+          EdhDict (Dict !ds) ->
             iopdLookup lhVal ds >>= \case
               Nothing -> exitEdh ets exit $ EdhBool $ inverse False
               Just {} -> exitEdh ets exit $ EdhBool $ inverse True

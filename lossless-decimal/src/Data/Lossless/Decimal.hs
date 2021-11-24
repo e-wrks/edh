@@ -337,6 +337,28 @@ showDecimal' v
       "" -> ""
       ds_' -> '.' : ds_'
 
+showDecimalFixed :: Int -> Decimal -> String
+showDecimalFixed digs v
+  | not $ decimalIsFinite v = show v
+  | digs <= 0 = show (round v :: Integer)
+  | otherwise = show q <> "." <> fracPart <> padZeros
+  where
+    (amp :: Integer) = 10 ^ digs
+    (q, r) = round (fromInteger amp * v) `quotRem` amp
+    fracPart = show r
+    padZeros = replicate (digs - length fracPart) '0'
+
+showDecimalLimited :: Int -> Decimal -> String
+showDecimalLimited digs v
+  | not $ decimalIsFinite v = show v
+  | digs <= 0 = show (round v :: Integer)
+  | r == 0 = show q
+  | otherwise = show q <> "." <> fracPart
+  where
+    (amp :: Integer) = 10 ^ digs
+    (q, r) = round (fromInteger amp * v) `quotRem` amp
+    fracPart = show r
+
 countPrimeFactor :: Integer -> Integer -> (Integer, Integer)
 countPrimeFactor _ 0 = (0, 0)
 countPrimeFactor !f !i =
