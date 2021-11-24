@@ -6560,6 +6560,29 @@ edhCompareValue !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
           if D.decimalIsNaN lhNum || D.decimalIsNaN rhNum
             then exit Nothing
             else exit $ Just $ compare lhNum rhNum
+        EdhQty rhQty ->
+          runEdhTx ets $
+            qtyToPureNumber rhQty $ \case
+              Nothing -> \_ets -> exit Nothing
+              Just rhNum -> \_ets -> exit $ Just $ compare lhNum rhNum
+        _ -> exit Nothing
+      EdhQty lhQty@(Quantity lhq lhu) -> case edhUltimate rhVal of
+        EdhQty rhQty@(Quantity rhq rhu) ->
+          runEdhTx ets $
+            unifyToUnit
+              lhu
+              (Right rhQty)
+              (\rhq' _ets -> exit $ Just $ compare lhq rhq')
+              $ unifyToUnit
+                rhu
+                (Right lhQty)
+                (\lhq' _ets -> exit $ Just $ compare lhq' rhq)
+                $ \_ets -> exit Nothing
+        EdhDecimal rhNum ->
+          runEdhTx ets $
+            qtyToPureNumber lhQty $ \case
+              Nothing -> \_ets -> exit Nothing
+              Just lhNum -> \_ets -> exit $ Just $ compare lhNum rhNum
         _ -> exit Nothing
       EdhString lhStr -> case edhUltimate rhVal of
         EdhString rhStr -> exit $ Just $ compare lhStr rhStr
