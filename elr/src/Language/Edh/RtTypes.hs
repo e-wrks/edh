@@ -1480,20 +1480,20 @@ instance Show ArgsReceiver where
   show NullaryReceiver = "()"
 
 data ArgReceiver
-  = -- @* <ident>@
-    RecvRestPosArgs !AttrAddrSrc
-  | -- @** <ident>@
-    RecvRestKwArgs !AttrAddrSrc
-  | -- @*** <ident>@
-    RecvRestPkArgs !AttrAddrSrc
+  = -- @* <ident>@ [: anno]
+    RecvRestPosArgs !AttrAddrSrc !(Maybe InpAnno)
+  | -- @** <ident>@ [: anno]
+    RecvRestKwArgs !AttrAddrSrc !(Maybe InpAnno)
+  | -- @*** <ident>@ [: anno]
+    RecvRestPkArgs !AttrAddrSrc !(Maybe InpAnno)
   | -- @<ident> [: anno] [as some.other.attr] [= default'expr]@
     RecvArg !AttrAddrSrc !(Maybe InpAnno) !(Maybe AttrRef) !(Maybe ExprSrc)
   deriving (Eq, Show)
 
 argReceiverSpan :: ArgReceiver -> SrcRange
-argReceiverSpan (RecvRestPosArgs (AttrAddrSrc _ src'span)) = src'span
-argReceiverSpan (RecvRestKwArgs (AttrAddrSrc _ src'span)) = src'span
-argReceiverSpan (RecvRestPkArgs (AttrAddrSrc _ src'span)) = src'span
+argReceiverSpan (RecvRestPosArgs (AttrAddrSrc _ src'span) _) = src'span
+argReceiverSpan (RecvRestKwArgs (AttrAddrSrc _ src'span) _) = src'span
+argReceiverSpan (RecvRestPkArgs (AttrAddrSrc _ src'span) _) = src'span
 argReceiverSpan (RecvArg (AttrAddrSrc _ src'span) _ _ _) = src'span
 
 data ArgsPacker = ArgsPacker [ArgSender] !SrcRange
@@ -1529,8 +1529,10 @@ methodArrowArgsReceiver ::
 methodArrowArgsReceiver
   (AttrExpr (DirectRef argAttr@(AttrAddrSrc !addr _)))
   !exit = case addr of
-    NamedAttr "_" -> exit $ Right $ SingleReceiver $ RecvRestPkArgs argAttr
-    _ -> exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing Nothing
+    NamedAttr "_" ->
+      exit $ Right $ SingleReceiver $ RecvRestPkArgs argAttr Nothing
+    _ ->
+      exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing Nothing
 methodArrowArgsReceiver (ArgsPackExpr (ArgsPacker !argSndrs !sndrsSpan)) !exit =
   cnvrt argSndrs []
   where
@@ -1538,11 +1540,11 @@ methodArrowArgsReceiver (ArgsPackExpr (ArgsPacker !argSndrs !sndrsSpan)) !exit =
     cnvrt [] !rcvrs = exit $ Right $ PackReceiver (reverse rcvrs) sndrsSpan
     cnvrt (sndr : rest) !rcvrs = case sndr of
       UnpackPosArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-        cnvrt rest (RecvRestPosArgs argRef : rcvrs)
+        cnvrt rest (RecvRestPosArgs argRef Nothing : rcvrs)
       UnpackKwArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-        cnvrt rest (RecvRestKwArgs argRef : rcvrs)
+        cnvrt rest (RecvRestKwArgs argRef Nothing : rcvrs)
       UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-        cnvrt rest (RecvRestPkArgs argRef : rcvrs)
+        cnvrt rest (RecvRestPkArgs argRef Nothing : rcvrs)
       SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
         cnvrt rest (RecvArg argRef Nothing Nothing Nothing : rcvrs)
       SendKwArg !argRef !defExpr ->
@@ -1586,11 +1588,11 @@ producerArrowArgsReceiver
                   sndrsSpan
       cnvrt !outletPrsnt (sndr : rest) !rcvrs = case sndr of
         UnpackPosArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-          cnvrt outletPrsnt rest (RecvRestPosArgs argRef : rcvrs)
+          cnvrt outletPrsnt rest (RecvRestPosArgs argRef Nothing : rcvrs)
         UnpackKwArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-          cnvrt outletPrsnt rest (RecvRestKwArgs argRef : rcvrs)
+          cnvrt outletPrsnt rest (RecvRestKwArgs argRef Nothing : rcvrs)
         UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
-          cnvrt outletPrsnt rest (RecvRestPkArgs argRef : rcvrs)
+          cnvrt outletPrsnt rest (RecvRestPkArgs argRef Nothing : rcvrs)
         SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
           cnvrt
             outletPrsnt

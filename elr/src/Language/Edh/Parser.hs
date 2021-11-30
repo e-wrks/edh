@@ -10,7 +10,7 @@ import Control.Monad.State.Strict (MonadState (get, put))
 import Data.Char
 import qualified Data.Char as Char
 import Data.Function
-import Data.Functor (($>))
+import Data.Functor
 import Data.List
 import Data.Lossless.Decimal as D (Decimal (Decimal), inf, nan)
 import Data.Maybe
@@ -511,7 +511,7 @@ parseArgsReceiver =
       choice
         [ do
             void $ keyword "as"
-            SingleReceiver . RecvRestPkArgs <$> parseAttrAddrSrc,
+            SingleReceiver . flip RecvRestPkArgs Nothing <$> parseAttrAddrSrc,
           do
             !lexeme'end <- lexemeEndPos
             return $
@@ -519,7 +519,7 @@ parseArgsReceiver =
         ]
 
     dropReceiver =
-      SingleReceiver . RecvRestPkArgs . AttrAddrSrc (NamedAttr "_")
+      SingleReceiver . flip RecvRestPkArgs Nothing . AttrAddrSrc (NamedAttr "_")
         <$> keyword "_"
 
     packReceiver = do
@@ -559,23 +559,37 @@ parseRestArgRecvs !endSymbol = parseArgRecvs [] False False
               then restPkArgs <|> restKwArgs <|> parseKwRecv True
               else nextPosArg
         case nextArg of
-          RecvRestPosArgs _ -> parseArgRecvs (nextArg : rs) kwConsumed True
-          RecvRestKwArgs _ -> parseArgRecvs (nextArg : rs) True posConsumed
+          RecvRestPosArgs _ _ -> parseArgRecvs (nextArg : rs) kwConsumed True
+          RecvRestKwArgs _ _ -> parseArgRecvs (nextArg : rs) True posConsumed
           _ -> parseArgRecvs (nextArg : rs) kwConsumed posConsumed
 
-    nextPosArg, restKwArgs, restPosArgs :: Parser ArgReceiver
+    nextPosArg, restPkArgs, restKwArgs, restPosArgs :: Parser ArgReceiver
     nextPosArg = restPkArgs <|> restKwArgs <|> restPosArgs <|> parseKwRecv True
     restPkArgs =
       -- `...` for src level compatibility with JavaScript destructuring syntax
-      (RecvRestPkArgs <$>) $
-        optionalArgName
-          =<< lexeme (stringSrc "***" <|> stringSrc "...")
+      (($ RecvRestPkArgs) <$>) $
+        optionalArgName =<< lexeme (stringSrc "***" <|> stringSrc "...")
     restKwArgs =
-      (RecvRestKwArgs <$>) $ optionalArgName =<< lexeme (stringSrc "**")
+      (($ RecvRestKwArgs) <$>) $ optionalArgName =<< lexeme (stringSrc "**")
     restPosArgs =
-      (RecvRestPosArgs <$>) $ optionalArgName =<< lexeme (stringSrc "*")
+      (($ RecvRestPosArgs) <$>) $ optionalArgName =<< lexeme (stringSrc "*")
+    optionalArgName ::
+      SrcRange ->
+      Parser ((AttrAddrSrc -> Maybe InpAnno -> ArgReceiver) -> ArgReceiver)
     optionalArgName src'span =
-      parseAttrAddrSrc <|> return (AttrAddrSrc (NamedAttr "_") src'span)
+      (<|> return (\c -> c (AttrAddrSrc (NamedAttr "_") src'span) Nothing)) $
+        do
+          !addr <- parseAttrAddrSrc
+          !anno <- parseArgAnno
+          return $ \c -> c addr anno
+    parseArgAnno :: Parser (Maybe InpAnno)
+    parseArgAnno = do
+      -- TODO carry on 'IntplSrcInfo' in the full call chain to here,
+      --      so the annotation expr can be interpolated.
+      !s <- getInput
+      !o <- getOffset
+      (!anno, _si') <- parseInpAnno (s, o, [])
+      return anno
 
 parseKwRecv :: Bool -> Parser ArgReceiver
 parseKwRecv !inPack = do
@@ -1355,7 +1369,8 @@ parseLoopHead !si = do
         !src'span <- keyword "_"
         let !ar =
               SingleReceiver $
-                RecvRestPkArgs $ AttrAddrSrc (NamedAttr "_") src'span
+                flip RecvRestPkArgs Nothing $
+                  AttrAddrSrc (NamedAttr "_") src'span
         !prepos <- litKeyword "from"
         (!iter, !si') <- parseExpr si
         return (prepos, ar, iter, si'),
@@ -1366,7 +1381,8 @@ parseLoopHead !si = do
           choice
             [ do
                 void $ keyword "as"
-                SingleReceiver . RecvRestPkArgs <$> parseAttrAddrSrc,
+                SingleReceiver . flip RecvRestPkArgs Nothing
+                  <$> parseAttrAddrSrc,
               do
                 !lexeme'end <- lexemeEndPos
                 return $

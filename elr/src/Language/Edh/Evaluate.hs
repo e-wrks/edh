@@ -1139,27 +1139,27 @@ recvEdhArgs !etsCaller !recvCtx !argsRcvr apk@(ArgsPack !posArgs !kwArgs) !exit 
       STM ()
     recvFromPack pk@(ArgsPack !posArgs' !kwArgs') !em !argRcvr !exit' =
       case argRcvr of
-        RecvRestPosArgs (AttrAddrSrc (NamedAttr "_") _) ->
+        RecvRestPosArgs (AttrAddrSrc (NamedAttr "_") _) _ ->
           -- silently drop the value to single underscore, while consume the args
           -- from incoming pack
           exit' (ArgsPack [] kwArgs')
-        RecvRestPosArgs (AttrAddrSrc !argAddr _) ->
+        RecvRestPosArgs (AttrAddrSrc !argAddr _) _ ->
           resolveEdhAttrAddr etsRecv argAddr $ \ !argKey -> do
             iopdInsert argKey (EdhArgsPack $ ArgsPack posArgs' odEmpty) em
             exit' (ArgsPack [] kwArgs')
-        RecvRestKwArgs (AttrAddrSrc (NamedAttr "_") _) ->
+        RecvRestKwArgs (AttrAddrSrc (NamedAttr "_") _) _ ->
           -- silently drop the value to single underscore, while consume the args
           -- from incoming pack
           exit' (ArgsPack posArgs' odEmpty)
-        RecvRestKwArgs (AttrAddrSrc !argAddr _) ->
+        RecvRestKwArgs (AttrAddrSrc !argAddr _) _ ->
           resolveEdhAttrAddr etsRecv argAddr $ \ !argKey -> do
             iopdInsert argKey (EdhArgsPack $ ArgsPack [] kwArgs') em
             exit' (ArgsPack posArgs' odEmpty)
-        RecvRestPkArgs (AttrAddrSrc (NamedAttr "_") _) ->
+        RecvRestPkArgs (AttrAddrSrc (NamedAttr "_") _) _ ->
           -- silently drop the value to single underscore, while consume the args
           -- from incoming pack
           exit' (ArgsPack [] odEmpty)
-        RecvRestPkArgs (AttrAddrSrc !argAddr _) ->
+        RecvRestPkArgs (AttrAddrSrc !argAddr _) _ ->
           resolveEdhAttrAddr etsRecv argAddr $ \ !argKey -> do
             iopdInsert argKey (EdhArgsPack pk) em
             exit' (ArgsPack [] odEmpty)
@@ -4635,13 +4635,13 @@ dtcFieldKeys' !ets !dtcArgRcvrs !exit = case dtcArgRcvrs of
       RecvArg (AttrAddrSrc addr _) _ Nothing _ ->
         resolveEdhAttrAddr ets addr $ \ !fk ->
           go rest ((fk, attrKeyStr fk <> "=") : fs)
-      RecvRestPkArgs (AttrAddrSrc addr _) ->
+      RecvRestPkArgs (AttrAddrSrc addr _) _ ->
         resolveEdhAttrAddr ets addr $ \ !fk ->
           go rest ((fk, "***") : fs)
-      RecvRestKwArgs (AttrAddrSrc addr _) ->
+      RecvRestKwArgs (AttrAddrSrc addr _) _ ->
         resolveEdhAttrAddr ets addr $ \ !fk ->
           go rest ((fk, "**") : fs)
-      RecvRestPosArgs (AttrAddrSrc addr _) ->
+      RecvRestPosArgs (AttrAddrSrc addr _) _ ->
         resolveEdhAttrAddr ets addr $ \ !fk ->
           go rest ((fk, "*") : fs)
 
