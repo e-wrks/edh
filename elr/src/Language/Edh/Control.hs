@@ -167,7 +167,7 @@ lspSrcRangeFromParsec'' !start !end =
     (SrcPos (unPos (sourceLine end) - 1) (unPos (sourceColumn end) - 1))
 
 data EdhParserState = EdhParserState
-  { -- global dict for operator info, as the parsing state
+  { -- global dict for operator info
     edh'parser'op'dict :: !GlobalOpDict,
     -- end of last lexeme
     edh'parser'lexeme'end'pos :: !SrcPos,
