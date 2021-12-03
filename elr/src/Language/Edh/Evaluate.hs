@@ -3193,7 +3193,7 @@ defineUnit !docCmt !decl !exit !ets = case decl of
       nSym
       (Just (unitSpecWithoutSrc dUnit, RatioFormula $ nQty / dQty))
       $ \ !defi -> case dUnit of
-        NamedUnitSrc dSym _ ->
+        NamedUnitSrc dSym _ | not (T.null dSym) ->
           defineFormula
             False
             dSym
