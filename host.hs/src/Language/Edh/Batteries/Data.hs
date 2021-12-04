@@ -14,8 +14,11 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.UUID as UUID
+import qualified Data.Vector as V
+import GHC.Conc (unsafeIOToSTM)
 import Language.Edh.Args
 import Language.Edh.Batteries.InterOp
+import Language.Edh.Batteries.Vector
 import Language.Edh.Control
 import Language.Edh.Evaluate
 import Language.Edh.IOPD
@@ -940,6 +943,11 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
         EdhDict (Dict !ds) ->
           dictEntryList ds >>= \ !del ->
             exitEdh ets exit (EdhArgsPack $ ArgsPack (vs ++ del) kwvs)
+        EdhObject !rhObj -> withHostObject' rhObj (exitEdh ets exit edhNA) $
+          \_vecInst (EdhVector !mvv _) -> do
+            !mv <- readTVar mvv
+            !vs' <- unsafeIOToSTM $ V.toList <$> V.freeze mv
+            exitEdh ets exit (EdhArgsPack $ ArgsPack (vs ++ vs') kwvs)
         _ -> exitEdh ets exit edhNA
       EdhList (List _ !l) -> case edhUltimate rhVal of
         EdhArgsPack (ArgsPack !args _) -> do
@@ -952,6 +960,12 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
         EdhDict (Dict !ds) ->
           dictEntryList ds >>= \ !del -> do
             modifyTVar' l (++ del)
+            exitEdh ets exit lhVal
+        EdhObject !rhObj -> withHostObject' rhObj (exitEdh ets exit edhNA) $
+          \_vecInst (EdhVector !mvv _) -> do
+            !mv <- readTVar mvv
+            !vs <- unsafeIOToSTM $ V.toList <$> V.freeze mv
+            modifyTVar' l (++ vs)
             exitEdh ets exit lhVal
         _ -> exitEdh ets exit edhNA
       EdhDict (Dict !ds) -> case edhUltimate rhVal of
