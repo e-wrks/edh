@@ -230,9 +230,9 @@ getObjAttrWithMagic' ::
 getObjAttrWithMagic' !obj !key exitNoAttr !exit = case edh'obj'store obj of
   -- class objects are magic providers, never magic consumers
   ClassStore {} -> \ !ets ->
-    lookupEdhSelfMagic obj key >>= \case
-      EdhNil -> runEdhTx ets exitNoAttr
-      art -> exitEdh ets exit (obj, art)
+    lookupEdhObjAttr obj key >>= \case
+      (_, EdhNil) -> runEdhTx ets exitNoAttr
+      (this, !val) -> exitEdh ets exit (this, val)
   -- give super objects the magical power to intercept attribute access on
   -- descendant objects, by intercepting the attr resolution
   _ -> trySuperMagic (AttrByName "(@<-)")
