@@ -2672,7 +2672,7 @@ withThisHostObj ::
   (v -> STM ()) ->
   STM ()
 withThisHostObj !ets =
-  withHostObject ets (edh'scope'this $ contextScope $ edh'context ets)
+  withHostInstance ets (edh'scope'this $ contextScope $ edh'context ets)
 
 withThisHostObj' ::
   forall v.
@@ -2682,16 +2682,16 @@ withThisHostObj' ::
   (v -> STM ()) ->
   STM ()
 withThisHostObj' !ets =
-  withHostObject' (edh'scope'this $ contextScope $ edh'context ets)
+  withHostInstance' (edh'scope'this $ contextScope $ edh'context ets)
 
-withHostObject ::
+withHostInstance ::
   forall v.
   (Eq v, Hashable v, Typeable v) =>
   EdhThreadState ->
   Object ->
   (v -> STM ()) ->
   STM ()
-withHostObject !ets !obj !exit = withHostObject' obj naExit exit
+withHostInstance !ets !obj !exit = withHostInstance' obj naExit exit
   where
     naExit =
       throwEdh ets UsageError $
@@ -2700,28 +2700,28 @@ withHostObject !ets !obj !exit = withHostObject' obj naExit exit
           <> ">> but bearing a: "
           <> T.pack (show $ edh'obj'store obj)
 
-withHostObject' ::
+withHostInstance' ::
   forall v.
   (Eq v, Hashable v, Typeable v) =>
   Object ->
   STM () ->
   (v -> STM ()) ->
   STM ()
-withHostObject' !obj !naExit !exit = case edh'obj'store obj of
+withHostInstance' !obj !naExit !exit = case edh'obj'store obj of
   HostStore !hsd -> case unwrapHostValue hsd of
     Just (hsv :: v) -> exit hsv
     _ -> naExit
   _ -> naExit
 
-withDerivedHostObject ::
+withHostObject ::
   forall v.
   (Eq v, Hashable v, Typeable v) =>
   EdhThreadState ->
   Object ->
   (Object -> v -> STM ()) ->
   STM ()
-withDerivedHostObject !ets !endObj !exit =
-  withDerivedHostObject'
+withHostObject !ets !endObj !exit =
+  withHostObject'
     endObj
     naExit
     exit
@@ -2731,14 +2731,14 @@ withDerivedHostObject !ets !endObj !exit =
         "not derived from a host object of expected storage type: "
           <> T.pack (show $ typeRep @v)
 
-withDerivedHostObject' ::
+withHostObject' ::
   forall v.
   (Eq v, Hashable v, Typeable v) =>
   Object ->
   STM () ->
   (Object -> v -> STM ()) ->
   STM ()
-withDerivedHostObject' !endObj !naExit !exit = case edh'obj'store endObj of
+withHostObject' !endObj !naExit !exit = case edh'obj'store endObj of
   HostStore !hsd -> case unwrapHostValue hsd of
     Just (hsv :: v) -> exit endObj hsv
     _ -> readTVar (edh'obj'supers endObj) >>= checkSupers
@@ -5497,7 +5497,7 @@ evalExpr'
             resolveEdhInstance cls objOther >>= \case
               Nothing -> exitEdh ets mthExit edhNA
               Just !instOther ->
-                withHostObject ets instOther $
+                withHostInstance ets instOther $
                   \(ArgsPack [EdhObject !clsOther] !dataFieldsOther) ->
                     if clsOther /= cls
                       then exitEdh ets mthExit edhNA

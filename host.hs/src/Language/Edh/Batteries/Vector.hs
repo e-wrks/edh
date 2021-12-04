@@ -208,7 +208,7 @@ createVectorClass !clsOuterScope =
                         else exitWithRange iStart iStop iStep
 
           case edhUltimate idxVal of
-            EdhObject !idxObj -> withHostObject' idxObj tryScalarIdx $
+            EdhObject !idxObj -> withHostInstance' idxObj tryScalarIdx $
               \(EdhVector vvMask _) ->
                 readTVar vvMask >>= \ !vMask ->
                   if MV.length vMask /= MV.length mvec
@@ -308,7 +308,7 @@ createVectorClass !clsOuterScope =
                       exitWithRangeAssign iStart iStop iStep
 
           case edhUltimate idxVal of
-            EdhObject !idxObj -> withHostObject' idxObj tryScalarIdx $
+            EdhObject !idxObj -> withHostInstance' idxObj tryScalarIdx $
               \(EdhVector vvMask _) ->
                 readTVar vvMask >>= \ !vMask ->
                   if MV.length vMask /= MV.length mvec
@@ -547,7 +547,7 @@ createVectorClass !clsOuterScope =
                       opAssignRange ets opSym other mvec iStart iStop iStep exit
 
           case edhUltimate idxVal of
-            EdhObject !idxObj -> withHostObject' idxObj tryScalarIdx $
+            EdhObject !idxObj -> withHostInstance' idxObj tryScalarIdx $
               \(EdhVector vvMask _) ->
                 readTVar vvMask >>= \ !vMask ->
                   if MV.length vMask /= MV.length mvec
