@@ -331,50 +331,61 @@ defProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valName) _))) _) 
         !es = edh'scope'entity scope
         !key = AttrByName valName
         !rhv = edhDeCaseClose rhVal
-        !nv = EdhNamedValue valName rhv
-        doDefine = defineScopeAttr ets key nv
+        nv = EdhNamedValue valName rhv
+        defAndExit = do
+          defineScopeAttr ets key nv
+          -- wrap with the sacred return to cease defaulting semantics
+          exitEdh ets exit $ EdhReturn $ EdhReturn nv
     iopdLookup key es >>= \case
-      Nothing -> do
-        doDefine
-        exitEdh ets exit nv
-      Just oldDef@(EdhNamedValue !n !v) ->
-        if v /= rhv
-          then edhValueRepr ets rhv $ \ !newRepr ->
-            edhValueRepr ets oldDef $ \ !oldRepr ->
-              throwEdh ets EvalError $
-                "can not redefine "
-                  <> valName
-                  <> " from { "
-                  <> oldRepr
-                  <> " } to { "
-                  <> newRepr
-                  <> " }"
-          else do
-            -- avoid writing the entity if all same
-            unless (n == valName) doDefine
-            exitEdh ets exit nv
-      _ -> do
-        doDefine
-        exitEdh ets exit nv
+      Nothing -> defAndExit
+      Just oldVal@(EdhNamedValue !n !v)
+        | n == valName ->
+          if v == rhv
+            then -- just summon the existing defined value
+            -- wrap with the sacred return to cease defaulting semantics
+              exitEdh ets exit $ EdhReturn $ EdhReturn oldVal
+            else edhValueRepr ets rhv $ \ !newRepr ->
+              edhValueRepr ets v $ \ !oldRepr ->
+                throwEdh ets EvalError $
+                  "can not redefine "
+                    <> valName
+                    <> " from { "
+                    <> oldRepr
+                    <> " } to { "
+                    <> newRepr
+                    <> " }"
+      _ -> defAndExit
 defProc !lhExpr _ _ =
   throwEdhTx EvalError $ "invalid value definition: " <> T.pack (show lhExpr)
 
 -- | operator (?:=) - named value definition if missing
 defMissingProc :: EdhIntrinsicOp
-defMissingProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "_") _))) _) _ _ !ets =
-  throwEdh ets UsageError "not so reasonable: _ ?:= xxx"
-defMissingProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valName) _))) _) !rhExpr !exit !ets =
-  iopdLookup key es >>= \case
-    Nothing -> runEdhTx ets $
-      evalExprSrc rhExpr $ \ !rhVal _ets -> do
-        let !rhv = edhDeCaseClose rhVal
-            !nv = EdhNamedValue valName rhv
-        defineScopeAttr ets key nv
-        exitEdh ets exit nv
-    Just !preVal -> exitEdh ets exit preVal
-  where
-    !es = edh'scope'entity $ contextScope $ edh'context ets
-    !key = AttrByName valName
+defMissingProc
+  (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr "_") _))) _)
+  _
+  _
+  !ets =
+    throwEdh ets UsageError "not so reasonable: _ ?:= xxx"
+defMissingProc
+  (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valName) _))) _)
+  !rhExpr
+  !exit
+  !ets =
+    iopdLookup key es >>= \case
+      Nothing -> runEdhTx ets $
+        evalExprSrc rhExpr $ \ !rhVal _ets -> do
+          let !rhv = edhDeCaseClose rhVal
+              !nv = EdhNamedValue valName rhv
+          defineScopeAttr ets key nv
+          -- wrap with the sacred return to cease defaulting semantics
+          exitEdh ets exit $ EdhReturn $ EdhReturn nv
+      Just !preVal ->
+        -- eval to existing value anyway, specified value only for default
+        -- wrap with the sacred return to cease defaulting semantics
+        exitEdh ets exit $ EdhReturn $ EdhReturn preVal
+    where
+      !es = edh'scope'entity $ contextScope $ edh'context ets
+      !key = AttrByName valName
 defMissingProc !lhExpr _ _ !ets =
   throwEdh ets EvalError $ "invalid value definition: " <> T.pack (show lhExpr)
 
