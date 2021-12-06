@@ -1617,7 +1617,9 @@ producerArrowArgsReceiver !badArgs !exit =
 -- - a procedure's return type
 -- - available effects expected by a class or procedure
 data InpAnno
-  = -- | Homogeneous collection annotation
+  = -- | `nil` annotation
+    NilAnno
+  | -- | Homogeneous collection annotation
     --
     -- The annotated artifact meant to be a postional-only apk (i.e. tuple) or
     -- list, containing hogeneous elements of the spoke type.

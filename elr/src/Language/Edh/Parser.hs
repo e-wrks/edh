@@ -899,15 +899,16 @@ parseInpAnno !si0 =
       return (PluralAnno body, si')
 
     parseAnnoBody si =
-      choice
-        [ parseSinkCtor si, -- an event sink
-          parseApkOrProcSig si, -- an apk result or procedure signature
-          parseEffExps si, -- effects expections
-          parseStrSpec si, -- literal string - narrow for type, wide for quaint
-          parseQtyAnno si,
-          parseCtorProto si -- direct/indirect attribute addressor,
-          -- optionally called with args for prototyping
-        ]
+      (NilAnno, si) <$ keyword "nil"
+        <|> choice
+          [ parseSinkCtor si, -- an event sink
+            parseApkOrProcSig si, -- an apk result or procedure signature
+            parseEffExps si, -- effects expections
+            parseStrSpec si, -- literal string - narrow for type, wide for quaint
+            parseQtyAnno si,
+            parseCtorProto si -- direct/indirect attribute addressor,
+            -- optionally called with args for prototyping
+          ]
 
     parseSinkCtor si = do
       !startPos <- getSourcePos
