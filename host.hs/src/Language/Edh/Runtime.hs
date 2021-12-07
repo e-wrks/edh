@@ -343,10 +343,11 @@ createEdhWorld !console = do
     atomically $
       (iopdFromList =<<) $
         sequence $
-          [ (AttrByName nm,) <$> mkHostProc rootScope EdhMethod nm hp
-            | (nm, hp) <-
-                [ ("__repr__", wrapHostProc mthModuClsRepr),
-                  ("__show__", wrapHostProc mthModuClsShow)
+          [ (AttrByName nm,) <$> mkHostProc rootScope mc nm hp
+            | (nm, mc, hp) <-
+                [ ("__repr__", EdhMethod, wrapHostProc mthModuRepr),
+                  ("__show__", EdhMethod, wrapHostProc mthModuShow),
+                  ("__call__", EdhIntrpr, wrapHostProc mthModuCall)
                 ]
           ]
   !clsModule <-
@@ -857,16 +858,16 @@ createEdhWorld !console = do
                    (AttrByName "__file__", EdhString moduFile)
                  ]
 
-    mthModuClsRepr :: EdhHostProc
-    mthModuClsRepr !exit !ets = do
+    mthModuRepr :: EdhHostProc
+    mthModuRepr !exit !ets = do
       !name <- lookupEdhSelfAttr this (AttrByName "__name__")
       edhValueStr ets name $ \ !nameStr ->
         exitEdh ets exit $ EdhString $ "<module: " <> nameStr <> ">"
       where
         !this = edh'scope'this $ contextScope $ edh'context ets
 
-    mthModuClsShow :: EdhHostProc
-    mthModuClsShow !exit !ets = do
+    mthModuShow :: EdhHostProc
+    mthModuShow !exit !ets = do
       !name <- lookupEdhSelfAttr this (AttrByName "__name__")
       !file <- lookupEdhSelfAttr this (AttrByName "__file__")
       edhValueStr ets name $ \ !nameStr -> edhValueStr ets file $ \ !fileStr ->
@@ -878,6 +879,19 @@ createEdhWorld !console = do
               <> fileStr
       where
         !this = edh'scope'this $ contextScope $ edh'context ets
+
+    mthModuCall :: "moduScript" !: ExprDefi -> EdhHostProc
+    mthModuCall (mandatoryArg -> moduScript@(ExprDefi _ _ srcLoc)) !exit !ets =
+      objectScope thisModu >>= \ !moduScope -> do
+        !tipFrame <- newCallFrame moduScope srcLoc
+        let ctxModu = ctx {edh'ctx'tip = tipFrame}
+            etsModu = ets {edh'context = ctxModu}
+        runEdhTx etsModu $
+          evalExprDefi moduScript $ \_ _ets ->
+            exitEdh ets exit $ EdhObject thisModu
+      where
+        !ctx = edh'context ets
+        !thisModu = edh'scope'this $ contextScope ctx
 
 declareEdhOperators ::
   EdhWorld -> OpDeclLoc -> [(OpSymbol, OpFixity, Precedence)] -> IO ()
