@@ -1444,12 +1444,19 @@ invokeMagic ::
   (((Object, EdhValue) -> STM ()) -> (Object, EdhValue) -> STM ()) ->
   EdhTx
 invokeMagic !obj !magicKey !apk !exit !checkBypassCall !ets =
-  runEdhTx ets $
-    getObjAttrWithMagic'
-      obj
-      magicKey
-      (\_ets -> checkBypassCall callAsMethod (obj, EdhNil))
-      (\result _ets -> checkBypassCall callAsMethod result)
+  case edh'obj'store obj of
+    -- a class object can only get magic from its/the meta class,
+    -- magics provided by a class is for its instances, not itself
+    ClassStore {} ->
+      lookupEdhObjAttr (edh'obj'class obj) magicKey
+        >>= checkBypassCall callAsMethod
+    _ ->
+      runEdhTx ets $
+        getObjAttrWithMagic'
+          obj
+          magicKey
+          (\_ets -> checkBypassCall callAsMethod (obj, EdhNil))
+          (\result _ets -> checkBypassCall callAsMethod result)
   where
     callAsMethod :: (Object, EdhValue) -> STM ()
     callAsMethod = \case
