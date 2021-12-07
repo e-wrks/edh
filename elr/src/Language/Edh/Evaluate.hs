@@ -1524,7 +1524,8 @@ edhMakeCall !calleeVal !aSndrs !exit !ets =
 --      an interpreter procedure
 edhMakeCall' :: EdhValue -> ArgsPack -> EdhTxExit EdhValue -> EdhTx
 edhMakeCall' !calleeVal !apk !exit !ets =
-  edhPrepareCall' ets calleeVal apk $ \ !mkCall -> runEdhTx ets $ mkCall exit
+  edhPrepareCall' ets calleeVal (const ($ apk)) $
+    \ !mkCall -> runEdhTx ets $ mkCall exit
 
 -- Each Edh call is carried out in 2 phases, the preparation and the actual
 -- call execution. This is necessary to support the `go/defer` mechanism,
@@ -1548,22 +1549,23 @@ edhPrepareCall ::
   ((EdhTxExit EdhValue -> EdhTx) -> STM ()) ->
   STM ()
 edhPrepareCall !etsCallPrep !calleeVal !argsSndr !callMaker =
-  if isInterpretingProc
-    then packEdhExprs etsCallPrep argsSndr $
-      \ !apk -> edhPrepareCall' etsCallPrep calleeVal apk callMaker
-    else packEdhArgs etsCallPrep argsSndr $
-      \ !apk -> edhPrepareCall' etsCallPrep calleeVal apk callMaker
+  edhPrepareCall' etsCallPrep calleeVal apkr callMaker
   where
-    isInterpretingProc = case calleeVal of
-      EdhProcedure EdhIntrpr {} _ -> True
-      EdhBoundProc EdhIntrpr {} _ _ _ -> True
-      EdhProcedure EdhIntrOp {} _ -> True
-      EdhBoundProc EdhIntrOp {} _ _ _ -> True
+    apkr :: EdhValue -> (ArgsPack -> STM ()) -> STM ()
+    apkr !realCallee = case realCallee of
+      EdhProcedure EdhIntrpr {} _ -> packEdhExprs etsCallPrep argsSndr
+      EdhBoundProc EdhIntrpr {} _ _ _ -> packEdhExprs etsCallPrep argsSndr
+      EdhProcedure EdhIntrOp {} _ -> packEdhExprs etsCallPrep argsSndr
+      EdhBoundProc EdhIntrOp {} _ _ _ -> packEdhExprs etsCallPrep argsSndr
       EdhProcedure (EdhOprtor _ _ _ !op'proc) _ ->
-        is3Args $ edh'procedure'args $ edh'procedure'decl op'proc
+        if is3Args $ edh'procedure'args $ edh'procedure'decl op'proc
+          then packEdhExprs etsCallPrep argsSndr
+          else packEdhArgs etsCallPrep argsSndr
       EdhBoundProc (EdhOprtor _ _ _ !op'proc) _ _ _ ->
-        is3Args $ edh'procedure'args $ edh'procedure'decl op'proc
-      _ -> False
+        if is3Args $ edh'procedure'args $ edh'procedure'decl op'proc
+          then packEdhExprs etsCallPrep argsSndr
+          else packEdhArgs etsCallPrep argsSndr
+      _ -> packEdhArgs etsCallPrep argsSndr
 
     is3Args = \case
       PackReceiver [RecvArg {}, RecvArg {}, RecvArg {}] _ -> True
@@ -1573,53 +1575,58 @@ edhPrepareCall !etsCallPrep !calleeVal !argsSndr !callMaker =
 edhPrepareCall' ::
   EdhThreadState -> -- ets to prepare the call
   EdhValue -> -- callee value
-  ArgsPack -> -- packed arguments
+  (EdhValue -> (ArgsPack -> STM ()) -> STM ()) -> -- args packer per real callee
   -- callback to receive the prepared call
   ((EdhTxExit EdhValue -> EdhTx) -> STM ()) ->
   STM ()
-edhPrepareCall'
-  !etsCallPrep
-  !calleeVal
-  apk@(ArgsPack !args !kwargs)
-  !callMaker =
-    case calleeVal of
-      EdhBoundProc !callee !this !that !effOuter ->
-        callProc callee this that $
+edhPrepareCall' !etsCallPrep !calleeVal !apkr !callMaker =
+  case calleeVal of
+    EdhBoundProc !callee !this !that !effOuter ->
+      apkr calleeVal $ \apk ->
+        callProc apk callee this that $
           flip (maybe id) effOuter $
             \ !outerStack !s -> s {edh'effects'stack = outerStack}
-      EdhProcedure !callee !effOuter ->
+    EdhProcedure !callee !effOuter ->
+      apkr calleeVal $ \apk ->
         callProc
+          apk
           callee
           (edh'scope'this callerScope)
           (edh'scope'that callerScope)
           $ flip (maybe id) effOuter $
             \ !outerStack !s -> s {edh'effects'stack = outerStack}
-      (EdhObject !obj) -> case edh'obj'store obj of
-        -- calling a class
-        ClassStore {} -> callMaker $ \ !exit -> edhConstructObj obj apk $
-          \ !instObj !ets -> exitEdh ets exit $ EdhObject instObj
-        -- calling an object
-        _ ->
-          lookupEdhObjAttr obj (AttrByName "__call__") >>= \case
-            (!this', EdhProcedure !callee !effOuter) ->
-              callProc callee this' obj $
+    (EdhObject !obj) -> case edh'obj'store obj of
+      -- calling a class
+      ClassStore {} ->
+        apkr calleeVal $ \apk ->
+          callMaker $ \ !exit -> edhConstructObj obj apk $
+            \ !instObj !ets -> exitEdh ets exit $ EdhObject instObj
+      -- calling an object
+      _ ->
+        lookupEdhObjAttr obj (AttrByName "__call__") >>= \case
+          (!this', realCallee@(EdhProcedure !callee !effOuter)) ->
+            apkr realCallee $ \apk ->
+              callProc apk callee this' obj $
                 flip (maybe id) effOuter $
                   \ !outerStack !s -> s {edh'effects'stack = outerStack}
-            (_, EdhBoundProc !callee !this !that !effOuter) ->
-              callProc callee this that $
+          (_, realCallee@(EdhBoundProc !callee !this !that !effOuter)) ->
+            apkr realCallee $ \apk ->
+              callProc apk callee this that $
                 flip (maybe id) effOuter $
                   \ !outerStack !s -> s {edh'effects'stack = outerStack}
-            _ -> edhSimpleDesc etsCallPrep calleeVal $ \ !badDesc ->
-              throwEdh etsCallPrep EvalError $
-                "no __call__ method on " <> badDesc
-      _ -> edhValueRepr etsCallPrep calleeVal $ \ !calleeRepr ->
-        throwEdh etsCallPrep EvalError $
-          "can not call a " <> edhTypeNameOf calleeVal <> ": " <> calleeRepr
-    where
-      callerScope = contextScope $ edh'context etsCallPrep
+          _ -> edhSimpleDesc etsCallPrep calleeVal $ \ !badDesc ->
+            throwEdh etsCallPrep EvalError $
+              "no __call__ method on " <> badDesc
+    _ -> edhValueRepr etsCallPrep calleeVal $ \ !calleeRepr ->
+      throwEdh etsCallPrep EvalError $
+        "can not call a " <> edhTypeNameOf calleeVal <> ": " <> calleeRepr
+  where
+    callerScope = contextScope $ edh'context etsCallPrep
 
-      callProc :: EdhProcDefi -> Object -> Object -> (Scope -> Scope) -> STM ()
-      callProc !callee !this !that !scopeMod = case callee of
+    callProc ::
+      ArgsPack -> EdhProcDefi -> Object -> Object -> (Scope -> Scope) -> STM ()
+    callProc apk@(ArgsPack !args !kwargs) !callee !this !that !scopeMod =
+      case callee of
         -- calling a method procedure
         EdhMethod !mth ->
           callMaker $ \ !exit -> callEdhMethod this that mth apk scopeMod exit
