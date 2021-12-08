@@ -203,13 +203,13 @@ parseVoidStmt = VoidStmt <$ keyword "pass" -- same as Python
 parseGoStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseGoStmt !si = do
   void $ keyword "go"
-  (!expr, !si') <- parseExpr si
+  (!expr, !si') <- let ?commaPacking = False in parseExpr si
   return (GoStmt expr, si')
 
 parseDeferStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseDeferStmt !si = do
   void $ keyword "defer"
-  (!expr, !si') <- parseExpr si
+  (!expr, !si') <- let ?commaPacking = False in parseExpr si
   return (DeferStmt expr, si')
 
 parseEffectStmt ::
@@ -218,25 +218,25 @@ parseEffectStmt ::
   Parser (Stmt, IntplSrcInfo)
 parseEffectStmt !docCmt !si = do
   void $ keyword "effect"
-  (!s, !si') <- parseExpr si
+  (!s, !si') <- let ?commaPacking = False in parseExpr si
   return (EffectStmt s docCmt, si')
 
 parseExportExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseExportExpr !si = do
   void $ keyword "export"
-  (!s, !si') <- parseExpr si
+  (!s, !si') <- let ?commaPacking = False in parseExpr si
   return (ExportExpr s, si')
 
 parseIncludeExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseIncludeExpr !si = do
   void $ keyword "include"
-  (!se, !si') <- parseExpr si
+  (!se, !si') <- let ?commaPacking = False in parseExpr si
   return (IncludeExpr se, si')
 
 parseIncExprExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseIncExprExpr !si = do
   void $ keyword "iexpr"
-  (!se, !si') <- parseExpr si
+  (!se, !si') <- let ?commaPacking = False in parseExpr si
   return (IncExprExpr se, si')
 
 parseImportExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -244,12 +244,12 @@ parseImportExpr !si = do
   (!ar, !se, !si') <- pyStyle <|> jsStyle
   (<|> return (ImportExpr ar se Nothing, si')) $ do
     void $ keyword "into"
-    (!intoExpr, !si'') <- parseExpr si'
+    (!intoExpr, !si'') <- let ?commaPacking = False in parseExpr si'
     return (ImportExpr ar se (Just intoExpr), si'')
   where
     pyStyle = do
       void $ keyword "from"
-      (!se, !si') <- parseExpr si
+      (!se, !si') <- let ?commaPacking = False in parseExpr si
       void $ keyword "import"
       !ar <- parseArgsReceiver
       return (ar, se, si')
@@ -257,7 +257,7 @@ parseImportExpr !si = do
       void $ keyword "import"
       !ar <- parseArgsReceiver
       void $ optional $ keyword "from"
-      (!se, !si') <- parseExpr si
+      (!se, !si') <- let ?commaPacking = False in parseExpr si
       return (ar, se, si')
 
 parseUnitStmt :: OptDocCmt -> IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
@@ -498,7 +498,7 @@ parseLetStmt !si = do
     parseArgsSender :: IntplSrcInfo -> Parser (ArgsPacker, IntplSrcInfo)
     parseArgsSender si' =
       parseArgsPacker si <|> do
-        (!x, !si'') <- parseExpr si'
+        (!x, !si'') <- let ?commaPacking = False in parseExpr si'
         return (ArgsPacker [SendPosArg x] (exprSrcSpan x), si'')
 
 parseArgsReceiver :: Parser ArgsReceiver
@@ -624,7 +624,7 @@ parseKwRecv !inPack = do
       --      so the default value expr can be interpolated.
       !s <- getInput
       !o <- getOffset
-      (!x, _si') <- parseExpr (s, o, [])
+      (!x, _si') <- let ?commaPacking = False in parseExpr (s, o, [])
       return x
 
 parseAttrRef :: Parser AttrRef
@@ -699,30 +699,30 @@ parseArgSends !si !closeSym !commaAppeared !ss = do
       void $ string "***" <|> string "..."
       notFollowedBy $ satisfy isOperatorChar
       sc
-      (!x, !si') <- parseExpr si
+      (!x, !si') <- let ?commaPacking = False in parseExpr si
       return (UnpackPkArgs x, si')
     unpackKwArgs = do
       void $ string "**"
       notFollowedBy $ satisfy isOperatorChar
       sc
-      (!x, !si') <- parseExpr si
+      (!x, !si') <- let ?commaPacking = False in parseExpr si
       return (UnpackKwArgs x, si')
     unpackPosArgs = do
       void $ string "*"
       notFollowedBy $ satisfy isOperatorChar
       sc
-      (!x, !si') <- parseExpr si
+      (!x, !si') <- let ?commaPacking = False in parseExpr si
       return (UnpackPosArgs x, si')
     parseKwArgSend :: Parser (ArgSender, IntplSrcInfo)
     parseKwArgSend = do
       !addr <- let ?allowKwAttr = True in parseAttrAddrSrc'
       equalSign
-      (!x, !si') <- parseExpr si
+      (!x, !si') <- let ?commaPacking = False in parseExpr si
       return (SendKwArg addr x, si')
     parse1ArgSend :: Parser (ArgSender, IntplSrcInfo)
     parse1ArgSend =
       try parseKwArgSend <|> do
-        (!x, !si') <- parseExpr si
+        (!x, !si') <- let ?commaPacking = False in parseExpr si
         return (SendPosArg x, si')
 
 parseNamespaceExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -784,7 +784,7 @@ parseDataExpr !si = do
 parseExtendsStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseExtendsStmt !si = do
   void $ keyword "extends"
-  (!x, !si') <- parseExpr si
+  (!x, !si') <- let ?commaPacking = True in parseExpr si
   return (ExtendsStmt x, si')
 
 parseMethodExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -804,8 +804,8 @@ parseGeneratorExpr !si = do
 parsePerceiveStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parsePerceiveStmt !si = do
   void $ keyword "perceive"
-  (!sink, !si') <- parseExpr si
-  (!body, !si'') <- parseExpr si'
+  (!sink, !si') <- let ?commaPacking = False in parseExpr si
+  (!body, !si'') <- let ?commaPacking = False in parseExpr si'
   return (PerceiveStmt sink body, si'')
 
 parseInterpreterExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -825,7 +825,7 @@ parseProducerExpr !si = do
 parseWhileExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseWhileExpr !si = do
   void $ keyword "while"
-  (!cnd, !si') <- parseExpr si
+  (!cnd, !si') <- let ?commaPacking = False in parseExpr si
   (!act, !si'') <- parseStmt si'
   return (WhileExpr cnd act, si'')
 
@@ -837,7 +837,7 @@ parseDoForOrWhileExpr !si = do
   choice
     [ do
         void $ keyword "if"
-        (!cond, !si'') <- parseExpr si'
+        (!cond, !si'') <- let ?commaPacking = False in parseExpr si'
         lbEnd <- lexemeEndPos
         optional (keyword "for") >>= \case
           Nothing -> return (IfExpr cond bodyStmt Nothing, si'')
@@ -858,7 +858,7 @@ parseDoForOrWhileExpr !si = do
             return (ForExpr scoped ar iter loopBodyStmt, si'''),
       do
         void $ keyword "while"
-        (!cnd, !si'') <- parseExpr si'
+        (!cnd, !si'') <- let ?commaPacking = False in parseExpr si'
         return (DoWhileExpr bodyStmt cnd, si''),
       do
         void $ keyword "for"
@@ -1008,7 +1008,7 @@ parseEffsAnno = symbol "{" *> go []
       --      so the default value expr can be interpolated.
       !s <- getInput
       !o <- getOffset
-      (!x, _si') <- parseExpr (s, o, [])
+      (!x, _si') <- let ?commaPacking = False in parseExpr (s, o, [])
       return x
 
 parseProcDecl :: SourcePos -> IntplSrcInfo -> Parser (ProcDecl, IntplSrcInfo)
@@ -1167,13 +1167,13 @@ parseReturnStmt ::
   Parser (Stmt, IntplSrcInfo)
 parseReturnStmt !docCmt !si = do
   void $ keyword "return"
-  (!x, !si') <- parseExpr si
+  (!x, !si') <- let ?commaPacking = True in parseExpr si
   return (ReturnStmt x docCmt, si')
 
 parseThrowStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseThrowStmt !si = do
   void $ keyword "throw"
-  (!x, !si') <- parseExpr si
+  (!x, !si') <- let ?commaPacking = True in parseExpr si
   return (ThrowStmt x, si')
 
 parseStmt' :: Int -> IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
@@ -1205,9 +1205,7 @@ parseStmt' !prec !si = do
               -- NOTE: keywords in statements above should either parse as
               --       literal too, or get detected by `illegalKeywrodAsIdent`
               --       as invalid for attribute identifier
-              do
-                (ExprSrc !x _, !si') <- parseExprPrec Nothing prec si
-                return (ExprStmt x docCmt, si')
+              parseExprStmt docCmt
             ]
         !lexeme'end <- lexemeEndPos
         return (StmtSrc stmt (lspSrcRangeFromParsec startPos lexeme'end), si')
@@ -1259,6 +1257,11 @@ parseStmt' !prec !si = do
       !errPos <- getSourcePos
       withIllegal (lspSrcPosFromParsec errPos) $
         T.pack $ parseErrorTextPretty err
+  where
+    parseExprStmt docCmt = do
+      (ExprSrc !x _, !si') <-
+        let ?commaPacking = True in parseExprPrec Nothing prec si
+      return (ExprStmt x docCmt, si')
 
 parseStmt :: IntplSrcInfo -> Parser (StmtSrc, IntplSrcInfo)
 parseStmt !si = parseStmt' (-10) si
@@ -1273,7 +1276,7 @@ parseProcBody !si = parseStmt' (-3) si
 parseIfExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseIfExpr !si = do
   void $ keyword "if"
-  (!cond, !si') <- parseExpr si
+  (!cond, !si') <- let ?commaPacking = False in parseExpr si
   void $ optional $ keyword "then"
   (!cseq, !si2) <- parseStmt si'
   (!alt, !si3) <-
@@ -1287,15 +1290,15 @@ parseIfExpr !si = do
 parseCaseExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseCaseExpr !si = do
   void $ keyword "case"
-  (!tgt, !si') <- parseExpr si
+  (!tgt, !si') <- let ?commaPacking = False in parseExpr si
   void $ keyword "of"
-  (!branches, !si'') <- parseExpr si'
+  (!branches, !si'') <- let ?commaPacking = False in parseExpr si'
   return (CaseExpr tgt branches, si'')
 
 parseYieldExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseYieldExpr !si = do
   void $ keyword "yield"
-  (!x, !si') <- parseExpr si
+  (!x, !si') <- let ?commaPacking = True in parseExpr si
   return (YieldExpr x, si')
 
 parseForExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -1315,7 +1318,7 @@ parseEdhLoopHead ::
 parseEdhLoopHead !si = do
   !ar <- parseArgsReceiver
   void $ keyword "from"
-  (!iter, !si') <- parseExpr si
+  (!iter, !si') <- let ?commaPacking = False in parseExpr si
   return (ar, iter, si')
 
 parseLoopHead ::
@@ -1332,19 +1335,20 @@ parseLoopHead !si = do
               choice
                 [ do
                     !prepos <- litKeyword "of" <|> litKeyword "in"
-                    (!iter, !si') <- parseExpr si
+                    (!iter, !si') <- let ?commaPacking = False in parseExpr si
                     void $ symbol ")"
                     return (prepos, ar, iter, si'),
                   do
                     void equalSign
-                    (!iter, !si') <- parseExpr si
+                    (!iter, !si') <- let ?commaPacking = False in parseExpr si
                     -- todo `iter` is semantically in js the initial value, not
                     --      the source, here only the syntax is accepted, the
                     --      semantics is weird. to support `for(;;)` semantics?
                     let dropRest si'' =
                           optionalSemicolon >>= \case
                             True -> do
-                              (_, !si''') <- parseExpr si''
+                              (_, !si''') <-
+                                let ?commaPacking = True in parseExpr si''
                               dropRest si'''
                             False -> return si''
                     !si'' <- dropRest si'
@@ -1356,7 +1360,7 @@ parseLoopHead !si = do
               !ars <- parseRestArgRecvs ")"
               !lexeme'end <- lexemeEndPos
               !prepos <- litKeyword "from" <|> litKeyword "in"
-              (!iter, !si') <- parseExpr si
+              (!iter, !si') <- let ?commaPacking = True in parseExpr si
               return
                 ( prepos,
                   PackReceiver ars $
@@ -1373,7 +1377,7 @@ parseLoopHead !si = do
                 flip RecvRestPkArgs Nothing $
                   AttrAddrSrc (NamedAttr "_") src'span
         !prepos <- litKeyword "from"
-        (!iter, !si') <- parseExpr si
+        (!iter, !si') <- let ?commaPacking = True in parseExpr si
         return (prepos, ar, iter, si'),
       do
         -- wild arg receiver, exclusively Edh syntax
@@ -1391,13 +1395,13 @@ parseLoopHead !si = do
                     SrcRange (lspSrcPosFromParsec startPos) lexeme'end
             ]
         !prepos <- litKeyword "from"
-        (!iter, !si') <- parseExpr si
+        (!iter, !si') <- let ?commaPacking = True in parseExpr si
         return (prepos, ar, iter, si'),
       do
         -- single arg receiver, Edh or Python-like syntax
         !singleArg <- parseKwRecv False
         !prepos <- litKeyword "from" <|> litKeyword "in"
-        (!iter, !si') <- parseExpr si
+        (!iter, !si') <- let ?commaPacking = True in parseExpr si
         return (prepos, SingleReceiver singleArg, iter, si')
     ]
 
@@ -1425,7 +1429,7 @@ parseListExpr !si = do
     parseElem si' es = do
       void optionalComma
       (symbol "]" >> return (es, si')) <|> do
-        (!x, !si'') <- parseExpr si'
+        (!x, !si'') <- let ?commaPacking = False in parseExpr si'
         void optionalComma
         parseElem si'' (x : es)
 
@@ -1633,7 +1637,8 @@ parseAttrAddr = parseAtNotation <|> NamedAttr <$> parseAttrName
     parseIntplSymAttr = do
       !s <- getInput
       !o <- getOffset
-      (!x, _) <- parseExprPrec Nothing (-20) (s, o, [])
+      (!x, _) <-
+        let ?commaPacking = False in parseExprPrec Nothing (-20) (s, o, [])
       !o' <- getOffset
       let !src = maybe "" (T.stripEnd . fst) $ takeN_ (o' - o) s
       return $ IntplSymAttr src x
@@ -1840,22 +1845,20 @@ parseDictOrBlock !si0 =
         litEntry = try $ do
           !k <- parseLit
           entryColon
-          (!v, !si') <- parseExpr si
+          (!v, !si') <- let ?commaPacking = False in parseExpr si
           return ((LitDictKey k, v), si')
         addrEntry = try $ do
           !k <- let ?allowKwAttr = True in parseAttrAddrSrc'
           entryColon
-          (!v, !si') <- parseExpr si
+          (!v, !si') <- let ?commaPacking = False in parseExpr si
           return ((AddrDictKey k, v), si')
         exprEntry = try $ do
           -- (:) should be infixl 5, cross check please
           (!k, !si') <-
-            parseExprPrec
-              (Just (OpSymSrc ":" noSrcRange, InfixL))
-              5
-              si
+            let ?commaPacking = False
+             in parseExprPrec (Just (OpSymSrc ":" noSrcRange, InfixL)) 5 si
           entryColon
-          (!v, !si'') <- parseExpr si'
+          (!v, !si'') <- let ?commaPacking = False in parseExpr si'
           return ((ExprDictKey k, v), si'')
 
 parseOpAddrOrApkOrParen :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
@@ -1919,31 +1922,31 @@ parsePrefixExpr !si =
   choice
     [ try $
         prefixOp "+" >> do
-          (!x, !si') <- parseExprPrec Nothing 9 si
+          (!x, !si') <- let ?commaPacking = False in parseExprPrec Nothing 9 si
           return (PrefixExpr PrefixPlus x, si'),
       try $
         prefixOp "-" >> do
-          (!x, !si') <- parseExprPrec Nothing 9 si
+          (!x, !si') <- let ?commaPacking = False in parseExprPrec Nothing 9 si
           return (PrefixExpr PrefixMinus x, si'),
       keyword "not" >> do
-        (!x, !si') <- parseExprPrec Nothing 4 si
+        (!x, !si') <- let ?commaPacking = False in parseExprPrec Nothing 4 si
         return (PrefixExpr Not x, si'),
       try $
         prefixOp "|" >> sc >> do
-          (!x, !si') <- parseExprPrec Nothing 1 si
+          (!x, !si') <- let ?commaPacking = False in parseExprPrec Nothing 1 si
           return (PrefixExpr Guard x, si'),
       keyword "void" >> do
-        (!x, !si') <- parseExpr si
+        (!x, !si') <- let ?commaPacking = True in parseExpr si
         return (VoidExpr x, si'),
       keyword "ai" >> do
-        (!x, !si') <- parseExpr si
+        (!x, !si') <- let ?commaPacking = True in parseExpr si
         return (AtoIsoExpr x, si'),
       keyword "default" >> do
         (!apkr, !si') <-
           optional (parseArgsPacker si) >>= \case
             Nothing -> return (Nothing, si)
             Just (!apkr'', !si'') -> return (Just apkr'', si'')
-        !x <- parseExprWithSrc
+        !x <- let ?commaPacking = False in parseExprWithSrc
         return (DefaultExpr apkr x, si'),
       unaryKwStmt "extends" ExtendsStmt,
       unaryKwStmt "return" $ flip ReturnStmt NoDocCmt,
@@ -1952,7 +1955,7 @@ parsePrefixExpr !si =
       -- prefix, to better inter-op with some other languages like JavaScript
       do
         void $ keyword "new" <|> keyword "try"
-        (ExprSrc !x _, !si') <- parseExpr si
+        (ExprSrc !x _, !si') <- let ?commaPacking = False in parseExpr si
         return (x, si')
     ]
   where
@@ -1962,7 +1965,7 @@ parsePrefixExpr !si =
     unaryKwStmt :: Text -> (ExprSrc -> Stmt) -> Parser (Expr, IntplSrcInfo)
     unaryKwStmt !kw !xc = do
       !kw'span <- keyword kw
-      (x@(ExprSrc _x !x'span), !si') <- parseExpr si
+      (x@(ExprSrc _x !x'span), !si') <- let ?commaPacking = True in parseExpr si
       return
         ( BlockExpr
             [StmtSrc (xc x) (SrcRange (src'start kw'span) (src'end x'span))],
@@ -1972,16 +1975,16 @@ parsePrefixExpr !si =
 -- besides hardcoded prefix operators, all other operators are infix binary
 -- operators, they can be declared and further overridden everywhere
 
-parseExprLit :: Parser ExprSrc
+parseExprLit :: (?commaPacking :: Bool) => Parser ExprSrc
 parseExprLit = do
   !startPos <- getSourcePos
   void $ keyword "expr"
   parseExprWithSrc' startPos
 
-parseExprWithSrc :: Parser ExprSrc
+parseExprWithSrc :: (?commaPacking :: Bool) => Parser ExprSrc
 parseExprWithSrc = getSourcePos >>= parseExprWithSrc'
 
-parseExprWithSrc' :: SourcePos -> Parser ExprSrc
+parseExprWithSrc' :: (?commaPacking :: Bool) => SourcePos -> Parser ExprSrc
 parseExprWithSrc' !startPos = do
   !s <- getInput
   !o <- getOffset
@@ -2006,10 +2009,11 @@ parseIntplExpr (s, o, sss) = do
   !ie's <- getInput
   !ie'o <- getOffset
   (!x, (!ie's', !ie'o', !ie'sss)) <-
-    parseExprPrec
-      Nothing
-      (-30)
-      (ie's, ie'o, [])
+    let ?commaPacking = True
+     in parseExprPrec
+          Nothing
+          (-30)
+          (ie's, ie'o, [])
   let !sss' =
         if o' > o
           then SrcSeg (maybe "" fst $ takeN_ (o' - o) s) : sss
@@ -2035,34 +2039,67 @@ parseIntplExpr (s, o, sss) = do
     )
 
 parseExprPrec ::
+  (?commaPacking :: Bool) =>
   Maybe (OpSymSrc, OpFixity) ->
   Precedence ->
   IntplSrcInfo ->
   Parser (ExprSrc, IntplSrcInfo)
-parseExprPrec !precedingOp !prec !si =
-  (parseExpr1st >>= \(!x, !si') -> parseMoreOps precedingOp si' x) <|> do
-    !missed'start <- lexemeEndPos
-    !missed'end <- getSourcePos
-    let !missed'span = lspSrcRangeFromParsec' missed'start missed'end
-        !missedExpr =
-          ExprSrc
-            ( AttrExpr
-                (DirectRef (AttrAddrSrc MissedAttrName missed'span))
-            )
-            missed'span
-    case precedingOp of
-      Nothing ->
-        parseMoreInfix Nothing si missedExpr >>= \case
-          ( ExprSrc
-              ( AttrExpr
-                  (DirectRef (AttrAddrSrc MissedAttrName _))
-                )
-              _,
-            _
-            ) -> empty
-          !lhsMissedResult -> return lhsMissedResult
-      Just {} -> return (missedExpr, si)
+parseExprPrec !precedingOp !prec !si = do
+  (!x, !si') <- let ?commaPacking = False in parseExpr1st
+  let choices =
+        [ parseMoreOps precedingOp si' x,
+          do
+            !missed'start <- lexemeEndPos
+            !missed'end <- getSourcePos
+            let !missed'span = lspSrcRangeFromParsec' missed'start missed'end
+                !missedExpr =
+                  ExprSrc
+                    ( AttrExpr
+                        (DirectRef (AttrAddrSrc MissedAttrName missed'span))
+                    )
+                    missed'span
+            case precedingOp of
+              Nothing ->
+                parseMoreInfix Nothing si missedExpr >>= \case
+                  ( ExprSrc
+                      ( AttrExpr
+                          (DirectRef (AttrAddrSrc MissedAttrName _))
+                        )
+                      _,
+                    _
+                    ) -> empty
+                  !lhsMissedResult -> return lhsMissedResult
+              Just {} -> return (missedExpr, si)
+        ]
+  choice $
+    if ?commaPacking
+      then parsePosArgList si' x : choices
+      else choices
   where
+    parsePosArgList :: IntplSrcInfo -> ExprSrc -> Parser (ExprSrc, IntplSrcInfo)
+    parsePosArgList !si0 !x0 =
+      let ?commaPacking = False
+       in do
+            void $ symbol ","
+            (!x, !si') <- parseExprPrec precedingOp prec si0
+            go [SendPosArg x, SendPosArg x0] si'
+      where
+        go :: [ArgSender] -> IntplSrcInfo -> Parser (ExprSrc, IntplSrcInfo)
+        go ss si' = (<|> done) $ do
+          void $ symbol ","
+          (!x, !si'') <- parseExprPrec precedingOp prec si'
+          go (SendPosArg x : ss) si''
+          where
+            done = do
+              !lexeme'end <- lexemeEndPos
+              let apkSpan = SrcRange (exprSrcStart x0) lexeme'end
+              return
+                ( ExprSrc
+                    (ArgsPackExpr $ ArgsPacker (reverse ss) apkSpan)
+                    apkSpan,
+                  si'
+                )
+
     parseExpr1st :: Parser (ExprSrc, IntplSrcInfo)
     parseExpr1st =
       ((,si) <$> parseExprLit) <|> parseIntplExpr si <|> do
@@ -2211,7 +2248,8 @@ parseExprPrec !precedingOp !prec !si =
 parseInfixOp :: Parser OpSymSrc
 parseInfixOp = uncurry OpSymSrc <$> parseWithRng parseOpLit
 
-parseExpr :: IntplSrcInfo -> Parser (ExprSrc, IntplSrcInfo)
+parseExpr ::
+  (?commaPacking :: Bool) => IntplSrcInfo -> Parser (ExprSrc, IntplSrcInfo)
 parseExpr = parseExprPrec Nothing (-10)
 
 parseWithRng :: forall a. Parser a -> Parser (a, SrcRange)
