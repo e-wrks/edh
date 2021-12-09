@@ -2194,15 +2194,12 @@ parseExprPrec !precedingOp !prec !si =
           Parser (Maybe (OpFixity, Precedence, OpSymSrc))
         tighterOp prec' = do
           !beforeOp <- getParserState
-          !errRptPos <- getOffset
           optional (try parseInfixOp) >>= \case
             Nothing -> return Nothing
             Just opSymSrc@(OpSymSrc !opSym _opSpan) -> do
               EdhParserState !opPD _ _ <- get
               case lookupOpFromDict opSym opPD of
-                Nothing -> do
-                  setOffset errRptPos
-                  fail $ "undeclared operator: " <> T.unpack opSym
+                Nothing -> fail $ "undeclared operator: " <> T.unpack opSym
                 Just (opFixity, opPrec, _) ->
                   if opPrec == prec'
                     then case opFixity of
