@@ -564,10 +564,32 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
           _ ->
             throwEdh ets EvalError $
               "invalid attribute reference type - " <> edhTypeNameOf addrVal
-  !x ->
-    throwEdh ets EvalError $
-      "invalid left hand expression for assignment: "
-        <> T.pack (show x)
+  _ -> methodArrowArgsReceiver (deParen'1 lhExpr) $ \case
+    -- todo allow indirect refs etc. as multi-assignment targets
+    Left _err ->
+      throwEdh ets EvalError $
+        "invalid left hand expression for assignment: " <> T.pack (show lhExpr)
+    Right !argsRcvr -> do
+      let apk = case edhUltimate rhVal of
+            EdhArgsPack k -> deApk k
+            _ -> ArgsPack [rhVal] odEmpty
+      recvEdhArgs ets ctx argsRcvr apk $ \ !um -> do
+        case edh'ctx'eff'target ctx of
+          Nothing ->
+            -- normal multi-assignment
+            iopdUpdate (odToList um) (edh'scope'entity scope)
+          Just !esEffs ->
+            -- define effectful artifacts by multi-assignment
+            -- note that nil can not appear as for arg receiving,
+            -- so no processing of delete semantics
+            iopdUpdate (odToList um) esEffs
+        case edh'ctx'exp'target ctx of
+          Nothing -> pure ()
+          Just !esExps ->
+            -- note that nil can not appear as for arg receiving,
+            -- so no processing of delete semantics
+            iopdUpdate (odToList um) esExps
+        exitEdh ets exit rhVal
   where
     !ctx = edh'context ets
     scope = contextScope ctx
