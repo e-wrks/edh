@@ -322,6 +322,41 @@ fapProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit =
 ffapProc :: EdhIntrinsicOp
 ffapProc !lhExpr !rhExpr = fapProc rhExpr lhExpr
 
+-- | operator ($!) - "strict" low-precedence operator for procedure call
+--
+-- similar to the function application ($!) operator in Haskell
+--
+-- note this does dynamic unpacking of apk, but doesn't work well for
+-- interpreter procedures
+sfapProc :: EdhIntrinsicOp
+sfapProc !lhExpr !rhExpr !exit = evalExprSrc rhExpr $ \ !rhVal ->
+  evalExprSrc lhExpr $ \ !lhVal -> case edhUltimate lhVal of
+    -- special case, support merging of apks with func app syntax, so args can
+    -- be chained then applied to some function
+    EdhArgsPack (ArgsPack !args !kwargs) -> case edhUltimate rhVal of
+      EdhArgsPack (ArgsPack !args' !kwargs') -> \ !ets -> do
+        !kwIOPD <- iopdFromList $ odToList kwargs
+        iopdUpdate (odToList kwargs') kwIOPD
+        !kwargs'' <- iopdSnapshot kwIOPD
+        exitEdh ets exit $ EdhArgsPack $ ArgsPack (args ++ args') kwargs''
+      _ -> exitEdhTx exit $ EdhArgsPack $ ArgsPack (args ++ [rhVal]) kwargs
+    -- normal case
+    !calleeVal -> do
+      let apk = case edhUltimate rhVal of
+            EdhArgsPack k -> k
+            _ -> ArgsPack [rhVal] odEmpty
+      edhMakeCall' calleeVal apk exit
+
+-- | operator (!|) - flipped ($!), "strict" low-precedence operator for
+-- procedure call
+--
+-- sorta similar to UNIX pipe
+--
+-- note this does dynamic unpacking of apk, but doesn't work well for
+-- interpreter procedures
+fsfapProc :: EdhIntrinsicOp
+fsfapProc !lhExpr !rhExpr = sfapProc rhExpr lhExpr
+
 -- | operator (:=) - named value definition
 defProc :: EdhIntrinsicOp
 defProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valName) _))) _) !rhExpr !exit =

@@ -329,6 +329,12 @@ installEdhBatteries world = do
       -- semantics), in Haskell style
       ("$@", InfixL, -5), -- out-laid arg sugar, callee at left
       ("@|", InfixR, -5), -- out-laid arg sugar, callee at right
+      -- "strict" version of ($) - eval rhs before making the call
+      -- doesn't work well for interpreter procedures
+      ("$!", InfixR, -5),
+      -- "strict" version of (|) - eval lhs before making the call
+      -- doesn't work well for interpreter procedures
+      ("!|", InfixL, 0),
       --
       -- assignments, make them lower than (++),
       -- so don't need to quote `a = b ++ c`
@@ -448,6 +454,8 @@ installEdhBatteries world = do
                   ("|", ffapProc),
                   ("$@", leftPosCallProc),
                   ("@|", rightPosCallProc),
+                  ("$!", sfapProc),
+                  ("!|", fsfapProc),
                   (":=", defProc),
                   ("?:=", defMissingProc),
                   ("..", rangeCtorProc ClosedBound ClosedBound),
