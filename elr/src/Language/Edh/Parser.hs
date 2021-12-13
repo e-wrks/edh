@@ -2046,7 +2046,7 @@ parseExprPrec ::
   Parser (ExprSrc, IntplSrcInfo)
 parseExprPrec !precedingOp !prec !si =
   (<|> admitMissingExpr) $
-    parseMoreOps precedingOp
+    parseMoreInfix precedingOp
       =<< if ?commaPacking
         then let ?commaPacking = False in parseOperand si >>= tryCommaPkr
         else parseOperand si
@@ -2063,7 +2063,7 @@ parseExprPrec !precedingOp !prec !si =
               missed'span
       case precedingOp of
         Nothing ->
-          parseMoreInfix Nothing si missedExpr >>= \case
+          parseMoreInfix Nothing (missedExpr, si) >>= \case
             ( ExprSrc
                 ( AttrExpr
                     (DirectRef (AttrAddrSrc MissedAttrName _))
@@ -2097,97 +2097,99 @@ parseExprPrec !precedingOp !prec !si =
                 )
 
     parseOperand :: IntplSrcInfo -> Parser (ExprSrc, IntplSrcInfo)
-    parseOperand !si0 =
-      ((,si0) <$> parseExprLit) <|> parseIntplExpr si0 <|> do
-        !startPos <- getSourcePos
-        (!x, !si') <-
-          choice
-            [ (,si0) . LitExpr <$> parseLit,
-              nullaryKwStmt "rethrow" RethrowStmt,
-              (,si0) <$> parseSymbolExpr,
-              parsePrefixExpr si0,
-              parseYieldExpr si0,
-              parseForExpr si0,
-              parseDoForOrWhileExpr si0,
-              parseWhileExpr si0,
-              parseIfExpr si0,
-              parseCaseExpr si0,
-              parseEffExpr si0,
-              parseListExpr si0,
-              parseScopedBlock si0,
-              parseDictOrBlock si0,
-              parseOpAddrOrApkOrParen si0,
-              parseExportExpr si0,
-              parseIncludeExpr si0,
-              parseIncExprExpr si0,
-              parseImportExpr si0,
-              parseNamespaceExpr si0,
-              parseClassExpr si0,
-              parseDataExpr si0,
-              parseMethodExpr si0,
-              parseGeneratorExpr si0,
-              parseInterpreterExpr si0,
-              parseProducerExpr si0,
-              parseOpDeclOvrdExpr si0,
-              (,si0) . AttrExpr <$> parseAttrRef
-            ]
-        !lexeme'end <- lexemeEndPos
-        return (ExprSrc x (lspSrcRangeFromParsec startPos lexeme'end), si')
+    parseOperand = tryMore <=< directPart
       where
-        nullaryKwStmt :: Text -> Stmt -> Parser (Expr, IntplSrcInfo)
-        nullaryKwStmt !kw !stmt = do
-          !kw'span <- keyword kw
-          return (BlockExpr [StmtSrc stmt kw'span], si0)
+        tryMore :: (ExprSrc, IntplSrcInfo) -> Parser (ExprSrc, IntplSrcInfo)
+        tryMore (!x, !si') =
+          choice
+            [ parseIndexer si' >>= \(!idx, !si'') ->
+                tryMore
+                  ( ExprSrc
+                      (IndexExpr idx x)
+                      (SrcRange (exprSrcStart x) (exprSrcEnd idx)),
+                    si''
+                  ),
+              parseArgsPacker si' >>= \(!aps, !si'') -> do
+                !lexeme'end <- lexemeEndPos
+                tryMore
+                  ( ExprSrc
+                      (CallExpr x aps)
+                      (SrcRange (exprSrcStart x) lexeme'end),
+                    si''
+                  ),
+              do
+                addr@(AttrAddrSrc _ !addr'span) <- try $ do
+                  singleDot
+                  let ?allowKwAttr = True in parseAttrAddrSrc'
+                tryMore
+                  ( ExprSrc
+                      (AttrExpr $ IndirectRef x addr)
+                      (SrcRange (exprSrcStart x) (src'end addr'span)),
+                    si'
+                  ),
+              return (x, si')
+            ]
 
-    parseMoreOps ::
-      Maybe (OpSymSrc, OpFixity) ->
-      (ExprSrc, IntplSrcInfo) ->
-      Parser (ExprSrc, IntplSrcInfo)
-    parseMoreOps !pOp (!expr, !si') =
-      choice
-        [ parseIndexer si' >>= \(!idx, !si'') ->
-            parseMoreOps pOp . (,si'') $
-              ExprSrc
-                (IndexExpr idx expr)
-                (SrcRange (exprSrcStart expr) (exprSrcEnd idx)),
-          parseArgsPacker si' >>= \(!aps, !si'') -> do
+        directPart :: IntplSrcInfo -> Parser (ExprSrc, IntplSrcInfo)
+        directPart !si0 =
+          ((,si0) <$> parseExprLit) <|> parseIntplExpr si0 <|> do
+            !startPos <- getSourcePos
+            (!x, !si') <-
+              choice
+                [ (,si0) . LitExpr <$> parseLit,
+                  nullaryKwStmt "rethrow" RethrowStmt,
+                  (,si0) <$> parseSymbolExpr,
+                  parsePrefixExpr si0,
+                  parseYieldExpr si0,
+                  parseForExpr si0,
+                  parseDoForOrWhileExpr si0,
+                  parseWhileExpr si0,
+                  parseIfExpr si0,
+                  parseCaseExpr si0,
+                  parseEffExpr si0,
+                  parseListExpr si0,
+                  parseScopedBlock si0,
+                  parseDictOrBlock si0,
+                  parseOpAddrOrApkOrParen si0,
+                  parseExportExpr si0,
+                  parseIncludeExpr si0,
+                  parseIncExprExpr si0,
+                  parseImportExpr si0,
+                  parseNamespaceExpr si0,
+                  parseClassExpr si0,
+                  parseDataExpr si0,
+                  parseMethodExpr si0,
+                  parseGeneratorExpr si0,
+                  parseInterpreterExpr si0,
+                  parseProducerExpr si0,
+                  parseOpDeclOvrdExpr si0,
+                  (,si0) . AttrExpr <$> parseAttrRef
+                ]
             !lexeme'end <- lexemeEndPos
-            parseMoreOps pOp . (,si'') $
-              ExprSrc
-                (CallExpr expr aps)
-                (SrcRange (exprSrcStart expr) lexeme'end),
-          parseIndirectRef pOp si' expr,
-          parseMoreInfix pOp si' expr
-        ]
-
-    parseIndirectRef ::
-      Maybe (OpSymSrc, OpFixity) ->
-      IntplSrcInfo ->
-      ExprSrc ->
-      Parser (ExprSrc, IntplSrcInfo)
-    parseIndirectRef !pOp !si' !tgtExpr = try $ do
-      singleDot
-      addr@(AttrAddrSrc _ !addr'span) <-
-        let ?allowKwAttr = True in parseAttrAddrSrc'
-      parseMoreOps pOp . (,si') $
-        flip ExprSrc (SrcRange (exprSrcStart tgtExpr) (src'end addr'span)) $
-          AttrExpr $ IndirectRef tgtExpr addr
+            return (ExprSrc x (lspSrcRangeFromParsec startPos lexeme'end), si')
+          where
+            nullaryKwStmt :: Text -> Stmt -> Parser (Expr, IntplSrcInfo)
+            nullaryKwStmt !kw !stmt = do
+              !kw'span <- keyword kw
+              return (BlockExpr [StmtSrc stmt kw'span], si0)
 
     parseMoreInfix ::
       Maybe (OpSymSrc, OpFixity) ->
-      IntplSrcInfo ->
-      ExprSrc ->
+      (ExprSrc, IntplSrcInfo) ->
       Parser (ExprSrc, IntplSrcInfo)
-    parseMoreInfix !pOp !si' !leftExpr =
+    parseMoreInfix !pOp (!leftExpr, !si') =
       tighterOp prec >>= \case
         Nothing -> return (leftExpr, si')
         Just (!opFixity, !opPrec, !opSym) -> do
           (!rightExpr, !si'') <-
             parseExprPrec (Just (opSym, opFixity)) opPrec si'
-          parseMoreInfix pOp si'' $
-            ExprSrc
-              (InfixExpr opSym leftExpr rightExpr)
-              (SrcRange (exprSrcStart leftExpr) (exprSrcEnd rightExpr))
+          parseMoreInfix
+            pOp
+            ( ExprSrc
+                (InfixExpr opSym leftExpr rightExpr)
+                (SrcRange (exprSrcStart leftExpr) (exprSrcEnd rightExpr)),
+              si''
+            )
       where
         tighterOp ::
           Precedence ->
