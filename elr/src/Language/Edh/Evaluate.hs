@@ -445,9 +445,9 @@ writeObjAttr !ets !obj !key !val !exit = case edh'obj'store obj of
   ClassStore !cls -> iopdInsert key val (edh'class'arts cls) >> exit val
   HostStore _ ->
     throwEdh ets UsageError $
-      "no such property `"
+      "can not write attribute `"
         <> T.pack (show key)
-        <> "` on host object of class "
+        <> "` to a host object of class "
         <> objClassName obj
 
 -- | Set an attribute value of an object
