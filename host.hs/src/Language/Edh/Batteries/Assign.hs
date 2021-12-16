@@ -21,7 +21,7 @@ assignProc (ExprSrc !lhe _) !rhExpr !exit !ets =
         let !rhv = edhDeCaseWrap rhVal
         evalExprSrc tgtExpr $ \ !tgtVal _ets -> case edhUltimate tgtVal of
           -- indexing assign to a dict
-          EdhDict (Dict  !ds) -> do
+          EdhDict (Dict !ds) -> do
             setDictItem ixVal rhv ds
             exitEdh ets exit rhv
 
@@ -76,7 +76,7 @@ assignWithOpProc !withOpSym lhExpr@(ExprSrc !lhe _) !rhExpr !exit !ets =
         let !rhv = edhDeCaseWrap rhVal
         evalExprSrc tgtExpr $ \ !tgtVal _ets -> case edhUltimate tgtVal of
           -- indexing assign to a dict
-          EdhDict (Dict  !ds) ->
+          EdhDict (Dict !ds) ->
             iopdLookupDefault EdhNil ixVal ds >>= \ !dVal ->
               runEdhTx ets $
                 evalInfix
@@ -266,3 +266,22 @@ overwriteNullProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal !ets ->
           )
         !expr'span -> ExprSrc (AttrExpr $ IndirectRef owner addr) expr'span
       _ -> lhExpr
+
+-- | operator (as), aliasing assignment
+asAssignProc :: EdhIntrinsicOp
+asAssignProc !lhExpr (ExprSrc !rhe _) !exit !ets =
+  runEdhTx etsAssign $
+    evalExprSrc lhExpr $ \ !lhVal ->
+      -- TODO: call magic __as__(attrKey, owner= NA)
+      -- wrap with the sacred return to cease defaulting semantics
+      if edh'ctx'pure ctx
+        then
+          edhSwitchState ets $
+            exitEdhTx exit $ EdhReturn $ EdhReturn $ edhDeCaseWrap lhVal
+        else
+          assignEdhTarget rhe (edhDeCaseWrap lhVal) $
+            edhSwitchState ets . exitEdhTx exit . EdhReturn . EdhReturn
+  where
+    !ctx = edh'context ets
+    -- discourage artifact definition during assignment
+    !etsAssign = ets {edh'context = ctx {edh'ctx'pure = True}}

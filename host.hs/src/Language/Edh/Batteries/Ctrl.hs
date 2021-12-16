@@ -380,20 +380,21 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                     matchDataClass clsObj fieldExtractors Nothing
                   !badClsVal -> edhSimpleDesc ets badClsVal $ \ !badDesc ->
                     throwEdh ets UsageError $ "invalid class: " <> badDesc
-        -- { class( field1, field2, ... ) = instAddr } -- fields by class again
+        -- { class( field1, field2, ... ) as instAddr } -- fields by class again
         -- but receive the matched object as well
         -- __match__ magic from the class works here
         [ StmtSrc
             ( ExprStmt
                 ( InfixExpr
-                    (OpSymSrc "=" _)
+                    (OpSymSrc !opSym _)
                     (ExprSrc (CallExpr (ExprSrc (AttrExpr !clsRef) _) !apkr) _)
                     (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc !instAddr _))) _)
                   )
                 _docCmt
               )
             _
-          ] ->
+          ] | opSym `elem` ["as", "="] ->
+            -- TODO: deprecate and remove (=) syntax sooner or later
             dcFieldsExtractor apkr $ \ !fieldExtractors ->
               runEdhTx ets $
                 evalAttrRef clsRef $ \ !clsVal _ets -> case clsVal of

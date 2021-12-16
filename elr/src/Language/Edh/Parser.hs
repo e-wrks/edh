@@ -722,8 +722,14 @@ parseArgSends !si !closeSym !commaAppeared !ss = do
     parse1ArgSend :: Parser (ArgSender, IntplSrcInfo)
     parse1ArgSend =
       try parseKwArgSend <|> do
-        (!x, !si') <- let ?commaPacking = False in parseExpr si
-        return (SendPosArg x, si')
+        (x@(ExprSrc x' _), !si') <- let ?commaPacking = False in parseExpr si
+        case x' of
+          InfixExpr
+            (OpSymSrc "as" _)
+            _lhx
+            (ExprSrc (AttrExpr (DirectRef !addr)) _) ->
+              return (SendKwArg addr x, si')
+          _ -> return (SendPosArg x, si')
 
 parseNamespaceExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseNamespaceExpr !si = do
