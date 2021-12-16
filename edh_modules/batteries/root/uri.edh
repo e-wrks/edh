@@ -91,7 +91,7 @@ export data URI(
    # Note this method throws for failure of conversion
    #}
   method parse ( v ) case v|str of {
-    { URI() = uri } -> uri
+    { URI() as uri } -> uri
     error( 'bad URI: ' ++ desc( v ) )
   }
 

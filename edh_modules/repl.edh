@@ -47,7 +47,7 @@ export interpreter runREPL( replScope ) void while true {
 
   # the exception can be happening on a descendant thread, this handler is run first on the throwing thread, then if not matched, will be throwTo the main thread, thus have this handler run again on the main thread
 
-  { IOError() = ioExc } -> { effect lastError = ioExc
+  { IOError() as ioExc } -> { effect lastError = ioExc
     console.fatal<| 'IO error - ' ++ ioExc
     rethrow # escalate it to the program loop of the host interpreter
   }

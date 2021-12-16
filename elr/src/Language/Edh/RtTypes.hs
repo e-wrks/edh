@@ -1545,10 +1545,39 @@ methodArrowArgsReceiver (ArgsPackExpr (ArgsPacker !argSndrs !sndrsSpan)) !exit =
         cnvrt rest (RecvRestKwArgs argRef Nothing : rcvrs)
       UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
         cnvrt rest (RecvRestPkArgs argRef Nothing : rcvrs)
+      SendPosArg
+        ( ExprSrc
+            ( InfixExpr
+                (OpSymSrc "as" _)
+                (ExprSrc (AttrExpr (DirectRef !argRef)) _)
+                ( ExprSrc
+                    ( InfixExpr
+                        (OpSymSrc "=" _)
+                        (ExprSrc (AttrExpr !retgtRef) _)
+                        !defExpr
+                      )
+                    _
+                  )
+              )
+            _
+          ) ->
+          cnvrt
+            rest
+            (RecvArg argRef Nothing (Just retgtRef) (Just defExpr) : rcvrs)
+      SendPosArg
+        ( ExprSrc
+            ( InfixExpr
+                (OpSymSrc "as" _)
+                (ExprSrc (AttrExpr (DirectRef !argRef)) _)
+                (ExprSrc (AttrExpr !retgtRef) _)
+              )
+            _
+          ) ->
+          cnvrt rest (RecvArg argRef Nothing (Just retgtRef) Nothing : rcvrs)
       SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
         cnvrt rest (RecvArg argRef Nothing Nothing Nothing : rcvrs)
-      SendKwArg !argRef !defExpr ->
-        cnvrt rest (RecvArg argRef Nothing Nothing (Just defExpr) : rcvrs)
+      SendKwArg !argRef !avExpr ->
+        cnvrt rest (RecvArg argRef Nothing Nothing (Just avExpr) : rcvrs)
       !badSndr ->
         exit $
           Left $
@@ -1593,16 +1622,55 @@ producerArrowArgsReceiver
           cnvrt outletPrsnt rest (RecvRestKwArgs argRef Nothing : rcvrs)
         UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
           cnvrt outletPrsnt rest (RecvRestPkArgs argRef Nothing : rcvrs)
+        SendPosArg
+          ( ExprSrc
+              ( InfixExpr
+                  (OpSymSrc "as" _)
+                  ( ExprSrc
+                      (AttrExpr (DirectRef argRef@(AttrAddrSrc !argAttr _)))
+                      _
+                    )
+                  ( ExprSrc
+                      ( InfixExpr
+                          (OpSymSrc "=" _)
+                          (ExprSrc (AttrExpr !retgtRef) _)
+                          !defExpr
+                        )
+                      _
+                    )
+                )
+              _
+            ) ->
+            cnvrt
+              (outletPrsnt || argAttr == NamedAttr "outlet")
+              rest
+              (RecvArg argRef Nothing (Just retgtRef) (Just defExpr) : rcvrs)
+        SendPosArg
+          ( ExprSrc
+              ( InfixExpr
+                  (OpSymSrc "as" _)
+                  ( ExprSrc
+                      (AttrExpr (DirectRef argRef@(AttrAddrSrc !argAttr _)))
+                      _
+                    )
+                  (ExprSrc (AttrExpr !retgtRef) _)
+                )
+              _
+            ) ->
+            cnvrt
+              (outletPrsnt || argAttr == NamedAttr "outlet")
+              rest
+              (RecvArg argRef Nothing (Just retgtRef) Nothing : rcvrs)
         SendPosArg (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
           cnvrt
             outletPrsnt
             rest
             (RecvArg argRef Nothing Nothing Nothing : rcvrs)
-        SendKwArg argRef@(AttrAddrSrc !argAttr _) !defExpr ->
+        SendKwArg argRef@(AttrAddrSrc !argAttr _) !avExpr ->
           cnvrt
             (outletPrsnt || argAttr == NamedAttr "outlet")
             rest
-            (RecvArg argRef Nothing Nothing (Just defExpr) : rcvrs)
+            (RecvArg argRef Nothing Nothing (Just avExpr) : rcvrs)
         !badSndr ->
           exit $
             Left $

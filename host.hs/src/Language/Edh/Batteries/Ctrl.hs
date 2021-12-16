@@ -855,6 +855,24 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
             go (argSender : rest) !keys = case argSender of
               SendPosArg
                 ( ExprSrc
+                    ( InfixExpr
+                        (OpSymSrc "as" _)
+                        ( ExprSrc
+                            (AttrExpr (DirectRef (AttrAddrSrc !srcAttr _)))
+                            _
+                          )
+                        ( ExprSrc
+                            (AttrExpr (DirectRef (AttrAddrSrc !tgtAttr _)))
+                            _
+                          )
+                      )
+                    _
+                  ) ->
+                  resolveEdhAttrAddr ets srcAttr $ \ !srcKey ->
+                    resolveEdhAttrAddr ets tgtAttr $
+                      \ !tgtKey -> go rest $ (srcKey, tgtKey) : keys
+              SendPosArg
+                ( ExprSrc
                     ( AttrExpr
                         ( DirectRef
                             (AttrAddrSrc !rcvAttr _)
@@ -874,14 +892,14 @@ branchProc (ExprSrc !lhExpr _) (ExprSrc !rhExpr _) !exit !ets = case lhExpr of
                       )
                     _
                   ) ->
+                  -- TODO: deprecate / remove this syntax sooner or later
                   resolveEdhAttrAddr ets srcAttr $ \ !srcKey ->
                     resolveEdhAttrAddr ets tgtAttr $
                       \ !tgtKey -> go rest $ (srcKey, tgtKey) : keys
               _ ->
                 throwEdh ets UsageError $
                   "bad data class field extractor: "
-                    <> T.pack
-                      (show argSender)
+                    <> T.pack (show argSender)
 
         matchDataClass ::
           Object ->
