@@ -266,22 +266,3 @@ overwriteNullProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal !ets ->
           )
         !expr'span -> ExprSrc (AttrExpr $ IndirectRef owner addr) expr'span
       _ -> lhExpr
-
--- | operator (as), aliasing assignment
-asAssignProc :: EdhIntrinsicOp
-asAssignProc !lhExpr (ExprSrc !rhe _) !exit !ets =
-  runEdhTx etsAssign $
-    evalExprSrc lhExpr $ \ !lhVal ->
-      -- TODO: call magic __as__(attrKey, owner= NA)
-      -- wrap with the sacred return to cease defaulting semantics
-      if edh'ctx'pure ctx
-        then
-          edhSwitchState ets $
-            exitEdhTx exit $ EdhReturn $ EdhReturn $ edhDeCaseWrap lhVal
-        else
-          assignEdhTarget rhe (edhDeCaseWrap lhVal) $
-            edhSwitchState ets . exitEdhTx exit . EdhReturn . EdhReturn
-  where
-    !ctx = edh'context ets
-    -- discourage artifact definition during assignment
-    !etsAssign = ets {edh'context = ctx {edh'ctx'pure = True}}

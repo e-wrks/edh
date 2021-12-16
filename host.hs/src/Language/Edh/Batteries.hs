@@ -341,7 +341,6 @@ installEdhBatteries world = do
       ("=", InfixR, 0),
       ("?=", InfixR, 0), -- tentative assignment
       ("|=", InfixR, 0), -- null overwritting assignment
-      ("as", InfixL, 0), -- aliasing assignment
       -- the definition operator, creates named value in Edh
       (":=", InfixR, 1),
       ("?:=", InfixR, 1),
@@ -417,6 +416,7 @@ installEdhBatteries world = do
       --     l = [3,7,5]
       --     [9,2] >> l
       --     [2,9,3,7,5]
+      ("as", InfixL, 1), -- aliasing
       ("/>", InfixR, 2),
       -- prefix test
       ("|*", Infix, 4),
@@ -468,6 +468,7 @@ installEdhBatteries world = do
                   ("?@", attrDerefTemptProc),
                   ("++", concatProc),
                   ("=<", cprhProc),
+                  ("as", asProc),
                   ("|*", isPrefixOfProc),
                   ("*|", hasSuffixProc),
                   (":>", prpdProc),
@@ -512,7 +513,6 @@ installEdhBatteries world = do
                   ("**=", assignWithOpProc "**"),
                   ("&&=", assignWithOpProc "&&"),
                   ("||=", assignWithOpProc "||"),
-                  ("as", asAssignProc),
                   ("=>", arrowProc),
                   ("=>*", prodArrowProc),
                   ("->", branchProc),

@@ -1031,3 +1031,12 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
   where
     insertToDict :: EdhThreadState -> EdhValue -> DictStore -> STM ()
     insertToDict !s !p !d = val2DictEntry s p $ \(k, v) -> setDictItem k v d
+
+-- | operator (as), aliasing
+--
+-- Also to enable certain syntatic sugars with the `as` keyword involved
+asProc :: EdhIntrinsicOp
+asProc !lhExpr (ExprSrc _rhe _) !exit = evalExprSrc lhExpr $ \ !lhVal ->
+  -- TODO: call magic __as__(attrKey, owner= NA)
+  -- wrap with the sacred return to cease defaulting semantics
+  exitEdhTx exit $ EdhReturn $ EdhReturn $ edhDeCaseWrap lhVal
