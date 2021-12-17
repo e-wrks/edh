@@ -163,7 +163,7 @@ finallyProc !tryExpr !finallyExpr !exit !etsOuter = do
 -- similar to fat arrow in JavaScript
 arrowProc :: EdhIntrinsicOp
 arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
-  methodArrowArgsReceiver (deParen'1 lhExpr) $ \case
+  methodArrowArgsReceiver lhExpr $ \case
     Left !err -> throwEdh ets UsageError err
     Right !argsRcvr -> do
       !idProc <- newRUID'STM
@@ -241,7 +241,7 @@ arrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
 -- | operator (=>*) - producing arrow, define an anonymous, bound producer
 prodArrowProc :: EdhIntrinsicOp
 prodArrowProc (ExprSrc !lhExpr !lhSpan) (ExprSrc !rhExpr !rhSpan) !exit !ets =
-  producerArrowArgsReceiver (deParen'1 lhExpr) $ \case
+  methodArrowArgsReceiver lhExpr $ \case
     Left !err -> throwEdh ets UsageError err
     Right !argsRcvr -> do
       !idProc <- newRUID'STM

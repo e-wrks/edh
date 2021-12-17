@@ -416,7 +416,7 @@ installEdhBatteries world = do
       --     l = [3,7,5]
       --     [9,2] >> l
       --     [2,9,3,7,5]
-      ("as", InfixL, 1), -- aliasing
+      ("as", InfixL, 5), -- aliasing
       ("/>", InfixR, 2),
       -- prefix test
       ("|*", Infix, 4),

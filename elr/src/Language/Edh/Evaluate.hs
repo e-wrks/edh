@@ -564,8 +564,7 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
           _ ->
             throwEdh ets EvalError $
               "invalid attribute reference type - " <> edhTypeNameOf addrVal
-  _ -> methodArrowArgsReceiver (deParen'1 lhExpr) $ \case
-    -- todo allow indirect refs etc. as multi-assignment targets
+  _ -> methodArrowArgsReceiver lhExpr $ \case
     Left _err ->
       throwEdh ets EvalError $
         "invalid left hand expression for assignment: " <> T.pack (show lhExpr)
@@ -607,6 +606,62 @@ assignEdhTarget !lhExpr !rhVal !exit !ets = case lhExpr of
         Just _esExps -> prepareExpStore ets obj $ \ !esExps -> do
           iopdInsert artKey artVal esExps
           exitEdh ets exit artVal
+
+methodArrowArgsReceiver ::
+  Expr ->
+  (Either Text ArgsReceiver -> STM ()) ->
+  STM ()
+methodArrowArgsReceiver !argsExpr !exit = case deParen'1 argsExpr of
+  ArgsPackExpr (ArgsPacker !argSndrs !sndrsSpan) -> do
+    let rcvrs = sequence $ cnvrt <$> argSndrs
+    exit $ flip PackReceiver sndrsSpan <$> rcvrs
+  AttrExpr (DirectRef argAttr@(AttrAddrSrc !addr _)) -> case addr of
+    NamedAttr "_" ->
+      exit $ Right $ SingleReceiver $ RecvRestPkArgs argAttr Nothing
+    _ ->
+      exit $ Right $ SingleReceiver $ RecvArg argAttr Nothing Nothing Nothing
+  !argExpr -> do
+    let rcvr = rcvExprAsArg argExpr
+    exit $ SingleReceiver <$> rcvr
+  where
+    rcvExprAsArg :: Expr -> Either Text ArgReceiver
+    rcvExprAsArg = \case
+      InfixExpr
+        (OpSymSrc "=" _)
+        ( ExprSrc
+            ( InfixExpr
+                (OpSymSrc "as" _)
+                (ExprSrc (AttrExpr (DirectRef !argRef)) _)
+                (ExprSrc (AttrExpr !retgtRef) _)
+              )
+            _
+          )
+        !defExpr ->
+          Right $ RecvArg argRef Nothing (Just retgtRef) (Just defExpr)
+      InfixExpr
+        (OpSymSrc "as" _)
+        (ExprSrc (AttrExpr (DirectRef !argRef)) _)
+        (ExprSrc (AttrExpr !retgtRef) _) ->
+          Right $ RecvArg argRef Nothing (Just retgtRef) Nothing
+      AttrExpr (DirectRef !argRef) ->
+        Right $ RecvArg argRef Nothing Nothing Nothing
+      !badArgExpr ->
+        Left $ "invalid argument expr for arrow: " <> T.pack (show badArgExpr)
+
+    cnvrt :: ArgSender -> Either Text ArgReceiver
+    cnvrt = \case
+      UnpackPosArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        Right (RecvRestPosArgs argRef Nothing)
+      UnpackKwArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        Right (RecvRestKwArgs argRef Nothing)
+      UnpackPkArgs (ExprSrc (AttrExpr (DirectRef !argRef)) _) ->
+        Right (RecvRestPkArgs argRef Nothing)
+      SendPosArg (ExprSrc !argExpr _) ->
+        rcvExprAsArg argExpr
+      SendKwArg !argRef !avExpr ->
+        Right (RecvArg argRef Nothing Nothing (Just avExpr))
+      !badSndr ->
+        Left $ "invalid argument expr for arrow: " <> T.pack (show badSndr)
 
 prepareExpStore ::
   EdhThreadState -> Object -> (EntityStore -> STM ()) -> STM ()
@@ -5662,37 +5717,11 @@ evalExpr' (ProducerExpr pd@(ProcDecl (AttrAddrSrc !addr _) _ _ _ _)) !docCmt !ex
                 edh'procedure'name = name,
                 edh'procedure'lexi = contextScope $ edh'context ets,
                 edh'procedure'doc = docCmt,
-                edh'procedure'decl =
-                  pd
-                    { edh'procedure'args =
-                        alwaysWithOutlet $ edh'procedure'args pd
-                    }
+                edh'procedure'decl = pd
               }
         !mthVal = EdhProcedure mth Nothing
     defineScopeAttr ets name mthVal
     exitEdh ets exit mthVal
-  where
-    bypassOutlet :: ArgReceiver
-    bypassOutlet =
-      RecvArg
-        (AttrAddrSrc (NamedAttr "outlet") noSrcRange)
-        Nothing
-        (Just (DirectRef (AttrAddrSrc (NamedAttr "_") noSrcRange)))
-        (Just (ExprSrc (LitExpr SinkCtor) noSrcRange))
-    alwaysWithOutlet :: ArgsReceiver -> ArgsReceiver
-    alwaysWithOutlet asr@(PackReceiver !ars !src'span) = go ars
-      where
-        go :: [ArgReceiver] -> ArgsReceiver
-        go [] = PackReceiver (bypassOutlet : ars) src'span
-        go (RecvArg (AttrAddrSrc (NamedAttr "outlet") _) _ _ _ : _) = asr
-        go (_ : ars') = go ars'
-    alwaysWithOutlet
-      asr@(SingleReceiver (RecvArg (AttrAddrSrc (NamedAttr "outlet") _) _ _ _)) =
-        asr
-    alwaysWithOutlet (SingleReceiver !sr) =
-      PackReceiver [bypassOutlet, sr] $ argReceiverSpan sr
-    alwaysWithOutlet wr@WildReceiver {} = wr
-    alwaysWithOutlet wr@NullaryReceiver {} = wr
 evalExpr'
   (OpDefiExpr !opFixity !opPrec (OpSymSrc !opSym _opSpan) !opProc)
   !docCmt
