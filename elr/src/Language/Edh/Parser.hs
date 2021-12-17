@@ -497,7 +497,7 @@ parseLetStmt !si = do
         ]
     parseArgsSender :: IntplSrcInfo -> Parser (ArgsPacker, IntplSrcInfo)
     parseArgsSender si' =
-      parseArgsPacker si <|> do
+      try (parseArgsPacker si <* notFollowedBy (satisfy isOperatorChar)) <|> do
         (!x, !si'') <- let ?commaPacking = False in parseExpr si'
         return (ArgsPacker [SendPosArg x] (exprSrcSpan x), si'')
 
