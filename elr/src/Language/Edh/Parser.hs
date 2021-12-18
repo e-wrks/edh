@@ -902,6 +902,7 @@ parseInpAnno !si0 =
       (NilAnno, si) <$ keyword "nil"
         <|> choice
           [ parseSinkCtor si, -- an event sink
+            parseChanCtor si, -- a channel
             parseApkOrProcSig si, -- an apk result or procedure signature
             parseEffExps si, -- effects expections
             parseStrSpec si, -- literal string - narrow for type, wide for quaint
@@ -918,6 +919,18 @@ parseInpAnno !si0 =
         ( CtorProtoAnno $
             ExprSrc
               (LitExpr SinkCtor)
+              (lspSrcRangeFromParsec startPos lexeme'end),
+          si
+        )
+
+    parseChanCtor si = do
+      !startPos <- getSourcePos
+      void $ keyword "chan"
+      !lexeme'end <- lexemeEndPos
+      return
+        ( CtorProtoAnno $
+            ExprSrc
+              (LitExpr ChanCtor)
               (lspSrcRangeFromParsec startPos lexeme'end),
           si
         )
@@ -1747,6 +1760,7 @@ parseLit =
       BoolLiteral <$> parseBoolLit,
       StringLiteral <$> parseStringLit,
       SinkCtor <$ litKw "sink",
+      ChanCtor <$ litKw "chan",
       DecLiteral D.nan <$ litKw "nan",
       DecLiteral D.inf <$ litKw "inf",
       ValueLiteral edhNone <$ litKw "None",

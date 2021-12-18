@@ -6,6 +6,7 @@ module Language.Edh.Evaluate where
 -- import GHC.Stack
 
 import Control.Applicative
+import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
@@ -15,6 +16,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import Data.Dynamic
+import Data.Functor
 import qualified Data.HashMap.Strict as Map
 import Data.Hashable
 import Data.IORef
@@ -32,7 +34,7 @@ import qualified Data.UUID as UUID
 import Deque.Lazy (Deque)
 import qualified Deque.Lazy as Deque
 import GHC.Clock
-import GHC.Conc (forkIOWithUnmask, myThreadId, unsafeIOToSTM)
+import GHC.Conc
 import GHC.Exts
 import Language.Edh.Control
 import Language.Edh.CoreLang
@@ -4554,6 +4556,7 @@ evalLiteral ets lit exit = case lit of
   BoolLiteral !v -> exit (EdhBool v)
   NilLiteral -> exit nil
   SinkCtor -> EdhSink <$> newSink >>= exit
+  ChanCtor -> EdhChan <$> newBChan >>= exit
   ValueLiteral !v -> exit v
   QtyLiteral !q !uomSpec ->
     resolveQuantity ets q (unitSpecWithoutSrc uomSpec) $ \case
@@ -7931,3 +7934,94 @@ fallbackEdhEffect !effKey !args !kwargs !exit !ets =
 fallbackEdhEffect' :: AttrKey -> (Maybe EdhValue -> EdhTx) -> EdhTx
 fallbackEdhEffect' !effKey !exit !ets =
   resolveEdhFallback' ets effKey $ runEdhTx ets . exit
+
+-- | Create a new channel
+newBChan :: STM BChan
+newBChan = unsafeIOToSTM $ do
+  !u <- newRUID
+  !xchg <- newMVar BChanIdle
+  return
+    BChan
+      { chan'uniq = u,
+        chan'xchg = xchg
+      }
+
+-- | Read a value out of a channel, blocking until some writer actually send a
+-- value through the channel.
+--
+-- `nil` will be returned indicating the channel has reached end-of-stream,
+-- either after blocking read or the channel has already been so before the
+-- attempt.
+readBChan :: BChan -> IO EdhValue
+readBChan (BChan _ !xchg) = attemptRead
+  where
+    attemptRead = join $
+      modifyMVar xchg $ \case
+        BChanWriter !v !taken ->
+          return
+            ( BChanIdle,
+              atomically $ do
+                void $ tryPutTMVar taken True
+                return v
+            )
+        BChanIdle -> do
+          !rcvr <- newEmptyTMVarIO
+          return
+            ( BChanReader rcvr,
+              atomically $ readTMVar rcvr
+            )
+        sitter@(BChanReader !rcvr) ->
+          return
+            ( sitter,
+              do
+                -- wait the winner reader to receive its value
+                void $ atomically $ readTMVar rcvr
+                -- attempt again
+                attemptRead
+            )
+        BChanEOS -> return (BChanEOS, return EdhNil)
+
+-- | Write a value into a channel, blocking until some reader is ready and
+-- actually receives the value.
+--
+-- Writing an 'EdhNil' carries the special semantics as marking the channel
+-- end-of-stream, and will NOT block. 'True' will be returned if the channel
+-- has never been marked eos before, or 'False' if it already reached eos.
+--
+-- Otherwise, 'True' will be returned on success, or 'False' if the channel has
+-- reached end-of-stream.
+writeBChan :: BChan -> EdhValue -> IO Bool
+writeBChan (BChan _ !xchg) EdhNil = modifyMVar xchg $ \case
+  BChanIdle -> return (BChanEOS, True)
+  BChanEOS -> return (BChanEOS, False)
+  BChanReader !rcvr -> do
+    void $ atomically $ tryPutTMVar rcvr EdhNil
+    return (BChanEOS, True)
+  BChanWriter _v !taken -> do
+    void $ atomically $ tryPutTMVar taken False
+    return (BChanEOS, True)
+writeBChan (BChan _ !xchg) !v = attemptWrite
+  where
+    attemptWrite = join $
+      modifyMVar xchg $ \case
+        BChanReader !rcvr ->
+          return
+            ( BChanIdle,
+              atomically $ putTMVar rcvr v $> True
+            )
+        BChanIdle -> do
+          !taken <- newEmptyTMVarIO
+          return
+            ( BChanWriter v taken,
+              atomically $ readTMVar taken
+            )
+        sitter@(BChanWriter _v !taken) ->
+          return
+            ( sitter,
+              do
+                -- wait the winner writter to send its value
+                void $ atomically $ readTMVar taken
+                -- attempt again
+                attemptWrite
+            )
+        BChanEOS -> return (BChanEOS, return False)

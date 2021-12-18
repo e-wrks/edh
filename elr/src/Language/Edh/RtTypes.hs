@@ -819,6 +819,37 @@ type EdhProc a = EdhTxExit a -> EdhTx
 -- return a value from this procedure
 type EdhHostProc = EdhTxExit EdhValue -> EdhTx
 
+data BChanSitter
+  = -- | End-Of-Stream
+    BChanEOS
+  | -- | Neither reading nor writing
+    BChanIdle
+  | -- | A reader raced ahead, waiting for some writer
+    BChanReader !(TMVar EdhValue)
+  | -- | A writer raced ahead, waiting for some reader(s)
+    BChanWriter !EdhValue !(TMVar Bool)
+
+-- | A 'BChan' (blocking channel) in Edh is more similar to an unbuffered Go
+-- channel, yet not like a Haskell 'Chan' or 'TChan', which does unbounded
+-- buffering.
+data BChan = BChan
+  { chan'uniq :: !RUID,
+    -- | The rendezvous point of values through this channel
+    --
+    -- Once filled with 'BChanEOS' (by writting an 'EdhNil' into this channel),
+    -- it should remain so ever on.
+    chan'xchg :: !(MVar BChanSitter)
+  }
+
+instance Eq BChan where
+  BChan x'u _ == BChan y'u _ = x'u == y'u
+
+instance Hashable BChan where
+  hashWithSalt s (BChan s'u _) = hashWithSalt s s'u
+
+instance Show BChan where
+  show s = "<chan" <> show (chan'uniq s) <> ">"
+
 -- | An event sink is similar to a Go channel, but is broadcast
 -- in nature, in contrast to the unicast nature of channels in Go.
 data Sink = Sink
@@ -1044,6 +1075,8 @@ data EdhValue
     EdhDefault !RUID !ArgsPack !Expr !(Maybe EdhThreadState)
   | -- | event sink
     EdhSink !Sink
+  | -- | channel
+    EdhChan !BChan
   | -- | named value, a.k.a. term definition
     EdhNamedValue !AttrName !EdhValue
   | -- | unit of measure definition
@@ -1095,6 +1128,7 @@ instance Show EdhValue where
       "default " <> show apk <> " " <> T.unpack src
     _ -> "<default: " ++ show apk ++ " " ++ show x ++ ">"
   show (EdhSink v) = show v
+  show (EdhChan v) = show v
   show (EdhNamedValue n v@EdhNamedValue {}) =
     -- Edh operators are all left-associative, parenthesis needed
     T.unpack n <> " := (" <> show v <> ")"
@@ -1145,6 +1179,7 @@ instance Eq EdhValue where
   EdhOrd x == EdhOrd y = x == y
   EdhDefault x'u _ _ _ == EdhDefault y'u _ _ _ = x'u == y'u
   EdhSink x == EdhSink y = x == y
+  EdhChan x == EdhChan y = x == y
   EdhNamedValue x'n x'v == EdhNamedValue y'n y'v = x'n == y'n && x'v == y'v
   EdhNamedValue _ x'v == y = x'v == y
   x == EdhNamedValue _ y'v = x == y'v
@@ -1189,6 +1224,7 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhDefault u _ _ _) =
     s `hashWithSalt` (-9 :: Int) `hashWithSalt` u
   hashWithSalt s (EdhSink x) = hashWithSalt s x
+  hashWithSalt s (EdhChan x) = hashWithSalt s x
   hashWithSalt s (EdhNamedValue _ v) = hashWithSalt s v
   hashWithSalt s (EdhUoM defi) =
     s `hashWithSalt` (-11 :: Int) `hashWithSalt` defi
@@ -2010,6 +2046,7 @@ instance Hashable UnitSpecSrc where
 
 data Literal
   = SinkCtor
+  | ChanCtor
   | NilLiteral
   | DecLiteral !Decimal
   | QtyLiteral !Decimal !UnitSpecSrc
@@ -2019,7 +2056,8 @@ data Literal
   deriving (Eq, Show)
 
 instance Hashable Literal where
-  hashWithSalt s SinkCtor = hashWithSalt s (-1 :: Int)
+  hashWithSalt s SinkCtor = hashWithSalt s (-2 :: Int)
+  hashWithSalt s ChanCtor = hashWithSalt s (-1 :: Int)
   hashWithSalt s NilLiteral = hashWithSalt s (0 :: Int)
   hashWithSalt s (DecLiteral x) = hashWithSalt s x
   hashWithSalt s (QtyLiteral qty uomSpec) =
@@ -2063,6 +2101,7 @@ edhTypeNameOf EdhReturn {} = "Return"
 edhTypeNameOf EdhOrd {} = "Ord"
 edhTypeNameOf EdhDefault {} = "Default"
 edhTypeNameOf EdhSink {} = "Sink"
+edhTypeNameOf EdhChan {} = "Chan"
 edhTypeNameOf EdhUoM {} = "UoM"
 edhTypeNameOf EdhQty {} = "Qty"
 edhTypeNameOf EdhExpr {} = "Expr"
