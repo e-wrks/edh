@@ -1704,9 +1704,7 @@ data Prefix
   = PrefixPlus
   | PrefixMinus
   | Not
-  | -- | to disregard the match target in context,
-    -- for a branch condition
-    Guard
+  | Guard -- boolean expression regardless of context match target
   deriving (Eq, Show)
 
 data DictKeyExpr

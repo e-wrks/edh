@@ -1934,21 +1934,18 @@ parseIndexer !si = do
 parsePrefixExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parsePrefixExpr !si =
   choice
-    [ try $
-        prefixOp "+" >> do
-          (!x, !si') <- let ?commaPacking = False in parseExprPrec Nothing 9 si
-          return (PrefixExpr PrefixPlus x, si'),
-      try $
-        prefixOp "-" >> do
-          (!x, !si') <- let ?commaPacking = False in parseExprPrec Nothing 9 si
-          return (PrefixExpr PrefixMinus x, si'),
-      keyword "not" >> do
+    [ prefixOp "+" >> do
+        (!x, !si') <- let ?commaPacking = False in parseExprPrec Nothing 9 si
+        return (PrefixExpr PrefixPlus x, si'),
+      prefixOp "-" >> do
+        (!x, !si') <- let ?commaPacking = False in parseExprPrec Nothing 9 si
+        return (PrefixExpr PrefixMinus x, si'),
+      prefixOp "!" <|> keyword "not" >> do
         (!x, !si') <- let ?commaPacking = False in parseExprPrec Nothing 4 si
         return (PrefixExpr Not x, si'),
-      try $
-        prefixOp "|" >> sc >> do
-          (!x, !si') <- let ?commaPacking = False in parseExprPrec Nothing 1 si
-          return (PrefixExpr Guard x, si'),
+      prefixOp "|" >> do
+        (!x, !si') <- let ?commaPacking = False in parseExprPrec Nothing 1 si
+        return (PrefixExpr Guard x, si'),
       keyword "void" >> do
         (!x, !si') <- let ?commaPacking = True in parseExpr si
         return (VoidExpr x, si'),
@@ -1973,8 +1970,12 @@ parsePrefixExpr !si =
         return (x, si')
     ]
   where
-    prefixOp :: Text -> Parser ()
-    prefixOp !opSym = string opSym >> notFollowedBy (satisfy isOperatorChar)
+    prefixOp :: Text -> Parser SrcRange
+    prefixOp !opSym = try $ do
+      !startPos <- getSourcePos
+      void $ lexeme (string opSym <* notFollowedBy (satisfy isOperatorChar))
+      !lexeme'end <- lexemeEndPos
+      return $ lspSrcRangeFromParsec startPos lexeme'end
 
     unaryKwStmt :: Text -> (ExprSrc -> Stmt) -> Parser (Expr, IntplSrcInfo)
     unaryKwStmt !kw !xc = do
