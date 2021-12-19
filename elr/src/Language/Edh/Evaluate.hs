@@ -16,7 +16,6 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import Data.Dynamic
-import Data.Functor
 import qualified Data.HashMap.Strict as Map
 import Data.Hashable
 import Data.IORef
@@ -1746,23 +1745,26 @@ edhPrepareCall' !etsCallPrep !calleeVal !apkr !callMaker =
           ProcDecl _ _ _ !pb !pl ->
             case edhUltimate <$> odLookup (AttrByName "outlet") kwargs of
               Nothing -> do
-                outlet <- newSink
+                outlet <- newBChan
                 callMaker $ \ !exit ->
-                  launchEventProducer (exit . EdhSink) outlet $
-                    callEdhMethod'
-                      Nothing
-                      this
-                      that
-                      mth
-                      pl
-                      pb
-                      ( ArgsPack args $
-                          odFromList $
-                            odToList kwargs
-                              ++ [(AttrByName "outlet", EdhSink outlet)]
-                      )
-                      scopeMod
-                      endOfEdh
+                  forkEdh
+                    id
+                    ( callEdhMethod'
+                        Nothing
+                        this
+                        that
+                        mth
+                        pl
+                        pb
+                        ( ArgsPack args $
+                            odFromList $
+                              odToList kwargs
+                                ++ [(AttrByName "outlet", EdhChan outlet)]
+                        )
+                        scopeMod
+                        endOfEdh
+                    )
+                    (\() -> exitEdhTx exit $ EdhChan outlet)
               Just (EdhSink !outlet) -> callMaker $ \exit ->
                 launchEventProducer (exit . EdhSink) outlet $
                   callEdhMethod'
@@ -1775,6 +1777,21 @@ edhPrepareCall' !etsCallPrep !calleeVal !apkr !callMaker =
                     (ArgsPack args kwargs)
                     scopeMod
                     endOfEdh
+              Just (EdhChan !outlet) -> callMaker $ \exit ->
+                forkEdh
+                  id
+                  ( callEdhMethod'
+                      Nothing
+                      this
+                      that
+                      mth
+                      pl
+                      pb
+                      (ArgsPack args kwargs)
+                      scopeMod
+                      endOfEdh
+                  )
+                  (\() -> exitEdhTx exit $ EdhChan outlet)
               Just !badVal ->
                 throwEdh etsCallPrep UsageError $
                   "the value passed to a producer as `outlet` found to be a "
@@ -2313,6 +2330,14 @@ edhPrepareForLoop
                   EdhArgsPack !apk -> do1 apk $ iterEvt subChan
                   !v -> do1 (ArgsPack [v] odEmpty) $ iterEvt subChan
 
+            iterChan :: BChan -> STM ()
+            iterChan !chan = runEdhTx etsLooper $
+              readBChan chan $ \case
+                -- nil marks end-of-stream
+                EdhNil -> exitEdhTx exit nil -- stop the for loop
+                EdhArgsPack !apk -> \_ets -> do1 apk $ iterChan chan
+                !v -> \_ets -> do1 (ArgsPack [v] odEmpty) $ iterChan chan
+
         case ultIterVal of
           -- loop from an event sink
           (EdhSink !sink) ->
@@ -2323,6 +2348,8 @@ edhPrepareForLoop
                 Just !ev -> case ev of
                   EdhArgsPack !apk -> do1 apk $ iterEvt subChan
                   !v -> do1 (ArgsPack [v] odEmpty) $ iterEvt subChan
+          -- loop from a channel
+          EdhChan !chan -> iterChan chan
           -- loop from a positonal-only args pack
           (EdhArgsPack (ArgsPack !args !kwargs))
             | odNull kwargs ->
@@ -3174,59 +3201,92 @@ evalStmt !stmt !exit = case stmt of
             schedDefered etsSched id (runLoop endOfEdh)
       _ -> \ !etsSched ->
         schedDefered etsSched id $ evalExpr' expr NoDocCmt endOfEdh
-  PerceiveStmt !sinkExpr bodyExpr@(ExprSrc body'x body'rng) ->
-    evalExprSrc sinkExpr $ \ !sinkVal !ets -> case edhUltimate sinkVal of
-      EdhSink !sink ->
-        if edh'in'tx ets
-          then do
-            modifyTVar' (sink'atoms sink) $ \ !prev'atoms !ev ->
-              runEdhTx
-                ets {edh'context = (edh'context ets) {edh'ctx'match = ev}}
-                $ evalExprSrc bodyExpr $ \_ _ets -> prev'atoms ev
-            exitEdh ets exit nil
-          else do
-            let reactor !breakThread =
-                  evalExprSrc bodyExpr $ \ !reactResult _etsReactor ->
-                    case edhDeCaseClose reactResult of
-                      EdhBreak -> writeTVar breakThread True
-                      -- todo warn or even err out in case
-                      -- return/continue/default etc. are returned to here?
-                      _ -> return ()
-            subscribeEvents sink >>= \case
-              Nothing -> case sink'mrv sink of -- already at eos
-                Nothing -> pure () -- non-lingering, nothing to do
-                Just {} ->
-                  -- a lingering sink, trigger an immediate nil perceiving
-                  runEdhTx ets $
-                    edhContIO' $
-                      drivePerceiver nil ets reactor id
-              Just (!perceiverChan, !lingerVal) -> do
-                modifyTVar'
-                  (edh'perceivers ets)
-                  (PerceiveRecord perceiverChan ets reactor :)
-                case lingerVal of
-                  Nothing -> pure ()
-                  Just !mrv ->
-                    -- mrv lingering, trigger an immediate perceiving
+  PerceiveStmt !srcExpr bodyExpr@(ExprSrc body'x body'rng) ->
+    evalExprSrc srcExpr $ \ !srcVal !ets -> do
+      let reactor !breakThread =
+            evalExprSrc bodyExpr $ \ !reactResult _etsReactor ->
+              case edhDeCaseClose reactResult of
+                EdhBreak -> writeTVar breakThread True
+                -- todo warn or even err out in case
+                -- return/continue/default etc. are returned to here?
+                _ -> return ()
+      case edhUltimate srcVal of
+        EdhSink !sink ->
+          if edh'in'tx ets
+            then do
+              modifyTVar' (sink'atoms sink) $ \ !prev'atoms !ev ->
+                runEdhTx
+                  ets {edh'context = (edh'context ets) {edh'ctx'match = ev}}
+                  $ evalExprSrc bodyExpr $ \_ _ets -> prev'atoms ev
+              exitEdh ets exit nil
+            else do
+              subscribeEvents sink >>= \case
+                Nothing -> case sink'mrv sink of -- already at eos
+                  Nothing -> pure () -- non-lingering, nothing to do
+                  Just {} ->
+                    -- a lingering sink, trigger an immediate nil perceiving
                     runEdhTx ets $
-                      edhContIO' $
-                        drivePerceiver mrv ets reactor id
-            exitEdh ets exit nil
-      EdhObject !sinkLikeObj -> do
-        let SrcLoc !doc _pos = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
-        !u <- newRUID'STM
-        runEdhTx ets $
-          invokeMagic
-            sinkLikeObj
-            (AttrByName "__perceive__")
-            ( ArgsPack
-                [EdhExpr (ExprDefi u body'x (SrcLoc doc body'rng)) ""]
-                odEmpty
-            )
-            (exitEdhTx exit)
-            ($)
-      _ -> edhSimpleDesc ets sinkVal $ \ !badDesc ->
-        throwEdh ets EvalError $ "not perceivable: " <> badDesc
+                      edhContIO' $ drivePerceiver nil ets reactor id
+                Just (!perceiverChan, !lingerVal) -> do
+                  modifyTVar'
+                    (edh'perceivers ets)
+                    ( PerceiveRecord
+                        (return $ tryReadTChan perceiverChan)
+                        ets
+                        reactor
+                        :
+                    )
+                  case lingerVal of
+                    Nothing -> pure ()
+                    Just !mrv ->
+                      -- mrv lingering, trigger an immediate perceiving
+                      runEdhTx ets $
+                        edhContIO' $
+                          drivePerceiver mrv ets reactor id
+              exitEdh ets exit nil
+        EdhChan (BChan _ !xchg) -> do
+          let perceiveChan :: IO (STM (Maybe EdhValue))
+              -- TODO so perceivers will always be preempted by blocking
+              -- channel readers, is that right?
+              perceiveChan = modifyMVar xchg $ \case
+                BChanWriter !v !taken -> do
+                  atomically $ void $ tryPutTMVar taken True
+                  return (BChanIdle, return $ Just v)
+                BChanEOS -> return (BChanEOS, return $ Just EdhNil)
+                !sitter -> return (sitter, return Nothing)
+          (runEdhTx ets . edhContIO . join) $
+            modifyMVar xchg $ \case
+              BChanEOS ->
+                return
+                  ( BChanEOS,
+                    drivePerceiver nil ets reactor id >>= \case
+                      True -> return () -- break thread per scripted wrt eos
+                      False -> atomically $ exitEdh ets exit nil
+                  )
+              !sitter ->
+                return
+                  ( sitter,
+                    atomically $ do
+                      modifyTVar'
+                        (edh'perceivers ets)
+                        (PerceiveRecord perceiveChan ets reactor :)
+                      exitEdh ets exit nil
+                  )
+        EdhObject !sinkLikeObj -> do
+          let SrcLoc !doc _pos = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
+          !u <- newRUID'STM
+          runEdhTx ets $
+            invokeMagic
+              sinkLikeObj
+              (AttrByName "__perceive__")
+              ( ArgsPack
+                  [EdhExpr (ExprDefi u body'x (SrcLoc doc body'rng)) ""]
+                  odEmpty
+              )
+              (exitEdhTx exit)
+              ($)
+        _ -> edhSimpleDesc ets srcVal $ \ !badDesc ->
+          throwEdh ets EvalError $ "not perceivable: " <> badDesc
   ThrowStmt !excExpr ->
     evalExprSrc excExpr $ \ !exv -> edhThrowTx $ edhDeCaseClose exv
   ExtendsStmt !superExpr -> evalExprSrc superExpr $ \ !superVal !ets ->
@@ -5099,24 +5159,14 @@ evalExpr' (PrefixExpr PrefixPlus !expr') !docCmt !exit =
   evalExprSrc' expr' docCmt exit
 evalExpr' (PrefixExpr PrefixMinus !expr') !docCmt !exit =
   evalExprSrc' expr' docCmt $ \ !val -> case edhDeCaseClose val of
-    (EdhDecimal !v) -> exitEdhTx exit (EdhDecimal (- v))
-    !v ->
-      throwEdhTx EvalError $
-        "can not negate a "
-          <> edhTypeNameOf v
-          <> ": "
-          <> T.pack (show v)
-          <> " ❌"
+    EdhDecimal !v -> exitEdhTx exit (EdhDecimal (- v))
+    _ -> edhSimpleDescTx val $ \badDesc ->
+      throwEdhTx EvalError $ "can not negate as number: " <> badDesc
 evalExpr' (PrefixExpr Not !expr') !docCmt !exit =
   evalExprSrc' expr' docCmt $ \ !val -> case edhDeCaseClose val of
-    (EdhBool v) -> exitEdhTx exit (EdhBool $ not v)
-    !v ->
-      throwEdhTx EvalError $
-        "expect bool but got a "
-          <> edhTypeNameOf v
-          <> ": "
-          <> T.pack (show v)
-          <> " ❌"
+    EdhBool v -> exitEdhTx exit (EdhBool $ not v)
+    _ -> edhSimpleDescTx val $ \badDesc ->
+      throwEdhTx EvalError $ "can not negate as boolean: " <> badDesc
 evalExpr' (PrefixExpr Guard !expr') !docCmt !exit = \ !ets -> do
   let !world = edh'prog'world $ edh'thread'prog ets
   (consoleLogger $ edh'world'console world)
@@ -5124,6 +5174,11 @@ evalExpr' (PrefixExpr Guard !expr') !docCmt !exit = \ !ets -> do
     (Just $ prettySrcLoc $ contextSrcLoc $ edh'context ets)
     "standalone guard treated as plain value."
   runEdhTx ets $ evalExprSrc' expr' docCmt exit
+evalExpr' (PrefixExpr ChanRead !chanExpr) !docCmt !exit =
+  evalExprSrc' chanExpr docCmt $ \ !val -> case edhUltimate val of
+    EdhChan !chan -> readBChan chan exit
+    _ -> edhSimpleDescTx val $ \badDesc ->
+      throwEdhTx EvalError $ "can not read as channel: " <> badDesc
 evalExpr' (VoidExpr !expr) !docCmt !exit =
   evalExprSrc' expr docCmt $ \case
     EdhReturn EdhNil -> exitEdhTx exit EdhNil
@@ -7175,8 +7230,7 @@ launchEventProducer
                 producerTx etsProducer
            in runEdhTx etsConsumer $
                 forkEdh id prodThAct $
-                  const $
-                    exitEdhTx exit sink
+                  const $ exitEdhTx exit sink
 
 mkHostClass' ::
   Scope ->
@@ -7800,7 +7854,7 @@ driveEdhThread !eps !defers !tq !unmask = readIORef trapReq >>= taskLoop
       where
         loopSTM :: IO Bool
         loopSTM =
-          atomically stmJob >>= \case
+          stmJob >>= atomically >>= \case
             Nothing -> return True -- program halted, terminate this thread
             Just (Right !toTerm) ->
               -- no perceiver has fired, the tx job has already been executed
@@ -7823,29 +7877,39 @@ driveEdhThread !eps !defers !tq !unmask = readIORef trapReq >>= taskLoop
 
         -- this is the STM work package, where perceivers can preempt the
         -- inline job on an Edh thread
-        stmJob :: STM (Maybe (Either [(EdhValue, PerceiveRecord)] Bool))
-        stmJob =
-          tryReadTMVar (edh'prog'result eps) >>= \case
-            Just _ -> return Nothing -- program halted
-            Nothing ->
-              -- program still running
-              (readTVar (edh'perceivers etsTask) >>= perceiverChk [])
-                >>= \ !gotevl ->
-                  if null gotevl
-                    then -- no perceiver fires, execute the tx job
-                      Just . Right <$> actTask
-                    else -- skip the tx job if at least one perceiver fires
-                      return $ Just $ Left gotevl
+        stmJob :: IO (STM (Maybe (Either [(EdhValue, PerceiveRecord)] Bool)))
+        stmJob = do
+          !perceiveRound <-
+            (readTVarIO (edh'perceivers etsTask) >>=) $
+              mapM $ \pr -> (pr,) <$> edh'perceive'intake pr
+          return $
+            tryReadTMVar (edh'prog'result eps) >>= \case
+              Just _ -> return Nothing -- program halted
+              Nothing -> do
+                -- program still running
+                (!gotevl, !updPcvrs) <- perceiverChk [] [] perceiveRound False
+                case updPcvrs of
+                  Nothing -> pure ()
+                  Just !pcvrs -> writeTVar (edh'perceivers etsTask) pcvrs
+                if null gotevl
+                  then -- no perceiver fires, execute the tx job
+                    Just . Right <$> actTask
+                  else -- skip the tx job if at least one perceiver fires
+                    return $ Just $ Left gotevl
 
         perceiverChk ::
           [(EdhValue, PerceiveRecord)] ->
           [PerceiveRecord] ->
-          STM [(EdhValue, PerceiveRecord)]
-        perceiverChk !gotevl [] = return gotevl
-        perceiverChk !gotevl (r@(PerceiveRecord !evc _ _) : rest) =
-          tryReadTChan evc >>= \case
-            Just !ev -> perceiverChk ((ev, r) : gotevl) rest
-            Nothing -> perceiverChk gotevl rest
+          [(PerceiveRecord, STM (Maybe EdhValue))] ->
+          Bool ->
+          STM ([(EdhValue, PerceiveRecord)], Maybe [PerceiveRecord])
+        perceiverChk !gotevl pcvrs [] !upd =
+          return (gotevl, if upd then Just $! reverse pcvrs else Nothing)
+        perceiverChk !gotevl pcvrs ((pr, intake) : rest) !upd =
+          intake >>= \case
+            Just EdhNil -> perceiverChk ((EdhNil, pr) : gotevl) pcvrs rest True
+            Just !ev -> perceiverChk ((ev, pr) : gotevl) (pr : pcvrs) rest upd
+            Nothing -> perceiverChk gotevl (pr : pcvrs) rest upd
 
 -- | make an effectful call from current Edh context
 --
@@ -7940,11 +8004,7 @@ newBChan :: STM BChan
 newBChan = unsafeIOToSTM $ do
   !u <- newRUID
   !xchg <- newMVar BChanIdle
-  return
-    BChan
-      { chan'uniq = u,
-        chan'xchg = xchg
-      }
+  return BChan {chan'uniq = u, chan'xchg = xchg}
 
 -- | Read a value out of a channel, blocking until some writer actually send a
 -- value through the channel.
@@ -7952,8 +8012,9 @@ newBChan = unsafeIOToSTM $ do
 -- `nil` will be returned indicating the channel has reached end-of-stream,
 -- either after blocking read or the channel has already been so before the
 -- attempt.
-readBChan :: BChan -> IO EdhValue
-readBChan (BChan _ !xchg) = attemptRead
+readBChan :: BChan -> EdhTxExit EdhValue -> EdhTx
+readBChan (BChan _ !xchg) !exit !ets =
+  runEdhTx ets $ edhContIO attemptRead
   where
     attemptRead = join $
       modifyMVar xchg $ \case
@@ -7962,24 +8023,29 @@ readBChan (BChan _ !xchg) = attemptRead
             ( BChanIdle,
               atomically $ do
                 void $ tryPutTMVar taken True
-                return v
+                exitEdh ets exit v
             )
         BChanIdle -> do
           !rcvr <- newEmptyTMVarIO
           return
             ( BChanReader rcvr,
-              atomically $ readTMVar rcvr
+              -- 'edhContSTM' to coop with perceivers on the same Edh thread
+              (atomically . runEdhTx ets . edhContSTM) $
+                readTMVar rcvr >>= exitEdh ets exit
             )
         sitter@(BChanReader !rcvr) ->
           return
             ( sitter,
-              do
+              -- 'edhContSTM' to coop with perceivers on the same Edh thread
+              (atomically . runEdhTx ets . edhContSTM) $ do
                 -- wait the winner reader to receive its value
-                void $ atomically $ readTMVar rcvr
-                -- attempt again
-                attemptRead
+                readTMVar rcvr >>= \case
+                  -- channel already reached eos, read not possible anymore
+                  EdhNil -> exitEdh ets exit EdhNil
+                  -- attempt again
+                  _ -> runEdhTx ets $ edhContIO attemptRead
             )
-        BChanEOS -> return (BChanEOS, return EdhNil)
+        BChanEOS -> return (BChanEOS, atomically $ exitEdh ets exit EdhNil)
 
 -- | Write a value into a channel, blocking until some reader is ready and
 -- actually receives the value.
@@ -7990,38 +8056,48 @@ readBChan (BChan _ !xchg) = attemptRead
 --
 -- Otherwise, 'True' will be returned on success, or 'False' if the channel has
 -- reached end-of-stream.
-writeBChan :: BChan -> EdhValue -> IO Bool
-writeBChan (BChan _ !xchg) EdhNil = modifyMVar xchg $ \case
-  BChanIdle -> return (BChanEOS, True)
-  BChanEOS -> return (BChanEOS, False)
-  BChanReader !rcvr -> do
-    void $ atomically $ tryPutTMVar rcvr EdhNil
-    return (BChanEOS, True)
-  BChanWriter _v !taken -> do
-    void $ atomically $ tryPutTMVar taken False
-    return (BChanEOS, True)
-writeBChan (BChan _ !xchg) !v = attemptWrite
+writeBChan :: BChan -> EdhValue -> EdhTxExit Bool -> EdhTx
+writeBChan (BChan _ !xchg) EdhNil !exit !ets = (runEdhTx ets . edhContIO) $
+  (atomically . exitEdh ets exit =<<) $
+    modifyMVar xchg $ \case
+      BChanIdle -> return (BChanEOS, True)
+      BChanEOS -> return (BChanEOS, False)
+      BChanReader !rcvr -> do
+        void $ atomically $ tryPutTMVar rcvr EdhNil
+        return (BChanEOS, True)
+      BChanWriter _v !taken -> do
+        void $ atomically $ tryPutTMVar taken False
+        return (BChanEOS, True)
+writeBChan (BChan _ !xchg) !v !exit !ets =
+  runEdhTx ets $ edhContIO attemptWrite
   where
     attemptWrite = join $
       modifyMVar xchg $ \case
         BChanReader !rcvr ->
           return
             ( BChanIdle,
-              atomically $ putTMVar rcvr v $> True
+              atomically $ do
+                putTMVar rcvr v
+                exitEdh ets exit True
             )
         BChanIdle -> do
           !taken <- newEmptyTMVarIO
           return
             ( BChanWriter v taken,
-              atomically $ readTMVar taken
+              -- 'edhContSTM' to coop with perceivers on the same Edh thread
+              (atomically . runEdhTx ets . edhContSTM) $
+                readTMVar taken >>= exitEdh ets exit
             )
         sitter@(BChanWriter _v !taken) ->
           return
             ( sitter,
-              do
-                -- wait the winner writter to send its value
-                void $ atomically $ readTMVar taken
-                -- attempt again
-                attemptWrite
+              -- 'edhContSTM' to coop with perceivers on the same Edh thread
+              (atomically . runEdhTx ets . edhContSTM) $ do
+                -- wait the winner writer to send its value
+                readTMVar taken >>= \case
+                  -- channel already reached eos, write not possible anymore
+                  False -> exitEdh ets exit False
+                  -- attempt again
+                  True -> runEdhTx ets $ edhContIO attemptWrite
             )
-        BChanEOS -> return (BChanEOS, return False)
+        BChanEOS -> return (BChanEOS, atomically $ exitEdh ets exit False)

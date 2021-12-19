@@ -3,6 +3,7 @@ module Language.Edh.Batteries.Evt where
 -- import           Debug.Trace
 
 import Control.Concurrent.STM
+import Control.Monad
 import Language.Edh.Control
 import Language.Edh.Evaluate
 import Language.Edh.RtTypes
@@ -21,6 +22,8 @@ evtPubProc !lhExpr !rhExpr !exit = evalExprSrc lhExpr $ \ !lhVal ->
             -- would implement wrong semantics.
             !val2Rtn = edhDeFlowCtrl val2Pub
          in postEdhEvent es val2Pub $ \() -> exitEdhTx exit val2Rtn
+    EdhChan !chan -> evalExprSrc rhExpr $ \ !rhVal ->
+      writeBChan chan rhVal $ exit . EdhBool
     _ -> exitEdhTx exit edhNA
 
 -- | virtual attribute <sink>.subseq

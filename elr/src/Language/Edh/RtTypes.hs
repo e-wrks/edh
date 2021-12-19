@@ -697,11 +697,12 @@ data EdhTask
   | EdhDoSTM !EdhThreadState !(STM Bool)
 
 data PerceiveRecord = PerceiveRecord
-  { -- | chan subscribed to source event sink
-    edh'perceive'chan :: !(TChan EdhValue),
+  { -- | intaking is prepared in 'IO' and performed in 'STM'
+    edh'perceive'intake :: !(IO (STM (Maybe EdhValue))),
     -- | origin ets upon the perceiver is armed
     edh'perceive'ets :: !EdhThreadState,
-    -- | reacting action per event received, event value is context match
+    -- | reacting action per event received, with the event value as context
+    -- match target
     edh'perceive'act :: !(TVar Bool -> EdhTx)
   }
 
@@ -1705,6 +1706,7 @@ data Prefix
   | PrefixMinus
   | Not
   | Guard -- boolean expression regardless of context match target
+  | ChanRead
   deriving (Eq, Show)
 
 data DictKeyExpr

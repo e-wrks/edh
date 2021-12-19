@@ -1946,6 +1946,9 @@ parsePrefixExpr !si =
       prefixOp "|" >> do
         (!x, !si') <- let ?commaPacking = False in parseExprPrec Nothing 1 si
         return (PrefixExpr Guard x, si'),
+      prefixOp "<-" >> do
+        (!x, !si') <- let ?commaPacking = False in parseExprPrec Nothing 9 si
+        return (PrefixExpr ChanRead x, si'),
       keyword "void" >> do
         (!x, !si') <- let ?commaPacking = True in parseExpr si
         return (VoidExpr x, si'),
