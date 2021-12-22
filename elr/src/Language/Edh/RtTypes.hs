@@ -440,14 +440,19 @@ type EdhObjectAllocator = (ObjectStore -> STM ()) -> EdhTx
 objClass :: Object -> Class
 objClass !obj = case edh'obj'store $ edh'obj'class obj of
   ClassStore !cls -> cls
+  EventStore !cls _alias _sink -> cls
   _ -> error "bug: class of an object not bearing ClassStore"
 
-edhClassName :: Object -> Text
+edhClassName :: Object -> AttrName
 edhClassName !clsObj = case edh'obj'store clsObj of
   ClassStore !cls -> procedureName $ edh'class'proc cls
-  _ -> "<bogus-class>"
+  EventStore !cls !alias _sink ->
+    if T.null alias
+      then procedureName $ edh'class'proc cls
+      else alias
+  _ -> "<bogus-class/event-name>"
 
-objClassName :: Object -> Text
+objClassName :: Object -> AttrName
 objClassName = edhClassName . edh'obj'class
 
 objClassProc :: Object -> ProcDefi
@@ -456,6 +461,7 @@ objClassProc = edhClassProc . edh'obj'class
     edhClassProc :: Object -> ProcDefi
     edhClassProc !clsObj = case edh'obj'store clsObj of
       ClassStore !cls -> edh'class'proc cls
+      EventStore !cls _alias _sink -> edh'class'proc cls
       _ -> error "bug: not a class"
 
 -- | An object views an entity, with inheritance relationship
@@ -481,34 +487,38 @@ instance Show Object where
   -- it's not right to call 'atomically' here to read 'edh'obj'supers' for
   -- the show, as 'show' may be called from an stm transaction, stm
   -- will fail hard on encountering of nested 'atomically' calls.
-  show obj = case edh'obj'store $ edh'obj'class obj of
-    ClassStore !cls ->
-      "<object: " ++ T.unpack (procedureName $ edh'class'proc cls) ++ ">"
-    _ -> "<bogus-object>"
+  show obj = "<object: " <> T.unpack (objClassName obj) <> ">"
 
 data ObjectStore
   = HashStore !EntityStore
-  | ClassStore !Class -- in case this is a class object
   | HostStore !HostValue
+  | ClassStore !Class
+  | EventStore !Class !AttrName !Sink
 
 instance Eq ObjectStore where
   HashStore x'es == HashStore y'es = x'es == y'es
-  ClassStore x'cls == ClassStore y'cls = x'cls == y'cls
   HostStore x'val == HostStore y'val = x'val == y'val
+  ClassStore x'cls == ClassStore y'cls = x'cls == y'cls
+  EventStore _ _ x'sink == EventStore _ _ y'sink = x'sink == y'sink
   _ == _ = False
 
 instance Hashable ObjectStore where
   hashWithSalt s (HashStore es) = s `hashWithSalt` es
-  hashWithSalt s (ClassStore cls) = s `hashWithSalt` cls
   hashWithSalt s (HostStore hv) = s `hashWithSalt` hv
+  hashWithSalt s (ClassStore cls) = s `hashWithSalt` cls
+  hashWithSalt s (EventStore _cls _alias sink) = s `hashWithSalt` sink
 
 instance Show ObjectStore where
   show HashStore {} = "<<HashStore>>"
-  show (ClassStore cls) = "<<ClassStore:" <> show cls <> ">>"
   show (HostStore (HostValue tr _)) =
     "<<HostStore:" <> show tr <> ">>"
   show (HostStore (PinnedHostValue (_ :: v) _)) =
     "<<HostStorePinned:" <> show (typeRep @v) <> ">>"
+  show (ClassStore cls) = "<<ClassStore:" <> show cls <> ">>"
+  show (EventStore cls alias _sink) =
+    "<<EventStore:" <> show cls
+      <> (if T.null alias then "" else " as " <> T.unpack alias)
+      <> ">>"
 
 -- | Try cast and unveil an Object's storage of a known type, while not
 -- considering any super object eligible
@@ -573,6 +583,10 @@ data EdhWorld = EdhWorld
     -- wrapping a host exceptin as an Edh object
     edh'exception'wrapper ::
       !(Maybe EdhThreadState -> SomeException -> STM Object),
+    -- the meta class of vanilla objects
+    edh'meta'class :: !Object,
+    -- the meta class of event objects
+    edh'event'class :: !Object,
     -- the class of module objects
     edh'module'class :: !Object,
     -- the number of times a metric trap is requested
@@ -855,34 +869,45 @@ instance Show BChan where
 -- in nature, in contrast to the unicast nature of channels in Go.
 data Sink = Sink
   { sink'uniq :: !RUID,
-    -- | most recent value for the lingering copy of an event sink
-    --
-    -- an event sink always starts out being the original lingering copy,
-    -- then one or more non-lingering, shadow copies of the original copy can
-    -- be obtained by `s.subseq` where `s` is either a lingering copy or
-    -- non-lingering copy
-    --
-    -- a non-lingering copy has this field being Nothing
-    sink'mrv :: !(Maybe (TVar EdhValue)),
-    -- | the broadcast channel
-    sink'chan :: !(TChan EdhValue),
+    -- | tail reference of the source event stream
+    sink'tail :: !(TVar EvtStream),
     -- | a chain of atomic actions to be injected into the publishing
     -- transaction for an event
-    sink'atoms :: TVar (EdhValue -> STM ()),
-    -- | subscriber counter, will remain negative once the sink is marked eos
-    -- (by publishing a `nil` value into it), or increase every time the sink
-    -- is subscribed (a subscriber's channel dup'ped from `sink'chan`)
-    sink'subc :: !(TVar Int)
+    sink'atoms :: TVar (Object -> STM ())
   }
 
 instance Eq Sink where
-  Sink x'u _ _ _ _ == Sink y'u _ _ _ _ = x'u == y'u
+  Sink x'u _ _ == Sink y'u _ _ = x'u == y'u
 
 instance Hashable Sink where
-  hashWithSalt s (Sink s'u _ _ _ _) = hashWithSalt s s'u
+  hashWithSalt s (Sink s'u _ _) = hashWithSalt s s'u
 
 instance Show Sink where
   show s = "<sink" <> show (sink'uniq s) <> ">"
+
+newtype EvtStream = EvtStream (TMVar (Object, EvtStream))
+
+emitEvent :: Object -> Sink -> STM ()
+emitEvent !evo (Sink _ !tailRef !atoms) = do
+  readTVar atoms >>= ($ evo)
+  !newTail <- EvtStream <$> newEmptyTMVar
+  (EvtStream cell) <- readTVar tailRef
+  putTMVar cell (evo, newTail)
+  writeTVar tailRef newTail
+
+-- | Create a new sink
+newSink :: STM Sink
+newSink = do
+  !u <- newRUID'STM
+  !tailCell <- EvtStream <$> newEmptyTMVar
+  !tailRef <- newTVar tailCell
+  !atomsVar <- newTVar $ const $ return ()
+  return
+    Sink
+      { sink'uniq = u,
+        sink'tail = tailRef,
+        sink'atoms = atomsVar
+      }
 
 -- | executable precedures
 data EdhProcDefi
@@ -1074,8 +1099,6 @@ data EdhValue
     -- from expressions, e.g lhs and rhs of an infix operator, to avoid
     -- duplicate evaluation of expressions involved
     EdhDefault !RUID !ArgsPack !Expr !(Maybe EdhThreadState)
-  | -- | event sink
-    EdhSink !Sink
   | -- | channel
     EdhChan !BChan
   | -- | named value, a.k.a. term definition
@@ -1128,7 +1151,6 @@ instance Show EdhValue where
     ExprWithSrc _ [SrcSeg src] ->
       "default " <> show apk <> " " <> T.unpack src
     _ -> "<default: " ++ show apk ++ " " ++ show x ++ ">"
-  show (EdhSink v) = show v
   show (EdhChan v) = show v
   show (EdhNamedValue n v@EdhNamedValue {}) =
     -- Edh operators are all left-associative, parenthesis needed
@@ -1179,7 +1201,6 @@ instance Eq EdhValue where
   EdhReturn x'v == EdhReturn y'v = x'v == y'v
   EdhOrd x == EdhOrd y = x == y
   EdhDefault x'u _ _ _ == EdhDefault y'u _ _ _ = x'u == y'u
-  EdhSink x == EdhSink y = x == y
   EdhChan x == EdhChan y = x == y
   EdhNamedValue x'n x'v == EdhNamedValue y'n y'v = x'n == y'n && x'v == y'v
   EdhNamedValue _ x'v == y = x'v == y
@@ -1224,7 +1245,6 @@ instance Hashable EdhValue where
   hashWithSalt s (EdhOrd o) = s `hashWithSalt` (-10 :: Int) `hashWithSalt` o
   hashWithSalt s (EdhDefault u _ _ _) =
     s `hashWithSalt` (-9 :: Int) `hashWithSalt` u
-  hashWithSalt s (EdhSink x) = hashWithSalt s x
   hashWithSalt s (EdhChan x) = hashWithSalt s x
   hashWithSalt s (EdhNamedValue _ v) = hashWithSalt s v
   hashWithSalt s (EdhUoM defi) =
@@ -1766,6 +1786,8 @@ data Expr
     NamespaceExpr !ProcDecl !ArgsPacker
   | -- | class definition
     ClassExpr !ProcDecl
+  | -- | event class definition
+    EventExpr !ProcDecl
   | -- | method procedure definition
     MethodExpr !ProcDecl
   | -- | generator procedure definition
@@ -2045,8 +2067,7 @@ instance Hashable UnitSpecSrc where
   hashWithSalt s u = hashWithSalt s $ unitSpecWithoutSrc u
 
 data Literal
-  = SinkCtor
-  | ChanCtor
+  = ChanCtor
   | NilLiteral
   | DecLiteral !Decimal
   | QtyLiteral !Decimal !UnitSpecSrc
@@ -2056,7 +2077,6 @@ data Literal
   deriving (Eq, Show)
 
 instance Hashable Literal where
-  hashWithSalt s SinkCtor = hashWithSalt s (-2 :: Int)
   hashWithSalt s ChanCtor = hashWithSalt s (-1 :: Int)
   hashWithSalt s NilLiteral = hashWithSalt s (0 :: Int)
   hashWithSalt s (DecLiteral x) = hashWithSalt s x
@@ -2082,12 +2102,15 @@ edhTypeNameOf EdhDict {} = "Dict"
 edhTypeNameOf EdhList {} = "List"
 edhTypeNameOf (EdhObject o) = case edh'obj'store o of
   HashStore {} -> "Object"
-  ClassStore !cls -> case edh'procedure'decl $ edh'class'proc cls of
-    ProcDecl {} -> "Class"
-    HostDecl {} -> "HostClass"
   HostStore (HostValue tr _) -> "HostValue:" <> T.pack (show tr)
   HostStore (PinnedHostValue (_ :: v) _) ->
     "PinnedHostValue:" <> T.pack (show (typeRep @v))
+  ClassStore !cls -> case edh'procedure'decl $ edh'class'proc cls of
+    ProcDecl {} -> "Class"
+    HostDecl {} -> "HostClass"
+  EventStore cls _ _ -> case edh'procedure'decl $ edh'class'proc cls of
+    ProcDecl {} -> "EventClass"
+    HostDecl {} -> "HostEventClass"
 edhTypeNameOf (EdhProcedure pc _) = edhProcTypeNameOf pc
 edhTypeNameOf (EdhBoundProc pc _ _ _) = edhProcTypeNameOf pc
 edhTypeNameOf EdhBreak = "Break"
@@ -2100,7 +2123,6 @@ edhTypeNameOf EdhYield {} = "Yield"
 edhTypeNameOf EdhReturn {} = "Return"
 edhTypeNameOf EdhOrd {} = "Ord"
 edhTypeNameOf EdhDefault {} = "Default"
-edhTypeNameOf EdhSink {} = "Sink"
 edhTypeNameOf EdhChan {} = "Chan"
 edhTypeNameOf EdhUoM {} = "UoM"
 edhTypeNameOf EdhQty {} = "Qty"
@@ -2133,15 +2155,6 @@ objectScope !obj = case edh'obj'store obj of
           edh'scope'this = obj,
           edh'scope'that = obj,
           edh'scope'proc = ocProc,
-          edh'effects'stack = []
-        }
-  ClassStore (Class !cp !cs _ _) ->
-    return
-      Scope
-        { edh'scope'entity = cs,
-          edh'scope'this = obj,
-          edh'scope'that = obj,
-          edh'scope'proc = cp,
           edh'effects'stack = []
         }
   HashStore !hs ->
@@ -2200,10 +2213,29 @@ objectScope !obj = case edh'obj'store obj of
                   edh'scope'proc = ocProc,
                   edh'effects'stack = []
                 }
+  ClassStore (Class !cp !cs _ _) ->
+    return
+      Scope
+        { edh'scope'entity = cs,
+          edh'scope'this = obj,
+          edh'scope'that = obj,
+          edh'scope'proc = cp,
+          edh'effects'stack = []
+        }
+  EventStore (Class !cp !cs _ _) _alias _sink ->
+    return
+      Scope
+        { edh'scope'entity = cs,
+          edh'scope'this = obj,
+          edh'scope'that = obj,
+          edh'scope'proc = cp,
+          edh'effects'stack = []
+        }
   where
     !oc = case edh'obj'store $ edh'obj'class obj of
       ClassStore !cls -> cls
-      _ -> error "bug: class of an object not bearing ClassStore"
+      EventStore !cls _alias _sink -> cls
+      _ -> error "bug: class of an object not bearing ClassStore/EventStore"
     ocProc = edh'class'proc oc
 
 -- | Wrap any host value as an object

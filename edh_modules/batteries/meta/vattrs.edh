@@ -148,20 +148,9 @@ can yield a unitless pure number if in some dimensionless UoM
   method __Descriptor_name__ ( _: 'Descriptor' ) pass
 
   {##
-   # a non-lingering copy of the event sink
+   # whether the channel is already at end-of-stream
    #}
-  method __Sink_subseq__ ( _: sink ) : sink pass
-  {##
-   # the most recent value from the event sink
-   #
-   # note this only works for a lingering event sink, `nil` is always returned
-   # for non-lingering event sinks
-   #}
-  method __Sink_mrv__ ( _: sink ) pass
-  {##
-   # whether the event sink is already at end-of-stream
-   #}
-  method __Sink_eos__ ( _: sink ) : 'Bool' pass
+  method __Chan_eos__ ( _: chan ) : 'Bool' pass
 
   {##
    # number of entries in the dict

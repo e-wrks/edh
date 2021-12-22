@@ -33,10 +33,10 @@ library
 
   other-modules:
     Language.Edh.Batteries.Assign
+    Language.Edh.Batteries.Chan
     Language.Edh.Batteries.Console
     Language.Edh.Batteries.Ctrl
     Language.Edh.Batteries.Data
-    Language.Edh.Batteries.Evt
     Language.Edh.Batteries.InterOp
     Language.Edh.Batteries.Math
     Language.Edh.Batteries.Reflect

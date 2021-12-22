@@ -171,6 +171,7 @@ fillClassMRO !cls !superClasses =
     l :: Object -> STM (Either Text [Object])
     l !c = case edh'obj'store c of
       ClassStore (Class _ _ _ !mro) -> Right . (c :) <$> readTVar mro
+      EventStore (Class _ _ _ !mro) _ _ -> Right . (c :) <$> readTVar mro
       _ ->
         return $
           Left $
@@ -230,7 +231,10 @@ lookupEdhObjAttr :: Object -> AttrKey -> STM (Object, EdhValue)
 lookupEdhObjAttr !obj !key =
   lookupEdhSelfAttr obj key >>= \case
     EdhNil -> case edh'obj'store obj of
-      ClassStore !cls -> readTVar (edh'class'mro cls) >>= searchSuperClasses
+      ClassStore !cls ->
+        readTVar (edh'class'mro cls) >>= searchSuperClasses
+      EventStore !cls _ _ ->
+        readTVar (edh'class'mro cls) >>= searchSuperClasses
       _ -> lookupEdhSuperAttr obj key
     !val -> return (obj, val)
   where
@@ -268,12 +272,20 @@ lookupEdhSelfAttr !obj !key = case edh'obj'store obj of
     iopdLookup key (edh'class'arts cls) >>= \case
       Just !v -> return v
       Nothing -> lookupFromClass
+  EventStore !cls _ _ ->
+    iopdLookup key (edh'class'arts cls) >>= \case
+      Just !v -> return v
+      Nothing -> lookupFromClass
   where
     lookupFromClass =
       if clsObj == obj
         then return EdhNil -- reached ultimate meta class of the world
         else case edh'obj'store clsObj of
           ClassStore !cls ->
+            iopdLookup key (edh'class'arts cls) >>= \case
+              Just !v -> return v
+              Nothing -> return EdhNil -- don't resort to meta class here
+          EventStore !cls _ _ ->
             iopdLookup key (edh'class'arts cls) >>= \case
               Just !v -> return v
               Nothing -> return EdhNil -- don't resort to meta class here
@@ -297,9 +309,17 @@ lookupEdhSelfMagic !obj !key = case edh'obj'store obj of
     -- magic attributes on a class are assumed for its instances,
     -- not for itself
     lookupFromClass
+  EventStore {} ->
+    -- magic attributes on a class are assumed for its instances,
+    -- not for itself
+    lookupFromClass
   where
     lookupFromClass = case edh'obj'store clsObj of
       ClassStore !cls ->
+        iopdLookup key (edh'class'arts cls) >>= \case
+          Just !v -> return v
+          Nothing -> return EdhNil -- don't resort to meta class here
+      EventStore !cls _ _ ->
         iopdLookup key (edh'class'arts cls) >>= \case
           Just !v -> return v
           Nothing -> return EdhNil -- don't resort to meta class here

@@ -41,6 +41,12 @@ createEdhWorld !console = do
   !ssMeta <- newTVarIO []
   !mroMeta <- newTVarIO [] -- no super class, and self is not stored
 
+  -- the event's meta class
+  !idEvent <- newRUID
+  !hsEvent <- atomically iopdEmpty
+  !ssEvent <- newTVarIO []
+  !mroEvent <- newTVarIO [] -- no super class, and self is not stored
+
   -- the root object and root scope
   !idRoot <- newRUID
   !hsRoot <- atomically iopdEmpty
@@ -91,6 +97,16 @@ createEdhWorld !console = do
       metaClass = Class metaProc hsMeta phantomAllocator mroMeta
       metaClassObj = Object (ClassStore metaClass) metaClassObj ssMeta
 
+      eventProc =
+        ProcDefi
+          idEvent
+          (AttrByName "event")
+          rootScope
+          (DocCmt ["the event's meta class"])
+          (specialProc "<event-class>" "<world-root>")
+      eventClass = Class eventProc hsEvent phantomAllocator mroEvent
+      eventClassObj = Object (ClassStore eventClass) eventClassObj ssEvent
+
       nsProc =
         ProcDefi
           idNamespace
@@ -104,9 +120,7 @@ createEdhWorld !console = do
 
   atomically $
     (flip iopdUpdate hsMeta =<<) $
-      sequence
-      -- todo more static attrs for class objects here
-      $
+      sequence $
         [ (AttrByName nm,) <$> mkHostProc rootScope EdhMethod nm hp
           | (nm, hp) <-
               [ ("__repr__", wrapHostProc mthClassRepr),
@@ -118,6 +132,25 @@ createEdhWorld !console = do
                | (nm, getter, setter) <-
                    [ ("name", mthClassNameGetter, Nothing),
                      ("mro", mthClassMROGetter, Nothing)
+                   ]
+             ]
+
+  atomically $
+    (flip iopdUpdate hsEvent =<<) $
+      sequence $
+        [ (AttrByName nm,) <$> mkHostProc rootScope EdhMethod nm hp
+          | (nm, hp) <-
+              [ ("__repr__", wrapHostProc mthEventRepr),
+                ("__show__", wrapHostProc mthEventShow),
+                ("__desc__", wrapHostProc mthEventDesc),
+                ("__as__", wrapHostProc mthEventAs),
+                ("__eq__", wrapHostProc mthEventEq)
+              ]
+        ]
+          ++ [ (AttrByName nm,) <$> mkHostProperty rootScope nm getter setter
+               | (nm, getter, setter) <-
+                   [ ("name", mthEventNameGetter, Nothing),
+                     ("mro", mthEventMROGetter, Nothing)
                    ]
              ]
 
@@ -396,6 +429,8 @@ createEdhWorld !console = do
             edh'scope'wrapper = edhWrapScope,
             edh'root'effects = rootEffects,
             edh'exception'wrapper = edhWrapException,
+            edh'meta'class = metaClassObj,
+            edh'event'class = eventClassObj,
             edh'module'class = clsModule,
             edh'trap'request = trapReq
           }
@@ -417,7 +452,7 @@ createEdhWorld !console = do
         exitEdh ets exit $ EdhString $ procedureName (edh'class'proc cls)
       _ -> exitEdh ets exit $ EdhString "<bogus-class>"
       where
-        !clsObj = edh'scope'that $ contextScope $ edh'context ets
+        !clsObj = edh'scope'this $ contextScope $ edh'context ets
 
     mthClassShow :: EdhHostProc
     mthClassShow !exit !ets = case edh'obj'store clsObj of
@@ -426,7 +461,7 @@ createEdhWorld !console = do
           EdhString $ "class: " <> procedureName (edh'class'proc cls)
       _ -> exitEdh ets exit $ EdhString "<bogus-class>"
       where
-        !clsObj = edh'scope'that $ contextScope $ edh'context ets
+        !clsObj = edh'scope'this $ contextScope $ edh'context ets
 
     mthClassDesc :: EdhHostProc
     mthClassDesc !exit !ets = case edh'obj'store clsObj of
@@ -439,7 +474,7 @@ createEdhWorld !console = do
               <> docString (edh'procedure'doc $ edh'class'proc cls)
       _ -> exitEdh ets exit $ EdhString "<bogus-class>"
       where
-        !clsObj = edh'scope'that $ contextScope $ edh'context ets
+        !clsObj = edh'scope'this $ contextScope $ edh'context ets
 
         docString :: OptDocCmt -> Text
         docString NoDocCmt = ""
@@ -452,7 +487,7 @@ createEdhWorld !console = do
         exitEdh ets exit $ attrKeyValue $ edh'procedure'name (edh'class'proc cls)
       _ -> exitEdh ets exit nil
       where
-        !clsObj = edh'scope'that $ contextScope $ edh'context ets
+        !clsObj = edh'scope'this $ contextScope $ edh'context ets
 
     mthClassMROGetter :: EdhHostProc
     mthClassMROGetter !exit !ets = case edh'obj'store clsObj of
@@ -461,7 +496,99 @@ createEdhWorld !console = do
         exitEdh ets exit $ EdhArgsPack $ ArgsPack (EdhObject <$> mro) odEmpty
       _ -> exitEdh ets exit nil
       where
-        !clsObj = edh'scope'that $ contextScope $ edh'context ets
+        !clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+    mthEventRepr :: EdhHostProc
+    mthEventRepr !exit !ets = case edh'obj'store clsObj of
+      EventStore !cls !alias _sink ->
+        exitEdh ets exit $
+          EdhString $
+            if T.null alias
+              then procedureName (edh'class'proc cls)
+              else
+                alias
+                  <> " {# =: "
+                  <> procedureName (edh'class'proc cls)
+                  <> " #}"
+      _ -> exitEdh ets exit $ EdhString "<bogus-event>"
+      where
+        !clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+    mthEventShow :: EdhHostProc
+    mthEventShow !exit !ets = case edh'obj'store clsObj of
+      EventStore !cls !alias _sink ->
+        exitEdh ets exit $
+          EdhString $
+            "event: " <> procedureName (edh'class'proc cls)
+              <> (if T.null alias then "" else " as " <> alias)
+      _ -> exitEdh ets exit $ EdhString "<bogus-event>"
+      where
+        !clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+    mthEventDesc :: EdhHostProc
+    mthEventDesc !exit !ets = case edh'obj'store clsObj of
+      EventStore !cls !alias _sink ->
+        exitEdh ets exit $
+          EdhString $
+            "event: " <> procedureName (edh'class'proc cls)
+              <> (if T.null alias then "" else " as " <> alias)
+              -- TODO show super classes it extends
+              -- TODO show member methods / properties / static attrs etc.
+              <> docString (edh'procedure'doc $ edh'class'proc cls)
+      _ -> exitEdh ets exit $ EdhString "<bogus-event>"
+      where
+        !clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+        docString :: OptDocCmt -> Text
+        docString NoDocCmt = ""
+        docString (DocCmt !docCmt) =
+          (("\n * doc comments *\n" <>) . T.unlines) docCmt
+
+    mthEventNameGetter :: EdhHostProc
+    mthEventNameGetter !exit !ets = case edh'obj'store clsObj of
+      EventStore !cls !alias _sink ->
+        exitEdh ets exit $
+          if T.null alias
+            then attrKeyValue $ edh'procedure'name (edh'class'proc cls)
+            else EdhString alias
+      _ -> exitEdh ets exit nil
+      where
+        !clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+    mthEventMROGetter :: EdhHostProc
+    mthEventMROGetter !exit !ets = case edh'obj'store clsObj of
+      EventStore !cls _alias _sink -> do
+        !mro <- readTVar $ edh'class'mro cls
+        exitEdh ets exit $ EdhArgsPack $ ArgsPack (EdhObject <$> mro) odEmpty
+      _ -> exitEdh ets exit nil
+      where
+        !clsObj = edh'scope'this $ contextScope $ edh'context ets
+
+    mthEventAs :: "alias" !: AttrName -> "owner" ?: Object -> EdhHostProc
+    mthEventAs (mandatoryArg -> alias) _owner !exit !ets =
+      case edh'obj'store clsObj of
+        EventStore !cls _alias _sink -> do
+          !sink <- newSink
+          exitEdh ets exit $
+            EdhObject $ clsObj {edh'obj'store = EventStore cls alias sink}
+        _ -> exitEdh ets exit $ EdhObject $ edh'scope'that $ contextScope ctx
+      where
+        !ctx = edh'context ets
+        !clsObj = edh'scope'this $ contextScope ctx
+
+    mthEventEq :: EdhValue -> EdhHostProc
+    mthEventEq !other !exit !ets = case other of
+      EdhObject !otherObj -> case edh'obj'store otherObj of
+        EventStore !otherCls _ _ -> case edh'obj'store clsObj of
+          EventStore !cls _ _ ->
+            exitEdh ets exit $ EdhBool $ cls == otherCls
+          _ -> exitEdh ets exit $ EdhBool False
+        _ -> exitEdh ets exit $ EdhBool False
+      _ ->
+        exitEdh ets exit $ EdhBool False
+      where
+        !ctx = edh'context ets
+        !clsObj = edh'scope'this $ contextScope ctx
 
     mthNsRepr :: EdhHostProc
     mthNsRepr !exit !ets = do

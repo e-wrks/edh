@@ -13,7 +13,6 @@ module Language.Edh.EHI
     module Language.Edh.RtTypes,
     module Language.Edh.IOPD,
     module Language.Edh.RUID,
-    module Language.Edh.Sink,
     module Language.Edh.Control,
     module Language.Edh.CoreLang,
     module Language.Edh.InterOpM,
@@ -27,6 +26,12 @@ module Language.Edh.EHI
     throwHostSTM',
     throwHostIO,
     throwHostIO',
+
+    -- ** IO/CPS channel api
+    newBChanIO,
+    closeBChanIO,
+    readBChan,
+    writeBChan,
 
     -- ** Re-exports
     Hashable (..),
@@ -47,4 +52,3 @@ import Language.Edh.Monad
 import Language.Edh.RUID
 import Language.Edh.RtTypes
 import Language.Edh.RuntimeM
-import Language.Edh.Sink

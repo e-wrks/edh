@@ -42,7 +42,6 @@ import Language.Edh.Parser
 import Language.Edh.PkgMan
 import Language.Edh.RUID
 import Language.Edh.RtTypes
-import Language.Edh.Sink
 import Language.Edh.Utils
 import Numeric
 import System.FilePath
@@ -231,6 +230,10 @@ getObjAttrWithMagic' ::
 getObjAttrWithMagic' !obj !key exitNoAttr !exit = case edh'obj'store obj of
   -- class objects are magic providers, never magic consumers
   ClassStore {} -> \ !ets ->
+    lookupEdhObjAttr obj key >>= \case
+      (_, EdhNil) -> runEdhTx ets exitNoAttr
+      (this, !val) -> exitEdh ets exit (this, val)
+  EventStore {} -> \ !ets ->
     lookupEdhObjAttr obj key >>= \case
       (_, EdhNil) -> runEdhTx ets exitNoAttr
       (this, !val) -> exitEdh ets exit (this, val)
@@ -444,6 +447,7 @@ writeObjAttr ::
 writeObjAttr !ets !obj !key !val !exit = case edh'obj'store obj of
   HashStore !hs -> iopdInsert key val hs >> exit val
   ClassStore !cls -> iopdInsert key val (edh'class'arts cls) >> exit val
+  EventStore !cls _ _ -> iopdInsert key val (edh'class'arts cls) >> exit val
   HostStore _ ->
     throwEdh ets UsageError $
       "can not write attribute `"
@@ -675,6 +679,7 @@ prepareExpStore' ::
 prepareExpStore' !ets !fromObj !naExit !exit = case edh'obj'store fromObj of
   HashStore !tgtEnt -> fromStore tgtEnt
   ClassStore !cls -> fromStore $ edh'class'arts cls
+  EventStore !cls _ _ -> fromStore $ edh'class'arts cls
   HostStore _ -> naExit
   where
     fromStore tgtEnt =
@@ -756,87 +761,93 @@ edhCreateHostObj' !clsObj !hsd !supers = do
 edhConstructObj :: Object -> ArgsPack -> (Object -> EdhTx) -> EdhTx
 edhConstructObj !clsObj !apk !exit !ets = do
   !instMap <- newTVar Map.empty
-  case edh'obj'store clsObj of
-    ClassStore !endClass -> do
-      let createOne ::
-            Object -> [Object] -> ArgsPack -> (Object -> STM ()) -> STM ()
-          createOne !co !restSupers !apkCtor !exitOne =
-            case edh'obj'store co of
-              ClassStore !cls ->
-                reformCtorArgs co cls apkCtor $ \ !apkCtor' -> do
-                  let allocIt :: STM ()
-                      allocIt = do
-                        !mro <- readTVar (edh'class'mro cls)
-                        !im <- readTVar instMap
-                        case sequence $
-                          (\ !sco -> fst <$> Map.lookup sco im)
-                            <$> mro of
-                          Nothing ->
-                            throwEdh
-                              ets
-                              EvalError
-                              "bug: missing some instance by mro"
-                          Just !supers -> do
-                            let !ctx = edh'context ets
-                                !tip = edh'ctx'tip ctx
-                                !etsAlloc =
-                                  ets
-                                    { edh'context =
-                                        ctx
-                                          { -- stack the tip frame one more time up, so effectful artifacts
-                                            -- directly in caller's scope are available during allocation
-                                            edh'ctx'tip = tip,
-                                            edh'ctx'stack = tip : edh'ctx'stack ctx,
-                                            -- discourage artifact definition during allocation
-                                            edh'ctx'pure = True
-                                          }
-                                    }
-                            runEdhTx etsAlloc $
-                              edh'class'allocator cls apkCtor' $ \ !os -> do
-                                !ss <- newTVar supers
-                                let !o = Object os co ss
-                                -- put into instance map by class
-                                modifyTVar' instMap $ Map.insert co (o, apkCtor')
-                                exitOne o
-                  case restSupers of
-                    [] -> allocIt
-                    (nextSuper : restSupers') ->
-                      createOne nextSuper restSupers' apkCtor' $ const allocIt
-              _ -> throwEdh ets EvalError "bug: non-class object in mro"
-      !superClasses <- readTVar (edh'class'mro endClass)
-      createOne clsObj superClasses apk $ \ !obj -> do
-        !im <- readTVar instMap
-        let callInit :: [Object] -> STM () -> STM ()
-            callInit [] !initExit = initExit
-            callInit (o : rest) !initExit =
-              case Map.lookup (edh'obj'class o) im of
-                Nothing -> throwEdh ets EvalError "bug: ctor apk missing"
-                Just (_o, !apkCtor') ->
-                  callInit rest $
-                    lookupEdhSelfMagic o (AttrByName "__init__")
-                      >>= \case
-                        EdhNil -> initExit
-                        EdhProcedure (EdhMethod !mthInit) _ ->
-                          runEdhTx ets $
-                            callEdhMethod o obj mthInit apkCtor' id $
-                              \_initResult _ets -> initExit
-                        EdhBoundProc (EdhMethod !mthInit) !this !that _ ->
-                          runEdhTx ets $
-                            callEdhMethod this that mthInit apkCtor' id $
-                              \_initResult _ets -> initExit
-                        !badInitMth ->
-                          edhSimpleDesc ets badInitMth $ \ !badDesc ->
-                            throwEdh ets UsageError $
-                              "invalid __init__ method on class "
-                                <> objClassName o
-                                <> " - "
-                                <> badDesc
-        !supers <- readTVar $ edh'obj'supers obj
-        callInit (obj : supers) $ runEdhTx ets $ exit obj
+  let createOne ::
+        Object -> [Object] -> ArgsPack -> (Object -> STM ()) -> STM ()
+      createOne !co !restSupers !apkCtor !exitOne = do
+        !cls <- case edh'obj'store co of
+          ClassStore !cls -> return cls
+          EventStore !cls _alias _sink -> return cls
+          _ -> throwEdh ets EvalError "bug: non-class object in mro"
+        reformCtorArgs co cls apkCtor $ \ !apkCtor' -> do
+          let allocIt :: STM ()
+              allocIt = do
+                !mro <- readTVar (edh'class'mro cls)
+                !im <- readTVar instMap
+                case sequence $ (\ !sco -> fst <$> Map.lookup sco im) <$> mro of
+                  Nothing ->
+                    throwEdh
+                      ets
+                      EvalError
+                      "bug: missing some instance by mro"
+                  Just !supers -> do
+                    let !ctx = edh'context ets
+                        !tip = edh'ctx'tip ctx
+                        !etsAlloc =
+                          ets
+                            { edh'context =
+                                ctx
+                                  { -- stack the tip frame one more time up, so effectful artifacts
+                                    -- directly in caller's scope are available during allocation
+                                    edh'ctx'tip = tip,
+                                    edh'ctx'stack = tip : edh'ctx'stack ctx,
+                                    -- discourage artifact definition during allocation
+                                    edh'ctx'pure = True
+                                  }
+                            }
+                    runEdhTx etsAlloc $
+                      edh'class'allocator cls apkCtor' $ \ !os -> do
+                        !ss <- newTVar supers
+                        let !o = Object os co ss
+                        -- put into instance map by class
+                        modifyTVar' instMap $ Map.insert co (o, apkCtor')
+                        exitOne o
+          case restSupers of
+            [] -> allocIt
+            (nextSuper : restSupers') ->
+              createOne nextSuper restSupers' apkCtor' $ const allocIt
+
+  !endClass <- case edh'obj'store clsObj of
+    ClassStore !cls -> return cls
+    EventStore !cls _alias _sink -> return cls
     _ ->
       throwEdh ets UsageError $
         "can not create new object from a non-class object, which is a: "
           <> objClassName clsObj
+
+  !superClasses <- readTVar (edh'class'mro endClass)
+  createOne clsObj superClasses apk $ \ !obj -> do
+    !im <- readTVar instMap
+    let callInit :: [Object] -> STM () -> STM ()
+        callInit [] !initExit = initExit
+        callInit (o : rest) !initExit =
+          case Map.lookup (edh'obj'class o) im of
+            Nothing -> throwEdh ets EvalError "bug: ctor apk missing"
+            Just (_o, !apkCtor') ->
+              callInit rest $
+                lookupEdhSelfMagic o (AttrByName "__init__")
+                  >>= \case
+                    EdhNil -> initExit
+                    EdhProcedure (EdhMethod !mthInit) _ ->
+                      runEdhTx ets $
+                        callEdhMethod o obj mthInit apkCtor' id $
+                          \_initResult _ets -> initExit
+                    EdhBoundProc (EdhMethod !mthInit) !this !that _ ->
+                      runEdhTx ets $
+                        callEdhMethod this that mthInit apkCtor' id $
+                          \_initResult _ets -> initExit
+                    !badInitMth ->
+                      edhSimpleDesc ets badInitMth $ \ !badDesc ->
+                        throwEdh ets UsageError $
+                          "invalid __init__ method on class "
+                            <> objClassName o
+                            <> " - "
+                            <> badDesc
+    !supers <- readTVar $ edh'obj'supers obj
+    callInit (obj : supers) $ do
+      forM_ (Map.toList im) $ \(co, _) -> case edh'obj'store co of
+        EventStore _cls _alias !sink -> emitEvent obj sink
+        _ -> pure ()
+      runEdhTx ets $ exit obj
   where
     reformCtorArgs ::
       Object -> Class -> ArgsPack -> (ArgsPack -> STM ()) -> STM ()
@@ -855,8 +866,7 @@ edhConstructObj !clsObj !apk !exit !ets = do
                         <> badDesc
           Just !badMagicVal -> edhSimpleDesc ets badMagicVal $ \ !badDesc ->
             throwEdh ets UsageError $
-              "bad __reform_ctor_args__ magic: "
-                <> badDesc
+              "bad __reform_ctor_args__ magic: " <> badDesc
 
 -- Clone a composite object with one of its object instance `mutObj` mutated
 -- to bear the new host storage data
@@ -932,6 +942,13 @@ edhMutCloneObj !ets !endObj !mutObj !newStore !exitEnd =
                                 edh'obj'supers = supersNew
                               }
                       return objClone
+                    HostStore !hsd -> do
+                      let !objClone =
+                            obj
+                              { edh'obj'store = HostStore hsd,
+                                edh'obj'supers = supersNew
+                              }
+                      return objClone
                     ClassStore !cls -> do
                       !cs' <- iopdClone $ edh'class'arts cls
                       let !clsClone =
@@ -944,13 +961,8 @@ edhMutCloneObj !ets !endObj !mutObj !newStore !exitEnd =
                                 edh'obj'supers = supersNew
                               }
                       return clsClone
-                    HostStore !hsd -> do
-                      let !objClone =
-                            obj
-                              { edh'obj'store = HostStore hsd,
-                                edh'obj'supers = supersNew
-                              }
-                      return objClone
+                    EventStore {} ->
+                      throwEdh ets UsageError "cloning an event class??"
               modifyTVar' instMap $ Map.insert obj objClone
               lookupEdhSelfMagic objClone (AttrByName "__clone__") >>= \case
                 EdhNil -> exit1 objClone
@@ -978,7 +990,12 @@ edhObjExtends :: EdhThreadState -> Object -> Object -> STM () -> STM ()
 edhObjExtends !ets !this !superObj !exit = case edh'obj'store this of
   ClassStore {} -> case edh'obj'store superObj of
     ClassStore {} -> doExtends
+    EventStore {} -> doExtends
     _ -> throwEdh ets UsageError "a class object can not extend a non-class"
+  EventStore {} -> case edh'obj'store superObj of
+    ClassStore {} -> doExtends
+    EventStore {} -> doExtends
+    _ -> throwEdh ets UsageError "an event class can not extend a non-class"
   _ -> doExtends
   where
     doExtends = do
@@ -1422,7 +1439,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                     exit ((edhNonNil <$> ll) ++ posArgs)
                   EdhObject !obj -> case edh'obj'store obj of
                     HostStore hs -> case unwrapHostValue hs of
-                      -- a data class instance
+                      -- a data/event class instance
                       -- syntactic sugar - 1 star unpacking of data instance
                       -- data fields to be unpacked as kwargs
                       Just (ArgsPack [_cls] !dataFields) -> do
@@ -1451,6 +1468,7 @@ packEdhArgs !ets !argSenders !pkExit = do
                   EdhObject !obj -> case edh'obj'store obj of
                     HashStore !hs -> unpackObj hs
                     ClassStore !cls -> unpackObj (edh'class'arts cls)
+                    EventStore !cls _ _ -> unpackObj (edh'class'arts cls)
                     HostStore {} -> edhValueRepr ets val $ \ !objRepr ->
                       throwEdh ets EvalError $
                         "can not unpack kwargs from a host object - "
@@ -1523,10 +1541,15 @@ invokeMagic ::
   EdhTx
 invokeMagic !obj !magicKey !apk !exit !checkBypassCall !ets =
   case edh'obj'store obj of
-    -- a class object can only get magic from its/the meta class,
-    -- magics provided by a class is for its instances, not itself
+    -- a class object (either vanilla or event) can only get magic from its
+    -- meta class, magics provided by a class is for its instances, not itself
     ClassStore {} ->
-      lookupEdhObjAttr (edh'obj'class obj) magicKey
+      (obj,)
+        <$> lookupEdhSelfAttr (edh'obj'class obj) magicKey
+        >>= checkBypassCall callAsMethod
+    EventStore {} ->
+      (obj,)
+        <$> lookupEdhSelfAttr (edh'obj'class obj) magicKey
         >>= checkBypassCall callAsMethod
     _ ->
       runEdhTx ets $
@@ -1686,6 +1709,11 @@ edhPrepareCall' !etsCallPrep !calleeVal !apkr !callMaker =
         apkr calleeVal $ \apk ->
           callMaker $ \ !exit -> edhConstructObj obj apk $
             \ !instObj !ets -> exitEdh ets exit $ EdhObject instObj
+      -- calling an event class
+      EventStore {} ->
+        apkr calleeVal $ \apk ->
+          callMaker $ \ !exit -> edhConstructObj obj apk $
+            \ !instObj !ets -> exitEdh ets exit $ EdhObject instObj
       -- calling an object
       _ ->
         lookupEdhObjAttr obj (AttrByName "__call__") >>= \case
@@ -1765,18 +1793,6 @@ edhPrepareCall' !etsCallPrep !calleeVal !apkr !callMaker =
                         endOfEdh
                     )
                     (\() -> exitEdhTx exit $ EdhChan outlet)
-              Just (EdhSink !outlet) -> callMaker $ \exit ->
-                launchEventProducer (exit . EdhSink) outlet $
-                  callEdhMethod'
-                    Nothing
-                    this
-                    that
-                    mth
-                    pl
-                    pb
-                    (ArgsPack args kwargs)
-                    scopeMod
-                    endOfEdh
               Just (EdhChan !outlet) -> callMaker $ \exit ->
                 forkEdh
                   id
@@ -2055,13 +2071,8 @@ edhPrepareForLoop
                     _ -> edhPrepareCall etsLoopPrep calleeVal argsSndr $
                       \ !mkCall -> runEdhTx etsLoopPrep $
                         mkCall $ \ !iterVal _ets -> loopOverValue iterVal
-              -- calling other procedures, assume to loop over its return value
-              -- todo should producer procedures be specially handled here?
-              --      the sink returned from it will assume sync producing
-              --      semantics if this for-loop is prefixed with `go`, in this
-              --      case both current thread and the producer procedure's
-              --      thread are assumed event producers.
               _ ->
+                -- calling other procedures, assume to loop over its return value
                 runEdhTx etsLoopPrep $
                   evalExprSrc iterExpr $ \ !iterVal _ets ->
                     loopOverValue $ edhDeCaseWrap iterVal
@@ -2319,17 +2330,6 @@ edhPrepareForLoop
             iterThem [] = exitEdh etsLooper exit nil
             iterThem (apk : apks) = do1 apk $ iterThem apks
 
-            -- loop over a subscriber's channel of an event sink
-            iterEvt :: TChan EdhValue -> STM ()
-            iterEvt !subChan =
-              edhDoSTM etsLooper $
-                readTChan subChan >>= \case
-                  EdhNil ->
-                    -- nil marks end-of-stream from an event sink
-                    exitEdh etsLooper exit nil -- stop the for-from-do loop
-                  EdhArgsPack !apk -> do1 apk $ iterEvt subChan
-                  !v -> do1 (ArgsPack [v] odEmpty) $ iterEvt subChan
-
             iterChan :: BChan -> STM ()
             iterChan !chan = runEdhTx etsLooper $
               readBChan chan $ \case
@@ -2339,15 +2339,6 @@ edhPrepareForLoop
                 !v -> \_ets -> do1 (ArgsPack [v] odEmpty) $ iterChan chan
 
         case ultIterVal of
-          -- loop from an event sink
-          (EdhSink !sink) ->
-            subscribeEvents sink >>= \case
-              Nothing -> exitEdh etsLooper exit nil -- already at eos
-              Just (!subChan, !mrv) -> case mrv of
-                Nothing -> iterEvt subChan
-                Just !ev -> case ev of
-                  EdhArgsPack !apk -> do1 apk $ iterEvt subChan
-                  !v -> do1 (ArgsPack [v] odEmpty) $ iterEvt subChan
           -- loop from a channel
           EdhChan !chan -> iterChan chan
           -- loop from a positonal-only args pack
@@ -3149,22 +3140,8 @@ evalStmt !stmt !exit = case stmt of
         iterExpr
         bodyStmt
         (const $ return ())
-        $ \ !iterVal !runLoop -> case iterVal of
-          EdhSink !sink -> do
-            -- @remind assuming sync-producing semantics, the for-loop to
-            -- be forked is assumed the consumer, here we wait the sink
-            -- get subscribed by it, before continuing current thread
-            let !subc = sink'subc sink
-            !subcBefore <- readTVar subc
-            if subcBefore < 0
-              then exitEdh etsForking exit nil -- the sink alread at eos
-              else runEdhTx etsForking $
-                forkEdh id (runLoop endOfEdh) $ \() -> edhContSTM $ do
-                  !subcNow <- readTVar subc
-                  when (subcNow == subcBefore) retry
-                  exitEdh etsForking exit nil
-          _ -> runEdhTx etsForking $
-            forkEdh id (runLoop endOfEdh) $ \() -> exitEdhTx exit nil
+        $ \_iterVal !runLoop -> runEdhTx etsForking $
+          forkEdh id (runLoop endOfEdh) $ \() -> exitEdhTx exit nil
     _ -> forkEdh id (evalExprSrc expr endOfEdh) $ \() -> exitEdhTx exit nil
   DeferStmt (ExprSrc !expr !src'span) -> do
     let schedDefered ::
@@ -3211,39 +3188,6 @@ evalStmt !stmt !exit = case stmt of
                 -- return/continue/default etc. are returned to here?
                 _ -> return ()
       case edhUltimate srcVal of
-        EdhSink !sink ->
-          if edh'in'tx ets
-            then do
-              modifyTVar' (sink'atoms sink) $ \ !prev'atoms !ev ->
-                runEdhTx
-                  ets {edh'context = (edh'context ets) {edh'ctx'match = ev}}
-                  $ evalExprSrc bodyExpr $ \_ _ets -> prev'atoms ev
-              exitEdh ets exit nil
-            else do
-              subscribeEvents sink >>= \case
-                Nothing -> case sink'mrv sink of -- already at eos
-                  Nothing -> pure () -- non-lingering, nothing to do
-                  Just {} ->
-                    -- a lingering sink, trigger an immediate nil perceiving
-                    runEdhTx ets $
-                      edhContIO' $ drivePerceiver nil ets reactor id
-                Just (!perceiverChan, !lingerVal) -> do
-                  modifyTVar'
-                    (edh'perceivers ets)
-                    ( PerceiveRecord
-                        (return $ tryReadTChan perceiverChan)
-                        ets
-                        reactor
-                        :
-                    )
-                  case lingerVal of
-                    Nothing -> pure ()
-                    Just !mrv ->
-                      -- mrv lingering, trigger an immediate perceiving
-                      runEdhTx ets $
-                        edhContIO' $
-                          drivePerceiver mrv ets reactor id
-              exitEdh ets exit nil
         EdhChan (BChan _ !xchg) -> do
           let perceiveChan :: IO (STM (Maybe EdhValue))
               -- TODO so perceivers will always be preempted by blocking
@@ -3272,12 +3216,12 @@ evalStmt !stmt !exit = case stmt of
                         (PerceiveRecord perceiveChan ets reactor :)
                       exitEdh ets exit nil
                   )
-        EdhObject !sinkLikeObj -> do
+        EdhObject !chanLikeObj -> do
           let SrcLoc !doc _pos = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
           !u <- newRUID'STM
           runEdhTx ets $
             invokeMagic
-              sinkLikeObj
+              chanLikeObj
               (AttrByName "__perceive__")
               ( ArgsPack
                   [EdhExpr (ExprDefi u body'x (SrcLoc doc body'rng)) ""]
@@ -4008,6 +3952,10 @@ importFromObject !tgtEnt !reExpObj !argsRcvr !fromObj !done !ets =
                 -- ensure instance artifacts overwrite class artifacts
                 collectExp (edh'class'arts cls) binder
                 collectExp hs binder
+              EventStore !cls _ _ -> do
+                -- ensure instance artifacts overwrite class artifacts
+                collectExp (edh'class'arts cls) binder
+                collectExp hs binder
               _ ->
                 edhSimpleDesc ets (EdhObject $ edh'obj'class fromObj) $
                   \ !badDesc ->
@@ -4016,6 +3964,7 @@ importFromObject !tgtEnt !reExpObj !argsRcvr !fromObj !done !ets =
                     throwEdh ets EvalError $
                       "bad class for the object to be imported - " <> badDesc
       ClassStore !cls -> collectExp (edh'class'arts cls) id
+      EventStore !cls _ _ -> collectExp (edh'class'arts cls) id
       HostStore !hsd -> case unwrapHostValue hsd of
         Just (fromScope :: Scope) ->
           let !this = edh'scope'this fromScope
@@ -4023,6 +3972,8 @@ importFromObject !tgtEnt !reExpObj !argsRcvr !fromObj !done !ets =
            in collectExp (edh'scope'entity fromScope) (doBindTo this that)
         Nothing -> case edh'obj'store $ edh'obj'class obj of
           ClassStore !cls ->
+            collectExp (edh'class'arts cls) (doBindTo obj fromObj)
+          EventStore !cls _ _ ->
             collectExp (edh'class'arts cls) (doBindTo obj fromObj)
           _ ->
             edhSimpleDesc ets (EdhObject $ edh'obj'class fromObj) $ \ !badDesc ->
@@ -4377,6 +4328,7 @@ intplExpr !ets !x !exit = case x of
   NamespaceExpr !pd !apkr -> intplProcDecl ets pd $ \ !pd' ->
     intplArgsPacker ets apkr $ \ !apkr' -> exit $ NamespaceExpr pd' apkr'
   ClassExpr !pd -> intplProcDecl ets pd $ \ !pd' -> exit $ ClassExpr pd'
+  EventExpr !pd -> intplProcDecl ets pd $ \ !pd' -> exit $ EventExpr pd'
   MethodExpr !pd -> intplProcDecl ets pd $ \ !pd' -> exit $ MethodExpr pd'
   GeneratorExpr !pd ->
     intplProcDecl ets pd $ \ !pd' -> exit $ GeneratorExpr pd'
@@ -4525,8 +4477,8 @@ intplStmt !ets !stmt !exit = case stmt of
       seqcontSTM (intplArgSender ets <$> sndrs) $
         \ !sndrs' -> exit $ LetStmt rcvrs' $ ArgsPacker sndrs' sndrsSpan
   ExtendsStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ ExtendsStmt x'
-  PerceiveStmt !sink !body -> intplExprSrc ets sink $ \ !sink' ->
-    intplExprSrc ets body $ \ !body' -> exit $ PerceiveStmt sink' body'
+  PerceiveStmt !chan !body -> intplExprSrc ets chan $ \ !chan' ->
+    intplExprSrc ets body $ \ !body' -> exit $ PerceiveStmt chan' body'
   ThrowStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ ThrowStmt x'
   ReturnStmt !x !docCmt -> intplExprSrc ets x $ \ !x' ->
     exit $ ReturnStmt x' docCmt
@@ -4606,7 +4558,7 @@ resolveQuantity !ets !q !uomSpec !exit0 = case uomSpec of
         EdhUoM (NamedUnitDefi' ud) | uom'defi'sym ud == uSym -> exit $ Right ud
         badVal -> edhSimpleDesc ets badVal $ \ !badDesc ->
           throwEdh ets UsageError $
-            "expect a UoM or pure number by [" <> uSym <> "], but it's a "
+            "expect a UoM or numeric variable by [" <> uSym <> "], but it's a "
               <> badDesc
 
 evalLiteral :: EdhThreadState -> Literal -> (EdhValue -> STM ()) -> STM ()
@@ -4615,7 +4567,6 @@ evalLiteral ets lit exit = case lit of
   StringLiteral !v -> exit (EdhString v)
   BoolLiteral !v -> exit (EdhBool v)
   NilLiteral -> exit nil
-  SinkCtor -> EdhSink <$> newSink >>= exit
   ChanCtor -> EdhChan <$> newBChan >>= exit
   ValueLiteral !v -> exit v
   QtyLiteral !q !uomSpec ->
@@ -4700,6 +4651,10 @@ edhObjDesc' !ets !o !kwargs !exitDesc = runEdhTx ets $
       (_, EdhNil) -> case edh'obj'store o of
         ClassStore cls ->
           exitDesc $ "class `" <> procedureName (edh'class'proc cls) <> "`"
+        EventStore cls alias _sink ->
+          exitDesc $
+            "event class `" <> procedureName (edh'class'proc cls) <> "`"
+              <> (if T.null alias then "" else " as " <> alias)
         _ -> edhObjRepr ets o $ \ !objRepr ->
           exitDesc $ "`" <> objClassName o <> "` object `" <> objRepr <> "`"
       (_, EdhString !desc) -> exitDesc desc
@@ -4763,7 +4718,16 @@ dtcFieldKeys !ets !dataCls !exit = case edh'obj'store dataCls of
       ets
       (edh'procedure'args $ edh'procedure'decl $ edh'class'proc cls)
       exit
-  _ -> throwEdh ets EvalError "bug: data class not bearing ClassStore"
+  EventStore !cls _ _ ->
+    dtcFieldKeys'
+      ets
+      (edh'procedure'args $ edh'procedure'decl $ edh'class'proc cls)
+      exit
+  _ ->
+    throwEdh
+      ets
+      EvalError
+      "bug: data/event class not bearing ClassStore/EventStore"
 
 dtcFieldKeys' ::
   EdhThreadState ->
@@ -4776,7 +4740,7 @@ dtcFieldKeys' !ets !dtcArgRcvrs !exit = case dtcArgRcvrs of
   WildReceiver _ ->
     throwEdh ets UsageError "wild receiver for data class not supported"
   NullaryReceiver ->
-    throwEdh ets EvalError "bug: not a data class for dtcFieldKeys"
+    throwEdh ets EvalError "bug: not a data/event class for dtcFieldKeys"
   where
     go :: [ArgReceiver] -> [(AttrKey, Text)] -> STM ()
     go [] !fs = exit $! reverse fs
@@ -5110,6 +5074,171 @@ defineEffect !ets !key !val =
   iopdInsert key val
     =<< prepareEffStore ets (edh'scope'entity $ contextScope $ edh'context ets)
 
+defineEdhClassByExpr ::
+  Object ->
+  (Class -> ObjectStore) ->
+  ProcDecl ->
+  OptDocCmt ->
+  EdhTxExit EdhValue ->
+  EdhTx
+defineEdhClassByExpr _ _ HostDecl {} _ _ =
+  throwEdhTx EvalError "bug: eval host class decl"
+defineEdhClassByExpr
+  !metaClass
+  !stoCtor
+  pd@( ProcDecl
+         (AttrAddrSrc !addr _)
+         !argsRcvr
+         _anno
+         (StmtSrc !body'stmt _)
+         !proc'loc
+       )
+  !docCmt
+  !exit = \ !ets -> resolveEdhAttrAddr ets addr $ \ !name -> do
+    let !ctx = edh'context ets
+        !scope = contextScope ctx
+    !idCls <- newRUID'STM
+    !cs <- iopdEmpty
+    !ss <- newTVar []
+    !mro <- newTVar []
+    let allocatorProc :: ArgsPack -> EdhObjectAllocator
+        allocatorProc !apkCtor !exitCtor !etsCtor = case argsRcvr of
+          -- a normal class
+          NullaryReceiver -> exitCtor . HashStore =<< iopdEmpty
+          -- a data/event class
+          _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
+            dtcFieldKeys' ets argsRcvr $ \ !fks -> do
+              let dataFields = odFromList $
+                    (<$> fks) $ \(fk, _prefix) ->
+                      (fk, odLookupDefault edhNA fk dataAttrs)
+              exitCtor $
+                HostStore $
+                  wrapHostValue $ ArgsPack [EdhObject clsObj] dataFields
+
+        !clsProc =
+          ProcDefi
+            { edh'procedure'ident = idCls,
+              edh'procedure'name = name,
+              edh'procedure'lexi = scope,
+              edh'procedure'doc = docCmt,
+              edh'procedure'decl = pd
+            }
+        !cls = Class clsProc cs allocatorProc mro
+        !clsObj = Object (stoCtor cls) metaClass ss
+
+        doExit _rtn _ets =
+          readTVar ss >>= fillClassMRO cls >>= \case
+            "" -> do
+              defineScopeAttr ets name $ EdhObject clsObj
+              exitEdh ets exit $ EdhObject clsObj
+            !mroInvalid -> throwEdh ets UsageError mroInvalid
+
+    let !clsScope =
+          Scope
+            { edh'scope'entity = cs,
+              edh'scope'this = clsObj,
+              edh'scope'that = clsObj,
+              edh'scope'proc = clsProc,
+              edh'effects'stack = []
+            }
+    !tipFrame <- newCallFrame clsScope proc'loc
+    let !clsCtx =
+          ctx
+            { edh'ctx'tip = tipFrame,
+              edh'ctx'stack = edh'ctx'tip ctx : edh'ctx'stack ctx,
+              edh'ctx'genr'caller = Nothing,
+              edh'ctx'match = true,
+              edh'ctx'pure = False,
+              edh'ctx'exp'target = Nothing,
+              edh'ctx'eff'target = Nothing
+            }
+        !etsCls = ets {edh'context = clsCtx}
+
+    case argsRcvr of
+      -- a normal class
+      NullaryReceiver -> pure ()
+      -- a data/event class
+      _ -> dtcFieldKeys' ets argsRcvr $ \ !fks -> do
+        !fldGetters <-
+          sequence
+            [ (fk,)
+                <$> mkHostProperty' clsScope fk (dtcFieldGetter fk) Nothing
+              | (fk, _reprPrefix) <- fks
+            ]
+        !mths <-
+          sequence
+            [ (AttrByName nm,) <$> mkHostProc clsScope mc nm hp
+              | (mc, nm, hp) <-
+                  [ (EdhMethod, "__repr__", (dtcReprProc, NullaryReceiver)),
+                    (EdhMethod, "__compare__", (dtcCmpProc, NullaryReceiver))
+                  ]
+            ]
+        iopdUpdate (fldGetters ++ mths) cs
+    -- calling the Edh class definition
+    runEdhTx etsCls $ evalStmt body'stmt doExit
+    where
+      dtcFieldGetter :: AttrKey -> EdhHostProc
+      dtcFieldGetter !attrKey !mthExit !ets =
+        withThisHostObj ets $ \(ArgsPack [_cls] !dataFields) ->
+          case odLookup attrKey dataFields of
+            Just !fv -> exitEdh ets mthExit fv
+            Nothing ->
+              throwEdh ets UsageError $
+                "no such field `" <> attrKeyStr attrKey <> "` on data object"
+
+      dtcReprProc :: ArgsPack -> EdhHostProc
+      dtcReprProc _ !mthExit !ets =
+        -- Note `cls` is always the original event class, for an event instance
+        -- of some aliased event class, use `objClass this` to get the aliased
+        -- event class if needed.
+        withThisHostObj ets $ \(ArgsPack [EdhObject !cls] !dataFields) ->
+          dtcFieldKeys ets cls $ \ !fks -> do
+            let unnamed :: (AttrKey, Text) -> (EdhValue, Text -> Text)
+                unnamed (!k, !p) =
+                  if "*" `T.isPrefixOf` p
+                    then (v, (p <>))
+                    else (v, id)
+                  where
+                    !v = odLookupDefault edhNA k dataFields
+                named :: (AttrKey, Text) -> (EdhValue, Text -> Text)
+                named (!k, !p) =
+                  if "*" `T.isPrefixOf` p
+                    then (v, (p <>))
+                    else (v, ((attrKeyStr k <> "=") <>))
+                  where
+                    !v = odLookupDefault edhNA k dataFields
+                rp = if length fks < 3 then unnamed else named
+            edhProcessReprs ets (rp <$> fks) $ \ !dfTokens ->
+              exitEdh ets mthExit $
+                EdhString $
+                  objClassName this
+                    <> "("
+                    <> T.intercalate ", " dfTokens
+                    <> ")"
+        where
+          !this = edh'scope'this $ contextScope $ edh'context ets
+
+      dtcCmpProc :: ArgsPack -> EdhHostProc
+      dtcCmpProc !apk !mthExit !ets = case apk of
+        ArgsPack [EdhObject !objOther] !kwargs | odNull kwargs ->
+          withThisHostObj ets $ \(ArgsPack [EdhObject !cls] !dataFields) ->
+            resolveEdhInstance cls objOther >>= \case
+              Nothing -> exitEdh ets mthExit edhNA
+              Just !instOther ->
+                withHostInstance ets instOther $
+                  \(ArgsPack [EdhObject !clsOther] !dataFieldsOther) ->
+                    if clsOther /= cls
+                      then exitEdh ets mthExit edhNA
+                      else edhCmpKeyedList
+                        ets
+                        (odToList dataFields)
+                        (odToList dataFieldsOther)
+                        $ \case
+                          Nothing -> exitEdh ets mthExit edhNA
+                          Just !conclusion ->
+                            exitEdh ets mthExit $ EdhOrd conclusion
+        _ -> exitEdh ets mthExit edhNA -- todo interpret kwargs or throw?
+
 -- | Evaluate an Edh expression definition
 evalExprDefi :: ExprDefi -> EdhTxExit EdhValue -> EdhTx
 evalExprDefi (ExprDefi _ !x !src'loc) !exit !ets =
@@ -5441,6 +5570,14 @@ evalExpr' (ImportExpr !argsRcvr !srcExpr !maybeInto) !docCmt !exit = \ !ets ->
                     argsRcvr
                     srcExpr
                     exit
+                EventStore !cls _ _ ->
+                  importInto
+                    chkExtImp
+                    (edh'class'arts cls)
+                    intoObj
+                    argsRcvr
+                    srcExpr
+                    exit
                 HostStore !hsd -> case unwrapHostValue hsd of
                   Just (intoScope :: Scope) ->
                     importInto
@@ -5502,164 +5639,21 @@ evalExpr' (DefaultExpr !maybeApk exprSrc@(ExprSrc !exprDef _)) _docCmt !exit =
 evalExpr' (InfixExpr !opSymSrc !lhExpr !rhExpr) _docCmt !exit =
   evalInfixSrc opSymSrc lhExpr rhExpr exit
 -- defining an Edh class
-evalExpr' (ClassExpr HostDecl {}) _ _ =
-  throwEdhTx EvalError "bug: eval host class decl"
-evalExpr'
-  ( ClassExpr
-      pd@( ProcDecl
-             (AttrAddrSrc !addr _)
-             !argsRcvr
-             _anno
-             (StmtSrc !body'stmt _)
-             !proc'loc
-           )
-    )
-  !docCmt
-  !exit =
-    \ !ets -> resolveEdhAttrAddr ets addr $ \ !name -> do
-      let !ctx = edh'context ets
-          !scope = contextScope ctx
-          !rootScope = edh'world'root $ edh'prog'world $ edh'thread'prog ets
-          !nsClass = edh'obj'class $ edh'scope'this rootScope
-          !metaClass = edh'obj'class nsClass
-
-      !idCls <- newRUID'STM
-      !cs <- iopdEmpty
-      !ss <- newTVar []
-      !mro <- newTVar []
-      let allocatorProc :: ArgsPack -> EdhObjectAllocator
-          allocatorProc !apkCtor !exitCtor !etsCtor = case argsRcvr of
-            -- a normal class
-            NullaryReceiver -> exitCtor . HashStore =<< iopdEmpty
-            -- a data class
-            _ -> recvEdhArgs etsCtor ctx argsRcvr apkCtor $ \ !dataAttrs ->
-              dtcFieldKeys' ets argsRcvr $ \ !fks -> do
-                let dataFields = odFromList $
-                      (<$> fks) $ \(fk, _prefix) ->
-                        (fk, odLookupDefault edhNA fk dataAttrs)
-                exitCtor $
-                  HostStore $
-                    wrapHostValue $ ArgsPack [EdhObject clsObj] dataFields
-
-          !clsProc =
-            ProcDefi
-              { edh'procedure'ident = idCls,
-                edh'procedure'name = name,
-                edh'procedure'lexi = scope,
-                edh'procedure'doc = docCmt,
-                edh'procedure'decl = pd
-              }
-          !cls = Class clsProc cs allocatorProc mro
-          !clsObj = Object (ClassStore cls) metaClass ss
-
-          doExit _rtn _ets =
-            readTVar ss >>= fillClassMRO cls >>= \case
-              "" -> do
-                defineScopeAttr ets name $ EdhObject clsObj
-                exitEdh ets exit $ EdhObject clsObj
-              !mroInvalid -> throwEdh ets UsageError mroInvalid
-
-      let !clsScope =
-            Scope
-              { edh'scope'entity = cs,
-                edh'scope'this = clsObj,
-                edh'scope'that = clsObj,
-                edh'scope'proc = clsProc,
-                edh'effects'stack = []
-              }
-      !tipFrame <- newCallFrame clsScope proc'loc
-      let !clsCtx =
-            ctx
-              { edh'ctx'tip = tipFrame,
-                edh'ctx'stack = edh'ctx'tip ctx : edh'ctx'stack ctx,
-                edh'ctx'genr'caller = Nothing,
-                edh'ctx'match = true,
-                edh'ctx'pure = False,
-                edh'ctx'exp'target = Nothing,
-                edh'ctx'eff'target = Nothing
-              }
-          !etsCls = ets {edh'context = clsCtx}
-
-      case argsRcvr of
-        -- a normal class
-        NullaryReceiver -> pure ()
-        -- a data class
-        _ -> dtcFieldKeys' ets argsRcvr $ \ !fks -> do
-          !fldGetters <-
-            sequence
-              [ (fk,)
-                  <$> mkHostProperty' clsScope fk (dtcFieldGetter fk) Nothing
-                | (fk, _reprPrefix) <- fks
-              ]
-          !mths <-
-            sequence
-              [ (AttrByName nm,) <$> mkHostProc clsScope mc nm hp
-                | (mc, nm, hp) <-
-                    [ (EdhMethod, "__repr__", (dtcReprProc, NullaryReceiver)),
-                      (EdhMethod, "__compare__", (dtcCmpProc, NullaryReceiver))
-                    ]
-              ]
-          iopdUpdate (fldGetters ++ mths) cs
-      -- calling the Edh class definition
-      runEdhTx etsCls $ evalStmt body'stmt doExit
-    where
-      dtcFieldGetter :: AttrKey -> EdhHostProc
-      dtcFieldGetter !attrKey !mthExit !ets =
-        withThisHostObj ets $ \(ArgsPack [_cls] !dataFields) ->
-          case odLookup attrKey dataFields of
-            Just !fv -> exitEdh ets mthExit fv
-            Nothing ->
-              throwEdh ets UsageError $
-                "no such field `" <> attrKeyStr attrKey <> "` on data object"
-
-      dtcReprProc :: ArgsPack -> EdhHostProc
-      dtcReprProc _ !mthExit !ets =
-        withThisHostObj ets $ \(ArgsPack [EdhObject !cls] !dataFields) ->
-          dtcFieldKeys ets cls $ \ !fks -> do
-            let unnamed :: (AttrKey, Text) -> (EdhValue, Text -> Text)
-                unnamed (!k, !p) =
-                  if "*" `T.isPrefixOf` p
-                    then (v, (p <>))
-                    else (v, id)
-                  where
-                    !v = odLookupDefault edhNA k dataFields
-                named :: (AttrKey, Text) -> (EdhValue, Text -> Text)
-                named (!k, !p) =
-                  if "*" `T.isPrefixOf` p
-                    then (v, (p <>))
-                    else (v, ((attrKeyStr k <> "=") <>))
-                  where
-                    !v = odLookupDefault edhNA k dataFields
-                rp = if length fks < 3 then unnamed else named
-            edhProcessReprs ets (rp <$> fks) $ \ !dfTokens ->
-              exitEdh ets mthExit $
-                EdhString $
-                  edhClassName cls
-                    <> "("
-                    <> T.intercalate ", " dfTokens
-                    <> ")"
-
-      dtcCmpProc :: ArgsPack -> EdhHostProc
-      dtcCmpProc !apk !mthExit !ets = case apk of
-        ArgsPack [EdhObject !objOther] !kwargs | odNull kwargs ->
-          withThisHostObj ets $ \(ArgsPack [EdhObject !cls] !dataFields) ->
-            resolveEdhInstance cls objOther >>= \case
-              Nothing -> exitEdh ets mthExit edhNA
-              Just !instOther ->
-                withHostInstance ets instOther $
-                  \(ArgsPack [EdhObject !clsOther] !dataFieldsOther) ->
-                    if clsOther /= cls
-                      then exitEdh ets mthExit edhNA
-                      else edhCmpKeyedList
-                        ets
-                        (odToList dataFields)
-                        (odToList dataFieldsOther)
-                        $ \case
-                          Nothing -> exitEdh ets mthExit edhNA
-                          Just !conclusion ->
-                            exitEdh ets mthExit $ EdhOrd conclusion
-        _ -> exitEdh ets mthExit edhNA -- todo interpret kwargs or throw?
-
+evalExpr' (ClassExpr pd) !docCmt !exit = \ets -> do
+  let metaClass = edh'meta'class $ edh'prog'world $ edh'thread'prog ets
+  runEdhTx ets $
+    defineEdhClassByExpr metaClass ClassStore pd docCmt exit
+-- defining an Edh event class
+evalExpr' (EventExpr pd) !docCmt !exit = \ets -> do
+  let metaClass = edh'event'class $ edh'prog'world $ edh'thread'prog ets
+  !sink <- newSink
+  runEdhTx ets $
+    defineEdhClassByExpr
+      metaClass
+      (\cls -> EventStore cls "" sink)
+      pd
+      docCmt
+      exit
 -- defining an Edh namespace
 evalExpr' (NamespaceExpr HostDecl {} _) _ _ =
   throwEdhTx EvalError "bug: eval host ns decl"
@@ -6607,6 +6601,9 @@ edhCompareValue !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
     ClassStore {} ->
       lookupEdhObjAttr (edh'obj'class lhObj) cmpMagicKey
         >>= tryMagic id lhObj rhVal tryRightHandMagic
+    EventStore {} ->
+      lookupEdhObjAttr (edh'obj'class lhObj) cmpMagicKey
+        >>= tryMagic id lhObj rhVal tryRightHandMagic
     _ ->
       lookupEdhObjAttr lhObj cmpMagicKey
         >>= tryMagic id lhObj rhVal tryRightHandMagic
@@ -6621,6 +6618,9 @@ edhCompareValue !ets !lhVal !rhVal !exit = case edhUltimate lhVal of
     tryRightHandMagic = case edhUltimate rhVal of
       EdhObject !rhObj -> case edh'obj'store rhObj of
         ClassStore {} ->
+          lookupEdhObjAttr (edh'obj'class rhObj) cmpMagicKey
+            >>= tryMagic inverse rhObj lhVal noMagic
+        EventStore {} ->
           lookupEdhObjAttr (edh'obj'class rhObj) cmpMagicKey
             >>= tryMagic inverse rhObj lhVal noMagic
         _ ->
@@ -7201,36 +7201,6 @@ regulateEdhSlice !ets !len (!start, !stop, !step) !exit = case step of
                                     <> T.pack (show iStop)
                               else exit (iStart', iStop', iStep)
             )
-
-postEdhEvent :: Sink -> EdhValue -> EdhTxExit () -> EdhTx
-postEdhEvent !sink !val !exit !ets =
-  postEvent sink val >>= \case
-    True -> exitEdh ets exit ()
-    False ->
-      if val == EdhNil
-        then exitEdh ets exit () -- allow repeated marking of eos
-        else throwEdh ets UsageError "attempt to publish into a sink at eos"
-
--- | Fork a new Edh thread to run the specified event producer, but hold the
--- production until current thread has later started consuming events from the
--- sink returned here.
-launchEventProducer :: EdhTxExit Sink -> Sink -> EdhTx -> EdhTx
-launchEventProducer
-  !exit
-  sink@(Sink _ _ _ _ !subc)
-  !producerTx
-  !etsConsumer =
-    readTVar subc >>= \ !subcBefore ->
-      if subcBefore < 0
-        then throwEdh etsConsumer UsageError "producer outlet already at eos"
-        else
-          let prodThAct !etsProducer = do
-                !subcNow <- readTVar subc
-                when (subcNow == subcBefore) retry
-                producerTx etsProducer
-           in runEdhTx etsConsumer $
-                forkEdh id prodThAct $
-                  const $ exitEdhTx exit sink
 
 mkHostClass' ::
   Scope ->
@@ -8000,11 +7970,27 @@ fallbackEdhEffect' !effKey !exit !ets =
   resolveEdhFallback' ets effKey $ runEdhTx ets . exit
 
 -- | Create a new channel
-newBChan :: STM BChan
-newBChan = unsafeIOToSTM $ do
+newBChanIO :: IO BChan
+newBChanIO = do
   !u <- newRUID
   !xchg <- newMVar BChanIdle
   return BChan {chan'uniq = u, chan'xchg = xchg}
+
+-- | Close a channel
+closeBChanIO :: BChan -> IO Bool
+closeBChanIO (BChan _ !xchg) = modifyMVar xchg $ \case
+  BChanIdle -> return (BChanEOS, True)
+  BChanEOS -> return (BChanEOS, False)
+  BChanReader !rcvr -> do
+    void $ atomically $ tryPutTMVar rcvr EdhNil
+    return (BChanEOS, True)
+  BChanWriter _v !taken -> do
+    void $ atomically $ tryPutTMVar taken False
+    return (BChanEOS, True)
+
+-- | Create a new channel
+newBChan :: STM BChan
+newBChan = unsafeIOToSTM newBChanIO
 
 -- | Read a value out of a channel, blocking until some writer actually send a
 -- value through the channel.
@@ -8057,17 +8043,9 @@ readBChan (BChan _ !xchg) !exit !ets =
 -- Otherwise, 'True' will be returned on success, or 'False' if the channel has
 -- reached end-of-stream.
 writeBChan :: BChan -> EdhValue -> EdhTxExit Bool -> EdhTx
-writeBChan (BChan _ !xchg) EdhNil !exit !ets = (runEdhTx ets . edhContIO) $
-  (atomically . exitEdh ets exit =<<) $
-    modifyMVar xchg $ \case
-      BChanIdle -> return (BChanEOS, True)
-      BChanEOS -> return (BChanEOS, False)
-      BChanReader !rcvr -> do
-        void $ atomically $ tryPutTMVar rcvr EdhNil
-        return (BChanEOS, True)
-      BChanWriter _v !taken -> do
-        void $ atomically $ tryPutTMVar taken False
-        return (BChanEOS, True)
+writeBChan !chan EdhNil !exit !ets =
+  (runEdhTx ets . edhContIO) $
+    atomically . exitEdh ets exit =<< closeBChanIO chan
 writeBChan (BChan _ !xchg) !v !exit !ets =
   runEdhTx ets $ edhContIO attemptWrite
   where

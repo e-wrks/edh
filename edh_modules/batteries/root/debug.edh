@@ -82,7 +82,9 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
     { { scope: ofScope } }
     -> console.print( ofScope.lexiLoc, **ofScope.attrs() )
     { otherVal } -> {
-      ; | type( otherVal ) is in ( "Object", "Class", "HostClass", ) -> {
+      ; | type( otherVal ) is in (
+        "Object", "Class", "HostClass", "EventClass",
+      ) -> {
         ofScope = scope( ofObj= otherVal )
         console.print( desc( otherVal ), **ofScope.attrs() )
       }
@@ -105,7 +107,9 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
       '  ' ++ k ++ '= ' ++ v
     )
     { otherVal } -> {
-      ; | type( otherVal ) is in ( "Object", "Class", "HostClass", ) -> {
+      ; | type( otherVal ) is in (
+        "Object", "Class", "HostClass", "EventClass",
+      ) -> {
         ofScope = scope( ofObj= otherVal )
         '\n'.join(
           desc( otherVal ),
@@ -156,7 +160,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
               # { { module:_ } } -> printDir( ofThe= scope( ofObj=tgtScope ) )
               # { { namespace:_ } } -> printDir( ofThe= scope( ofObj=tgtScope ) )
               ; | type( tgtScope ) is in (
-                "Object", "Class", "HostClass",
+                "Object", "Class", "HostClass", "EventClass",
               ) -> printDir(
                 ofThe= scope( ofObj=tgtScope )
               )
@@ -204,7 +208,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
    #  *) This can terminate the process when *stdin* is already at EOF
    #}
   method replWith( obj ) {
-    if type( obj ) is not in ( "Object", "Class", "HostClass", )
+    if type( obj ) is not in ( "Object", "Class", "HostClass", "EventClass", )
     # if we don't throw here, the while-loop below will loop infinitely,
     # as it'll try recover from errors
     then error( 'No scope inside - ' ++ desc( obj ) )
@@ -235,7 +239,7 @@ debug and replHere() or console.warn<| 'An unusual case needs inspection here.'
               # { { module:_ } } -> printDir( ofThe= scope( ofObj=tgtScope ) )
               # { { namespace:_ } } -> printDir( ofThe= scope( ofObj=tgtScope ) )
               ; | type( tgtScope ) is in (
-                "Object", "Class", "HostClass",
+                "Object", "Class", "HostClass", "EventClass",
               ) -> printDir(
                 ofThe= scope( ofObj=tgtScope )
               )

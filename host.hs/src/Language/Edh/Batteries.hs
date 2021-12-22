@@ -15,10 +15,10 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Void (Void)
 import Language.Edh.Batteries.Assign
+import Language.Edh.Batteries.Chan
 import Language.Edh.Batteries.Console
 import Language.Edh.Batteries.Ctrl
 import Language.Edh.Batteries.Data
-import Language.Edh.Batteries.Evt
 import Language.Edh.Batteries.InterOp
 import Language.Edh.Batteries.Math
 import Language.Edh.Batteries.Reflect
@@ -473,7 +473,7 @@ installEdhBatteries world = do
                   ("*|", hasSuffixProc),
                   (":>", prpdProc),
                   ("/>", lstrvrsPrpdProc),
-                  ("<-", evtPubProc),
+                  ("<-", chanWriteProc),
                   ("+", addProc),
                   ("-", subtProc),
                   ("*", mulProc),
@@ -587,9 +587,7 @@ installEdhBatteries world = do
                   (EdhMethod, "parseEdh", wrapHostProc parseEdhProc),
                   (EdhMethod, "makeOp", wrapHostProc makeOpProc),
                   (EdhIntrpr, "unzip", wrapHostProc unzipProc),
-                  (EdhMethod, "__Sink_subseq__", wrapHostProc sink'subseqProc),
-                  (EdhMethod, "__Sink_mrv__", wrapHostProc sink'mrvProc),
-                  (EdhMethod, "__Sink_eos__", wrapHostProc sink'eosProc),
+                  (EdhMethod, "__Chan_eos__", wrapHostProc chan'eosProc),
                   (EdhMethod, "__Dict_size__", wrapHostProc dictSizeProc),
                   (EdhMethod, "__Dict_keys__", wrapHostProc dictKeysProc),
                   (EdhMethod, "__Dict_values__", wrapHostProc dictValuesProc),

@@ -550,19 +550,19 @@ instance EdhCallableM fn' => EdhCallableM (Maybe Ordering -> fn') where
     EdhOrd !val' -> callFromEdhM (fn (Just val')) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
 
--- receive anonymous arg taking 'Sink'
-instance EdhCallableM fn' => EdhCallableM (Sink -> fn') where
+-- receive anonymous arg taking 'BChan'
+instance EdhCallableM fn' => EdhCallableM (BChan -> fn') where
   callFromEdhM !fn (ArgsPack (val : args) !kwargs) = case val of
-    EdhSink !val' -> callFromEdhM (fn val') (ArgsPack args kwargs)
+    EdhChan !val' -> callFromEdhM (fn val') (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
   callFromEdhM _ _ = throwEdhM UsageError "missing anonymous arg"
 
--- receive optional anonymous arg taking 'Sink'
-instance EdhCallableM fn' => EdhCallableM (Maybe Sink -> fn') where
+-- receive optional anonymous arg taking 'BChan'
+instance EdhCallableM fn' => EdhCallableM (Maybe BChan -> fn') where
   callFromEdhM !fn (ArgsPack [] !kwargs) =
     callFromEdhM (fn Nothing) (ArgsPack [] kwargs)
   callFromEdhM !fn (ArgsPack (val : args) !kwargs) = case val of
-    EdhSink !val' -> callFromEdhM (fn (Just val')) (ArgsPack args kwargs)
+    EdhChan !val' -> callFromEdhM (fn (Just val')) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
 
 -- receive anonymous arg taking 'EdhNamedValue'
@@ -1844,12 +1844,12 @@ instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Mayb
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
--- receive named arg taking 'Sink'
-instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg Sink name -> fn') where
+-- receive named arg taking 'BChan'
+instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg BChan name -> fn') where
   callFromEdhM !fn (ArgsPack !args !kwargs) =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhSink !val' ->
+        EdhChan !val' ->
           callFromEdhM (fn (NamedEdhArg val')) (ArgsPack args kwargs')
         _ ->
           throwEdhM UsageError $
@@ -1860,7 +1860,7 @@ instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg Sink 
       (Nothing, !kwargs') -> case args of
         [] -> throwEdhM UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
-          EdhSink !val' ->
+          EdhChan !val' ->
             callFromEdhM (fn (NamedEdhArg val')) (ArgsPack args' kwargs')
           _ ->
             throwEdhM UsageError $
@@ -1871,12 +1871,12 @@ instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg Sink 
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
--- receive named, optional arg taking 'Sink'
-instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Maybe Sink) name -> fn') where
+-- receive named, optional arg taking 'BChan'
+instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Maybe BChan) name -> fn') where
   callFromEdhM !fn (ArgsPack !args !kwargs) =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhSink !val' ->
+        EdhChan !val' ->
           callFromEdhM
             (fn (NamedEdhArg (Just val')))
             (ArgsPack args kwargs')
@@ -1889,7 +1889,7 @@ instance (KnownSymbol name, EdhCallableM fn') => EdhCallableM (NamedEdhArg (Mayb
       (Nothing, !kwargs') -> case args of
         [] -> callFromEdhM (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs')
         val : args' -> case val of
-          EdhSink !val' ->
+          EdhChan !val' ->
             callFromEdhM
               (fn (NamedEdhArg (Just val')))
               (ArgsPack args' kwargs')
@@ -2833,19 +2833,19 @@ instance EdhAllocatorM fn' => EdhAllocatorM (Maybe Ordering -> fn') where
     EdhOrd !val' -> allocObjM (fn (Just val')) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
 
--- receive anonymous arg taking 'Sink'
-instance EdhAllocatorM fn' => EdhAllocatorM (Sink -> fn') where
+-- receive anonymous arg taking 'BChan'
+instance EdhAllocatorM fn' => EdhAllocatorM (BChan -> fn') where
   allocObjM !fn (ArgsPack (val : args) !kwargs) = case val of
-    EdhSink !val' -> allocObjM (fn val') (ArgsPack args kwargs)
+    EdhChan !val' -> allocObjM (fn val') (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
   allocObjM _ _ = throwEdhM UsageError "missing anonymous arg"
 
--- receive optional anonymous arg taking 'Sink'
-instance EdhAllocatorM fn' => EdhAllocatorM (Maybe Sink -> fn') where
+-- receive optional anonymous arg taking 'BChan'
+instance EdhAllocatorM fn' => EdhAllocatorM (Maybe BChan -> fn') where
   allocObjM !fn (ArgsPack [] !kwargs) =
     allocObjM (fn Nothing) (ArgsPack [] kwargs)
   allocObjM !fn (ArgsPack (val : args) !kwargs) = case val of
-    EdhSink !val' -> allocObjM (fn (Just val')) (ArgsPack args kwargs)
+    EdhChan !val' -> allocObjM (fn (Just val')) (ArgsPack args kwargs)
     _ -> throwEdhM UsageError "arg type mismatch: anonymous"
 
 -- receive anonymous arg taking 'EdhNamedValue'
@@ -4127,12 +4127,12 @@ instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Ma
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
--- receive named arg taking 'Sink'
-instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg Sink name -> fn') where
+-- receive named arg taking 'BChan'
+instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg BChan name -> fn') where
   allocObjM !fn (ArgsPack !args !kwargs) =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhSink !val' ->
+        EdhChan !val' ->
           allocObjM (fn (NamedEdhArg val')) (ArgsPack args kwargs')
         _ ->
           throwEdhM UsageError $
@@ -4143,7 +4143,7 @@ instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg Sin
       (Nothing, !kwargs') -> case args of
         [] -> throwEdhM UsageError $ "missing named arg: " <> argName
         val : args' -> case val of
-          EdhSink !val' ->
+          EdhChan !val' ->
             allocObjM (fn (NamedEdhArg val')) (ArgsPack args' kwargs')
           _ ->
             throwEdhM UsageError $
@@ -4154,12 +4154,12 @@ instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg Sin
     where
       !argName = T.pack $ symbolVal (Proxy :: Proxy name)
 
--- receive named, optional arg taking 'Sink'
-instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Maybe Sink) name -> fn') where
+-- receive named, optional arg taking 'BChan'
+instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Maybe BChan) name -> fn') where
   allocObjM !fn (ArgsPack !args !kwargs) =
     case odTakeOut (AttrByName argName) kwargs of
       (Just !val, !kwargs') -> case val of
-        EdhSink !val' ->
+        EdhChan !val' ->
           allocObjM
             (fn (NamedEdhArg (Just val')))
             (ArgsPack args kwargs')
@@ -4172,7 +4172,7 @@ instance (KnownSymbol name, EdhAllocatorM fn') => EdhAllocatorM (NamedEdhArg (Ma
       (Nothing, !kwargs') -> case args of
         [] -> allocObjM (fn (NamedEdhArg Nothing)) (ArgsPack [] kwargs')
         val : args' -> case val of
-          EdhSink !val' ->
+          EdhChan !val' ->
             allocObjM
               (fn (NamedEdhArg (Just val')))
               (ArgsPack args' kwargs')

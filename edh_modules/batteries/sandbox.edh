@@ -12,7 +12,6 @@ export {
   import * './root/ho'
   import * './root/iter'
   import * './root/str'
-  import * './root/evt'
   import * './root/math'
   import * './root/slice'
   import * './root/uri'

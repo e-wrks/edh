@@ -781,6 +781,22 @@ parseDataExpr !si = do
       si''
     )
 
+parseEventExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
+parseEventExpr !si = do
+  !startPos <- getSourcePos
+  void $ keyword "event"
+  {- HLINT ignore "Reduce duplication" -}
+  !pn <- parseAttrAddrSrc
+  !ar <- parseArgsReceiver
+  (!anno, si') <- parseInpAnno si
+  (!body, !si'') <- parseProcBody si'
+  !lexeme'end <- lexemeEndPos
+  return
+    ( EventExpr $
+        ProcDecl pn ar anno body (lspSrcLocFromParsec startPos lexeme'end),
+      si''
+    )
+
 parseExtendsStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parseExtendsStmt !si = do
   void $ keyword "extends"
@@ -901,8 +917,7 @@ parseInpAnno !si0 =
     parseAnnoBody si =
       (NilAnno, si) <$ keyword "nil"
         <|> choice
-          [ parseSinkCtor si, -- an event sink
-            parseChanCtor si, -- a channel
+          [ parseChanCtor si, -- a channel
             parseApkOrProcSig si, -- an apk result or procedure signature
             parseEffExps si, -- effects expections
             parseStrSpec si, -- literal string - narrow for type, wide for quaint
@@ -910,18 +925,6 @@ parseInpAnno !si0 =
             parseCtorProto si -- direct/indirect attribute addressor,
             -- optionally called with args for prototyping
           ]
-
-    parseSinkCtor si = do
-      !startPos <- getSourcePos
-      void $ keyword "sink"
-      !lexeme'end <- lexemeEndPos
-      return
-        ( CtorProtoAnno $
-            ExprSrc
-              (LitExpr SinkCtor)
-              (lspSrcRangeFromParsec startPos lexeme'end),
-          si
-        )
 
     parseChanCtor si = do
       !startPos <- getSourcePos
@@ -1759,7 +1762,6 @@ parseLit =
     [ NilLiteral <$ litKw "nil",
       BoolLiteral <$> parseBoolLit,
       StringLiteral <$> parseStringLit,
-      SinkCtor <$ litKw "sink",
       ChanCtor <$ litKw "chan",
       DecLiteral D.nan <$ litKw "nan",
       DecLiteral D.inf <$ litKw "inf",
@@ -2176,6 +2178,7 @@ parseExprPrec !precedingOp !prec !si =
                   parseNamespaceExpr si0,
                   parseClassExpr si0,
                   parseDataExpr si0,
+                  parseEventExpr si0,
                   parseMethodExpr si0,
                   parseGeneratorExpr si0,
                   parseInterpreterExpr si0,

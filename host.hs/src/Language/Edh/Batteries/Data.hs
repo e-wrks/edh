@@ -1032,11 +1032,43 @@ cprhProc !lhExpr rhExpr@(ExprSrc !rhe _) !exit = case deParen' rhe of
     insertToDict :: EdhThreadState -> EdhValue -> DictStore -> STM ()
     insertToDict !s !p !d = val2DictEntry s p $ \(k, v) -> setDictItem k v d
 
--- | operator (as), aliasing
+-- | operator (as), aliasing binding (assignment)
 --
 -- Also to enable certain syntatic sugars with the `as` keyword involved
 asProc :: EdhIntrinsicOp
-asProc !lhExpr (ExprSrc _rhe _) !exit = evalExprSrc lhExpr $ \ !lhVal ->
-  -- TODO: call magic __as__(attrKey, owner= NA)
-  -- wrap with the sacred return to cease defaulting semantics
-  exitEdhTx exit $ EdhReturn $ EdhReturn $ edhDeCaseWrap lhVal
+asProc !lhExpr (ExprSrc !rhe _) !exit !ets = case rhe of
+  AttrExpr (DirectRef (AttrAddrSrc !addr _)) ->
+    resolveEdhAttrAddr ets addr $ go $ not $ edh'ctx'pure ctx
+  AttrExpr (IndirectRef (ExprSrc _ownerExpr _) (AttrAddrSrc !addr _)) ->
+    -- todo: solve & pass `owner=  <owner value>` to `__as__()` magic
+    resolveEdhAttrAddr ets addr $ go True
+  _ ->
+    throwEdh ets UsageError $ "invalid alias expression: " <> T.pack (show rhe)
+  where
+    !ctx = edh'context ets
+    -- discourage artifact definition during lhs expr eval
+    !etsAssign = ets {edh'context = ctx {edh'ctx'pure = True}}
+
+    go !doAssign !key = runEdhTx etsAssign $
+      evalExprSrc lhExpr $ \ !lhVal -> case edhUltimate lhVal of
+        EdhObject !o ->
+          invokeMagic
+            o
+            (AttrByName "__as__")
+            (ArgsPack [attrKeyValue key] odEmpty)
+            doExit
+            $ \callAsMethod -> \case
+              (_, EdhNil) ->
+                throwEdh ets UsageError "you don't try aliasing nil"
+              !magicArt -> callAsMethod magicArt
+        _ -> doExit $ edhDeCaseClose lhVal
+      where
+        -- wrap with the sacred return to cease defaulting semantics
+        doExit !resultVal =
+          if doAssign
+            then
+              assignEdhTarget rhe resultVal $
+                edhSwitchState ets . exitEdhTx exit . EdhReturn . EdhReturn
+            else
+              edhSwitchState ets $
+                exitEdhTx exit $ EdhReturn $ EdhReturn resultVal

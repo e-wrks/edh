@@ -16,7 +16,6 @@ export {
   import * './ho'
   import * './iter'
   import * './str'
-  import * './evt'
   import * './math'
   import * './ops'
   import * './slice'

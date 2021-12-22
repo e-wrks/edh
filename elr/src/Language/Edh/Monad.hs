@@ -298,10 +298,11 @@ edhValueAsAttrKeyM !keyVal = case edhUltimate keyVal of
 prepareExpStoreM :: Object -> Edh EntityStore
 prepareExpStoreM !fromObj = case edh'obj'store fromObj of
   HashStore !tgtEnt -> fromStore tgtEnt
-  ClassStore !cls -> fromStore $ edh'class'arts cls
   HostStore _ ->
     naM $
       "no way exporting with a host object of class " <> objClassName fromObj
+  ClassStore !cls -> fromStore $ edh'class'arts cls
+  EventStore !cls _ _ -> fromStore $ edh'class'arts cls
   where
     fromStore tgtEnt = mEdh $ \exit ets ->
       (exitEdh ets exit =<<) $
@@ -425,11 +426,24 @@ prepareEffStoreM' !magicKey = mEdh $ \ !exit !ets ->
       ets
       (edh'scope'entity $ contextScope $ edh'context ets)
 
+-- | Define an effectful artifact
 defineEffectM :: AttrKey -> EdhValue -> Edh ()
 defineEffectM !key !val = Edh $ \_naExit !exit !ets -> do
   iopdInsert key val
     =<< prepareEffStore ets (edh'scope'entity $ contextScope $ edh'context ets)
   exitEdh ets exit ()
+
+-- | Create an Edh channel
+newChanM :: Edh BChan
+newChanM = inlineSTM newBChan
+
+-- | Read an Edh channel
+readChanM :: BChan -> Edh EdhValue
+readChanM !chan = mEdh $ \ !exit -> readBChan chan exit
+
+-- | Write an Edh channel
+writeChanM :: BChan -> EdhValue -> Edh Bool
+writeChanM !chan !v = mEdh $ \ !exit -> writeBChan chan v exit
 
 -- ** Edh Monad Utilities
 
