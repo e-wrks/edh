@@ -2778,7 +2778,7 @@ evalEdh' !srcName !lineNo !srcCode !exit !ets =
 
 withThisHostObj ::
   forall v.
-  (Eq v, Hashable v, Typeable v) =>
+  (Typeable v) =>
   EdhThreadState ->
   (v -> STM ()) ->
   STM ()
@@ -2787,7 +2787,7 @@ withThisHostObj !ets =
 
 withThisHostObj' ::
   forall v.
-  (Eq v, Hashable v, Typeable v) =>
+  (Typeable v) =>
   EdhThreadState ->
   STM () ->
   (v -> STM ()) ->
@@ -2797,7 +2797,7 @@ withThisHostObj' !ets =
 
 withHostInstance ::
   forall v.
-  (Eq v, Hashable v, Typeable v) =>
+  (Typeable v) =>
   EdhThreadState ->
   Object ->
   (v -> STM ()) ->
@@ -2813,7 +2813,7 @@ withHostInstance !ets !obj !exit = withHostInstance' obj naExit exit
 
 withHostInstance' ::
   forall v.
-  (Eq v, Hashable v, Typeable v) =>
+  (Typeable v) =>
   Object ->
   STM () ->
   (v -> STM ()) ->
@@ -2826,7 +2826,7 @@ withHostInstance' !obj !naExit !exit = case edh'obj'store obj of
 
 withHostObject ::
   forall v.
-  (Eq v, Hashable v, Typeable v) =>
+  (Typeable v) =>
   EdhThreadState ->
   Object ->
   (Object -> v -> STM ()) ->
@@ -2844,7 +2844,7 @@ withHostObject !ets !endObj !exit =
 
 withHostObject' ::
   forall v.
-  (Eq v, Hashable v, Typeable v) =>
+  (Typeable v) =>
   Object ->
   STM () ->
   (Object -> v -> STM ()) ->
