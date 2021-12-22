@@ -1148,9 +1148,14 @@ instance Show EdhValue where
   show (EdhReturn v) = "<return: " ++ show v ++ ">"
   show (EdhOrd ord) = show ord
   show (EdhDefault _ apk x _) = case x of
+    LitExpr !lit -> "default" <> apkRepr <> " " <> show lit
     ExprWithSrc _ [SrcSeg src] ->
-      "default " <> show apk <> " " <> T.unpack src
-    _ -> "<default: " ++ show apk ++ " " ++ show x ++ ">"
+      "default" <> apkRepr <> " " <> T.unpack src
+    _ -> "<default:" <> apkRepr <> " " <> show x <> ">"
+    where
+      apkRepr = case apk of
+        ArgsPack [] kwargs | odNull kwargs -> ""
+        _ -> " " <> show apk
   show (EdhChan v) = show v
   show (EdhNamedValue n v@EdhNamedValue {}) =
     -- Edh operators are all left-associative, parenthesis needed
@@ -1310,7 +1315,7 @@ edhNA =
     EdhDefault
       (unsafePerformIO newRUID)
       (ArgsPack [] odEmpty)
-      (ExprWithSrc (ExprSrc (LitExpr NilLiteral) noSrcRange) [SrcSeg "nil"])
+      (LitExpr NilLiteral)
       Nothing
 {-# NOINLINE edhNA #-}
 
@@ -2074,7 +2079,16 @@ data Literal
   | BoolLiteral !Bool
   | StringLiteral !Text
   | ValueLiteral !EdhValue
-  deriving (Eq, Show)
+  deriving (Eq)
+
+instance Show Literal where
+  show ChanCtor = "chan"
+  show NilLiteral = "nil"
+  show (DecLiteral d) = show d
+  show (QtyLiteral d u) = show d <> show u
+  show (BoolLiteral b) = if b then "true" else "false"
+  show (StringLiteral s) = T.unpack s
+  show (ValueLiteral v) = show v
 
 instance Hashable Literal where
   hashWithSalt s ChanCtor = hashWithSalt s (-1 :: Int)

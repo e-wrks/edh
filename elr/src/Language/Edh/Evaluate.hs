@@ -4858,12 +4858,7 @@ edhValueRepr !ets !val !exitRepr = case val of
   EdhFallthrough -> exitRepr "{fallthrough}"
   EdhReturn !rtn -> edhValueRepr ets rtn $ \ !rtnRepr ->
     exitRepr $ "{ return " <> rtnRepr <> " }"
-  EdhDefault _ !apk !x _ -> edhValueRepr ets (EdhArgsPack apk) $
-    \ !apkRepr -> case x of
-      ExprWithSrc _ [SrcSeg src] ->
-        exitRepr $ "default " <> apkRepr <> " " <> src
-      -- TODO repr of interpolated expr
-      _ -> exitRepr $ "<default: " <> apkRepr <> " " <> T.pack (show x) <> ">"
+  defVal@EdhDefault {} -> exitRepr $ T.pack $ show defVal
   -- repr of other values, fallback to its 'Show' instance
   _ -> exitRepr $ T.pack $ show val
   where
@@ -6370,6 +6365,14 @@ edhValueNull !ets (EdhObject !o) !exit = runEdhTx ets $
     magicExit :: EdhTxExit EdhValue
     magicExit (EdhBool b) _ets = exit b
     magicExit v _ets = edhValueNull ets v $ exit . not
+edhValueNull ets (EdhDefault _u _apk (LitExpr !lit) _ets) !exit = case lit of
+  NilLiteral -> exit True
+  DecLiteral d -> exit $ D.decimalIsNaN d || d == 0
+  QtyLiteral q _uom -> exit $ D.decimalIsNaN q || q == 0
+  BoolLiteral b -> exit $ not b
+  StringLiteral s -> exit $ T.null s
+  ValueLiteral v -> edhValueNull ets v exit
+  _ -> exit False
 edhValueNull _ _ !exit = exit False
 
 edhValueNullTx :: EdhValue -> EdhTxExit Bool -> EdhTx
