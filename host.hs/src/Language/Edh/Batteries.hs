@@ -22,6 +22,7 @@ import Language.Edh.Batteries.Data
 import Language.Edh.Batteries.InterOp
 import Language.Edh.Batteries.Math
 import Language.Edh.Batteries.Reflect
+import Language.Edh.Batteries.Sema
 import Language.Edh.Batteries.Vector
 import Language.Edh.Control
 import Language.Edh.Evaluate
@@ -598,7 +599,9 @@ installEdhBatteries world = do
                 ]
           ]
             ++ [ (AttrByName "Vector",) . EdhObject
-                   <$> createVectorClass rootScope
+                   <$> createVectorClass rootScope,
+                 (AttrByName "Semaphore",) . EdhObject
+                   <$> createSemaClass rootScope
                ]
 
       !console <-

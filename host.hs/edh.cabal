@@ -40,6 +40,7 @@ library
     Language.Edh.Batteries.InterOp
     Language.Edh.Batteries.Math
     Language.Edh.Batteries.Reflect
+    Language.Edh.Batteries.Sema
     Language.Edh.Batteries.Vector
     Language.Edh.Runtime
 
