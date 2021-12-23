@@ -22,9 +22,10 @@ createSemaClass !clsOuterScope =
         sequence
           [ (AttrByName nm,) <$> mkHostProc clsScope vc nm hp
             | (nm, vc, hp) <-
-                [ ("clear", EdhMethod, wrapHostProc semaClearProc),
-                  ("put", EdhMethod, wrapHostProc semaPutProc),
+                [ ("waitAny", EdhMethod, wrapHostProc semaWaitAnyProc),
                   ("wait", EdhMethod, wrapHostProc semaWaitProc),
+                  ("clear", EdhMethod, wrapHostProc semaClearProc),
+                  ("put", EdhMethod, wrapHostProc semaPutProc),
                   ("inc", EdhMethod, wrapHostProc semaIncProc),
                   ("dec", EdhMethod, wrapHostProc semaDecProc),
                   ("__null__", EdhMethod, wrapHostProc semaNullProc),
@@ -43,6 +44,44 @@ createSemaClass !clsOuterScope =
         _ -> do
           !sema <- newEmptyTMVar @Int
           ctorExit . HostStore =<< pinHostValue sema
+
+    semaWaitAnyProc :: EdhHostProc
+    semaWaitAnyProc !exit !ets =
+      withThisHostObj @EdhSema ets $ \ !sema -> runEdhTx ets $
+        edhContSTM $ do
+          !i <- takeTMVar sema
+          exitEdh ets exit $ EdhDecimal $ fromIntegral i
+
+    semaWaitProc :: "consume" ?: Int -> EdhHostProc
+    semaWaitProc (defaultArg 1 -> !iConsume) !exit !ets =
+      withThisHostObj @EdhSema ets $ \ !sema ->
+        if
+            | iConsume > 0 -> do
+              let tryConsume :: EdhTx
+                  -- use `edhContSTM` to cooperate with perceivers
+                  tryConsume = edhContSTM $ do
+                    !i <- takeTMVar sema
+                    let !iAvail = max 0 i
+                        !iNew = iAvail - iConsume
+                    if iNew < 0
+                      then do
+                        -- no enough inventory to consume,
+                        -- put it back and wait another round for more
+                        putTMVar sema i
+                        runEdhTx ets tryConsume
+                      else do
+                        -- consume specified count
+                        when (iNew > 0) $ putTMVar sema iNew
+                        exitEdh ets exit $ EdhDecimal $ fromIntegral iNew
+              runEdhTx ets tryConsume
+            | iConsume == 0 -> runEdhTx ets $
+              edhContSTM $ do
+                !i <- readTMVar sema
+                exitEdh ets exit $ EdhDecimal $ fromIntegral i
+            | otherwise ->
+              throwEdh ets UsageError $
+                "invalid consumption of semaphore inventory: "
+                  <> T.pack (show iConsume)
 
     semaClearProc :: EdhHostProc
     semaClearProc !exit !ets = withThisHostObj @EdhSema ets $ \ !sema ->
@@ -71,41 +110,8 @@ createSemaClass !clsOuterScope =
               throwEdh ets UsageError $
                 "invalid semaphore inventory to put: " <> T.pack (show iNew)
 
-    semaWaitProc :: "consume" ?: Int -> EdhHostProc
-    semaWaitProc (defaultArg 1 -> !iConsume) !exit !ets =
-      withThisHostObj @EdhSema ets $ \ !sema ->
-        if
-            | iConsume > 0 -> do
-              let tryConsume :: EdhTx
-                  -- use `edhContSTM` to cooperate with perceivers
-                  tryConsume = edhContSTM $ do
-                    !i <- takeTMVar sema
-                    let !iAvail = max 0 i
-                        !iNew = iAvail - iConsume
-                    if iNew < 0
-                      then do
-                        -- no enough inventory to consume,
-                        -- put it back and wait another round for more
-                        putTMVar sema i
-                        runEdhTx ets tryConsume
-                      else do
-                        -- consume specified count
-                        when (iNew > 0) $ putTMVar sema iNew
-                        exitEdh ets exit $ EdhDecimal $ fromIntegral iNew
-              runEdhTx ets tryConsume
-            | iConsume == 0 ->
-              tryReadTMVar sema >>= \case
-                Nothing -> exitEdh ets exit $ EdhDecimal 0
-                Just i -> do
-                  let !iOld = max 0 i
-                  exitEdh ets exit $ EdhDecimal $ fromIntegral iOld
-            | otherwise ->
-              throwEdh ets UsageError $
-                "invalid consumption of semaphore inventory: "
-                  <> T.pack (show iConsume)
-
-    semaIncProc :: "chg" !: Int -> EdhHostProc
-    semaIncProc (mandatoryArg -> !iChg) !exit !ets =
+    semaIncProc :: "chg" ?: Int -> EdhHostProc
+    semaIncProc (defaultArg 1 -> !iChg) !exit !ets =
       withThisHostObj @EdhSema ets $ \ !sema ->
         if
             | iChg > 0 ->
@@ -128,8 +134,8 @@ createSemaClass !clsOuterScope =
                 "invalid increment to semaphore inventory: "
                   <> T.pack (show iChg)
 
-    semaDecProc :: "chg" !: Int -> EdhHostProc
-    semaDecProc (mandatoryArg -> !iChg) !exit !ets =
+    semaDecProc :: "chg" ?: Int -> EdhHostProc
+    semaDecProc (defaultArg 1 -> !iChg) !exit !ets =
       withThisHostObj @EdhSema ets $ \ !sema ->
         if
             | iChg > 0 ->
