@@ -162,7 +162,7 @@ Clear the inventory, return the amount (possibly zero) that originally available
     {##
 Put the specified number of inventory as the new total, regardless of how many originally available, that number (possibly zero) is returned tho.
      #}
-    method put( inv: PositiveInt ): PositiveInt pass
+    method put( inv: PositiveInt as _ ): PositiveInt pass
 
     {##
 Increase the total number of inventory as specified, return the original number (possibly zero).
@@ -176,6 +176,19 @@ Note the number can never be really decreased below zero, the inventory is assum
      #}
     method dec( chg: PositiveInt = 1 ): PositiveInt pass
 
+    {##
+Reveal current number of inventory
+
+Never blocking wait, zero is returned when none available, also no guarantee after return.
+     #}
+    property$ method inv() pass
+
+    {##
+Set current number of inventory
+
+Setting this property to `nil` is equivalent to calling `clear()` method, otherwise it's equivalent to calling the `put()` method.
+     #}
+    setter$ method inv(inv: PositiveInt as _) pass
   }
 
 }

@@ -3,6 +3,7 @@ module Language.Edh.Batteries.Sema where
 import Control.Applicative
 import Control.Concurrent.STM
 import Control.Monad
+import qualified Data.Lossless.Decimal as D
 import qualified Data.Text as T
 import Language.Edh.Args
 import Language.Edh.Batteries.InterOp
@@ -19,7 +20,7 @@ createSemaClass !clsOuterScope =
   mkHostClass clsOuterScope "Semaphore" (allocEdhObj semaAllocator) [] $
     \ !clsScope -> do
       !mths <-
-        sequence
+        sequence $
           [ (AttrByName nm,) <$> mkHostProc clsScope vc nm hp
             | (nm, vc, hp) <-
                 [ ("waitAny", EdhMethod, wrapHostProc semaWaitAnyProc),
@@ -29,10 +30,15 @@ createSemaClass !clsOuterScope =
                   ("inc", EdhMethod, wrapHostProc semaIncProc),
                   ("dec", EdhMethod, wrapHostProc semaDecProc),
                   ("__null__", EdhMethod, wrapHostProc semaNullProc),
-                  ("__len__", EdhMethod, wrapHostProc semaLenProc),
+                  ("__len__", EdhMethod, wrapHostProc semaInvGetter),
                   ("__repr__", EdhMethod, wrapHostProc semaReprProc)
                 ]
           ]
+            ++ [ (AttrByName nm,) <$> mkHostProperty clsScope nm getter setter
+                 | (nm, getter, setter) <-
+                     [ ("inv", semaInvGetter, Just semaInvSetter)
+                     ]
+               ]
       iopdUpdate mths $ edh'scope'entity clsScope
   where
     semaAllocator :: "initial" ?: Int -> EdhObjectAllocator
@@ -166,15 +172,31 @@ createSemaClass !clsOuterScope =
         Nothing -> exitEdh ets exit $ EdhBool True
         Just i -> exitEdh ets exit $ EdhBool $ i <= 0
 
-    semaLenProc :: EdhHostProc
-    semaLenProc !exit !ets = withThisHostObj @EdhSema ets $ \ !sema ->
-      tryReadTMVar sema >>= \case
-        Nothing -> exitEdh ets exit $ EdhDecimal 0
-        Just i -> exitEdh ets exit $ EdhDecimal $ fromIntegral $ max 0 i
-
     semaReprProc :: EdhHostProc
     semaReprProc !exit !ets = withThisHostObj @EdhSema ets $ \ !sema ->
       tryReadTMVar sema >>= \case
         Nothing -> exitEdh ets exit $ EdhString "Semaphore()"
         Just i ->
           exitEdh ets exit $ EdhString $ "Semaphore(" <> T.pack (show i) <> ")"
+
+    semaInvGetter :: EdhHostProc
+    semaInvGetter !exit !ets = withThisHostObj @EdhSema ets $ \ !sema ->
+      tryReadTMVar sema >>= \case
+        Nothing -> exitEdh ets exit $ EdhDecimal 0
+        Just i -> exitEdh ets exit $ EdhDecimal $ fromIntegral $ max 0 i
+
+    semaInvSetter :: Maybe EdhValue -> EdhHostProc
+    semaInvSetter Nothing !exit = semaClearProc $ \_ ->
+      -- to maintain intuition in chained assignment
+      exitEdhTx exit EdhNil
+    semaInvSetter (Just invVal) !exit = case edhUltimate invVal of
+      EdhDecimal invD -> case D.decimalToInteger invD of
+        Just inv | inv >= 0 -> semaPutProc (NamedEdhArg $ fromInteger inv) $
+          -- to maintain intuition in chained assignment
+          \_ -> exitEdhTx exit invVal
+        _ -> badVal
+      _ -> badVal
+      where
+        badVal = edhValueDescTx invVal $ \badDesc ->
+          throwEdhTx UsageError $
+            "invalid semaphore inventory to set: " <> badDesc
