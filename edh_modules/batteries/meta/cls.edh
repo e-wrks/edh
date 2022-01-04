@@ -151,8 +151,13 @@ Wait any number of inventory comes available, consume all of them, return the am
 
     {##
 Wait until the specified number of inventory can be consumed, consume exactly that many and return the amount remain available (possibly zero).
+
+If a positive `timeout` is specified, and that many milliseconds has passed before the consumption is possible, a `nil` will be returned.
      #}
-    method wait( consume: PositiveInt = 1 ): PositiveInt pass
+    method wait(
+      consume: PositiveInt = 1,
+      timeout: PositiveInt = nil,
+    ): PositiveInt | nil pass
 
     {##
 Clear the inventory, return the amount (possibly zero) that originally available.

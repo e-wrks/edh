@@ -1,6 +1,7 @@
 module Language.Edh.Batteries.Sema where
 
 import Control.Applicative
+import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad
 import qualified Data.Lossless.Decimal as D
@@ -58,36 +59,53 @@ createSemaClass !clsOuterScope =
           !i <- takeTMVar sema
           exitEdh ets exit $ EdhDecimal $ fromIntegral i
 
-    semaWaitProc :: "consume" ?: Int -> EdhHostProc
-    semaWaitProc (defaultArg 1 -> !iConsume) !exit !ets =
-      withThisHostObj @EdhSema ets $ \ !sema ->
-        if
-            | iConsume > 0 -> do
-              let tryConsume :: EdhTx
-                  -- use `edhContSTM` to cooperate with perceivers
-                  tryConsume = edhContSTM $ do
-                    !i <- takeTMVar sema
-                    let !iAvail = max 0 i
-                        !iNew = iAvail - iConsume
-                    if iNew < 0
-                      then do
-                        -- no enough inventory to consume,
-                        -- put it back and wait another round for more
-                        putTMVar sema i
-                        runEdhTx ets tryConsume
-                      else do
-                        -- consume specified count
-                        when (iNew > 0) $ putTMVar sema iNew
-                        exitEdh ets exit $ EdhDecimal $ fromIntegral iNew
-              runEdhTx ets tryConsume
-            | iConsume == 0 -> runEdhTx ets $
-              edhContSTM $ do
-                !i <- readTMVar sema
-                exitEdh ets exit $ EdhDecimal $ fromIntegral i
-            | otherwise ->
-              throwEdh ets UsageError $
-                "invalid consumption of semaphore inventory: "
-                  <> T.pack (show iConsume)
+    semaWaitProc :: "consume" ?: Int -> "timeout" ?: Int -> EdhHostProc
+    semaWaitProc
+      (defaultArg 1 -> !iConsume)
+      (optionalArg -> !maybeTimeout)
+      !exit
+      !ets = withThisHostObj @EdhSema ets $ \ !sema -> do
+        let doWait :: STM () -> STM ()
+            doWait !overdueChk =
+              if
+                  | iConsume > 0 -> do
+                    let tryConsume :: EdhTx
+                        -- use `edhContSTM` to cooperate with perceivers
+                        tryConsume = edhContSTM $
+                          (overdueChk `orElse`) $ do
+                            !i <- takeTMVar sema
+                            let !iAvail = max 0 i
+                                !iNew = iAvail - iConsume
+                            if iNew < 0
+                              then do
+                                -- no enough inventory to consume,
+                                -- put it back and wait another round for more
+                                putTMVar sema i
+                                runEdhTx ets tryConsume
+                              else do
+                                -- consume specified count
+                                when (iNew > 0) $ putTMVar sema iNew
+                                exitEdh ets exit $ EdhDecimal $ fromIntegral iNew
+                    runEdhTx ets tryConsume
+                  | iConsume == 0 -> runEdhTx ets $
+                    edhContSTM $ do
+                      !i <- readTMVar sema
+                      exitEdh ets exit $ EdhDecimal $ fromIntegral i
+                  | otherwise ->
+                    throwEdh ets UsageError $
+                      "invalid consumption of semaphore inventory: "
+                        <> T.pack (show iConsume)
+        case maybeTimeout of
+          Just timeout | timeout > 0 -> runEdhTx ets $
+            edhContIO $ do
+              !overdueResult <- newEmptyTMVarIO
+              void $
+                forkFinally (threadDelay timeout) $
+                  const $ atomically $ void $ tryPutTMVar overdueResult EdhNil
+              atomically $
+                doWait $ takeTMVar overdueResult >>= exitEdh ets exit
+          _ ->
+            doWait retry
 
     semaClearProc :: EdhHostProc
     semaClearProc !exit !ets = withThisHostObj @EdhSema ets $ \ !sema ->
