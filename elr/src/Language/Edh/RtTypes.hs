@@ -843,6 +843,8 @@ data BChanSitter
     BChanReader !(TMVar EdhValue)
   | -- | A writer raced ahead, waiting for some reader(s)
     BChanWriter !EdhValue !(TMVar Bool)
+  | -- | One or more perceivers armed, waiting for some writer
+    BChanPerceiver !(TMVar EdhValue)
 
 -- | A 'BChan' (blocking channel) in Edh is more similar to an unbuffered Go
 -- channel, yet not like a Haskell 'Chan' or 'TChan', which does unbounded

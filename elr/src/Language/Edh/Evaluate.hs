@@ -3189,15 +3189,37 @@ evalStmt !stmt !exit = case stmt of
                 _ -> return ()
       case edhUltimate srcVal of
         EdhChan (BChan _ !xchg) -> do
-          let perceiveChan :: IO (STM (Maybe EdhValue))
-              -- TODO so perceivers will always be preempted by blocking
-              -- channel readers, is that right?
+          let perceiveTMVar !pcvr =
+                tryTakeTMVar pcvr >>= \case
+                  Just EdhNil -> do
+                    void $ tryPutTMVar pcvr EdhNil
+                    return $ Just EdhNil
+                  pv -> return pv
+              perceiveChan :: IO (STM (Maybe EdhValue))
+              -- TODO find ways to clear out 'BChanPerceiver' sitter
+              --      after all relevant threads terminated.
               perceiveChan = modifyMVar xchg $ \case
+                BChanIdle -> do
+                  -- this is the first perceiver upon the specified chan
+                  !pcvr <- newEmptyTMVarIO
+                  return (BChanPerceiver pcvr, perceiveTMVar pcvr)
+                sitter@(BChanPerceiver !pcvr) ->
+                  -- share a 'TMVar' by all perceivers, they race to get the
+                  -- next item from the chan
+                  return (sitter, perceiveTMVar pcvr)
+                sitter@(BChanReader !rcvr) ->
+                  -- let a sync chan reader preempt any perceiver,
+                  -- but broadcast the EoS in case
+                  return
+                    ( sitter,
+                      readTMVar rcvr >>= \case
+                        EdhNil -> return $ Just EdhNil -- got EoS
+                        _ -> return Nothing
+                    )
                 BChanWriter !v !taken -> do
                   atomically $ void $ tryPutTMVar taken True
                   return (BChanIdle, return $ Just v)
                 BChanEOS -> return (BChanEOS, return $ Just EdhNil)
-                !sitter -> return (sitter, return Nothing)
           (runEdhTx ets . edhContIO . join) $
             modifyMVar xchg $ \case
               BChanEOS ->
@@ -7990,6 +8012,9 @@ closeBChanIO (BChan _ !xchg) = modifyMVar xchg $ \case
   BChanWriter _v !taken -> do
     void $ atomically $ tryPutTMVar taken False
     return (BChanEOS, True)
+  BChanPerceiver !pcvr -> do
+    void $ atomically $ tryPutTMVar pcvr EdhNil
+    return (BChanEOS, True)
 
 -- | Create a new channel
 newBChan :: STM BChan
@@ -8007,6 +8032,19 @@ readBChan (BChan _ !xchg) !exit !ets =
   where
     attemptRead = join $
       modifyMVar xchg $ \case
+        BChanPerceiver !pcvr -> do
+          -- preempt those armed perceivers
+          !rcvr <- newEmptyTMVarIO
+          return
+            ( BChanReader rcvr,
+              -- 'edhContSTM' to coop with perceivers on the same Edh thread
+              (atomically . runEdhTx ets . edhContSTM) $ do
+                !v <- readTMVar rcvr
+                case v of -- relay EoS to perceivers
+                  EdhNil -> void $ tryPutTMVar pcvr EdhNil
+                  _ -> pure ()
+                exitEdh ets exit v
+            )
         BChanWriter !v !taken ->
           return
             ( BChanIdle,
@@ -8054,6 +8092,13 @@ writeBChan (BChan _ !xchg) !v !exit !ets =
   where
     attemptWrite = join $
       modifyMVar xchg $ \case
+        BChanPerceiver !pcvr ->
+          return
+            ( BChanIdle,
+              atomically $ do
+                putTMVar pcvr v
+                exitEdh ets exit True
+            )
         BChanReader !rcvr ->
           return
             ( BChanIdle,
