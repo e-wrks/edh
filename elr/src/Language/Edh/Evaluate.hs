@@ -8078,8 +8078,9 @@ readBChan (BChan _ !xchg) !exit !ets =
 -- actually receives the value.
 --
 -- Writing an 'EdhNil' carries the special semantics as marking the channel
--- end-of-stream, and will NOT block. 'True' will be returned if the channel
--- has never been marked eos before, or 'False' if it already reached eos.
+-- end-of-stream, and will NOT block. Otherwise 'True' will be returned if the
+-- value is is actually received by some reader, or 'False' if the channel
+-- reached eos before that can happen.
 --
 -- Otherwise, 'True' will be returned on success, or 'False' if the channel has
 -- reached end-of-stream.

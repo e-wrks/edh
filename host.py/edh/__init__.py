@@ -11,14 +11,14 @@ __all__ = [
     # exports from .apk
     'ArgsPack',
 
+    # exports from .chan
+    'BChan',
+
     # exports from .ctrl
     'EndOfStream', 'nil', 'EdhPeerError', 'read_stream',
 
     # exports from .eff
     'effect', 'effect_import',
-
-    # exports from .evt
-    'PubChan', 'SubChan', 'EventSink',
 
     # exports from .expr
     'expr',
@@ -33,9 +33,9 @@ __all__ = [
 
 from .adt import *
 from .apk import *
+from .chan import *
 from .ctrl import *
 from .eff import *
-from .evt import *
 from .expr import *
 from .sig import *
 from .sym import *
