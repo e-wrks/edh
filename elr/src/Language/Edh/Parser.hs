@@ -1915,6 +1915,23 @@ parseApkRest !startPos !si !closeSym !mustApk = do
       [SendPosArg singleExpr@(ExprSrc !x _)]
         | not mustApk'' ->
           if closeSym == ")" then ParenExpr singleExpr else x
+      [SendKwArg lhs@(AttrAddrSrc _lhAddr lhSpan) rhs@(ExprSrc !x rhSpan)]
+        | not mustApk'' ->
+          if closeSym == ")"
+            then
+              ParenExpr
+                ( ExprSrc
+                    ( InfixExpr
+                        ( OpSymSrc
+                            "="
+                            (SrcRange (src'end lhSpan) (src'start rhSpan))
+                        )
+                        (ExprSrc (AttrExpr (DirectRef lhs)) lhSpan)
+                        rhs
+                    )
+                    (SrcRange (src'start lhSpan) (src'end rhSpan))
+                )
+            else x
       _ ->
         ArgsPackExpr $
           ArgsPacker (reverse ss) (lspSrcRangeFromParsec startPos lexeme'end)
