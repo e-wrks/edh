@@ -54,7 +54,7 @@ for y from someStreamIn( 300 ) | somePipeline do {
 # %%
 # producer based pipelines can be fed lazily / interactively,
 # due to the async nature
-feedIn = sink
+feedIn = chan
 perceive (
   feedIn | add3 | mul5
 ) { y } -> {
@@ -65,21 +65,13 @@ perceive (
 
 
 # %%
-# wait a tiny bit, as following interactive cells may be at run before
-# producer procedures in the pipeline are started
-for _ from console.everyMillis( 10 ) do { break }
-# note for real cases, the race condition should be solved by putting feeding
-# code into another producer procedure with outlet=feedIn
-
+feedIn <- 3 + 300
 
 # %%
-void feedIn <- 3 + 300
+feedIn <- 11 + 300
 
 # %%
-void feedIn <- 11 + 300
-
-# %%
-void feedIn <- 2 + 300
+feedIn <- 2 + 300
 
 # %}
 

@@ -3188,56 +3188,34 @@ evalStmt !stmt !exit = case stmt of
                 -- return/continue/default etc. are returned to here?
                 _ -> return ()
       case edhUltimate srcVal of
-        EdhChan (BChan _ !xchg) -> do
-          let perceiveTMVar !pcvr =
-                tryTakeTMVar pcvr >>= \case
-                  Just EdhNil -> do
-                    void $ tryPutTMVar pcvr EdhNil
-                    return $ Just EdhNil
-                  pv -> return pv
-              perceiveChan :: IO (STM (Maybe EdhValue))
-              -- TODO find ways to clear out 'BChanPerceiver' sitter
-              --      after all relevant threads terminated.
-              perceiveChan = modifyMVar xchg $ \case
-                BChanIdle -> do
-                  -- this is the first perceiver upon the specified chan
-                  !pcvr <- newEmptyTMVarIO
-                  return (BChanPerceiver pcvr, perceiveTMVar pcvr)
-                sitter@(BChanPerceiver !pcvr) ->
-                  -- share a 'TMVar' by all perceivers, they race to get the
-                  -- next item from the chan
-                  return (sitter, perceiveTMVar pcvr)
-                sitter@(BChanReader !rcvr) ->
-                  -- let a sync chan reader preempt any perceiver,
-                  -- but broadcast the EoS in case
-                  return
-                    ( sitter,
-                      readTMVar rcvr >>= \case
-                        EdhNil -> return $ Just EdhNil -- got EoS
-                        _ -> return Nothing
-                    )
-                BChanWriter !v !taken -> do
-                  atomically $ void $ tryPutTMVar taken True
-                  return (BChanIdle, return $ Just v)
-                BChanEOS -> return (BChanEOS, return $ Just EdhNil)
-          (runEdhTx ets . edhContIO . join) $
-            modifyMVar xchg $ \case
-              BChanEOS ->
-                return
-                  ( BChanEOS,
-                    drivePerceiver nil ets reactor id >>= \case
-                      True -> return () -- break thread per scripted wrt eos
-                      False -> atomically $ exitEdh ets exit nil
-                  )
-              !sitter ->
-                return
-                  ( sitter,
-                    atomically $ do
-                      modifyTVar'
-                        (edh'perceivers ets)
-                        (PerceiveRecord perceiveChan ets reactor :)
-                      exitEdh ets exit nil
-                  )
+        EdhChan (BChan _ !xchg) ->
+          readTVar xchg >>= \case
+            (_, BChanEOS) ->
+              runEdhTx ets $
+                edhContIO $
+                  drivePerceiver nil ets reactor id >>= \case
+                    True -> return () -- break thread per scripted wrt eos
+                    False -> atomically $ exitEdh ets exit nil
+            _ -> do
+              !eosShot <- newTVar False
+              let perceiveChan :: STM (Maybe EdhValue)
+                  perceiveChan =
+                    readTVar xchg >>= \case
+                      (!chsn, BChanWrote !v) -> do
+                        writeTVar xchg (max 1 (chsn + 1), BChanIdle)
+                        return $ Just v
+                      (_, BChanEOS) ->
+                        -- eos should shoot at most once
+                        readTVar eosShot >>= \case
+                          True -> return Nothing
+                          False -> do
+                            writeTVar eosShot True
+                            return $ Just EdhNil
+                      _ -> return Nothing
+              modifyTVar'
+                (edh'perceivers ets)
+                (PerceiveRecord (return perceiveChan) ets reactor :)
+              exitEdh ets exit nil
         EdhObject !chanLikeObj -> do
           let SrcLoc !doc _pos = edh'exe'src'loc $ edh'ctx'tip $ edh'context ets
           !u <- newRUID'STM
@@ -7995,30 +7973,23 @@ fallbackEdhEffect' !effKey !exit !ets =
   resolveEdhFallback' ets effKey $ runEdhTx ets . exit
 
 -- | Create a new channel
-newBChanIO :: IO BChan
-newBChanIO = do
-  !u <- newRUID
-  !xchg <- newMVar BChanIdle
+newBChan :: STM BChan
+newBChan = do
+  !u <- newRUID'STM
+  !xchg <- newTVar (0, BChanIdle)
   return BChan {chan'uniq = u, chan'xchg = xchg}
 
 -- | Close a channel
-closeBChanIO :: BChan -> IO Bool
-closeBChanIO (BChan _ !xchg) = modifyMVar xchg $ \case
-  BChanIdle -> return (BChanEOS, True)
-  BChanEOS -> return (BChanEOS, False)
-  BChanReader !rcvr -> do
-    void $ atomically $ tryPutTMVar rcvr EdhNil
-    return (BChanEOS, True)
-  BChanWriter _v !taken -> do
-    void $ atomically $ tryPutTMVar taken False
-    return (BChanEOS, True)
-  BChanPerceiver !pcvr -> do
-    void $ atomically $ tryPutTMVar pcvr EdhNil
-    return (BChanEOS, True)
-
--- | Create a new channel
-newBChan :: STM BChan
-newBChan = unsafeIOToSTM newBChanIO
+closeBChan :: BChan -> STM Bool
+closeBChan (BChan _ !xchg) =
+  readTVar xchg >>= \case
+    (_, BChanIdle) -> do
+      writeTVar xchg (-1, BChanEOS)
+      return True
+    (_, BChanWrote _) -> do
+      writeTVar xchg (-1, BChanEOS)
+      return True
+    (_, BChanEOS) -> return False
 
 -- | Read a value out of a channel, blocking until some writer actually send a
 -- value through the channel.
@@ -8028,51 +7999,20 @@ newBChan = unsafeIOToSTM newBChanIO
 -- attempt.
 readBChan :: BChan -> EdhTxExit EdhValue -> EdhTx
 readBChan (BChan _ !xchg) !exit !ets =
-  runEdhTx ets $ edhContIO attemptRead
+  readTVar xchg >>= \case
+    (!chsn, BChanWrote !v) -> do
+      writeTVar xchg (chsn, BChanIdle)
+      exitEdh ets exit v
+    (_, BChanIdle) -> runEdhTx ets $ edhContSTM doRead
+    (_, BChanEOS) -> exitEdh ets exit nil
   where
-    attemptRead = join $
-      modifyMVar xchg $ \case
-        BChanPerceiver !pcvr -> do
-          -- preempt those armed perceivers
-          !rcvr <- newEmptyTMVarIO
-          return
-            ( BChanReader rcvr,
-              -- 'edhContSTM' to coop with perceivers on the same Edh thread
-              (atomically . runEdhTx ets . edhContSTM) $ do
-                !v <- readTMVar rcvr
-                case v of -- relay EoS to perceivers
-                  EdhNil -> void $ tryPutTMVar pcvr EdhNil
-                  _ -> pure ()
-                exitEdh ets exit v
-            )
-        BChanWriter !v !taken ->
-          return
-            ( BChanIdle,
-              atomically $ do
-                void $ tryPutTMVar taken True
-                exitEdh ets exit v
-            )
-        BChanIdle -> do
-          !rcvr <- newEmptyTMVarIO
-          return
-            ( BChanReader rcvr,
-              -- 'edhContSTM' to coop with perceivers on the same Edh thread
-              (atomically . runEdhTx ets . edhContSTM) $
-                readTMVar rcvr >>= exitEdh ets exit
-            )
-        sitter@(BChanReader !rcvr) ->
-          return
-            ( sitter,
-              -- 'edhContSTM' to coop with perceivers on the same Edh thread
-              (atomically . runEdhTx ets . edhContSTM) $ do
-                -- wait the winner reader to receive its value
-                readTMVar rcvr >>= \case
-                  -- channel already reached eos, read not possible anymore
-                  EdhNil -> exitEdh ets exit EdhNil
-                  -- attempt again
-                  _ -> runEdhTx ets $ edhContIO attemptRead
-            )
-        BChanEOS -> return (BChanEOS, atomically $ exitEdh ets exit EdhNil)
+    doRead =
+      readTVar xchg >>= \case
+        (!chsn, BChanWrote !v) -> do
+          writeTVar xchg (chsn, BChanIdle)
+          exitEdh ets exit v
+        (_, BChanIdle) -> retry
+        (_, BChanEOS) -> exitEdh ets exit nil
 
 -- | Write a value into a channel, blocking until some reader is ready and
 -- actually receives the value.
@@ -8085,46 +8025,33 @@ readBChan (BChan _ !xchg) !exit !ets =
 -- Otherwise, 'True' will be returned on success, or 'False' if the channel has
 -- reached end-of-stream.
 writeBChan :: BChan -> EdhValue -> EdhTxExit Bool -> EdhTx
-writeBChan !chan EdhNil !exit !ets =
-  (runEdhTx ets . edhContIO) $
-    atomically . exitEdh ets exit =<< closeBChanIO chan
+writeBChan !chan EdhNil !exit !ets = exitEdh ets exit =<< closeBChan chan
 writeBChan (BChan _ !xchg) !v !exit !ets =
-  runEdhTx ets $ edhContIO attemptWrite
+  readTVar xchg >>= \case
+    (!chsn, BChanIdle) -> do
+      let !chsn' = max 1 (chsn + 1)
+      writeTVar xchg (chsn', BChanWrote v)
+      runEdhTx ets $ edhContSTM $ waitTaken chsn'
+    (_, BChanWrote _) -> runEdhTx ets $ edhContSTM doWrite
+    (_, BChanEOS) -> exitEdh ets exit False
   where
-    attemptWrite = join $
-      modifyMVar xchg $ \case
-        BChanPerceiver !pcvr ->
-          return
-            ( BChanIdle,
-              atomically $ do
-                putTMVar pcvr v
-                exitEdh ets exit True
-            )
-        BChanReader !rcvr ->
-          return
-            ( BChanIdle,
-              atomically $ do
-                putTMVar rcvr v
-                exitEdh ets exit True
-            )
-        BChanIdle -> do
-          !taken <- newEmptyTMVarIO
-          return
-            ( BChanWriter v taken,
-              -- 'edhContSTM' to coop with perceivers on the same Edh thread
-              (atomically . runEdhTx ets . edhContSTM) $
-                readTMVar taken >>= exitEdh ets exit
-            )
-        sitter@(BChanWriter _v !taken) ->
-          return
-            ( sitter,
-              -- 'edhContSTM' to coop with perceivers on the same Edh thread
-              (atomically . runEdhTx ets . edhContSTM) $ do
-                -- wait the winner writer to send its value
-                readTMVar taken >>= \case
-                  -- channel already reached eos, write not possible anymore
-                  False -> exitEdh ets exit False
-                  -- attempt again
-                  True -> runEdhTx ets $ edhContIO attemptWrite
-            )
-        BChanEOS -> return (BChanEOS, atomically $ exitEdh ets exit False)
+    doWrite =
+      readTVar xchg >>= \case
+        (!chsn, BChanIdle) -> do
+          let !chsn' = max 1 (chsn + 1)
+          writeTVar xchg (chsn', BChanWrote v)
+          runEdhTx ets $ edhContSTM $ waitTaken chsn'
+        (_, BChanWrote _) -> retry
+        (_, BChanEOS) -> exitEdh ets exit False
+
+    waitTaken !chsn = do
+      (chsn', sitter) <- readTVar xchg
+      if chsn' == chsn
+        then case sitter of
+          BChanIdle -> exitEdh ets exit True -- most usual case
+          BChanWrote _ -> retry -- not taken yet
+          BChanEOS -> exitEdh ets exit False -- impossible, but?
+        else case sitter of
+          BChanIdle -> exitEdh ets exit True -- some other(s) be faster
+          BChanWrote _ -> exitEdh ets exit True -- some other(s) be faster
+          BChanEOS -> exitEdh ets exit False -- eos before taken

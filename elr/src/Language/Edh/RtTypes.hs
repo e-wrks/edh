@@ -839,12 +839,8 @@ data BChanSitter
     BChanEOS
   | -- | Neither reading nor writing
     BChanIdle
-  | -- | A reader raced ahead, waiting for some writer
-    BChanReader !(TMVar EdhValue)
-  | -- | A writer raced ahead, waiting for some reader(s)
-    BChanWriter !EdhValue !(TMVar Bool)
-  | -- | One or more perceivers armed, waiting for some writer
-    BChanPerceiver !(TMVar EdhValue)
+  | -- | A writer raced ahead, waiting for any reader
+    BChanWrote !EdhValue
 
 -- | A 'BChan' (blocking channel) in Edh is more similar to an unbuffered Go
 -- channel, yet not like a Haskell 'Chan' or 'TChan', which does unbounded
@@ -855,7 +851,7 @@ data BChan = BChan
     --
     -- Once filled with 'BChanEOS' (by writting an 'EdhNil' into this channel),
     -- it should remain so ever on.
-    chan'xchg :: !(MVar BChanSitter)
+    chan'xchg :: !(TVar (Int, BChanSitter))
   }
 
 instance Eq BChan where

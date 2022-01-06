@@ -7,19 +7,18 @@
 # %{
 
 # %%
-xs = sink
-xsReady = sink
+xs = chan
+xsReady = chan
 go {
   defer {
     console.info<| 'the thread done.'
   }
   {
-    perceive ( outlet=xs ) | producer _( outlet ) {
-      xsReady <- true
-    } {
+    perceive xs {
       nil -> break
       { x } -> throw x
     }
+    go xsReady <- true
     for _ from console.everySeconds( 5 ) do {
       throw Exception( 'nothing broken in 5 seconds' )
     }

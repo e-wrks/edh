@@ -2,7 +2,6 @@ module Language.Edh.Batteries.Chan where
 
 -- import           Debug.Trace
 
-import Control.Concurrent
 import Control.Monad
 import GHC.Conc
 import Language.Edh.Control
@@ -25,8 +24,8 @@ chan'eosProc :: EdhValue -> EdhHostProc
 chan'eosProc !chanVal !exit !ets =
   case edhUltimate chanVal of
     EdhChan (BChan _ !xchg) ->
-      unsafeIOToSTM (tryReadMVar xchg) >>= \case
-        Just BChanEOS -> exitEdh ets exit $ EdhBool True
+      readTVar xchg >>= \case
+        (_, BChanEOS) -> exitEdh ets exit $ EdhBool True
         _ -> exitEdh ets exit $ EdhBool False
     _ -> edhSimpleDesc ets chanVal $ \ !badDesc ->
       throwEdh ets UsageError $ "not a channel but a " <> badDesc

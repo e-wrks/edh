@@ -28,8 +28,8 @@ module Language.Edh.EHI
     throwHostIO',
 
     -- ** IO/CPS channel api
-    newBChanIO,
-    closeBChanIO,
+    newBChan,
+    closeBChan,
     readBChan,
     writeBChan,
 

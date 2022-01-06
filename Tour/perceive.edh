@@ -1,8 +1,17 @@
 {
-  evs = sink
-  stopSig = sink
+  evs = chan
+  stopSig = chan
 
-  go {
+  go {@
+    perceive evs { ev } -> {
+      console.info <| '  🎐  sth perceived: ' ++ ev
+    }
+
+    # keep this thread running forever
+    for _ from console.everySeconds(60) do pass
+  @}
+
+  go {@
 
     defer {
       console.info <| "I'm really done."
@@ -21,24 +30,27 @@
     }
 
     for ev from evs do {
-      console.info <| '  🎐  sth happening: ' ++ ev
+      console.info <| '  🎉  sth received: ' ++ ev
     }
 
-  }
+  @}
 
 }
 
 # wait a second
 for _ from console.everySeconds( 1 ) do break
-evs <- '  🛎️  ding.ding..'; pass
-# stopSig <- "don't do that!" ;pass
+evs <- '  🛎️  ding.ding..'
+# stopSig <- "don't do that!"
 
 # wait a second
 for _ from console.everySeconds( 1 ) do break
-evs <- '  🍃  chill..chill...'; pass
-stopSig <- "that's enough!"; pass
+evs <- '  🍃  chill..chill...'
+stopSig <- "that's enough!"
 
 # wait a second
 for _ from console.everySeconds( 1 ) do break
-evs <- '  ☎️  ling.ling..ling...'; pass
+evs <- '  ☎️  ling.ling..ling...'
 # stopSig <-nil
+
+# wait a second
+for _ from console.everySeconds( 1 ) do break
