@@ -427,8 +427,7 @@ installEdhBatteries world = do
       (">@", InfixL, 3),
       -- suffix cut (pattern only)
       ("@<", InfixL, 3),
-      -- publish to sink
-      --     evsPub <- outEvent
+      -- channel write
       ("<-", InfixR, 1),
       -- string coercing concatenation
       ("++", InfixL, 2),
