@@ -1058,8 +1058,7 @@ asProc !lhExpr (ExprSrc !rhe _) !exit !ets = case rhe of
             (ArgsPack [attrKeyValue key] odEmpty)
             doExit
             $ \callAsMethod -> \case
-              (_, EdhNil) ->
-                throwEdh ets UsageError "you don't try aliasing nil"
+              (_, EdhNil) -> runEdhTx ets $ doExit $ edhDeCaseClose lhVal
               !magicArt -> callAsMethod magicArt
         _ -> doExit $ edhDeCaseClose lhVal
       where
