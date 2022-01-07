@@ -150,7 +150,7 @@ createEdhWorld !console = do
           ++ [ (AttrByName nm,) <$> mkHostProperty rootScope nm getter setter
                | (nm, getter, setter) <-
                    [ ("name", mthEventNameGetter, Nothing),
-                     ("mro", mthEventMROGetter, Nothing)
+                     ("mro", mthEventMRO'Getter, Nothing)
                    ]
              ]
 
@@ -555,8 +555,8 @@ createEdhWorld !console = do
       where
         !clsObj = edh'scope'this $ contextScope $ edh'context ets
 
-    mthEventMROGetter :: EdhHostProc
-    mthEventMROGetter !exit !ets = case edh'obj'store clsObj of
+    mthEventMRO'Getter :: EdhHostProc
+    mthEventMRO'Getter !exit !ets = case edh'obj'store clsObj of
       EventStore !cls _alias _sink -> do
         !mro <- readTVar $ edh'class'mro cls
         exitEdh ets exit $ EdhArgsPack $ ArgsPack (EdhObject <$> mro) odEmpty
