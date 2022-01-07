@@ -815,7 +815,7 @@ edhConstructObj !clsObj !apk !exit !ets = do
           <> objClassName clsObj
 
   !superClasses <- readTVar (edh'class'mro endClass)
-  createOne clsObj superClasses apk $ \ !obj -> do
+  createOne clsObj superClasses apk $ \ !endObj -> do
     !im <- readTVar instMap
     let callInit :: [Object] -> STM () -> STM ()
         callInit [] !initExit = initExit
@@ -829,7 +829,7 @@ edhConstructObj !clsObj !apk !exit !ets = do
                     EdhNil -> initExit
                     EdhProcedure (EdhMethod !mthInit) _ ->
                       runEdhTx ets $
-                        callEdhMethod o obj mthInit apkCtor' id $
+                        callEdhMethod o endObj mthInit apkCtor' id $
                           \_initResult _ets -> initExit
                     EdhBoundProc (EdhMethod !mthInit) !this !that _ ->
                       runEdhTx ets $
@@ -842,12 +842,12 @@ edhConstructObj !clsObj !apk !exit !ets = do
                             <> objClassName o
                             <> " - "
                             <> badDesc
-    !supers <- readTVar $ edh'obj'supers obj
-    callInit (obj : supers) $ do
+    !supers <- readTVar $ edh'obj'supers endObj
+    callInit (endObj : supers) $ do
       forM_ (Map.toList im) $ \(co, _) -> case edh'obj'store co of
-        EventStore _cls _alias !sink -> emitEvent obj sink
+        EventStore _cls _alias !sink -> emitEvent endObj sink
         _ -> pure ()
-      runEdhTx ets $ exit obj
+      runEdhTx ets $ exit endObj
   where
     reformCtorArgs ::
       Object -> Class -> ArgsPack -> (ArgsPack -> STM ()) -> STM ()
