@@ -19,6 +19,7 @@ import Language.Edh.Batteries.Chan
 import Language.Edh.Batteries.Console
 import Language.Edh.Batteries.Ctrl
 import Language.Edh.Batteries.Data
+import Language.Edh.Batteries.Evt
 import Language.Edh.Batteries.InterOp
 import Language.Edh.Batteries.Math
 import Language.Edh.Batteries.Reflect
@@ -429,6 +430,10 @@ installEdhBatteries world = do
       ("@<", InfixL, 3),
       -- channel write
       ("<-", InfixR, 1),
+      -- event action rule
+      ("-?", Infix, -9),
+      -- event deriving rule
+      (":-", Infix, -9),
       -- string coercing concatenation
       ("++", InfixL, 2),
       -- for src level js compatibility, no implementation
@@ -474,6 +479,8 @@ installEdhBatteries world = do
                   (":>", prpdProc),
                   ("/>", lstrvrsPrpdProc),
                   ("<-", chanWriteProc),
+                  ("-?", evtActOp),
+                  (":-", evtDerivOp),
                   ("+", addProc),
                   ("-", subtProc),
                   ("*", mulProc),
