@@ -20,6 +20,9 @@ __all__ = [
     # exports from .eff
     'effect', 'effect_import',
 
+    # exports from .evt
+    'PubChan', 'SubChan', 'EventSink',
+
     # exports from .expr
     'expr',
 
@@ -36,6 +39,7 @@ from .apk import *
 from .chan import *
 from .ctrl import *
 from .eff import *
+from .evt import *
 from .expr import *
 from .sig import *
 from .sym import *
