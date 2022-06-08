@@ -139,7 +139,7 @@ iopdInsert' ::
   v ->
   IOPD k v ->
   STM ()
-iopdInsert' !keyMap !key !val d@(IOPD _did !mv !wpv _nhv !av) =
+iopdInsert' !keyMap !key !val d@(IOPD _did !mv !wpv !nhv !av) =
   if impliesDeletionAtRHS val
     then iopdDelete' keyMap key d
     else doInsert
@@ -148,9 +148,12 @@ iopdInsert' !keyMap !key !val d@(IOPD _did !mv !wpv _nhv !av) =
       keyMap key >>= \ !key' ->
         {- HLINT ignore "Redundant <$>" -}
         Map.lookup key' <$> readTVar mv >>= \case
-          Just !i ->
-            readTVar av >>= unsafeIOToSTM . flip MV.unsafeRead i
-              >>= flip writeTVar (Just (key, val))
+          Just !i -> do
+            !entry <- readTVar av >>= unsafeIOToSTM . flip MV.unsafeRead i
+            readTVar entry >>= \case
+              Nothing -> modifyTVar' nhv (subtract 1)
+              Just {} -> pure ()
+            writeTVar entry (Just (key, val))
           Nothing -> do
             !entry <- newTVar $ Just (key, val)
             !wp0 <- readTVar wpv
