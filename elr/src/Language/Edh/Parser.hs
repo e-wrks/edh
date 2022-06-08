@@ -1984,7 +1984,7 @@ parsePrefixExpr !si =
       unaryKwStmt "extends" ExtendsStmt,
       unaryKwStmt "return" $ flip ReturnStmt NoDocCmt,
       unaryKwStmt "throw" ThrowStmt,
-      -- technically accept the `new` and `try keyword anywhere as an expr
+      -- technically accept the `new` and `try` keyword anywhere as an expr
       -- prefix, to better inter-op with some other languages like JavaScript
       do
         void $ keyword "new" <|> keyword "try"
