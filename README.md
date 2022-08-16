@@ -98,7 +98,7 @@ application logics in similar ways.
 ### The Mission
 
 **Edh** competes with [Python](https://python.org) in aid of **Haskell**
-instead of **C**/**C++** to be the breeding ground for next phenomenal
+instead of [**C**](https://www.scaler.com/topics/c/)/**C++** to be the breeding ground for next phenomenal
 pieces of software, after [TensorFlow](https://tensorflow.org),
 [Pandas](https://pandas.pydata.org/), [Numpy](https://numpy.org/) etc.
 by providing equaly good or even better language constructs to rivals
