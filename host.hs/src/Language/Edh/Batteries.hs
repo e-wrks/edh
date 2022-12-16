@@ -9,6 +9,7 @@ import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
+import qualified Control.Monad.Catch as Catch
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -162,13 +163,13 @@ defaultEdhConsole !inputSettings = do
           readInput ::
             Text -> Text -> [Text] -> Haskeline.InputT IO (Maybe EdhInput)
           readInput !ps1 !ps2 !initialLines =
-            Haskeline.catch (readLines initialLines) $ \case
+            Catch.catch (readLines initialLines) $ \case
               UserInterrupt -> startOver
-              ex -> Haskeline.throwIO ex
+              ex -> throw ex
             where
-              startOver = Haskeline.catch (readLines []) $ \case
+              startOver = Catch.catch (readLines []) $ \case
                 UserInterrupt -> startOver
-                ex -> Haskeline.throwIO ex
+                ex -> throw ex
 
               parsePasteSpec :: Parsec Void Text (Int, Int, Text)
               parsePasteSpec = do

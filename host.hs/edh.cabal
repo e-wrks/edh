@@ -83,6 +83,7 @@ library
     , ghc                   >=8.6.5
     , hashable
     , haskeline
+    , exceptions
     , lossless-decimal
     , megaparsec            >7.0
     , mtl
@@ -152,6 +153,7 @@ executable edh
     , ghc                   >=8.6.5
     , hashable
     , haskeline
+    , exceptions
     , lossless-decimal
     , megaparsec            >7.0
     , mtl
@@ -207,6 +209,7 @@ executable runedh
     , ghc                   >=8.6.5
     , hashable
     , haskeline
+    , exceptions
     , lossless-decimal
     , megaparsec            >7.0
     , mtl
@@ -262,6 +265,7 @@ executable edhm
     , ghc                   >=8.6.5
     , hashable
     , haskeline
+    , exceptions
     , lossless-decimal
     , megaparsec            >7.0
     , mtl
