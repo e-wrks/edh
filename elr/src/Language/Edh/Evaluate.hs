@@ -3178,7 +3178,7 @@ evalStmt !stmt !exit = case stmt of
             schedDefered etsSched id (runLoop endOfEdh)
       _ -> \ !etsSched ->
         schedDefered etsSched id $ evalExpr' expr NoDocCmt endOfEdh
-  PerceiveStmt !srcExpr bodyExpr@(ExprSrc body'x body'rng) ->
+  PerceiveStmt !eosOnly !srcExpr bodyExpr@(ExprSrc body'x body'rng) ->
     evalExprSrc srcExpr $ \ !srcVal !ets -> do
       let reactor !breakThread =
             evalExprSrc bodyExpr $ \ !reactResult _etsReactor ->
@@ -3201,9 +3201,12 @@ evalStmt !stmt !exit = case stmt of
               let perceiveChan :: STM (Maybe EdhValue)
                   perceiveChan =
                     readTVar xchg >>= \case
-                      (!chsn, BChanWrote !v) -> do
-                        writeTVar xchg (max 1 (chsn + 1), BChanIdle)
-                        return $ Just v
+                      (!chsn, BChanWrote !v) ->
+                        if eosOnly
+                          then return Nothing
+                          else do
+                            writeTVar xchg (max 1 (chsn + 1), BChanIdle)
+                            return $ Just v
                       (_, BChanEOS) ->
                         -- eos should shoot at most once
                         readTVar eosShot >>= \case
@@ -4477,8 +4480,8 @@ intplStmt !ets !stmt !exit = case stmt of
       seqcontSTM (intplArgSender ets <$> sndrs) $
         \ !sndrs' -> exit $ LetStmt rcvrs' $ ArgsPacker sndrs' sndrsSpan
   ExtendsStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ ExtendsStmt x'
-  PerceiveStmt !chan !body -> intplExprSrc ets chan $ \ !chan' ->
-    intplExprSrc ets body $ \ !body' -> exit $ PerceiveStmt chan' body'
+  PerceiveStmt !eosOnly !chan !body -> intplExprSrc ets chan $ \ !chan' ->
+    intplExprSrc ets body $ \ !body' -> exit $ PerceiveStmt eosOnly chan' body'
   ThrowStmt !x -> intplExprSrc ets x $ \ !x' -> exit $ ThrowStmt x'
   ReturnStmt !x !docCmt -> intplExprSrc ets x $ \ !x' ->
     exit $ ReturnStmt x' docCmt

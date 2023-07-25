@@ -1399,7 +1399,7 @@ data Stmt
     -- data, including `nil` as end-of-stream indicator.
     --
     -- the perceiption construct is somewhat similar to unix signal handling
-    PerceiveStmt !ExprSrc !ExprSrc
+    PerceiveStmt !Bool !ExprSrc !ExprSrc
   | -- | break from a while/for loop, or terminate the Edh thread if given
     -- from a perceiver
     BreakStmt

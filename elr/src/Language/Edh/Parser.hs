@@ -820,9 +820,10 @@ parseGeneratorExpr !si = do
 parsePerceiveStmt :: IntplSrcInfo -> Parser (Stmt, IntplSrcInfo)
 parsePerceiveStmt !si = do
   void $ keyword "perceive"
+  eosOnly <- isJust <$> optional (keyword "nil")
   (!sink, !si') <- let ?commaPacking = False in parseExpr si
   (!body, !si'') <- let ?commaPacking = False in parseExpr si'
-  return (PerceiveStmt sink body, si'')
+  return (PerceiveStmt eosOnly sink body, si'')
 
 parseInterpreterExpr :: IntplSrcInfo -> Parser (Expr, IntplSrcInfo)
 parseInterpreterExpr !si = do
