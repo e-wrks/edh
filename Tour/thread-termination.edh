@@ -6,14 +6,14 @@ msgCh = chan
 method withCleanup() {
 
   {
-    perceive termSig nil -> break
+    perceive nil termSig break
 
     for msg from msgCh do {
       console.info<| 'got msg: ' ++ msg
     }
     console.info<| 'so you marked msgCh eos before termSig, right?'
 
-  } $=> { { ThreadTerminate:_ } } -> {
+  } $=> {{ ThreadTerminate:_ }} -> {
 
     console.info<| 'got expected ThreadTerminate'
 
