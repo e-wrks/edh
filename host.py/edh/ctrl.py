@@ -41,12 +41,22 @@ class EdhPeerError(RuntimeError):
 
 async def read_stream(eos: asyncio.Future, rdr: Coroutine) -> Union[_EndOfStream, Any]:
     try:
+        task_rdr = asyncio.create_task(rdr)
         done, _pending = await asyncio.wait(
-            {eos, asyncio.create_task(rdr)}, return_when=asyncio.FIRST_COMPLETED
+            {eos, task_rdr}, 
+            return_when=asyncio.FIRST_COMPLETED
         )
         if len(done) <= 1 and eos in done:
             # done without unprocessed item
             await eos  # reraise exception if that caused eos
+
+            # update by king 2023-05-30
+            # solve in nest_asyncio.apply()
+            # This warning message "Task was destroyed but it is pending!" will be printed
+            if not task_rdr.done():
+                logger.debug(f"task_rdr is running,manual cancel it. {task_rdr}")
+                task_rdr.cancel()
+
             return EndOfStream
         for fut in done:
             if fut is not eos:
