@@ -1015,10 +1015,11 @@ createEdhWorld !console = do
             etsModu = ets {edh'context = ctxModu}
         runEdhTx etsModu $
           evalExprDefi moduScript $ \_ _ets ->
-            exitEdh ets exit $ EdhObject thisModu
+            exitEdh ets exit $ EdhObject that
       where
         !ctx = edh'context ets
         !thisModu = edh'scope'this $ contextScope ctx
+        !that = edh'scope'this $ contextScope ctx
 
 declareEdhOperators ::
   EdhWorld -> OpDeclLoc -> [(OpSymbol, OpFixity, Precedence)] -> IO ()
