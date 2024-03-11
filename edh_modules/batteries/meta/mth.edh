@@ -44,6 +44,11 @@ export {
     uuid'str :: String || None
   }
 
+  parseInt :: (String) -> Decimal
+  {##
+   # parse a string as integer
+   #}
+  method parseInt( str_ ) pass
 
   blob :: ( Any, orElse!Any= default error ) -> Blob
   {##
