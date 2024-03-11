@@ -91,6 +91,13 @@ If the program is run by the main thread of an Đ interpreter process, this will
   }
 
 
+  env :: ( String ) -> String || nil
+  {##
+   # Lookup current system's environment variable value
+   #}
+  method env(name) nil
+
+
   now :: () -> int!Decimal
   {##
    # Obtain nanoseconds ellapsed since epoch in UTC, from the underlying operating system

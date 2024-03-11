@@ -623,6 +623,7 @@ installEdhBatteries world = do
                   (EdhMethod, "readCommand", wrapHostProc conReadCommandProc),
                   (EdhMethod, "log", wrapHostProc conLogProc),
                   (EdhMethod, "print", wrapHostProc conPrintProc),
+                  (EdhMethod, "env", wrapHostProc conEnvProc),
                   (EdhMethod, "now", wrapHostProc conNowProc),
                   (EdhGnrtor, "everyMicros", wrapHostProc conEveryMicrosProc),
                   (EdhGnrtor, "everyMillis", wrapHostProc conEveryMillisProc),

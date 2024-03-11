@@ -8,6 +8,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Debug.Trace (trace)
 import GHC.Conc (unsafeIOToSTM)
+import GHC.IO.Unsafe (unsafePerformIO)
 import Language.Edh.Args
 import Language.Edh.Control
 import Language.Edh.Evaluate
@@ -15,6 +16,7 @@ import Language.Edh.IOPD
 import Language.Edh.RtTypes
 import Language.Edh.Runtime
 import System.Clock (Clock (Realtime), getTime, toNanoSecs)
+import System.Environment
 import Prelude
 
 -- | operator (<|)
@@ -148,14 +150,14 @@ conReadSourceProc
           readTMVar cmdIn >>= \(EdhInput !name !lineNo !lines_) ->
             if locInfo
               then
-                exitEdh ets exit $
-                  EdhPair
+                exitEdh ets exit
+                  $ EdhPair
                     ( EdhPair
                         (EdhString name)
                         (EdhDecimal $ fromIntegral lineNo)
                     )
-                    $ EdhString $
-                      T.unlines lines_
+                  $ EdhString
+                  $ T.unlines lines_
               else exitEdh ets exit $ EdhString $ T.unlines lines_
     where
       !world = edh'prog'world $ edh'thread'prog ets
@@ -235,6 +237,13 @@ conPrintProc !args !kwargs !exit !ets =
       EdhString !s -> exitRepr s
       _ -> edhValueRepr ets v exitRepr
 
+conEnvProc :: "name" !: Text -> EdhHostProc
+conEnvProc (mandatoryArg -> !varName) !exit !ets = do
+  let varVal = unsafePerformIO $ lookupEnv $ T.unpack varName
+  exitEdh ets exit $ case varVal of
+    Nothing -> EdhNil
+    Just !strVal -> EdhString $ T.pack strVal
+
 conNowProc :: EdhHostProc
 conNowProc !exit !ets = do
   nanos <- (toNanoSecs <$>) $ unsafeIOToSTM $ getTime Realtime
@@ -266,7 +275,9 @@ timelyNotify !ets !scale !interval !wait1st !exit =
                   ( do
                       !ns'now <- currNanos
                       threadDelay $
-                        fromInteger $ max 0 $ delayMicros - (ns'now - last'ns)
+                        fromInteger $
+                          max 0 $
+                            delayMicros - (ns'now - last'ns)
                   )
                   ( const $ do
                       !curr'ns <- currNanos
