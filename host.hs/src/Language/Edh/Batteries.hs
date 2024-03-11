@@ -139,13 +139,13 @@ defaultEdhConsole !inputSettings = do
         case ior of
           ConsoleShutdown -> return () -- gracefully stop the io loop
           ConsoleOut !txt -> do
-            liftIO $
-              bracket
+            liftIO
+              $ bracket
                 (atomically $ takeTMVar outputTk)
                 (atomically . putTMVar outputTk)
-                $ \() -> do
-                  TIO.hPutStr stdout txt
-                  hFlush stdout
+              $ \() -> do
+                TIO.hPutStr stdout txt
+                hFlush stdout
             ioLoop
           ConsoleIn !cmdIn !ps1 !ps2 -> do
             -- mark out idle before starting input, or flush request will hang
@@ -185,16 +185,16 @@ defaultEdhConsole !inputSettings = do
                 case runParser parsePasteSpec "%%paste" pasteSpec of
                   Right (lineCnt, lineNo, srcName)
                     | lineCnt > 0 && lineNo > 0 ->
-                      recvLines lineCnt [] >>= \case
-                        Nothing -> return Nothing
-                        Just !lines_ ->
-                          return $
-                            Just $
-                              EdhInput
-                                { edh'input'src'name = srcName,
-                                  edh'input'1st'line = lineNo,
-                                  edh'input'src'lines = lines_
-                                }
+                        recvLines lineCnt [] >>= \case
+                          Nothing -> return Nothing
+                          Just !lines_ ->
+                            return $
+                              Just $
+                                EdhInput
+                                  { edh'input'src'name = srcName,
+                                    edh'input'1st'line = lineNo,
+                                    edh'input'src'lines = lines_
+                                  }
                   _ ->
                     Haskeline.getInputLine
                       "Invalid %%paste spec\nKey in a valid one or Ctrl^C to cancel: "
@@ -225,12 +225,12 @@ defaultEdhConsole !inputSettings = do
                      in case pendingLines of
                           []
                             | "{" == T.stripEnd code ->
-                              -- an unindented `{` marks start of multi-line input
-                              readLines [""]
+                                -- an unindented `{` marks start of multi-line input
+                                readLines [""]
                           []
                             | "" == T.strip code ->
-                              -- got an empty line in single-line input mode
-                              readLines [] -- start over in single-line input mode
+                                -- got an empty line in single-line input mode
+                                readLines [] -- start over in single-line input mode
                           [] -> case T.stripPrefix "%%paste" code of
                             -- start pasting
                             Just !pasteSpec -> recvPaste pasteSpec
@@ -249,9 +249,8 @@ defaultEdhConsole !inputSettings = do
                               return $
                                 Just $
                                   EdhInput "" 1 $
-                                    reverse $
-                                      init
-                                        pendingLines
+                                    tail $
+                                      reverse pendingLines
                             _ ->
                               -- got a line in multi-line input mode
                               readLines $ code : pendingLines
@@ -639,7 +638,9 @@ installEdhBatteries world = do
                    (AttrByName "fatal", EdhDecimal 50),
                    ( AttrByName "logLevel",
                      EdhDecimal $
-                       fromIntegral $ consoleLogLevel $ edh'world'console world
+                       fromIntegral $
+                         consoleLogLevel $
+                           edh'world'console world
                    )
                  ]
       iopdUpdate conArts $ edh'scope'entity conScope
