@@ -24,6 +24,7 @@ import Language.Edh.Evaluate
 import Language.Edh.IOPD
 import Language.Edh.RUID
 import Language.Edh.RtTypes
+import Text.Read (readMaybe)
 import Prelude
 
 strStripProc :: Text -> EdhHostProc
@@ -74,7 +75,8 @@ exprDeBlock (EdhExpr _ !src) !exit =
         go (line : rest) cumLines =
           go rest $
             (: cumLines) $
-              maybe (T.stripEnd line) T.stripEnd $ T.stripPrefix indent line
+              maybe (T.stripEnd line) T.stripEnd $
+                T.stripPrefix indent line
         go [] [] = error "bug: impossible case"
 exprDeBlock !v !exit = edhSimpleDescTx v $ \badDesc ->
   exitEdhTx exit $ EdhString $ "not an expr: " <> badDesc
@@ -375,20 +377,20 @@ defProc (ExprSrc (AttrExpr (DirectRef (AttrAddrSrc (NamedAttr !valName) _))) _) 
       Nothing -> defAndExit
       Just oldVal@(EdhNamedValue !n !v)
         | n == valName ->
-          if v == rhv
-            then -- just summon the existing defined value
-            -- wrap with the sacred return to cease defaulting semantics
-              exitEdh ets exit $ EdhReturn $ EdhReturn oldVal
-            else edhValueRepr ets rhv $ \ !newRepr ->
-              edhValueRepr ets v $ \ !oldRepr ->
-                throwEdh ets EvalError $
-                  "can not redefine "
-                    <> valName
-                    <> " from { "
-                    <> oldRepr
-                    <> " } to { "
-                    <> newRepr
-                    <> " }"
+            if v == rhv
+              then -- just summon the existing defined value
+              -- wrap with the sacred return to cease defaulting semantics
+                exitEdh ets exit $ EdhReturn $ EdhReturn oldVal
+              else edhValueRepr ets rhv $ \ !newRepr ->
+                edhValueRepr ets v $ \ !oldRepr ->
+                  throwEdh ets EvalError $
+                    "can not redefine "
+                      <> valName
+                      <> " from { "
+                      <> oldRepr
+                      <> " } to { "
+                      <> newRepr
+                      <> " }"
       _ -> defAndExit
 defProc !lhExpr _ _ =
   throwEdhTx EvalError $ "invalid value definition: " <> T.pack (show lhExpr)
@@ -452,7 +454,7 @@ uuidCtorProc (Just !uuidTxt) !exit !ets = case UUID.fromText uuidTxt of
 jsonProc :: ArgsPack -> EdhHostProc
 jsonProc (ArgsPack [value] !kwargs) !exit !ets
   | odNull kwargs =
-    edhValueJson ets value $ exitEdh ets exit . EdhString
+      edhValueJson ets value $ exitEdh ets exit . EdhString
 jsonProc !apk !exit !ets =
   edhValueJson ets (EdhArgsPack apk) $ exitEdh ets exit . EdhString
 
@@ -562,6 +564,13 @@ concatProc !lhExpr !rhExpr !exit !ets =
                   noSrcRange
               )
 
+-- | parse String as integer
+parseIntProc :: "str" !: Text -> EdhHostProc
+parseIntProc (mandatoryArg -> !strVal) !exit !ets =
+  exitEdh ets exit $ case readMaybe @Int (T.unpack strVal) of
+    Just !intVal -> EdhDecimal $ fromIntegral intVal
+    Nothing -> EdhNil
+
 -- | utility repr(val) - repr extractor
 reprProc :: ExprDefi -> EdhHostProc
 reprProc (ExprDefi _ !x _) !exit =
@@ -638,16 +647,20 @@ showProc (ExprDefi _ !x _) !kwExprs !exit !ets = runEdhTx ets $
             !magicArt -> callAsMethod magicArt
       EdhProcedure !callable Nothing ->
         exitEdhTx exit $
-          EdhString $ T.pack (show callable)
+          EdhString $
+            T.pack (show callable)
       EdhProcedure !callable Just {} ->
         exitEdhTx exit $
-          EdhString $ "effectful " <> T.pack (show callable)
+          EdhString $
+            "effectful " <> T.pack (show callable)
       EdhBoundProc !callable _ _ Nothing ->
         exitEdhTx exit $
-          EdhString $ "bound " <> T.pack (show callable)
+          EdhString $
+            "bound " <> T.pack (show callable)
       EdhBoundProc !callable _ _ Just {} ->
         exitEdhTx exit $
-          EdhString $ "effectful bound " <> T.pack (show callable)
+          EdhString $
+            "effectful bound " <> T.pack (show callable)
       -- todo specialize more informative show for intrinsic types of values
       _ -> showWithNoMagic v
   where
@@ -744,7 +757,8 @@ dictProc (ArgsPack !args !kwargs) !exit !ets = do
       ]
   flip iopdUpdate ds $
     {- HLINT ignore "Use first" -}
-    (<$> odToList kwargs) $ \(key, val) -> (attrKeyValue key, val)
+    (<$> odToList kwargs) $
+      \(key, val) -> (attrKeyValue key, val)
   exitEdh ets exit (EdhDict (Dict ds))
 
 dictSizeProc :: Dict -> EdhHostProc
@@ -855,7 +869,7 @@ unzipProc (mandatoryArg -> ExprDefi _ !tuplesExpr _) !exit !ets =
         ( \ !val -> case val of
             EdhArgsPack (ArgsPack !args !kwargs)
               | odNull kwargs ->
-                modifyTVar' stripsVar $ log1 args
+                  modifyTVar' stripsVar $ log1 args
             _ -> edhSimpleDesc ets val $
               \ !badDesc ->
                 throwEdh ets UsageError $
@@ -865,7 +879,9 @@ unzipProc (mandatoryArg -> ExprDefi _ !tuplesExpr _) !exit !ets =
         $ \_iterVal !runLoop -> runEdhTx ets $
           runLoop $ \_ _ets ->
             readTVar stripsVar
-              >>= exitEdh ets exit . EdhArgsPack . flip ArgsPack odEmpty
+              >>= exitEdh ets exit
+                . EdhArgsPack
+                . flip ArgsPack odEmpty
                 . fmap mkStrip
     _ -> runEdhTx ets $
       evalExpr tuplesExpr $ \ !tuplesVal _ets ->
@@ -873,12 +889,14 @@ unzipProc (mandatoryArg -> ExprDefi _ !tuplesExpr _) !exit !ets =
           EdhArgsPack (ArgsPack !s !kwargs) | odNull kwargs ->
             unzipSeries s $ \ !strips ->
               exitEdh ets exit $
-                EdhArgsPack $ ArgsPack (mkStrip <$> strips) odEmpty
+                EdhArgsPack $
+                  ArgsPack (mkStrip <$> strips) odEmpty
           EdhList (List _u !sVar) -> do
             !s <- readTVar sVar
             unzipSeries s $ \ !strips ->
               exitEdh ets exit $
-                EdhArgsPack $ ArgsPack (mkStrip <$> strips) odEmpty
+                EdhArgsPack $
+                  ArgsPack (mkStrip <$> strips) odEmpty
           _ -> edhSimpleDesc ets tuplesVal $ \ !badDesc ->
             throwEdh ets UsageError $
               "unzip series should be a tuple or list, but given: "
@@ -892,7 +910,7 @@ unzipProc (mandatoryArg -> ExprDefi _ !tuplesExpr _) !exit !ets =
         go (v : rest) strips = case edhUltimate v of
           EdhArgsPack (ArgsPack !vs !kwargs)
             | odNull kwargs ->
-              go rest $ log1 vs strips
+                go rest $ log1 vs strips
           EdhList (List _u !vsVar) -> do
             !vs <- readTVar vsVar
             go rest $ log1 vs strips
@@ -1070,4 +1088,6 @@ asProc !lhExpr (ExprSrc !rhe _) !exit !ets = case rhe of
                 edhSwitchState ets . exitEdhTx exit . EdhReturn . EdhReturn
             else
               edhSwitchState ets $
-                exitEdhTx exit $ EdhReturn $ EdhReturn resultVal
+                exitEdhTx exit $
+                  EdhReturn $
+                    EdhReturn resultVal

@@ -564,6 +564,7 @@ installEdhBatteries world = do
                   (EdhMethod, "UUID", wrapHostProc uuidCtorProc),
                   (EdhMethod, "error", wrapHostProc errorProc),
                   (EdhMethod, "blob", wrapHostProc blobProc),
+                  (EdhMethod, "parseInt", wrapHostProc parseIntProc),
                   (EdhIntrpr, "str", wrapHostProc strProc),
                   (EdhMethod, "json", wrapHostProc jsonProc),
                   (EdhIntrpr, "repr", wrapHostProc reprProc),
