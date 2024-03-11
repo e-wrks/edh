@@ -44,17 +44,6 @@ export {
     uuid'str :: String || None
   }
 
-  id :: ( Any ) -> Any
-  {##
-   # obtain identity of a value
-   #
-   # immutable values tend to have themselves being their respective identity
-   #
-   # mutable values (including objects, lists, dicts, etc.) tend to have their
-   # respective identities as `UUID` associated with their respective unique
-   # identifier within the running process
-   #}
-  method id( v ) pass
 
   blob :: ( Any, orElse!Any= default error ) -> Blob
   {##
