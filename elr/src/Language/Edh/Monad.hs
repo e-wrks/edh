@@ -6,6 +6,7 @@ module Language.Edh.Monad where
 import Control.Applicative
 import Control.Concurrent.STM
 import Control.Exception
+import Control.Monad
 import Control.Monad.State.Strict
 import qualified Data.ByteString as B
 import Data.Dynamic
